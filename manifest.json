@@ -1,0 +1,21 @@
+{
+  "name": "I-PASSBOOK Indrones",
+  "short_name": "I-PASSBOOK",
+  "description": "Indrones Product After-Sales Summary Book Intelligence Platform.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#001B4B",
+  "theme_color": "#0E62FF",
+  "icons": [
+    {
+      "src": "assets/logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "assets/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

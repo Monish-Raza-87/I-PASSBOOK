@@ -26,6 +26,18 @@ let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook
 
+// ─── AUTHORIZATION ─────────────────────────────────────────────────────────────
+const AUTHORIZED_CR_EMAILS = [
+  'monish.raza@indrones.com',
+  'ravi@indrones.com',
+  'adhik.nair@indrones.com',
+];
+
+function isAuthorizedCR() {
+  return currentUser?.email &&
+         AUTHORIZED_CR_EMAILS.includes(currentUser.email.toLowerCase().trim());
+}
+
 // ─── DOM REFS ─────────────────────────────────────────────────────────────────
 const splash      = document.getElementById('splash-screen');
 const authCont    = document.getElementById('auth-container');
@@ -292,17 +304,18 @@ const SECTIONS = {
   'sec-a': {
     title: 'Section A — Preliminary Details & Activity Log',
     fields: [
-      { id: 'a_irNumber',      label: 'IR Number',              type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
-      { id: 'a_droneId',       label: 'Drone Serial No.',        type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
-      { id: 'a_dateRaised',    label: 'Date Issue Raised',       type: 'date'  },
-      { id: 'a_crmOwner',      label: 'CRM Owner',               type: 'text',     placeholder: 'Name of CRM person' },
-      { id: 'a_customerName',  label: 'Customer / Client Name',  type: 'text',     placeholder: 'Organisation or person' },
-      { id: 'a_contactEmail',  label: 'Customer Email',          type: 'email',    placeholder: 'customer@example.com' },
-      { id: 'a_contactPhone',  label: 'Customer Phone',          type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
-      { id: 'a_issueType',     label: 'Issue Type',              type: 'select',   options: ['Hardware Damage','Software Issue','Firmware Issue','Battery Issue','Operational Query','RMA / Return','Other'] },
-      { id: 'a_issueDesc',     label: 'Issue Description',       type: 'textarea', placeholder: 'Describe the problem in detail...' },
-      { id: 'a_activityLog',   label: 'Activity Log (Timeline)', type: 'textarea', placeholder: 'Date | Action taken | Person responsible...' },
-      { id: 'a_overallStatus', label: 'Overall IR Status',       type: 'select',   options: ['Open','Pending Customer Approval','In Production','In QC','Dispatched','Closed'] },
+      { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
+      { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
+      { id: 'a_dateRaised',    label: 'Date Issue Raised',             type: 'date' },
+      { id: 'a_crmOwner',      label: 'Customer Relations Manager',    type: 'text',     placeholder: 'Name of CRM person', restricted: true },
+      { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person' },
+      { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com' },
+      { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
+      { id: 'a_issueType',     label: 'Issue Type',                   type: 'select',   options: ['Hardware Damage','Software Issue','Firmware Issue','Battery Issue','Operational Query','RMA / Return','Other'] },
+      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...' },
+      { id: 'a_summaryLink',   label: 'IR Summary Sheet Link',        type: 'url',      placeholder: 'Paste link to the spreadsheet row...' },
+      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable' },
+      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'], restricted: true },
     ]
   },
   'sec-b': {
@@ -485,18 +498,92 @@ function buildField(field, irNumber) {
       </div>
     `).join('');
     control = `<div>${rows}</div>`;
+  } else if (field.type === 'activityTable') {
+    const initialRows = 5;
+    const defaultDate = currentIR?.dateRaised || '';
+    let rowsHtml = '';
+    for (let i = 1; i <= initialRows; i++) {
+      rowsHtml += buildActivityRow(i, i === 1 ? defaultDate : '');
+    }
+    control = `
+      <div class="activity-table-wrapper" id="${id}">
+        <div class="activity-table-header">
+          <span class="act-col-day">#</span>
+          <span class="act-col-date">Date</span>
+          <span class="act-col-activity">Activity Description</span>
+          <span class="act-col-remark">Remark</span>
+        </div>
+        <div class="activity-table-body" id="${id}-body">
+          ${rowsHtml}
+        </div>
+        <button type="button" class="btn-add-row" onclick="addActivityRow('${id}')">+ Add Row</button>
+      </div>
+    `;
+  } else if (field.type === 'url') {
+    control = `
+      <div class="url-field-wrapper">
+        <input type="url" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" oninput="updateUrlLink('${id}')" />
+        <a id="${id}-open" href="#" target="_blank" class="url-open-btn" style="display:none;">Open &#8599;</a>
+      </div>
+    `;
   } else {
     // text, number, date, email, tel
     const val = (field.id === 'a_irNumber') ? irNumber : (field.id === 'a_droneId' ? (currentIR?.droneId || '') : '');
     control = `<input type="${field.type}" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${val}" ${field.readonly ? 'readonly style="opacity:0.6"' : ''} />`;
   }
 
+  // Apply restricted field behavior (CRM-only fields)
+  const isRestricted = field.restricted && !isAuthorizedCR();
+  if (isRestricted) {
+    control = control.replace(/<select /, '<select disabled ');
+    control = control.replace(/<input /, '<input disabled ');
+  }
+
+  const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
+
   return `
-    <div class="form-group">
-      <label class="form-label" for="${id}">${field.label}</label>
+    <div class="form-group${isRestricted ? ' field-restricted' : ''}">
+      <label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}</label>
       ${control}
     </div>
   `;
+}
+
+// ─── ACTIVITY TABLE HELPERS ────────────────────────────────────────────────────
+function buildActivityRow(dayCount, dateValue) {
+  return `
+    <div class="activity-table-row">
+      <input type="number" class="form-input act-day" value="${dayCount}" readonly />
+      <input type="date" class="form-input act-date" value="${dateValue}" />
+      <input type="text" class="form-input act-activity" placeholder="Activity..." />
+      <input type="text" class="form-input act-remark" placeholder="Remark..." />
+    </div>
+  `;
+}
+
+function addActivityRow(fieldId) {
+  const body = document.getElementById(fieldId + '-body');
+  if (!body) return;
+  const existingRows = body.querySelectorAll('.activity-table-row');
+  const nextDay = existingRows.length > 0
+    ? parseInt(existingRows[existingRows.length - 1].querySelector('.act-day').value || '0') + 1
+    : 1;
+  body.insertAdjacentHTML('beforeend', buildActivityRow(nextDay, ''));
+  const lastRow = body.lastElementChild;
+  if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function updateUrlLink(fieldId) {
+  const input = document.getElementById(fieldId);
+  const link = document.getElementById(fieldId + '-open');
+  if (!input || !link) return;
+  if (input.value && input.value.trim()) {
+    link.href = input.value.trim();
+    link.style.display = 'inline-flex';
+  } else {
+    link.href = '#';
+    link.style.display = 'none';
+  }
 }
 
 function handleFilePreview(e) {
@@ -537,11 +624,50 @@ function populateFieldValue(sectionId, fieldId, value) {
   const section = SECTIONS[sectionId];
   const field = section?.fields.find(f => f.id === fieldId);
 
+  // Handle checklist type
   if (field?.type === 'checklist' && value && typeof value === 'object') {
     field.items.forEach((item, i) => {
       const el = document.getElementById(`${fieldId}_${i}`);
       if (el) el.value = value[item] || '';
     });
+    return;
+  }
+
+  // Handle activityTable type
+  if (field?.type === 'activityTable') {
+    const body = document.getElementById(fieldId + '-body');
+    if (!body) return;
+
+    if (Array.isArray(value)) {
+      // New format: array of row objects
+      body.innerHTML = '';
+      value.forEach((row, i) => {
+        body.insertAdjacentHTML('beforeend', buildActivityRow(
+          row.dayCount || (i + 1),
+          row.date || ''
+        ));
+        const rows = body.querySelectorAll('.activity-table-row');
+        const lastRow = rows[rows.length - 1];
+        if (lastRow) {
+          lastRow.querySelector('.act-activity').value = row.activity || '';
+          lastRow.querySelector('.act-remark').value = row.remark || '';
+        }
+      });
+    } else if (typeof value === 'string' && value.trim()) {
+      // Backward compatibility: old textarea data
+      const firstActivity = body.querySelector('.activity-table-row:first-child .act-activity');
+      if (firstActivity) firstActivity.value = value;
+    }
+    return;
+  }
+
+  // Handle url type
+  if (field?.type === 'url') {
+    const el = document.getElementById(fieldId);
+    if (el) {
+      el.value = value || '';
+      updateUrlLink(fieldId);
+    }
     return;
   }
 
@@ -584,6 +710,21 @@ async function saveSection(sectionId, irNumber) {
         if (el) checkValues[field.items[i]] = el.value;
       });
       fieldValues[field.id] = checkValues;
+    } else if (field.type === 'activityTable') {
+      const body = document.getElementById(field.id + '-body');
+      if (body) {
+        const rows = body.querySelectorAll('.activity-table-row');
+        const tableData = [];
+        rows.forEach(row => {
+          tableData.push({
+            dayCount: row.querySelector('.act-day')?.value || '',
+            date: row.querySelector('.act-date')?.value || '',
+            activity: row.querySelector('.act-activity')?.value || '',
+            remark: row.querySelector('.act-remark')?.value || '',
+          });
+        });
+        fieldValues[field.id] = tableData;
+      }
     } else {
       const el = document.getElementById(field.id);
       if (el) fieldValues[field.id] = el.value;

@@ -509,6 +509,116 @@ select.form-input option { background: #0f172a; }
   outline: none; cursor: pointer;
 }
 
+/* ── Activity Log Table ── */
+.activity-table-wrapper {
+  margin-top: 4px;
+  overflow-x: auto;
+}
+
+.activity-table-header {
+  display: grid;
+  grid-template-columns: 48px 130px 1fr 1fr;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.activity-table-row {
+  display: grid;
+  grid-template-columns: 48px 130px 1fr 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+  align-items: center;
+}
+
+.activity-table-row .form-input {
+  padding: 8px 10px;
+  font-size: 0.88rem;
+}
+
+.act-day {
+  text-align: center;
+  font-weight: 600;
+}
+
+.btn-add-row {
+  margin-top: 10px;
+  padding: 10px 16px;
+  background: rgba(14,98,255,0.12);
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 100%;
+  transition: background 0.2s;
+}
+
+.btn-add-row:hover {
+  background: rgba(14,98,255,0.22);
+}
+
+/* ── Restricted Fields (CRM-only) ── */
+.field-restricted .form-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: rgba(0,0,0,0.18);
+}
+
+.field-restricted select.form-input:disabled {
+  pointer-events: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+}
+
+.field-lock-icon {
+  font-size: 0.75rem;
+  opacity: 0.6;
+  margin-left: 4px;
+}
+
+.field-restricted-label {
+  color: rgba(241,245,249,0.65);
+}
+
+/* ── URL Field ── */
+.url-field-wrapper {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.url-field-wrapper .form-input {
+  flex: 1;
+}
+
+.url-open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  background: rgba(14,98,255,0.15);
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.url-open-btn:hover {
+  background: rgba(14,98,255,0.3);
+}
+
 /* ── Toast ── */
 #toast {
   position: fixed;
@@ -536,4 +646,17 @@ select.form-input option { background: #0f172a; }
   #sections-wrapper { max-width: 760px; margin-inline: auto; }
   #ir-banner        { padding: 1.2rem 2rem; }
   .tabs-container   { padding-left: calc((100% - 760px) / 2); }
+}
+
+/* ── Mobile adjustments for activity table ── */
+@media (max-width: 599px) {
+  .activity-table-header,
+  .activity-table-row {
+    grid-template-columns: 36px 100px 1fr 1fr;
+    gap: 4px;
+  }
+  .activity-table-row .form-input {
+    padding: 6px 8px;
+    font-size: 0.82rem;
+  }
 }

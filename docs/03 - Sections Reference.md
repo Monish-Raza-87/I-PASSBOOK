@@ -12,14 +12,36 @@ All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436
 | `a_irNumber` | IR Number | text | **Readonly** — auto-filled from IR data |
 | `a_droneId` | Drone Serial No. | text | **Readonly** — auto-filled from IR data |
 | `a_dateRaised` | Date Issue Raised | date | |
-| `a_crmOwner` | CRM Owner | text | |
+| `a_crmOwner` | Customer Relations Manager | text | 🔒 **Restricted** — only authorized CR emails can edit |
 | `a_customerName` | Customer / Client Name | text | |
 | `a_contactEmail` | Customer Email | email | |
 | `a_contactPhone` | Customer Phone | tel | |
 | `a_issueType` | Issue Type | select | Options: Hardware Damage, Software Issue, Firmware Issue, Battery Issue, Operational Query, RMA / Return, Other |
 | `a_issueDesc` | Issue Description | textarea | |
-| `a_activityLog` | Activity Log (Timeline) | textarea | |
-| `a_overallStatus` | Overall IR Status | select | Options: Open, Pending Customer Approval, In Production, In QC, Dispatched, Closed |
+| `a_summaryLink` | IR Summary Sheet Link | url | Link to the row in IDS/CR/007 spreadsheet, with "Open ↗" button |
+| `a_activityLog` | Activity Log (Timeline) | activityTable | Dynamic table: Day #, Date, Activity Description, Remark. Starts with 5 rows, "Add Row" button. |
+| `a_overallStatus` | IR Status | select | 🔒 **Restricted** — only authorized CR emails can edit. Options: Open, Hold, Close, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, Other |
+
+### Authorization (Section A only)
+- **Restricted fields** (`a_crmOwner`, `a_overallStatus`) can only be edited by:
+  - `monish.raza@indrones.com`
+  - `ravi@indrones.com`
+  - `adhik.nair@indrones.com`
+- For all other users, these fields appear **disabled** with a 🔒 icon
+- Server-side validation in `backend.gs` also preserves existing values for restricted fields if the `savedBy` email is not authorized
+
+### Activity Log Table Format
+| Column | Field Class | Content |
+|---|---|---|
+| Day # | `.act-day` | Auto-incrementing number, readonly |
+| Date | `.act-date` | Date picker, first row defaults to IR filing date |
+| Activity Description | `.act-activity` | Free text |
+| Remark | `.act-remark` | Free text |
+
+- Starts with 5 empty rows
+- "Add Row" button appends new row with next day number
+- Data saved as JSON array: `[{dayCount, date, activity, remark}, ...]`
+- Backward compatible: old textarea string data loads into first row's activity field
 
 > **`a_overallStatus`** is the field read by `getAllIRStatuses()` in the backend to populate the status badge on the Master Index cards.
 

@@ -25,6 +25,9 @@ var CONFIG = {
   ALLOWED_DOMAIN: 'indrones.com',
 };
 
+// Authorized Customer Relations personnel — only these emails can edit restricted fields
+var AUTHORIZED_CR_EMAILS = ['monish.raza@indrones.com', 'ravi@indrones.com', 'adhik.nair@indrones.com'];
+
 // ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
@@ -183,11 +186,25 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   var data = tab.getDataRange().getValues();
 
   var existingRow = -1;
+  var existingFields = {};
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === irNumber && data[i][1] === sectionId) {
       existingRow = i + 1; // 1-indexed row in sheet
+      try { existingFields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
       break;
     }
+  }
+
+  // 2b. Protect restricted fields — only authorized CR personnel can change them
+  var restrictedFields = ['a_crmOwner', 'a_overallStatus'];
+  if (AUTHORIZED_CR_EMAILS.indexOf(savedBy.toLowerCase().trim()) === -1) {
+    restrictedFields.forEach(function(key) {
+      if (existingFields[key] !== undefined) {
+        fields[key] = existingFields[key]; // Preserve existing value
+      } else {
+        delete fields[key]; // Remove if it didn't exist before
+      }
+    });
   }
 
   var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');

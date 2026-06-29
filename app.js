@@ -210,7 +210,10 @@ async function fetchIRs() {
   setSyncStatus('⟳ Syncing with IR Repository...');
   try {
     const url = `${CONFIG.GAS_URL}?action=listIRs`;
-    const res  = await fetch(url);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res  = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
     const data = await res.json();
     if (data.status === 'ok') {
       allIRs = data.records || [];

@@ -210,7 +210,7 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   }
 
   // 2b. Protect restricted fields — entire Section A is CR-only; other sections are open
-  var restrictedFields = ['a_dateRaised', 'a_crmOwner', 'a_customerName', 'a_contactEmail', 'a_contactPhone', 'a_issueType', 'a_issueDesc', 'a_summaryLink', 'a_activityLog', 'a_overallStatus'];
+  var restrictedFields = ['a_dateRaised', 'a_crmOwner', 'a_customerName', 'a_contactEmail', 'a_contactPhone', 'a_issueType', 'a_issueDesc', 'a_activityLog', 'a_overallStatus'];
   if (AUTHORIZED_CR_EMAILS.indexOf(savedBy.toLowerCase().trim()) === -1) {
     restrictedFields.forEach(function(key) {
       if (existingFields[key] !== undefined) {

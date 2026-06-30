@@ -18,7 +18,6 @@ All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436
 | `a_contactPhone` | Customer Phone | tel | 🔒 **CR-only** · Auto-filled from the phone portion of "Who's Reporting?" (Col L) |
 | `a_issueType` | What Support Is Required? | text | 🔒 **CR-only** · Auto-filled from Form Responses "What Support Is Required?" (Col G) |
 | `a_issueDesc` | Issue Description | textarea | 🔒 **CR-only** · Auto-filled from Form Responses "Please Describe Your Problem..." (Col H) |
-| `a_summaryLink` | IR Summary Sheet Link | url | 🔒 **CR-only** · Link to the IDS/CR/007 row, with "Open ↗" button |
 | `a_activityLog` | Activity Log (Timeline) | activityTable | 🔒 **CR-only** · Dynamic table: Day #, Date, Activity, Remark |
 | `a_overallStatus` | IR Status | select | 🔒 **CR-only** · Auto-filled from Form Responses "Issue Status" (Col D). Options: Open, Hold, Close, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, Other |
 
@@ -45,7 +44,6 @@ Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when 
 | `a_contactEmail` | Col P — Email Address | `IR_REPO_EMAIL_COL` |
 | `a_issueType` | Col G — What Support Is Required? | `IR_REPO_SUPPORT_COL` |
 | `a_issueDesc` | Col H — Please Describe Your Problem... | `IR_REPO_DESC_COL` |
-| `a_summaryLink` | Col A — Summary | `IR_REPO_SUMLINK_COL` |
 | `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
 
 ### Activity Log Table Format

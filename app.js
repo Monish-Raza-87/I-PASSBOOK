@@ -246,13 +246,13 @@ function parseCSV(text) {
   return rows;
 }
 
-// 'dd-MMM-yyyy' for display (IR card subtitle). Falls back to raw string.
+// 'DD MONTH YYYY' for display (full month name). Falls back to raw string.
 function toDisplayDate(val) {
   if (!val) return '';
   const d = new Date(val);
   if (isNaN(d.getTime())) return String(val).trim();
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${String(d.getDate()).padStart(2,'0')}-${months[d.getMonth()]}-${d.getFullYear()}`;
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  return `${String(d.getDate()).padStart(2,'0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 // Split "Who's Reporting?" (Col L) into a name and a phone number.
@@ -372,14 +372,16 @@ function renderIRList(records) {
 
   irList.innerHTML = records.map(ir => `
     <div class="ir-card animate-slide-up" data-id="${ir.irNumber}" onclick="openPassbook('${ir.irNumber}')">
-      <div>
+      <div class="ir-card-main">
         <div class="ir-title">${ir.irNumber}</div>
-        <div class="ir-subtitle">🚁 ${ir.droneId} &nbsp;·&nbsp; ${ir.dateRaised || ''}</div>
-        ${ir.summaryLink ? `<a href="${ir.summaryLink}" onclick="event.stopPropagation()" target="_blank" style="font-size:0.75rem; color:var(--primary-color);">View Summary ↗</a>` : ''}
+        <div class="ir-meta">
+          <span class="ir-sn">${ir.droneId || ''}</span>
+          ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${ir.dateRaised}</span>` : ''}
+        </div>
       </div>
-      <div>
+      <div class="ir-card-side">
         <span class="badge ${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
-        <div style="color:var(--text-muted); font-size:1.2rem; text-align:right; margin-top:6px;">›</div>
+        ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank">View Summary ↗</a>` : ''}
       </div>
     </div>
   `).join('');
@@ -448,7 +450,6 @@ const SECTIONS = {
       { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX', restricted: true },
       { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     placeholder: 'e.g. Hardware Damage, Software Issue...', restricted: true },
       { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...', restricted: true },
-      { id: 'a_summaryLink',   label: 'IR Summary Sheet Link',        type: 'url',      placeholder: 'Paste link to the spreadsheet row...', restricted: true },
       { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable', restricted: true },
       { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'], restricted: true },
     ]
@@ -614,8 +615,26 @@ function buildField(field, irNumber) {
   const id = field.id;
   let control = '';
 
+  // Auto-fill values from the current IR (Form Responses data).
+  // Shared across textarea / url / text / date / email / tel controls.
+  const autoFill = {
+    'a_irNumber':      currentIR?.irNumber || '',
+    'a_droneId':       currentIR?.droneId || '',
+    'a_dateRaised':    toISODate(currentIR?.incidentDate || currentIR?.dateRaised),
+    'a_crmOwner':      currentIR?.spoc || '',
+    'a_customerName':  currentIR?.customerName || '',
+    'a_contactEmail':  currentIR?.contactEmail || '',
+    'a_contactPhone':  currentIR?.contactPhone || '',
+    'a_issueType':     currentIR?.issueType || '',
+    'a_issueDesc':     currentIR?.issueDesc || '',
+    'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
+  };
+  const val = autoFill[field.id] !== undefined ? autoFill[field.id] : '';
+  // Escape for safe insertion into an HTML attribute or textarea content
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
   if (field.type === 'textarea') {
-    control = `<textarea id="${id}" class="form-input" placeholder="${field.placeholder || ''}" ${field.readonly ? 'readonly' : ''}></textarea>`;
+    control = `<textarea id="${id}" class="form-input" placeholder="${field.placeholder || ''}" ${field.readonly ? 'readonly' : ''}>${esc(val)}</textarea>`;
   } else if (field.type === 'select') {
     const opts = field.options.map(o => `<option value="${o}">${o}</option>`).join('');
     control = `<select id="${id}" class="form-input">${opts}</select>`;
@@ -668,27 +687,13 @@ function buildField(field, irNumber) {
   } else if (field.type === 'url') {
     control = `
       <div class="url-field-wrapper">
-        <input type="url" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" oninput="updateUrlLink('${id}')" />
+        <input type="url" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${esc(val)}" oninput="updateUrlLink('${id}')" />
         <a id="${id}-open" href="#" target="_blank" class="url-open-btn" style="display:none;">Open &#8599;</a>
       </div>
     `;
   } else {
-    // text, number, date, email, tel — auto-fill from IR data where available
-    const autoFillMap = {
-      'a_irNumber':      currentIR?.irNumber || '',
-      'a_droneId':       currentIR?.droneId || '',
-      'a_dateRaised':    toISODate(currentIR?.incidentDate || currentIR?.dateRaised),
-      'a_crmOwner':      currentIR?.spoc || '',
-      'a_customerName':  currentIR?.customerName || '',
-      'a_contactEmail':  currentIR?.contactEmail || '',
-      'a_contactPhone':  currentIR?.contactPhone || '',
-      'a_issueType':     currentIR?.issueType || '',
-      'a_issueDesc':     currentIR?.issueDesc || '',
-      'a_summaryLink':   currentIR?.summaryLink || '',
-      'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
-    };
-    const val = autoFillMap[field.id] !== undefined ? autoFillMap[field.id] : '';
-    control = `<input type="${field.type}" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${val}" ${field.readonly ? 'readonly style="opacity:0.6"' : ''} />`;
+    // text, number, date, email, tel
+    control = `<input type="${field.type}" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${esc(val)}" ${field.readonly ? 'readonly style="opacity:0.6"' : ''} />`;
   }
 
   // Apply restricted field behavior (CRM-only fields)

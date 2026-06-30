@@ -10,16 +10,17 @@ var CONFIG = {
   // The IR Repository sheet (Form Responses tab) — source of new IR records
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_TAB:      'Form Responses',
-  IR_REPO_IR_COL:       2,   // Column B  — "IR Number"
-  IR_REPO_ID_COL:       11,  // Column K  — "Mention the Drone Serial No (S250XX)"
-  IR_REPO_SUMLINK_COL:  1,   // Column A  — "Summary"
-  IR_REPO_DATE_COL:     3,   // Column C  — "Timestamp"
-  IR_REPO_STATUS_COL:    4,  // Column D  — "Issue Status"
-  IR_REPO_SPOC_COL:      6,  // Column F  — "SPOC"
-  IR_REPO_SUPPORT_COL:   7,  // Column G  — "What Support Is Required?"
-  IR_REPO_DESC_COL:      8,  // Column H  — "Please Describe Your Problem..."
-  IR_REPO_REPORTER_COL:  12, // Column L  — "Who's Reporting? (Name & Contact)"
-  IR_REPO_EMAIL_COL:     16,  // Column P  — "Email Address"
+  IR_REPO_IR_COL:        2,   // Column B  — "IR Number"
+  IR_REPO_ID_COL:        11,   // Column K  — "Mention the Drone Serial No (S250XX)"
+  IR_REPO_SUMLINK_COL:   1,   // Column A  — "Summary"
+  IR_REPO_DATE_COL:       3,   // Column C  — "Timestamp"
+  IR_REPO_STATUS_COL:     4,  // Column D  — "Issue Status"
+  IR_REPO_SPOC_COL:       6,   // Column F  — "SPOC"
+  IR_REPO_SUPPORT_COL:    7,   // Column G  — "What Support Is Required?"
+  IR_REPO_DESC_COL:       8,   // Column H  — "Please Describe Your Problem..."
+  IR_REPO_INCIDENT_COL:   9,   // Column I  — "Date of Incident"
+  IR_REPO_REPORTER_COL:  12,   // Column L  — "Who's Reporting? (Name & Contact)"
+  IR_REPO_EMAIL_COL:      16,   // Column P  — "Email Address"
 
   // The original I-PASSBOOK Master Sheet (Legacy data holder)
   PASSBOOK_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
@@ -109,6 +110,7 @@ function listIRs() {
         issueDesc:     (row[CONFIG.IR_REPO_DESC_COL - 1] || '').toString().trim(),
         spoc:          (row[CONFIG.IR_REPO_SPOC_COL - 1] || '').toString().trim(),
         initialStatus: (row[CONFIG.IR_REPO_STATUS_COL - 1] || '').toString().trim(),
+        incidentDate:  (row[CONFIG.IR_REPO_INCIDENT_COL - 1] || '').toString().trim(),
       };
     })
     .filter(function(r) { return r.irNumber !== ''; })

@@ -545,6 +545,16 @@ select.form-input option { background: #0f172a; }
   font-weight: 600;
 }
 
+.btn-top-save {
+  background: rgba(14,98,255,0.12);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  box-shadow: none;
+  margin-bottom: 1rem;
+}
+.btn-top-save:hover { background: rgba(14,98,255,0.22); }
+.btn-top-save:active { transform: scale(0.975); }
+
 .btn-add-row {
   margin-top: 10px;
   padding: 10px 16px;

@@ -309,12 +309,12 @@ const SECTIONS = {
     fields: [
       { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
       { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
-      { id: 'a_dateRaised',    label: 'Date Issue Raised',             type: 'date',     restricted: true },
+      { id: 'a_dateRaised',    label: 'Incident Timeline',            type: 'date',     restricted: true },
       { id: 'a_crmOwner',      label: 'Customer Relations Manager',    type: 'text',     placeholder: 'Name of CRM person', restricted: true },
       { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person', restricted: true },
       { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com', restricted: true },
       { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX', restricted: true },
-      { id: 'a_issueType',     label: 'Issue Type',                   type: 'select',   options: ['Hardware Damage','Software Issue','Firmware Issue','Battery Issue','Operational Query','RMA / Return','Other'], restricted: true },
+      { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     placeholder: 'e.g. Hardware Damage, Software Issue...', restricted: true },
       { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...', restricted: true },
       { id: 'a_summaryLink',   label: 'IR Summary Sheet Link',        type: 'url',      placeholder: 'Paste link to the spreadsheet row...', restricted: true },
       { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable', restricted: true },
@@ -467,6 +467,10 @@ function buildSectionForms(irNumber) {
     const btn = document.getElementById('save-' + secId);
     if (btn) btn.onclick = () => saveSection(secId, irNumber);
   });
+
+  // Wire Section A top save button (duplicate of bottom)
+  const btnTopA = document.getElementById('save-sec-a-top');
+  if (btnTopA) btnTopA.onclick = () => saveSection('sec-a', irNumber);
 }
 
 function buildField(field, irNumber) {
@@ -505,8 +509,10 @@ function buildField(field, irNumber) {
     const initialRows = 5;
     const defaultDate = currentIR?.dateRaised || '';
     let rowsHtml = '';
-    for (let i = 1; i <= initialRows; i++) {
-      rowsHtml += buildActivityRow(i, i === 1 ? defaultDate : '');
+    // First row: pre-filled with "IR reported" and the date
+    rowsHtml += buildActivityRow(1, defaultDate, 'IR reported');
+    for (let i = 2; i <= initialRows; i++) {
+      rowsHtml += buildActivityRow(i, '');
     }
     control = `
       <div class="activity-table-wrapper" id="${id}">
@@ -534,7 +540,7 @@ function buildField(field, irNumber) {
     const autoFillMap = {
       'a_irNumber':      currentIR?.irNumber || '',
       'a_droneId':       currentIR?.droneId || '',
-      'a_dateRaised':    currentIR?.dateRaised || '',
+      'a_dateRaised':    currentIR?.incidentDate || currentIR?.dateRaised || '',
       'a_crmOwner':      currentIR?.spoc || '',
       'a_customerName':  currentIR?.customerName || '',
       'a_contactEmail':  currentIR?.contactEmail || '',
@@ -576,12 +582,12 @@ function buildField(field, irNumber) {
 }
 
 // ─── ACTIVITY TABLE HELPERS ────────────────────────────────────────────────────
-function buildActivityRow(dayCount, dateValue) {
+function buildActivityRow(dayCount, dateValue, activityValue) {
   return `
     <div class="activity-table-row">
       <input type="number" class="form-input act-day" value="${dayCount}" readonly />
       <input type="date" class="form-input act-date" value="${dateValue}" />
-      <input type="text" class="form-input act-activity" placeholder="Activity..." />
+      <input type="text" class="form-input act-activity" placeholder="Activity..." value="${activityValue || ''}" />
       <input type="text" class="form-input act-remark" placeholder="Remark..." />
     </div>
   `;
@@ -707,11 +713,14 @@ function populateFieldValue(sectionId, fieldId, value) {
 
 async function saveSection(sectionId, irNumber) {
   const btn = document.getElementById('save-' + sectionId);
+  const btnTop = document.getElementById('save-' + sectionId + '-top');
   const section = SECTIONS[sectionId];
   if (!section) return;
 
+  const btnLabel = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
   btn.textContent = 'Saving…';
   btn.className = 'btn saving';
+  if (btnTop) { btnTop.textContent = 'Saving…'; btnTop.className = 'btn saving'; }
 
   // Collect field values
   const formData = new FormData();
@@ -782,6 +791,7 @@ async function saveSection(sectionId, irNumber) {
     if (data.status === 'ok') {
       btn.textContent = '✓ Saved!';
       btn.className = 'btn saved';
+      if (btnTop) { btnTop.textContent = '✓ Saved!'; btnTop.className = 'btn saved'; }
       showToast('Section saved successfully!');
     } else {
       throw new Error(data.message || 'Backend error');
@@ -789,12 +799,14 @@ async function saveSection(sectionId, irNumber) {
   } catch (err) {
     btn.textContent = '⚠ Retry Save';
     btn.className = 'btn error';
+    if (btnTop) { btnTop.textContent = '⚠ Retry Save'; btnTop.className = 'btn error'; }
     showToast('❌ Save failed: ' + err.message);
   }
 
   setTimeout(() => {
-    btn.textContent = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
+    btn.textContent = btnLabel;
     btn.className = 'btn';
+    if (btnTop) { btnTop.textContent = btnLabel; btnTop.className = 'btn'; }
   }, 3000);
 }
 
@@ -820,10 +832,10 @@ function showToast(msg) {
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: '', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: '', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation' },
-    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: '', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open' },
-    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: '', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered' },
-    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: '', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed' },
+    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',  incidentDate: '2025-09-28' },
+    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
+    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',            incidentDate: '2025-09-18' },
+    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
+    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
   ];
 }

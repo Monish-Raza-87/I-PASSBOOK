@@ -255,6 +255,19 @@ function toDisplayDate(val) {
   return `${String(d.getDate()).padStart(2,'0')}-${months[d.getMonth()]}-${d.getFullYear()}`;
 }
 
+// Split "Who's Reporting?" (Col L) into a name and a phone number.
+// Col L typically looks like "SREENIVAS PAI 7828148298" or "Monish Raza, 9424485787".
+function splitNamePhone(text) {
+  if (!text) return { name: '', phone: '' };
+  const m = text.match(/(\+?\d[\d\s\-]{8,}\d)/);   // 10+ digit phone, optional +, spaces/dashes allowed
+  if (m) {
+    const phone = m[1].replace(/[\s\-]/g, '');
+    const name = text.replace(m[1], '').replace(/[,&\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return { name, phone };
+  }
+  return { name: text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(), phone: '' };
+}
+
 async function fetchIRsFromSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${CONFIG.IR_REPO_GID}`;
   const controller = new AbortController();
@@ -291,6 +304,7 @@ async function fetchIRsFromSheet() {
     const ts   = cell(row, C.timestamp);
     const inc  = cell(row, C.incident);
     const stat = cell(row, C.status) || 'Open';
+    const { name, phone } = splitNamePhone(cell(row, C.reportedBy));
     records.push({
       irNumber,
       droneId:       cell(row, C.uas),
@@ -298,7 +312,8 @@ async function fetchIRsFromSheet() {
       dateRaisedISO: toISODate(ts),
       status:        stat,
       summaryLink:   cell(row, C.summary),
-      customerName:  cell(row, C.reportedBy),
+      customerName:  name,
+      contactPhone:  phone,
       contactEmail:  cell(row, C.email),
       issueType:     cell(row, C.category),
       issueDesc:     cell(row, C.desc),
@@ -666,6 +681,7 @@ function buildField(field, irNumber) {
       'a_crmOwner':      currentIR?.spoc || '',
       'a_customerName':  currentIR?.customerName || '',
       'a_contactEmail':  currentIR?.contactEmail || '',
+      'a_contactPhone':  currentIR?.contactPhone || '',
       'a_issueType':     currentIR?.issueType || '',
       'a_issueDesc':     currentIR?.issueDesc || '',
       'a_summaryLink':   currentIR?.summaryLink || '',

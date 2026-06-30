@@ -15,7 +15,7 @@ All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436
 | `a_crmOwner` | Customer Relations Manager | text | 🔒 **CR-only** · Auto-filled from Form Responses SPOC (Col F) |
 | `a_customerName` | Customer / Client Name | text | 🔒 **CR-only** · Auto-filled from Form Responses "Who's Reporting?" (Col L) |
 | `a_contactEmail` | Customer Email | email | 🔒 **CR-only** · Auto-filled from Form Responses email (Col P) |
-| `a_contactPhone` | Customer Phone | tel | 🔒 **CR-only** |
+| `a_contactPhone` | Customer Phone | tel | 🔒 **CR-only** · Auto-filled from the phone portion of "Who's Reporting?" (Col L) |
 | `a_issueType` | What Support Is Required? | text | 🔒 **CR-only** · Auto-filled from Form Responses "What Support Is Required?" (Col G) |
 | `a_issueDesc` | Issue Description | textarea | 🔒 **CR-only** · Auto-filled from Form Responses "Please Describe Your Problem..." (Col H) |
 | `a_summaryLink` | IR Summary Sheet Link | url | 🔒 **CR-only** · Link to the IDS/CR/007 row, with "Open ↗" button |

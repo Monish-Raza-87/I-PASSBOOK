@@ -38,11 +38,14 @@
 
 ### Fetching IR List (`listIRs`)
 ```
-Browser → GET GAS_URL?action=listIRs
-       → GAS reads IR Repository Sheet ("Form Responses" tab)
-       → GAS also reads APP_DATA for status (sec-a → a_overallStatus)
-       → Returns { status: "ok", records: [...] }
+Browser → GET docs.google.com/.../gviz/tq?tqx=out:csv&sheet=Timeline 1
+       → Frontend parses CSV directly from the IR Repository Sheet
+       → No Apps Script deploy required (sheet is link-shared)
+       → Falls back to GAS ?action=listIRs, then demo data, on failure
 ```
+> **Note:** The IR list is read directly from the **"Timeline 1"** tab by the
+> frontend. The GAS `listIRs` action reads the same tab (`IR_REPO_TAB`) and is
+> kept as a fallback; it also joins `APP_DATA` for `a_overallStatus`.
 
 ### Fetching Passbook Data (`getPassbook`)
 ```

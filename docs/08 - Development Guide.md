@@ -59,7 +59,7 @@ The Google OAuth Client ID in `app.js` comes from a Google Cloud project. To rec
 Two Google Sheets are needed:
 
 ### 1. IR Repository Sheet
-- Must have a tab named `Form Responses`
+- Must have a tab named `Timeline 1` (curated IR records)
 - Columns used: A (summary link), B (IR Number), C (timestamp), K (drone serial no.)
 - Typically fed by a Google Form
 

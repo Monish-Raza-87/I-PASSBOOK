@@ -18,6 +18,15 @@ const CONFIG = {
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
   // without Google auth while this prototype is still being built.
   ENABLE_DEV_AUTH_BYPASS: true,
+
+  // IR Repository spreadsheet — read directly by the frontend via Google's
+  // public CSV endpoint (sheet is link-shared, so no login/Apps Script needed).
+  // Tab "Timeline 1" holds the curated IR records:
+  //   Col A IR_SUMMARY · Col B IR_NO. · Col C TIMESTAMP · Col D IR_STATUS ·
+  //   Col F SPOC · Col G IR_CATEGORY (What Support) · Col H IR_DESCRIPTION ·
+  //   Col I INCIDENT_DATE · Col K UAS SN · Col L REPORTED_BY · Col P REPORTED_BY_EMAIL
+  IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
+  IR_REPO_TAB:      'Timeline 1',
 };
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -206,8 +215,114 @@ function showIndex() {
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
+// ─── IR REPOSITORY — DIRECT SHEET READ ───────────────────────────────────────
+// Reads the "Timeline 1" tab straight from Google Sheets as CSV. No Apps Script
+// deploy required. Falls back to GAS / demo if the sheet is unreachable.
+
+// Parse CSV text into rows[][] — handles quoted fields, embedded commas,
+// doubled quotes, and newlines inside quoted fields.
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ',') {
+      row.push(field); field = '';
+    } else if (c === '\n') {
+      row.push(field); rows.push(row); row = []; field = '';
+    } else if (c !== '\r') {
+      field += c;
+    }
+  }
+  if (field !== '' || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+// 'dd-MMM-yyyy' for display (IR card subtitle). Falls back to raw string.
+function toDisplayDate(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val).trim();
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${String(d.getDate()).padStart(2,'0')}-${months[d.getMonth()]}-${d.getFullYear()}`;
+}
+
+async function fetchIRsFromSheet() {
+  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(CONFIG.IR_REPO_TAB)}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const res = await fetch(url, { signal: controller.signal });
+  clearTimeout(timeout);
+  const text = await res.text();
+  const rows = parseCSV(text);
+  if (rows.length < 2) return [];
+
+  const headers = rows[0].map(h => h.trim());
+  const col = name => { const i = headers.indexOf(name); return i >= 0 ? i : -1; };
+  const C = {
+    summary:    col('IR_SUMMARY'),
+    irNo:       col('IR_NO.'),
+    timestamp:  col('TIMESTAMP'),
+    status:     col('IR_STATUS'),
+    spoc:       col('SPOC'),
+    category:   col('IR_CATEGORY'),
+    desc:       col('IR_DESCRIPTION'),
+    incident:   col('INCIDENT_DATE'),
+    uas:        col('UAS SN'),
+    reportedBy: col('REPORTED_BY'),
+    email:      col('REPORTED_BY_EMAIL'),
+  };
+  const cell = (row, i) => (i >= 0 && row[i] != null ? row[i].trim() : '');
+
+  const records = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    const irNumber = cell(row, C.irNo);
+    if (!irNumber) continue;
+    const ts   = cell(row, C.timestamp);
+    const inc  = cell(row, C.incident);
+    const stat = cell(row, C.status) || 'Open';
+    records.push({
+      irNumber,
+      droneId:       cell(row, C.uas),
+      dateRaised:    toDisplayDate(ts),
+      dateRaisedISO: toISODate(ts),
+      status:        stat,
+      summaryLink:   cell(row, C.summary),
+      customerName:  cell(row, C.reportedBy),
+      contactEmail:  cell(row, C.email),
+      issueType:     cell(row, C.category),
+      issueDesc:     cell(row, C.desc),
+      spoc:          cell(row, C.spoc),
+      initialStatus: stat,
+      incidentDate:  toISODate(inc),
+    });
+  }
+  return records.reverse();   // latest first
+}
+
 async function fetchIRs() {
   setSyncStatus('⟳ Syncing with IR Repository...');
+
+  // 1. Primary: read the sheet directly (no backend deploy needed)
+  try {
+    const records = await fetchIRsFromSheet();
+    if (records && records.length) {
+      allIRs = records;
+      setSyncStatus(`✓ ${allIRs.length} IRs loaded from sheet · Last sync: ${new Date().toLocaleTimeString()}`);
+      renderIRList(allIRs);
+      return;
+    }
+  } catch (e) { /* fall through to GAS backend */ }
+
+  // 2. Fallback: Apps Script backend
   try {
     const url = `${CONFIG.GAS_URL}?action=listIRs`;
     const controller = new AbortController();
@@ -219,11 +334,11 @@ async function fetchIRs() {
       allIRs = data.records || [];
       setSyncStatus(`✓ ${allIRs.length} IRs loaded · Last sync: ${new Date().toLocaleTimeString()}`);
       renderIRList(allIRs);
-    } else {
-      throw new Error(data.message || 'Unknown error');
+      return;
     }
+    throw new Error(data.message || 'Unknown error');
   } catch (err) {
-    setSyncStatus('⚠ Could not sync. Showing cached data or demo mode.');
+    setSyncStatus('⚠ Could not sync. Showing demo data.');
     // Demo mode: render sample cards so UI is visible
     allIRs = getDemoIRs();
     renderIRList(allIRs);
@@ -514,8 +629,8 @@ function buildField(field, irNumber) {
     const initialRows = 5;
     const defaultDate = toISODate(currentIR?.dateRaised);
     let rowsHtml = '';
-    // First row: pre-filled with "IR reported" and the date
-    rowsHtml += buildActivityRow(1, defaultDate, 'IR reported');
+    // First row: pre-filled with "IR Reported" and the date
+    rowsHtml += buildActivityRow(1, defaultDate, 'IR Reported');
     for (let i = 2; i <= initialRows; i++) {
       rowsHtml += buildActivityRow(i, '');
     }

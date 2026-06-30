@@ -9,7 +9,7 @@
 var CONFIG = {
   // The IR Repository sheet (Form Responses tab) — source of new IR records
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_TAB:      'Form Responses',
+  IR_REPO_TAB:      'Timeline 1',   // Curated IR records (Col G = What Support, Col H = Description)
   IR_REPO_IR_COL:        2,   // Column B  — "IR Number"
   IR_REPO_ID_COL:        11,   // Column K  — "Mention the Drone Serial No (S250XX)"
   IR_REPO_SUMLINK_COL:   1,   // Column A  — "Summary"

@@ -309,7 +309,7 @@ const SECTIONS = {
     fields: [
       { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
       { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
-      { id: 'a_dateRaised',    label: 'Incident Timeline',            type: 'date',     restricted: true },
+      { id: 'a_dateRaised',    label: 'Date of Incident',             type: 'date',     restricted: true },
       { id: 'a_crmOwner',      label: 'Customer Relations Manager',    type: 'text',     placeholder: 'Name of CRM person', restricted: true },
       { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person', restricted: true },
       { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com', restricted: true },
@@ -471,6 +471,11 @@ function buildSectionForms(irNumber) {
   // Wire Section A top save button (duplicate of bottom)
   const btnTopA = document.getElementById('save-sec-a-top');
   if (btnTopA) btnTopA.onclick = () => saveSection('sec-a', irNumber);
+
+  // Initialize URL link buttons for any pre-populated URL fields
+  document.querySelectorAll('.url-field-wrapper input[type="url"]').forEach(inp => {
+    if (inp.value) updateUrlLink(inp.id);
+  });
 }
 
 function buildField(field, irNumber) {
@@ -507,7 +512,7 @@ function buildField(field, irNumber) {
     control = `<div>${rows}</div>`;
   } else if (field.type === 'activityTable') {
     const initialRows = 5;
-    const defaultDate = currentIR?.dateRaised || '';
+    const defaultDate = toISODate(currentIR?.dateRaised);
     let rowsHtml = '';
     // First row: pre-filled with "IR reported" and the date
     rowsHtml += buildActivityRow(1, defaultDate, 'IR reported');
@@ -540,7 +545,7 @@ function buildField(field, irNumber) {
     const autoFillMap = {
       'a_irNumber':      currentIR?.irNumber || '',
       'a_droneId':       currentIR?.droneId || '',
-      'a_dateRaised':    currentIR?.incidentDate || currentIR?.dateRaised || '',
+      'a_dateRaised':    toISODate(currentIR?.incidentDate || currentIR?.dateRaised),
       'a_crmOwner':      currentIR?.spoc || '',
       'a_customerName':  currentIR?.customerName || '',
       'a_contactEmail':  currentIR?.contactEmail || '',
@@ -582,6 +587,26 @@ function buildField(field, irNumber) {
 }
 
 // ─── ACTIVITY TABLE HELPERS ────────────────────────────────────────────────────
+
+// Convert a backend date value to 'yyyy-MM-dd' for <input type="date">.
+// Handles ISO dates, GAS 'dd-MMM-yyyy' (dateRaised), and Date.toString()
+// output (incidentDate from a form date question). Returns '' if unparseable.
+function toISODate(val) {
+  if (!val) return '';
+  const s = String(val).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;                 // already ISO
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);     // dd-MMM-yyyy
+  if (m) {
+    const months = { Jan:'01',Feb:'02',Mar:'03',Apr:'04',May:'05',Jun:'06',
+                     Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
+    const mon = months[m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase()];
+    if (mon) return `${m[3]}-${mon}-${m[1].padStart(2, '0')}`;
+  }
+  const d = new Date(s);                                       // Date.toString() etc.
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function buildActivityRow(dayCount, dateValue, activityValue) {
   return `
     <div class="activity-table-row">

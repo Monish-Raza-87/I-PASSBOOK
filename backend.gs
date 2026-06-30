@@ -10,10 +10,16 @@ var CONFIG = {
   // The IR Repository sheet (Form Responses tab) — source of new IR records
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_TAB:      'Form Responses',
-  IR_REPO_IR_COL:   2,   // Column B  — "IR Number"
-  IR_REPO_ID_COL:   11,  // Column K  — "Mention the Drone Serial No (S250XX)"
-  IR_REPO_SUMLINK:  1,   // Column A  — "Summary" (text summary of the issue)
-  IR_REPO_DATE_COL: 3,   // Column C  — "Timestamp"
+  IR_REPO_IR_COL:       2,   // Column B  — "IR Number"
+  IR_REPO_ID_COL:       11,  // Column K  — "Mention the Drone Serial No (S250XX)"
+  IR_REPO_SUMLINK_COL:  1,   // Column A  — "Summary"
+  IR_REPO_DATE_COL:     3,   // Column C  — "Timestamp"
+  IR_REPO_STATUS_COL:    4,  // Column D  — "Issue Status"
+  IR_REPO_SPOC_COL:      6,  // Column F  — "SPOC"
+  IR_REPO_SUPPORT_COL:   7,  // Column G  — "What Support Is Required?"
+  IR_REPO_DESC_COL:      8,  // Column H  — "Please Describe Your Problem..."
+  IR_REPO_REPORTER_COL:  12, // Column L  — "Who's Reporting? (Name & Contact)"
+  IR_REPO_EMAIL_COL:     16,  // Column P  — "Email Address"
 
   // The original I-PASSBOOK Master Sheet (Legacy data holder)
   PASSBOOK_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
@@ -90,13 +96,19 @@ function listIRs() {
     .map(function(row) {
       var irNumber = (row[CONFIG.IR_REPO_IR_COL - 1] || '').toString().trim();
       return {
-        dateRaised:  row[CONFIG.IR_REPO_DATE_COL - 1]
-                      ? Utilities.formatDate(new Date(row[CONFIG.IR_REPO_DATE_COL - 1]), 'Asia/Kolkata', 'dd-MMM-yyyy')
-                      : '',
-        irNumber:    irNumber,
-        droneId:     (row[CONFIG.IR_REPO_ID_COL - 1] || '').toString().trim(),
-        summaryLink: (row[CONFIG.IR_REPO_SUMLINK - 1] || '').toString().trim(),
-        status:      statusMap[irNumber] || 'Open',
+        dateRaised:    row[CONFIG.IR_REPO_DATE_COL - 1]
+                        ? Utilities.formatDate(new Date(row[CONFIG.IR_REPO_DATE_COL - 1]), 'Asia/Kolkata', 'dd-MMM-yyyy')
+                        : '',
+        irNumber:      irNumber,
+        droneId:       (row[CONFIG.IR_REPO_ID_COL - 1] || '').toString().trim(),
+        summaryLink:   (row[CONFIG.IR_REPO_SUMLINK_COL - 1] || '').toString().trim(),
+        status:        statusMap[irNumber] || 'Open',
+        customerName:  (row[CONFIG.IR_REPO_REPORTER_COL - 1] || '').toString().trim(),
+        contactEmail:  (row[CONFIG.IR_REPO_EMAIL_COL - 1] || '').toString().trim(),
+        issueType:     (row[CONFIG.IR_REPO_SUPPORT_COL - 1] || '').toString().trim(),
+        issueDesc:     (row[CONFIG.IR_REPO_DESC_COL - 1] || '').toString().trim(),
+        spoc:          (row[CONFIG.IR_REPO_SPOC_COL - 1] || '').toString().trim(),
+        initialStatus: (row[CONFIG.IR_REPO_STATUS_COL - 1] || '').toString().trim(),
       };
     })
     .filter(function(r) { return r.irNumber !== ''; })
@@ -195,8 +207,8 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     }
   }
 
-  // 2b. Protect restricted fields — only authorized CR personnel can change them
-  var restrictedFields = ['a_crmOwner', 'a_overallStatus'];
+  // 2b. Protect restricted fields — entire Section A is CR-only; other sections are open
+  var restrictedFields = ['a_dateRaised', 'a_crmOwner', 'a_customerName', 'a_contactEmail', 'a_contactPhone', 'a_issueType', 'a_issueDesc', 'a_summaryLink', 'a_activityLog', 'a_overallStatus'];
   if (AUTHORIZED_CR_EMAILS.indexOf(savedBy.toLowerCase().trim()) === -1) {
     restrictedFields.forEach(function(key) {
       if (existingFields[key] !== undefined) {

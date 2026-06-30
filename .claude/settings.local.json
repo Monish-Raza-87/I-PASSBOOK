@@ -7,7 +7,10 @@
       "Bash(git config *)",
       "Bash(git commit -m 'Add Obsidian-style project documentation \\(docs/\\) *)",
       "Bash(node -e ' *)",
-      "Bash(npx -y serve -l 3000 -s)"
+      "Bash(npx -y serve -l 3000 -s)",
+      "Bash(git commit -m 'Restructure Section A: authorization, activity log, status options *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }

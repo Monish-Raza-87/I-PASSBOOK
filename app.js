@@ -275,7 +275,7 @@ async function openPassbook(irNumber) {
 
   document.getElementById('ir-banner-title').textContent = irNumber;
   document.getElementById('ir-banner-sub').textContent =
-    `🚁 ${currentIR.droneId || '—'} · Raised: ${currentIR.dateRaised || '—'} · Status: ${currentIR.status || 'Open'}`;
+    `${currentIR.droneId || '—'} · ${currentIR.customerName || '—'} · Status: ${currentIR.status || 'Open'}`;
 
   indexView.style.display = 'none';
   detailView.style.display = 'flex';
@@ -309,15 +309,15 @@ const SECTIONS = {
     fields: [
       { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
       { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
-      { id: 'a_dateRaised',    label: 'Date Issue Raised',             type: 'date' },
+      { id: 'a_dateRaised',    label: 'Date Issue Raised',             type: 'date',     restricted: true },
       { id: 'a_crmOwner',      label: 'Customer Relations Manager',    type: 'text',     placeholder: 'Name of CRM person', restricted: true },
-      { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person' },
-      { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com' },
-      { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
-      { id: 'a_issueType',     label: 'Issue Type',                   type: 'select',   options: ['Hardware Damage','Software Issue','Firmware Issue','Battery Issue','Operational Query','RMA / Return','Other'] },
-      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...' },
-      { id: 'a_summaryLink',   label: 'IR Summary Sheet Link',        type: 'url',      placeholder: 'Paste link to the spreadsheet row...' },
-      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable' },
+      { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person', restricted: true },
+      { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com', restricted: true },
+      { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX', restricted: true },
+      { id: 'a_issueType',     label: 'Issue Type',                   type: 'select',   options: ['Hardware Damage','Software Issue','Firmware Issue','Battery Issue','Operational Query','RMA / Return','Other'], restricted: true },
+      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...', restricted: true },
+      { id: 'a_summaryLink',   label: 'IR Summary Sheet Link',        type: 'url',      placeholder: 'Paste link to the spreadsheet row...', restricted: true },
+      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable', restricted: true },
       { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'], restricted: true },
     ]
   },
@@ -530,16 +530,39 @@ function buildField(field, irNumber) {
       </div>
     `;
   } else {
-    // text, number, date, email, tel
-    const val = (field.id === 'a_irNumber') ? irNumber : (field.id === 'a_droneId' ? (currentIR?.droneId || '') : '');
+    // text, number, date, email, tel — auto-fill from IR data where available
+    const autoFillMap = {
+      'a_irNumber':      currentIR?.irNumber || '',
+      'a_droneId':       currentIR?.droneId || '',
+      'a_dateRaised':    currentIR?.dateRaised || '',
+      'a_crmOwner':      currentIR?.spoc || '',
+      'a_customerName':  currentIR?.customerName || '',
+      'a_contactEmail':  currentIR?.contactEmail || '',
+      'a_issueType':     currentIR?.issueType || '',
+      'a_issueDesc':     currentIR?.issueDesc || '',
+      'a_summaryLink':   currentIR?.summaryLink || '',
+      'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
+    };
+    const val = autoFillMap[field.id] !== undefined ? autoFillMap[field.id] : '';
     control = `<input type="${field.type}" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${val}" ${field.readonly ? 'readonly style="opacity:0.6"' : ''} />`;
   }
 
   // Apply restricted field behavior (CRM-only fields)
   const isRestricted = field.restricted && !isAuthorizedCR();
   if (isRestricted) {
-    control = control.replace(/<select /, '<select disabled ');
-    control = control.replace(/<input /, '<input disabled ');
+    if (field.type === 'activityTable') {
+      // Disable all inputs inside the activity table
+      control = control.replace(/<input /g, '<input disabled ');
+      // Disable the "Add Row" button
+      control = control.replace(/<button type="button" class="btn-add-row"/, '<button type="button" class="btn-add-row" disabled style="opacity:0.4;cursor:not-allowed;"');
+    } else if (field.type === 'url') {
+      // Disable just the URL input inside the wrapper
+      control = control.replace(/<input type="url"/, '<input type="url" disabled');
+    } else {
+      control = control.replace(/<select /, '<select disabled ');
+      control = control.replace(/<input /, '<input disabled ');
+      control = control.replace(/<textarea /, '<textarea disabled ');
+    }
   }
 
   const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
@@ -797,10 +820,10 @@ function showToast(msg) {
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: '' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'Pending Customer Approval', summaryLink: '' },
-    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: '' },
-    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Dispatched',      summaryLink: '' },
-    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',          summaryLink: '' },
+    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: '', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production' },
+    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: '', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation' },
+    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: '', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open' },
+    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: '', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered' },
+    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: '', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed' },
   ];
 }

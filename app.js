@@ -21,12 +21,12 @@ const CONFIG = {
 
   // IR Repository spreadsheet — read directly by the frontend via Google's
   // public CSV endpoint (sheet is link-shared, so no login/Apps Script needed).
-  // Tab "Timeline 1" holds the curated IR records:
-  //   Col A IR_SUMMARY · Col B IR_NO. · Col C TIMESTAMP · Col D IR_STATUS ·
-  //   Col F SPOC · Col G IR_CATEGORY (What Support) · Col H IR_DESCRIPTION ·
-  //   Col I INCIDENT_DATE · Col K UAS SN · Col L REPORTED_BY · Col P REPORTED_BY_EMAIL
+  // Tab "Form Responses" holds the IR records (columns matched by header text):
+  //   Col A Summary · Col B IR Number · Col C Timestamp · Col D Issue Status ·
+  //   Col F SPOC · Col G What Support Is Required? · Col H Please Describe… ·
+  //   Col I Date of Incident · Col K Drone Serial No · Col L Who's Reporting? · Col P Email Address
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_TAB:      'Timeline 1',
+  IR_REPO_TAB:      'Form Responses',
 };
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ function showIndex() {
 }
 
 // ─── IR REPOSITORY — DIRECT SHEET READ ───────────────────────────────────────
-// Reads the "Timeline 1" tab straight from Google Sheets as CSV. No Apps Script
+// Reads the "Form Responses" tab straight from Google Sheets as CSV. No Apps Script
 // deploy required. Falls back to GAS / demo if the sheet is unreachable.
 
 // Parse CSV text into rows[][] — handles quoted fields, embedded commas,
@@ -265,19 +265,20 @@ async function fetchIRsFromSheet() {
   if (rows.length < 2) return [];
 
   const headers = rows[0].map(h => h.trim());
-  const col = name => { const i = headers.indexOf(name); return i >= 0 ? i : -1; };
+  // Match by substring so minor wording changes in the form headers don't break it
+  const col = needle => headers.findIndex(h => h.includes(needle));
   const C = {
-    summary:    col('IR_SUMMARY'),
-    irNo:       col('IR_NO.'),
-    timestamp:  col('TIMESTAMP'),
-    status:     col('IR_STATUS'),
+    summary:    col('Summary'),
+    irNo:       col('IR Number'),
+    timestamp:  col('Timestamp'),
+    status:     col('Issue Status'),
     spoc:       col('SPOC'),
-    category:   col('IR_CATEGORY'),
-    desc:       col('IR_DESCRIPTION'),
-    incident:   col('INCIDENT_DATE'),
-    uas:        col('UAS SN'),
-    reportedBy: col('REPORTED_BY'),
-    email:      col('REPORTED_BY_EMAIL'),
+    category:   col('What Support'),
+    desc:       col('Please Describe'),
+    incident:   col('Date of Incident'),
+    uas:        col('Drone Serial No'),
+    reportedBy: col("Who's Reporting"),
+    email:      col('Email Address'),
   };
   const cell = (row, i) => (i >= 0 && row[i] != null ? row[i].trim() : '');
 

@@ -9,7 +9,7 @@ The backend is a **Google Apps Script (GAS) web app** deployed from `backend.gs`
 ## GET Endpoints
 
 ### `listIRs`
-Fetches all IR records from the **Timeline 1** tab.
+Fetches all IR records from the **Form Responses** tab.
 
 > The frontend now reads this tab directly via Google's CSV endpoint (no deploy
 > needed); this GAS action is the fallback.
@@ -34,7 +34,7 @@ GET {BASE_URL}?action=listIRs
 }
 ```
 
-- Reads from IR Repository sheet (`Timeline 1` tab)
+- Reads from IR Repository sheet (`Form Responses` tab)
 - Merges status from APP_DATA (sec-a → `a_overallStatus`)
 - Returns latest-first order (reversed)
 
@@ -106,7 +106,7 @@ Content-Type: multipart/form-data
 ```javascript
 var CONFIG = {
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_TAB: 'Timeline 1',
+  IR_REPO_TAB: 'Form Responses',
   IR_REPO_IR_COL: 2,    // Column B
   IR_REPO_ID_COL: 11,   // Column K
   IR_REPO_SUMLINK: 1,   // Column A

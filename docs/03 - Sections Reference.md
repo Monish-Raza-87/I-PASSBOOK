@@ -33,20 +33,20 @@ All other users see every Section A field as **disabled** with a 🔒 icon. This
 - **Backend** (`backend.gs`): `saveSection()` preserves existing values for all `sec-a` field IDs when `savedBy` is not in `AUTHORIZED_CR_EMAILS`
 
 ### Auto-Population from the IR Repository
-Fields are pre-filled from the IDS/CR/007 sheet's **"Timeline 1"** tab when an IR is opened:
+Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when an IR is opened:
 
-| Section A Field | Timeline 1 Column | Config Key |
+| Section A Field | Form Responses Column | Config Key |
 |---|---|---|
-| `a_irNumber` | Col B — IR_NO. | `IR_REPO_IR_COL` |
-| `a_droneId` | Col K — UAS SN | `IR_REPO_ID_COL` |
-| `a_dateRaised` | Col I — INCIDENT_DATE | `IR_REPO_INCIDENT_COL` |
+| `a_irNumber` | Col B — IR Number | `IR_REPO_IR_COL` |
+| `a_droneId` | Col K — Mention the Drone Serial No (S250XX) | `IR_REPO_ID_COL` |
+| `a_dateRaised` | Col I — Date of Incident | `IR_REPO_INCIDENT_COL` |
 | `a_crmOwner` | Col F — SPOC | `IR_REPO_SPOC_COL` |
-| `a_customerName` | Col L — REPORTED_BY | `IR_REPO_REPORTER_COL` |
-| `a_contactEmail` | Col P — REPORTED_BY_EMAIL | `IR_REPO_EMAIL_COL` |
-| `a_issueType` | Col G — IR_CATEGORY (What Support Is Required?) | `IR_REPO_SUPPORT_COL` |
-| `a_issueDesc` | Col H — IR_DESCRIPTION | `IR_REPO_DESC_COL` |
-| `a_summaryLink` | Col A — IR_SUMMARY | `IR_REPO_SUMLINK_COL` |
-| `a_overallStatus` | Col D — IR_STATUS | `IR_REPO_STATUS_COL` |
+| `a_customerName` | Col L — Who's Reporting? | `IR_REPO_REPORTER_COL` |
+| `a_contactEmail` | Col P — Email Address | `IR_REPO_EMAIL_COL` |
+| `a_issueType` | Col G — What Support Is Required? | `IR_REPO_SUPPORT_COL` |
+| `a_issueDesc` | Col H — Please Describe Your Problem... | `IR_REPO_DESC_COL` |
+| `a_summaryLink` | Col A — Summary | `IR_REPO_SUMLINK_COL` |
+| `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
 
 ### Activity Log Table Format
 | Column | Field Class | Content |

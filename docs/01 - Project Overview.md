@@ -24,7 +24,7 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 | Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (31 KB) |
 | Styling | Custom CSS with CSS variables | Dark glassmorphism theme |
 | Backend | Google Apps Script (GAS) | Deployed as web app, in `backend.gs` |
-| Database | Google Sheets | `APP_DATA` tab for passbook data, `Timeline 1` tab for IR records |
+| Database | Google Sheets | `APP_DATA` tab for passbook data, `Form Responses` tab for IR records |
 | File Storage | Google Drive | Photos/files stored in `IR###/Section X` folders |
 | Auth | Google OAuth 2.0 (GIS) | Restricted to `@indrones.com` domain |
 | PWA | Service Worker + Manifest | Offline caching of static assets |

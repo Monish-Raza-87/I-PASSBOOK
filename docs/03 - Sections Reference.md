@@ -11,24 +11,42 @@ All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436
 |---|---|---|---|
 | `a_irNumber` | IR Number | text | **Readonly** — auto-filled from IR data |
 | `a_droneId` | Drone Serial No. | text | **Readonly** — auto-filled from IR data |
-| `a_dateRaised` | Date Issue Raised | date | |
-| `a_crmOwner` | Customer Relations Manager | text | 🔒 **Restricted** — only authorized CR emails can edit |
-| `a_customerName` | Customer / Client Name | text | |
-| `a_contactEmail` | Customer Email | email | |
-| `a_contactPhone` | Customer Phone | tel | |
-| `a_issueType` | Issue Type | select | Options: Hardware Damage, Software Issue, Firmware Issue, Battery Issue, Operational Query, RMA / Return, Other |
-| `a_issueDesc` | Issue Description | textarea | |
-| `a_summaryLink` | IR Summary Sheet Link | url | Link to the row in IDS/CR/007 spreadsheet, with "Open ↗" button |
-| `a_activityLog` | Activity Log (Timeline) | activityTable | Dynamic table: Day #, Date, Activity Description, Remark. Starts with 5 rows, "Add Row" button. |
-| `a_overallStatus` | IR Status | select | 🔒 **Restricted** — only authorized CR emails can edit. Options: Open, Hold, Close, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, Other |
+| `a_dateRaised` | Date Issue Raised | date | 🔒 **CR-only** · Auto-filled from Form Responses timestamp |
+| `a_crmOwner` | Customer Relations Manager | text | 🔒 **CR-only** · Auto-filled from Form Responses SPOC (Col F) |
+| `a_customerName` | Customer / Client Name | text | 🔒 **CR-only** · Auto-filled from Form Responses "Who's Reporting?" (Col L) |
+| `a_contactEmail` | Customer Email | email | 🔒 **CR-only** · Auto-filled from Form Responses email (Col P) |
+| `a_contactPhone` | Customer Phone | tel | 🔒 **CR-only** |
+| `a_issueType` | Issue Type | select | 🔒 **CR-only** · Auto-filled from Form Responses "What Support Is Required?" (Col G) |
+| `a_issueDesc` | Issue Description | textarea | 🔒 **CR-only** · Auto-filled from Form Responses "Please Describe Your Problem..." (Col H) |
+| `a_summaryLink` | IR Summary Sheet Link | url | 🔒 **CR-only** · Link to the IDS/CR/007 row, with "Open ↗" button |
+| `a_activityLog` | Activity Log (Timeline) | activityTable | 🔒 **CR-only** · Dynamic table: Day #, Date, Activity, Remark |
+| `a_overallStatus` | IR Status | select | 🔒 **CR-only** · Auto-filled from Form Responses "Issue Status" (Col D). Options: Open, Hold, Close, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, Other |
 
-### Authorization (Section A only)
-- **Restricted fields** (`a_crmOwner`, `a_overallStatus`) can only be edited by:
-  - `monish.raza@indrones.com`
-  - `ravi@indrones.com`
-  - `adhik.nair@indrones.com`
-- For all other users, these fields appear **disabled** with a 🔒 icon
-- Server-side validation in `backend.gs` also preserves existing values for restricted fields if the `savedBy` email is not authorized
+### Authorization — Section A (ALL fields restricted to CR team)
+**Entire Section A** is editable only by authorized Customer Relations personnel:
+- `monish.raza@indrones.com`
+- `ravi@indrones.com`
+- `adhik.nair@indrones.com`
+
+All other users see every Section A field as **disabled** with a 🔒 icon. This is enforced both:
+- **Frontend**: fields rendered with `disabled` attribute, "Add Row" button disabled
+- **Backend** (`backend.gs`): `saveSection()` preserves existing values for all `sec-a` field IDs when `savedBy` is not in `AUTHORIZED_CR_EMAILS`
+
+### Auto-Population from Form Responses
+Fields are pre-filled from the IDS/CR/007 Form Responses sheet when an IR is opened:
+
+| Section A Field | Form Responses Column | Config Key |
+|---|---|---|
+| `a_irNumber` | Col B — IR Number | `IR_REPO_IR_COL` |
+| `a_droneId` | Col K — Drone Serial No | `IR_REPO_ID_COL` |
+| `a_dateRaised` | Col C — Timestamp | `IR_REPO_DATE_COL` |
+| `a_crmOwner` | Col F — SPOC | `IR_REPO_SPOC_COL` |
+| `a_customerName` | Col L — Who's Reporting? | `IR_REPO_REPORTER_COL` |
+| `a_contactEmail` | Col P — Email Address | `IR_REPO_EMAIL_COL` |
+| `a_issueType` | Col G — What Support Is Required? | `IR_REPO_SUPPORT_COL` |
+| `a_issueDesc` | Col H — Please Describe Your Problem... | `IR_REPO_DESC_COL` |
+| `a_summaryLink` | Col A — Summary | `IR_REPO_SUMLINK_COL` |
+| `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
 
 ### Activity Log Table Format
 | Column | Field Class | Content |

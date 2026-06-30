@@ -21,11 +21,12 @@ const CONFIG = {
 
   // IR Repository spreadsheet — read directly by the frontend via Google's
   // public CSV endpoint (sheet is link-shared, so no login/Apps Script needed).
-  // Tab "Form Responses" holds the IR records (columns matched by header text):
+  // "Form Responses" tab (gid 335027370) holds the IR records (matched by header):
   //   Col A Summary · Col B IR Number · Col C Timestamp · Col D Issue Status ·
   //   Col F SPOC · Col G What Support Is Required? · Col H Please Describe… ·
   //   Col I Date of Incident · Col K Drone Serial No · Col L Who's Reporting? · Col P Email Address
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
+  IR_REPO_GID:      '335027370',   // numeric gid — more reliable than the tab name
   IR_REPO_TAB:      'Form Responses',
 };
 
@@ -255,7 +256,7 @@ function toDisplayDate(val) {
 }
 
 async function fetchIRsFromSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(CONFIG.IR_REPO_TAB)}`;
+  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${CONFIG.IR_REPO_GID}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   const res = await fetch(url, { signal: controller.signal });

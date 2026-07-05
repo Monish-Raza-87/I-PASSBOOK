@@ -824,6 +824,50 @@ select.form-input option { background: #0f172a; }
   background: var(--primary); color: #fff; border-color: var(--primary);
 }
 
+/* ── IQC config editor (admin modal) ── */
+.iqc-cfg-rows-head {
+  display: grid;
+  grid-template-columns: 110px 90px 1.2fr 1.6fr 32px;
+  gap: 8px;
+  padding: 0 2px 4px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+.iqc-cfg-row {
+  display: grid;
+  grid-template-columns: 110px 90px 1.2fr 1.6fr 32px;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.iqc-cfg-row .form-input { padding: 6px 8px; font-size: 0.8rem; }
+.iqc-cfg-del {
+  width: 30px; height: 30px;
+  border-radius: 6px;
+  border: 1px solid rgba(239,68,68,0.5);
+  background: rgba(239,68,68,0.12);
+  color: #ef4444;
+  font-size: 1.1rem; line-height: 1;
+  cursor: pointer;
+}
+.iqc-cfg-del:hover { background: rgba(239,68,68,0.25); }
+.iqc-cfg-add {
+  width: 100%;
+  margin: 0.3rem 0 1rem;
+  padding: 7px 10px;
+  background: rgba(14,98,255,0.12);
+  border: 1px dashed var(--primary);
+  border-radius: 8px;
+  color: var(--primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.iqc-cfg-add:hover { background: rgba(14,98,255,0.22); }
+
 /* ── Draft banner ── */
 .draft-banner {
   display: flex;

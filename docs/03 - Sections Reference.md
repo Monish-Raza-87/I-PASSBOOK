@@ -176,6 +176,21 @@ The bottom `c_remarks` textarea holds overall remarks. The `c_signIqc` e-signatu
 follows the same locked + override-with-history behaviour as Section B (see
 [`esignature` type](#e-signatures-esignature-type)).
 
+### Admin customization (Section C)
+Admins (`ADMIN_EMAILS` — `monish.raza@indrones.com`, `customer.relations@indrones.com`,
+plus the `?dev=1` user for testing) see a **⚙ Manage Inspection Points & Dropdowns**
+button under the IQC table. The modal edits:
+- the **Result dropdown options** (one per line; defaults `PASS` / `FAIL` / `NA`),
+- the **inspection points** themselves — each row's type (Header group / Check row /
+  Editable blank), code, item/group name, and visual-checks text — with add/remove.
+
+Changes persist to GAS under irNumber `__CONFIG__` / sectionId `iqc-config` (shared
+across users) and to `localStorage` (per-device fallback); `loadIqcConfig()` runs at
+app start and re-renders any open IQC table while preserving entered results/remarks.
+Runtime state lives in `iqcZones` / `iqcResultOptions`; defaults are
+`IQC_ZONES_DEFAULTS` / `IQC_RESULT_OPTIONS_DEFAULTS`. (Section B's inward options use
+the same admin set — see `isAdmin()`.)
+
 ---
 
 ## Section D — Technical Support Analysis

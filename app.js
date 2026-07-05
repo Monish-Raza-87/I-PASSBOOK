@@ -48,20 +48,23 @@ function isAuthorizedCR() {
          AUTHORIZED_CR_EMAILS.includes(currentUser.email.toLowerCase().trim());
 }
 
-// ─── SECTION B — INWARD CHECKLIST CONFIG ──────────────────────────────────────
-// Admins who may customize the per-particular dropdown options.
-const INWARD_ADMIN_EMAILS = [
+// ─── ADMIN (config editors) ───────────────────────────────────────────────────
+// Admins may customize Section B inward dropdowns and Section C inspection
+// points / result options.
+const ADMIN_EMAILS = [
   'monish.raza@indrones.com',
   'customer.relations@indrones.com',
 ];
-function isInwardAdmin() {
+function isAdmin() {
   const email = currentUser?.email?.toLowerCase().trim();
   if (!email) return false;
-  if (INWARD_ADMIN_EMAILS.includes(email)) return true;
+  if (ADMIN_EMAILS.includes(email)) return true;
   // Allow the local dev user (?dev=1) to test admin features.
   if (email === `dev@${CONFIG.ALLOWED_DOMAIN}`) return true;
   return false;
 }
+// Kept as an alias so existing Section B code reads naturally.
+const isInwardAdmin = isAdmin;
 
 // The 11 particulars from the IDS master Inward Checklist.
 // `options` (a key into INWARD_OPTIONS_DEFAULTS) marks particulars whose
@@ -101,8 +104,8 @@ let esignatureState = {};
 // group banners (A/B/C/D/E). Rows with `editable: true` are blank placeholder
 // lines the inspector fills in (extra payloads / accessories). Each non-header
 // row has a PASS/FAIL/NA result dropdown and a per-row remark.
-const IQC_RESULT_OPTIONS = ['PASS', 'FAIL', 'NA'];
-const IQC_ZONES = [
+const IQC_RESULT_OPTIONS_DEFAULTS = ['PASS', 'FAIL', 'NA'];
+const IQC_ZONES_DEFAULTS = [
   { id: 'A',      code: 'A',      name: 'Airframe',            header: true },
   { id: 'A1',     code: 'A.1.',  name: 'All Four Arms',       checks: 'Cracks, Bends, Deformations, Loose Arms and Damage To Holes' },
   { id: 'A2',     code: 'A.2.',  name: 'Air Vehicle Body',    checks: 'Damage, Crack, Scratch, Missing/Loose Screws, Loose Objects Inside' },
@@ -132,6 +135,10 @@ const IQC_ZONES = [
   { id: 'E4',     code: 'E.4',   name: '', editable: true },
   { id: 'E5',     code: 'E.5.',  name: '', editable: true },
 ];
+
+// Runtime, admin-customizable copies (defaults merged with any saved overrides).
+let iqcZones = JSON.parse(JSON.stringify(IQC_ZONES_DEFAULTS));
+let iqcResultOptions = [...IQC_RESULT_OPTIONS_DEFAULTS];
 
 // ─── DOM REFS ─────────────────────────────────────────────────────────────────
 const splash      = document.getElementById('splash-screen');
@@ -262,6 +269,8 @@ function showApp() {
   fetchIRs();
   // Load admin-customizable inward dropdown options (best-effort)
   loadInwardOptions();
+  // Load admin-customizable IQC inspection points + result options
+  loadIqcConfig();
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -807,6 +816,9 @@ function buildField(field, irNumber) {
       </div>
     `;
   } else if (field.type === 'iqcTable') {
+    const adminBtn = isAdmin()
+      ? `<button type="button" class="btn-inward-options" onclick="openIqcConfigModal()">&#9881; Manage Inspection Points &amp; Dropdowns</button>`
+      : '';
     control = `
       <div class="iqc-table-wrapper" id="${id}">
         <div class="iqc-table-header">
@@ -816,6 +828,7 @@ function buildField(field, irNumber) {
           <span>Remark</span>
         </div>
         <div class="iqc-table-body">${buildIqcRowsHTML()}</div>
+        ${adminBtn}
       </div>`;
   } else if (field.type === 'esignature') {
     control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
@@ -1071,13 +1084,13 @@ function buildInwardRowsHTML() {
   }).join('');
 }
 
-// Build the IQC visual-inspection rows from IQC_ZONES.
+// Build the IQC visual-inspection rows from the (admin-customizable) iqcZones.
 function buildIqcRowsHTML() {
-  return IQC_ZONES.map(z => {
+  return iqcZones.map(z => {
     if (z.header) {
       return `<div class="iqc-zone-header"><span class="iqc-zone-code">${escHtml(z.code)}</span><span class="iqc-zone-name">${escHtml(z.name)}</span></div>`;
     }
-    const resultOpts = IQC_RESULT_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+    const resultOpts = iqcResultOptions.map(o => `<option value="${escHtml(o)}">${escHtml(o)}</option>`).join('');
     const zoneCell = z.editable
       ? `<div class="iqc-zone"><span class="iqc-zone-code">${escHtml(z.code)}</span><input type="text" class="form-input iqc-name" data-id="${escHtml(z.id)}" placeholder="Item name" /></div>`
       : `<div class="iqc-zone"><span class="iqc-zone-code">${escHtml(z.code)}</span><span class="iqc-zone-name">${escHtml(z.name)}</span></div>`;
@@ -1136,6 +1149,173 @@ function applyInwardOptions() {
   // Re-render any visible inward table with the new option lists
   document.querySelectorAll('.inward-table-body').forEach(tb => { tb.innerHTML = buildInwardRowsHTML(); });
   saveInwardOptions();
+}
+
+// ─── IQC INSPECTION POINTS + RESULT DROPDOWN (admin-customizable) ─────────────
+// Persisted to GAS under irNumber="__CONFIG__"/sectionId="iqc-config" (shared)
+// and mirrored to localStorage. Falls back to IQC_ZONES_DEFAULTS /
+// IQC_RESULT_OPTIONS_DEFAULTS on load.
+
+function loadIqcConfig() {
+  try {
+    const local = localStorage.getItem('ipb_iqc_config');
+    if (local) {
+      const cfg = JSON.parse(local);
+      if (Array.isArray(cfg.zones)) iqcZones = cfg.zones;
+      if (Array.isArray(cfg.resultOptions)) iqcResultOptions = cfg.resultOptions;
+    }
+  } catch {}
+  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
+    .then(r => r.json())
+    .then(data => {
+      const saved = data?.sections?.['iqc-config'];
+      if (!saved) return;
+      if (Array.isArray(saved.zones)) iqcZones = saved.zones;
+      if (Array.isArray(saved.resultOptions)) iqcResultOptions = saved.resultOptions;
+      try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
+      reRenderIqcTables();
+    })
+    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+}
+
+function saveIqcConfig() {
+  try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
+  const fd = new FormData();
+  fd.append('action', 'saveSection');
+  fd.append('irNumber', '__CONFIG__');
+  fd.append('sectionId', 'iqc-config');
+  fd.append('savedBy', currentUser?.email || 'unknown');
+  fd.append('fields', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions }));
+  fd.append('files', JSON.stringify([]));
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(() => showToast('Inspection config saved'))
+    .catch(() => showToast('Saved locally (backend unreachable)'));
+}
+
+// Re-render every visible IQC table, preserving already-entered values.
+function reRenderIqcTables() {
+  document.querySelectorAll('.iqc-table-wrapper').forEach(w => {
+    const body = w.querySelector('.iqc-table-body');
+    if (!body) return;
+    const prior = {};
+    body.querySelectorAll('.iqc-row').forEach(row => {
+      const id = row.dataset.id;
+      if (!id) return;
+      prior[id] = {
+        result: row.querySelector('.iqc-result')?.value || '',
+        remark: row.querySelector('.iqc-remark')?.value || '',
+        name:   row.querySelector('.iqc-name')?.value || '',
+        checks: row.querySelector('.iqc-checks')?.value || '',
+      };
+    });
+    body.innerHTML = buildIqcRowsHTML();
+    Object.entries(prior).forEach(([id, cell]) => {
+      const row = body.querySelector(`.iqc-row[data-id="${id}"]`);
+      if (!row) return;
+      if (cell.result) row.querySelector('.iqc-result').value = cell.result;
+      if (cell.remark) row.querySelector('.iqc-remark').value = cell.remark;
+      const nameEl = row.querySelector('.iqc-name');   if (nameEl && cell.name)   nameEl.value = cell.name;
+      const checksEl = row.querySelector('.iqc-checks'); if (checksEl && cell.checks) checksEl.value = cell.checks;
+    });
+  });
+}
+
+function iqcCfgType(z) { return z.header ? 'header' : (z.editable ? 'editable' : 'check'); }
+
+function buildIqcCfgRowsHTML() {
+  return iqcZones.map(z => {
+    const t = iqcCfgType(z);
+    const typeSel = `<select class="form-input iqc-cfg-type">
+      <option value="header"${t === 'header' ? ' selected' : ''}>Header (group)</option>
+      <option value="check"${t === 'check' ? ' selected' : ''}>Check row</option>
+      <option value="editable"${t === 'editable' ? ' selected' : ''}>Editable (blank)</option>
+    </select>`;
+    return `
+      <div class="iqc-cfg-row" data-id="${escHtml(z.id)}">
+        ${typeSel}
+        <input class="form-input iqc-cfg-code" value="${escHtml(z.code || '')}" placeholder="Code (e.g. A.1.)" />
+        <input class="form-input iqc-cfg-name" value="${escHtml(z.name || '')}" placeholder="Item / group name" />
+        <input class="form-input iqc-cfg-checks" value="${escHtml(z.checks || '')}" placeholder="Visual checks (check rows)" />
+        <button type="button" class="iqc-cfg-del" onclick="this.closest('.iqc-cfg-row').remove()">&times;</button>
+      </div>`;
+  }).join('');
+}
+
+function openIqcConfigModal() {
+  if (!isAdmin()) { showToast('Not authorized'); return; }
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'iqc-config-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Manage Inspection Points &amp; Dropdowns</h3>
+        <button type="button" class="inward-options-close" onclick="closeIqcConfigModal()">&times;</button>
+      </div>
+      <p class="inward-options-hint">Edit the Result dropdown options (one per line), then the inspection points. Changes apply to every IR's IQC table and persist for all users.</p>
+      <div class="opt-group">
+        <label class="form-label">Result dropdown options</label>
+        <textarea class="form-input opt-textarea" id="iqc-cfg-results" placeholder="One option per line">${escHtml(iqcResultOptions.join('\n'))}</textarea>
+      </div>
+      <div class="iqc-cfg-rows-head">
+        <span>Type</span><span>Code</span><span>Item / Group name</span><span>Visual checks</span><span></span>
+      </div>
+      <div id="iqc-cfg-rows">${buildIqcCfgRowsHTML()}</div>
+      <button type="button" class="btn iqc-cfg-add" onclick="addIqcCfgRow()">+ Add row</button>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeIqcConfigModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyIqcConfig()">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function closeIqcConfigModal() {
+  const m = document.getElementById('iqc-config-modal');
+  if (m) m.remove();
+}
+
+function addIqcCfgRow() {
+  const container = document.getElementById('iqc-cfg-rows');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = 'iqc-cfg-row';
+  div.dataset.id = 'new_' + Date.now();
+  div.innerHTML = `
+    <select class="form-input iqc-cfg-type">
+      <option value="header">Header (group)</option>
+      <option value="check" selected>Check row</option>
+      <option value="editable">Editable (blank)</option>
+    </select>
+    <input class="form-input iqc-cfg-code" placeholder="Code (e.g. A.1.)" />
+    <input class="form-input iqc-cfg-name" placeholder="Item / group name" />
+    <input class="form-input iqc-cfg-checks" placeholder="Visual checks (check rows)" />
+    <button type="button" class="iqc-cfg-del" onclick="this.closest('.iqc-cfg-row').remove()">&times;</button>`;
+  container.appendChild(div);
+}
+
+function applyIqcConfig() {
+  const resultsText = document.getElementById('iqc-cfg-results')?.value || '';
+  iqcResultOptions = resultsText.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!iqcResultOptions.length) iqcResultOptions = [...IQC_RESULT_OPTIONS_DEFAULTS];
+  const rows = document.querySelectorAll('#iqc-config-modal .iqc-cfg-row');
+  const newZones = [];
+  rows.forEach((row, i) => {
+    const type   = row.querySelector('.iqc-cfg-type')?.value || 'check';
+    const code   = row.querySelector('.iqc-cfg-code')?.value || '';
+    const name   = row.querySelector('.iqc-cfg-name')?.value || '';
+    const checks = row.querySelector('.iqc-cfg-checks')?.value || '';
+    const id = row.dataset.id || `z${i}`;
+    const z = { id, code, name, checks };
+    if (type === 'header') z.header = true;
+    else if (type === 'editable') z.editable = true;
+    newZones.push(z);
+  });
+  iqcZones = newZones;
+  closeIqcConfigModal();
+  reRenderIqcTables();
+  saveIqcConfig();
 }
 
 function handleFilePreview(e) {

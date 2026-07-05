@@ -330,19 +330,22 @@ question, the lead time, and the Purchase Manager sign-off.
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
 | `d_partB` | Part B — Cost Analysis (Repair Estimate & Lead Time) | divider | Sub-section heading band (no value) |
-| `d_warrantyQualified` | Is This Repair Qualified For Cover Under Warranty? | select | Options: _(blank)_, Yes, No |
+| `d_warrantyQualified` | Is This Repair Qualified For Cover Under Warranty? (Yes/No) | select | Options: _(blank)_, Yes, No. Label matches the Format worksheet row exactly |
 | `d_repairTable` | Particulars For Repair / Replace | costTable | See the `costTable` type below |
 | `d_leadTime` | Estimated Lead Time | text | e.g. "7–10 working days" |
+| `d_goAhead` | Received Go Ahead By The Customer? | select | Options: _(blank)_, Yes, No. Customer approval of the estimate (Format tab row 55) |
 | `d_signPurchaseManager` | Digital Signature — Purchase Manager | esignature | Closes Part B |
 
-> **Note on the warranty row:** the exact row text
-> "Is This Repair Qualified For Cover Under Warranty? (Yes/No)" was not readable
-> on any of the publicly-link-shared tabs of the master sheet (Section D is
-> heavily merged-cell, and that specific row wasn't exposed on the accessible
-> gids). Part B was therefore inferred from the visible Section D structure
-> (the repair/replace estimate columns, "Lead Time" in the section title, and
-> the two signature roles). If the sheet has additional Part B fields or
-> different labels, tell me and I'll correct them.
+> **Note on Part B field types:** the Format worksheet's Section D region uses
+> heavy cell-merging, so Google's public CSV endpoint blanks out most of the
+> merged cells (the warranty row text and the input types aren't readable via
+> the link-shared feed). Field labels and order were confirmed from the cells
+> that *are* visible — the repair-table header (row 47: Particulars/Qty/Rate/
+> Cost/Remark at U/W/X/Y/Z), "Received Go Ahead By The Customer" (row 55), and
+> the two signatures (row 60: Technical Support (QC Manager) at U, Purchase
+> Manager at X). The warranty, lead-time and go-ahead **input types** (select
+> Yes/No vs. text vs. date) were inferred — if the sheet uses a different
+> control for any of these, tell me and I'll adjust.
 
 ### Cost estimate table (`costTable` type)
 A repeatable repair/replace estimate table mirroring the sheet's Part B layout:

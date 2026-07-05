@@ -629,9 +629,10 @@ const SECTIONS = {
 
       // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
       { id: 'd_partB',              label: 'Part B — Cost Analysis (Repair Estimate &amp; Lead Time)', type: 'divider' },
-      { id: 'd_warrantyQualified',  label: 'Is This Repair Qualified For Cover Under Warranty?', type: 'select', options: ['', 'Yes', 'No'] },
+      { id: 'd_warrantyQualified',  label: 'Is This Repair Qualified For Cover Under Warranty? (Yes/No)', type: 'select', options: ['', 'Yes', 'No'] },
       { id: 'd_repairTable',        label: 'Particulars For Repair / Replace', type: 'costTable' },
       { id: 'd_leadTime',           label: 'Estimated Lead Time', type: 'text', placeholder: 'e.g. 7–10 working days' },
+      { id: 'd_goAhead',            label: 'Received Go Ahead By The Customer?', type: 'select', options: ['', 'Yes', 'No'] },
       { id: 'd_signPurchaseManager', label: 'Digital Signature — Purchase Manager', type: 'esignature', role: 'Purchase Manager' },
     ]
   },

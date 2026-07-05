@@ -262,11 +262,11 @@ function sendNudgeEmail(params) {
     throw new Error('Email can only be sent to @' + CONFIG.ALLOWED_DOMAIN + ' addresses.');
   }
 
-  var subject = '[I-PASSBOOK] ' + irNumber + ' — you have been nudged';
+  var subject = '[I-PASSBOOK] ' + irNumber + ' — you have a comment';
   var lines = [
     'Hi,',
     '',
-    fromName + ' nudged you on I-PASSBOOK.',
+    fromName + ' mentioned you in a comment on I-PASSBOOK.',
     '',
     'IR: ' + irNumber
   ];

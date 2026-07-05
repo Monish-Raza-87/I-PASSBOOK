@@ -746,7 +746,7 @@ function buildSectionForms(irNumber) {
     btn.type = 'button';
     btn.className = 'sec-nudge-btn';
     btn.innerHTML = '💬';
-    btn.title = 'Nudge / comments on this section';
+    btn.title = 'Comments on this section';
     btn.onclick = () => openNudgeModalForSection(secId);
     const h2 = sec.querySelector('.section-title');
     if (h2) h2.appendChild(btn);
@@ -960,7 +960,7 @@ function buildField(field, irNumber) {
   const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
   // Per-field nudge / comment button (skipped for the read-only analysis note).
   const fieldNudgeBtn = field.type && field.type !== 'analysisNote'
-    ? `<button type="button" class="field-nudge-btn" title="Comments / nudge on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬</button>`
+    ? `<button type="button" class="field-nudge-btn" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬</button>`
     : '';
   const labelHtml = field.label
     ? `<label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
@@ -2446,7 +2446,7 @@ function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
   nudgeSelectedEmail = null;
   const title = scope === 'field'  ? `Comments · ${label || fieldId}`
               : scope === 'section' ? `Comments · ${label || sectionId}`
-              : `Nudge / Comments · ${irNumber}`;
+              : `Comments · ${irNumber}`;
   const ctxLine = scope === 'field'  ? `IR ${irNumber} · Field “${label || fieldId}”`
                 : scope === 'section' ? `IR ${irNumber} · Section ${label || sectionId}`
                 : `IR ${irNumber} (whole passbook)`;
@@ -2468,13 +2468,15 @@ function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
         <label class="form-label" style="margin-top:0.6rem;">Message</label>
         <textarea id="nudge-message" class="form-input" rows="3" placeholder="What do you want to remind or assign?"></textarea>
         <div class="nudge-composer-actions">
-          <button type="button" class="btn btn-secondary" onclick="sendNudge(false)">💬 Notify in app</button>
-          <button type="button" class="btn btn-secondary" onclick="sendNudge(true)">✉️ Notify in app + send email</button>
+          <button type="button" class="btn" onclick="sendComment()">💬 Comment</button>
         </div>
       </div>
     </div>`;
   document.body.appendChild(modal);
   renderNudgeThread();
+  // Keyboard navigation for the @-mention suggestion dropdown (↑/↓ + Enter + Esc).
+  const recipientInput = document.getElementById('nudge-recipient');
+  if (recipientInput) recipientInput.addEventListener('keydown', onNudgeRecipientKeydown);
   // Close on backdrop click
   modal.addEventListener('click', e => { if (e.target === modal) closeNudgeModal(); });
 }
@@ -2495,7 +2497,7 @@ function renderNudgeThread() {
   const el = document.getElementById('nudge-thread');
   if (!el) return;
   const thread = nudges.filter(nudgeCtxMatch).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
-  if (!thread.length) { el.innerHTML = '<div class="nudge-empty">No comments yet. Tag someone above to nudge them about this.</div>'; return; }
+  if (!thread.length) { el.innerHTML = '<div class="nudge-empty">No comments yet. Tag someone above to notify them about this.</div>'; return; }
   el.innerHTML = thread.map(n => {
     const mine = (n.from || '').toLowerCase() === myEmail();
     return `<div class="nudge-post ${mine ? 'mine' : ''}">
@@ -2513,6 +2515,7 @@ function rerenderOpenNudgeModal() {
 }
 function onNudgeRecipientInput(value) {
   nudgeSelectedEmail = null;
+  nudgeSuggestIndex = -1;
   const suggest = document.getElementById('nudge-suggest');
   if (!suggest) return;
   const q = (value || '').replace(/^@/, '').trim().toLowerCase();
@@ -2521,12 +2524,44 @@ function onNudgeRecipientInput(value) {
     .filter(d => (d.name || '').toLowerCase().includes(q) || (d.email || '').toLowerCase().includes(q))
     .slice(0, 6);
   if (!matches.length) { suggest.innerHTML = '<div class="nudge-suggest-empty">No match — type a full email to tag anyway.</div>'; suggest.style.display = 'block'; return; }
-  suggest.innerHTML = matches.map(d =>
-    `<button type="button" class="nudge-suggest-item" onclick="selectNudgeRecipient('${escHtml(d.email)}','${escHtml((d.name||'').replace(/'/g, ''))}')">
+  suggest.innerHTML = matches.map((d, i) =>
+    `<button type="button" class="nudge-suggest-item" data-idx="${i}" data-email="${escHtml(d.email)}" data-name="${escHtml((d.name||'').replace(/"/g, '&quot;'))}" onclick="selectNudgeRecipient('${escHtml(d.email)}','${escHtml((d.name||'').replace(/'/g, ''))}')">
       <span class="nudge-suggest-name">${escHtml(d.name || '')}</span>
       <span class="nudge-suggest-email">${escHtml(d.email || '')}</span>
     </button>`).join('');
   suggest.style.display = 'block';
+}
+// Keyboard navigation for the suggestion dropdown: ↑/↓ to move, Enter to
+// select, Esc to close. Bound to the recipient input in openNudgeModal.
+let nudgeSuggestIndex = -1;
+function onNudgeRecipientKeydown(e) {
+  const suggest = document.getElementById('nudge-suggest');
+  if (!suggest || suggest.style.display !== 'block') return;
+  const items = Array.from(suggest.querySelectorAll('.nudge-suggest-item'));
+  if (!items.length) return;
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    nudgeSuggestIndex = (nudgeSuggestIndex + 1) % items.length;
+    highlightNudgeSuggest(items);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    nudgeSuggestIndex = (nudgeSuggestIndex - 1 + items.length) % items.length;
+    highlightNudgeSuggest(items);
+  } else if (e.key === 'Enter') {
+    if (nudgeSuggestIndex >= 0 && items[nudgeSuggestIndex]) {
+      e.preventDefault();
+      const it = items[nudgeSuggestIndex];
+      selectNudgeRecipient(it.dataset.email, it.dataset.name || '');
+    }
+  } else if (e.key === 'Escape') {
+    suggest.innerHTML = ''; suggest.style.display = 'none';
+    nudgeSuggestIndex = -1;
+  }
+}
+function highlightNudgeSuggest(items) {
+  items.forEach((it, i) => it.classList.toggle('nudge-suggest-active', i === nudgeSuggestIndex));
+  const active = items[nudgeSuggestIndex];
+  if (active) active.scrollIntoView({ block: 'nearest' });
 }
 function selectNudgeRecipient(email, name) {
   nudgeSelectedEmail = email;
@@ -2534,6 +2569,7 @@ function selectNudgeRecipient(email, name) {
   if (inp) inp.value = `${name} <${email}>`;
   const suggest = document.getElementById('nudge-suggest');
   if (suggest) { suggest.innerHTML = ''; suggest.style.display = 'none'; }
+  nudgeSuggestIndex = -1;
 }
 function resolveNudgeRecipient() {
   if (nudgeSelectedEmail) return nudgeSelectedEmail;
@@ -2546,7 +2582,7 @@ function resolveNudgeRecipient() {
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return raw;
   return '';
 }
-async function sendNudge(alsoEmail) {
+async function sendComment() {
   if (!nudgeModalCtx) return;
   const to = resolveNudgeRecipient();
   const message = (document.getElementById('nudge-message')?.value || '').trim();
@@ -2570,13 +2606,11 @@ async function sendNudge(alsoEmail) {
     readBy: [],
   };
   await addNudge(nudge);
-  if (alsoEmail) {
-    await sendNudgeEmailBackend(nudge);
-  } else {
-    showToast('Nudge sent');
-  }
+  // One action: posts the comment in-app AND emails the recipient automatically.
+  await sendNudgeEmailBackend(nudge);
   // clear composer
   nudgeSelectedEmail = null;
+  nudgeSuggestIndex = -1;
   const r = document.getElementById('nudge-recipient'); if (r) r.value = '';
   const m = document.getElementById('nudge-message'); if (m) m.value = '';
   const suggest = document.getElementById('nudge-suggest'); if (suggest) { suggest.innerHTML = ''; suggest.style.display = 'none'; }
@@ -2596,7 +2630,7 @@ async function sendNudgeEmailBackend(nudge) {
     fd.append('message',  nudge.message || '');
     const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
     const data = await res.json();
-    if (data.status === 'ok') { showToast('Nudge sent · email delivered to ' + nudge.to); return; }
+    if (data.status === 'ok') { showToast('Comment posted · email sent to ' + nudge.to); return; }
     showToast('Email failed: ' + (data.message || 'backend error') + ' — opening mail client');
   } catch {
     showToast('Email backend unreachable — opening mail client');
@@ -2610,9 +2644,9 @@ async function resendNudgeEmail(id) {
   await sendNudgeEmailBackend(n);
 }
 function openNudgeMailto(n) {
-  const subj = `[I-PASSBOOK] ${n.irNumber || ''} — you've been nudged`;
+  const subj = `[I-PASSBOOK] ${n.irNumber || ''} — you have a comment`;
   const ctx = scopeContextText(n);
-  const body = `Hi,\n\n${n.fromName || n.from} nudged you on I-PASSBOOK.\n\nIR: ${n.irNumber || ''}\n${ctx}\n\nMessage:\n${n.message || ''}\n\n— Sent via I-PASSBOOK`;
+  const body = `Hi,\n\n${n.fromName || n.from} mentioned you in a comment on I-PASSBOOK.\n\nIR: ${n.irNumber || ''}\n${ctx}\n\nMessage:\n${n.message || ''}\n\n— Sent via I-PASSBOOK`;
   window.location.href = `mailto:${encodeURIComponent(n.to || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
 

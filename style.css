@@ -1138,6 +1138,8 @@ select.form-input option { background: #0f172a; }
   color: var(--text); text-align: left;
 }
 .nudge-suggest-item:hover { background: rgba(14,98,255,0.16); }
+.nudge-suggest-item.nudge-suggest-active,
+.nudge-suggest-item.nudge-suggest-active:hover { background: rgba(14,98,255,0.28); }
 .nudge-suggest-name { font-size: 0.8rem; }
 .nudge-suggest-email { font-size: 0.72rem; color: var(--muted); }
 .nudge-suggest-empty { padding: 7px 10px; font-size: 0.74rem; color: var(--muted); }

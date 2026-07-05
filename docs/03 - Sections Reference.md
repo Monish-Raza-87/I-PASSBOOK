@@ -14,41 +14,44 @@ in the draft and must be re-attached.
 
 ---
 
-## Nudge / Tag / Alert system (app-wide)
+## Comments / Tag system (app-wide)
 Any signed-in user can **@-tag a teammate** to remind or assign them, at three
-levels, available everywhere in the app:
+levels, available everywhere in the app. (Internally the data model is still
+called "nudges" — the user-facing name is "Comments".)
 
-- **Per IR** — `💬 Nudge / Comments` button in the IR banner (scope `ir`).
+- **Per IR** — `💬 Comments` button in the IR banner (scope `ir`).
 - **Per section** — a `💬` button injected after each section title (scope `section`).
 - **Per field** — a `💬` button on every field label (scope `field`, Sheets-like cell comments).
 
-### Composing a nudge
-The Nudge modal shows the existing thread for that context plus a composer:
+### Composing a comment
+The Comments modal shows the existing thread for that context plus a composer:
 - **Tag someone (@)** — type `@` or a few letters of a name/email; matching
-  entries from the **Team Directory** appear as suggestions to click. A full
-  email can also be typed directly.
+  entries from the **Team Directory** appear as suggestions. **Keyboard-friendly:**
+  ↑/↓ to move the highlight, **Enter** to select, **Esc** to close. A full email
+  can also be typed directly.
 - **Message** — free text.
-- **💬 Notify in app** stores the nudge (automatic — no operator clicks).
-- **✉️ Notify in app + send email** stores the nudge **and** sends a real email
-  automatically via the Apps Script backend (`MailApp.sendEmail`) — zero operator
-  clicks. If the backend is unreachable it falls back to a pre-filled mailto
-  (operator clicks Send once).
+- **💬 Comment** — a **single button** that posts the comment in-app **and** sends a
+  real email automatically via the Apps Script backend (`MailApp.sendEmail`) —
+  zero operator clicks, no in-app/email choice to make. If the backend is
+  unreachable it falls back to a pre-filled mailto (operator clicks Send once).
 
 ### Delivery
-- **In-app 🔔 bell** in the header shows a badge with the unread count of nudges
+- **In-app 🔔 bell** in the header shows a badge with the unread count of comments
   addressed to (or mentioning) the signed-in user. Opening the bell lists them
   (newest first) with **Open IR** and **✉️ Email** (re-send via backend, mailto
   fallback) actions, and marks them read.
 - The bell polls the backend every ~90 s and refreshes on open.
 
-### Backend (`backend.gs`) — nudge email
-The `sendNudgeEmail` POST action sends via `MailApp.sendEmail`, restricted to
-`@indrones.com` recipients (so the app can't be used to mail externally). The
-sender's email is set as `replyTo`. **Requires redeploying** the Apps Script web
-app after adding this action. Quota: Apps Script's daily MailApp limit applies.
+### Backend (`backend.gs`) — comment email
+The `sendNudgeEmail` POST action (name kept for contract stability) sends via
+`MailApp.sendEmail`, restricted to `@indrones.com` recipients (so the app can't
+be used to mail externally). The sender's email is set as `replyTo`. Email
+subject/body read "you have a comment" / "mentioned you in a comment"
+(no "nudge" wording). **Requires redeploying** the Apps Script web app after
+adding this action. Quota: Apps Script's daily MailApp limit applies.
 
 ### Storage (no backend redeploy required)
-Nudges are stored via the existing generic `saveSection` / `getPassbook`
+Comments are stored via the existing generic `saveSection` / `getPassbook`
 endpoints under a special irNumber `__NUDGES__` / sectionId `all`, field
 `items` = array of:
 
@@ -57,10 +60,10 @@ endpoints under a special irNumber `__NUDGES__` / sectionId `all`, field
   to, from, fromName, message, mentions[], createdAt, readBy[] }
 ```
 
-Adding a nudge does a fresh fetch → append → save to reduce lost writes
-(concurrent last-write-wins is still possible). All nudges live in one APP_DATA
-cell, so the list is bounded by the ~50,000-char cell limit (archive later if it
-grows).
+Adding a comment does a fresh fetch → append → save to reduce lost writes
+(concurrent last-write-wins is still possible). All comments live in one
+APP_DATA cell, so the list is bounded by the ~50,000-char cell limit (archive
+later if it grows).
 
 ### Team Directory (admin-editable)
 `TEAM_DIRECTORY_DEFAULTS` seeds the @-mention suggestions; admins

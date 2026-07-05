@@ -14,6 +14,63 @@ in the draft and must be re-attached.
 
 ---
 
+## Nudge / Tag / Alert system (app-wide)
+Any signed-in user can **@-tag a teammate** to remind or assign them, at three
+levels, available everywhere in the app:
+
+- **Per IR** — `💬 Nudge / Comments` button in the IR banner (scope `ir`).
+- **Per section** — a `💬` button injected after each section title (scope `section`).
+- **Per field** — a `💬` button on every field label (scope `field`, Sheets-like cell comments).
+
+### Composing a nudge
+The Nudge modal shows the existing thread for that context plus a composer:
+- **Tag someone (@)** — type `@` or a few letters of a name/email; matching
+  entries from the **Team Directory** appear as suggestions to click. A full
+  email can also be typed directly.
+- **Message** — free text.
+- **💬 Notify in app** stores the nudge (automatic — no operator clicks).
+- **✉️ Notify in app + send email** stores the nudge **and** sends a real email
+  automatically via the Apps Script backend (`MailApp.sendEmail`) — zero operator
+  clicks. If the backend is unreachable it falls back to a pre-filled mailto
+  (operator clicks Send once).
+
+### Delivery
+- **In-app 🔔 bell** in the header shows a badge with the unread count of nudges
+  addressed to (or mentioning) the signed-in user. Opening the bell lists them
+  (newest first) with **Open IR** and **✉️ Email** (re-send via backend, mailto
+  fallback) actions, and marks them read.
+- The bell polls the backend every ~90 s and refreshes on open.
+
+### Backend (`backend.gs`) — nudge email
+The `sendNudgeEmail` POST action sends via `MailApp.sendEmail`, restricted to
+`@indrones.com` recipients (so the app can't be used to mail externally). The
+sender's email is set as `replyTo`. **Requires redeploying** the Apps Script web
+app after adding this action. Quota: Apps Script's daily MailApp limit applies.
+
+### Storage (no backend redeploy required)
+Nudges are stored via the existing generic `saveSection` / `getPassbook`
+endpoints under a special irNumber `__NUDGES__` / sectionId `all`, field
+`items` = array of:
+
+```
+{ id, irNumber, scope, sectionId?, fieldId?, sectionLabel?, fieldLabel?,
+  to, from, fromName, message, mentions[], createdAt, readBy[] }
+```
+
+Adding a nudge does a fresh fetch → append → save to reduce lost writes
+(concurrent last-write-wins is still possible). All nudges live in one APP_DATA
+cell, so the list is bounded by the ~50,000-char cell limit (archive later if it
+grows).
+
+### Team Directory (admin-editable)
+`TEAM_DIRECTORY_DEFAULTS` seeds the @-mention suggestions; admins
+(`ADMIN_EMAILS` + dev) edit it via **⚙ Directory** in the bell panel. Overrides
+persist to GAS under irNumber `__CONFIG__` / sectionId `team-directory`
+(field `entries`) and to `localStorage` (`ipb_team_directory`).
+`loadTeamDirectory()` runs at app start.
+
+---
+
 ## Section A — Preliminary Details & Activity Log
 **ID:** `sec-a`
 
@@ -193,22 +250,120 @@ the same admin set — see `isAdmin()`.)
 
 ---
 
-## Section D — Technical Support Analysis
+## Section D — Investigation
 **ID:** `sec-d`
 
-| Field ID | Label | Type |
-|---|---|---|
-| `d_techDate` | Analysis Date | date |
-| `d_techBy` | Tech Support Engineer | text |
-| `d_rootCause` | Root Cause | textarea |
-| `d_repairScope` | Recommended Repair Scope | textarea |
-| `d_matCostEstimate` | Material Cost Estimate (₹) | number |
-| `d_labourCost` | Labour Cost Estimate (₹) | number |
-| `d_totalEstimate` | Total Estimate (₹) | number |
-| `d_crStatus` | Cost Report (CR) Status | select: Not Sent / Sent – Awaiting Approval / Approved by Customer / Rejected by Customer |
-| `d_crDate` | CR Sent / Approval Date | date |
-| `d_techPhotos` | Analysis Photos / Reports | file |
-| `d_notes` | Additional Notes | textarea |
+Section D is built in two parts, each signed off by a different role:
+- **Part A — Investigation** (flight-data analysis) → signed off by the
+  **Technical Support (QC Manager)**.
+- **Part B — Cost Analysis** (repair estimate & lead time) → signed off by the
+  **Purchase Manager**.
+
+In the original I-PASSBOOK sheet the two signatures sit side-by-side; here they
+are split — the QC Manager signature appears at the end of Part A and the
+Purchase Manager signature at the end of Part B. The damage-report sub-section
+from the sheet is deferred (later development).
+
+### Part A — Investigation
+
+| Field ID | Label | Type | Notes |
+|---|---|---|---|
+| `d_partA` | Part A — Investigation | divider | Sub-section heading band (no value) |
+| `d_analysisBy` | Analysis Performed By | text | Engineer / analyst name |
+| `d_analysisDate` | Analysis Date | date | |
+| `d_intro` | _(none)_ | analysisNote | Read-only dynamic line: "Dear customer, analysis of **IRXXX** for your system with ID **XXXXX** has been completed. Its findings are as below." — `IRXXX` → `currentIR.irNumber`, `XXXXX` → `currentIR.droneId` |
+| `d_investigation` | Description of Investigation | textarea | |
+| `d_evidence` | Investigation Evidence (Images) | imageEvidence | Image-only, with a name/context caption per image (see below) |
+| `d_rootCause` | Root Cause | textarea | |
+| `d_correctiveAction` | Corrective Action | textarea | |
+| `d_preventiveAction` | Preventive Action | textarea | |
+| `d_signQcManager` | Digital Signature — Technical Support (QC Manager) | esignature | Closes Part A |
+
+### Download Investigation (PDF)
+A **⬇ Download Investigation (PDF)** button under the section builds a clean,
+client-facing printable document (IR, system ID, date, analyst, the dynamic
+intro, investigation, evidence images with captions, root cause / corrective /
+preventive) and opens the browser print dialog so it can be saved/shared as PDF.
+Newly-attached (not-yet-saved) images are embedded as data URLs; uploaded
+images use their Drive URLs. **Part B (Cost Analysis) is excluded** from this
+download. The document ends with an **Investigation Authorised** sign-off line
+showing the Technical Support (QC Manager) name + date if Part A is already
+signed, otherwise "Pending signature".
+
+### Image evidence (`imageEvidence` type)
+Each entry is an image plus a free-text **Name / context** caption. Control
+state lives in `evidenceState[fieldId]` (reset on `openPassbook`):
+
+```
+evidenceState['d_evidence'] = [
+  { caption, link, file, url },   // link = Drive URL ('' while pending); file/url = local File + object URL
+  ...
+]
+```
+
+- **Add:** `+ Add evidence image` opens an image-only picker (`accept="image/*"`,
+  multiple). Each picked file is shown as a thumbnail with an editable caption
+  and a ✕ remove button.
+- **Saved value** (`d_evidence`) is an array `[{ caption, link }]` — captions
+  paired with the Drive URLs of already-uploaded images; pending (not-yet-uploaded)
+  images have `link: ''`.
+- **Upload:** on Save, only the pending images are sent as files (fieldId
+  `d_evidence`); the backend uploads them to Drive and stores the new URLs in
+  `d_evidence_links` (comma-separated, in upload order). Already-uploaded links
+  are carried in `d_evidence` and re-sent on every save, so they survive re-saves.
+- **Link merge:** because the backend overwrites `d_evidence_links` with only the
+  newest uploads, newly-uploaded URLs are merged back into `evidenceState` from
+  `d_evidence_links` — on load (`populateFieldValue`) and immediately after a
+  successful save (`refreshEvidenceLinksAfterSave`) — so captions stay paired
+  with their images and a later caption-only re-save persists the URLs in
+  `d_evidence`.
+- **Drafts:** captions + already-uploaded links are included in the draft (like
+  other fields); the local image files themselves are not (consistent with the
+  all-sections note that files/photos must be re-attached).
+
+### Part B — Cost Analysis (Repair Estimate & Lead Time)
+
+Mirrors Section D Part B of the I-PASSBOOK sheet — the repair/replace estimate
+columns (Particulars / Qty / Rate / Cost / Remark), the warranty qualification
+question, the lead time, and the Purchase Manager sign-off.
+
+| Field ID | Label | Type | Notes |
+|---|---|---|---|
+| `d_partB` | Part B — Cost Analysis (Repair Estimate & Lead Time) | divider | Sub-section heading band (no value) |
+| `d_warrantyQualified` | Is This Repair Qualified For Cover Under Warranty? | select | Options: _(blank)_, Yes, No |
+| `d_repairTable` | Particulars For Repair / Replace | costTable | See the `costTable` type below |
+| `d_leadTime` | Estimated Lead Time | text | e.g. "7–10 working days" |
+| `d_signPurchaseManager` | Digital Signature — Purchase Manager | esignature | Closes Part B |
+
+> **Note on the warranty row:** the exact row text
+> "Is This Repair Qualified For Cover Under Warranty? (Yes/No)" was not readable
+> on any of the publicly-link-shared tabs of the master sheet (Section D is
+> heavily merged-cell, and that specific row wasn't exposed on the accessible
+> gids). Part B was therefore inferred from the visible Section D structure
+> (the repair/replace estimate columns, "Lead Time" in the section title, and
+> the two signature roles). If the sheet has additional Part B fields or
+> different labels, tell me and I'll correct them.
+
+### Cost estimate table (`costTable` type)
+A repeatable repair/replace estimate table mirroring the sheet's Part B layout:
+
+| Column | Behaviour |
+|---|---|
+| `#` | Read-only serial number (auto, re-numbered on row delete) |
+| Particulars | Free text — the part / labour item |
+| Qty | Number (≥0) |
+| Rate | Number (≥0) — per-unit cost |
+| Cost | **Auto** = Qty × Rate (read-only, recomputed on input) |
+| Remark | Free text |
+| ✕ | Remove row |
+
+A **Total Repair Cost: ₹…** line sums Cost across all rows live. `+ Add Row`
+appends a fresh row. **Saved value** is an array
+`[{ particular, qty, rate, cost, remark }, ...]`; completely blank rows are
+dropped on save. On load, saved rows are rebuilt (Cost re-computed); an empty
+saved value re-seeds 3 blank rows so the operator always has inputs ready.
+
+---
 
 ---
 

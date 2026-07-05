@@ -98,6 +98,10 @@ const INWARD_OPTIONS_DEFAULTS = {
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
 // E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
 let esignatureState = {};
+// Image-evidence control state (Section D): evidenceState[fieldId] = [{ caption, link, file, url }].
+// `link` = Drive URL of an already-uploaded image ('' while pending upload); `file`/`url`
+// hold the local File + object URL for images not yet uploaded to Drive.
+let evidenceState = {};
 
 // ─── SECTION C — IQC VISUAL INSPECTION CONFIG ──────────────────────────────────
 // Inspection zones from the IDS master Section C sheet. `header: true` rows are
@@ -271,6 +275,14 @@ function showApp() {
   loadInwardOptions();
   // Load admin-customizable IQC inspection points + result options
   loadIqcConfig();
+  // Load team directory (@-mention suggestions) + nudges, and start nudge polling
+  loadTeamDirectory();
+  loadNudges();
+  startNudgePolling();
+
+  // Bell toggle
+  const bell = document.getElementById('nudge-bell');
+  if (bell) bell.addEventListener('click', toggleNudgePanel);
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -503,6 +515,7 @@ searchInput.addEventListener('input', () => {
 async function openPassbook(irNumber) {
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
   esignatureState = {};   // clear signatures from any previously-open IR
+  evidenceState = {};     // clear image-evidence state from any previously-open IR
 
   document.getElementById('ir-banner-title').textContent = irNumber;
   document.getElementById('ir-banner-sub').textContent =
@@ -524,6 +537,10 @@ async function openPassbook(irNumber) {
 
 // Back button
 backBtn.addEventListener('click', showIndex);
+
+// IR banner nudge / comments button
+const irNudgeBtn = document.getElementById('ir-nudge-btn');
+if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
 
 // ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
 // Any edit within a section is persisted as a draft (debounced), so unsaved
@@ -591,20 +608,31 @@ const SECTIONS = {
       { id: 'c_signIqc',      label: 'Digital Signature — IQC Inspector', type: 'esignature', role: 'IQC Inspector' },
     ]
   },
+  // Section D — Investigation, in two parts:
+  //  Part A. Investigation (Flight Data Analysis) — signed off by the QC Manager.
+  //  Part B. Cost Analysis (Repair Estimate & Lead Time) — signed off by the Purchase Manager.
+  // The damage-report sub-section is deferred (later development).
   'sec-d': {
-    title: 'Section D — Technical Support Analysis',
+    title: 'Section D — Investigation',
     fields: [
-      { id: 'd_techDate',       label: 'Analysis Date',      type: 'date' },
-      { id: 'd_techBy',         label: 'Tech Support Engineer', type: 'text', placeholder: 'Engineer name' },
-      { id: 'd_rootCause',      label: 'Root Cause',          type: 'textarea', placeholder: 'Detailed root cause analysis...' },
-      { id: 'd_repairScope',    label: 'Recommended Repair Scope', type: 'textarea', placeholder: 'What exactly needs repair or replacement...' },
-      { id: 'd_matCostEstimate',label: 'Material Cost Estimate (₹)', type: 'number', placeholder: '0.00' },
-      { id: 'd_labourCost',     label: 'Labour Cost Estimate (₹)',   type: 'number', placeholder: '0.00' },
-      { id: 'd_totalEstimate',  label: 'Total Estimate (₹)',         type: 'number', placeholder: '0.00' },
-      { id: 'd_crStatus',       label: 'Cost Report (CR) Status',    type: 'select', options: ['Not Sent','Sent – Awaiting Approval','Approved by Customer','Rejected by Customer'] },
-      { id: 'd_crDate',         label: 'CR Sent / Approval Date',    type: 'date' },
-      { id: 'd_techPhotos',     label: 'Analysis Photos / Reports',  type: 'file', multiple: true },
-      { id: 'd_notes',          label: 'Additional Notes',           type: 'textarea', placeholder: 'Any additional observations...' },
+      // ── Part A — Investigation ──
+      { id: 'd_partA',            label: 'Part A — Investigation',          type: 'divider' },
+      { id: 'd_analysisBy',     label: 'Analysis Performed By', type: 'text', placeholder: 'Engineer / analyst name' },
+      { id: 'd_analysisDate',   label: 'Analysis Date',         type: 'date' },
+      { id: 'd_intro',          label: '',                       type: 'analysisNote' },
+      { id: 'd_investigation',  label: 'Description of Investigation', type: 'textarea', placeholder: 'Summarise the investigation performed, logs/telemetry reviewed, tests done...' },
+      { id: 'd_evidence',       label: 'Investigation Evidence (Images)', type: 'imageEvidence' },
+      { id: 'd_rootCause',      label: 'Root Cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
+      { id: 'd_correctiveAction',  label: 'Corrective Action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
+      { id: 'd_preventiveAction',  label: 'Preventive Action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
+      { id: 'd_signQcManager',  label: 'Digital Signature — Technical Support (QC Manager)', type: 'esignature', role: 'Technical Support (QC Manager)' },
+
+      // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
+      { id: 'd_partB',              label: 'Part B — Cost Analysis (Repair Estimate &amp; Lead Time)', type: 'divider' },
+      { id: 'd_warrantyQualified',  label: 'Is This Repair Qualified For Cover Under Warranty?', type: 'select', options: ['', 'Yes', 'No'] },
+      { id: 'd_repairTable',        label: 'Particulars For Repair / Replace', type: 'costTable' },
+      { id: 'd_leadTime',           label: 'Estimated Lead Time', type: 'text', placeholder: 'e.g. 7–10 working days' },
+      { id: 'd_signPurchaseManager', label: 'Digital Signature — Purchase Manager', type: 'esignature', role: 'Purchase Manager' },
     ]
   },
   'sec-e': {
@@ -705,6 +733,24 @@ function buildSectionForms(irNumber) {
   const btnTopA = document.getElementById('save-sec-a-top');
   if (btnTopA) btnTopA.onclick = () => saveSection('sec-a', irNumber);
 
+  // Wire Section D Part A PDF download
+  const dlD = document.getElementById('download-sec-d');
+  if (dlD) dlD.onclick = () => downloadSectionDPartA();
+
+  // Inject a 💬 nudge button after each section title (per-section tagging)
+  Object.keys(SECTIONS).forEach(secId => {
+    const sec = document.getElementById(secId);
+    if (!sec || sec.querySelector('.sec-nudge-btn')) return;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sec-nudge-btn';
+    btn.innerHTML = '💬';
+    btn.title = 'Nudge / comments on this section';
+    btn.onclick = () => openNudgeModalForSection(secId);
+    const h2 = sec.querySelector('.section-title');
+    if (h2) h2.appendChild(btn);
+  });
+
   // Initialize URL link buttons for any pre-populated URL fields
   document.querySelectorAll('.url-field-wrapper input[type="url"]').forEach(inp => {
     if (inp.value) updateUrlLink(inp.id);
@@ -733,7 +779,11 @@ function buildField(field, irNumber) {
   // Escape for safe insertion into an HTML attribute or textarea content
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  if (field.type === 'textarea') {
+  if (field.type === 'divider') {
+    // A sub-section heading band used to split a section into parts (Part A / Part B).
+    // Returns early: no label row, no nudge button, no value to save.
+    return `<div class="section-divider" id="${id}">${field.label || ''}</div>`;
+  } else if (field.type === 'textarea') {
     control = `<textarea id="${id}" class="form-input" placeholder="${field.placeholder || ''}" ${field.readonly ? 'readonly' : ''}>${esc(val)}</textarea>`;
   } else if (field.type === 'select') {
     const opts = field.options.map(o => `<option value="${o}">${o}</option>`).join('');
@@ -784,6 +834,28 @@ function buildField(field, irNumber) {
         <button type="button" class="btn-add-row" onclick="addActivityRow('${id}')">+ Add Row</button>
       </div>
     `;
+  } else if (field.type === 'costTable') {
+    // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B:
+    // columns Particulars | Qty | Rate | Cost (auto = Qty*Rate) | Remark, plus a total.
+    const initialRows = 3;
+    let rowsHtml = '';
+    for (let i = 1; i <= initialRows; i++) rowsHtml += buildCostRow(i);
+    control = `
+      <div class="cost-table-wrapper" id="${id}">
+        <div class="cost-table-header">
+          <span class="cost-sn">#</span>
+          <span class="cost-particular">Particulars For Repair / Replace</span>
+          <span class="cost-qty">Qty</span>
+          <span class="cost-rate">Rate</span>
+          <span class="cost-cost">Cost</span>
+          <span class="cost-remark">Remark</span>
+          <span class="cost-del-h"></span>
+        </div>
+        <div class="cost-table-body" id="${id}-body">${rowsHtml}</div>
+        <button type="button" class="btn-add-row" onclick="addCostRow('${id}')">+ Add Row</button>
+        <div class="cost-total">Total Repair Cost: ₹<span id="${id}-total">0.00</span></div>
+      </div>
+    `;
   } else if (field.type === 'inwardTable') {
     const rows = INWARD_PARTICULARS.map((p, i) => {
       const opts = p.options ? (inwardOptions[p.options] || []) : null;
@@ -832,6 +904,22 @@ function buildField(field, irNumber) {
       </div>`;
   } else if (field.type === 'esignature') {
     control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
+  } else if (field.type === 'analysisNote') {
+    // Dynamic read-only intro line: "Dear customer, analysis of IRXXX for your
+    // system with ID XXXXX has been completed. Its findings are as below."
+    const irNum  = currentIR?.irNumber || 'IRXXX';
+    const drone = currentIR?.droneId || 'XXXXX';
+    control = `
+      <div class="analysis-note" id="${id}">
+        Dear customer, analysis of <strong>${escHtml(irNum)}</strong> for your system with ID <strong>${escHtml(drone)}</strong> has been completed. Its findings are as below.
+      </div>`;
+  } else if (field.type === 'imageEvidence') {
+    control = `
+      <div class="image-evidence" id="${id}-wrap" data-field="${id}">
+        <div class="image-evidence-list" id="${id}-list"></div>
+        <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${id}')">+ Add evidence image</button>
+        <input type="file" id="${id}-picker" accept="image/*" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
+      </div>`;
   } else if (field.type === 'url') {
     control = `
       <div class="url-field-wrapper">
@@ -869,10 +957,17 @@ function buildField(field, irNumber) {
   }
 
   const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
+  // Per-field nudge / comment button (skipped for the read-only analysis note).
+  const fieldNudgeBtn = field.type && field.type !== 'analysisNote'
+    ? `<button type="button" class="field-nudge-btn" title="Comments / nudge on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬</button>`
+    : '';
+  const labelHtml = field.label
+    ? `<label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
+    : (fieldNudgeBtn ? `<div class="form-label">${fieldNudgeBtn}</div>` : '');
 
   return `
     <div class="form-group${isRestricted ? ' field-restricted' : ''}">
-      <label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}</label>
+      ${labelHtml}
       ${control}
     </div>
   `;
@@ -920,6 +1015,69 @@ function addActivityRow(fieldId) {
   body.insertAdjacentHTML('beforeend', buildActivityRow(nextDay, ''));
   const lastRow = body.lastElementChild;
   if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ─── COST TABLE (Section D Part B) ────────────────────────────────────────────
+// Repair/Replace estimate rows: Particulars | Qty | Rate | Cost (auto) | Remark.
+// Cost per row = Qty × Rate; a running total is shown under the table.
+
+function buildCostRow(sn) {
+  const escSn = (sn == null ? '' : sn);
+  return `
+    <div class="cost-table-row">
+      <input type="number" class="form-input cost-sn" value="${escSn}" readonly />
+      <input type="text"   class="form-input cost-particular" placeholder="Particular..." />
+      <input type="number" class="form-input cost-qty" placeholder="0" min="0" step="any" oninput="recalcCostRow(this)" />
+      <input type="number" class="form-input cost-rate" placeholder="0.00" min="0" step="any" oninput="recalcCostRow(this)" />
+      <input type="text"   class="form-input cost-cost" readonly />
+      <input type="text"   class="form-input cost-remark" placeholder="Remark..." />
+      <button type="button" class="cost-del" onclick="removeCostRow(this)" title="Remove row">&#10005;</button>
+    </div>
+  `;
+}
+function addCostRow(fieldId) {
+  const body = document.getElementById(fieldId + '-body');
+  if (!body) return;
+  const next = (body.querySelectorAll('.cost-table-row').length + 1);
+  body.insertAdjacentHTML('beforeend', buildCostRow(next));
+  const lastRow = body.lastElementChild;
+  if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function removeCostRow(btn) {
+  const row = btn.closest('.cost-table-row');
+  if (!row) return;
+  const wrapper = row.closest('.cost-table-wrapper');
+  row.remove();
+  if (wrapper) { renumberCostRows(wrapper); recalcCostTotal(wrapper.id); }
+}
+function renumberCostRows(wrapper) {
+  wrapper.querySelectorAll('.cost-table-row').forEach((row, i) => {
+    const sn = row.querySelector('.cost-sn');
+    if (sn) sn.value = String(i + 1);
+  });
+}
+function recalcCostRow(input) {
+  const row = input.closest('.cost-table-row');
+  if (!row) return;
+  const qty   = parseFloat(row.querySelector('.cost-qty').value) || 0;
+  const rate  = parseFloat(row.querySelector('.cost-rate').value) || 0;
+  const cost  = qty * rate;
+  const costEl = row.querySelector('.cost-cost');
+  costEl.value = (Math.round(cost * 100) / 100).toFixed(2);
+  const wrapper = row.closest('.cost-table-wrapper');
+  if (wrapper) recalcCostTotal(wrapper.id);
+}
+function recalcCostTotal(wrapperId) {
+  const wrapper = document.getElementById(wrapperId);
+  if (!wrapper) return;
+  let total = 0;
+  wrapper.querySelectorAll('.cost-table-row').forEach(row => {
+    const qty  = parseFloat(row.querySelector('.cost-qty').value) || 0;
+    const rate = parseFloat(row.querySelector('.cost-rate').value) || 0;
+    total += qty * rate;
+  });
+  const totalEl = wrapper.querySelector(`#${wrapperId}-total`);
+  if (totalEl) totalEl.textContent = (Math.round(total * 100) / 100).toFixed(2);
 }
 
 function updateUrlLink(fieldId) {
@@ -1352,9 +1510,37 @@ async function loadSectionData(irNumber) {
   }
 }
 
-function populateFieldValue(sectionId, fieldId, value) {
+function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   const section = SECTIONS[sectionId];
   const field = section?.fields.find(f => f.id === fieldId);
+
+  // analysisNote is a read-only display line built from currentIR — nothing to populate.
+  if (field?.type === 'analysisNote') return;
+  // divider is a static sub-heading — no value to populate.
+  if (field?.type === 'divider') return;
+
+  // Handle imageEvidence type — value is [{caption, link}]
+  if (field?.type === 'imageEvidence') {
+    let arr = Array.isArray(value) ? value : [];
+    // When loading SAVED data, captions saved with empty links (pending upload at
+    // last save) get their Drive URLs merged in from '<fieldId>_links'. Skip this
+    // for drafts: a draft's empty link means a not-yet-uploaded image, which must
+    // NOT pick up a Drive URL belonging to a different (saved) entry.
+    if (!isDraft) {
+      const linksRaw = currentSectionData?.[sectionId]?.[fieldId + '_links'];
+      if (linksRaw) {
+        const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
+        let li = 0;
+        arr = arr.map(e => {
+          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++] };
+          return { caption: e.caption || '', link: e.link || '' };
+        });
+      }
+    }
+    evidenceState[fieldId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null }));
+    renderImageEvidence(fieldId);
+    return;
+  }
 
   // Handle checklist type
   if (field?.type === 'checklist' && value && typeof value === 'object') {
@@ -1433,6 +1619,31 @@ function populateFieldValue(sectionId, fieldId, value) {
     return;
   }
 
+  // Handle costTable type — value is [{particular, qty, rate, cost, remark}, ...]
+  if (field?.type === 'costTable') {
+    const body = document.getElementById(fieldId + '-body');
+    if (!body) return;
+    const rows = Array.isArray(value) ? value : [];
+    body.innerHTML = '';
+    if (rows.length === 0) {
+      // Re-seed a few empty rows so the operator always has inputs ready.
+      for (let i = 1; i <= 3; i++) body.insertAdjacentHTML('beforeend', buildCostRow(i));
+    } else {
+      rows.forEach((r, i) => {
+        body.insertAdjacentHTML('beforeend', buildCostRow(i + 1));
+        const lastRow = body.lastElementChild;
+        if (lastRow) {
+          lastRow.querySelector('.cost-particular').value = r.particular || '';
+          lastRow.querySelector('.cost-qty').value       = r.qty || '';
+          lastRow.querySelector('.cost-rate').value      = r.rate || '';
+          lastRow.querySelector('.cost-remark').value   = r.remark || '';
+          recalcCostRow(lastRow.querySelector('.cost-qty'));   // computes cost + updates total
+        }
+      });
+    }
+    return;
+  }
+
   // Handle url type
   if (field?.type === 'url') {
     const el = document.getElementById(fieldId);
@@ -1460,7 +1671,16 @@ function collectSectionValues(sectionId) {
   if (!section) return { fieldValues, fileFields };
 
   for (const field of section.fields) {
-    if (field.type === 'file') {
+    if (field.type === 'analysisNote' || field.type === 'divider') {
+      continue; // read-only display / static heading, nothing to save
+    } else if (field.type === 'imageEvidence') {
+      const entries = evidenceState[field.id] || [];
+      // Captions + already-uploaded Drive links are carried in the field value;
+      // only the not-yet-uploaded images are sent as files.
+      fieldValues[field.id] = entries.map(e => ({ caption: e.caption || '', link: e.link || '' }));
+      const newFiles = entries.filter(e => e.file).map(e => e.file);
+      if (newFiles.length) fileFields.push({ id: field.id, files: newFiles });
+    } else if (field.type === 'file') {
       const inp = document.getElementById(field.id);
       if (inp?.files?.length > 0) fileFields.push({ id: field.id, files: inp.files });
     } else if (field.type === 'checklist') {
@@ -1484,6 +1704,23 @@ function collectSectionValues(sectionId) {
         });
       }
       fieldValues[field.id] = tableData;
+    } else if (field.type === 'costTable') {
+      const body = document.getElementById(field.id + '-body');
+      const rows = [];
+      if (body) {
+        body.querySelectorAll('.cost-table-row').forEach(row => {
+          const particular = row.querySelector('.cost-particular')?.value || '';
+          const qty   = row.querySelector('.cost-qty')?.value || '';
+          const rate  = row.querySelector('.cost-rate')?.value || '';
+          const cost  = row.querySelector('.cost-cost')?.value || '';
+          const remark = row.querySelector('.cost-remark')?.value || '';
+          // Drop completely blank rows so we don't store empty noise.
+          if (particular || qty || rate || remark) {
+            rows.push({ particular, qty, rate, cost, remark });
+          }
+        });
+      }
+      fieldValues[field.id] = rows;
     } else if (field.type === 'inwardTable') {
       const wrapper = document.getElementById(field.id);
       const tableData = {};
@@ -1576,7 +1813,7 @@ function restoreDrafts() {
     if (!draft) return;
     restored.push(secId);
     Object.entries(draft).forEach(([fieldId, value]) => {
-      populateFieldValue(secId, fieldId, value);
+      populateFieldValue(secId, fieldId, value, true);
     });
   });
   return restored;
@@ -1655,6 +1892,9 @@ async function saveSection(sectionId, irNumber) {
       clearDraft(sectionId);
       refreshDraftBanner();
       showToast('Section saved successfully!');
+      // For sections with image evidence, pull the freshly-uploaded Drive URLs
+      // back into the in-memory state so captions stay paired with images.
+      refreshEvidenceLinksAfterSave(sectionId, irNumber);
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -1680,6 +1920,242 @@ function fileToBase64(file) {
     reader.onerror = reject;
   });
 }
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = reject;
+  });
+}
+
+// ─── SECTION D — PART A PDF DOWNLOAD ──────────────────────────────────────────
+// Builds a clean, client-facing printable document of the Investigation (Part A
+// only) and opens the browser print dialog so it can be saved/shared as a PDF.
+// Part B (Cost Analysis) is deliberately excluded.
+async function downloadSectionDPartA() {
+  const irNum  = currentIR?.irNumber || 'IR';
+  const drone  = currentIR?.droneId  || '';
+  const getVal = id => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
+  const analysisBy   = getVal('d_analysisBy');
+  const analysisDate = toDisplayDate(getVal('d_analysisDate'));
+  const investigation = getVal('d_investigation');
+  const rootCause     = getVal('d_rootCause');
+  const corrective    = getVal('d_correctiveAction');
+  const preventive    = getVal('d_preventiveAction');
+
+  // Evidence images: uploaded images use their Drive URL; not-yet-saved images
+  // are read as data URLs so they embed reliably in the printed document.
+  const entries = evidenceState['d_evidence'] || [];
+  const images = [];
+  for (const e of entries) {
+    let src = e.link || '';
+    if (!src && e.file) { try { src = await fileToDataUrl(e.file); } catch {} }
+    if (src) images.push({ caption: e.caption || '', src });
+  }
+
+  const esc   = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const nlbr  = s => esc(s).replace(/\n/g, '<br>');
+  const para  = (label, val) => val && val.trim()
+    ? `<h2>${esc(label)}</h2><div class="val">${nlbr(val)}</div>`
+    : `<h2>${esc(label)}</h2><div class="val muted">—</div>`;
+  const imgBlock = images.map(im => `
+    <figure>
+      <img src="${esc(im.src)}" />
+      ${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}
+    </figure>`).join('');
+
+  // QC Manager sign-off — the Investigation (Part A) authoriser. Shows the
+  // signed name + date if already signed, otherwise "Pending".
+  const qcSig = esignatureState['d_signQcManager'];
+  const qcSignBlock = (() => {
+    if (qcSig && qcSig.signedBy) {
+      const when = qcSig.signedAt ? toDisplayDate(qcSig.signedAt.split('T')[0]) : '';
+      return `<div class="signoff">
+        <h2>Investigation Authorised</h2>
+        <div class="signoff-row">
+          <div class="signoff-label">Technical Support (QC Manager)</div>
+          <div class="signoff-name">${esc(qcSig.signedBy)}</div>
+          <div class="signoff-date">${esc(when)}</div>
+        </div>
+      </div>`;
+    }
+    return `<div class="signoff">
+      <h2>Investigation Authorised</h2>
+      <div class="signoff-row">
+        <div class="signoff-label">Technical Support (QC Manager)</div>
+        <div class="signoff-name muted">Pending signature</div>
+        <div class="signoff-date"></div>
+      </div>
+    </div>`;
+  })();
+
+  const html = `<!doctype html><html><head><meta charset="utf-8" />
+<title>${esc(irNum)} — Investigation</title>
+<style>
+  @page { margin: 16mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; }
+  .head { border-bottom: 2px solid #0E62FF; padding-bottom: 10px; margin-bottom: 14px; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #0E62FF; }
+  .brand { font-size: 12px; color: #64748b; letter-spacing: .04em; text-transform: uppercase; }
+  .meta { font-size: 13px; color: #334155; margin: 12px 0; }
+  .meta span { display: inline-block; margin-right: 18px; }
+  .intro { background: #eef4ff; border-left: 4px solid #0E62FF; padding: 12px 14px; font-size: 14px; line-height: 1.5; margin: 6px 0 18px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #0E62FF; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin: 22px 0 8px; }
+  .val { font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+  .val.muted { color: #94a3b8; }
+  figure { margin: 12px 0; text-align: center; page-break-inside: avoid; }
+  figure img { max-width: 100%; max-height: 600px; border: 1px solid #e2e8f0; border-radius: 8px; }
+  figcaption { font-size: 12px; color: #475569; margin-top: 6px; }
+  .signoff { margin-top: 28px; page-break-inside: avoid; }
+  .signoff h2 { margin-bottom: 12px; }
+  .signoff-row { display: flex; align-items: flex-end; gap: 28px; }
+  .signoff-label { font-size: 12px; color: #475569; border-top: 1px solid #0f172a; padding-top: 6px; min-width: 240px; }
+  .signoff-name { font-size: 14px; font-weight: 600; color: #0f172a; }
+  .signoff-name.muted { color: #94a3b8; font-weight: 400; }
+  .signoff-date { font-size: 12px; color: #475569; }
+  .foot { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
+</style></head><body>
+  <div class="head">
+    <div class="brand">Indrones After-Sales · I-PASSBOOK</div>
+    <h1>Investigation Report</h1>
+  </div>
+  <div class="meta">
+    <span><strong>IR:</strong> ${esc(irNum)}</span>
+    <span><strong>System ID:</strong> ${esc(drone)}</span>
+    <span><strong>Date:</strong> ${esc(analysisDate)}</span>
+    <span><strong>Analyst:</strong> ${esc(analysisBy)}</span>
+  </div>
+  <div class="intro">Dear customer, analysis of <strong>${esc(irNum)}</strong> for your system with ID <strong>${esc(drone)}</strong> has been completed. Its findings are as below.</div>
+  ${para('Description of Investigation', investigation)}
+  ${images.length ? `<h2>Investigation Evidence</h2>${imgBlock}` : ''}
+  ${para('Root Cause', rootCause)}
+  ${para('Corrective Action', corrective)}
+  ${para('Preventive Action', preventive)}
+  ${qcSignBlock}
+  <div class="foot">This report was generated from I-PASSBOOK · Section D (Part A — Investigation).</div>
+  <script>
+    (function(){
+      var printed = false;
+      function go(){ if (printed) return; printed = true; setTimeout(function(){ window.focus(); window.print(); }, 250); }
+      var imgs = Array.prototype.slice.call(document.images);
+      var pending = imgs.length;
+      if (!pending) { window.onload = go; return; }
+      function done(){ if (--pending <= 0) go(); }
+      imgs.forEach(function(im){
+        if (im.complete && im.naturalWidth) { done(); return; }
+        im.onload  = done;
+        im.onerror = done;
+      });
+      window.onload = function(){ setTimeout(go, 4000); };
+    })();
+  <\/script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if (!w) { showToast('Allow pop-ups to download the PDF'); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+}
+
+// ─── IMAGE EVIDENCE (Section D) ───────────────────────────────────────────────
+// Per-image evidence with a name/context caption. New images are uploaded to
+// Drive via the existing file mechanism (fieldId '_links'); captions + the
+// already-uploaded Drive URLs live in the field value `d_evidence` as
+// [{caption, link}]. The backend overwrites '_links' with only the newly-uploaded
+// URLs on each save, so already-uploaded links are carried in `d_evidence` and
+// re-sent on every save; newly-uploaded links are merged back from '_links'
+// after a save (and on load) so captions stay paired with their images.
+function renderImageEvidence(fieldId) {
+  const list = document.getElementById(fieldId + '-list');
+  if (!list) return;
+  const entries = evidenceState[fieldId] || [];
+  evidenceState[fieldId] = entries;
+  list.innerHTML = entries.map((e, i) => {
+    const src = e.link || e.url || '';
+    const img = src
+      ? `<img src="${escHtml(src)}" class="evidence-thumb" alt="evidence" />`
+      : `<div class="evidence-thumb-placeholder">No preview</div>`;
+    return `
+      <div class="evidence-item">
+        ${img}
+        <input type="text" class="form-input evidence-caption"
+               data-field="${escHtml(fieldId)}" data-idx="${i}"
+               placeholder="Name / context of this image"
+               value="${escHtml(e.caption || '')}"
+               oninput="updateEvidenceCaption('${escHtml(fieldId)}', ${i}, this.value)" />
+        <button type="button" class="evidence-remove"
+                onclick="removeEvidenceImage('${escHtml(fieldId)}', ${i})" title="Remove">&#10005;</button>
+      </div>`;
+  }).join('');
+}
+function addEvidenceImage(fieldId) {
+  document.getElementById(fieldId + '-picker').click();
+}
+function onEvidencePicked(fieldId, input) {
+  const files = Array.from(input.files || []);
+  if (!evidenceState[fieldId]) evidenceState[fieldId] = [];
+  files.forEach(f => {
+    evidenceState[fieldId].push({ caption: '', link: '', file: f, url: URL.createObjectURL(f) });
+  });
+  input.value = '';
+  renderImageEvidence(fieldId);
+  saveDraft(sectionIdFromFieldId(fieldId));
+}
+function removeEvidenceImage(fieldId, idx) {
+  const arr = evidenceState[fieldId] || [];
+  const e = arr[idx];
+  if (e?.url) URL.revokeObjectURL(e.url);
+  arr.splice(idx, 1);
+  renderImageEvidence(fieldId);
+  saveDraft(sectionIdFromFieldId(fieldId));
+}
+function updateEvidenceCaption(fieldId, idx, value) {
+  const arr = evidenceState[fieldId];
+  if (arr && arr[idx]) arr[idx].caption = value;
+  // draft auto-save is handled by the global `input` listener on #sections-wrapper
+}
+// Fill any pending (link='') entries in evidenceState[fieldId] with the Drive
+// URLs the backend stored in '<fieldId>_links' (in upload order). Used both on
+// load and after a successful save so captions stay aligned to their images.
+function mergeEvidenceLinks(fieldId, linksRaw) {
+  const arr = evidenceState[fieldId];
+  if (!arr || !arr.length) return;
+  const links = String(linksRaw || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!links.length) return;
+  let li = 0;
+  arr.forEach(e => {
+    if (!e.link && li < links.length) {
+      e.link = links[li++];
+      if (e.url) { URL.revokeObjectURL(e.url); e.url = null; }
+      e.file = null;
+    }
+  });
+  renderImageEvidence(fieldId);
+}
+// After a save that uploaded new evidence images, fetch the section's '_links'
+// from the backend and merge them into evidenceState so a later caption-only
+// re-save carries the Drive URLs in 'd_evidence' (the backend overwrites
+// '_links' with only the newest uploads, so links must live in 'd_evidence').
+async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
+  const fields = SECTIONS[sectionId]?.fields || [];
+  const evFields = fields.filter(f => f.type === 'imageEvidence');
+  if (!evFields.length) return;
+  const hasPending = evFields.some(f => (evidenceState[f.id] || []).some(e => !e.link));
+  if (!hasPending) return;
+  try {
+    const url = `${CONFIG.GAS_URL}?action=getPassbook&irNumber=${encodeURIComponent(irNumber)}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status === 'ok' && data.sections) {
+      currentSectionData = data.sections; // keep the saved-state cache in sync
+      const secFields = data.sections[sectionId] || {};
+      evFields.forEach(f => mergeEvidenceLinks(f.id, secFields[f.id + '_links']));
+    }
+  } catch {}
+}
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 function showToast(msg) {
@@ -1688,6 +2164,472 @@ function showToast(msg) {
   setTimeout(() => {
     toast.style.transform = 'translateX(-50%) translateY(100px)';
   }, 3000);
+}
+
+// ─── NUDGE / TAG / ALERT SYSTEM ───────────────────────────────────────────────
+// Lets any user @-tag a teammate (by name, with autocomplete from the Indrones
+// directory) at three levels — the whole IR, a section, or a single field. The
+// tagged person sees a 🔔 notification in-app, and the sender can also fire off a
+// pre-filled email (mailto). No backend redeploy needed: nudges are stored via
+// the existing generic saveSection/getPassbook endpoints under a special
+// irNumber '__NUDGES__' / sectionId 'all' (same mechanism as the admin config).
+
+// ── Team directory (admin-editable; used for @-mention autocomplete) ──
+const TEAM_DIRECTORY_DEFAULTS = [
+  { name: 'Monish Raza',        email: 'monish.raza@indrones.com' },
+  { name: 'Ravi Singh',         email: 'ravi@indrones.com' },
+  { name: 'Adhik Nair',          email: 'adhik.nair@indrones.com' },
+  { name: 'Customer Relations', email: 'customer.relations@indrones.com' },
+];
+let teamDirectory = TEAM_DIRECTORY_DEFAULTS.map(d => ({ ...d }));
+
+function loadTeamDirectory() {
+  try {
+    const local = localStorage.getItem('ipb_team_directory');
+    if (local) { const arr = JSON.parse(local); if (Array.isArray(arr) && arr.length) teamDirectory = arr; }
+  } catch {}
+  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
+    .then(r => r.json())
+    .then(data => {
+      const saved = data?.sections?.['team-directory'];
+      if (saved && Array.isArray(saved.entries) && saved.entries.length) {
+        teamDirectory = saved.entries;
+        try { localStorage.setItem('ipb_team_directory', JSON.stringify(saved.entries)); } catch {}
+      }
+    })
+    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+}
+function saveTeamDirectory() {
+  if (!isAdmin()) { showToast('Not authorized'); return; }
+  try { localStorage.setItem('ipb_team_directory', JSON.stringify(teamDirectory)); } catch {}
+  const fd = new FormData();
+  fd.append('action', 'saveSection');
+  fd.append('irNumber', '__CONFIG__');
+  fd.append('sectionId', 'team-directory');
+  fd.append('savedBy', currentUser?.email || 'unknown');
+  fd.append('fields', JSON.stringify({ entries: teamDirectory }));
+  fd.append('files', JSON.stringify([]));
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(() => showToast('Team directory saved'))
+    .catch(() => showToast('Saved locally (backend unreachable)'));
+}
+function openTeamDirectoryModal() {
+  if (!isAdmin()) { showToast('Only admins can edit the team directory'); return; }
+  if (document.getElementById('team-dir-modal')) return;
+  const rows = teamDirectory.map((d, i) => `
+    <div class="team-dir-row" data-i="${i}">
+      <input class="form-input td-name" placeholder="Full name" value="${escHtml(d.name || '')}" />
+      <input class="form-input td-email" placeholder="name@indrones.com" value="${escHtml(d.email || '')}" />
+      <button type="button" class="team-dir-del" onclick="removeTeamDirRow(this)">&times;</button>
+    </div>`).join('');
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'team-dir-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Manage Team Directory</h3>
+        <button type="button" class="inward-options-close" onclick="closeTeamDirectoryModal()">&times;</button>
+      </div>
+      <p class="inward-options-hint">People here appear in the @-mention suggestions across the app. Use @indrones.com emails.</p>
+      <div class="inward-options-body"><div id="team-dir-rows">${rows}</div>
+        <button type="button" class="btn-add-row" onclick="addTeamDirRow()">+ Add member</button>
+      </div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeTeamDirectoryModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyTeamDirectory()">Save Directory</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+function addTeamDirRow() {
+  const wrap = document.getElementById('team-dir-rows');
+  if (!wrap) return;
+  const i = wrap.children.length;
+  const div = document.createElement('div');
+  div.className = 'team-dir-row';
+  div.dataset.i = i;
+  div.innerHTML = `<input class="form-input td-name" placeholder="Full name" />
+      <input class="form-input td-email" placeholder="name@indrones.com" />
+      <button type="button" class="team-dir-del" onclick="removeTeamDirRow(this)">&times;</button>`;
+  wrap.appendChild(div);
+}
+function removeTeamDirRow(btn) {
+  btn.closest('.team-dir-row')?.remove();
+}
+function closeTeamDirectoryModal() { document.getElementById('team-dir-modal')?.remove(); }
+function applyTeamDirectory() {
+  const rows = document.querySelectorAll('#team-dir-rows .team-dir-row');
+  const entries = [];
+  rows.forEach(r => {
+    const name  = r.querySelector('.td-name')?.value.trim() || '';
+    const email = r.querySelector('.td-email')?.value.trim().toLowerCase() || '';
+    if (name || email) entries.push({ name, email });
+  });
+  teamDirectory = entries.filter(e => e.email);
+  closeTeamDirectoryModal();
+  saveTeamDirectory();
+}
+
+// ── Nudge store ──
+const NUDGE_IR  = '__NUDGES__';
+const NUDGE_SEC = 'all';
+let nudges = [];
+let nudgePollTimer = null;
+let nudgeModalCtx = null;       // { scope, irNumber, sectionId, fieldId, label }
+let nudgeSelectedEmail = null;  // recipient chosen via autocomplete in the composer
+
+function loadNudges() {
+  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${NUDGE_IR}`)
+    .then(r => r.json())
+    .then(data => {
+      const items = data?.sections?.[NUDGE_SEC]?.items;
+      nudges = Array.isArray(items) ? items : [];
+      refreshBell();
+      if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
+      rerenderOpenNudgeModal();
+    })
+    .catch(() => { /* keep current list */ });
+}
+function startNudgePolling() {
+  if (nudgePollTimer) clearInterval(nudgePollTimer);
+  nudgePollTimer = setInterval(loadNudges, 90000);
+}
+function stopNudgePolling() { if (nudgePollTimer) { clearInterval(nudgePollTimer); nudgePollTimer = null; } }
+
+function saveNudgesList(list) {
+  const fd = new FormData();
+  fd.append('action', 'saveSection');
+  fd.append('irNumber', NUDGE_IR);
+  fd.append('sectionId', NUDGE_SEC);
+  fd.append('savedBy', currentUser?.email || 'unknown');
+  fd.append('fields', JSON.stringify({ items: list }));
+  fd.append('files', JSON.stringify([]));
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json());
+}
+// Append a nudge using a fresh fetch → append → save, to reduce lost writes when
+// two people nudge at the same instant (last-write-wins is still possible).
+async function addNudge(nudge) {
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${NUDGE_IR}`);
+    const data = await res.json();
+    const list = Array.isArray(data?.sections?.[NUDGE_SEC]?.items) ? data.sections[NUDGE_SEC].items : [];
+    list.push(nudge);
+    await saveNudgesList(list);
+    nudges = list;
+  } catch {
+    // Backend unreachable — keep going locally so the UI still works.
+    nudges.push(nudge);
+  }
+  refreshBell();
+  rerenderOpenNudgeModal();
+}
+function markNudgeRead(id) {
+  const me = (currentUser?.email || '').toLowerCase();
+  const n = nudges.find(x => x.id === id);
+  if (!n) return;
+  n.readBy = Array.isArray(n.readBy) ? n.readBy : [];
+  if (!n.readBy.map(s => String(s).toLowerCase()).includes(me)) n.readBy.push(me);
+  saveNudgesList(nudges);
+  refreshBell();
+  if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
+  rerenderOpenNudgeModal();
+}
+
+// ── Helpers ──
+function myEmail() { return (currentUser?.email || '').toLowerCase(); }
+function isForMe(n) {
+  const me = myEmail();
+  if (!me) return false;
+  if ((n.to || '').toLowerCase() === me) return true;
+  return (n.mentions || []).some(m => String(m).toLowerCase() === me);
+}
+function unreadForMe() { return nudges.filter(n => isForMe(n) && !(n.readBy || []).map(s => String(s).toLowerCase()).includes(myEmail())); }
+function relativeTime(ts) {
+  const t = Number(ts); if (!t) return '';
+  const s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 604800) return Math.floor(s / 86400) + 'd ago';
+  return toDisplayDate(new Date(t).toISOString());
+}
+function scopeContextText(n) {
+  if (n.scope === 'field')  return `Field: ${n.fieldLabel || n.fieldId || ''}${n.sectionId ? ' · Section ' + n.sectionId : ''}`;
+  if (n.scope === 'section') return `Section: ${n.sectionLabel || n.sectionId || ''}`;
+  return 'IR-level';
+}
+function nudgeId() { return 'n_' + Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e6).toString(36); }
+
+// ── Bell ──
+function refreshBell() {
+  const badge = document.getElementById('nudge-badge');
+  if (!badge) return;
+  const c = unreadForMe().length;
+  badge.textContent = c > 9 ? '9+' : String(c);
+  badge.style.display = c > 0 ? 'block' : 'none';
+}
+function toggleNudgePanel() {
+  let panel = document.getElementById('nudge-panel');
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'nudge-panel';
+    panel.className = 'nudge-panel';
+    document.body.appendChild(panel);
+    document.addEventListener('click', e => {
+      const bell = document.getElementById('nudge-bell');
+      if (panel.style.display === 'block' && !panel.contains(e.target) && e.target !== bell && !bell?.contains(e.target)) panel.style.display = 'none';
+    });
+  }
+  const open = panel.style.display === 'block';
+  if (open) { panel.style.display = 'none'; return; }
+  // mark my nudges as read on open
+  let changed = false;
+  nudges.forEach(n => { if (isForMe(n) && !(n.readBy || []).map(s => String(s).toLowerCase()).includes(myEmail())) { n.readBy = Array.isArray(n.readBy) ? n.readBy : []; n.readBy.push(myEmail()); changed = true; } });
+  if (changed) saveNudgesList(nudges);
+  renderNudgePanel();
+  panel.style.display = 'block';
+  refreshBell();
+}
+function renderNudgePanel() {
+  const panel = document.getElementById('nudge-panel');
+  if (!panel) return;
+  const me = myEmail();
+  const mine = nudges.filter(isForMe).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const dirBtn = isAdmin()
+    ? `<button type="button" class="nudge-mini" title="Manage the @-mention directory" onclick="openTeamDirectoryModal()">⚙ Directory</button>`
+    : '';
+  if (!mine.length) {
+    panel.innerHTML = `<div class="nudge-panel-head">
+        <span>Notifications</span>
+        <span style="display:flex; gap:6px; align-items:center;">${dirBtn}<button type="button" class="inward-options-close" onclick="toggleNudgePanel()">&times;</button></span>
+      </div><div class="nudge-empty">No notifications yet.</div>`;
+    return;
+  }
+  const items = mine.map(n => {
+    const ir = allIRs.find(ir => ir.irNumber === n.irNumber);
+    const canOpen = !!ir;
+    return `<div class="nudge-item">
+      <div class="nudge-item-top">
+        <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
+        <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
+      </div>
+      <div class="nudge-ctx">🔔 ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
+      <div class="nudge-msg">${escHtml(n.message || '')}</div>
+      <div class="nudge-actions">
+        ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escHtml(n.irNumber)}')">Open IR</button>` : ''}
+        <button type="button" class="nudge-mini" onclick="resendNudgeEmail('${escHtml(n.id)}')">✉️ Email</button>
+      </div>
+    </div>`;
+  }).join('');
+  panel.innerHTML = `<div class="nudge-panel-head">
+      <span>Notifications (${mine.length})</span>
+      <span style="display:flex; gap:6px; align-items:center;">${dirBtn}<button type="button" class="inward-options-close" onclick="toggleNudgePanel()">&times;</button></span>
+    </div><div class="nudge-list">${items}</div>`;
+}
+function openIRFromNudge(irNumber) {
+  document.getElementById('nudge-panel').style.display = 'none';
+  if (allIRs.find(ir => ir.irNumber === irNumber)) openPassbook(irNumber);
+  else showToast('IR ' + irNumber + ' not in current list');
+}
+function openNudgeMailtoById(id) {
+  const n = nudges.find(x => x.id === id);
+  if (n) openNudgeMailto(n);
+}
+
+// ── Reusable Nudge modal (IR / section / field) ──
+function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
+  closeNudgeModal();
+  nudgeModalCtx = { scope, irNumber, sectionId, fieldId, label: label || '' };
+  nudgeSelectedEmail = null;
+  const title = scope === 'field'  ? `Comments · ${label || fieldId}`
+              : scope === 'section' ? `Comments · ${label || sectionId}`
+              : `Nudge / Comments · ${irNumber}`;
+  const ctxLine = scope === 'field'  ? `IR ${irNumber} · Field “${label || fieldId}”`
+                : scope === 'section' ? `IR ${irNumber} · Section ${label || sectionId}`
+                : `IR ${irNumber} (whole passbook)`;
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'nudge-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card nudge-card">
+      <div class="inward-options-head">
+        <h3>${escHtml(title)}</h3>
+        <button type="button" class="inward-options-close" onclick="closeNudgeModal()">&times;</button>
+      </div>
+      <div class="nudge-ctx-line">${escHtml(ctxLine)}</div>
+      <div class="nudge-thread" id="nudge-thread"></div>
+      <div class="nudge-composer">
+        <label class="form-label">Tag someone (@)</label>
+        <input type="text" id="nudge-recipient" class="form-input" placeholder="Type @ or a name / email…" autocomplete="off" oninput="onNudgeRecipientInput(this.value)" />
+        <div class="nudge-suggest" id="nudge-suggest"></div>
+        <label class="form-label" style="margin-top:0.6rem;">Message</label>
+        <textarea id="nudge-message" class="form-input" rows="3" placeholder="What do you want to remind or assign?"></textarea>
+        <div class="nudge-composer-actions">
+          <button type="button" class="btn btn-secondary" onclick="sendNudge(false)">💬 Notify in app</button>
+          <button type="button" class="btn btn-secondary" onclick="sendNudge(true)">✉️ Notify in app + send email</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  renderNudgeThread();
+  // Close on backdrop click
+  modal.addEventListener('click', e => { if (e.target === modal) closeNudgeModal(); });
+}
+function closeNudgeModal() {
+  document.getElementById('nudge-modal')?.remove();
+  nudgeModalCtx = null;
+  nudgeSelectedEmail = null;
+}
+function nudgeCtxMatch(n) {
+  const c = nudgeModalCtx; if (!c) return false;
+  if ((n.irNumber || '') !== (c.irNumber || '')) return false;
+  if ((n.scope || '') !== (c.scope || '')) return false;
+  if ((n.sectionId || '') !== (c.sectionId || '')) return false;
+  if ((n.fieldId || '') !== (c.fieldId || '')) return false;
+  return true;
+}
+function renderNudgeThread() {
+  const el = document.getElementById('nudge-thread');
+  if (!el) return;
+  const thread = nudges.filter(nudgeCtxMatch).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  if (!thread.length) { el.innerHTML = '<div class="nudge-empty">No comments yet. Tag someone above to nudge them about this.</div>'; return; }
+  el.innerHTML = thread.map(n => {
+    const mine = (n.from || '').toLowerCase() === myEmail();
+    return `<div class="nudge-post ${mine ? 'mine' : ''}">
+      <div class="nudge-item-top">
+        <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
+        <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
+      </div>
+      <div class="nudge-to">→ ${escHtml(n.to || '')}</div>
+      <div class="nudge-msg">${escHtml(n.message || '')}</div>
+    </div>`;
+  }).join('');
+}
+function rerenderOpenNudgeModal() {
+  if (document.getElementById('nudge-modal')) renderNudgeThread();
+}
+function onNudgeRecipientInput(value) {
+  nudgeSelectedEmail = null;
+  const suggest = document.getElementById('nudge-suggest');
+  if (!suggest) return;
+  const q = (value || '').replace(/^@/, '').trim().toLowerCase();
+  if (!q) { suggest.innerHTML = ''; suggest.style.display = 'none'; return; }
+  const matches = teamDirectory
+    .filter(d => (d.name || '').toLowerCase().includes(q) || (d.email || '').toLowerCase().includes(q))
+    .slice(0, 6);
+  if (!matches.length) { suggest.innerHTML = '<div class="nudge-suggest-empty">No match — type a full email to tag anyway.</div>'; suggest.style.display = 'block'; return; }
+  suggest.innerHTML = matches.map(d =>
+    `<button type="button" class="nudge-suggest-item" onclick="selectNudgeRecipient('${escHtml(d.email)}','${escHtml((d.name||'').replace(/'/g, ''))}')">
+      <span class="nudge-suggest-name">${escHtml(d.name || '')}</span>
+      <span class="nudge-suggest-email">${escHtml(d.email || '')}</span>
+    </button>`).join('');
+  suggest.style.display = 'block';
+}
+function selectNudgeRecipient(email, name) {
+  nudgeSelectedEmail = email;
+  const inp = document.getElementById('nudge-recipient');
+  if (inp) inp.value = `${name} <${email}>`;
+  const suggest = document.getElementById('nudge-suggest');
+  if (suggest) { suggest.innerHTML = ''; suggest.style.display = 'none'; }
+}
+function resolveNudgeRecipient() {
+  if (nudgeSelectedEmail) return nudgeSelectedEmail;
+  const raw = (document.getElementById('nudge-recipient')?.value || '').trim();
+  if (!raw) return '';
+  const direct = teamDirectory.find(d =>
+    d.email.toLowerCase() === raw.toLowerCase() ||
+    `${d.name} <${d.email}>`.toLowerCase() === raw.toLowerCase());
+  if (direct) return direct.email;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return raw;
+  return '';
+}
+async function sendNudge(alsoEmail) {
+  if (!nudgeModalCtx) return;
+  const to = resolveNudgeRecipient();
+  const message = (document.getElementById('nudge-message')?.value || '').trim();
+  if (!to) { showToast('Pick or type a recipient first'); return; }
+  if (!message) { showToast('Write a message first'); return; }
+  const c = nudgeModalCtx;
+  const nudge = {
+    id: nudgeId(),
+    irNumber: c.irNumber,
+    scope: c.scope,
+    sectionId: c.sectionId || null,
+    fieldId: c.fieldId || null,
+    sectionLabel: c.scope === 'section' ? c.label : null,
+    fieldLabel: c.scope === 'field' ? c.label : null,
+    to,
+    from: currentUser?.email || 'unknown',
+    fromName: currentUser?.name || currentUser?.email || 'Someone',
+    message,
+    mentions: [to],
+    createdAt: Date.now(),
+    readBy: [],
+  };
+  await addNudge(nudge);
+  if (alsoEmail) {
+    await sendNudgeEmailBackend(nudge);
+  } else {
+    showToast('Nudge sent');
+  }
+  // clear composer
+  nudgeSelectedEmail = null;
+  const r = document.getElementById('nudge-recipient'); if (r) r.value = '';
+  const m = document.getElementById('nudge-message'); if (m) m.value = '';
+  const suggest = document.getElementById('nudge-suggest'); if (suggest) { suggest.innerHTML = ''; suggest.style.display = 'none'; }
+  renderNudgeThread();
+}
+// Send the nudge email automatically via the Apps Script backend (MailApp).
+// Falls back to a pre-filled mailto (manual Send) if the backend is unreachable.
+async function sendNudgeEmailBackend(nudge) {
+  try {
+    const fd = new FormData();
+    fd.append('action', 'sendNudgeEmail');
+    fd.append('to',       nudge.to || '');
+    fd.append('from',     nudge.from || '');
+    fd.append('fromName', nudge.fromName || '');
+    fd.append('irNumber', nudge.irNumber || '');
+    fd.append('context',  scopeContextText(nudge));
+    fd.append('message',  nudge.message || '');
+    const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.status === 'ok') { showToast('Nudge sent · email delivered to ' + nudge.to); return; }
+    showToast('Email failed: ' + (data.message || 'backend error') + ' — opening mail client');
+  } catch {
+    showToast('Email backend unreachable — opening mail client');
+  }
+  openNudgeMailto(nudge);
+}
+// Re-send an existing nudge's email from the bell panel (auto via backend).
+async function resendNudgeEmail(id) {
+  const n = nudges.find(x => x.id === id);
+  if (!n) return;
+  await sendNudgeEmailBackend(n);
+}
+function openNudgeMailto(n) {
+  const subj = `[I-PASSBOOK] ${n.irNumber || ''} — you've been nudged`;
+  const ctx = scopeContextText(n);
+  const body = `Hi,\n\n${n.fromName || n.from} nudged you on I-PASSBOOK.\n\nIR: ${n.irNumber || ''}\n${ctx}\n\nMessage:\n${n.message || ''}\n\n— Sent via I-PASSBOOK`;
+  window.location.href = `mailto:${encodeURIComponent(n.to || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
+}
+
+// ── Trigger wrappers (resolve context from current state) ──
+function openNudgeModalForIR() {
+  if (!currentIR?.irNumber) { showToast('Open an IR first'); return; }
+  openNudgeModal('ir', currentIR.irNumber, null, null, '');
+}
+function openNudgeModalForSection(sectionId) {
+  if (!currentIR?.irNumber) return;
+  const label = SECTIONS[sectionId]?.title?.replace(/^Section [A-Z] — /, '') || sectionId;
+  openNudgeModal('section', currentIR.irNumber, sectionId, null, label);
+}
+function openNudgeModalForField(fieldId) {
+  if (!currentIR?.irNumber) return;
+  const sectionId = sectionIdFromFieldId(fieldId);
+  const field = SECTIONS[sectionId]?.fields.find(f => f.id === fieldId);
+  openNudgeModal('field', currentIR.irNumber, sectionId, fieldId, field?.label || fieldId);
 }
 
 // ─── DEMO MODE DATA ──────────────────────────────────────────────────────────

@@ -52,11 +52,15 @@
 
     <!-- Top Header -->
     <header>
-      <div id="back-btn" style="display:none; cursor:pointer; padding:4px 8px; border-radius:8px; background:var(--glass-bg); border:1px solid var(--glass-border);">
+      <div id="back-btn" style="display:none; cursor:pointer; padding:4px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-border);">
         ← Back
       </div>
       <div id="header-title" style="font-weight:700; font-size:1rem; flex:1; text-align:center;">I-PASSBOOK</div>
-      <div id="user-avatar" style="width:32px; height:32px; border-radius:50%; background:var(--primary-color); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; cursor:pointer;" title="Sign Out">?</div>
+      <div id="nudge-bell" class="nudge-bell" title="Nudges &amp; alerts">
+        <span class="nudge-bell-icon">🔔</span>
+        <span id="nudge-badge" class="nudge-badge" style="display:none;">0</span>
+      </div>
+      <div id="user-avatar" style="width:32px; height:32px; border-radius:50%; background:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; cursor:pointer;" title="Sign Out">?</div>
     </header>
 
     <!-- ====== MASTER INDEX VIEW ====== -->
@@ -77,9 +81,12 @@
     <div id="detail-view">
 
       <!-- IR Identity Banner -->
-      <div id="ir-banner" style="padding: 1rem; background: linear-gradient(135deg, var(--primary-dark), var(--primary-color)); border-bottom: 1px solid var(--glass-border);">
-        <div id="ir-banner-title" style="font-size:1.3rem; font-weight:800;"></div>
-        <div id="ir-banner-sub" style="font-size:0.85rem; color:rgba(255,255,255,0.75); margin-top:2px;"></div>
+      <div id="ir-banner" style="padding: 1rem; background: linear-gradient(135deg, var(--primary-dark), var(--primary)); border-bottom: 1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:0.75rem;">
+        <div style="min-width:0;">
+          <div id="ir-banner-title" style="font-size:1.3rem; font-weight:800;"></div>
+          <div id="ir-banner-sub" style="font-size:0.85rem; color:rgba(255,255,255,0.75); margin-top:2px;"></div>
+        </div>
+        <button type="button" id="ir-nudge-btn" class="btn-ghost-light" title="Nudge a teammate or leave a comment on this IR">💬 Nudge / Comments</button>
       </div>
 
       <!-- Unsaved-draft notice -->
@@ -90,7 +97,7 @@
         <div class="tab active" data-section="sec-a">A: Preliminary</div>
         <div class="tab" data-section="sec-b">B: Inward</div>
         <div class="tab" data-section="sec-c">C: IQC</div>
-        <div class="tab" data-section="sec-d">D: Tech Support</div>
+        <div class="tab" data-section="sec-d">D: Investigation</div>
         <div class="tab" data-section="sec-e">E: Production</div>
         <div class="tab" data-section="sec-f">F: QC</div>
         <div class="tab" data-section="sec-g">G: Flight Test</div>
@@ -123,11 +130,12 @@
           <button class="btn" id="save-sec-c" style="margin-top:1rem;">Save Section C</button>
         </div>
 
-        <!-- Section D: Technical Support -->
+        <!-- Section D: Investigation -->
         <div id="sec-d" class="section-content">
-          <h2 class="section-title">Section D — Technical Support Analysis</h2>
+          <h2 class="section-title">Section D — Investigation</h2>
           <div id="sec-d-form"></div>
           <button class="btn" id="save-sec-d" style="margin-top:1rem;">Save Section D</button>
+          <button class="btn btn-secondary" id="download-sec-d" style="margin-top:0.5rem;">⬇ Download Investigation (PDF)</button>
         </div>
 
         <!-- Section E: Production -->

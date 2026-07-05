@@ -67,6 +67,8 @@ function doPost(e) {
       var savedBy     = params.savedBy;
 
       result = saveSection(irNumber, sectionId, fields, files, savedBy);
+    } else if (action === 'sendNudgeEmail') {
+      result = sendNudgeEmail(params);
     } else {
       result = { status: 'error', message: 'Unknown action: ' + action };
     }
@@ -234,6 +236,50 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ACTION: sendNudgeEmail
+// Sends an automatic nudge email via MailApp (no operator clicks). Restricted
+// to the allowed domain so the app can't be used to mail outside Indrones.
+// ──────────────────────────────────────────────────────────────────────────────
+function sendNudgeEmail(params) {
+  var to       = (params.to || '').trim();
+  var from     = (params.from || '').trim();
+  var fromName = (params.fromName || params.from || 'Someone');
+  var irNumber = params.irNumber || '';
+  var message  = params.message || '';
+  var context  = params.context || '';
+
+  // Accept "Name <email>" or a bare email; extract the bare address.
+  var angleMatch = to.match(/<([^>]+)>/);
+  if (angleMatch) to = angleMatch[1].trim();
+
+  if (!to) throw new Error('Recipient (to) is required.');
+
+  // Only allow @indrones.com recipients (prevents abuse / external leaks).
+  var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
+  if (to.toLowerCase().indexOf(suffix) !== to.length - suffix.length) {
+    throw new Error('Email can only be sent to @' + CONFIG.ALLOWED_DOMAIN + ' addresses.');
+  }
+
+  var subject = '[I-PASSBOOK] ' + irNumber + ' — you have been nudged';
+  var lines = [
+    'Hi,',
+    '',
+    fromName + ' nudged you on I-PASSBOOK.',
+    '',
+    'IR: ' + irNumber
+  ];
+  if (context) lines.push('Context: ' + context);
+  lines = lines.concat(['', 'Message:', message, '', '— Sent automatically via I-PASSBOOK', '']);
+
+  var body = lines.join('\n');
+  var options = { name: 'I-PASSBOOK' };
+  if (from) options.replyTo = from;
+
+  MailApp.sendEmail(to, subject, body, options);
+  return { status: 'ok', message: 'Email sent to ' + to };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // DRIVE HELPERS
 // ──────────────────────────────────────────────────────────────────────────────
 function getOrCreateSectionFolder(irNumber, sectionId) {
@@ -260,7 +306,7 @@ function getSectionLabel(sectionId) {
     'sec-a': 'Section A - Preliminary Details',
     'sec-b': 'Section B - Inward Checklist',
     'sec-c': 'Section C - IQC Inspection',
-    'sec-d': 'Section D - Tech Support Analysis',
+    'sec-d': 'Section D - Investigation',
     'sec-e': 'Section E - Production Rework',
     'sec-f': 'Section F - Quality Control',
     'sec-g': 'Section G - Flight Test',

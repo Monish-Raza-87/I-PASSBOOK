@@ -470,12 +470,29 @@ async function openPassbook(irNumber) {
   // Build all section forms
   buildSectionForms(irNumber);
 
-  // Load saved data for this IR
+  // Load saved data for this IR, then restore any unsaved drafts on top
   await loadSectionData(irNumber);
+  restoreDrafts();
+  refreshDraftBanner();
 }
 
 // Back button
 backBtn.addEventListener('click', showIndex);
+
+// ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
+// Any edit within a section is persisted as a draft (debounced), so unsaved
+// progress survives navigation/reload/failed saves.
+let draftTimer = null;
+document.getElementById('sections-wrapper').addEventListener('input', e => {
+  const sec = e.target.closest('.section-content');
+  if (!sec) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => saveDraft(sec.id), 400);
+});
+document.getElementById('sections-wrapper').addEventListener('change', e => {
+  const sec = e.target.closest('.section-content');
+  if (sec) saveDraft(sec.id);
+});
 
 // ─── TAB NAVIGATION ──────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -734,6 +751,7 @@ function buildField(field, irNumber) {
           <span class="inward-particular">${esc(p.name)}</span>
           ${modelControl}
           <input type="number" min="0" class="form-input inward-qty" data-particular="${esc(p.name)}" placeholder="Qty" />
+          <input type="text" class="form-input inward-remark" data-particular="${esc(p.name)}" placeholder="Remark" />
         </div>`;
     }).join('');
     const adminBtn = isInwardAdmin()
@@ -746,6 +764,7 @@ function buildField(field, irNumber) {
           <span class="inward-particular">Particulars</span>
           <span class="inward-model-h">Model / Value</span>
           <span class="inward-qty">Qty</span>
+          <span class="inward-remark-h">Remark</span>
         </div>
         <div class="inward-table-body">${rows}</div>
         ${adminBtn}
@@ -923,6 +942,9 @@ function signESignature(fieldId) {
     : (prev?.history || []);
   esignatureState[fieldId] = { signedBy: email, signedAt: new Date().toISOString(), history };
   refreshESignature(fieldId);
+  // Persist the signature as a draft so it survives even if the section isn't saved
+  const secId = sectionIdFromFieldId(fieldId);
+  if (secId) saveDraft(secId);
   showToast('Signed: ' + email);
 }
 
@@ -997,6 +1019,7 @@ function buildInwardRowsHTML() {
         <span class="inward-particular">${escHtml(p.name)}</span>
         ${modelControl}
         <input type="number" min="0" class="form-input inward-qty" data-particular="${escHtml(p.name)}" placeholder="Qty" />
+        <input type="text" class="form-input inward-remark" data-particular="${escHtml(p.name)}" placeholder="Remark" />
       </div>`;
   }).join('');
 }
@@ -1092,15 +1115,17 @@ function populateFieldValue(sectionId, fieldId, value) {
     return;
   }
 
-  // Handle inwardTable type — value is { [particularName]: { model, qty } }
+  // Handle inwardTable type — value is { [particularName]: { model, qty, remark } }
   if (field?.type === 'inwardTable' && value && typeof value === 'object') {
     const wrapper = document.getElementById(fieldId);
     if (!wrapper) return;
     Object.entries(value).forEach(([particular, cell]) => {
-      const modelEl = wrapper.querySelector(`.inward-model[data-particular="${particular}"]`);
-      const qtyEl   = wrapper.querySelector(`.inward-qty[data-particular="${particular}"]`);
-      if (modelEl && cell) modelEl.value = cell.model || '';
-      if (qtyEl && cell)   qtyEl.value   = cell.qty || '';
+      const modelEl  = wrapper.querySelector(`.inward-model[data-particular="${particular}"]`);
+      const qtyEl    = wrapper.querySelector(`.inward-qty[data-particular="${particular}"]`);
+      const remarkEl = wrapper.querySelector(`.inward-remark[data-particular="${particular}"]`);
+      if (modelEl && cell)  modelEl.value  = cell.model || '';
+      if (qtyEl && cell)    qtyEl.value    = cell.qty || '';
+      if (remarkEl && cell) remarkEl.value = cell.remark || '';
     });
     return;
   }
@@ -1158,6 +1183,143 @@ function populateFieldValue(sectionId, fieldId, value) {
   }
 }
 
+// Collect all field values for a section from the DOM + esignatureState.
+// Shared by saveSection and the draft auto-persist. Returns { fieldValues, fileFields }.
+function collectSectionValues(sectionId) {
+  const section = SECTIONS[sectionId];
+  const fieldValues = {};
+  const fileFields = [];
+  if (!section) return { fieldValues, fileFields };
+
+  for (const field of section.fields) {
+    if (field.type === 'file') {
+      const inp = document.getElementById(field.id);
+      if (inp?.files?.length > 0) fileFields.push({ id: field.id, files: inp.files });
+    } else if (field.type === 'checklist') {
+      const checkValues = {};
+      field.items.forEach((_, i) => {
+        const el = document.getElementById(field.id + '_' + i);
+        if (el) checkValues[field.items[i]] = el.value;
+      });
+      fieldValues[field.id] = checkValues;
+    } else if (field.type === 'activityTable') {
+      const body = document.getElementById(field.id + '-body');
+      const tableData = [];
+      if (body) {
+        body.querySelectorAll('.activity-table-row').forEach(row => {
+          tableData.push({
+            dayCount: row.querySelector('.act-day')?.value || '',
+            date:     row.querySelector('.act-date')?.value || '',
+            activity: row.querySelector('.act-activity')?.value || '',
+            remark:   row.querySelector('.act-remark')?.value || '',
+          });
+        });
+      }
+      fieldValues[field.id] = tableData;
+    } else if (field.type === 'inwardTable') {
+      const wrapper = document.getElementById(field.id);
+      const tableData = {};
+      if (wrapper) {
+        wrapper.querySelectorAll('.inward-row').forEach(row => {
+          const modelEl   = row.querySelector('.inward-model');
+          const qtyEl     = row.querySelector('.inward-qty');
+          const remarkEl  = row.querySelector('.inward-remark');
+          const particular = modelEl?.dataset.particular;
+          if (!particular) return;
+          const model = modelEl?.value || '';
+          const qty   = qtyEl?.value || '';
+          const remark = remarkEl?.value || '';
+          if (model || qty || remark) tableData[particular] = { model, qty, remark };
+        });
+      }
+      fieldValues[field.id] = tableData;
+    } else if (field.type === 'esignature') {
+      fieldValues[field.id] = esignatureState[field.id] || {};
+    } else {
+      const el = document.getElementById(field.id);
+      if (el) fieldValues[field.id] = el.value;
+    }
+  }
+  return { fieldValues, fileFields };
+}
+
+// ─── DRAFT AUTO-PERSIST ────────────────────────────────────────────────────────
+// Unsaved entries are written to localStorage per IR+section on every edit, so
+// progress survives navigation, reloads, or a failed/unsaved Save. A draft is
+// cleared only on a successful Save. On reopening an IR, drafts are restored on
+// top of the saved data and a banner lets the user review / discard them.
+
+function draftKey(sectionId) {
+  return `ipb_draft_${currentIR?.irNumber || '_'}_${sectionId}`;
+}
+function sectionIdFromFieldId(fieldId) {
+  const letter = (fieldId || '').split('_')[0];     // 'a','b',...
+  return letter ? `sec-${letter}` : null;
+}
+function saveDraft(sectionId) {
+  if (!currentIR?.irNumber) return;
+  const { fieldValues } = collectSectionValues(sectionId);
+  try {
+    localStorage.setItem(draftKey(sectionId), JSON.stringify({ savedAt: Date.now(), values: fieldValues }));
+  } catch {}
+  refreshDraftBanner();
+}
+function loadDraft(sectionId) {
+  try {
+    const raw = localStorage.getItem(draftKey(sectionId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed?.values || null;
+  } catch { return null; }
+}
+function clearDraft(sectionId) {
+  try { localStorage.removeItem(draftKey(sectionId)); } catch {}
+}
+function clearAllDrafts() {
+  if (!currentIR?.irNumber) return;
+  Object.keys(SECTIONS).forEach(clearDraft);
+  refreshDraftBanner();
+}
+function hasAnyDraft() {
+  return Object.keys(SECTIONS).some(sec => loadDraft(sec) !== null);
+}
+function restoreDrafts() {
+  let restored = [];
+  Object.keys(SECTIONS).forEach(secId => {
+    const draft = loadDraft(secId);
+    if (!draft) return;
+    restored.push(secId);
+    Object.entries(draft).forEach(([fieldId, value]) => {
+      populateFieldValue(secId, fieldId, value);
+    });
+  });
+  return restored;
+}
+function refreshDraftBanner() {
+  const banner = document.getElementById('draft-banner');
+  if (!banner) return;
+  if (!currentIR?.irNumber || !hasAnyDraft()) { banner.style.display = 'none'; return; }
+  const label = currentIR.irNumber;
+  banner.style.display = 'block';
+  banner.innerHTML = `
+    <span class="draft-banner-text">You have unsaved entries restored from a previous session for ${escHtml(label)}. Review each section and Save, or discard.</span>
+    <button type="button" class="draft-banner-btn" onclick="discardAllDrafts()">Discard restored drafts</button>`;
+}
+function discardAllDrafts() {
+  // Drop drafts, rebuild forms fresh (re-applies Section A auto-fill), then
+  // re-apply the saved backend data so the UI reflects the last saved state.
+  Object.keys(SECTIONS).forEach(clearDraft);
+  esignatureState = {};
+  buildSectionForms(currentIR.irNumber);
+  if (currentSectionData) {
+    Object.entries(currentSectionData).forEach(([secId, fields]) => {
+      Object.entries(fields).forEach(([fieldId, value]) => populateFieldValue(secId, fieldId, value));
+    });
+  }
+  refreshDraftBanner();
+  showToast('Drafts discarded — saved data restored');
+}
+
 async function saveSection(sectionId, irNumber) {
   const btn = document.getElementById('save-' + sectionId);
   const btnTop = document.getElementById('save-' + sectionId + '-top');
@@ -1176,59 +1338,7 @@ async function saveSection(sectionId, irNumber) {
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
 
-  const fieldValues = {};
-  const fileFields  = [];
-
-  for (const field of section.fields) {
-    if (field.type === 'file') {
-      const inp = document.getElementById(field.id);
-      if (inp?.files?.length > 0) {
-        fileFields.push({ id: field.id, files: inp.files });
-      }
-    } else if (field.type === 'checklist') {
-      const checkValues = {};
-      field.items.forEach((_, i) => {
-        const el = document.getElementById(field.id + '_' + i);
-        if (el) checkValues[field.items[i]] = el.value;
-      });
-      fieldValues[field.id] = checkValues;
-    } else if (field.type === 'activityTable') {
-      const body = document.getElementById(field.id + '-body');
-      if (body) {
-        const rows = body.querySelectorAll('.activity-table-row');
-        const tableData = [];
-        rows.forEach(row => {
-          tableData.push({
-            dayCount: row.querySelector('.act-day')?.value || '',
-            date: row.querySelector('.act-date')?.value || '',
-            activity: row.querySelector('.act-activity')?.value || '',
-            remark: row.querySelector('.act-remark')?.value || '',
-          });
-        });
-        fieldValues[field.id] = tableData;
-      }
-    } else if (field.type === 'inwardTable') {
-      const wrapper = document.getElementById(field.id);
-      const tableData = {};
-      if (wrapper) {
-        wrapper.querySelectorAll('.inward-row').forEach(row => {
-          const modelEl = row.querySelector('.inward-model');
-          const qtyEl   = row.querySelector('.inward-qty');
-          const particular = modelEl?.dataset.particular;
-          if (!particular) return;
-          const model = modelEl?.value || '';
-          const qty   = qtyEl?.value || '';
-          if (model || qty) tableData[particular] = { model, qty };
-        });
-      }
-      fieldValues[field.id] = tableData;
-    } else if (field.type === 'esignature') {
-      fieldValues[field.id] = esignatureState[field.id] || {};
-    } else {
-      const el = document.getElementById(field.id);
-      if (el) fieldValues[field.id] = el.value;
-    }
-  }
+  const { fieldValues, fileFields } = collectSectionValues(sectionId);
 
   formData.append('fields', JSON.stringify(fieldValues));
 
@@ -1256,6 +1366,8 @@ async function saveSection(sectionId, irNumber) {
       btn.textContent = '✓ Saved!';
       btn.className = 'btn saved';
       if (btnTop) { btnTop.textContent = '✓ Saved!'; btnTop.className = 'btn saved'; }
+      clearDraft(sectionId);
+      refreshDraftBanner();
       showToast('Section saved successfully!');
     } else {
       throw new Error(data.message || 'Backend error');
@@ -1264,7 +1376,7 @@ async function saveSection(sectionId, irNumber) {
     btn.textContent = '⚠ Retry Save';
     btn.className = 'btn error';
     if (btnTop) { btnTop.textContent = '⚠ Retry Save'; btnTop.className = 'btn error'; }
-    showToast('❌ Save failed: ' + err.message);
+    showToast('❌ Save failed: ' + err.message + ' — your entries are kept as a draft.');
   }
 
   setTimeout(() => {

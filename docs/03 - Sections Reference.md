@@ -2,6 +2,16 @@
 
 All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436).
 
+### Draft auto-preservation (all sections)
+Any edit within a section is auto-persisted to `localStorage` as a draft keyed
+`ipb_draft_<irNumber>_<sectionId>` (debounced on `input`, immediate on `change`).
+On reopening an IR, after saved data loads, drafts are restored on top and a
+banner ("You have unsaved entries restored…") offers **Discard restored drafts**.
+A draft is cleared only on a successful Save (or via Discard). E-signatures are
+included in the draft, so signing survives even if the section isn't saved
+(signing also triggers an immediate draft write). Files/photos are not persisted
+in the draft and must be re-attached.
+
 ---
 
 ## Section A — Preliminary Details & Activity Log
@@ -77,8 +87,9 @@ Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when 
 | `b_signInventory` | Digital Signature — Inventory (ST No. Assigner) | esignature | Email + timestamp; locked after signing |
 
 ### Particulars table (`b_inwardTable`)
-Saved as an object keyed by particular name: `{ "Air Vehicle": { model, qty }, ... }`.
-11 particulars from the IDS master Inward Checklist:
+Saved as an object keyed by particular name: `{ "Air Vehicle": { model, qty, remark }, ... }`.
+Each row has Model/Value, Qty, and a per-row Remark (an overall `b_remarks`
+textarea is also at the bottom). 11 particulars from the IDS master Inward Checklist:
 
 | # | Particular | Input | Option group |
 |---|---|---|---|

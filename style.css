@@ -653,7 +653,7 @@ select.form-input option { background: #0f172a; }
 .inward-table-header,
 .inward-row {
   display: grid;
-  grid-template-columns: 28px 1.4fr 1.6fr 64px;
+  grid-template-columns: 26px 1.3fr 1.5fr 56px 1.1fr;
   gap: 8px;
   align-items: center;
   padding: 8px 10px;
@@ -675,6 +675,7 @@ select.form-input option { background: #0f172a; }
 .inward-sn { font-size: 0.8rem; color: var(--muted); text-align: center; }
 .inward-particular { font-size: 0.85rem; font-weight: 600; }
 .inward-model-h { font-size: 0.72rem; }
+.inward-remark-h { font-size: 0.72rem; }
 .inward-row .form-input { padding: 6px 8px; font-size: 0.82rem; }
 .inward-qty { text-align: center; }
 
@@ -774,6 +775,31 @@ select.form-input option { background: #0f172a; }
 .inward-options-foot .btn-primary {
   background: var(--primary); color: #fff; border-color: var(--primary);
 }
+
+/* ── Draft banner ── */
+.draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  background: rgba(245,158,11,0.12);
+  border-bottom: 1px solid rgba(245,158,11,0.4);
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+.draft-banner-text { flex: 1; min-width: 200px; }
+.draft-banner-btn {
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--warning);
+  background: transparent;
+  color: var(--warning);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+.draft-banner-btn:hover { background: rgba(245,158,11,0.2); }
 
 /* ── Toast ── */
 #toast {

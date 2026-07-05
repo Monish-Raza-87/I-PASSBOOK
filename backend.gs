@@ -22,8 +22,10 @@ var CONFIG = {
   IR_REPO_REPORTER_COL:  12,   // Column L  — "Who's Reporting? (Name & Contact)"
   IR_REPO_EMAIL_COL:      16,   // Column P  — "Email Address"
 
-  // The original I-PASSBOOK Master Sheet (Legacy data holder)
-  PASSBOOK_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
+  // The I-PASSBOOK App Data sheet ("I-Passbook App Repository") — APP_DATA tab
+  // holds all saved section data. NOTE: the *deployed* backend is an older
+  // build than this file; keep this ID in sync with the live deployment.
+  PASSBOOK_SHEET_ID: '141L8Wt4hrvJmN3dTtnI8VDK76NutK_7KZ_jbM2qEOwQ',
   DATA_TAB:          'APP_DATA',  // Web App data goes here
 
   // Google Drive root folder for IR photo uploads

@@ -48,6 +48,54 @@ function isAuthorizedCR() {
          AUTHORIZED_CR_EMAILS.includes(currentUser.email.toLowerCase().trim());
 }
 
+// ─── SECTION B — INWARD CHECKLIST CONFIG ──────────────────────────────────────
+// Admins who may customize the per-particular dropdown options.
+const INWARD_ADMIN_EMAILS = [
+  'monish.raza@indrones.com',
+  'customer.relations@indrones.com',
+];
+function isInwardAdmin() {
+  const email = currentUser?.email?.toLowerCase().trim();
+  if (!email) return false;
+  if (INWARD_ADMIN_EMAILS.includes(email)) return true;
+  // Allow the local dev user (?dev=1) to test admin features.
+  if (email === `dev@${CONFIG.ALLOWED_DOMAIN}`) return true;
+  return false;
+}
+
+// The 11 particulars from the IDS master Inward Checklist.
+// `options` (a key into INWARD_OPTIONS_DEFAULTS) marks particulars whose
+// Model/Value cell is a dropdown; particulars without `options` are free text.
+const INWARD_PARTICULARS = [
+  { name: 'Air Vehicle',              options: 'airframe' },
+  { name: 'Battery',                  options: 'battery'  },
+  { name: 'Charger',                  options: 'charger'  },
+  { name: 'Radio Controller',         options: 'rc'       },
+  { name: 'Payload',                  options: 'payload'  },
+  { name: 'Propeller',                options: 'airframe' },
+  { name: 'Base',                     options: 'base'     },
+  { name: 'Bag With Foam',            options: 'airframe' },
+  { name: 'Tripod/Bipod',             options: null       },
+  { name: 'Center Pole',              options: null       },
+  { name: 'Toolkit-Box And Accessories', options: null    },
+];
+
+// Default dropdown options per option-group. Admin-editable at runtime
+// (see Manage Inward Options); overrides persist via GAS __CONFIG__ + localStorage.
+const INWARD_OPTIONS_DEFAULTS = {
+  airframe: ['Sigma 25 Geo (S25G)', 'Sigma 25 Pro (S25P)', 'Sigma 75 (S75)', 'Sigma 100 (S100)', 'Fujin', 'Fighter', 'Talon', 'Striver', 'DID NOT COME'],
+  battery:  ['4S3P', '6S3P', '6S2P', '4S4P', 'LiPo 22000 mAh', 'LiPo 16000 mAh', '6S4P', 'DID NOT COME'],
+  charger:  ['D2', 'Ultra Power', 'Hota', 'Sky RC', 'ISDT K2', 'DID NOT COME'],
+  rc:       ['Skydroid T12', 'Siyi MK15', 'Siyi MK32', 'DID NOT COME'],
+  payload:  ['ADTI 24 mp', 'View Pro A609', 'Siyi A8 Mini', 'Share 5 Angle', 'Sony A6000', 'DID NOT COME'],
+  base:     ['Emlid RS2', 'Spectra SP85', 'Spectra SP60', 'DID NOT COME'],
+};
+
+// Runtime option lists (defaults merged with any saved overrides).
+let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
+// E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
+let esignatureState = {};
+
 // ─── DOM REFS ─────────────────────────────────────────────────────────────────
 const splash      = document.getElementById('splash-screen');
 const authCont    = document.getElementById('auth-container');
@@ -175,6 +223,8 @@ function showApp() {
 
   // Fetch IRs
   fetchIRs();
+  // Load admin-customizable inward dropdown options (best-effort)
+  loadInwardOptions();
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -406,6 +456,7 @@ searchInput.addEventListener('input', () => {
 // ─── PASSBOOK DETAIL ─────────────────────────────────────────────────────────
 async function openPassbook(irNumber) {
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
+  esignatureState = {};   // clear signatures from any previously-open IR
 
   document.getElementById('ir-banner-title').textContent = irNumber;
   document.getElementById('ir-banner-sub').textContent =
@@ -457,26 +508,13 @@ const SECTIONS = {
   'sec-b': {
     title: 'Section B — Inward Checklist (Inventory)',
     fields: [
-      { id: 'b_receivedDate', label: 'Date of Inward',  type: 'date' },
-      { id: 'b_receivedBy',   label: 'Received By (Inventory Staff)', type: 'text', placeholder: 'Staff name' },
-      { id: 'b_trackingNo',   label: 'Inward Tracking No. / Courier', type: 'text', placeholder: 'AWB or docket number' },
-      {
-        id: 'b_checklist', label: 'Items Received', type: 'checklist',
-        items: [
-          'Air Vehicle (Drone Frame)',
-          'Flight Controller',
-          'Battery Pack (1)',
-          'Battery Pack (2)',
-          'Battery Pack (3)',
-          'Battery Charger',
-          'Remote Controller',
-          'Propellers Set',
-          'Case / Carry Bag',
-          'Accessories / Others',
-        ]
-      },
-      { id: 'b_inwardPhotos', label: 'Inward Photos',   type: 'file', multiple: true },
-      { id: 'b_remarks',      label: 'Inventory Remarks', type: 'textarea', placeholder: 'Condition at receiving, missing items, etc.' },
+      { id: 'b_inwardDate', label: 'Inward Date',  type: 'date' },
+      { id: 'b_inwardBy',   label: 'Inward By (Name)', type: 'text', placeholder: 'Person who performed the inward' },
+      { id: 'b_stNo',       label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number assigned by Inventory' },
+      { id: 'b_inwardTable', label: 'Particulars Received', type: 'inwardTable' },
+      { id: 'b_remarks',    label: 'Remarks', type: 'textarea', placeholder: 'Condition at receiving, missing items, observations, etc.' },
+      { id: 'b_signInward',    label: 'Digital Signature — Inward Performed By',  type: 'esignature', role: 'Inward Performed By' },
+      { id: 'b_signInventory', label: 'Digital Signature — Inventory (ST No. Assigner)', type: 'esignature', role: 'Inventory (ST No. Assigner)' },
     ]
   },
   'sec-c': {
@@ -684,6 +722,37 @@ function buildField(field, irNumber) {
         <button type="button" class="btn-add-row" onclick="addActivityRow('${id}')">+ Add Row</button>
       </div>
     `;
+  } else if (field.type === 'inwardTable') {
+    const rows = INWARD_PARTICULARS.map((p, i) => {
+      const opts = p.options ? (inwardOptions[p.options] || []) : null;
+      const modelControl = opts
+        ? `<select class="form-input inward-model" data-particular="${esc(p.name)}"><option value=""></option>${opts.map(o => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select>`
+        : `<input type="text" class="form-input inward-model" data-particular="${esc(p.name)}" placeholder="Enter value" />`;
+      return `
+        <div class="inward-row">
+          <span class="inward-sn">${i + 1}</span>
+          <span class="inward-particular">${esc(p.name)}</span>
+          ${modelControl}
+          <input type="number" min="0" class="form-input inward-qty" data-particular="${esc(p.name)}" placeholder="Qty" />
+        </div>`;
+    }).join('');
+    const adminBtn = isInwardAdmin()
+      ? `<button type="button" class="btn-inward-options" onclick="openInwardOptionsModal()">&#9881; Manage Dropdown Options</button>`
+      : '';
+    control = `
+      <div class="inward-table-wrapper" id="${id}">
+        <div class="inward-table-header">
+          <span class="inward-sn">#</span>
+          <span class="inward-particular">Particulars</span>
+          <span class="inward-model-h">Model / Value</span>
+          <span class="inward-qty">Qty</span>
+        </div>
+        <div class="inward-table-body">${rows}</div>
+        ${adminBtn}
+      </div>
+    `;
+  } else if (field.type === 'esignature') {
+    control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
   } else if (field.type === 'url') {
     control = `
       <div class="url-field-wrapper">
@@ -699,7 +768,13 @@ function buildField(field, irNumber) {
   // Apply restricted field behavior (CRM-only fields)
   const isRestricted = field.restricted && !isAuthorizedCR();
   if (isRestricted) {
-    if (field.type === 'activityTable') {
+    if (field.type === 'inwardTable') {
+      control = control.replace(/<select /g, '<select disabled ');
+      control = control.replace(/<input /g, '<input disabled ');
+    } else if (field.type === 'esignature') {
+      // Signature buttons are disabled for non-authorized users on restricted sections
+      control = control.replace(/<button type="button" class="btn-esign/g, '<button type="button" disabled class="btn-esign');
+    } else if (field.type === 'activityTable') {
       // Disable all inputs inside the activity table
       control = control.replace(/<input /g, '<input disabled ');
       // Disable the "Add Row" button
@@ -781,6 +856,195 @@ function updateUrlLink(fieldId) {
   }
 }
 
+// ─── E-SIGNATURE (Section B) ───────────────────────────────────────────────────
+// Captures the signed-in user's email + full timestamp. Once signed, the cell
+// is locked (not editable, not deletable). An authorized user may override
+// (re-sign); each prior value is retained in `history` and shown on hover.
+
+function formatTimestamp(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function escHtml(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderESignatureHTML(fieldId, role) {
+  const sig = esignatureState[fieldId];
+  const email = currentUser?.email || '';
+  const history = (sig && sig.history) ? sig.history : [];
+  const historyLines = history.map(h => `• ${escHtml(h.signedBy)} — ${escHtml(formatTimestamp(h.signedAt))}`).join('<br>');
+  const historyTitle = historyLines
+    ? `Edit history (hover):&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
+    : '';
+
+  if (sig && sig.signedBy) {
+    const canOverride = isInwardAdmin() || isAuthorizedCR() || sig.signedBy === email;
+    const overrideBtn = canOverride
+      ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${fieldId}')">Override &amp; Re-sign</button>`
+      : '';
+    return `
+      <div class="esignature-signed" title="${escHtml(historyTitle)}">
+        <div class="esignature-row">
+          <span class="esignature-check">&#10003;</span>
+          <div class="esignature-info">
+            <div class="esignature-line">${escHtml(role)} — signed by <strong>${escHtml(sig.signedBy)}</strong></div>
+            <div class="esignature-stamp">${escHtml(formatTimestamp(sig.signedAt))}</div>
+          </div>
+        </div>
+        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Edit history:</span><br>${historyLines}</div>` : ''}
+        ${overrideBtn}
+      </div>`;
+  }
+  // Unsigned
+  const signBtn = email
+    ? `<button type="button" class="btn-esign btn-esign-sign" onclick="signESignature('${fieldId}')">Sign as ${escHtml(email)}</button>`
+    : `<span class="esignature-muted">Sign in to sign.</span>`;
+  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span>${signBtn}</div>`;
+}
+
+function refreshESignature(fieldId) {
+  const block = document.getElementById(fieldId + '-block');
+  if (block) block.innerHTML = renderESignatureHTML(fieldId, block.dataset.role || '');
+}
+
+// Sign (or override-and-resign) the given e-signature field.
+function signESignature(fieldId) {
+  const email = currentUser?.email;
+  if (!email) { showToast('Sign in first'); return; }
+  const prev = esignatureState[fieldId];
+  const history = (prev && prev.signedBy)
+    ? [...(prev.history || []), { signedBy: prev.signedBy, signedAt: prev.signedAt }]
+    : (prev?.history || []);
+  esignatureState[fieldId] = { signedBy: email, signedAt: new Date().toISOString(), history };
+  refreshESignature(fieldId);
+  showToast('Signed: ' + email);
+}
+
+// ─── INWARD DROPDOWN OPTIONS (admin-customizable) ──────────────────────────────
+// Persisted to GAS under irNumber="__CONFIG__", sectionId="inward-options"
+// (best-effort) and mirrored to localStorage so edits survive when GAS is
+// unreachable. Falls back to INWARD_OPTIONS_DEFAULTS on load.
+
+function loadInwardOptions() {
+  // 1. localStorage override (per-device, always available)
+  try {
+    const local = localStorage.getItem('ipb_inward_options');
+    if (local) inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, JSON.parse(local));
+  } catch {}
+  // 2. Shared config from GAS (best-effort, non-blocking)
+  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
+    .then(r => r.json())
+    .then(data => {
+      const saved = data?.sections?.['inward-options'];
+      if (saved && saved.options && typeof saved.options === 'object') {
+        inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, saved.options);
+        try { localStorage.setItem('ipb_inward_options', JSON.stringify(saved.options)); } catch {}
+        // Re-render any visible inward table, preserving already-entered values
+        document.querySelectorAll('.inward-table-wrapper').forEach(w => {
+          const tbody = w.querySelector('.inward-table-body');
+          if (!tbody) return;
+          const prior = {};
+          tbody.querySelectorAll('.inward-row').forEach(row => {
+            const m = row.querySelector('.inward-model');
+            const q = row.querySelector('.inward-qty');
+            if (m?.dataset.particular) prior[m.dataset.particular] = { model: m.value, qty: q?.value };
+          });
+          tbody.innerHTML = buildInwardRowsHTML();
+          Object.entries(prior).forEach(([p, cell]) => {
+            if (!cell) return;
+            const m = tbody.querySelector(`.inward-model[data-particular="${p}"]`);
+            const q = tbody.querySelector(`.inward-qty[data-particular="${p}"]`);
+            if (m) m.value = cell.model || '';
+            if (q) q.value = cell.qty || '';
+          });
+        });
+      }
+    })
+    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+}
+
+function saveInwardOptions() {
+  if (!isInwardAdmin()) { showToast('Not authorized'); return; }
+  try { localStorage.setItem('ipb_inward_options', JSON.stringify(inwardOptions)); } catch {}
+  const fd = new FormData();
+  fd.append('action', 'saveSection');
+  fd.append('irNumber', '__CONFIG__');
+  fd.append('sectionId', 'inward-options');
+  fd.append('savedBy', currentUser?.email || 'unknown');
+  fd.append('fields', JSON.stringify({ options: inwardOptions }));
+  fd.append('files', JSON.stringify([]));
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(() => showToast('Inward options saved'))
+    .catch(() => showToast('Saved locally (backend unreachable)'));
+}
+
+function buildInwardRowsHTML() {
+  return INWARD_PARTICULARS.map((p, i) => {
+    const opts = p.options ? (inwardOptions[p.options] || []) : null;
+    const modelControl = opts
+      ? `<select class="form-input inward-model" data-particular="${escHtml(p.name)}"><option value=""></option>${opts.map(o => `<option value="${escHtml(o)}">${escHtml(o)}</option>`).join('')}</select>`
+      : `<input type="text" class="form-input inward-model" data-particular="${escHtml(p.name)}" placeholder="Enter value" />`;
+    return `
+      <div class="inward-row">
+        <span class="inward-sn">${i + 1}</span>
+        <span class="inward-particular">${escHtml(p.name)}</span>
+        ${modelControl}
+        <input type="number" min="0" class="form-input inward-qty" data-particular="${escHtml(p.name)}" placeholder="Qty" />
+      </div>`;
+  }).join('');
+}
+
+function openInwardOptionsModal() {
+  if (!isInwardAdmin()) { showToast('Not authorized'); return; }
+  const groups = Object.keys(INWARD_OPTIONS_DEFAULTS);
+  const fields = groups.map(g => `
+    <div class="opt-group">
+      <label class="form-label">${escHtml(g)} — used by: ${INWARD_PARTICULARS.filter(p => p.options === g).map(p => escHtml(p.name)).join(', ') || '(none)'}</label>
+      <textarea class="form-input opt-textarea" data-group="${escHtml(g)}" placeholder="One option per line">${escHtml((inwardOptions[g] || []).join('\n'))}</textarea>
+    </div>`).join('');
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'inward-options-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Manage Inward Dropdown Options</h3>
+        <button type="button" class="inward-options-close" onclick="closeInwardOptionsModal()">&times;</button>
+      </div>
+      <p class="inward-options-hint">One option per line. Changes apply to every IR's inward table and persist for all users.</p>
+      <div class="inward-options-body">${fields}</div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeInwardOptionsModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyInwardOptions()">Save Options</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+
+function closeInwardOptionsModal() {
+  const m = document.getElementById('inward-options-modal');
+  if (m) m.remove();
+}
+
+function applyInwardOptions() {
+  document.querySelectorAll('#inward-options-modal .opt-textarea').forEach(ta => {
+    const g = ta.dataset.group;
+    const list = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
+    inwardOptions[g] = list;
+  });
+  closeInwardOptionsModal();
+  // Re-render any visible inward table with the new option lists
+  document.querySelectorAll('.inward-table-body').forEach(tb => { tb.innerHTML = buildInwardRowsHTML(); });
+  saveInwardOptions();
+}
+
 function handleFilePreview(e) {
   const inp = e.target;
   const previewContainer = document.getElementById(inp.id + '-previews');
@@ -825,6 +1089,26 @@ function populateFieldValue(sectionId, fieldId, value) {
       const el = document.getElementById(`${fieldId}_${i}`);
       if (el) el.value = value[item] || '';
     });
+    return;
+  }
+
+  // Handle inwardTable type — value is { [particularName]: { model, qty } }
+  if (field?.type === 'inwardTable' && value && typeof value === 'object') {
+    const wrapper = document.getElementById(fieldId);
+    if (!wrapper) return;
+    Object.entries(value).forEach(([particular, cell]) => {
+      const modelEl = wrapper.querySelector(`.inward-model[data-particular="${particular}"]`);
+      const qtyEl   = wrapper.querySelector(`.inward-qty[data-particular="${particular}"]`);
+      if (modelEl && cell) modelEl.value = cell.model || '';
+      if (qtyEl && cell)   qtyEl.value   = cell.qty || '';
+    });
+    return;
+  }
+
+  // Handle esignature type — value is { signedBy, signedAt, history: [] }
+  if (field?.type === 'esignature') {
+    esignatureState[fieldId] = (value && typeof value === 'object') ? value : {};
+    refreshESignature(fieldId);
     return;
   }
 
@@ -923,6 +1207,23 @@ async function saveSection(sectionId, irNumber) {
         });
         fieldValues[field.id] = tableData;
       }
+    } else if (field.type === 'inwardTable') {
+      const wrapper = document.getElementById(field.id);
+      const tableData = {};
+      if (wrapper) {
+        wrapper.querySelectorAll('.inward-row').forEach(row => {
+          const modelEl = row.querySelector('.inward-model');
+          const qtyEl   = row.querySelector('.inward-qty');
+          const particular = modelEl?.dataset.particular;
+          if (!particular) return;
+          const model = modelEl?.value || '';
+          const qty   = qtyEl?.value || '';
+          if (model || qty) tableData[particular] = { model, qty };
+        });
+      }
+      fieldValues[field.id] = tableData;
+    } else if (field.type === 'esignature') {
+      fieldValues[field.id] = esignatureState[field.id] || {};
     } else {
       const el = document.getElementById(field.id);
       if (el) fieldValues[field.id] = el.value;

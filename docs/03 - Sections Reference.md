@@ -68,24 +68,54 @@ Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when 
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
-| `b_receivedDate` | Date of Inward | date | |
-| `b_receivedBy` | Received By | text | |
-| `b_trackingNo` | Inward Tracking No. | text | |
-| `b_checklist` | Items Received | checklist | 10 items (see below) |
-| `b_inwardPhotos` | Inward Photos | file | Multiple, images/PDF |
-| `b_remarks` | Inventory Remarks | textarea | |
+| `b_inwardDate` | Inward Date | date | |
+| `b_inwardBy` | Inward By (Name) | text | Person who performed the inward |
+| `b_stNo` | Stock Transfer (ST) No. | text | Assigned by Inventory |
+| `b_inwardTable` | Particulars Received | inwardTable | 11-row table: Particular, Model/Value (dropdown or free text), Qty |
+| `b_remarks` | Remarks | textarea | |
+| `b_signInward` | Digital Signature — Inward Performed By | esignature | Email + timestamp; locked after signing |
+| `b_signInventory` | Digital Signature — Inventory (ST No. Assigner) | esignature | Email + timestamp; locked after signing |
 
-**Checklist items** (each has Received/Missing/Damaged/N/A dropdown):
-1. Air Vehicle (Drone Frame)
-2. Flight Controller
-3. Battery Pack (1)
-4. Battery Pack (2)
-5. Battery Pack (3)
-6. Battery Charger
-7. Remote Controller
-8. Propellers Set
-9. Case / Carry Bag
-10. Accessories / Others
+### Particulars table (`b_inwardTable`)
+Saved as an object keyed by particular name: `{ "Air Vehicle": { model, qty }, ... }`.
+11 particulars from the IDS master Inward Checklist:
+
+| # | Particular | Input | Option group |
+|---|---|---|---|
+| 1 | Air Vehicle | dropdown | `airframe` |
+| 2 | Battery | dropdown | `battery` |
+| 3 | Charger | dropdown | `charger` |
+| 4 | Radio Controller | dropdown | `rc` |
+| 5 | Payload | dropdown | `payload` |
+| 6 | Propeller | dropdown | `airframe` |
+| 7 | Base | dropdown | `base` |
+| 8 | Bag With Foam | dropdown | `airframe` |
+| 9 | Tripod/Bipod | free text | — |
+| 10 | Center Pole | free text | — |
+| 11 | Toolkit-Box And Accessories | free text | — |
+
+### Dropdown option groups (admin-customizable)
+Defaults defined in `INWARD_OPTIONS_DEFAULTS` (`app.js`); admins
+(`monish.raza@indrones.com`, `customer.relations@indrones.com`) edit them via the
+**⚙ Manage Dropdown Options** button shown on the inward table. Overrides persist
+to GAS under irNumber `__CONFIG__` / sectionId `inward-options` (shared) and to
+`localStorage` (per-device fallback). `loadInwardOptions()` runs at app start.
+
+| Group | Used by | Default options |
+|---|---|---|
+| `airframe` | Air Vehicle, Propeller, Bag With Foam | Sigma 25 Geo (S25G), Sigma 25 Pro (S25P), Sigma 75 (S75), Sigma 100 (S100), Fujin, Fighter, Talon, Striver, DID NOT COME |
+| `battery` | Battery | 4S3P, 6S3P, 6S2P, 4S4P, LiPo 22000 mAh, LiPo 16000 mAh, 6S4P, DID NOT COME |
+| `charger` | Charger | D2, Ultra Power, Hota, Sky RC, ISDT K2, DID NOT COME |
+| `rc` | Radio Controller | Skydroid T12, Siyi MK15, Siyi MK32, DID NOT COME |
+| `payload` | Payload | ADTI 24 mp, View Pro A609, Siyi A8 Mini, Share 5 Angle, Sony A6000, DID NOT COME |
+| `base` | Base | Emlid RS2, Spectra SP85, Spectra SP60, DID NOT COME |
+
+### E-signatures (`esignature` type)
+Saved as `{ signedBy, signedAt, history: [{ signedBy, signedAt }, ...] }`.
+- Signing captures the signed-in user's **email + full ISO timestamp** (displayed as `DD Month YYYY, HH:MM:SS`).
+- Once signed, the field is **locked** — not editable, not deletable.
+- An authorized user (inward admin / CR / the original signer) may **Override & Re-sign**; the previous value is pushed into `history`, which is shown on the block (and as a hover tooltip on the signed cell).
+- `esignatureState` is reset each time a passbook is opened (`openPassbook`) and populated from saved data by `populateFieldValue`.
 
 ---
 

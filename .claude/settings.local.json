@@ -16,7 +16,11 @@
       "Bash(git reset *)",
       "Bash(git restore *)",
       "WebFetch(domain:docs.google.com)",
-      "WebFetch(domain:spreadsheets.google.com)"
+      "WebFetch(domain:spreadsheets.google.com)",
+      "Bash(curl *)",
+      "Bash(node --check app.js)",
+      "Bash(node --check backend.js)",
+      "Bash(node --check style.css)"
     ]
   }
 }

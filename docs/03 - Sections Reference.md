@@ -130,18 +130,51 @@ Saved as `{ signedBy, signedAt, history: [{ signedBy, signedAt }, ...] }`.
 
 ---
 
-## Section C — IQC Inspection
+## Section C — IQC Visual Inspection
 **ID:** `sec-c`
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
 | `c_iqcDate` | Inspection Date | date | |
-| `c_iqcBy` | IQC Inspector | text | |
-| `c_externalDmg` | External Damage Observed | textarea | |
-| `c_electricalDmg` | Electrical / PCB Damage | textarea | |
-| `c_iqcPhotos` | IQC Inspection Photos | file | Multiple |
-| `c_iqcObservation` | Overall IQC Observation | textarea | |
-| `c_iqcResult` | IQC Result | select | Pass – Proceed to Tech Analysis / Fail – Return to Customer / Partial – Proceed with caution |
+| `c_iqcBy` | Inspected By | text | IQC inspector name |
+| `c_evidenceLink` | Link to Evidence (Photo / Video) Folder | url | Folder link with "Open ↗" |
+| `c_iqcTable` | Visual Inspection Checklist | iqcTable | Zone rows: Result (PASS/FAIL/NA) + per-row Remark |
+| `c_remarks` | Remarks | textarea | Overall remarks at the bottom |
+| `c_signIqc` | Digital Signature — IQC Inspector | esignature | Email + timestamp; locked after signing |
+
+### Visual inspection checklist (`c_iqcTable`)
+Saved as an object keyed by zone id: `{ "A1": { result, remark }, "D5I": { result, remark, name, checks }, ... }`.
+Editable placeholder rows also store the inspector-entered `name` and `checks`.
+
+Inspection zones (`IQC_ZONES` in `app.js`), grouped A–E:
+
+| Group | Zone id | Code | Item | Visual checks |
+|---|---|---|---|---|
+| A — Airframe | A1 | A.1. | All Four Arms | Cracks, Bends, Deformations, Loose Arms and Damage To Holes |
+|  | A2 | A.2. | Air Vehicle Body | Damage, Crack, Scratch, Missing/Loose Screws, Loose Objects Inside |
+|  | A3 | A.3. | Landing Gears/Legs | Damage |
+| B — Propulsion | B1 | B.1. | All The Propellers | Chipping, Damage, Self-Tightening Bolts Are Intact |
+|  | B2 | B.2. | All 4 Prop-Mounts | Bend, Bolts Are Tightened, Scratch |
+|  | B3 | B.3. | All Four Motors | Deposit Of Dirt, Debris, Sign Of Impact, Scratch, Free to Rotate |
+| C — Battery And Charger | C1 | C.1. | All The Batteries | Case Damage, Scratch, Missing/Loose Bolt, Voltage Check (Balance/Imbalance) |
+|  | C2 | C.2. | Battery Bay | Damage, Looseness, Battery Connectors |
+|  | C3 | C.3. | Battery Charger | Power On Test, Damage, Scratch, Loose Objects Inside, Power Cable |
+| D — Avionics And Sensors | D1 | D.1. | GPS | Damage, Scratch |
+|  | D2 | D.2. | Antennas | Missing, Damage, Scratch |
+|  | D3 | D.3. | Dampeners | Damage, Scratch |
+|  | D4 | D.4. | Radio Controller | Damage, Scratch, Charging Port, Loose Objects Inside, Power On Test and Screen Test |
+|  | D5a | D.5. | ODS | Damage, Scratch |
+|  | D5b | D.5. | Sensor/Payload | Damage, Scratch, Loose Objects Inside, SD Card Availability, Payload Cable And Connectors Are Intact |
+|  | D5I / D5II / D5III | D.5.I / II / III | _(editable)_ | Inspector fills item name + checks |
+| E — Accessories | E1 | E.1. | Base With Bag | Damage, Scratch, Missing Part (Antenna, Charging Cable), Power On Test |
+|  | E2 | E.2. | Tripod/BiPod, Center Pole | Damage, Missing Part |
+|  | E3 | E.3. | Drone Bag With Foam | Damage |
+|  | E4 / E5 | E.4 / E.5. | _(editable)_ | Inspector fills item name + checks |
+
+Each check row has a **Result** dropdown (`PASS` / `FAIL` / `NA`) and a **Remark** field.
+The bottom `c_remarks` textarea holds overall remarks. The `c_signIqc` e-signature
+follows the same locked + override-with-history behaviour as Section B (see
+[`esignature` type](#e-signatures-esignature-type)).
 
 ---
 

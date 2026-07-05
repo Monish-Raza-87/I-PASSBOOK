@@ -96,6 +96,43 @@ let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
 // E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
 let esignatureState = {};
 
+// ─── SECTION C — IQC VISUAL INSPECTION CONFIG ──────────────────────────────────
+// Inspection zones from the IDS master Section C sheet. `header: true` rows are
+// group banners (A/B/C/D/E). Rows with `editable: true` are blank placeholder
+// lines the inspector fills in (extra payloads / accessories). Each non-header
+// row has a PASS/FAIL/NA result dropdown and a per-row remark.
+const IQC_RESULT_OPTIONS = ['PASS', 'FAIL', 'NA'];
+const IQC_ZONES = [
+  { id: 'A',      code: 'A',      name: 'Airframe',            header: true },
+  { id: 'A1',     code: 'A.1.',  name: 'All Four Arms',       checks: 'Cracks, Bends, Deformations, Loose Arms and Damage To Holes' },
+  { id: 'A2',     code: 'A.2.',  name: 'Air Vehicle Body',    checks: 'Damage, Crack, Scratch, Missing/Loose Screws, Loose Objects Inside' },
+  { id: 'A3',     code: 'A.3.',  name: 'Landing Gears/Legs', checks: 'Damage' },
+  { id: 'B',      code: 'B',      name: 'Propulsion',          header: true },
+  { id: 'B1',     code: 'B.1.',  name: 'All The Propellers',  checks: 'Chipping, Damage, Self-Tightening Bolts Are Intact' },
+  { id: 'B2',     code: 'B.2.',  name: 'All 4 Prop-Mounts',   checks: 'Bend, Bolts Are Tightened, Scratch' },
+  { id: 'B3',     code: 'B.3.',  name: 'All Four Motors',     checks: 'Deposit Of Dirt, Debris, Sign Of Impact, Scratch, Free to Rotate' },
+  { id: 'C',      code: 'C',      name: 'Battery And Charger', header: true },
+  { id: 'C1',     code: 'C.1.',  name: 'All The Batteries',  checks: 'Case Damage, Scratch, Missing/Loose Bolt, Voltage Check (Balance/Imbalance)' },
+  { id: 'C2',     code: 'C.2.',  name: 'Battery Bay',        checks: 'Damage, Looseness, Battery Connectors' },
+  { id: 'C3',     code: 'C.3.',  name: 'Battery Charger',    checks: 'Power On Test, Damage, Scratch, Loose Objects Inside, Power Cable' },
+  { id: 'D',      code: 'D',      name: 'Avionics And Sensors', header: true },
+  { id: 'D1',     code: 'D.1.',  name: 'GPS',                checks: 'Damage, Scratch' },
+  { id: 'D2',     code: 'D.2.',  name: 'Antennas',           checks: 'Missing, Damage, Scratch' },
+  { id: 'D3',     code: 'D.3.',  name: 'Dampeners',          checks: 'Damage, Scratch' },
+  { id: 'D4',     code: 'D.4.',  name: 'Radio Controller',   checks: 'Damage, Scratch, Charging Port, Loose Objects Inside, Power On Test and Screen Test' },
+  { id: 'D5a',    code: 'D.5.',  name: 'ODS',                checks: 'Damage, Scratch' },
+  { id: 'D5b',    code: 'D.5.',  name: 'Sensor/Payload',     checks: 'Damage, Scratch, Loose Objects Inside, SD Card Availability, Payload Cable And Connectors Are Intact' },
+  { id: 'D5I',    code: 'D.5.I',  name: '', editable: true },
+  { id: 'D5II',   code: 'D.5.II', name: '', editable: true },
+  { id: 'D5III',  code: 'D.5.III', name: '', editable: true },
+  { id: 'E',      code: 'E',      name: 'Accessories',        header: true },
+  { id: 'E1',     code: 'E.1.',  name: 'Base With Bag',      checks: 'Damage, Scratch, Missing Part (Antenna, Charging Cable), Power On Test' },
+  { id: 'E2',     code: 'E.2.',  name: 'Tripod/BiPod, Center Pole', checks: 'Damage, Missing Part' },
+  { id: 'E3',     code: 'E.3.',  name: 'Drone Bag With Foam', checks: 'Damage' },
+  { id: 'E4',     code: 'E.4',   name: '', editable: true },
+  { id: 'E5',     code: 'E.5.',  name: '', editable: true },
+];
+
 // ─── DOM REFS ─────────────────────────────────────────────────────────────────
 const splash      = document.getElementById('splash-screen');
 const authCont    = document.getElementById('auth-container');
@@ -535,15 +572,14 @@ const SECTIONS = {
     ]
   },
   'sec-c': {
-    title: 'Section C — IQC Inspection',
+    title: 'Section C — IQC Visual Inspection',
     fields: [
-      { id: 'c_iqcDate',       label: 'Inspection Date', type: 'date' },
-      { id: 'c_iqcBy',         label: 'IQC Inspector',   type: 'text', placeholder: 'Inspector name' },
-      { id: 'c_externalDmg',   label: 'External Damage Observed', type: 'textarea', placeholder: 'Cracks, dents, broken parts...' },
-      { id: 'c_electricalDmg', label: 'Electrical / PCB Damage',  type: 'textarea', placeholder: 'Burnt components, corrosion...' },
-      { id: 'c_iqcPhotos',     label: 'IQC Inspection Photos',    type: 'file', multiple: true },
-      { id: 'c_iqcObservation',label: 'Overall IQC Observation',  type: 'textarea', placeholder: 'Summary of findings...' },
-      { id: 'c_iqcResult',     label: 'IQC Result',               type: 'select', options: ['Pass – Proceed to Tech Analysis','Fail – Return to Customer','Partial – Proceed with caution'] },
+      { id: 'c_iqcDate',      label: 'Inspection Date', type: 'date' },
+      { id: 'c_iqcBy',        label: 'Inspected By',    type: 'text', placeholder: 'IQC inspector name' },
+      { id: 'c_evidenceLink', label: 'Link to Evidence (Photo / Video) Folder', type: 'url', placeholder: 'Paste folder link...' },
+      { id: 'c_iqcTable',     label: 'Visual Inspection Checklist', type: 'iqcTable' },
+      { id: 'c_remarks',      label: 'Remarks', type: 'textarea', placeholder: 'Overall inspection remarks, observations, summary...' },
+      { id: 'c_signIqc',      label: 'Digital Signature — IQC Inspector', type: 'esignature', role: 'IQC Inspector' },
     ]
   },
   'sec-d': {
@@ -770,6 +806,17 @@ function buildField(field, irNumber) {
         ${adminBtn}
       </div>
     `;
+  } else if (field.type === 'iqcTable') {
+    control = `
+      <div class="iqc-table-wrapper" id="${id}">
+        <div class="iqc-table-header">
+          <span>Zone / Item</span>
+          <span>Visual Checks To Perform</span>
+          <span>Result</span>
+          <span>Remark</span>
+        </div>
+        <div class="iqc-table-body">${buildIqcRowsHTML()}</div>
+      </div>`;
   } else if (field.type === 'esignature') {
     control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
   } else if (field.type === 'url') {
@@ -787,7 +834,7 @@ function buildField(field, irNumber) {
   // Apply restricted field behavior (CRM-only fields)
   const isRestricted = field.restricted && !isAuthorizedCR();
   if (isRestricted) {
-    if (field.type === 'inwardTable') {
+    if (field.type === 'inwardTable' || field.type === 'iqcTable') {
       control = control.replace(/<select /g, '<select disabled ');
       control = control.replace(/<input /g, '<input disabled ');
     } else if (field.type === 'esignature') {
@@ -1024,6 +1071,29 @@ function buildInwardRowsHTML() {
   }).join('');
 }
 
+// Build the IQC visual-inspection rows from IQC_ZONES.
+function buildIqcRowsHTML() {
+  return IQC_ZONES.map(z => {
+    if (z.header) {
+      return `<div class="iqc-zone-header"><span class="iqc-zone-code">${escHtml(z.code)}</span><span class="iqc-zone-name">${escHtml(z.name)}</span></div>`;
+    }
+    const resultOpts = IQC_RESULT_OPTIONS.map(o => `<option value="${o}">${o}</option>`).join('');
+    const zoneCell = z.editable
+      ? `<div class="iqc-zone"><span class="iqc-zone-code">${escHtml(z.code)}</span><input type="text" class="form-input iqc-name" data-id="${escHtml(z.id)}" placeholder="Item name" /></div>`
+      : `<div class="iqc-zone"><span class="iqc-zone-code">${escHtml(z.code)}</span><span class="iqc-zone-name">${escHtml(z.name)}</span></div>`;
+    const checksCell = z.editable
+      ? `<input type="text" class="form-input iqc-checks" data-id="${escHtml(z.id)}" placeholder="Checks to perform" />`
+      : `<span class="iqc-checks-text">${escHtml(z.checks || '')}</span>`;
+    return `
+      <div class="iqc-row" data-id="${escHtml(z.id)}">
+        ${zoneCell}
+        <div class="iqc-checks-cell">${checksCell}</div>
+        <select class="form-input iqc-result" data-id="${escHtml(z.id)}"><option value=""></option>${resultOpts}</select>
+        <input type="text" class="form-input iqc-remark" data-id="${escHtml(z.id)}" placeholder="Remark" />
+      </div>`;
+  }).join('');
+}
+
 function openInwardOptionsModal() {
   if (!isInwardAdmin()) { showToast('Not authorized'); return; }
   const groups = Object.keys(INWARD_OPTIONS_DEFAULTS);
@@ -1137,6 +1207,24 @@ function populateFieldValue(sectionId, fieldId, value) {
     return;
   }
 
+  // Handle iqcTable type — value is { [zoneId]: { result, remark, name?, checks? } }
+  if (field?.type === 'iqcTable' && value && typeof value === 'object') {
+    const wrapper = document.getElementById(fieldId);
+    if (!wrapper) return;
+    Object.entries(value).forEach(([zoneId, cell]) => {
+      if (!cell) return;
+      const resultEl = wrapper.querySelector(`.iqc-result[data-id="${zoneId}"]`);
+      const remarkEl = wrapper.querySelector(`.iqc-remark[data-id="${zoneId}"]`);
+      const nameEl   = wrapper.querySelector(`.iqc-name[data-id="${zoneId}"]`);
+      const checksEl = wrapper.querySelector(`.iqc-checks[data-id="${zoneId}"]`);
+      if (resultEl) resultEl.value = cell.result || '';
+      if (remarkEl) remarkEl.value = cell.remark || '';
+      if (nameEl)   nameEl.value   = cell.name || '';
+      if (checksEl) checksEl.value = cell.checks || '';
+    });
+    return;
+  }
+
   // Handle activityTable type
   if (field?.type === 'activityTable') {
     const body = document.getElementById(fieldId + '-body');
@@ -1230,6 +1318,24 @@ function collectSectionValues(sectionId) {
           const qty   = qtyEl?.value || '';
           const remark = remarkEl?.value || '';
           if (model || qty || remark) tableData[particular] = { model, qty, remark };
+        });
+      }
+      fieldValues[field.id] = tableData;
+    } else if (field.type === 'iqcTable') {
+      const wrapper = document.getElementById(field.id);
+      const tableData = {};
+      if (wrapper) {
+        wrapper.querySelectorAll('.iqc-row').forEach(row => {
+          const zoneId = row.dataset.id;
+          if (!zoneId) return;
+          const result  = row.querySelector('.iqc-result')?.value || '';
+          const remark  = row.querySelector('.iqc-remark')?.value || '';
+          const nameEl  = row.querySelector('.iqc-name');
+          const checksEl = row.querySelector('.iqc-checks');
+          const cell = { result, remark };
+          if (nameEl)  cell.name  = nameEl.value || '';
+          if (checksEl) cell.checks = checksEl.value || '';
+          if (result || remark || cell.name || cell.checks) tableData[zoneId] = cell;
         });
       }
       fieldValues[field.id] = tableData;

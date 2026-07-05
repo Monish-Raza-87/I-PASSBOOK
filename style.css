@@ -693,6 +693,54 @@ select.form-input option { background: #0f172a; }
 }
 .btn-inward-options:hover { background: rgba(14,98,255,0.22); }
 
+/* ── Section C — IQC visual inspection table ── */
+.iqc-table-wrapper {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: rgba(255,255,255,0.02);
+}
+.iqc-table-body { display: flex; flex-direction: column; }
+.iqc-table-header {
+  display: grid;
+  grid-template-columns: 1.3fr 2.2fr 110px 1.5fr;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.05);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--muted);
+}
+.iqc-zone-header {
+  display: flex; align-items: baseline; gap: 0.5rem;
+  padding: 7px 10px;
+  background: rgba(14,98,255,0.12);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+.iqc-zone-header:first-child { border-top: none; }
+.iqc-zone-code { font-weight: 800; font-size: 0.82rem; color: var(--primary); }
+.iqc-zone-name { font-weight: 700; font-size: 0.82rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.iqc-row {
+  display: grid;
+  grid-template-columns: 1.3fr 2.2fr 110px 1.5fr;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.iqc-row:last-child { border-bottom: none; }
+.iqc-zone { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.iqc-zone .iqc-zone-code { font-weight: 700; color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+.iqc-zone .iqc-zone-name { font-size: 0.84rem; font-weight: 600; }
+.iqc-zone .iqc-name { flex: 1; min-width: 0; padding: 5px 8px; font-size: 0.82rem; }
+.iqc-checks-cell { font-size: 0.78rem; color: var(--muted); min-width: 0; }
+.iqc-checks-text { line-height: 1.35; }
+.iqc-row .form-input { padding: 5px 8px; font-size: 0.82rem; }
+.iqc-result { }
+
 /* ── Section B — E-signature ── */
 .esignature-block { font-size: 0.85rem; }
 .esignature-unsigned {

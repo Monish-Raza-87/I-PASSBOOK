@@ -32,6 +32,27 @@ const CONFIG = {
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
+
+// Stamp the signed-in user's verified @indrones.com email onto every Apps Script
+// backend call, so the backend can enforce Indrones-only access. The GAS web app
+// runs "Execute as: Me" + access "Anyone", so without this the backend can't tell
+// who's calling. Only the GAS endpoint is intercepted; all other fetches pass
+// through untouched, and any interceptor error never blocks a fetch.
+const _origFetch = window.fetch.bind(window);
+window.fetch = function (input, init) {
+  try {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.indexOf(CONFIG.GAS_URL) === 0 && currentUser && currentUser.email) {
+      if (init && init.body && init.body instanceof FormData) {
+        init.body.append('userEmail', currentUser.email);
+      } else {
+        const sep = url.indexOf('?') >= 0 ? '&' : '?';
+        input = url + sep + 'userEmail=' + encodeURIComponent(currentUser.email);
+      }
+    }
+  } catch (e) { /* never block a fetch on the interceptor */ }
+  return _origFetch(input, init);
+};
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook

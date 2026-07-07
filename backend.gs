@@ -42,7 +42,19 @@ var AUTHORIZED_CR_EMAILS = ['monish.raza@indrones.com', 'ravi@indrones.com', 'ad
 // ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
+// Indrones-only access gate. The web app runs "Execute as: Me" + access "Anyone",
+// so the backend otherwise can't tell who's calling. The frontend attaches the
+// signed-in user's verified @indrones.com email to every request; this rejects
+// anything missing or not on the allowed domain. Lets you keep the static PWA
+// public (GitHub Pages) without exposing the data to anonymous callers.
+function requireIndrones(e) {
+  var email = (e.parameter.userEmail || '').toLowerCase().trim();
+  var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
+  return !!email && email.indexOf(suffix) === email.length - suffix.length;
+}
+
 function doGet(e) {
+  if (!requireIndrones(e)) return buildResponse({ status: 'error', message: 'Access restricted to @indrones.com accounts.' });
   var action = e.parameter.action || '';
   var result;
 
@@ -59,6 +71,7 @@ function doGet(e) {
 }
 
 function doPost(e) {
+  if (!requireIndrones(e)) return buildResponse({ status: 'error', message: 'Access restricted to @indrones.com accounts.' });
   var result;
   try {
     var params = e.parameter;

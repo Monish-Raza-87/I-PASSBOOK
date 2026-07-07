@@ -34,6 +34,10 @@ var CONFIG = {
   DRIVE_ROOT_FOLDER_ID: '1sc9mXOHPaWW1wiVvtDmyYLflGUogtm06',
 
   ALLOWED_DOMAIN: 'indrones.com',
+
+  // Google OAuth web client ID (same one the frontend uses for GIS sign-in).
+  // Used server-side to verify the ID token's audience.
+  GOOGLE_CLIENT_ID: '719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com',
 };
 
 // Authorized Customer Relations personnel — only these emails can edit restricted fields
@@ -42,19 +46,46 @@ var AUTHORIZED_CR_EMAILS = ['monish.raza@indrones.com', 'ravi@indrones.com', 'ad
 // ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
-// Indrones-only access gate. The web app runs "Execute as: Me" + access "Anyone",
-// so the backend otherwise can't tell who's calling. The frontend attaches the
-// signed-in user's verified @indrones.com email to every request; this rejects
-// anything missing or not on the allowed domain. Lets you keep the static PWA
-// public (GitHub Pages) without exposing the data to anonymous callers.
-function requireIndrones(e) {
-  var email = (e.parameter.userEmail || '').toLowerCase().trim();
-  var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
-  return !!email && email.indexOf(suffix) === email.length - suffix.length;
+// ──────────────────────────────────────────────────────────────────────────────
+// AUTH — verify the caller's Google ID token
+// ──────────────────────────────────────────────────────────────────────────────
+// The web app runs "Execute as: Me" + access "Anyone", so the backend must
+// authenticate the caller itself. The frontend attaches a fresh Google ID
+// token (from GIS) to every request. We verify it against Google's tokeninfo
+// endpoint — checking audience (our client ID), email_verified, @indrones.com
+// domain, and expiry — and return the verified email. The email is read FROM
+// THE TOKEN, never from a client-supplied parameter, so the Indrones-only gate
+// can no longer be spoofed by passing a known email.
+function requireAuth(e) {
+  var token = (e.parameter.idToken || '').toString().trim();
+  return verifyIdToken(token); // returns verified email string, or null
+}
+
+function verifyIdToken(idToken) {
+  if (!idToken) return null;
+  try {
+    var url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
+    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (resp.getResponseCode() !== 200) return null;
+    var info = JSON.parse(resp.getContentText());
+
+    if (info.aud !== CONFIG.GOOGLE_CLIENT_ID) return null;          // token must be for us
+    var ev = info.email_verified;
+    if (ev !== 'true' && ev !== true) return null;                  // email must be verified by Google
+    var email = (info.email || '').toLowerCase().trim();
+    var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
+    if (!email || email.indexOf(suffix) !== email.length - suffix.length) return null; // Indrones only
+    var now = Math.floor(Date.now() / 1000);
+    if (info.exp && Number(info.exp) < now) return null;           // not expired
+    return email;
+  } catch (err) {
+    return null;
+  }
 }
 
 function doGet(e) {
-  if (!requireIndrones(e)) return buildResponse({ status: 'error', message: 'Access restricted to @indrones.com accounts.' });
+  var authEmail = requireAuth(e);
+  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
   var action = e.parameter.action || '';
   var result;
 
@@ -71,7 +102,8 @@ function doGet(e) {
 }
 
 function doPost(e) {
-  if (!requireIndrones(e)) return buildResponse({ status: 'error', message: 'Access restricted to @indrones.com accounts.' });
+  var authEmail = requireAuth(e);
+  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
   var result;
   try {
     var params = e.parameter;
@@ -82,11 +114,12 @@ function doPost(e) {
       var files       = JSON.parse(params.files   || '[]');
       var irNumber    = params.irNumber;
       var sectionId   = params.sectionId;
-      var savedBy     = params.savedBy;
-
-      result = saveSection(irNumber, sectionId, fields, files, savedBy);
+      // savedBy is the VERIFIED email from the token — never a client-supplied
+      // value — so a non-CR user cannot impersonate a CR email to edit restricted
+      // Section A fields or forge the audit trail.
+      result = saveSection(irNumber, sectionId, fields, files, authEmail);
     } else if (action === 'sendNudgeEmail') {
-      result = sendNudgeEmail(params);
+      result = sendNudgeEmail(params, authEmail);
     } else {
       result = { status: 'error', message: 'Unknown action: ' + action };
     }
@@ -262,13 +295,14 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 // Sends an automatic nudge email via MailApp (no operator clicks). Restricted
 // to the allowed domain so the app can't be used to mail outside Indrones.
 // ──────────────────────────────────────────────────────────────────────────────
-function sendNudgeEmail(params) {
+function sendNudgeEmail(params, authEmail) {
   var to       = (params.to || '').trim();
-  var from     = (params.from || '').trim();
-  var fromName = (params.fromName || params.from || 'Someone');
+  var fromName = (params.fromName || authEmail || 'Someone');
   var irNumber = params.irNumber || '';
   var message  = params.message || '';
   var context  = params.context || '';
+  // Sender is the verified caller — a client can't spoof the reply-to address.
+  var from     = authEmail || '';
 
   // Accept "Name <email>" or a bare email; extract the bare address.
   var angleMatch = to.match(/<([^>]+)>/);

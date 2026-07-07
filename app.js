@@ -33,25 +33,117 @@ const CONFIG = {
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
 
-// Stamp the signed-in user's verified @indrones.com email onto every Apps Script
-// backend call, so the backend can enforce Indrones-only access. The GAS web app
-// runs "Execute as: Me" + access "Anyone", so without this the backend can't tell
-// who's calling. Only the GAS endpoint is intercepted; all other fetches pass
-// through untouched, and any interceptor error never blocks a fetch.
+// ─── GAS CALL AUTH (verified Google ID token) ────────────────────────────────
+// Every Apps Script backend call must carry a fresh, verified Google ID token.
+// The backend now validates that token (signature via Google tokeninfo, expiry,
+// audience = our client ID, @indrones.com domain) and reads the caller's email
+// FROM THE TOKEN — not from a parameter. This closes the spoofing hole the old
+// email-parameter gate had (anyone who knew the GAS URL + an @indrones.com
+// email could read/write all data).
+//
+// `currentUser.token` is a GIS ID token (~1h lifetime). We keep one warm in
+// memory: at boot a silent Google One-Tap (auto_select) re-issues one for
+// returning users, and the interceptor refreshes + retries once if the backend
+// reports the token expired/stale. The token is NEVER persisted to storage.
+let _gisReady = null;
+function loadGis() {
+  if (_gisReady) return _gisReady;
+  _gisReady = new Promise((resolve) => {
+    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) return resolve();
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => resolve(); // resolve anyway; refresh fails gracefully
+    document.head.appendChild(s);
+  });
+  return _gisReady;
+}
+
+let _refreshing = null;
+function refreshIdToken() {
+  if (_refreshing) return _refreshing;
+  _refreshing = new Promise((resolve, reject) => {
+    loadGis().then(() => {
+      if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) return reject(new Error('gis-unavailable'));
+      let done = false;
+      const finish = (ok, val) => { if (done) return; done = true; _refreshing = null; ok ? resolve(val) : reject(val); };
+      const timer = setTimeout(() => finish(false, new Error('timeout')), 9000);
+      try {
+        google.accounts.id.initialize({
+          client_id: CONFIG.GOOGLE_CLIENT_ID,
+          callback: (resp) => {
+            if (resp && resp.credential) { currentUser.token = resp.credential; finish(true, resp.credential); }
+            else finish(false, new Error('no-credential'));
+          },
+        });
+        google.accounts.id.prompt({ auto_select: true }); // silent for returning users
+      } catch (e) { clearTimeout(timer); finish(false, e); }
+    });
+  });
+  return _refreshing;
+}
+
+function ensureAuthToken() {
+  if (currentUser && currentUser.token) return Promise.resolve(currentUser.token);
+  return refreshIdToken();
+}
+
 const _origFetch = window.fetch.bind(window);
 window.fetch = function (input, init) {
-  try {
+  return (async () => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (url.indexOf(CONFIG.GAS_URL) === 0 && currentUser && currentUser.email) {
-      if (init && init.body && init.body instanceof FormData) {
-        init.body.append('userEmail', currentUser.email);
-      } else {
-        const sep = url.indexOf('?') >= 0 ? '&' : '?';
-        input = url + sep + 'userEmail=' + encodeURIComponent(currentUser.email);
+    const isGAS = url.indexOf(CONFIG.GAS_URL) === 0;
+    if (!isGAS) return _origFetch(input, init);
+
+    // Dev bypass (localhost + ?dev=1): no real Google account to mint a token,
+    // so backend calls can't be authorized and fall back to demo data. This is
+    // intentional — real testing happens signed-in on the live site.
+    if (shouldUseDevAuthBypass()) return _origFetch(input, init);
+
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    const emailQ = currentUser && currentUser.email ? ('userEmail=' + encodeURIComponent(currentUser.email)) : '';
+    // buildInput(null) → userEmail only (works with the old email-gate backend
+    // during the redeploy window). buildInput(token) → idToken + userEmail.
+    const buildInput = (tok) => url + sep + (tok ? ('idToken=' + encodeURIComponent(tok) + (emailQ ? '&' : '')) : '') + emailQ;
+
+    const isFormData = init && init.body && init.body instanceof FormData;
+    const origBody = isFormData ? init.body : null;
+    const buildInit = (tok) => {
+      if (isFormData) {
+        const fd = new FormData(origBody);
+        if (tok) fd.append('idToken', tok);
+        if (emailQ) fd.append('userEmail', currentUser.email);
+        return Object.assign({}, init, { body: fd });
       }
+      return init;
+    };
+
+    let token = currentUser && currentUser.token;
+    if (!token) { try { token = await ensureAuthToken(); } catch { /* leave token null */ } }
+
+    input = isFormData ? url : buildInput(token);
+    init = buildInit(token);
+    let resp = await _origFetch(input, init);
+
+    // Retry once only on a real auth rejection (token expired / stale). Match
+    // the backend's exact "Unauthorized…" message so unrelated errors (e.g. an
+    // @-nudge to a non-Indrones address) don't trigger a pointless re-auth.
+    if (resp && resp.ok) {
+      try {
+        const data = await resp.clone().json();
+        if (data && data.status === 'error' && (data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
+          try {
+            const fresh = await refreshIdToken();
+            input = isFormData ? url : buildInput(fresh);
+            init = buildInit(fresh);
+            resp = await _origFetch(input, init);
+          } catch { /* give up; surface the original error */ }
+        }
+      } catch { /* response wasn't JSON; ignore */ }
     }
-  } catch (e) { /* never block a fetch on the interceptor */ }
-  return _origFetch(input, init);
+    return resp;
+  })();
 };
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view

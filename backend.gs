@@ -47,6 +47,7 @@ function doGet(e) {
   try {
     if      (action === 'listIRs')     result = listIRs();
     else if (action === 'getPassbook') result = getPassbook(e.parameter.irNumber);
+    else if (action === 'getAuditLog') result = getAuditLog(e.parameter.irNumber);
     else                               result = { status: 'error', message: 'Unknown action: ' + action };
   } catch (err) {
     result = { status: 'error', message: err.message };
@@ -225,6 +226,10 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     });
   }
 
+  // 2c. Audit trail — record this save + every field overwrite (old→new) so any
+  // later correction is traceable. Derived Drive-link keys (*_links) are skipped.
+  appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, fields);
+
   var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
   var rowData   = [irNumber, sectionId, savedBy, JSON.stringify(fields), timestamp];
 
@@ -330,6 +335,74 @@ function getOrCreateDataTab(ss) {
     tab.setFrozenRows(1);
   }
   return tab;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// AUDIT TRAIL — records every section save + every field overwrite (old→new) so
+// corrections are traceable. Lives in an AUDIT_LOG tab on the data sheet.
+// Columns: Timestamp | IR Number | Section ID | Saved By | Event | Field ID |
+//          Old Value | New Value
+// ──────────────────────────────────────────────────────────────────────────────
+function getOrCreateAuditTab(ss) {
+  var tab = ss.getSheetByName('AUDIT_LOG');
+  if (!tab) {
+    tab = ss.insertSheet('AUDIT_LOG');
+    tab.getRange(1, 1, 1, 8).setValues([['Timestamp', 'IR Number', 'Section ID', 'Saved By', 'Event', 'Field ID', 'Old Value', 'New Value']]);
+    tab.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+function snapValue(v) {
+  if (v == null) return '';
+  var s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+  return s.length > 500 ? s.substring(0, 500) + '…' : s;
+}
+function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, newFields) {
+  var tab = getOrCreateAuditTab(ss);
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var rows = [];
+  // One row per save event (so even a no-change save is traceable).
+  rows.push([ts, irNumber, sectionId, savedBy, 'saved', '', '', '']);
+  var ex = existingFields || {};
+  var nw = newFields || {};
+  Object.keys(nw).forEach(function(k) {
+    if (/_links$/.test(k)) return;            // derived Drive-link keys — not user edits
+    var had = ex.hasOwnProperty(k);
+    var newJ = snapValue(nw[k]);
+    if (!had) {
+      rows.push([ts, irNumber, sectionId, savedBy, 'added', k, '', newJ]);
+    } else if (snapValue(ex[k]) !== newJ) {
+      rows.push([ts, irNumber, sectionId, savedBy, 'changed', k, snapValue(ex[k]), newJ]);
+    }
+  });
+  Object.keys(ex).forEach(function(k) {
+    if (/_links$/.test(k)) return;
+    if (!nw.hasOwnProperty(k)) rows.push([ts, irNumber, sectionId, savedBy, 'removed', k, snapValue(ex[k]), '']);
+  });
+  if (rows.length > 1) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ACTION: getAuditLog — returns the audit trail for one IR, oldest first
+// ──────────────────────────────────────────────────────────────────────────────
+function getAuditLog(irNumber) {
+  if (!irNumber) throw new Error('irNumber is required.');
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = ss.getSheetByName('AUDIT_LOG');
+  if (!tab) return { status: 'ok', entries: [] };
+  var data = tab.getDataRange().getValues();
+  var entries = [];
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][1] === irNumber) {
+      entries.push({
+        timestamp: data[i][0], irNumber: data[i][1], sectionId: data[i][2],
+        savedBy: data[i][3], event: data[i][4], fieldId: data[i][5],
+        oldValue: data[i][6], newValue: data[i][7]
+      });
+    }
+  }
+  return { status: 'ok', entries: entries };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

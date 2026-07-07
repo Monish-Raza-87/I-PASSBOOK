@@ -81,6 +81,22 @@ persist to GAS under irNumber `__CONFIG__` / sectionId `team-directory`
 (field `entries`) and to `localStorage` (`ipb_team_directory`).
 `loadTeamDirectory()` runs at app start.
 
+## Audit trail / Edit history (app-wide)
+Every section save records the **date of the event** and captures any
+**overwrite** (correction) so events are traceable back later — the "date of events"
+requirement. Backend (`backend.gs`, requires redeploy):
+
+- `saveSection` writes to an **`AUDIT_LOG`** tab on the data sheet, columns:
+  `Timestamp | IR Number | Section ID | Saved By | Event | Field ID | Old Value | New Value`.
+- One row per save (`event = "saved"`) plus one row per changed field:
+  `added` (new field), `changed` (old→new — the overwrite/correction), `removed`.
+- Derived Drive-link keys (`*_links`) are skipped so upload bookkeeping isn't noise.
+- `getAuditLog(irNumber)` GET action returns the trail for one IR.
+
+Frontend: the IR banner **🕓 History** button opens a modal listing the trail newest
+first, showing who saved, the event, the field, and old→new values. Until the backend
+is redeployed it shows "No history yet".
+
 ---
 
 ## Section A — Preliminary Details & Activity Log
@@ -395,18 +411,13 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 
 | Field ID | Label | Type |
 |---|---|---|
-| `e_prodStart` | Production Start Date | date |
-| `e_prodEnd` | Production End Date | date |
-| `e_prodBy` | Production Technician | text |
-| `e_reworkItems` | Rework / Replacement Items | textarea |
-| `e_partNos` | Part Numbers Used | textarea |
 | `e_prodDocs` | Route Card / Job Card (Image or PDF) | imageEvidence |
 | `e_prodRemarks` | Rework Details / Remarks | textarea |
 | `e_signProduction` | Digital Signature — Production Technician | esignature |
 
-The route/job card upload uses the shared `imageEvidence` control (image **or** PDF, with
-preview and a 📷 **Capture photo** button — see Section D "Image evidence"). Ends with a
-Production Technician e-signature.
+Stripped to just the route/job card upload (shared `imageEvidence` — image **or** PDF,
+preview + 📷 capture, see Section D "Image evidence"), a rework remark, and a Production
+Technician e-signature.
 
 ---
 
@@ -415,16 +426,11 @@ Production Technician e-signature.
 
 | Field ID | Label | Type |
 |---|---|---|
-| `f_qcDate` | QC Date | date |
-| `f_qcBy` | QC Inspector | text |
-| `f_qcChecklist` | QC Checklist / Test Results | textarea |
-| `f_qcResult` | QC Result | select: Pass / Fail / Conditional Pass |
 | `f_qcDocs` | QC Report (Image or PDF) | imageEvidence |
 | `f_qcRemarks` | QC Remarks | textarea |
 | `f_signQc` | Digital Signature — QC Inspector | esignature |
 
-QC report upload is the shared `imageEvidence` control (image/PDF + capture). Ends with a
-QC Inspector e-signature.
+QC report upload (shared `imageEvidence`), remarks, and a QC Inspector e-signature.
 
 ---
 
@@ -433,25 +439,26 @@ QC Inspector e-signature.
 
 | Field ID | Label | Type |
 |---|---|---|
-| `g_ftDate` | Flight Test Date | date |
-| `g_ftPilot` | Test Pilot | text |
-| `g_ftDuration` | Test Duration (mins) | number |
-| `g_ftConditions` | Test Conditions | textarea |
-| `g_ftObservation` | Flight Test Observations | textarea |
-| `g_ftResult` | Flight Test Result | select: Pass / Fail / Conditional Pass |
-| `g_actualMatCost` | Actual Material Cost (₹) | number |
-| `g_actualLabour` | Actual Labour Cost (₹) | number |
-| `g_actualTotal` | Actual Total Cost (₹) | number |
 | `g_basicReport` | Basic Flight Test Report (Image or PDF) | imageEvidence |
 | `g_missionReport` | Mission Flight Test Report (Image or PDF) | imageEvidence |
-| `g_flightLogs` | Data Check — Flight Logs (Image or PDF) | imageEvidence |
-| `g_postProcessing` | Data Check — Post-Processing (Image or PDF) | imageEvidence |
+| `g_flightLogs` | Data Check — Flight Logs | checkpointEvidence |
+| `g_postProcessing` | Data Check — Post-Processing | checkpointEvidence |
 | `g_dataCheckRemarks` | Data Check Remarks | textarea |
 | `g_signPilot` | Digital Signature — Test Pilot | esignature |
 
-Four separate `imageEvidence` uploads (a. basic report, b. mission report, c.i flight logs,
-c.ii post-processing), each image/PDF with preview + 📷 capture, followed by a data-check
-remark and a Test Pilot e-signature.
+Two report uploads (a. basic, b. mission) as `imageEvidence`, then two **data-check
+checkpoints** (`checkpointEvidence`, see below) — one for flight logs, one for
+post-processing — each a tick the QC person marks "done" **plus** an image/PDF attachment
+with preview. Then a data-check remark and a Test Pilot e-signature.
+
+### Data-check checkpoint (`checkpointEvidence` type)
+A composite field grouping a **done tick** + an **image/PDF attachment**:
+- A checkbox (`<id>_done`) the QC person ticks to confirm the check is performed/verified.
+- An `imageEvidence` attachment living under `<id>_attach` (preview + caption + 📷 capture).
+- **Saved value:** `{ done: bool, attach: [{ caption, link, type, name }] }`. Pending
+  attachment files are uploaded under the `<id>_attach` field id, so Drive links land in
+  `<id>_attach_links` and are merged back on load / after save (same machinery as
+  `imageEvidence`).
 
 ---
 

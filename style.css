@@ -1122,6 +1122,40 @@ select.form-input option { background: #0f172a; }
 }
 .comment-count.unread { background: var(--danger); color: #fff; }
 
+/* Section G — data-check checkpoint (tick + attachment grouped as one block) */
+.checkpoint-block {
+  display: flex; flex-direction: column; gap: 0.6rem;
+  padding: 0.7rem;
+  border: 1px solid var(--glass-border); border-radius: var(--radius);
+  background: rgba(14,98,255,0.04);
+}
+.checkpoint-tick {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.85rem; font-weight: 600; cursor: pointer;
+}
+.checkpoint-tick input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+.checkpoint-tick-label { line-height: 1.2; }
+
+/* Audit trail / History modal */
+.hist-list { padding: 0.4rem 0.6rem 0.8rem; display: flex; flex-direction: column; gap: 0.5rem; max-height: 64vh; overflow: auto; }
+.hist-item {
+  background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border);
+  border-radius: 10px; padding: 0.5rem 0.7rem; font-size: 0.8rem;
+}
+.hist-top { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-bottom: 2px; }
+.hist-ev { font-weight: 700; color: var(--primary); white-space: nowrap; }
+.hist-field {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.74rem;
+  background: rgba(0,0,0,0.25); padding: 1px 6px; border-radius: 6px;
+}
+.hist-field.hist-muted { color: var(--muted); background: transparent; font-family: inherit; }
+.hist-time { margin-left: auto; color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+.hist-by { color: var(--muted); font-size: 0.74rem; margin-bottom: 4px; }
+.hist-diff { font-size: 0.74rem; word-break: break-word; margin-top: 2px; }
+.hist-old, .hist-new { font-weight: 700; font-size: 0.68rem; }
+.hist-old { color: var(--danger); }
+.hist-new { color: var(--success); }
+
 /* ── Nudge / alerts ── */
 .nudge-bell {
   position: relative; cursor: pointer;

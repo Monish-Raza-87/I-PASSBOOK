@@ -549,6 +549,9 @@ backBtn.addEventListener('click', showIndex);
 // IR banner nudge / comments button
 const irNudgeBtn = document.getElementById('ir-nudge-btn');
 if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
+// IR banner audit-trail / history button
+const irHistoryBtn = document.getElementById('ir-history-btn');
+if (irHistoryBtn) irHistoryBtn.addEventListener('click', openHistoryModal);
 
 // ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
 // Any edit within a section is persisted as a draft (debounced), so unsaved
@@ -654,11 +657,6 @@ const SECTIONS = {
   'sec-e': {
     title: 'Section E — Production (Rework)',
     fields: [
-      { id: 'e_prodStart',    label: 'Production Start Date', type: 'date' },
-      { id: 'e_prodEnd',      label: 'Production End Date',   type: 'date' },
-      { id: 'e_prodBy',       label: 'Production Technician', type: 'text', placeholder: 'Technician name' },
-      { id: 'e_reworkItems',  label: 'Rework / Replacement Items',  type: 'textarea', placeholder: 'List of components replaced or repaired...' },
-      { id: 'e_partNos',      label: 'Part Numbers Used',           type: 'textarea', placeholder: 'Part No. | Item | Qty' },
       { id: 'e_prodDocs',     label: 'Route Card / Job Card (Image or PDF)', type: 'imageEvidence' },
       { id: 'e_prodRemarks',  label: 'Rework Details / Remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
       { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
@@ -667,10 +665,6 @@ const SECTIONS = {
   'sec-f': {
     title: 'Section F — Quality Control (QC)',
     fields: [
-      { id: 'f_qcDate',       label: 'QC Date',           type: 'date' },
-      { id: 'f_qcBy',         label: 'QC Inspector',      type: 'text', placeholder: 'Inspector name' },
-      { id: 'f_qcChecklist',  label: 'QC Checklist / Test Results', type: 'textarea', placeholder: 'Motor test, ESC test, Compass, GPS, Gimbal...' },
-      { id: 'f_qcResult',     label: 'QC Result',         type: 'select', options: ['Pass – Proceed to Flight Test','Fail – Return to Production','Conditional Pass'] },
       { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
       { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
@@ -679,19 +673,10 @@ const SECTIONS = {
   'sec-g': {
     title: 'Section G — Flight Test',
     fields: [
-      { id: 'g_ftDate',       label: 'Flight Test Date',    type: 'date' },
-      { id: 'g_ftPilot',      label: 'Test Pilot',          type: 'text', placeholder: 'Pilot name' },
-      { id: 'g_ftDuration',   label: 'Test Duration (mins)', type: 'number', placeholder: '0' },
-      { id: 'g_ftConditions', label: 'Test Conditions',      type: 'textarea', placeholder: 'Wind speed, location, altitude...' },
-      { id: 'g_ftObservation',label: 'Flight Test Observations', type: 'textarea', placeholder: 'How the drone performed, any anomalies...' },
-      { id: 'g_ftResult',     label: 'Flight Test Result',   type: 'select', options: ['Pass – Ready for PDI','Fail – Return to Production','Conditional Pass'] },
-      { id: 'g_actualMatCost',label: 'Actual Material Cost (₹)', type: 'number', placeholder: '0.00' },
-      { id: 'g_actualLabour', label: 'Actual Labour Cost (₹)',   type: 'number', placeholder: '0.00' },
-      { id: 'g_actualTotal',  label: 'Actual Total Cost (₹)',    type: 'number', placeholder: '0.00' },
       { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
       { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
-      { id: 'g_flightLogs',    label: 'Data Check — Flight Logs (Image or PDF)',     type: 'imageEvidence' },
-      { id: 'g_postProcessing', label: 'Data Check — Post-Processing (Image or PDF)', type: 'imageEvidence' },
+      { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
+      { id: 'g_postProcessing', label: 'Data Check — Post-Processing', type: 'checkpointEvidence', tickLabel: 'Post-processing data check performed & verified' },
       { id: 'g_dataCheckRemarks', label: 'Data Check Remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
       { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
@@ -949,6 +934,27 @@ function buildField(field, irNumber) {
         </div>
         <input type="file" id="${id}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
         <input type="file" id="${id}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${id}', this)" />
+      </div>`;
+  } else if (field.type === 'checkpointEvidence') {
+    // A data-check checkpoint: a tick the QC person marks "done" PLUS an
+    // image/PDF attachment (with preview + capture), grouped as one block.
+    // The attachment reuses the imageEvidence machinery under `<id>_attach`.
+    const attachId = id + '_attach';
+    control = `
+      <div class="checkpoint-block" id="${id}">
+        <label class="checkpoint-tick">
+          <input type="checkbox" id="${id}_done" onchange="onCheckpointTick('${escHtml(id)}')" />
+          <span class="checkpoint-tick-label">${escHtml(field.tickLabel || 'Data check performed &amp; verified')}</span>
+        </label>
+        <div class="image-evidence" id="${attachId}-wrap" data-field="${attachId}">
+          <div class="image-evidence-list" id="${attachId}-list"></div>
+          <div class="evidence-actions">
+            <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escHtml(attachId)}')">+ Add image / PDF</button>
+            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escHtml(attachId)}')">📷 Capture photo</button>
+          </div>
+          <input type="file" id="${attachId}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
+          <input type="file" id="${attachId}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
+        </div>
       </div>`;
   } else if (field.type === 'dispatchChecklist') {
     // Dispatch-vs-received-goods checklist. Items are sourced dynamically from
@@ -1592,6 +1598,33 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
+  // Handle checkpointEvidence type — value is { done, attach: [{caption,link,type,name}] }
+  if (field?.type === 'checkpointEvidence') {
+    const v = (value && typeof value === 'object') ? value : {};
+    const doneEl = document.getElementById(fieldId + '_done');
+    if (doneEl) doneEl.checked = !!v.done;
+    const attachId = fieldId + '_attach';
+    let arr = Array.isArray(v.attach) ? v.attach : [];
+    if (!isDraft) {
+      const linksRaw = currentSectionData?.[sectionId]?.[attachId + '_links'];
+      if (linksRaw) {
+        const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
+        let li = 0;
+        arr = arr.map(e => {
+          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++], type: e.type || '', name: e.name || '' };
+          return { caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' };
+        });
+      }
+      if (!arr.length) {
+        const links = String(currentSectionData?.[sectionId]?.[attachId + '_links'] || '').split(',').map(s => s.trim()).filter(Boolean);
+        arr = links.map(l => ({ caption: '', link: l, type: '', name: '' }));
+      }
+    }
+    evidenceState[attachId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null, type: e.type || '', name: e.name || '' }));
+    renderImageEvidence(attachId);
+    return;
+  }
+
   // Handle checklist type
   if (field?.type === 'checklist' && value && typeof value === 'object') {
     field.items.forEach((item, i) => {
@@ -1730,6 +1763,17 @@ function collectSectionValues(sectionId) {
       fieldValues[field.id] = entries.map(e => ({ caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' }));
       const newFiles = entries.filter(e => e.file).map(e => e.file);
       if (newFiles.length) fileFields.push({ id: field.id, files: newFiles });
+    } else if (field.type === 'checkpointEvidence') {
+      // Tick state + attachment entries (attachment lives under <id>_attach).
+      const doneEl = document.getElementById(field.id + '_done');
+      const attachId = field.id + '_attach';
+      const entries = evidenceState[attachId] || [];
+      fieldValues[field.id] = {
+        done: !!(doneEl?.checked),
+        attach: entries.map(e => ({ caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' })),
+      };
+      const newFiles = entries.filter(e => e.file).map(e => e.file);
+      if (newFiles.length) fileFields.push({ id: attachId, files: newFiles });
     } else if (field.type === 'dispatchChecklist') {
       fieldValues[field.id] = collectDispatchChecklist(field.id);
     } else if (field.type === 'file') {
@@ -2206,6 +2250,11 @@ function onEvidencePicked(fieldId, input) {
   renderImageEvidence(fieldId);
   saveDraft(sectionIdFromFieldId(fieldId));
 }
+// Tick on a checkpointEvidence box — persists a draft so the tick survives reload.
+function onCheckpointTick(fieldId) {
+  const secId = sectionIdFromFieldId(fieldId);
+  if (secId) saveDraft(secId);
+}
 function removeEvidenceImage(fieldId, idx) {
   const arr = evidenceState[fieldId] || [];
   const e = arr[idx];
@@ -2313,9 +2362,17 @@ function mergeEvidenceLinks(fieldId, linksRaw) {
 // '_links' with only the newest uploads, so links must live in 'd_evidence').
 async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
   const fields = SECTIONS[sectionId]?.fields || [];
-  const evFields = fields.filter(f => f.type === 'imageEvidence');
-  if (!evFields.length) return;
-  const hasPending = evFields.some(f => (evidenceState[f.id] || []).some(e => !e.link));
+  // Direct imageEvidence fields + checkpointEvidence attachments (live under
+  // <fieldId>_attach) both need their freshly-uploaded Drive URLs merged back in.
+  const evFields = fields
+    .filter(f => f.type === 'imageEvidence')
+    .map(f => ({ id: f.id, type: 'imageEvidence' }));
+  const cpFields = fields
+    .filter(f => f.type === 'checkpointEvidence')
+    .map(f => ({ id: f.id + '_attach', type: 'checkpointEvidence' }));
+  const allEvFields = evFields.concat(cpFields);
+  if (!allEvFields.length) return;
+  const hasPending = allEvFields.some(f => (evidenceState[f.id] || []).some(e => !e.link));
   if (!hasPending) return;
   try {
     const url = `${CONFIG.GAS_URL}?action=getPassbook&irNumber=${encodeURIComponent(irNumber)}`;
@@ -2324,7 +2381,7 @@ async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
     if (data.status === 'ok' && data.sections) {
       currentSectionData = data.sections; // keep the saved-state cache in sync
       const secFields = data.sections[sectionId] || {};
-      evFields.forEach(f => mergeEvidenceLinks(f.id, secFields[f.id + '_links']));
+      allEvFields.forEach(f => mergeEvidenceLinks(f.id, secFields[f.id + '_links']));
     }
   } catch {}
 }
@@ -2867,6 +2924,62 @@ function openNudgeModalForField(fieldId) {
   const field = SECTIONS[sectionId]?.fields.find(f => f.id === fieldId);
   openNudgeModal('field', currentIR.irNumber, sectionId, fieldId, field?.label || fieldId);
 }
+
+// ─── AUDIT TRAIL / EDIT HISTORY ───────────────────────────────────────────────
+// Shows the backend AUDIT_LOG for the open IR: every save + every field overwrite
+// (old→new), newest first — so any later correction is traceable. Requires the
+// redeployed backend (getAuditLog action).
+async function openHistoryModal() {
+  if (!currentIR?.irNumber) { showToast('Open an IR first'); return; }
+  const irNumber = currentIR.irNumber;
+  let entries = [];
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}`);
+    const data = await res.json();
+    if (data.status === 'ok') entries = Array.isArray(data.entries) ? data.entries : [];
+    else if (data.status === 'error') { showToast('History: ' + (data.message || 'backend error')); }
+  } catch {
+    showToast('History unavailable — backend not connected yet');
+  }
+  const evLabel = e => e.event === 'changed' ? '✏️ changed'
+    : e.event === 'added' ? '➕ added'
+    : e.event === 'removed' ? '➖ removed'
+    : '💾 saved';
+  const clip = s => String(s == null ? '' : s).slice(0, 200);
+  const body = entries.length
+    ? entries.slice().reverse().map(e => {
+        const field = e.fieldId
+          ? `<span class="hist-field">${escHtml(e.fieldId)}</span>`
+          : '<span class="hist-field hist-muted">(section save)</span>';
+        let diff = '';
+        if (e.event === 'changed' || e.event === 'removed')
+          diff = `<div class="hist-diff"><span class="hist-old">old:</span> ${escHtml(clip(e.oldValue))}</div>`
+               + `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
+        else if (e.event === 'added')
+          diff = `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
+        return `<div class="hist-item">
+          <div class="hist-top"><span class="hist-ev">${evLabel(e)}</span>${field}<span class="hist-time">${escHtml(e.timestamp || '')}</span></div>
+          <div class="hist-by">by ${escHtml(e.savedBy || '')} · ${escHtml(e.sectionId || '')}</div>
+          ${diff}
+        </div>`;
+      }).join('')
+    : '<div class="nudge-empty">No history yet. Once the backend is redeployed, every save and field correction will be recorded here.</div>';
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'history-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card nudge-card">
+      <div class="inward-options-head">
+        <h3>History · ${escHtml(irNumber)}</h3>
+        <button type="button" class="inward-options-close" onclick="closeHistoryModal()">&times;</button>
+      </div>
+      <div class="nudge-ctx-line">Audit trail — every save &amp; field correction (newest first).</div>
+      <div class="hist-list">${body}</div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeHistoryModal(); });
+}
+function closeHistoryModal() { document.getElementById('history-modal')?.remove(); }
 
 // ─── DEMO MODE DATA ──────────────────────────────────────────────────────────
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.

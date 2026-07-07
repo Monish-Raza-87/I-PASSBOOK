@@ -23,6 +23,11 @@ called "nudges" — the user-facing name is "Comments".)
 - **Per section** — a `💬` button injected after each section title (scope `section`).
 - **Per field** — a `💬` button on every field label (scope `field`, Sheets-like cell comments).
 
+Each section/field `💬` button shows a small **count badge** of the comments sitting on
+it — red when one is unread and addressed to the signed-in user — so comments "reflect
+over that section" without opening the modal (Google-Workspace anchored-comment style).
+The badge updates on load, on poll (~90 s), and after each comment is posted/read.
+
 ### Composing a comment
 The Comments modal shows the existing thread for that context plus a composer:
 - **Tag someone (@)** — type `@` or a few letters of a name/email; matching
@@ -30,16 +35,19 @@ The Comments modal shows the existing thread for that context plus a composer:
   ↑/↓ to move the highlight, **Enter** to select, **Esc** to close. A full email
   can also be typed directly.
 - **Message** — free text.
-- **💬 Comment** — a **single button** that posts the comment in-app **and** sends a
-  real email automatically via the Apps Script backend (`MailApp.sendEmail`) —
-  zero operator clicks, no in-app/email choice to make. If the backend is
-  unreachable it falls back to a pre-filled mailto (operator clicks Send once).
+- **💬 Comment** — a **single button** that posts the comment in-app **and** relays the
+  email notification automatically via the Apps Script backend (`MailApp.sendEmail`) —
+  zero operator clicks, no in-app/email choice, and **no mail client ever opens**
+  (Google-Workspace style). If the backend is unreachable the comment is still saved
+  in-app and a non-intrusive toast explains the email is pending — it never falls back
+  to a `mailto:` popup. Email starts working the moment `sendNudgeEmail` is deployed
+  + authorised.
 
 ### Delivery
 - **In-app 🔔 bell** in the header shows a badge with the unread count of comments
   addressed to (or mentioning) the signed-in user. Opening the bell lists them
-  (newest first) with **Open IR** and **✉️ Email** (re-send via backend, mailto
-  fallback) actions, and marks them read.
+  (newest first) with an **Open IR** action and marks them read. (There is no manual
+  "send email" button — email is always automatic on comment creation.)
 - The bell polls the backend every ~90 s and refreshes on open.
 
 ### Backend (`backend.gs`) — comment email
@@ -48,7 +56,8 @@ The `sendNudgeEmail` POST action (name kept for contract stability) sends via
 be used to mail externally). The sender's email is set as `replyTo`. Email
 subject/body read "you have a comment" / "mentioned you in a comment"
 (no "nudge" wording). **Requires redeploying** the Apps Script web app after
-adding this action. Quota: Apps Script's daily MailApp limit applies.
+adding this action (and completing the one-time `script.send_mail` OAuth consent —
+see Development Guide). Quota: Apps Script's daily MailApp limit applies.
 
 ### Storage (no backend redeploy required)
 Comments are stored via the existing generic `saveSection` / `getPassbook`
@@ -276,7 +285,7 @@ from the sheet is deferred (later development).
 | `d_analysisDate` | Analysis Date | date | |
 | `d_intro` | _(none)_ | analysisNote | Read-only dynamic line: "Dear customer, analysis of **IRXXX** for your system with ID **XXXXX** has been completed. Its findings are as below." — `IRXXX` → `currentIR.irNumber`, `XXXXX` → `currentIR.droneId` |
 | `d_investigation` | Description of Investigation | textarea | |
-| `d_evidence` | Investigation Evidence (Images) | imageEvidence | Image-only, with a name/context caption per image (see below) |
+| `d_evidence` | Investigation Evidence (Images) | imageEvidence | Image or PDF, with a name/context caption per file (see below); 📷 capture supported |
 | `d_rootCause` | Root Cause | textarea | |
 | `d_correctiveAction` | Corrective Action | textarea | |
 | `d_preventiveAction` | Preventive Action | textarea | |
@@ -294,23 +303,28 @@ showing the Technical Support (QC Manager) name + date if Part A is already
 signed, otherwise "Pending signature".
 
 ### Image evidence (`imageEvidence` type)
-Each entry is an image plus a free-text **Name / context** caption. Control
-state lives in `evidenceState[fieldId]` (reset on `openPassbook`):
+Each entry is an image **or PDF** plus a free-text **Name / context** caption. This
+control is shared by Section D and by the upload fields in Sections E / F / G / H / I.
+Control state lives in `evidenceState[fieldId]` (reset on `openPassbook`):
 
 ```
 evidenceState['d_evidence'] = [
-  { caption, link, file, url },   // link = Drive URL ('' while pending); file/url = local File + object URL
-  ...
-]
+  { caption, link, file, url, type, name },   // link = Drive URL ('' while pending);
+  ...                                         // file/url = local File + object URL;
+]                                             // type = 'image'|'pdf'; name = filename
 ```
 
-- **Add:** `+ Add evidence image` opens an image-only picker (`accept="image/*"`,
-  multiple). Each picked file is shown as a thumbnail with an editable caption
-  and a ✕ remove button.
-- **Saved value** (`d_evidence`) is an array `[{ caption, link }]` — captions
-  paired with the Drive URLs of already-uploaded images; pending (not-yet-uploaded)
-  images have `link: ''`.
-- **Upload:** on Save, only the pending images are sent as files (fieldId
+- **Add:** `+ Add image / PDF` opens a picker (`accept="image/*,application/pdf"`,
+  multiple). **📷 Capture photo** opens the device camera directly
+  (`<input accept="image/*" capture="environment">` → back camera on phones).
+  Each picked file is shown as a thumbnail (images) or a 📄 Open-PDF card (PDFs),
+  with an editable caption and a ✕ remove button.
+- **Preview:** saved Drive images render via `https://lh3.googleusercontent.com/d/{id}`
+  (extracted from the Drive URL); local files use their object URL; PDFs link out.
+- **Saved value** (`d_evidence` etc.) is an array `[{ caption, link, type, name }]` —
+  captions + type/filename paired with the Drive URLs of already-uploaded files;
+  pending (not-yet-uploaded) files have `link: ''`.
+- **Upload:** on Save, only the pending files are sent as files (fieldId
   `d_evidence`); the backend uploads them to Drive and stores the new URLs in
   `d_evidence_links` (comma-separated, in upload order). Already-uploaded links
   are carried in `d_evidence` and re-sent on every save, so they survive re-saves.
@@ -318,10 +332,13 @@ evidenceState['d_evidence'] = [
   newest uploads, newly-uploaded URLs are merged back into `evidenceState` from
   `d_evidence_links` — on load (`populateFieldValue`) and immediately after a
   successful save (`refreshEvidenceLinksAfterSave`) — so captions stay paired
-  with their images and a later caption-only re-save persists the URLs in
+  with their files and a later caption-only re-save persists the URLs in
   `d_evidence`.
+- **Back-compat:** fields migrated from the old `file` type (Sections E/F/G/H/I
+  uploads) had only `<fieldId>_links` with no entry array; on load those links
+  seed one entry each so old uploads still preview.
 - **Drafts:** captions + already-uploaded links are included in the draft (like
-  other fields); the local image files themselves are not (consistent with the
+  other fields); the local image/PDF files themselves are not (consistent with the
   all-sections note that files/photos must be re-attached).
 
 ### Part B — Cost Analysis (Repair Estimate & Lead Time)
@@ -383,8 +400,13 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 | `e_prodBy` | Production Technician | text |
 | `e_reworkItems` | Rework / Replacement Items | textarea |
 | `e_partNos` | Part Numbers Used | textarea |
-| `e_prodPhotos` | Rework Photos | file |
-| `e_prodRemarks` | Production Remarks | textarea |
+| `e_prodDocs` | Route Card / Job Card (Image or PDF) | imageEvidence |
+| `e_prodRemarks` | Rework Details / Remarks | textarea |
+| `e_signProduction` | Digital Signature — Production Technician | esignature |
+
+The route/job card upload uses the shared `imageEvidence` control (image **or** PDF, with
+preview and a 📷 **Capture photo** button — see Section D "Image evidence"). Ends with a
+Production Technician e-signature.
 
 ---
 
@@ -397,8 +419,12 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 | `f_qcBy` | QC Inspector | text |
 | `f_qcChecklist` | QC Checklist / Test Results | textarea |
 | `f_qcResult` | QC Result | select: Pass / Fail / Conditional Pass |
-| `f_qcPhotos` | QC Test Evidence | file |
+| `f_qcDocs` | QC Report (Image or PDF) | imageEvidence |
 | `f_qcRemarks` | QC Remarks | textarea |
+| `f_signQc` | Digital Signature — QC Inspector | esignature |
+
+QC report upload is the shared `imageEvidence` control (image/PDF + capture). Ends with a
+QC Inspector e-signature.
 
 ---
 
@@ -416,7 +442,16 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 | `g_actualMatCost` | Actual Material Cost (₹) | number |
 | `g_actualLabour` | Actual Labour Cost (₹) | number |
 | `g_actualTotal` | Actual Total Cost (₹) | number |
-| `g_ftPhotos` | Flight Test Photos / Video | file |
+| `g_basicReport` | Basic Flight Test Report (Image or PDF) | imageEvidence |
+| `g_missionReport` | Mission Flight Test Report (Image or PDF) | imageEvidence |
+| `g_flightLogs` | Data Check — Flight Logs (Image or PDF) | imageEvidence |
+| `g_postProcessing` | Data Check — Post-Processing (Image or PDF) | imageEvidence |
+| `g_dataCheckRemarks` | Data Check Remarks | textarea |
+| `g_signPilot` | Digital Signature — Test Pilot | esignature |
+
+Four separate `imageEvidence` uploads (a. basic report, b. mission report, c.i flight logs,
+c.ii post-processing), each image/PDF with preview + 📷 capture, followed by a data-check
+remark and a Test Pilot e-signature.
 
 ---
 
@@ -427,10 +462,12 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 |---|---|---|---|
 | `h_pdiDate` | PDI Date | date | |
 | `h_pdiBy` | PDI Inspector | text | |
-| `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) |
-| `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC |
-| `h_pdiPhotos` | PDI Photos | file | |
+| `h_pdiDocs` | PDI Report (Image or PDF) | imageEvidence | upload + 📷 capture |
 | `h_pdiRemarks` | PDI Remarks | textarea | |
+| `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) |
+| `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section B) | dispatchChecklist | dynamic, from Section B |
+| `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC |
+| `h_signPdi` | Digital Signature — PDI Inspector | esignature | |
 
 **Checklist items** (each has ✔ Received / ✘ Missing / ⚠ Damaged / N/A):
 1. Physical Condition – OK
@@ -441,6 +478,13 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 6. Accessories Packed
 7. Documentation Included
 8. Branding / Labels Intact
+
+**Dispatch checklist (`dispatchChecklist` type).** Auto-built from the goods actually
+received in Section B (`b_inwardTable`) — one row per received particular, each with a
+dropdown: ✔ Dispatched (same qty) / ⚠ Short (less qty) / ✘ Missing / N/A. Ensures exactly
+the same items received go back out. The list reads the live Section B table (then saved
+data) and re-renders whenever Section B is edited or saved; prior selections are preserved.
+Placed before the PDI e-signature. Saved as `{ [particular]: status }`.
 
 ---
 
@@ -456,5 +500,5 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 | `i_stNo` | Stock Transfer (ST) No. | text |
 | `i_deliveryAddr` | Delivery Address | textarea |
 | `i_estDelivery` | Expected Delivery Date | date |
-| `i_dispatchPhotos` | Dispatch / Packing Photos | file |
+| `i_dispatchPhotos` | Dispatch / Packing Photos (Image or PDF) | imageEvidence |
 | `i_remarks` | Logistics Remarks | textarea |

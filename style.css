@@ -1076,6 +1076,52 @@ select.form-input option { background: #0f172a; }
 }
 .btn-add-evidence:hover { background: rgba(14,98,255,0.16); border-color: var(--primary); }
 
+/* Evidence action row (Add image/PDF + Capture photo) */
+.evidence-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* PDF evidence entry — clickable card instead of an image thumbnail */
+.evidence-item-pdf { padding: 6px 8px; }
+.evidence-pdf-link {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border); border-radius: 8px;
+  background: rgba(14,98,255,0.06);
+  color: var(--text); text-decoration: none;
+  font-size: 0.85rem;
+}
+.evidence-pdf-link:hover { background: rgba(14,98,255,0.14); border-color: var(--primary); }
+.evidence-pdf-icon { font-size: 1.4rem; line-height: 1; }
+.evidence-pdf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.evidence-pdf-open { font-size: 0.75rem; color: var(--primary); font-weight: 600; white-space: nowrap; }
+
+/* Section H — Dispatch checklist (verify against Section B received goods) */
+.dispatch-checklist { display: flex; flex-direction: column; gap: 0.5rem; }
+.dispatch-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem;
+  padding: 8px 10px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius);
+  background: rgba(0,0,0,0.12);
+}
+.dispatch-label { flex: 1; min-width: 180px; font-size: 0.85rem; }
+.dispatch-select { width: auto; min-width: 180px; max-width: 100%; }
+.dispatch-empty {
+  padding: 0.8rem 1rem; border: 1px dashed var(--glass-border); border-radius: var(--radius);
+  background: rgba(0,0,0,0.12); color: var(--muted); font-size: 0.82rem;
+}
+
+/* Comment count badges on section / field 💬 buttons (Google-Workspace anchored comments) */
+.sec-nudge-btn, .field-nudge-btn { position: relative; }
+.comment-count {
+  position: absolute; top: -7px; right: -7px;
+  min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px;
+  background: var(--glass-border); color: var(--text);
+  font-size: 0.58rem; font-weight: 700; line-height: 1;
+  display: none; align-items: center; justify-content: center;
+  border: 1px solid #121a2e;
+}
+.comment-count.unread { background: var(--danger); color: #fff; }
+
 /* ── Nudge / alerts ── */
 .nudge-bell {
   position: relative; cursor: pointer;

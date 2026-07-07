@@ -98,10 +98,15 @@ const INWARD_OPTIONS_DEFAULTS = {
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
 // E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
 let esignatureState = {};
-// Image-evidence control state (Section D): evidenceState[fieldId] = [{ caption, link, file, url }].
-// `link` = Drive URL of an already-uploaded image ('' while pending upload); `file`/`url`
-// hold the local File + object URL for images not yet uploaded to Drive.
+// Image-evidence control state (used by Section D + E/F/G/H/I uploads):
+// evidenceState[fieldId] = [{ caption, link, file, url, type, name }].
+// `link` = Drive URL of an already-uploaded file ('' while pending upload); `file`/`url`
+// hold the local File + object URL for files not yet uploaded to Drive. `type`
+// is 'image' | 'pdf' (controls preview); `name` is the original filename.
 let evidenceState = {};
+// Dispatch-checklist state for the open IR: { [fieldId]: { [particular]: status } }.
+// Section H verifies dispatched goods against the items received in Section B.
+let dispatchChecklistState = {};
 
 // ─── SECTION C — IQC VISUAL INSPECTION CONFIG ──────────────────────────────────
 // Inspection zones from the IDS master Section C sheet. `header: true` rows are
@@ -516,6 +521,7 @@ async function openPassbook(irNumber) {
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
   esignatureState = {};   // clear signatures from any previously-open IR
   evidenceState = {};     // clear image-evidence state from any previously-open IR
+  dispatchChecklistState = {}; // clear Section H dispatch checklist from previous IR
 
   document.getElementById('ir-banner-title').textContent = irNumber;
   document.getElementById('ir-banner-sub').textContent =
@@ -533,6 +539,8 @@ async function openPassbook(irNumber) {
   await loadSectionData(irNumber);
   restoreDrafts();
   refreshDraftBanner();
+  refreshCommentCounts();   // show comment counts on each section/field 💬 button
+  renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section B draft values
 }
 
 // Back button
@@ -546,11 +554,18 @@ if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
 // Any edit within a section is persisted as a draft (debounced), so unsaved
 // progress survives navigation/reload/failed saves.
 let draftTimer = null;
+let dispatchRefreshTimer = null;
 document.getElementById('sections-wrapper').addEventListener('input', e => {
   const sec = e.target.closest('.section-content');
   if (!sec) return;
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => saveDraft(sec.id), 400);
+  // Editing Section B (Inward) changes which goods Section H must verify against —
+  // debounce a refresh of the dispatch checklist so it stays in sync.
+  if (sec.id === 'sec-b') {
+    clearTimeout(dispatchRefreshTimer);
+    dispatchRefreshTimer = setTimeout(() => renderDispatchChecklist('h_dispatchChecklist'), 350);
+  }
 });
 document.getElementById('sections-wrapper').addEventListener('change', e => {
   const sec = e.target.closest('.section-content');
@@ -644,8 +659,9 @@ const SECTIONS = {
       { id: 'e_prodBy',       label: 'Production Technician', type: 'text', placeholder: 'Technician name' },
       { id: 'e_reworkItems',  label: 'Rework / Replacement Items',  type: 'textarea', placeholder: 'List of components replaced or repaired...' },
       { id: 'e_partNos',      label: 'Part Numbers Used',           type: 'textarea', placeholder: 'Part No. | Item | Qty' },
-      { id: 'e_prodPhotos',   label: 'Rework Photos',               type: 'file', multiple: true },
-      { id: 'e_prodRemarks',  label: 'Production Remarks',          type: 'textarea', placeholder: 'Any notes for QC team...' },
+      { id: 'e_prodDocs',     label: 'Route Card / Job Card (Image or PDF)', type: 'imageEvidence' },
+      { id: 'e_prodRemarks',  label: 'Rework Details / Remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
+      { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
     ]
   },
   'sec-f': {
@@ -655,8 +671,9 @@ const SECTIONS = {
       { id: 'f_qcBy',         label: 'QC Inspector',      type: 'text', placeholder: 'Inspector name' },
       { id: 'f_qcChecklist',  label: 'QC Checklist / Test Results', type: 'textarea', placeholder: 'Motor test, ESC test, Compass, GPS, Gimbal...' },
       { id: 'f_qcResult',     label: 'QC Result',         type: 'select', options: ['Pass – Proceed to Flight Test','Fail – Return to Production','Conditional Pass'] },
-      { id: 'f_qcPhotos',     label: 'QC Test Evidence',  type: 'file', multiple: true },
+      { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
+      { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
     ]
   },
   'sec-g': {
@@ -671,7 +688,12 @@ const SECTIONS = {
       { id: 'g_actualMatCost',label: 'Actual Material Cost (₹)', type: 'number', placeholder: '0.00' },
       { id: 'g_actualLabour', label: 'Actual Labour Cost (₹)',   type: 'number', placeholder: '0.00' },
       { id: 'g_actualTotal',  label: 'Actual Total Cost (₹)',    type: 'number', placeholder: '0.00' },
-      { id: 'g_ftPhotos',     label: 'Flight Test Photos / Video', type: 'file', multiple: true },
+      { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
+      { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
+      { id: 'g_flightLogs',    label: 'Data Check — Flight Logs (Image or PDF)',     type: 'imageEvidence' },
+      { id: 'g_postProcessing', label: 'Data Check — Post-Processing (Image or PDF)', type: 'imageEvidence' },
+      { id: 'g_dataCheckRemarks', label: 'Data Check Remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
+      { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
   },
   'sec-h': {
@@ -679,6 +701,8 @@ const SECTIONS = {
     fields: [
       { id: 'h_pdiDate',     label: 'PDI Date',            type: 'date' },
       { id: 'h_pdiBy',       label: 'PDI Inspector',       type: 'text', placeholder: 'Inspector name' },
+      { id: 'h_pdiDocs',     label: 'PDI Report (Image or PDF)', type: 'imageEvidence' },
+      { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
       {
         id: 'h_pdiChecklist', label: 'PDI Checklist', type: 'checklist',
         items: [
@@ -692,9 +716,9 @@ const SECTIONS = {
           'Branding / Labels Intact',
         ]
       },
+      { id: 'h_dispatchChecklist', label: 'Dispatch Checklist — verify same goods as received (Section B)', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
-      { id: 'h_pdiPhotos',   label: 'PDI Photos',          type: 'file', multiple: true },
-      { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
+      { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
     ]
   },
   'sec-i': {
@@ -707,7 +731,7 @@ const SECTIONS = {
       { id: 'i_stNo',         label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number from ERP / Tally' },
       { id: 'i_deliveryAddr', label: 'Delivery Address',   type: 'textarea', placeholder: 'Full delivery address...' },
       { id: 'i_estDelivery',  label: 'Expected Delivery Date', type: 'date' },
-      { id: 'i_dispatchPhotos', label: 'Dispatch / Packing Photos', type: 'file', multiple: true },
+      { id: 'i_dispatchPhotos', label: 'Dispatch / Packing Photos (Image or PDF)', type: 'imageEvidence' },
       { id: 'i_remarks',      label: 'Logistics Remarks',  type: 'textarea', placeholder: 'Special instructions, insurance, etc.' },
     ]
   },
@@ -745,7 +769,8 @@ function buildSectionForms(irNumber) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'sec-nudge-btn';
-    btn.innerHTML = '💬';
+    btn.dataset.sectionId = secId;
+    btn.innerHTML = '💬<span class="comment-count" style="display:none;">0</span>';
     btn.title = 'Comments on this section';
     btn.onclick = () => openNudgeModalForSection(secId);
     const h2 = sec.querySelector('.section-title');
@@ -918,9 +943,19 @@ function buildField(field, irNumber) {
     control = `
       <div class="image-evidence" id="${id}-wrap" data-field="${id}">
         <div class="image-evidence-list" id="${id}-list"></div>
-        <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${id}')">+ Add evidence image</button>
-        <input type="file" id="${id}-picker" accept="image/*" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
+        <div class="evidence-actions">
+          <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${id}')">+ Add image / PDF</button>
+          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${id}')">📷 Capture photo</button>
+        </div>
+        <input type="file" id="${id}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
+        <input type="file" id="${id}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${id}', this)" />
       </div>`;
+  } else if (field.type === 'dispatchChecklist') {
+    // Dispatch-vs-received-goods checklist. Items are sourced dynamically from
+    // Section B (Inward) at render time, so the operator verifies the exact same
+    // goods go back out. Rendered empty here; filled by renderDispatchChecklist()
+    // once Section B data is available (on load / when B is edited).
+    control = `<div class="dispatch-checklist" id="${id}" data-field="${id}"></div>`;
   } else if (field.type === 'url') {
     control = `
       <div class="url-field-wrapper">
@@ -960,7 +995,7 @@ function buildField(field, irNumber) {
   const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
   // Per-field nudge / comment button (skipped for the read-only analysis note).
   const fieldNudgeBtn = field.type && field.type !== 'analysisNote'
-    ? `<button type="button" class="field-nudge-btn" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬</button>`
+    ? `<button type="button" class="field-nudge-btn" data-field-id="${escHtml(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   const labelHtml = field.label
     ? `<label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
@@ -1520,7 +1555,7 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   // divider is a static sub-heading — no value to populate.
   if (field?.type === 'divider') return;
 
-  // Handle imageEvidence type — value is [{caption, link}]
+  // Handle imageEvidence type — value is [{caption, link, type, name}]
   if (field?.type === 'imageEvidence') {
     let arr = Array.isArray(value) ? value : [];
     // When loading SAVED data, captions saved with empty links (pending upload at
@@ -1533,13 +1568,27 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
         const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
         let li = 0;
         arr = arr.map(e => {
-          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++] };
-          return { caption: e.caption || '', link: e.link || '' };
+          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++], type: e.type || '', name: e.name || '' };
+          return { caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' };
         });
       }
+      // Back-compat: fields migrated from the old `file` type stored only Drive
+      // links in <fieldId>_links with no entry array. Seed one entry per link so
+      // those uploads still preview after migration to imageEvidence.
+      if (!arr.length) {
+        const links = String(currentSectionData?.[sectionId]?.[fieldId + '_links'] || '').split(',').map(s => s.trim()).filter(Boolean);
+        arr = links.map(l => ({ caption: '', link: l, type: '', name: '' }));
+      }
     }
-    evidenceState[fieldId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null }));
+    evidenceState[fieldId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null, type: e.type || '', name: e.name || '' }));
     renderImageEvidence(fieldId);
+    return;
+  }
+
+  // Handle dispatchChecklist type — value is { [particular]: status }
+  if (field?.type === 'dispatchChecklist') {
+    dispatchChecklistState[fieldId] = (value && typeof value === 'object') ? value : {};
+    renderDispatchChecklist(fieldId);
     return;
   }
 
@@ -1676,11 +1725,13 @@ function collectSectionValues(sectionId) {
       continue; // read-only display / static heading, nothing to save
     } else if (field.type === 'imageEvidence') {
       const entries = evidenceState[field.id] || [];
-      // Captions + already-uploaded Drive links are carried in the field value;
-      // only the not-yet-uploaded images are sent as files.
-      fieldValues[field.id] = entries.map(e => ({ caption: e.caption || '', link: e.link || '' }));
+      // Captions + type + already-uploaded Drive links are carried in the field
+      // value; only the not-yet-uploaded files are sent as files.
+      fieldValues[field.id] = entries.map(e => ({ caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' }));
       const newFiles = entries.filter(e => e.file).map(e => e.file);
       if (newFiles.length) fileFields.push({ id: field.id, files: newFiles });
+    } else if (field.type === 'dispatchChecklist') {
+      fieldValues[field.id] = collectDispatchChecklist(field.id);
     } else if (field.type === 'file') {
       const inp = document.getElementById(field.id);
       if (inp?.files?.length > 0) fileFields.push({ id: field.id, files: inp.files });
@@ -1896,6 +1947,9 @@ async function saveSection(sectionId, irNumber) {
       // For sections with image evidence, pull the freshly-uploaded Drive URLs
       // back into the in-memory state so captions stay paired with images.
       refreshEvidenceLinksAfterSave(sectionId, irNumber);
+      // Saving Section B changes the goods Section H verifies against — refresh
+      // the dispatch checklist so it lists exactly what was received.
+      if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -1950,6 +2004,7 @@ async function downloadSectionDPartA() {
   const entries = evidenceState['d_evidence'] || [];
   const images = [];
   for (const e of entries) {
+    if ((e.type || '') === 'pdf') continue;   // PDFs can't embed in the printed doc
     let src = e.link || '';
     if (!src && e.file) { try { src = await fileToDataUrl(e.file); } catch {} }
     if (src) images.push({ caption: e.caption || '', src });
@@ -2069,22 +2124,61 @@ async function downloadSectionDPartA() {
 // URLs on each save, so already-uploaded links are carried in `d_evidence` and
 // re-sent on every save; newly-uploaded links are merged back from '_links'
 // after a save (and on load) so captions stay paired with their images.
+// Extract a Google Drive file id from a Drive URL (for direct image preview).
+function driveFileId(link) {
+  if (!link) return '';
+  const s = String(link);
+  const m = s.match(/\/file\/d\/([A-Za-z0-9_-]{10,})/) || s.match(/[?&]id=([A-Za-z0-9_-]{10,})/) || s.match(/^https:\/\/drive\.google\.com\/open\?id=([A-Za-z0-9_-]{10,})/);
+  return m ? m[1] : '';
+}
+// Direct-renderable URL for a saved evidence image (Drive → lh3 preview) or the
+// local blob URL for a not-yet-uploaded file.
+function evidencePreviewUrl(e) {
+  if (e.url) return e.url;
+  if (e.link) {
+    const id = driveFileId(e.link);
+    if (id) return `https://lh3.googleusercontent.com/d/${id}=w600`;
+    return e.link;
+  }
+  return '';
+}
+function guessEvidenceType(e) {
+  if (e.type) return e.type;
+  const n = (e.name || e.link || e.caption || '').toLowerCase();
+  if (n.includes('.pdf') || n.includes('application/pdf')) return 'pdf';
+  return 'image';
+}
 function renderImageEvidence(fieldId) {
   const list = document.getElementById(fieldId + '-list');
   if (!list) return;
   const entries = evidenceState[fieldId] || [];
   evidenceState[fieldId] = entries;
   list.innerHTML = entries.map((e, i) => {
-    const src = e.link || e.url || '';
-    const img = src
-      ? `<img src="${escHtml(src)}" class="evidence-thumb" alt="evidence" />`
-      : `<div class="evidence-thumb-placeholder">No preview</div>`;
+    const isPdf = guessEvidenceType(e) === 'pdf';
+    const preview = isPdf
+      ? (() => {
+          const href = e.link || e.url || '';
+          const name = e.name || (e.file ? e.file.name : 'PDF document');
+          return href
+            ? `<a class="evidence-pdf-link" href="${escHtml(href)}" target="_blank" rel="noopener">
+                 <span class="evidence-pdf-icon">📄</span>
+                 <span class="evidence-pdf-name">${escHtml(name)}</span>
+                 <span class="evidence-pdf-open">Open ↗</span>
+               </a>`
+            : `<div class="evidence-pdf-link"><span class="evidence-pdf-icon">📄</span><span class="evidence-pdf-name">${escHtml(name)}</span></div>`;
+        })()
+      : (() => {
+          const src = evidencePreviewUrl(e);
+          return src
+            ? `<img src="${escHtml(src)}" class="evidence-thumb" alt="evidence" loading="lazy" />`
+            : `<div class="evidence-thumb-placeholder">No preview</div>`;
+        })();
     return `
-      <div class="evidence-item">
-        ${img}
+      <div class="evidence-item${isPdf ? ' evidence-item-pdf' : ''}">
+        ${preview}
         <input type="text" class="form-input evidence-caption"
                data-field="${escHtml(fieldId)}" data-idx="${i}"
-               placeholder="Name / context of this image"
+               placeholder="Name / context of this file"
                value="${escHtml(e.caption || '')}"
                oninput="updateEvidenceCaption('${escHtml(fieldId)}', ${i}, this.value)" />
         <button type="button" class="evidence-remove"
@@ -2095,11 +2189,18 @@ function renderImageEvidence(fieldId) {
 function addEvidenceImage(fieldId) {
   document.getElementById(fieldId + '-picker').click();
 }
+// Open the device camera (mobile `capture="environment"` → back camera) to take
+// a photo straight into the evidence list.
+function captureEvidenceImage(fieldId) {
+  const cap = document.getElementById(fieldId + '-capture');
+  if (cap) cap.click();
+}
 function onEvidencePicked(fieldId, input) {
   const files = Array.from(input.files || []);
   if (!evidenceState[fieldId]) evidenceState[fieldId] = [];
   files.forEach(f => {
-    evidenceState[fieldId].push({ caption: '', link: '', file: f, url: URL.createObjectURL(f) });
+    const type = f.type === 'application/pdf' ? 'pdf' : (f.type.startsWith('image/') ? 'image' : '');
+    evidenceState[fieldId].push({ caption: '', link: '', file: f, url: URL.createObjectURL(f), type, name: f.name });
   });
   input.value = '';
   renderImageEvidence(fieldId);
@@ -2112,6 +2213,76 @@ function removeEvidenceImage(fieldId, idx) {
   arr.splice(idx, 1);
   renderImageEvidence(fieldId);
   saveDraft(sectionIdFromFieldId(fieldId));
+}
+
+// ─── SECTION H — DISPATCH CHECKLIST (verify against Section B goods received) ──
+// Renders one row per good actually received in Section B (Inward), each with a
+// dropdown to confirm the same item is being dispatched back. The goods list is
+// read live from the Section B table (so unsaved B edits show) then from saved
+// data. Re-rendered whenever Section B changes; prior dispatch selections are
+// preserved across re-renders via dispatchChecklistState.
+function renderDispatchChecklist(fieldId) {
+  const wrap = document.getElementById(fieldId);
+  if (!wrap) return;
+
+  // Source goods from Section B — live DOM first, then saved data.
+  let inward = null;
+  const bWrap = document.getElementById('b_inwardTable');
+  if (bWrap) {
+    const live = {};
+    bWrap.querySelectorAll('.inward-row').forEach(row => {
+      const modelEl = row.querySelector('.inward-model');
+      const qtyEl   = row.querySelector('.inward-qty');
+      const particular = modelEl?.dataset.particular;
+      if (!particular) return;
+      const model = modelEl?.value || '';
+      const qty   = qtyEl?.value || '';
+      if (model || qty) live[particular] = { model, qty };
+    });
+    if (Object.keys(live).length) inward = live;
+  }
+  if (!inward) inward = (currentSectionData?.['sec-b']?.b_inwardTable) || {};
+
+  const items = Object.entries(inward).filter(([, c]) => c && (c.model || c.qty));
+  const saved = dispatchChecklistState[fieldId] || {};
+
+  if (!items.length) {
+    wrap.innerHTML = '<div class="dispatch-empty">No goods recorded in Section B (Inward) yet. Fill &amp; save Section B first — the received items will then appear here for dispatch verification.</div>';
+    return;
+  }
+  wrap.innerHTML = items.map(([particular, cell]) => {
+    const label = `${particular}${cell.model ? ' — ' + cell.model : ''}${cell.qty ? ' (Qty received: ' + cell.qty + ')' : ''}`;
+    return `
+      <div class="dispatch-row">
+        <label class="dispatch-label">${escHtml(label)}</label>
+        <select class="dispatch-select form-input" data-particular="${escHtml(particular)}">
+          <option value="">— Pending —</option>
+          <option value="Dispatched">✔ Dispatched (same qty)</option>
+          <option value="Short">⚠ Short / less qty</option>
+          <option value="Missing">✘ Missing</option>
+          <option value="N/A">N/A</option>
+        </select>
+      </div>`;
+  }).join('');
+  wrap.querySelectorAll('.dispatch-select').forEach(sel => {
+    const v = saved[sel.dataset.particular];
+    if (v) sel.value = v;
+    sel.addEventListener('change', () => {
+      dispatchChecklistState[fieldId] = dispatchChecklistState[fieldId] || {};
+      dispatchChecklistState[fieldId][sel.dataset.particular] = sel.value;
+      saveDraft(sectionIdFromFieldId(fieldId));
+    });
+  });
+}
+function collectDispatchChecklist(fieldId) {
+  const wrap = document.getElementById(fieldId);
+  const out = {};
+  if (wrap) {
+    wrap.querySelectorAll('.dispatch-select').forEach(sel => {
+      if (sel.value) out[sel.dataset.particular] = sel.value;
+    });
+  }
+  return out;
 }
 function updateEvidenceCaption(fieldId, idx, value) {
   const arr = evidenceState[fieldId];
@@ -2288,6 +2459,7 @@ function loadNudges() {
       const items = data?.sections?.[NUDGE_SEC]?.items;
       nudges = Array.isArray(items) ? items : [];
       refreshBell();
+      refreshCommentCounts();
       if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
       rerenderOpenNudgeModal();
     })
@@ -2324,6 +2496,7 @@ async function addNudge(nudge) {
     nudges.push(nudge);
   }
   refreshBell();
+  refreshCommentCounts();
   rerenderOpenNudgeModal();
 }
 function markNudgeRead(id) {
@@ -2334,6 +2507,7 @@ function markNudgeRead(id) {
   if (!n.readBy.map(s => String(s).toLowerCase()).includes(me)) n.readBy.push(me);
   saveNudgesList(nudges);
   refreshBell();
+  refreshCommentCounts();
   if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
   rerenderOpenNudgeModal();
 }
@@ -2371,6 +2545,46 @@ function refreshBell() {
   badge.textContent = c > 9 ? '9+' : String(c);
   badge.style.display = c > 0 ? 'block' : 'none';
 }
+
+// ── Per-section / per-field comment badges ──
+// Mirrors Google Workspace anchored comments: each section & field 💬 button
+// shows a count of the comments sitting on it (red when one is unread & for me),
+// so comments "reflect over that section" without opening the modal.
+function commentsForCtx(scope, sectionId, fieldId) {
+  const ir = currentIR?.irNumber || '';
+  return nudges.filter(n => (n.irNumber || '') === ir && (n.scope || '') === scope &&
+    (scope === 'field'  ? (n.fieldId  || '') === (fieldId  || '')
+     : scope === 'section' ? (n.sectionId || '') === (sectionId || '')
+     : true));
+}
+function readByMe(n) {
+  const me = myEmail();
+  return (n.readBy || []).map(s => String(s).toLowerCase()).includes(me);
+}
+function setCommentBadge(btn, count, unread) {
+  if (!btn) return;
+  const badge = btn.querySelector('.comment-count');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 9 ? '9+' : String(count);
+    badge.style.display = 'inline-flex';
+    badge.classList.toggle('unread', !!unread);
+  } else {
+    badge.style.display = 'none';
+    badge.classList.remove('unread');
+  }
+}
+function refreshCommentCounts() {
+  if (!currentIR?.irNumber) return;
+  document.querySelectorAll('.sec-nudge-btn').forEach(btn => {
+    const list = commentsForCtx('section', btn.dataset.sectionId, null);
+    setCommentBadge(btn, list.length, list.some(n => isForMe(n) && !readByMe(n)));
+  });
+  document.querySelectorAll('.field-nudge-btn').forEach(btn => {
+    const list = commentsForCtx('field', null, btn.dataset.fieldId);
+    setCommentBadge(btn, list.length, list.some(n => isForMe(n) && !readByMe(n)));
+  });
+}
 function toggleNudgePanel() {
   let panel = document.getElementById('nudge-panel');
   if (!panel) {
@@ -2392,6 +2606,7 @@ function toggleNudgePanel() {
   renderNudgePanel();
   panel.style.display = 'block';
   refreshBell();
+  refreshCommentCounts();
 }
 function renderNudgePanel() {
   const panel = document.getElementById('nudge-panel');
@@ -2420,7 +2635,6 @@ function renderNudgePanel() {
       <div class="nudge-msg">${escHtml(n.message || '')}</div>
       <div class="nudge-actions">
         ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escHtml(n.irNumber)}')">Open IR</button>` : ''}
-        <button type="button" class="nudge-mini" onclick="resendNudgeEmail('${escHtml(n.id)}')">✉️ Email</button>
       </div>
     </div>`;
   }).join('');
@@ -2433,10 +2647,6 @@ function openIRFromNudge(irNumber) {
   document.getElementById('nudge-panel').style.display = 'none';
   if (allIRs.find(ir => ir.irNumber === irNumber)) openPassbook(irNumber);
   else showToast('IR ' + irNumber + ' not in current list');
-}
-function openNudgeMailtoById(id) {
-  const n = nudges.find(x => x.id === id);
-  if (n) openNudgeMailto(n);
 }
 
 // ── Reusable Nudge modal (IR / section / field) ──
@@ -2616,8 +2826,12 @@ async function sendComment() {
   const suggest = document.getElementById('nudge-suggest'); if (suggest) { suggest.innerHTML = ''; suggest.style.display = 'none'; }
   renderNudgeThread();
 }
-// Send the nudge email automatically via the Apps Script backend (MailApp).
-// Falls back to a pre-filled mailto (manual Send) if the backend is unreachable.
+// Send the comment email automatically via the Apps Script backend (MailApp).
+// Google-Workspace style: the comment is already saved in-app (addNudge); this
+// only relays the email notification. It NEVER opens a mail client — on failure
+// it just toasts, so commenting is never blocked by an email popup. The email
+// starts working automatically the moment the backend (sendNudgeEmail) is
+// deployed + authorised.
 async function sendNudgeEmailBackend(nudge) {
   try {
     const fd = new FormData();
@@ -2631,23 +2845,10 @@ async function sendNudgeEmailBackend(nudge) {
     const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
     const data = await res.json();
     if (data.status === 'ok') { showToast('Comment posted · email sent to ' + nudge.to); return; }
-    showToast('Email failed: ' + (data.message || 'backend error') + ' — opening mail client');
+    showToast('Comment saved · email pending: ' + (data.message || 'backend error'));
   } catch {
-    showToast('Email backend unreachable — opening mail client');
+    showToast('Comment saved in app · email will send automatically once the backend is connected');
   }
-  openNudgeMailto(nudge);
-}
-// Re-send an existing nudge's email from the bell panel (auto via backend).
-async function resendNudgeEmail(id) {
-  const n = nudges.find(x => x.id === id);
-  if (!n) return;
-  await sendNudgeEmailBackend(n);
-}
-function openNudgeMailto(n) {
-  const subj = `[I-PASSBOOK] ${n.irNumber || ''} — you have a comment`;
-  const ctx = scopeContextText(n);
-  const body = `Hi,\n\n${n.fromName || n.from} mentioned you in a comment on I-PASSBOOK.\n\nIR: ${n.irNumber || ''}\n${ctx}\n\nMessage:\n${n.message || ''}\n\n— Sent via I-PASSBOOK`;
-  window.location.href = `mailto:${encodeURIComponent(n.to || '')}?subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(body)}`;
 }
 
 // ── Trigger wrappers (resolve context from current state) ──

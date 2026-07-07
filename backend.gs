@@ -28,8 +28,10 @@ var CONFIG = {
   PASSBOOK_SHEET_ID: '141L8Wt4hrvJmN3dTtnI8VDK76NutK_7KZ_jbM2qEOwQ',
   DATA_TAB:          'APP_DATA',  // Web App data goes here
 
-  // Google Drive root folder for IR photo uploads
-  DRIVE_ROOT_FOLDER_ID: '1W41jpmnmIOmoG2XFfdlurkATvFSfxN9r',
+  // Google Drive root folder for IR uploads — "I-PASSBOOK APP" folder in the
+  // customer.relations@indrones.com Drive. The account that deploys this script
+  // (Execute as: Me) MUST have Editor access to this folder.
+  DRIVE_ROOT_FOLDER_ID: '1sc9mXOHPaWW1wiVvtDmyYLflGUogtm06',
 
   ALLOWED_DOMAIN: 'indrones.com',
 };

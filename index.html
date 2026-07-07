@@ -87,7 +87,7 @@
           <div id="ir-banner-sub" style="font-size:0.85rem; color:rgba(255,255,255,0.75); margin-top:2px;"></div>
         </div>
         <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-end;">
-          <button type="button" id="ir-nudge-btn" class="btn-ghost-light" title="Comment on this IR / tag a teammate">💬 Comments</button>
+          <button type="button" id="ir-nudge-btn" class="btn-ghost-light" style="position:relative;" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none;">0</span></button>
           <button type="button" id="ir-history-btn" class="btn-ghost-light" title="Audit trail / edit history for this IR">🕓 History</button>
         </div>
       </div>
@@ -191,5 +191,14 @@
   "></div>
 
   <script src="app.js"></script>
+  <script>
+    // Register the service worker so the app is installable + offline-capable on
+    // phones. The SW never caches the Apps Script backend (live data stays live).
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./sw.js').catch(() => {});
+      });
+    }
+  </script>
 </body>
 </html>

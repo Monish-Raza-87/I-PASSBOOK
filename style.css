@@ -1109,6 +1109,52 @@ select.form-input option { background: #0f172a; }
   background: rgba(0,0,0,0.12); color: var(--muted); font-size: 0.82rem;
 }
 
+/* Section H — Cross Check Particulars (received vs packed failsafe table) */
+.cc-note {
+  font-size: 0.78rem; color: var(--muted); margin-bottom: 0.5rem;
+  padding: 0.45rem 0.6rem; border-left: 3px solid var(--primary);
+  background: rgba(14,98,255,0.08); border-radius: 6px;
+}
+.crosscheck-table {
+  width: 100%; border-collapse: collapse; font-size: 0.83rem;
+  border: 1px solid var(--glass-border); border-radius: var(--radius); overflow: hidden;
+}
+.crosscheck-table th {
+  text-align: left; padding: 8px 10px; font-size: 0.72rem; text-transform: uppercase;
+  letter-spacing: 0.04em; color: #fff; background: var(--primary); font-weight: 600;
+}
+.crosscheck-table td {
+  padding: 8px 10px; border-top: 1px solid var(--glass-border);
+  vertical-align: middle; background: rgba(0,0,0,0.12);
+}
+.cc-particular { font-weight: 600; }
+.cc-sub { font-weight: 400; font-size: 0.75rem; color: var(--muted); }
+.cc-received { width: 110px; text-align: center; color: var(--text); }
+.cc-packed { width: 220px; }
+.cc-packed .dispatch-select { width: 100%; }
+.crosscheck-summary { margin-top: 0.55rem; font-size: 0.8rem; }
+.crosscheck-summary .cc-ok { color: var(--success); font-weight: 600; }
+.crosscheck-summary .cc-warn { color: var(--warning); }
+
+/* Section I — courier name selector (preset + Other free text) */
+.courier-name-wrap { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+.courier-name-wrap .form-input { flex: 1; min-width: 160px; }
+
+/* Comments — Open / Resolved status */
+.nudge-post-actions, .nudge-actions {
+  display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap;
+}
+.nudge-status {
+  font-size: 0.66rem; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid transparent; letter-spacing: 0.02em;
+}
+.nudge-status.open { color: var(--warning); background: rgba(245,158,11,0.14); border-color: rgba(245,158,11,0.4); }
+.nudge-status.resolved { color: var(--success); background: rgba(34,197,94,0.14); border-color: rgba(34,197,94,0.4); }
+.nudge-post.resolved, .nudge-item.resolved { opacity: 0.6; }
+.nudge-post.resolved .nudge-msg, .nudge-item.resolved .nudge-msg {
+  text-decoration: line-through; text-decoration-color: var(--muted); text-decoration-thickness: 1px;
+}
+
 /* Comment count badges on section / field 💬 buttons (Google-Workspace anchored comments) */
 .sec-nudge-btn, .field-nudge-btn { position: relative; }
 .comment-count {

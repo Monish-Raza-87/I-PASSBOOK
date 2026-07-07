@@ -340,6 +340,17 @@ function getOrCreateDataTab(ss) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ONE-TIME SETUP — run manually from the editor to pre-create the AUDIT_LOG tab.
+// Safe to run repeatedly (no-op if the tab already exists).
+// ──────────────────────────────────────────────────────────────────────────────
+function setupAuditLog() {
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  getOrCreateAuditTab(ss);
+  getOrCreateDataTab(ss);
+  return 'APP_DATA + AUDIT_LOG tabs ready on sheet ' + CONFIG.PASSBOOK_SHEET_ID;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // AUDIT TRAIL — records every section save + every field overwrite (old→new) so
 // corrections are traceable. Lives in an AUDIT_LOG tab on the data sheet.
 // Columns: Timestamp | IR Number | Section ID | Saved By | Event | Field ID |

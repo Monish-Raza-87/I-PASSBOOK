@@ -684,24 +684,9 @@ const SECTIONS = {
   'sec-h': {
     title: 'Section H — Pre-Delivery Inspection (PDI)',
     fields: [
-      { id: 'h_pdiDate',     label: 'PDI Date',            type: 'date' },
-      { id: 'h_pdiBy',       label: 'PDI Inspector',       type: 'text', placeholder: 'Inspector name' },
       { id: 'h_pdiDocs',     label: 'PDI Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
-      {
-        id: 'h_pdiChecklist', label: 'PDI Checklist', type: 'checklist',
-        items: [
-          'Physical Condition – OK',
-          'All Parts Present',
-          'Battery Fully Charged',
-          'Firmware Updated',
-          'Calibration Done',
-          'Accessories Packed',
-          'Documentation Included',
-          'Branding / Labels Intact',
-        ]
-      },
-      { id: 'h_dispatchChecklist', label: 'Dispatch Checklist — verify same goods as received (Section B)', type: 'dispatchChecklist' },
+      { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
       { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
     ]
@@ -710,13 +695,10 @@ const SECTIONS = {
     title: 'Section I — Logistics & Dispatch',
     fields: [
       { id: 'i_dispatchDate', label: 'Dispatch Date',      type: 'date' },
-      { id: 'i_dispatchBy',   label: 'Dispatched By',      type: 'text', placeholder: 'Logistics / store person name' },
-      { id: 'i_courier',      label: 'Courier / Transporter', type: 'text', placeholder: 'e.g. BlueDart, DHL, own vehicle' },
-      { id: 'i_awbNo',        label: 'AWB / Docket No.',   type: 'text', placeholder: 'Tracking number' },
-      { id: 'i_stNo',         label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number from ERP / Tally' },
-      { id: 'i_deliveryAddr', label: 'Delivery Address',   type: 'textarea', placeholder: 'Full delivery address...' },
-      { id: 'i_estDelivery',  label: 'Expected Delivery Date', type: 'date' },
-      { id: 'i_dispatchPhotos', label: 'Dispatch / Packing Photos (Image or PDF)', type: 'imageEvidence' },
+      { id: 'i_courier',      label: 'Courier / Transporter', type: 'courierName', default: 'Bluedart' },
+      { id: 'i_courierTrackId', label: 'Courier Tracking ID', type: 'text', placeholder: 'AWB / docket / tracking number' },
+      { id: 'i_clientReceivedDate', label: 'Client Received the Courier Date', type: 'date' },
+      { id: 'i_dispatchPhotos', label: 'Attachments (Image or PDF)', type: 'imageEvidence' },
       { id: 'i_remarks',      label: 'Logistics Remarks',  type: 'textarea', placeholder: 'Special instructions, insurance, etc.' },
     ]
   },
@@ -799,6 +781,19 @@ function buildField(field, irNumber) {
   } else if (field.type === 'select') {
     const opts = field.options.map(o => `<option value="${o}">${o}</option>`).join('');
     control = `<select id="${id}" class="form-input">${opts}</select>`;
+  } else if (field.type === 'courierName') {
+    // Courier selector with a preset list + "Other (type name)…" fallback.
+    // Default courier (e.g. Bluedart) is pre-selected; choosing Other reveals a
+    // free-text input so any non-standard transporter can be named.
+    const presets = (field.options && field.options.length) ? field.options : ['Bluedart', 'DTDC', 'FedEx', 'DHL', 'India Post'];
+    const def = field.default || presets[0] || 'Bluedart';
+    const optHtml = presets.map(o => `<option value="${esc(o)}"${o === def ? ' selected' : ''}>${esc(o)}</option>`).join('')
+      + `<option value="__other__">Other (type name)…</option>`;
+    control = `
+      <div class="courier-name-wrap" id="${id}-wrap">
+        <select id="${id}" class="form-input" onchange="onCourierNameChange('${esc(id)}')">${optHtml}</select>
+        <input type="text" id="${id}-other" class="form-input courier-other" placeholder="Type courier name" style="display:none;" />
+      </div>`;
   } else if (field.type === 'file') {
     control = `
       <div class="file-upload-wrapper" onclick="document.getElementById('${id}').click()">
@@ -1598,6 +1593,24 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
+  // Handle courierName type — stored as a single string. If it matches a preset
+  // option, select it; otherwise pick "Other" and drop the name into the text box.
+  if (field?.type === 'courierName') {
+    const sel = document.getElementById(fieldId);
+    const other = document.getElementById(fieldId + '-other');
+    if (!sel) return;
+    const v = (value == null || typeof value === 'object') ? '' : String(value);
+    const isPreset = Array.from(sel.options).some(o => o.value === v && o.value !== '__other__');
+    if (isPreset) {
+      sel.value = v;
+      if (other) { other.value = ''; other.style.display = 'none'; }
+    } else if (v) {
+      sel.value = '__other__';
+      if (other) { other.value = v; other.style.display = 'block'; }
+    }
+    return;
+  }
+
   // Handle checkpointEvidence type — value is { done, attach: [{caption,link,type,name}] }
   if (field?.type === 'checkpointEvidence') {
     const v = (value && typeof value === 'object') ? value : {};
@@ -1776,6 +1789,10 @@ function collectSectionValues(sectionId) {
       if (newFiles.length) fileFields.push({ id: attachId, files: newFiles });
     } else if (field.type === 'dispatchChecklist') {
       fieldValues[field.id] = collectDispatchChecklist(field.id);
+    } else if (field.type === 'courierName') {
+      const sel = document.getElementById(field.id);
+      const other = document.getElementById(field.id + '-other');
+      if (sel) fieldValues[field.id] = sel.value === '__other__' ? (other?.value?.trim() || '') : sel.value;
     } else if (field.type === 'file') {
       const inp = document.getElementById(field.id);
       if (inp?.files?.length > 0) fileFields.push({ id: field.id, files: inp.files });
@@ -2296,32 +2313,68 @@ function renderDispatchChecklist(fieldId) {
   const saved = dispatchChecklistState[fieldId] || {};
 
   if (!items.length) {
-    wrap.innerHTML = '<div class="dispatch-empty">No goods recorded in Section B (Inward) yet. Fill &amp; save Section B first — the received items will then appear here for dispatch verification.</div>';
+    wrap.innerHTML = '<div class="dispatch-empty">No goods recorded in Section B (Inward) yet. Fill &amp; save Section B first — every received particular will then appear here for the cross-check (pack exactly the same, nothing less or more).</div>';
     return;
   }
-  wrap.innerHTML = items.map(([particular, cell]) => {
-    const label = `${particular}${cell.model ? ' — ' + cell.model : ''}${cell.qty ? ' (Qty received: ' + cell.qty + ')' : ''}`;
+  // Tabular failsafe: each received particular (with model + qty received) sits
+  // beside a "packed for dispatch?" dropdown. The operator confirms each line so
+  // the dispatch matches the inward — nothing less, nothing more.
+  const rows = items.map(([particular, cell]) => {
+    const model = cell.model || '';
+    const qty   = cell.qty || '';
+    const particularCell = `${escHtml(particular)}${model ? '<br><span class="cc-sub">' + escHtml(model) + '</span>' : ''}`;
     return `
-      <div class="dispatch-row">
-        <label class="dispatch-label">${escHtml(label)}</label>
-        <select class="dispatch-select form-input" data-particular="${escHtml(particular)}">
-          <option value="">— Pending —</option>
-          <option value="Dispatched">✔ Dispatched (same qty)</option>
-          <option value="Short">⚠ Short / less qty</option>
-          <option value="Missing">✘ Missing</option>
-          <option value="N/A">N/A</option>
-        </select>
-      </div>`;
+      <tr class="cc-row" data-particular="${escHtml(particular)}">
+        <td class="cc-particular">${particularCell}</td>
+        <td class="cc-received">${qty ? escHtml(qty) : '—'}</td>
+        <td class="cc-packed">
+          <select class="dispatch-select form-input" data-particular="${escHtml(particular)}">
+            <option value="">— Pending —</option>
+            <option value="Dispatched">✔ Packed (same as received)</option>
+            <option value="Short">⚠ Short (less than received)</option>
+            <option value="Missing">✘ Missing</option>
+            <option value="Extra">+ Extra (more than received)</option>
+            <option value="N/A">N/A</option>
+          </select>
+        </td>
+      </tr>`;
   }).join('');
+  wrap.innerHTML = `
+    <div class="cc-note">Pack exactly the goods received during Inward — nothing less, nothing more. Mark each particular below.</div>
+    <table class="crosscheck-table">
+      <thead><tr><th>Particular (as received — Section B)</th><th>Qty received</th><th>Packed for dispatch?</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="crosscheck-summary" id="${fieldId}-summary"></div>`;
   wrap.querySelectorAll('.dispatch-select').forEach(sel => {
     const v = saved[sel.dataset.particular];
     if (v) sel.value = v;
     sel.addEventListener('change', () => {
       dispatchChecklistState[fieldId] = dispatchChecklistState[fieldId] || {};
       dispatchChecklistState[fieldId][sel.dataset.particular] = sel.value;
+      updateCrossCheckSummary(fieldId);
       saveDraft(sectionIdFromFieldId(fieldId));
     });
   });
+  updateCrossCheckSummary(fieldId);
+}
+// One-line verdict under the cross-check table: green when every received
+// particular is packed as-received, otherwise a count of what's still pending /
+// flagged so the operator knows the cross-check isn't complete.
+function updateCrossCheckSummary(fieldId) {
+  const el = document.getElementById(fieldId + '-summary');
+  if (!el) return;
+  const sels = document.querySelectorAll(`#${fieldId} .dispatch-select`);
+  let packed = 0, pending = 0, flagged = 0, total = 0;
+  sels.forEach(s => {
+    total++;
+    if (!s.value) pending++;
+    else if (s.value === 'Dispatched') packed++;
+    else flagged++;
+  });
+  if (total === 0) { el.innerHTML = ''; return; }
+  if (packed === total) el.innerHTML = `<span class="cc-ok">✓ All ${total} particulars packed as received — ready to dispatch.</span>`;
+  else el.innerHTML = `<span class="cc-warn">${pending} pending · ${packed} packed · ${flagged} flagged — finish the cross-check before dispatch.</span>`;
 }
 function collectDispatchChecklist(fieldId) {
   const wrap = document.getElementById(fieldId);
@@ -2332,6 +2385,15 @@ function collectDispatchChecklist(fieldId) {
     });
   }
   return out;
+}
+// Show / hide the free-text courier input when the "Other (type name)…" option is
+// chosen (or cleared). Draft auto-save is handled by the global change listener.
+function onCourierNameChange(id) {
+  const sel = document.getElementById(id);
+  const other = document.getElementById(id + '-other');
+  if (!sel || !other) return;
+  if (sel.value === '__other__') { other.style.display = 'block'; other.focus(); }
+  else { other.style.display = 'none'; other.value = ''; }
 }
 function updateEvidenceCaption(fieldId, idx, value) {
   const arr = evidenceState[fieldId];
@@ -2568,6 +2630,28 @@ function markNudgeRead(id) {
   if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
   rerenderOpenNudgeModal();
 }
+// Toggle a comment between Open and Resolved (and back). Any signed-in
+// collaborator can resolve/reopen — like a lightweight issue thread. Resolving
+// records who + when so the history is traceable. Missing/legacy nudges (no
+// status field) are treated as 'open'.
+function toggleNudgeStatus(id) {
+  const n = nudges.find(x => x.id === id);
+  if (!n) return;
+  if (n.status === 'resolved') {
+    n.status = 'open';
+    n.resolvedAt = null;
+    n.resolvedBy = null;
+  } else {
+    n.status = 'resolved';
+    n.resolvedAt = Date.now();
+    n.resolvedBy = currentUser?.email || 'unknown';
+  }
+  saveNudgesList(nudges);
+  refreshBell();
+  refreshCommentCounts();
+  rerenderOpenNudgeModal();
+  if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
+}
 
 // ── Helpers ──
 function myEmail() { return (currentUser?.email || '').toLowerCase(); }
@@ -2633,14 +2717,25 @@ function setCommentBadge(btn, count, unread) {
 }
 function refreshCommentCounts() {
   if (!currentIR?.irNumber) return;
+  // Badges count OPEN (unresolved) comments; the red dot only fires when one of
+  // those open comments is still unread and directed at me. Resolved comments
+  // no longer demand attention, so they don't keep a badge lit.
+  const isOpen = n => (n.status || 'open') !== 'resolved';
+  const hasAttention = list => list.filter(isOpen).some(n => isForMe(n) && !readByMe(n));
   document.querySelectorAll('.sec-nudge-btn').forEach(btn => {
     const list = commentsForCtx('section', btn.dataset.sectionId, null);
-    setCommentBadge(btn, list.length, list.some(n => isForMe(n) && !readByMe(n)));
+    setCommentBadge(btn, list.filter(isOpen).length, hasAttention(list));
   });
   document.querySelectorAll('.field-nudge-btn').forEach(btn => {
     const list = commentsForCtx('field', null, btn.dataset.fieldId);
-    setCommentBadge(btn, list.length, list.some(n => isForMe(n) && !readByMe(n)));
+    setCommentBadge(btn, list.filter(isOpen).length, hasAttention(list));
   });
+  // IR-level hub button = open comments anywhere in this IR (ir + section + field)
+  const irBtn = document.getElementById('ir-nudge-btn');
+  if (irBtn) {
+    const all = nudges.filter(n => (n.irNumber || '') === (currentIR.irNumber || ''));
+    setCommentBadge(irBtn, all.filter(isOpen).length, hasAttention(all));
+  }
 }
 function toggleNudgePanel() {
   let panel = document.getElementById('nudge-panel');
@@ -2683,7 +2778,14 @@ function renderNudgePanel() {
   const items = mine.map(n => {
     const ir = allIRs.find(ir => ir.irNumber === n.irNumber);
     const canOpen = !!ir;
-    return `<div class="nudge-item">
+    const resolved = n.status === 'resolved';
+    const statusChip = resolved
+      ? `<span class="nudge-status resolved">✓ Resolved</span>`
+      : `<span class="nudge-status open">● Open</span>`;
+    const actionBtn = resolved
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+    return `<div class="nudge-item ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
         <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
@@ -2691,6 +2793,8 @@ function renderNudgePanel() {
       <div class="nudge-ctx">🔔 ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
       <div class="nudge-msg">${escHtml(n.message || '')}</div>
       <div class="nudge-actions">
+        ${statusChip}
+        ${actionBtn}
         ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escHtml(n.irNumber)}')">Open IR</button>` : ''}
       </div>
     </div>`;
@@ -2716,7 +2820,7 @@ function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
               : `Comments · ${irNumber}`;
   const ctxLine = scope === 'field'  ? `IR ${irNumber} · Field “${label || fieldId}”`
                 : scope === 'section' ? `IR ${irNumber} · Section ${label || sectionId}`
-                : `IR ${irNumber} (whole passbook)`;
+                : `All comments across IR ${irNumber} (IR-level + every section/field)`;
   const modal = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'nudge-modal';
@@ -2763,17 +2867,34 @@ function nudgeCtxMatch(n) {
 function renderNudgeThread() {
   const el = document.getElementById('nudge-thread');
   if (!el) return;
-  const thread = nudges.filter(nudgeCtxMatch).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+  const ctx = nudgeModalCtx;
+  // IR-level modal is the comment hub for the whole passbook: show EVERY comment
+  // in this IR (ir + section + field scopes), each tagged with where it sits.
+  // Section/field modals keep the exact-scope filter.
+  const thread = (ctx && ctx.scope === 'ir')
+    ? nudges.filter(n => (n.irNumber || '') === (ctx.irNumber || ''))
+    : nudges.filter(nudgeCtxMatch);
+  thread.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   if (!thread.length) { el.innerHTML = '<div class="nudge-empty">No comments yet. Tag someone above to notify them about this.</div>'; return; }
   el.innerHTML = thread.map(n => {
     const mine = (n.from || '').toLowerCase() === myEmail();
-    return `<div class="nudge-post ${mine ? 'mine' : ''}">
+    const resolved = n.status === 'resolved';
+    const loc = (ctx && ctx.scope === 'ir') ? `<div class="nudge-ctx">📍 ${escHtml(scopeContextText(n))}</div>` : '';
+    const statusChip = resolved
+      ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">✓ Resolved</span>`
+      : `<span class="nudge-status open">● Open</span>`;
+    const actionBtn = resolved
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+    return `<div class="nudge-post ${mine ? 'mine' : ''} ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
         <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
       </div>
+      ${loc}
       <div class="nudge-to">→ ${escHtml(n.to || '')}</div>
       <div class="nudge-msg">${escHtml(n.message || '')}</div>
+      <div class="nudge-post-actions">${statusChip}${actionBtn}</div>
     </div>`;
   }).join('');
 }
@@ -2871,6 +2992,9 @@ async function sendComment() {
     mentions: [to],
     createdAt: Date.now(),
     readBy: [],
+    status: 'open',          // 'open' | 'resolved' — any collaborator can resolve/reopen
+    resolvedAt: null,
+    resolvedBy: null,
   };
   await addNudge(nudge);
   // One action: posts the comment in-app AND emails the recipient automatically.

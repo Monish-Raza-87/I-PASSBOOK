@@ -197,13 +197,13 @@ window.addEventListener('load', () => {
     splash.style.transform = 'scale(1.04)';
     setTimeout(() => {
       splash.style.display = 'none';
-      const stored = sessionStorage.getItem('ipb_user');
+      const stored = loadStoredUser();
       if (stored) {
-        currentUser = JSON.parse(stored);
+        currentUser = stored;
         showApp();
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
-        sessionStorage.setItem('ipb_user', JSON.stringify(currentUser));
+        persistUser(currentUser, false); // dev bypass: this tab only
         showApp();
       } else {
         showAuth();
@@ -225,6 +225,38 @@ function createDevUser() {
     initial: 'D',
     token: 'local-dev',
   };
+}
+
+// ─── PERSISTENT LOGIN ("keep me logged in") ──────────────────────────────────
+// Stores the signed-in profile so the app reopens already logged in on the
+// device. `persist=true` (the checkbox) writes to localStorage (survives app
+// close / phone restart); `persist=false` writes to sessionStorage only (this
+// tab, cleared on close). Only the profile is persisted — the raw ID token is
+// NEVER written to storage (it's unused after sign-in; the backend gate relies
+// on the verified email, and keeping the token out of storage limits exposure
+// if the device is shared or lost).
+function persistUser(user, persist) {
+  const safe = {
+    name:    user.name,
+    email:   user.email,
+    picture: user.picture,
+    initial: user.initial,
+  };
+  try {
+    sessionStorage.setItem('ipb_user', JSON.stringify(safe));
+    if (persist) localStorage.setItem('ipb_user', JSON.stringify(safe));
+    else localStorage.removeItem('ipb_user');
+  } catch { /* storage may be unavailable in private mode — non-fatal */ }
+}
+
+function loadStoredUser() {
+  try {
+    const persisted = localStorage.getItem('ipb_user');
+    if (persisted) return JSON.parse(persisted);
+    const session = sessionStorage.getItem('ipb_user');
+    if (session) return JSON.parse(session);
+  } catch { }
+  return null;
 }
 
 // ─── GOOGLE AUTH ─────────────────────────────────────────────────────────────
@@ -268,7 +300,8 @@ function handleCredential(response) {
     initial: payload.name?.charAt(0)?.toUpperCase() || '?',
     token:   response.credential,
   };
-  sessionStorage.setItem('ipb_user', JSON.stringify(currentUser));
+  const keepBox = document.getElementById('keep-signin');
+  persistUser(currentUser, keepBox ? keepBox.checked !== false : true);
   showApp();
 }
 
@@ -337,7 +370,10 @@ function toggleUserMenu() {
 }
 
 function signOut() {
-  sessionStorage.removeItem('ipb_user');
+  try {
+    localStorage.removeItem('ipb_user');
+    sessionStorage.removeItem('ipb_user');
+  } catch { }
   if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
   location.reload();
 }

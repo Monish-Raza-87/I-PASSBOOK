@@ -21,6 +21,10 @@ var CONFIG = {
   IR_REPO_INCIDENT_COL:   9,   // Column I  — "Date of Incident"
   IR_REPO_REPORTER_COL:  12,   // Column L  — "Who's Reporting? (Name & Contact)"
   IR_REPO_EMAIL_COL:      16,   // Column P  — "Email Address"
+  IR_REPO_INCIDENT_LOC_COL: 13, // Column M  — "Incident Location and Weather"
+  IR_REPO_EVIDENCE_N_COL:   14, // Column N  — "Evidence: Attach Files From The Incident"
+  IR_REPO_EVIDENCE_Q_COL:   17, // Column Q  — "Evidence: Attach Screenshot of UAV Forecast..."
+  IR_REPO_COMPANY_COL:      18, // Column R  — "Where Do You Work?"
 
   // The I-PASSBOOK App Data sheet ("I-Passbook App Repository") — APP_DATA tab
   // holds all saved section data. NOTE: the *deployed* backend is an older
@@ -35,6 +39,14 @@ var CONFIG = {
 
   ALLOWED_DOMAIN: 'indrones.com',
 
+  // Admins can manage users & assign per-section access (and bypass all
+  // permission checks). Must match the frontend ADMIN_EMAILS.
+  ADMIN_EMAILS: ['customer.relations@indrones.com', 'monish.raza@indrones.com'],
+
+  // Session lifetime (days). A server-issued session token lets the PWA stay
+  // signed in across reopens without repeated Google One-Tap pop-ups.
+  SESSION_DAYS: 30,
+
   // Google OAuth web client ID (same one the frontend uses for GIS sign-in).
   // Used server-side to verify the ID token's audience.
   GOOGLE_CLIENT_ID: '719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com',
@@ -46,25 +58,22 @@ var CONFIG = {
   LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 };
 
-// Authorized Customer Relations personnel — only these emails can edit restricted fields
-var AUTHORIZED_CR_EMAILS = ['monish.raza@indrones.com', 'ravi@indrones.com', 'adhik.nair@indrones.com'];
-
 // ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
-// ──────────────────────────────────────────────────────────────────────────────
-// AUTH — verify the caller's Google ID token
-// ──────────────────────────────────────────────────────────────────────────────
-// The web app runs "Execute as: Me" + access "Anyone", so the backend must
-// authenticate the caller itself. The frontend attaches a fresh Google ID
-// token (from GIS) to every request. We verify it against Google's tokeninfo
-// endpoint — checking audience (our client ID), email_verified, @indrones.com
-// domain, and expiry — and return the verified email. The email is read FROM
-// THE TOKEN, never from a client-supplied parameter, so the Indrones-only gate
-// can no longer be spoofed by passing a known email.
+// AUTH — verify the caller. Two credential forms are accepted:
+//   1) sessionToken — a server-issued, revocable, ~30-day session (the normal
+//      path for a reopened "keep me logged in" PWA — no Google pop-up needed).
+//   2) idToken — a fresh Google ID token (sign-in / reconnect / the login call).
+// Both resolve to the verified @indrones.com email, read from the credential
+// itself — never from a client-supplied parameter — so the Indrones-only gate
+// cannot be spoofed by passing a known email.
 function requireAuth(e) {
-  var token = (e.parameter.idToken || '').toString().trim();
-  return verifyIdToken(token); // returns verified email string, or null
+  var st = (e.parameter.sessionToken || '').toString().trim();
+  if (st) { var em = lookupSession(st); if (em) return em; }
+  var idt = (e.parameter.idToken || '').toString().trim();
+  if (idt) return verifyIdToken(idt);
+  return null;
 }
 
 function verifyIdToken(idToken) {
@@ -90,55 +99,315 @@ function verifyIdToken(idToken) {
 }
 
 function doGet(e) {
+  var action = e.parameter.action || '';
+  // login verifies its own idToken and issues a session (no prior auth needed).
+  if (action === 'login') return buildResponse(doLogin(e.parameter.idToken));
+  // getMyAccess needs identity but is valid even for users with no access yet.
+  if (action === 'getMyAccess') {
+    var email = requireAuth(e);
+    if (!email) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
+    return buildResponse(getMyAccess(email));
+  }
+
   var authEmail = requireAuth(e);
   if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
-  var action = e.parameter.action || '';
   var result;
-
   try {
     if      (action === 'listIRs')        result = listIRs();
-    else if (action === 'getPassbook')    result = getPassbook(e.parameter.irNumber);
+    else if (action === 'getPassbook')    result = getPassbook(e.parameter.irNumber, authEmail);
     else if (action === 'getAuditLog')    result = getAuditLog(e.parameter.irNumber);
     else if (action === 'listLegacyIRs')  result = listLegacyIRs();
+    else if (action === 'listACL')        result = listACL(authEmail);
     else                                  result = { status: 'error', message: 'Unknown action: ' + action };
   } catch (err) {
     result = { status: 'error', message: err.message };
   }
-
   return buildResponse(result);
 }
 
 function doPost(e) {
+  var params = e.parameter;
+  var action = params.action || '';
+  // login verifies its own idToken and issues a session (no prior auth needed).
+  // Accepted on POST as well as GET so the frontend can send the (long) idToken
+  // in the form body instead of the URL, avoiding URL-length limits.
+  if (action === 'login') return buildResponse(doLogin(params.idToken));
+  // logout revokes the session itself (handled before the auth gate).
+  if (action === 'logout') return buildResponse(doLogout(params.sessionToken));
+  // requestAccess needs identity but is valid for users with no access yet.
+  if (action === 'requestAccess') {
+    var em = requireAuth(e);
+    if (!em) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
+    return buildResponse(requestAccess(em, params));
+  }
+
   var authEmail = requireAuth(e);
   if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
   var result;
   try {
-    var params = e.parameter;
-    var action = params.action || '';
-
     if (action === 'saveSection') {
-      var fields      = JSON.parse(params.fields  || '{}');
-      var files       = JSON.parse(params.files   || '[]');
-      var irNumber    = params.irNumber;
-      var sectionId   = params.sectionId;
-      // savedBy is the VERIFIED email from the token — never a client-supplied
-      // value — so a non-CR user cannot impersonate a CR email to edit restricted
-      // Section A fields or forge the audit trail.
-      result = saveSection(irNumber, sectionId, fields, files, authEmail);
+      var fields    = JSON.parse(params.fields  || '{}');
+      var files     = JSON.parse(params.files   || '[]');
+      // savedBy is the VERIFIED email from the credential — never a client value.
+      result = saveSection(params.irNumber, params.sectionId, fields, files, authEmail);
     } else if (action === 'sendNudgeEmail') {
       result = sendNudgeEmail(params, authEmail);
+    } else if (action === 'saveACL') {
+      result = saveACL(params, authEmail);
+    } else if (action === 'decideRequest') {
+      result = decideRequest(params, authEmail);
     } else {
       result = { status: 'error', message: 'Unknown action: ' + action };
     }
   } catch (err) {
     result = { status: 'error', message: err.message };
   }
-
   return buildResponse(result);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ACTION: listIRs
+// SESSIONS — server-issued session tokens (so the PWA stays signed in without
+// repeated Google One-Tap pop-ups). Stored on the data sheet's SESSIONS tab.
+// ──────────────────────────────────────────────────────────────────────────────
+var SECTION_KEYS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+
+function getOrCreateSessionsTab(ss) {
+  var tab = ss.getSheetByName('SESSIONS');
+  if (!tab) {
+    tab = ss.insertSheet('SESSIONS');
+    tab.getRange(1, 1, 1, 5).setValues([['Session Token', 'Email', 'Created At', 'Expires At', 'Revoked']]);
+    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+// Verify a session token and return its email, or null if missing/expired/revoked.
+function lookupSession(token) {
+  if (!token) return null;
+  try {
+    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+    var tab = getOrCreateSessionsTab(ss);
+    var data = tab.getDataRange().getValues();
+    var now = new Date();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) !== token) continue;
+      if (String(data[i][4]).toLowerCase() === 'revoked') return null;
+      var exp = data[i][3] ? new Date(data[i][3]) : null;
+      if (exp && exp < now) return null;
+      return String(data[i][1]).toLowerCase().trim();
+    }
+    return null;
+  } catch (e) { return null; }
+}
+
+// Exchange a fresh Google ID token for a new session token (login).
+function doLogin(idToken) {
+  var email = verifyIdToken(idToken);
+  if (!email) return { status: 'error', message: 'Invalid or expired sign-in token.' };
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateSessionsTab(ss);
+  var token = Utilities.getUuid();
+  var now = new Date();
+  var exp = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
+  tab.appendRow([token, email, now, exp, '']);
+  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+}
+
+function doLogout(sessionToken) {
+  if (!sessionToken) return { status: 'ok' };
+  try {
+    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+    var tab = getOrCreateSessionsTab(ss);
+    var data = tab.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]) === sessionToken) { tab.getRange(i + 1, 5).setValue('revoked'); break; }
+    }
+  } catch (e) { /* non-fatal */ }
+  return { status: 'ok' };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ACCESS CONTROL — per-user, per-section permission levels.
+// Level hierarchy: '' (none) < 'view' < 'comment' < 'edit'.
+// Admins (CONFIG.ADMIN_EMAILS) bypass everything: full edit, view all, manage.
+// ──────────────────────────────────────────────────────────────────────────────
+function isAdminEmail(email) {
+  email = (email || '').toLowerCase().trim();
+  return CONFIG.ADMIN_EMAILS.map(function (a) { return a.toLowerCase(); }).indexOf(email) > -1;
+}
+
+function getOrCreateAclTab(ss) {
+  var tab = ss.getSheetByName('ACL');
+  if (!tab) {
+    var heads = ['Email'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By']);
+    tab = ss.insertSheet('ACL');
+    tab.getRange(1, 1, 1, heads.length).setValues([heads]);
+    tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+function getOrCreateRequestsTab(ss) {
+  var tab = ss.getSheetByName('ACCESS_REQUESTS');
+  if (!tab) {
+    var heads = ['Email', 'Name', 'Requested At', 'Status', 'Decided By', 'Decided At'];
+    tab = ss.insertSheet('ACCESS_REQUESTS');
+    tab.getRange(1, 1, 1, heads.length).setValues([heads]);
+    tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+// Resolve a user's role + per-section permissions.
+// role: 'admin' (full edit, bypass) | 'user' (ACL entry exists) | 'none' (no entry).
+function getEffectiveAccess(email) {
+  email = (email || '').toLowerCase().trim();
+  if (isAdminEmail(email)) {
+    var all = {};
+    SECTION_KEYS.forEach(function (s) { all[s] = 'edit'; });
+    return { role: 'admin', permissions: all };
+  }
+  try {
+    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+    var tab = getOrCreateAclTab(ss);
+    var data = tab.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).toLowerCase().trim() === email) {
+        var perms = {};
+        for (var j = 0; j < SECTION_KEYS.length; j++) perms[SECTION_KEYS[j]] = String(data[i][j + 1] || '').trim();
+        return { role: 'user', permissions: perms };
+      }
+    }
+  } catch (e) { /* fall through to none */ }
+  return { role: 'none', permissions: {} };
+}
+
+function canView(perms, sec)    { var v = perms && perms[sec]; return v === 'view' || v === 'comment' || v === 'edit'; }
+function canComment(perms, sec) { var v = perms && perms[sec]; return v === 'comment' || v === 'edit'; }
+function canEdit(perms, sec)    { return !!(perms && perms[sec] === 'edit'); }
+
+// GET getMyAccess — the caller's own role/permissions + whether they have a
+// pending access request. Used at boot to decide app vs request-access screen.
+function getMyAccess(email) {
+  email = (email || '').toLowerCase().trim();
+  var access = getEffectiveAccess(email);
+  var pending = false;
+  try {
+    var rt = getOrCreateRequestsTab(SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID));
+    var data = rt.getDataRange().getValues();
+    for (var i = 1; i < data.length; i++) {
+      if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending') { pending = true; break; }
+    }
+  } catch (e) { /* ignore */ }
+  return { status: 'ok', role: access.role, permissions: access.permissions, pendingRequest: pending };
+}
+
+// GET listACL (admin) — all users + their perms, plus pending requests.
+function listACL(authEmail) {
+  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var atab = getOrCreateAclTab(ss);
+  var rtab = getOrCreateRequestsTab(ss);
+  var adata = atab.getDataRange().getValues();
+  var users = [];
+  for (var i = 1; i < adata.length; i++) {
+    var email = String(adata[i][0] || '').trim();
+    if (!email) continue;
+    var perms = {};
+    for (var j = 0; j < SECTION_KEYS.length; j++) perms[SECTION_KEYS[j]] = String(adata[i][j + 1] || '').trim();
+    users.push({ email: email, permissions: perms });
+  }
+  var rdata = rtab.getDataRange().getValues();
+  var requests = [];
+  for (var k = 1; k < rdata.length; k++) {
+    if (String(rdata[k][3]) !== 'pending') continue;
+    requests.push({
+      email: String(rdata[k][0] || '').trim(),
+      name:  String(rdata[k][1] || '').trim(),
+      requestedAt: rdata[k][2] ? Utilities.formatDate(new Date(rdata[k][2]), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : ''
+    });
+  }
+  return { status: 'ok', users: users, requests: requests };
+}
+
+// POST saveACL (admin) — upsert or remove one user's per-section permissions.
+function saveACL(params, authEmail) {
+  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
+  var email = (params.email || '').toString().toLowerCase().trim();
+  if (!email) return { status: 'error', message: 'Email required.' };
+  var mode = (params.mode || 'upsert').toString();
+  var perms = {};
+  try { perms = JSON.parse(params.permissions || '{}'); } catch (e) { perms = {}; }
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateAclTab(ss);
+  var data = tab.getDataRange().getValues();
+  var ts  = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var rowIdx = -1;
+  for (var i = 1; i < data.length; i++) { if (String(data[i][0]).toLowerCase().trim() === email) { rowIdx = i; break; } }
+  if (mode === 'remove') {
+    if (rowIdx > 0) tab.deleteRow(rowIdx + 1);
+    return { status: 'ok', message: 'Removed ' + email };
+  }
+  var row = [email];
+  for (var j = 0; j < SECTION_KEYS.length; j++) {
+    var v = perms[SECTION_KEYS[j]];
+    row.push((v === 'view' || v === 'comment' || v === 'edit') ? v : '');
+  }
+  row.push(ts); row.push(authEmail);
+  if (rowIdx > 0) tab.getRange(rowIdx + 1, 1, 1, row.length).setValues([row]);
+  else tab.appendRow(row);
+  return { status: 'ok', message: 'Saved access for ' + email };
+}
+
+// POST requestAccess (any verified @indrones user) — record a pending request
+// and email the admins.
+function requestAccess(email, params) {
+  email = (email || '').toLowerCase().trim();
+  var name = (params.name || '').toString().trim();
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateRequestsTab(ss);
+  var data = tab.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending')
+      return { status: 'ok', message: 'Your access request is already pending.' };
+  }
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  tab.appendRow([email, name, ts, 'pending', '', '']);
+  try {
+    var subj = '[I-PASSBOOK] Access request from ' + email;
+    var body = (name ? name + '\n' : '') + email + ' requested access to I-PASSBOOK.\n\nApprove it from the app: avatar menu → User Access & Requests → Pending.';
+    CONFIG.ADMIN_EMAILS.forEach(function (a) { MailApp.sendEmail(a, subj, body, { name: 'I-PASSBOOK' }); });
+  } catch (e) { /* email is best-effort; the request row is enough */ }
+  return { status: 'ok', message: 'Access request sent to the admins.' };
+}
+
+// POST decideRequest (admin) — approve (optionally with initial perms) or reject.
+function decideRequest(params, authEmail) {
+  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
+  var email    = (params.email || '').toString().toLowerCase().trim();
+  var decision = (params.decision || '').toString();           // 'approve' | 'reject'
+  var perms = {};
+  try { perms = JSON.parse(params.permissions || '{}'); } catch (e) { perms = {}; }
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateRequestsTab(ss);
+  var data = tab.getDataRange().getValues();
+  var ts  = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending') {
+      tab.getRange(i + 1, 4).setValue(decision);
+      tab.getRange(i + 1, 5).setValue(authEmail);
+      tab.getRange(i + 1, 6).setValue(ts);
+      break;
+    }
+  }
+  if (decision === 'approve') {
+    saveACL({ email: email, permissions: JSON.stringify(perms), mode: 'upsert' }, authEmail);
+  }
+  return { status: 'ok', message: 'Request ' + decision + 'd.' };
+}
 // Reads Form Responses tab from IR Repository and returns IR list, latest first
 // ──────────────────────────────────────────────────────────────────────────────
 function listIRs() {
@@ -171,6 +440,13 @@ function listIRs() {
         spoc:          (row[CONFIG.IR_REPO_SPOC_COL - 1] || '').toString().trim(),
         initialStatus: (row[CONFIG.IR_REPO_STATUS_COL - 1] || '').toString().trim(),
         incidentDate:  (row[CONFIG.IR_REPO_INCIDENT_COL - 1] || '').toString().trim(),
+        // Section A auto-populated intake fields (read-only in the app, sourced
+        // from the customer form). N & Q are two separate evidence columns the
+        // frontend combines into a single "Evidence" field.
+        incidentLocationWeather: (row[CONFIG.IR_REPO_INCIDENT_LOC_COL - 1] || '').toString().trim(),
+        evidenceFormN: (row[CONFIG.IR_REPO_EVIDENCE_N_COL - 1] || '').toString().trim(),
+        evidenceFormQ: (row[CONFIG.IR_REPO_EVIDENCE_Q_COL - 1] || '').toString().trim(),
+        companyName:  (row[CONFIG.IR_REPO_COMPANY_COL - 1] || '').toString().trim(),
       };
     })
     .filter(function(r) { return r.irNumber !== ''; })
@@ -209,8 +485,15 @@ function getAllIRStatuses() {
 // ACTION: getPassbook
 // Returns all saved section data for a given IR number
 // ──────────────────────────────────────────────────────────────────────────────
-function getPassbook(irNumber) {
+function getPassbook(irNumber, authEmail) {
   if (!irNumber) throw new Error('irNumber is required.');
+
+  var access = getEffectiveAccess(authEmail);
+  // No-access users see nothing (defence in depth — the frontend keeps them on
+  // the request-access screen, but the backend never trusts that).
+  if (access.role === 'none') return { status: 'ok', sections: {} };
+
+  var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__ app stores
 
   var ss   = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
   var tab  = getOrCreateDataTab(ss);
@@ -218,12 +501,14 @@ function getPassbook(irNumber) {
 
   var sections = {};
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === irNumber) {
-      var secId  = data[i][1] || '';
-      var fields = {};
-      try { fields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
-      sections[secId] = fields;
-    }
+    if (data[i][0] !== irNumber) continue;
+    var secId = String(data[i][1] || '');
+    // Hide real sections the caller can't view. Sentinel app stores (comments,
+    // dropdown config) are shared app data — visible to any user with access.
+    if (!isSentinel && access.role !== 'admin' && !canView(access.permissions, secId)) continue;
+    var fields = {};
+    try { fields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
+    sections[secId] = fields;
   }
 
   return { status: 'ok', sections: sections };
@@ -235,6 +520,16 @@ function getPassbook(irNumber) {
 // ──────────────────────────────────────────────────────────────────────────────
 function saveSection(irNumber, sectionId, fields, files, savedBy) {
   if (!irNumber || !sectionId) throw new Error('irNumber and sectionId are required.');
+
+  var access = getEffectiveAccess(savedBy);
+  var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__
+  // Real sections require edit permission (admins bypass). Sentinel app stores
+  // (comments read-marks, dropdown config) are writable by any authenticated
+  // user with access — the comment UI itself is gated client-side by canComment.
+  if (!isSentinel && access.role === 'none')
+    throw new Error('Forbidden: you do not have access to this IR.');
+  if (!isSentinel && access.role !== 'admin' && !canEdit(access.permissions, sectionId))
+    throw new Error('Forbidden: you do not have edit access to ' + sectionId + '.');
 
   // 1. Handle file uploads first — create IR folder / Section subfolder
   var fileLinks = {};
@@ -269,15 +564,14 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     }
   }
 
-  // 2b. Protect restricted fields — entire Section A is CR-only; other sections are open
-  var restrictedFields = ['a_dateRaised', 'a_crmOwner', 'a_customerName', 'a_contactEmail', 'a_contactPhone', 'a_issueType', 'a_issueDesc', 'a_activityLog', 'a_overallStatus'];
-  if (AUTHORIZED_CR_EMAILS.indexOf(savedBy.toLowerCase().trim()) === -1) {
-    restrictedFields.forEach(function(key) {
-      if (existingFields[key] !== undefined) {
-        fields[key] = existingFields[key]; // Preserve existing value
-      } else {
-        delete fields[key]; // Remove if it didn't exist before
-      }
+  // 2b. Section A intake fields are auto-populated from the customer form and
+  // are editable by NO ONE. Strip any of them from the incoming payload so a
+  // crafted save can't write a divergent copy into APP_DATA. (They're displayed
+  // live from the IR Repository, not from here.)
+  if (sectionId === 'sec-a') {
+    ['a_irNumber','a_droneId','a_dateRaised','a_issueType','a_issueDesc','a_customerName',
+     'a_contactEmail','a_incidentLocationWeather','a_evidence','a_companyName'].forEach(function(k) {
+      delete fields[k];
     });
   }
 
@@ -308,8 +602,20 @@ function sendNudgeEmail(params, authEmail) {
   var irNumber = params.irNumber || '';
   var message  = params.message || '';
   var context  = params.context || '';
+  var sectionId = (params.sectionId || '').toString();
   // Sender is the verified caller — a client can't spoof the reply-to address.
   var from     = authEmail || '';
+
+  // Comment permission gate. Admins bypass. Otherwise the caller must have
+  // 'comment'/'edit' on the comment's target section; an IR-scope comment (no
+  // sectionId) requires comment access on at least one section.
+  var access = getEffectiveAccess(authEmail);
+  var allowed = access.role === 'admin';
+  if (!allowed) {
+    if (sectionId) allowed = canComment(access.permissions, sectionId);
+    else allowed = SECTION_KEYS.some(function (s) { return canComment(access.permissions, s); });
+  }
+  if (!allowed) throw new Error('Forbidden: you do not have comment access.');
 
   // Accept "Name <email>" or a bare email; extract the bare address.
   var angleMatch = to.match(/<([^>]+)>/);

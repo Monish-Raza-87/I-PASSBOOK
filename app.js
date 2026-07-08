@@ -38,18 +38,17 @@ const CONFIG = {
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
 
-// ─── GAS CALL AUTH (verified Google ID token) ────────────────────────────────
-// Every Apps Script backend call must carry a fresh, verified Google ID token.
-// The backend now validates that token (signature via Google tokeninfo, expiry,
-// audience = our client ID, @indrones.com domain) and reads the caller's email
-// FROM THE TOKEN — not from a parameter. This closes the spoofing hole the old
-// email-parameter gate had (anyone who knew the GAS URL + an @indrones.com
-// email could read/write all data).
+// ─── GAS CALL AUTH (server-issued session token) ──────────────────────────────
+// One Google sign-in verifies the caller's identity; the backend then mints a
+// revocable, app-scoped SESSION TOKEN (30-day) that the frontend persists. Every
+// backend call carries that session token — so a reopened "keep me logged in"
+// PWA just works, with no Google sign-in pop-up. The Google ID token itself is
+// NEVER persisted; only the short-lived in-memory one (during sign-in/reconnect)
+// is sent on the `login` call to obtain the session.
 //
-// `currentUser.token` is a GIS ID token (~1h lifetime). We keep one warm in
-// memory: at boot a silent Google One-Tap (auto_select) re-issues one for
-// returning users, and the interceptor refreshes + retries once if the backend
-// reports the token expired/stale. The token is NEVER persisted to storage.
+// The backend reads the caller's email FROM the credential (session token or ID
+// token), never from a client param — so the @indrones-only gate can't be
+// spoofed. See [[auth-token-gate]].
 let _gisReady = null;
 function loadGis() {
   if (_gisReady) return _gisReady;
@@ -59,39 +58,58 @@ function loadGis() {
     s.src = 'https://accounts.google.com/gsi/client';
     s.async = true;
     s.onload = () => resolve();
-    s.onerror = () => resolve(); // resolve anyway; refresh fails gracefully
+    s.onerror = () => resolve(); // resolve anyway; reconnect fails gracefully
     document.head.appendChild(s);
   });
   return _gisReady;
 }
 
-let _refreshing = null;
-function refreshIdToken() {
-  if (_refreshing) return _refreshing;
-  _refreshing = new Promise((resolve, reject) => {
-    loadGis().then(() => {
-      if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) return reject(new Error('gis-unavailable'));
-      let done = false;
-      const finish = (ok, val) => { if (done) return; done = true; _refreshing = null; ok ? resolve(val) : reject(val); };
-      const timer = setTimeout(() => finish(false, new Error('timeout')), 9000);
-      try {
-        google.accounts.id.initialize({
-          client_id: CONFIG.GOOGLE_CLIENT_ID,
-          callback: (resp) => {
-            if (resp && resp.credential) { currentUser.token = resp.credential; finish(true, resp.credential); }
-            else finish(false, new Error('no-credential'));
-          },
-        });
-        google.accounts.id.prompt({ auto_select: true }); // silent for returning users
-      } catch (e) { clearTimeout(timer); finish(false, e); }
-    });
-  });
-  return _refreshing;
+// Persist/restore the session token (localStorage only — "keep me logged in").
+const SESSION_KEY = 'ipb_session';
+function persistSession(token) {
+  try { if (token) localStorage.setItem(SESSION_KEY, token); else localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+}
+function loadSession() {
+  try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
 }
 
-function ensureAuthToken() {
-  if (currentUser && currentUser.token) return Promise.resolve(currentUser.token);
-  return refreshIdToken();
+// Exchange a fresh Google ID token for a server session token + access payload.
+// Called right after sign-in and after an explicit Reconnect. Non-blocking: the
+// app is already usable (in-memory ID token keeps the old backend happy during
+// the redeploy window); the session just makes it survive a reopen.
+function loginBackend(idToken) {
+  if (!idToken) return Promise.resolve(null);
+  const fd = new FormData();
+  fd.append('action', 'login');
+  fd.append('idToken', idToken);
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && data.status === 'ok' && data.sessionToken) {
+        currentUser.sessionToken = data.sessionToken;
+        currentUser.access = { role: data.role, permissions: data.permissions, pendingRequest: !!data.pendingRequest };
+        persistSession(data.sessionToken);
+        return data;
+      }
+      return null;
+    })
+    .catch(() => null);
+}
+
+// Refresh the caller's role/permissions from the backend (boot + after access
+// changes). Best-effort — a failure leaves the previous access in place.
+function refreshMyAccess() {
+  if (!currentUser || (!currentUser.sessionToken && !currentUser.token)) return Promise.resolve(null);
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getMyAccess';
+  return fetch(url).then(r => r.ok ? r.json() : null)
+    .then(data => {
+      if (data && data.status === 'ok') {
+        currentUser.access = { role: data.role, permissions: data.permissions, pendingRequest: !!data.pendingRequest };
+        return data;
+      }
+      return null;
+    })
+    .catch(() => null);
 }
 
 const _origFetch = window.fetch.bind(window);
@@ -101,78 +119,53 @@ window.fetch = function (input, init) {
     const isGAS = url.indexOf(CONFIG.GAS_URL) === 0;
     if (!isGAS) return _origFetch(input, init);
 
-    // Dev bypass (localhost + ?dev=1): no real Google account to mint a token,
-    // so backend calls can't be authorized and fall back to demo data. This is
-    // intentional — real testing happens signed-in on the live site.
+    // Dev bypass (localhost + ?dev=1): no real Google account, so backend calls
+    // aren't authorized and fall back to demo data. Intentional — real testing
+    // happens signed-in on the live site.
     if (shouldUseDevAuthBypass()) return _origFetch(input, init);
 
-    const sep = url.indexOf('?') >= 0 ? '&' : '?';
-    const emailQ = currentUser && currentUser.email ? ('userEmail=' + encodeURIComponent(currentUser.email)) : '';
-    // buildInput(null) → userEmail only (works with the old email-gate backend
-    // during the redeploy window). buildInput(token) → idToken + userEmail.
-    const buildInput = (tok) => url + sep + (tok ? ('idToken=' + encodeURIComponent(tok) + (emailQ ? '&' : '')) : '') + emailQ;
+    // Credentials to attach. sessionToken is the normal path (works on reopen).
+    // idToken is only present in memory right after sign-in/reconnect; sending
+    // it too keeps calls working during the backend redeploy window (old gate
+    // only understands idToken). userEmail is for logging only.
+    const sessionToken = (currentUser && currentUser.sessionToken) || null;
+    const idToken = (currentUser && currentUser.token) || null;
+    const email = (currentUser && currentUser.email) || '';
 
     const isFormData = init && init.body && init.body instanceof FormData;
     const origBody = isFormData ? init.body : null;
-    const buildInit = (tok) => {
-      if (isFormData) {
-        // FormData() only accepts an HTMLFormElement, so copy entries by hand.
-        const fd = new FormData();
-        for (const [k, v] of origBody.entries()) fd.append(k, v);
-        if (tok) fd.append('idToken', tok);
-        if (emailQ) fd.append('userEmail', currentUser.email);
-        return Object.assign({}, init, { body: fd });
-      }
-      return init;
+
+    const appendAuth = (fd) => {
+      if (sessionToken) fd.append('sessionToken', sessionToken);
+      if (idToken) fd.append('idToken', idToken);
+      if (email) fd.append('userEmail', email);
     };
 
-    // Use the in-memory token if we have one. We deliberately do NOT auto-prompt
-    // here: calling google.accounts.id.prompt() on every backend call (and again
-    // on retry) is what caused the repeated Google sign-in pop-ups. If there's
-    // no token (e.g. a reopened "keep me logged in" session, or the ~1h token
-    // expired), the call goes out without one and the backend's gate returns
-    // Unauthorized. We then surface a SINGLE non-blocking hint to Reconnect
-    // (avatar menu → Reconnect to Google) instead of a pop-up storm. The token
-    // gate still fully protects fresh sign-ins (token lives in memory).
-    const token = (currentUser && currentUser.token) || null;
-
-    input = isFormData ? url : buildInput(token);
-    init = buildInit(token);
-    const resp = await _origFetch(input, init);
-
-    if (resp && resp.ok) {
-      try {
-        const data = await resp.clone().json();
-        if (data && data.status === 'error' && (data.message || '').toLowerCase().indexOf('unauthorized') === 0 && !_authToastShown) {
-          _authToastShown = true; // one hint per session, not per call
-          showToast('Session expired — tap avatar → Reconnect to Google');
-        }
-      } catch { /* response wasn't JSON; ignore */ }
+    if (isFormData) {
+      // FormData() only accepts an HTMLFormElement, so copy entries by hand.
+      const fd = new FormData();
+      for (const [k, v] of origBody.entries()) fd.append(k, v);
+      appendAuth(fd);
+      return _origFetch(url, Object.assign({}, init, { body: fd }));
     }
-    return resp;
+
+    // GET-style: append creds to the URL.
+    const sep = url.indexOf('?') >= 0 ? '&' : '?';
+    let q = '';
+    if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
+    if (idToken) q += (q ? '&' : '') + 'idToken=' + encodeURIComponent(idToken);
+    if (email) q += (q ? '&' : '') + 'userEmail=' + encodeURIComponent(email);
+    return _origFetch(url + (q ? sep + q : ''), init);
   })();
 };
-let _authToastShown = false;
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook
 let legacyMap   = {};          // irNumber -> { label, gid, embedUrl, openUrl } for legacy IRs (≤~IR441)
 
-// ─── AUTHORIZATION ─────────────────────────────────────────────────────────────
-const AUTHORIZED_CR_EMAILS = [
-  'monish.raza@indrones.com',
-  'ravi@indrones.com',
-  'adhik.nair@indrones.com',
-];
-
-function isAuthorizedCR() {
-  return currentUser?.email &&
-         AUTHORIZED_CR_EMAILS.includes(currentUser.email.toLowerCase().trim());
-}
-
-// ─── ADMIN (config editors) ───────────────────────────────────────────────────
-// Admins may customize Section B inward dropdowns and Section C inspection
-// points / result options.
+// ─── ADMIN (config editors + access managers) ─────────────────────────────────
+// Admins manage users & per-section access, and bypass every permission check.
+// Must match backend CONFIG.ADMIN_EMAILS.
 const ADMIN_EMAILS = [
   'monish.raza@indrones.com',
   'customer.relations@indrones.com',
@@ -187,6 +180,25 @@ function isAdmin() {
 }
 // Kept as an alias so existing Section B code reads naturally.
 const isInwardAdmin = isAdmin;
+
+// ─── ACCESS CONTROL (per-section view / comment / edit) ───────────────────────
+// `currentUser.access` is populated by loginBackend / refreshMyAccess:
+//   { role: 'admin'|'user'|'none', permissions: { 'sec-a':'edit', ... }, pendingRequest }
+// During the backend redeploy window (or a transient getMyAccess failure) access
+// may be undefined — we fall back to a permissive profile so the app keeps
+// working exactly as it did before ACLs existed. The backend enforces
+// independently once redeployed, so this frontend leniency is safe in transition.
+const SECTION_IDS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+function myAccess() {
+  if (currentUser && currentUser.access) return currentUser.access;
+  // Permissive fallback: treat as a user with edit on every section.
+  const all = {};
+  SECTION_IDS.forEach(s => { all[s] = 'edit'; });
+  return { role: isAdmin() ? 'admin' : 'user', permissions: all, pendingRequest: false, __fallback: true };
+}
+function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
+function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'comment' || v === 'edit'; }
+function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 
 // The 11 particulars from the IDS master Inward Checklist.
 // `options` (a key into INWARD_OPTIONS_DEFAULTS) marks particulars whose
@@ -301,7 +313,13 @@ window.addEventListener('load', () => {
       const stored = loadStoredUser();
       if (stored) {
         currentUser = stored;
+        // Restore the server session token so backend calls are authorized
+        // without another Google sign-in pop-up.
+        currentUser.sessionToken = loadSession();
         showApp();
+        // Refresh role/permissions from the backend (drives access gating +
+        // request-access screen). Best-effort; gating has a safe fallback.
+        refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
         persistUser(currentUser, false); // dev bypass: this tab only
@@ -404,6 +422,9 @@ function handleCredential(response) {
   const keepBox = document.getElementById('keep-signin');
   persistUser(currentUser, keepBox ? keepBox.checked !== false : true);
   showApp();
+  // Mint a server session token so the app stays signed in across reopens
+  // (non-blocking — the in-memory ID token keeps things working meanwhile).
+  loginBackend(response.credential).then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
 }
 
 function parseJwt(token) {
@@ -446,6 +467,250 @@ function showApp() {
   // Bell toggle
   const bell = document.getElementById('nudge-bell');
   if (bell) bell.addEventListener('click', toggleNudgePanel);
+
+  // Wire the request-access screen buttons (shown later by applyAccessGating
+  // if the signed-in user has no access yet).
+  const raBtn = document.getElementById('request-access-btn');
+  if (raBtn) raBtn.addEventListener('click', requestAccessAction);
+  const raOut = document.getElementById('request-access-signout');
+  if (raOut) raOut.addEventListener('click', signOut);
+}
+
+// ─── ACCESS GATING (boot-level: app vs request-access screen) ────────────────
+// Called after login / refreshMyAccess. A signed-in user with role 'none'
+// (and not an admin) gets the request-access screen instead of the IR index.
+function applyAccessGating() {
+  const ra = document.getElementById('request-access');
+  if (!ra) return;
+  const a = myAccess();
+  const locked = a.role === 'none' && !isAdmin() && !a.__fallback;
+  if (locked) {
+    ra.style.display = 'flex';
+    indexView.style.display = 'none';
+    detailView.style.display = 'none';
+    const emailEl = document.getElementById('request-access-email');
+    if (emailEl) emailEl.textContent = currentUser?.email || '';
+    const pendEl = document.getElementById('request-access-pending');
+    if (pendEl) pendEl.style.display = a.pendingRequest ? 'block' : 'none';
+    const btn = document.getElementById('request-access-btn');
+    if (btn) { btn.disabled = !!a.pendingRequest; btn.textContent = a.pendingRequest ? 'Access requested' : 'Request access'; }
+    return;
+  }
+  // Has access (or fallback during transition) → hide request-access screen.
+  ra.style.display = 'none';
+  if (detailView.style.display === 'flex') {
+    applySectionAccessGating();   // a passbook is open — re-gate with fresh access
+  } else {
+    showIndex();
+  }
+}
+
+// Submit an access request. The backend records it as pending + emails admins.
+function requestAccessAction() {
+  const fd = new FormData();
+  fd.append('action', 'requestAccess');
+  fd.append('name', currentUser?.name || '');
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.status === 'ok') {
+        if (currentUser.access) currentUser.access.pendingRequest = true;
+        applyAccessGating();
+        showToast('Access requested — an admin will review it');
+      } else {
+        showToast('Could not request access: ' + ((data && data.message) || 'backend error'));
+      }
+    })
+    .catch(() => showToast('Could not reach the backend — try again'));
+}
+
+// ─── ADMIN: User Access & Requests modal ─────────────────────────────────────
+const ACCESS_LEVELS = ['', 'view', 'comment', 'edit'];
+const ACCESS_LABEL  = { '': 'None', 'view': 'View', 'comment': 'Comment', 'edit': 'Edit' };
+const SECTION_LABELS = { 'sec-a':'A','sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G','sec-h':'H','sec-i':'I' };
+
+function openAccessModal() {
+  if (!isAdmin()) { showToast('Admins only'); return; }
+  let modal = document.getElementById('access-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'access-modal';
+  modal.innerHTML = `
+    <div class="access-card">
+      <div class="inward-options-head">
+        <div class="inward-options-title">👥 User Access &amp; Requests</div>
+        <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
+      </div>
+      <div class="access-body">
+        <div class="access-section">
+          <h3>Pending requests</h3>
+          <div id="access-requests"><div class="access-loading">Loading…</div></div>
+        </div>
+        <div class="access-section">
+          <h3>Users &amp; permissions</h3>
+          <p class="access-hint">Set each section to None / View / Comment / Edit per user. Admins (customer.relations@ / monish.raza@) always have full edit.</p>
+          <div class="access-add-row">
+            <input type="email" id="access-new-email" class="form-input" placeholder="add user email @indrones.com" />
+            <button type="button" class="btn" id="access-add-btn">+ Add</button>
+          </div>
+          <div id="access-users"><div class="access-loading">Loading…</div></div>
+          <button type="button" class="btn" id="access-save-all" style="margin-top:0.75rem;">💾 Save all changes</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
+  document.getElementById('access-add-btn').addEventListener('click', addAccessUser);
+  document.getElementById('access-save-all').addEventListener('click', saveAllAccess);
+  loadAccessData();
+}
+function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
+
+let accessCache = { users: [], requests: [] };
+function loadAccessData() {
+  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listACL')
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.status === 'ok') {
+        accessCache = { users: data.users || [], requests: data.requests || [] };
+        renderAccessRequests();
+        renderAccessUsers();
+      } else {
+        document.getElementById('access-requests').innerHTML = '<div class="access-error">Could not load — is the backend redeployed?</div>';
+        document.getElementById('access-users').innerHTML = '';
+      }
+    })
+    .catch(() => {
+      document.getElementById('access-requests').innerHTML = '<div class="access-error">Could not reach the backend.</div>';
+      document.getElementById('access-users').innerHTML = '';
+    });
+}
+
+function renderAccessRequests() {
+  const el = document.getElementById('access-requests');
+  const reqs = accessCache.requests || [];
+  if (!reqs.length) { el.innerHTML = '<div class="access-empty">No pending requests.</div>'; return; }
+  el.innerHTML = reqs.map(r => `
+    <div class="access-request-row">
+      <div><div class="access-req-name">${escHtml(r.name || '—')}</div><div class="access-req-email">${escHtml(r.email)}</div><div class="access-req-time">${escHtml(r.requestedAt || '')}</div></div>
+      <div class="access-req-actions">
+        <button type="button" class="btn btn-sm" onclick="approveRequest('${escHtml(r.email)}')">Approve</button>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="rejectRequest('${escHtml(r.email)}')">Reject</button>
+      </div>
+    </div>`).join('');
+}
+
+function renderAccessUsers() {
+  const el = document.getElementById('access-users');
+  const users = accessCache.users || [];
+  const colHead = SECTION_IDS.map(s => `<th title="${escHtml(SECTIONS[s]?.title || s)}">${SECTION_LABELS[s]}</th>`).join('');
+  const rows = users.map((u, idx) => {
+    const cells = SECTION_IDS.map(s => {
+      const v = (u.permissions && u.permissions[s]) || '';
+      const opts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
+      return `<td><select class="access-cell" data-row="${idx}" data-sec="${s}">${opts}</select></td>`;
+    }).join('');
+    return `<tr class="access-user-row">
+      <td class="access-email-cell">${escHtml(u.email)}</td>
+      ${cells}
+      <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button></td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = users.length ? `
+    <div class="access-table-wrap"><table class="access-table">
+      <thead><tr><th>User</th>${colHead}<th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : '<div class="access-empty">No users yet — add one above.</div>';
+}
+
+// Read the current dropdown selections for a row from the DOM (captures the
+// admin's edits before saving).
+function readRowPermsFromDom(idx) {
+  const perms = {};
+  SECTION_IDS.forEach(s => {
+    const sel = document.querySelector(`.access-cell[data-row="${idx}"][data-sec="${s}"]`);
+    perms[s] = sel ? sel.value : '';
+  });
+  return perms;
+}
+
+function saveAccessRow(email, perms) {
+  const fd = new FormData();
+  fd.append('action', 'saveACL');
+  fd.append('email', email);
+  fd.append('permissions', JSON.stringify(perms));
+  fd.append('mode', 'upsert');
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json());
+}
+
+function addAccessUser() {
+  const inp = document.getElementById('access-new-email');
+  const email = (inp?.value || '').trim().toLowerCase();
+  if (!email.endsWith('@' + CONFIG.ALLOWED_DOMAIN)) { showToast('Enter a valid @' + CONFIG.ALLOWED_DOMAIN + ' email'); return; }
+  if (accessCache.users.some(u => u.email === email)) { showToast('That user is already listed'); return; }
+  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = ''; });
+  accessCache.users.push({ email, permissions: perms });
+  inp.value = '';
+  renderAccessUsers();
+  saveAccessRow(email, perms).then(d => {
+    showToast(d && d.status === 'ok' ? 'Added ' + email + ' (no access — set permissions)' : 'Add failed: ' + ((d && d.message) || 'error'));
+    loadAccessData();
+  });
+}
+
+function removeAccessUser(idx) {
+  const u = accessCache.users[idx];
+  if (!u) return;
+  if (!confirm('Remove access for ' + u.email + '?')) return;
+  const fd = new FormData();
+  fd.append('action', 'saveACL');
+  fd.append('email', u.email);
+  fd.append('mode', 'remove');
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(() => { showToast('Removed ' + u.email); loadAccessData(); });
+}
+
+function saveAllAccess() {
+  const users = accessCache.users || [];
+  let done = 0, failed = 0;
+  const total = users.length;
+  if (!total) { showToast('Nothing to save'); return; }
+  const btn = document.getElementById('access-save-all');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  Promise.all(users.map((u, idx) => saveAccessRow(u.email, readRowPermsFromDom(idx))
+    .then(d => { if (d && d.status === 'ok') done++; else failed++; })
+    .catch(() => failed++)
+  )).then(() => {
+    btn.disabled = false; btn.textContent = '💾 Save all changes';
+    showToast(failed ? `Saved ${done}, ${failed} failed` : `Saved access for ${done} user${done === 1 ? '' : 's'}`);
+    loadAccessData();
+  });
+}
+
+function approveRequest(email) {
+  // Approve with default View on every section — the admin can fine-tune in the
+  // users table below. Keeps the request flow one click.
+  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = 'view'; });
+  const fd = new FormData();
+  fd.append('action', 'decideRequest');
+  fd.append('email', email);
+  fd.append('decision', 'approve');
+  fd.append('permissions', JSON.stringify(perms));
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
+    showToast(d && d.status === 'ok' ? `Approved ${email} — default View access. Adjust below.` : 'Approve failed: ' + ((d && d.message) || 'error'));
+    loadAccessData();
+  });
+}
+function rejectRequest(email) {
+  if (!confirm('Reject access request from ' + email + '?')) return;
+  const fd = new FormData();
+  fd.append('action', 'decideRequest');
+  fd.append('email', email);
+  fd.append('decision', 'reject');
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
+    showToast(d && d.status === 'ok' ? `Rejected ${email}` : 'Reject failed: ' + ((d && d.message) || 'error'));
+    loadAccessData();
+  });
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -457,12 +722,15 @@ function createUserMenu() {
     menu.innerHTML = `
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
+      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access &amp; Requests</button>' : ''}
       <button class="signout-btn" id="reconnect-btn">⟳ Reconnect to Google</button>
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
     document.getElementById('reconnect-btn').addEventListener('click', () => { menu.style.display = 'none'; reconnectGoogle(); });
     document.getElementById('signout-btn').addEventListener('click', signOut);
+    const adminBtn = document.getElementById('access-admin-btn');
+    if (adminBtn) adminBtn.addEventListener('click', () => { menu.style.display = 'none'; openAccessModal(); });
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== userAvatar) menu.style.display = 'none';
     });
@@ -476,8 +744,19 @@ function toggleUserMenu() {
 }
 
 function signOut() {
+  // Revoke the server session (best-effort), then clear local state.
+  const st = currentUser && currentUser.sessionToken;
+  if (st) {
+    try {
+      const fd = new FormData();
+      fd.append('action', 'logout');
+      fd.append('sessionToken', st);
+      fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
+    } catch { /* non-fatal */ }
+  }
   try {
     localStorage.removeItem('ipb_user');
+    localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');
   } catch { }
   if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
@@ -513,6 +792,11 @@ function reconnectGoogle() {
               if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
             } catch { /* keep existing */ }
             showToast('✓ Reconnected to Google — saves enabled');
+            // Re-mint the server session with the fresh ID token.
+            loginBackend(resp.credential).then(d => {
+              if (d) showToast('✓ Session restored');
+              if (typeof applyAccessGating === 'function') applyAccessGating();
+            });
           } else {
             showToast('Reconnect cancelled — saves need a Google sign-in');
           }
@@ -611,6 +895,11 @@ async function fetchIRsFromSheet() {
     uas:        col('Drone Serial No'),
     reportedBy: col("Who's Reporting"),
     email:      col('Email Address'),
+    // Section A intake fields (auto-populated, read-only in the app):
+    incidentLoc: col('Incident Location and Weather'),
+    evidenceN:   col('Evidence: Attach Files From The Incident'),
+    evidenceQ:   col('Evidence: Attach Screenshot of UAV Forecast'),
+    company:     col('Where Do You Work'),
   };
   const cell = (row, i) => (i >= 0 && row[i] != null ? row[i].trim() : '');
 
@@ -638,6 +927,11 @@ async function fetchIRsFromSheet() {
       spoc:          cell(row, C.spoc),
       initialStatus: stat,
       incidentDate:  toISODate(inc),
+      // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
+      incidentLocationWeather: cell(row, C.incidentLoc),
+      evidenceFormN:            cell(row, C.evidenceN),
+      evidenceFormQ:            cell(row, C.evidenceQ),
+      companyName:              cell(row, C.company),
     });
   }
   return records.reverse();   // latest first
@@ -911,17 +1205,23 @@ const SECTIONS = {
   'sec-a': {
     title: 'Section A — Preliminary Details & Activity Log',
     fields: [
-      { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     placeholder: 'e.g. IR409',      readonly: true },
-      { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     placeholder: 'e.g. S25P014',    readonly: true },
-      { id: 'a_dateRaised',    label: 'Date of Incident',             type: 'date',     restricted: true },
-      { id: 'a_crmOwner',      label: 'Customer Relations Manager',    type: 'text',     placeholder: 'Name of CRM person', restricted: true },
-      { id: 'a_customerName',  label: 'Customer / Client Name',       type: 'text',     placeholder: 'Organisation or person', restricted: true },
-      { id: 'a_contactEmail',  label: 'Customer Email',               type: 'email',    placeholder: 'customer@example.com', restricted: true },
-      { id: 'a_contactPhone',  label: 'Customer Phone',               type: 'tel',      placeholder: '+91 XXXXX XXXXX', restricted: true },
-      { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     placeholder: 'e.g. Hardware Damage, Software Issue...', restricted: true },
-      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', placeholder: 'Describe the problem in detail...', restricted: true },
-      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',      type: 'activityTable', restricted: true },
-      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'], restricted: true },
+      // ── Locked intake fields: auto-populated from the customer IR form,
+      //    read-only for EVERYONE (no one edits these — they're the form's record).
+      { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     readonly: true, locked: true },
+      { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     readonly: true, locked: true },
+      { id: 'a_dateRaised',    label: 'Date of Incident',             type: 'date',     readonly: true, locked: true },
+      { id: 'a_companyName',   label: 'Company Name',                type: 'text',     readonly: true, locked: true },
+      { id: 'a_customerName',  label: 'Respondant Name',             type: 'text',     readonly: true, locked: true },
+      { id: 'a_contactEmail',  label: 'Respondant Email',            type: 'email',    readonly: true, locked: true },
+      { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     readonly: true, locked: true },
+      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', readonly: true, locked: true },
+      { id: 'a_incidentLocationWeather', label: 'Incident Location and Weather', type: 'textarea', readonly: true, locked: true },
+      { id: 'a_evidence',      label: 'Evidence (from customer form)', type: 'readonlyLinks', locked: true },
+      // ── Editable (governed by Section A edit permission): CRM fills these.
+      { id: 'a_crmOwner',      label: 'Customer Relations Manager',  type: 'text',     placeholder: 'Name of CRM person' },
+      { id: 'a_contactPhone',  label: 'Customer Phone',              type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
+      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',     type: 'activityTable' },
+      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'] },
     ]
   },
   'sec-b': {
@@ -1029,7 +1329,7 @@ function buildSectionForms(irNumber) {
   Object.entries(SECTIONS).forEach(([sectionId, section]) => {
     const container = document.getElementById(sectionId + '-form') || document.getElementById(sectionId).querySelector('div');
     if (!container) return;
-    container.innerHTML = section.fields.map(f => buildField(f, irNumber)).join('');
+    container.innerHTML = section.fields.map(f => buildField(f, irNumber, sectionId)).join('');
     // Wire up file inputs for live preview
     container.querySelectorAll('input[type=file]').forEach(inp => {
       inp.addEventListener('change', handleFilePreview);
@@ -1069,9 +1369,74 @@ function buildSectionForms(irNumber) {
   document.querySelectorAll('.url-field-wrapper input[type="url"]').forEach(inp => {
     if (inp.value) updateUrlLink(inp.id);
   });
+
+  // Apply per-section access gating (tab/pane visibility, Save/comment buttons,
+  // input enabling). Runs after every build so it reflects current access.
+  applySectionAccessGating();
 }
 
-function buildField(field, irNumber) {
+// Gate the open passbook by the caller's per-section permissions.
+//  - !canView   → hide the tab and its pane entirely.
+//  - canView only → keep the pane visible but disable every input (no edits,
+//                  no signature, no add-row) so a view-only user can't type
+//                  unsavable values. Save buttons are disabled.
+//  - !canComment → hide the 💬 section/field comment buttons.
+function applySectionAccessGating() {
+  SECTION_IDS.forEach(secId => {
+    const tab = document.querySelector(`.tab[data-section="${secId}"]`);
+    const pane = document.getElementById(secId);
+    if (!pane) return;
+    const view = canViewSection(secId);
+    const edit = canEditSection(secId);
+    const comment = canCommentSection(secId);
+
+    // Tab + pane visibility
+    if (tab) tab.style.display = view ? '' : 'none';
+    // If the hidden pane is the currently-active tab, fall back to the first
+    // visible one so the user never lands on a blank hidden section.
+    if (!view && tab && tab.classList.contains('active')) {
+      tab.classList.remove('active');
+      pane.classList.remove('active');
+      const firstVisible = document.querySelector('.tab:not([style*="display: none"])');
+      if (firstVisible) { firstVisible.classList.add('active'); const fp = document.getElementById(firstVisible.dataset.section); if (fp) fp.classList.add('active'); }
+    }
+
+    // Save buttons (top + bottom) + D PDF download
+    ['save-' + secId, 'save-' + secId + '-top'].forEach(bid => {
+      const b = document.getElementById(bid);
+      if (!b) return;
+      b.disabled = !edit;
+      b.style.opacity = edit ? '' : '0.5';
+      b.style.cursor = edit ? '' : 'not-allowed';
+      b.title = edit ? '' : 'You have view-only access to this section';
+    });
+
+    // View-only → disable every editable control in the pane (locked intake
+    // fields are already readonly; this catches the editable ones).
+    if (view && !edit) {
+      pane.querySelectorAll('input, textarea, select, button').forEach(el => {
+        if (el.id === 'nudge-bell' || el.classList.contains('sec-nudge-btn')) return;
+        if (el.type === 'file') { el.disabled = true; return; }
+        // Don't disable the section's comment button if the user can comment.
+        if (el.classList.contains('field-nudge-btn') && comment) return;
+        if (el.classList.contains('btn-add-row') || el.classList.contains('btn-esign') ||
+            el.classList.contains('btn-add-evidence') || el.classList.contains('field-nudge-btn')) {
+          if (!comment) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; }
+          return;
+        }
+        el.disabled = true;
+      });
+    }
+
+    // Section 💬 comment button visibility
+    const secNudge = pane.querySelector('.sec-nudge-btn');
+    if (secNudge) secNudge.style.display = comment ? '' : 'none';
+    // Field 💬 buttons
+    pane.querySelectorAll('.field-nudge-btn').forEach(b => { b.style.display = comment ? '' : 'none'; });
+  });
+}
+
+function buildField(field, irNumber, sectionId) {
   const id = field.id;
   let control = '';
 
@@ -1088,6 +1453,10 @@ function buildField(field, irNumber) {
     'a_issueType':     currentIR?.issueType || '',
     'a_issueDesc':     currentIR?.issueDesc || '',
     'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
+    // Locked intake fields sourced from the customer form (cols M/N+Q/R):
+    'a_companyName':              currentIR?.companyName || '',
+    'a_incidentLocationWeather':  currentIR?.incidentLocationWeather || '',
+    'a_evidence':                 [currentIR?.evidenceFormN, currentIR?.evidenceFormQ].filter(Boolean).join('\n'),
   };
   const val = autoFill[field.id] !== undefined ? autoFill[field.id] : '';
   // Escape for safe insertion into an HTML attribute or textarea content
@@ -1285,46 +1654,40 @@ function buildField(field, irNumber) {
         <a id="${id}-open" href="#" target="_blank" class="url-open-btn" style="display:none;">Open &#8599;</a>
       </div>
     `;
+  } else if (field.type === 'readonlyLinks') {
+    // Read-only display of one or more URLs / text lines (e.g. form evidence
+    // uploads). Splits the value on whitespace/newlines/commas; anything that
+    // looks like a URL becomes an openable link, everything else is plain text.
+    const tokens = String(val || '').split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+    const linkHtml = t => {
+      const e = esc(t);
+      return /^https?:\/\//i.test(t)
+        ? `<a href="${e}" target="_blank" rel="noopener" class="readonly-link">${e}</a>`
+        : `<span class="readonly-text">${e}</span>`;
+    };
+    control = `<div id="${id}" class="readonly-links-box">${tokens.length ? tokens.map(linkHtml).join('<br/>') : '<span class="readonly-text">&mdash;</span>'}</div>`;
   } else {
     // text, number, date, email, tel
     control = `<input type="${field.type}" id="${id}" class="form-input" placeholder="${field.placeholder || ''}" value="${esc(val)}" ${field.readonly ? 'readonly style="opacity:0.6"' : ''} />`;
   }
 
-  // Apply restricted field behavior (CRM-only fields)
-  const isRestricted = field.restricted && !isAuthorizedCR();
-  if (isRestricted) {
-    if (field.type === 'inwardTable' || field.type === 'iqcTable') {
-      control = control.replace(/<select /g, '<select disabled ');
-      control = control.replace(/<input /g, '<input disabled ');
-    } else if (field.type === 'esignature') {
-      // Signature buttons are disabled for non-authorized users on restricted sections
-      control = control.replace(/<button type="button" class="btn-esign/g, '<button type="button" disabled class="btn-esign');
-    } else if (field.type === 'activityTable') {
-      // Disable all inputs inside the activity table
-      control = control.replace(/<input /g, '<input disabled ');
-      // Disable the "Add Row" button
-      control = control.replace(/<button type="button" class="btn-add-row"/, '<button type="button" class="btn-add-row" disabled style="opacity:0.4;cursor:not-allowed;"');
-    } else if (field.type === 'url') {
-      // Disable just the URL input inside the wrapper
-      control = control.replace(/<input type="url"/, '<input type="url" disabled');
-    } else {
-      control = control.replace(/<select /, '<select disabled ');
-      control = control.replace(/<input /, '<input disabled ');
-      control = control.replace(/<textarea /, '<textarea disabled ');
-    }
-  }
-
-  const lockIcon = isRestricted ? ' <span class="field-lock-icon" title="Only authorized CRM personnel can edit this field">&#128274;</span>' : '';
-  // Per-field nudge / comment button (skipped for the read-only analysis note).
-  const fieldNudgeBtn = field.type && field.type !== 'analysisNote'
+  // Locked intake fields are auto-populated from the customer form and editable
+  // by NO ONE. They render read-only with a lock marker. (Per-section edit
+  // gating is applied at the section level in buildSectionForms, not here.)
+  const locked = !!field.locked;
+  const lockIcon = locked ? ' <span class="field-lock-icon" title="Auto-filled from the customer IR form — not editable">&#128274;</span>' : '';
+  // Per-field nudge / comment button. Hidden when the whole section isn't
+  // commentable for this user (skipped for read-only analysis notes too).
+  const canFieldComment = sectionId ? canCommentSection(sectionId) : true;
+  const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
     ? `<button type="button" class="field-nudge-btn" data-field-id="${escHtml(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   const labelHtml = field.label
-    ? `<label class="form-label${isRestricted ? ' field-restricted-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
+    ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
     : (fieldNudgeBtn ? `<div class="form-label">${fieldNudgeBtn}</div>` : '');
 
   return `
-    <div class="form-group${isRestricted ? ' field-restricted' : ''}">
+    <div class="form-group${locked ? ' field-locked' : ''}">
       ${labelHtml}
       ${control}
     </div>
@@ -2088,7 +2451,7 @@ function collectSectionValues(sectionId) {
   if (!section) return { fieldValues, fileFields };
 
   for (const field of section.fields) {
-    if (field.type === 'analysisNote' || field.type === 'divider') {
+    if (field.type === 'analysisNote' || field.type === 'divider' || field.type === 'readonlyLinks') {
       continue; // read-only display / static heading, nothing to save
     } else if (field.type === 'imageEvidence') {
       const entries = evidenceState[field.id] || [];
@@ -2896,12 +3259,17 @@ function loadNudges() {
   fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${NUDGE_IR}`)
     .then(r => r.json())
     .then(data => {
-      const items = data?.sections?.[NUDGE_SEC]?.items;
-      nudges = Array.isArray(items) ? items : [];
-      refreshBell();
-      refreshCommentCounts();
-      if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
-      rerenderOpenNudgeModal();
+      // Only replace the local list on a successful read. On auth/error, keep
+      // the existing (optimistic) comments so a transient backend failure or an
+      // expired session doesn't wipe what the user just posted.
+      if (data && data.status === 'ok') {
+        const items = data?.sections?.[NUDGE_SEC]?.items;
+        nudges = Array.isArray(items) ? items : [];
+        refreshBell();
+        refreshCommentCounts();
+        if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
+        rerenderOpenNudgeModal();
+      }
     })
     .catch(() => { /* keep current list */ });
 }
@@ -2951,6 +3319,47 @@ function markNudgeRead(id) {
   if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
   rerenderOpenNudgeModal();
 }
+
+// ── Comment editing ──
+// A user can edit their own comments; an admin can edit anyone's. Editing is
+// last-write-wins (same as posting): fetch the current list, update the one
+// comment, save. Records editedAt/editedBy so the change is traceable.
+let editingNudgeId = null;
+function canEditNudge(n) {
+  if (!n) return false;
+  if (isAdmin()) return true;
+  return (n.from || '').toLowerCase() === myEmail();
+}
+async function editNudge(id, newMessage) {
+  const msg = (newMessage || '').trim();
+  const n = nudges.find(x => x.id === id);
+  if (!n) return;
+  if (!msg) { showToast('Comment cannot be empty'); return; }
+  n.message = msg;
+  n.editedAt = Date.now();
+  n.editedBy = currentUser?.email || 'unknown';
+  editingNudgeId = null;
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${NUDGE_IR}`);
+    const data = await res.json();
+    const list = Array.isArray(data?.sections?.[NUDGE_SEC]?.items) ? data.sections[NUDGE_SEC].items : [];
+    const idx = list.findIndex(x => x.id === id);
+    if (idx >= 0) {
+      list[idx] = Object.assign({}, list[idx], { message: msg, editedAt: n.editedAt, editedBy: n.editedBy });
+      await saveNudgesList(list);
+      nudges = list;
+    } else {
+      await saveNudgesList(nudges);
+    }
+  } catch {
+    // Backend unreachable — keep the local edit.
+  }
+  refreshBell();
+  refreshCommentCounts();
+  rerenderOpenNudgeModal();
+}
+function startEditNudge(id) { editingNudgeId = id; renderNudgeThread(); }
+function cancelEditNudge()  { editingNudgeId = null; renderNudgeThread(); }
 // Toggle a comment between Open and Resolved (and back). Any signed-in
 // collaborator can resolve/reopen — like a lightweight issue thread. Resolving
 // records who + when so the history is traceable. Missing/legacy nudges (no
@@ -3200,6 +3609,8 @@ function renderNudgeThread() {
   el.innerHTML = thread.map(n => {
     const mine = (n.from || '').toLowerCase() === myEmail();
     const resolved = n.status === 'resolved';
+    const editing = editingNudgeId === n.id;
+    const editable = canEditNudge(n);
     const loc = (ctx && ctx.scope === 'ir') ? `<div class="nudge-ctx">📍 ${escHtml(scopeContextText(n))}</div>` : '';
     const statusChip = resolved
       ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">✓ Resolved</span>`
@@ -3207,6 +3618,19 @@ function renderNudgeThread() {
     const actionBtn = resolved
       ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
       : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+    const editBtn = editable && !editing
+      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escHtml(n.id)}')" title="Edit comment">✏ Edit</button>`
+      : '';
+    const editedTag = n.editedAt
+      ? `<span class="nudge-edited" title="Edited${n.editedBy ? ' by ' + n.editedBy : ''} · ${relativeTime(n.editedAt)}">(edited)</span>`
+      : '';
+    const msgOrEditor = editing
+      ? `<div class="nudge-edit-wrap">
+           <textarea class="nudge-edit-input" id="nudge-edit-${escHtml(n.id)}">${escHtml(n.message || '')}</textarea>
+           <button type="button" class="nudge-mini primary" onclick="editNudge('${escHtml(n.id)}', document.getElementById('nudge-edit-${escHtml(n.id)}').value)">Save</button>
+           <button type="button" class="nudge-mini" onclick="cancelEditNudge()">Cancel</button>
+         </div>`
+      : `<div class="nudge-msg">${escHtml(n.message || '')}${editedTag}</div>`;
     return `<div class="nudge-post ${mine ? 'mine' : ''} ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
@@ -3214,8 +3638,8 @@ function renderNudgeThread() {
       </div>
       ${loc}
       <div class="nudge-to">→ ${escHtml(n.to || '')}</div>
-      <div class="nudge-msg">${escHtml(n.message || '')}</div>
-      <div class="nudge-post-actions">${statusChip}${actionBtn}</div>
+      ${msgOrEditor}
+      <div class="nudge-post-actions">${statusChip}${actionBtn}${editBtn}</div>
     </div>`;
   }).join('');
 }
@@ -3318,8 +3742,9 @@ async function sendComment() {
     resolvedBy: null,
   };
   await addNudge(nudge);
-  // One action: posts the comment in-app AND emails the recipient automatically.
-  await sendNudgeEmailBackend(nudge);
+  // Fire the email notification in the background — it's a side-effect and
+  // shouldn't make the user wait on the submit. Toasts its own outcome.
+  sendNudgeEmailBackend(nudge);
   // clear composer
   nudgeSelectedEmail = null;
   nudgeSuggestIndex = -1;
@@ -3342,6 +3767,7 @@ async function sendNudgeEmailBackend(nudge) {
     fd.append('from',     nudge.from || '');
     fd.append('fromName', nudge.fromName || '');
     fd.append('irNumber', nudge.irNumber || '');
+    fd.append('sectionId', nudge.sectionId || '');
     fd.append('context',  scopeContextText(nudge));
     fd.append('message',  nudge.message || '');
     const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
@@ -3408,7 +3834,7 @@ async function openHistoryModal() {
           ${diff}
         </div>`;
       }).join('')
-    : '<div class="nudge-empty">No history yet. Once the backend is redeployed, every save and field correction will be recorded here.</div>';
+    : '<div class="nudge-empty">No history yet — saves and edits for this IR will appear here.</div>';
   const modal = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'history-modal';

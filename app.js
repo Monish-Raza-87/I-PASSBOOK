@@ -1842,7 +1842,7 @@ function renderESignatureHTML(fieldId, role) {
     : '';
 
   if (sig && sig.signedBy) {
-    const canOverride = isInwardAdmin() || isAuthorizedCR() || sig.signedBy === email;
+    const canOverride = isAdmin() || sig.signedBy === email;
     const overrideBtn = canOverride
       ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${fieldId}')">Override &amp; Re-sign</button>`
       : '';

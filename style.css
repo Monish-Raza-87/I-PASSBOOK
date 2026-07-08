@@ -1439,3 +1439,66 @@ select.form-input option { background: #0f172a; }
     font-size: 0.82rem;
   }
 }
+
+/* ── Section A locked intake fields (read-only, auto-populated from the form) ── */
+.readonly-links-box {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.85rem;
+  color: var(--muted-strong);
+  line-height: 1.5;
+  word-break: break-word;
+}
+.readonly-links-box .readonly-link {
+  color: var(--primary);
+  text-decoration: underline;
+  display: inline-block;
+  margin: 2px 0;
+}
+.readonly-links-box .readonly-text { color: var(--muted); }
+/* Locked (read-only) inputs share the muted look of the existing readonly style. */
+.form-input[readonly] { cursor: default; }
+
+/* ── Comment edit control ── */
+.nudge-edit-wrap { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.nudge-edit-input { width: 100%; min-height: 64px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--glass-border); background: var(--glass); color: var(--text);
+  font: inherit; font-size: 0.85rem; resize: vertical; }
+.nudge-edit-input:focus { outline: none; border-color: var(--primary); }
+.nudge-edit-wrap .nudge-mini.primary { background: var(--primary); color: #fff; border: none; }
+.nudge-edited { font-size: 0.7rem; color: var(--muted); margin-left: 4px; font-style: italic; }
+
+/* ── Admin: User Access & Requests modal ── */
+.access-card { background: var(--bg); max-width: 1100px; width: 100%; max-height: 92vh;
+  border-radius: 16px; overflow: hidden; display: flex; flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
+.access-body { padding: 1rem 1.25rem 1.25rem; overflow-y: auto; }
+.access-section { margin-bottom: 1.5rem; }
+.access-section h3 { font-size: 1rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text); }
+.access-hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem; }
+.access-loading, .access-empty { font-size: 0.85rem; color: var(--muted); padding: 0.5rem 0; }
+.access-error { font-size: 0.85rem; color: var(--danger); padding: 0.5rem 0; }
+.access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.access-add-row .form-input { flex: 1; }
+.access-request-row { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem;
+  padding: 0.6rem 0.75rem; background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 10px; margin-bottom: 0.5rem; }
+.access-req-name { font-weight: 600; font-size: 0.9rem; }
+.access-req-email { font-size: 0.82rem; color: var(--muted-strong); }
+.access-req-time { font-size: 0.72rem; color: var(--muted); }
+.access-req-actions { display: flex; gap: 0.4rem; flex-shrink: 0; }
+.access-table-wrap { overflow-x: auto; }
+.access-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.access-table th, .access-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid var(--glass-border); }
+.access-table th { font-weight: 600; color: var(--muted-strong); background: var(--glass); }
+.access-table td.access-email-cell { text-align: left; font-weight: 600; white-space: nowrap; color: var(--text); }
+.access-cell { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--glass-border);
+  background: var(--bg); color: var(--text); font-size: 0.78rem; }
+.btn-sm { padding: 5px 10px; font-size: 0.8rem; }
+.btn-danger { background: var(--danger); color: #fff; border: none; }
+
+/* ── Locked Section A intake field styling ── */
+.field-locked-label { color: var(--muted-strong); }
+.field-locked .form-input[readonly] { opacity: 0.75; background: var(--glass); }

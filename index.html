@@ -54,6 +54,18 @@
   <!-- ========== MAIN APP ========== -->
   <div id="app-container">
 
+    <!-- ====== REQUEST ACCESS VIEW (shown when a signed-in user has no access yet) ====== -->
+    <div id="request-access" style="display:none; flex:1; align-items:center; justify-content:center; padding:2rem 1rem;">
+      <div class="glass-card animate-slide-up" style="max-width:460px; width:100%; text-align:center;">
+        <div class="splash-logo" style="font-size:1.8rem;">I-PASSBOOK</div>
+        <p style="color:var(--muted); margin-top:0.5rem; font-size:0.9rem;">You're signed in, but your account doesn't have access yet.</p>
+        <div id="request-access-email" style="margin:1rem 0; font-weight:600; color:var(--muted-strong);"></div>
+        <button class="btn" id="request-access-btn" style="width:100%;">Request access</button>
+        <p id="request-access-pending" style="display:none; margin-top:1rem; color:var(--primary); font-size:0.85rem;">✓ Access requested — an admin will review and assign your permissions.</p>
+        <button class="btn btn-secondary" id="request-access-signout" style="width:100%; margin-top:0.75rem;">Sign Out</button>
+      </div>
+    </div>
+
     <!-- Top Header -->
     <header>
       <div id="back-btn" style="display:none; cursor:pointer; padding:4px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-border);">

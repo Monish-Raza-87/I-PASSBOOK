@@ -148,6 +148,7 @@ window.fetch = function (input, init) {
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook
+let legacyMap   = {};          // irNumber -> { label, gid, embedUrl, openUrl } for legacy IRs (≤~IR441)
 
 // ─── AUTHORIZATION ─────────────────────────────────────────────────────────────
 const AUTHORIZED_CR_EMAILS = [
@@ -422,6 +423,8 @@ function showApp() {
 
   // Fetch IRs
   fetchIRs();
+  // Load legacy I-PASSBOOK index (read-only archive of pre-app IRs) — best-effort
+  loadLegacyIndex();
   // Load admin-customizable inward dropdown options (best-effort)
   loadInwardOptions();
   // Load admin-customizable IQC inspection points + result options
@@ -626,6 +629,39 @@ async function fetchIRs() {
 
 function setSyncStatus(msg) { syncStatus.textContent = msg; }
 
+// ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
+// Loads the index of legacy per-IR tabs (token-gated via the backend) so the
+// master list can badge legacy IRs and the detail view can embed a read-only
+// copy of the original sheet record. Best-effort: failures just skip legacy.
+async function loadLegacyIndex() {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    const res = await fetch(`${CONFIG.GAS_URL}?action=listLegacyIRs`, { signal: controller.signal });
+    clearTimeout(timeout);
+    const data = await res.json();
+    if (data.status === 'ok' && Array.isArray(data.records)) {
+      legacyMap = {};
+      data.records.forEach(r => { if (r.irNumber) legacyMap[r.irNumber] = r; });
+      mergeLegacyOnlyIRs();
+      renderIRList(allIRs);   // re-render to apply Legacy badges / appended cards
+    }
+  } catch { /* legacy unavailable — non-fatal */ }
+}
+
+// Append legacy IRs that aren't already in the master list (very old IRs not in
+// the Form Responses tab) so they're still reachable from the app.
+function mergeLegacyOnlyIRs() {
+  Object.values(legacyMap).forEach(l => {
+    if (!allIRs.some(ir => ir.irNumber === l.irNumber)) {
+      const drone = (l.label || '').split('|')[1]?.trim() || '';
+      allIRs.push({ irNumber: l.irNumber, droneId: drone, dateRaised: '', status: 'Open', isLegacyOnly: true });
+    }
+  });
+  // keep latest-first ordering by IR number
+  allIRs.sort((a, b) => parseInt((b.irNumber || '').replace(/\D/g, ''), 10) - parseInt((a.irNumber || '').replace(/\D/g, ''), 10));
+}
+
 function renderIRList(records) {
   if (!records || records.length === 0) {
     irList.innerHTML = '<div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div>';
@@ -642,6 +678,7 @@ function renderIRList(records) {
         </div>
       </div>
       <div class="ir-card-side">
+        ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
         <span class="badge ${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
         ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank">View Summary ↗</a>` : ''}
       </div>
@@ -690,6 +727,54 @@ async function openPassbook(irNumber) {
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
   renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section B draft values
+
+  // Legacy record: show the "Legacy Record" button if this IR exists in the
+  // legacy workbook, and auto-open that read-only view when there's no new-app
+  // data yet (so old IRs immediately show their original record, not empty tabs).
+  const legacy = legacyMap[irNumber];
+  const legacyBtn = document.getElementById('ir-legacy-btn');
+  if (legacy && legacyBtn) {
+    legacyBtn.style.display = '';
+    const hasNewData = currentSectionData && Object.keys(currentSectionData).length > 0;
+    if (!hasNewData) openLegacyModal(legacy.embedUrl, legacy.label, legacy.openUrl);
+  } else if (legacyBtn) {
+    legacyBtn.style.display = 'none';
+  }
+}
+
+// Open a full-screen, read-only embed of the IR's legacy I-PASSBOOK tab. The
+// sheet itself is shown via Google's preview endpoint (no editing UI); a link
+// to open it directly in Google Sheets is provided as a fallback.
+function openLegacyModal(embedUrl, label, openUrl) {
+  let modal = document.getElementById('legacy-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.className = 'inward-options-modal';   // reuse the full-screen overlay style
+  modal.id = 'legacy-modal';
+  modal.innerHTML = `
+    <div class="legacy-card">
+      <div class="legacy-head">
+        <div>
+          <div class="legacy-title">🏛 Legacy I-PASSBOOK Record</div>
+          <div class="legacy-sub">${escHtml(label || '')} · read-only</div>
+        </div>
+        <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
+      </div>
+      <div class="legacy-frame-wrap">
+        <iframe src="${embedUrl}" class="legacy-frame" title="Legacy record ${escHtml(label || '')}" referrerpolicy="no-referrer" loading="lazy"></iframe>
+        <div class="legacy-fallback">
+          <span>Can't see the record here?</span>
+          <a href="${openUrl}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
+}
+
+function closeLegacyModal() {
+  const m = document.getElementById('legacy-modal');
+  if (m) m.remove();
 }
 
 // Back button
@@ -701,6 +786,12 @@ if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
 // IR banner audit-trail / history button
 const irHistoryBtn = document.getElementById('ir-history-btn');
 if (irHistoryBtn) irHistoryBtn.addEventListener('click', openHistoryModal);
+// IR banner legacy-record button
+const irLegacyBtn = document.getElementById('ir-legacy-btn');
+if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
+  const l = legacyMap[currentIR?.irNumber];
+  if (l) openLegacyModal(l.embedUrl, l.label, l.openUrl);
+});
 
 // ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
 // Any edit within a section is persisted as a draft (debounced), so unsaved

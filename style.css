@@ -425,6 +425,7 @@ header {
 .badge-open    { background: rgba(16,185,129,0.15); color: var(--success); border: 1px solid rgba(16,185,129,0.4); }
 .badge-pending { background: rgba(245,158,11,0.15); color: var(--warning); border: 1px solid rgba(245,158,11,0.4); }
 .badge-closed  { background: rgba(148,163,184,0.1); color: var(--muted);   border: 1px solid rgba(148,163,184,0.3); }
+.badge-legacy  { background: rgba(99,102,241,0.18); color: #a5b4fc; border: 1px solid rgba(129,140,248,0.45); }
 
 /* Empty state */
 .empty-state {
@@ -1364,6 +1365,30 @@ select.form-input option { background: #0f172a; }
   background: rgba(239,68,68,0.12); color: var(--danger); cursor: pointer; font-size: 1rem;
 }
 .team-dir-del:hover { background: rgba(239,68,68,0.25); }
+
+/* ── Legacy I-PASSBOOK record (read-only embed) ── */
+#legacy-modal { padding: 0.5rem; }
+.legacy-card {
+  width: 100%; max-width: 1180px; height: 92vh; max-height: 92vh;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--glass-border-strong);
+  border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-lg);
+}
+.legacy-head {
+  display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+  padding: 0.7rem 1rem; border-bottom: 1px solid var(--glass-border);
+}
+.legacy-title { font-weight: 700; font-size: 1rem; }
+.legacy-sub { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+.legacy-frame-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.legacy-frame {
+  flex: 1; width: 100%; border: 0; background: #fff; min-height: 0;
+}
+.legacy-fallback {
+  display: flex; align-items: center; justify-content: center; gap: 0.8rem;
+  padding: 0.5rem 1rem; border-top: 1px solid var(--glass-border);
+  font-size: 0.8rem; color: var(--muted); background: rgba(0,0,0,0.18);
+}
 
 /* ── Toast ── */
 #toast {

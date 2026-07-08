@@ -28,6 +28,11 @@ const CONFIG = {
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_GID:      '335027370',   // numeric gid — more reliable than the tab name
   IR_REPO_TAB:      'Form Responses',
+
+  // Legacy I-PASSBOOK workbook (pre-app records, IR1–IR441). Link-shared, so it
+  // embeds read-only with NO Google sign-in / token / backend — shown via the
+  // 🏛 Legacy button on the home screen. Each IR is its own tab in this workbook.
+  LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 };
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -817,7 +822,7 @@ function openLegacyModal(embedUrl, label, openUrl) {
     <div class="legacy-card">
       <div class="legacy-head">
         <div>
-          <div class="legacy-title">🏛 Legacy I-PASSBOOK Record</div>
+          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
           <div class="legacy-sub">${escHtml(label || '')} · read-only</div>
         </div>
         <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
@@ -839,6 +844,17 @@ function closeLegacyModal() {
   if (m) m.remove();
 }
 
+// Open the entire legacy I-PASSBOOK workbook (IR1–IR441) read-only, embedded
+// with tab switching — via Google's preview endpoint. The workbook is
+// link-shared, so this needs NO Google sign-in, NO token, NO backend call and
+// therefore NO sign-in pop-ups. A fallback link opens it directly in Sheets.
+function openLegacyWorkbook() {
+  const id = CONFIG.LEGACY_SHEET_ID;
+  const embedUrl = `https://docs.google.com/spreadsheets/d/${id}/preview?rm=minimal`;
+  const openUrl  = `https://docs.google.com/spreadsheets/d/${id}/edit`;
+  openLegacyModal(embedUrl, 'IR1–IR441 · switch tabs at the bottom', openUrl);
+}
+
 // Back button
 backBtn.addEventListener('click', showIndex);
 
@@ -854,6 +870,9 @@ if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
   const l = legacyMap[currentIR?.irNumber];
   if (l) openLegacyModal(l.embedUrl, l.label, l.openUrl);
 });
+// Home-screen "Legacy I-PASSBOOK" button — opens the whole old workbook read-only
+const legacyWorkbookBtn = document.getElementById('legacy-workbook-btn');
+if (legacyWorkbookBtn) legacyWorkbookBtn.addEventListener('click', openLegacyWorkbook);
 
 // ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
 // Any edit within a section is persisted as a draft (debounced), so unsaved

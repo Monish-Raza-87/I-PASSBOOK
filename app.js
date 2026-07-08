@@ -450,9 +450,11 @@ function createUserMenu() {
     menu.innerHTML = `
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
+      <button class="signout-btn" id="reconnect-btn">⟳ Reconnect to Google</button>
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
+    document.getElementById('reconnect-btn').addEventListener('click', () => { menu.style.display = 'none'; reconnectGoogle(); });
     document.getElementById('signout-btn').addEventListener('click', signOut);
     document.addEventListener('click', (e) => {
       if (!menu.contains(e.target) && e.target !== userAvatar) menu.style.display = 'none';
@@ -473,6 +475,49 @@ function signOut() {
   } catch { }
   if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
   location.reload();
+}
+
+// ─── RECONNECT TO GOOGLE ─────────────────────────────────────────────────────
+// The silent One-Tap (auto_select) used at boot is unreliable on mobile PWAs —
+// it often doesn't fire on a reopened app, so the backend's token gate rejects
+// saves and the legacy archive with "Unauthorized". This user-initiated flow
+// shows the real One-Tap card (a tap, not a silent moment), which is reliable,
+// then refreshes the token-gated data. Reachable from the user menu.
+function reconnectGoogle() {
+  return loadGis().then(() => {
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
+      showToast('Google sign-in unavailable — check your connection');
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) { settled = true; showToast('Reconnect timed out — try again'); }
+    }, 20000);
+    try {
+      google.accounts.id.initialize({
+        client_id: CONFIG.GOOGLE_CLIENT_ID,
+        callback: (resp) => {
+          if (settled) return; settled = true; clearTimeout(timer);
+          if (resp && resp.credential) {
+            currentUser.token = resp.credential;
+            // keep the stored profile's email in sync if the re-signed account differs
+            try {
+              const p = parseJwt(resp.credential);
+              if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
+            } catch { /* keep existing */ }
+            showToast('✓ Reconnected to Google');
+            loadLegacyIndex();   // re-fetch the token-gated legacy archive
+          } else {
+            showToast('Reconnect cancelled — saves & legacy need a Google sign-in');
+          }
+        },
+      });
+      google.accounts.id.prompt(); // visible One-Tap — reliable when user-initiated
+    } catch (e) {
+      clearTimeout(timer);
+      showToast('Reconnect failed — try Sign Out and sign in again');
+    }
+  });
 }
 
 // ─── MASTER INDEX ────────────────────────────────────────────────────────────
@@ -651,8 +696,16 @@ async function loadLegacyIndex() {
         showToast(`🏛 Legacy archive linked — ${Object.keys(legacyMap).length} IRs`);
       }
     } else {
-      // Most common cause: backend.gs not yet redeployed (listLegacyIRs unknown action).
-      showToast('Legacy archive unavailable — redeploy backend.gs to enable');
+      // Surface the real reason. "Unauthorized" = no valid Google token on this
+      // device (silent sign-in didn't fire) — saves will fail the same way; the
+      // fix is Reconnect to Google from the user menu. Anything else is a backend
+      // error (e.g. the deployer can't open the legacy sheet) — show it verbatim.
+      var msg = (data.message || 'unknown error').toLowerCase();
+      if (msg.indexOf('unauthorized') === 0) {
+        showToast('Legacy needs Google sign-in — tap avatar → Reconnect to Google');
+      } else {
+        showToast('Legacy archive error: ' + (data.message || 'unknown'));
+      }
     }
   } catch { /* legacy unavailable — non-fatal */ }
 }

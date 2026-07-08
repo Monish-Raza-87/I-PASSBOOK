@@ -111,7 +111,9 @@ window.fetch = function (input, init) {
     const origBody = isFormData ? init.body : null;
     const buildInit = (tok) => {
       if (isFormData) {
-        const fd = new FormData(origBody);
+        // FormData() only accepts an HTMLFormElement, so copy entries by hand.
+        const fd = new FormData();
+        for (const [k, v] of origBody.entries()) fd.append(k, v);
         if (tok) fd.append('idToken', tok);
         if (emailQ) fd.append('userEmail', currentUser.email);
         return Object.assign({}, init, { body: fd });
@@ -645,6 +647,12 @@ async function loadLegacyIndex() {
       data.records.forEach(r => { if (r.irNumber) legacyMap[r.irNumber] = r; });
       mergeLegacyOnlyIRs();
       renderIRList(allIRs);   // re-render to apply Legacy badges / appended cards
+      if (Object.keys(legacyMap).length) {
+        showToast(`🏛 Legacy archive linked — ${Object.keys(legacyMap).length} IRs`);
+      }
+    } else {
+      // Most common cause: backend.gs not yet redeployed (listLegacyIRs unknown action).
+      showToast('Legacy archive unavailable — redeploy backend.gs to enable');
     }
   } catch { /* legacy unavailable — non-fatal */ }
 }

@@ -121,32 +121,33 @@ window.fetch = function (input, init) {
       return init;
     };
 
-    let token = currentUser && currentUser.token;
-    if (!token) { try { token = await ensureAuthToken(); } catch { /* leave token null */ } }
+    // Use the in-memory token if we have one. We deliberately do NOT auto-prompt
+    // here: calling google.accounts.id.prompt() on every backend call (and again
+    // on retry) is what caused the repeated Google sign-in pop-ups. If there's
+    // no token (e.g. a reopened "keep me logged in" session, or the ~1h token
+    // expired), the call goes out without one and the backend's gate returns
+    // Unauthorized. We then surface a SINGLE non-blocking hint to Reconnect
+    // (avatar menu → Reconnect to Google) instead of a pop-up storm. The token
+    // gate still fully protects fresh sign-ins (token lives in memory).
+    const token = (currentUser && currentUser.token) || null;
 
     input = isFormData ? url : buildInput(token);
     init = buildInit(token);
-    let resp = await _origFetch(input, init);
+    const resp = await _origFetch(input, init);
 
-    // Retry once only on a real auth rejection (token expired / stale). Match
-    // the backend's exact "Unauthorized…" message so unrelated errors (e.g. an
-    // @-nudge to a non-Indrones address) don't trigger a pointless re-auth.
     if (resp && resp.ok) {
       try {
         const data = await resp.clone().json();
-        if (data && data.status === 'error' && (data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
-          try {
-            const fresh = await refreshIdToken();
-            input = isFormData ? url : buildInput(fresh);
-            init = buildInit(fresh);
-            resp = await _origFetch(input, init);
-          } catch { /* give up; surface the original error */ }
+        if (data && data.status === 'error' && (data.message || '').toLowerCase().indexOf('unauthorized') === 0 && !_authToastShown) {
+          _authToastShown = true; // one hint per session, not per call
+          showToast('Session expired — tap avatar → Reconnect to Google');
         }
       } catch { /* response wasn't JSON; ignore */ }
     }
     return resp;
   })();
 };
+let _authToastShown = false;
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook
@@ -425,8 +426,9 @@ function showApp() {
 
   // Fetch IRs
   fetchIRs();
-  // Load legacy I-PASSBOOK index (read-only archive of pre-app IRs) — best-effort
-  loadLegacyIndex();
+  // NOTE: the token-gated legacy archive (pre-app IRs ≤ IR441) is intentionally
+  // NOT loaded — it relied on a silent Google One-Tap per call, which caused
+  // repeated sign-in pop-ups. Previous IRs are left in the old I-PASSBOOK sheet.
   // Load admin-customizable inward dropdown options (best-effort)
   loadInwardOptions();
   // Load admin-customizable IQC inspection points + result options
@@ -505,10 +507,9 @@ function reconnectGoogle() {
               const p = parseJwt(resp.credential);
               if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
             } catch { /* keep existing */ }
-            showToast('✓ Reconnected to Google');
-            loadLegacyIndex();   // re-fetch the token-gated legacy archive
+            showToast('✓ Reconnected to Google — saves enabled');
           } else {
-            showToast('Reconnect cancelled — saves & legacy need a Google sign-in');
+            showToast('Reconnect cancelled — saves need a Google sign-in');
           }
         },
       });

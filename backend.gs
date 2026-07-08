@@ -38,6 +38,12 @@ var CONFIG = {
   // Google OAuth web client ID (same one the frontend uses for GIS sign-in).
   // Used server-side to verify the ID token's audience.
   GOOGLE_CLIENT_ID: '719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com',
+
+  // Legacy I-PASSBOOK sheet (the pre-app workbook used till ~IR441). Each IR is
+  // its own tab named like "IR310 | S25P023". Surfaced read-only in the app so
+  // the team doesn't have to look in two places. Tabs not matching /^IR\d+/
+  // (Flow chart, index, format) are ignored.
+  LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 };
 
 // Authorized Customer Relations personnel — only these emails can edit restricted fields
@@ -90,10 +96,11 @@ function doGet(e) {
   var result;
 
   try {
-    if      (action === 'listIRs')     result = listIRs();
-    else if (action === 'getPassbook') result = getPassbook(e.parameter.irNumber);
-    else if (action === 'getAuditLog') result = getAuditLog(e.parameter.irNumber);
-    else                               result = { status: 'error', message: 'Unknown action: ' + action };
+    if      (action === 'listIRs')        result = listIRs();
+    else if (action === 'getPassbook')    result = getPassbook(e.parameter.irNumber);
+    else if (action === 'getAuditLog')    result = getAuditLog(e.parameter.irNumber);
+    else if (action === 'listLegacyIRs')  result = listLegacyIRs();
+    else                                  result = { status: 'error', message: 'Unknown action: ' + action };
   } catch (err) {
     result = { status: 'error', message: err.message };
   }
@@ -463,6 +470,37 @@ function getAuditLog(irNumber) {
     }
   }
   return { status: 'ok', entries: entries };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ACTION: listLegacyIRs
+// Enumerates the per-IR tabs in the legacy I-PASSBOOK workbook (tabs named like
+// "IR310 | S25P023"). Returns each IR's number, full tab label, and ready-made
+// embed/open URLs so the frontend can show the legacy record read-only. Tabs not
+// matching /^IR\d+/ (Flow chart, index, format, etc.) are skipped. Token-gated.
+// ──────────────────────────────────────────────────────────────────────────────
+function listLegacyIRs() {
+  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var sheets = ss.getSheets();
+  var sheetId = CONFIG.LEGACY_SHEET_ID;
+  var records = [];
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    var m = name.match(/^IR\s*(\d+)/i);
+    if (!m) continue;
+    var gid = sheets[i].getSheetId();
+    records.push({
+      irNumber:  'IR' + m[1],
+      label:     name,
+      gid:       gid,
+      embedUrl:  'https://docs.google.com/spreadsheets/d/' + sheetId + '/preview?rm=minimal&gid=' + gid + '&single=true',
+      openUrl:   'https://docs.google.com/spreadsheets/d/' + sheetId + '/edit#gid=' + gid
+    });
+  }
+  records.sort(function (a, b) {
+    return parseInt(b.irNumber.replace(/\D/g, ''), 10) - parseInt(a.irNumber.replace(/\D/g, ''), 10);
+  });
+  return { status: 'ok', records: records };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

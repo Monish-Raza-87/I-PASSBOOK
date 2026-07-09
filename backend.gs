@@ -76,24 +76,49 @@ function requireAuth(e) {
   return null;
 }
 
+// Last verifyIdToken failure reason. Surfaced via doLogin so the frontend can
+// show WHY a login was rejected (instead of a generic "invalid token") — this
+// is what lets us diagnose a deployed-backend mismatch without console access.
+// Safe to expose: the client ID is already public in the frontend (public repo).
+var _idTokenVerifyError = '';
+
 function verifyIdToken(idToken) {
-  if (!idToken) return null;
+  _idTokenVerifyError = '';
+  if (!idToken) { _idTokenVerifyError = 'no idToken supplied'; return null; }
   try {
     var url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
     var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (resp.getResponseCode() !== 200) return null;
+    var code = resp.getResponseCode();
+    if (code !== 200) {
+      var errBody = '';
+      try { errBody = resp.getContentText(); } catch (e) {}
+      _idTokenVerifyError = 'tokeninfo returned HTTP ' + code + (errBody ? (': ' + errBody.substring(0, 160)) : '');
+      return null;
+    }
     var info = JSON.parse(resp.getContentText());
 
-    if (info.aud !== CONFIG.GOOGLE_CLIENT_ID) return null;          // token must be for us
+    // aud is normally a string, but Google may return an array in some flows —
+    // accept the token if our client ID is present in either form.
+    var aud = info.aud;
+    var audOk = aud === CONFIG.GOOGLE_CLIENT_ID ||
+      (Array.isArray(aud) && aud.indexOf(CONFIG.GOOGLE_CLIENT_ID) >= 0);
+    if (!audOk) {
+      _idTokenVerifyError = 'aud mismatch — token aud=' + JSON.stringify(aud) + ', backend expects ' + CONFIG.GOOGLE_CLIENT_ID;
+      return null;
+    }
     var ev = info.email_verified;
-    if (ev !== 'true' && ev !== true) return null;                  // email must be verified by Google
+    if (ev !== 'true' && ev !== true) { _idTokenVerifyError = 'email_verified is ' + JSON.stringify(ev); return null; }
     var email = (info.email || '').toLowerCase().trim();
     var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
-    if (!email || email.indexOf(suffix) !== email.length - suffix.length) return null; // Indrones only
+    if (!email || email.indexOf(suffix) !== email.length - suffix.length) {
+      _idTokenVerifyError = 'email not @' + CONFIG.ALLOWED_DOMAIN + ': ' + email;
+      return null;
+    }
     var now = Math.floor(Date.now() / 1000);
-    if (info.exp && Number(info.exp) < now) return null;           // not expired
+    if (info.exp && Number(info.exp) < now) { _idTokenVerifyError = 'token expired (exp=' + info.exp + ', now=' + now + ')'; return null; }
     return email;
   } catch (err) {
+    _idTokenVerifyError = 'verifyIdToken threw: ' + err.message;
     return null;
   }
 }
@@ -204,7 +229,7 @@ function lookupSession(token) {
 // Exchange a fresh Google ID token for a new session token (login).
 function doLogin(idToken) {
   var email = verifyIdToken(idToken);
-  if (!email) return { status: 'error', message: 'Invalid or expired sign-in token.' };
+  if (!email) return { status: 'error', message: 'Invalid or expired sign-in token — ' + (_idTokenVerifyError || 'unknown reason') };
   var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
   var tab = getOrCreateSessionsTab(ss);
   var token = Utilities.getUuid();

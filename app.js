@@ -96,6 +96,41 @@ function loginBackend(idToken) {
     .catch(() => null);
 }
 
+// One-shot silent re-login at boot for a reopened "keep me logged in" app that
+// has a stored profile but no session token (e.g. signed in under the old
+// backend before it was redeployed). Asks GIS for a fresh ID token via
+// auto_select (silent for returning users — no pop-up card), then exchanges it
+// for a session. This is a SINGLE attempt per boot, not per backend call (which
+// is what caused the old pop-up storm). If it doesn't fire in time, the
+// interceptor's Unauthorized toast tells the user to tap Reconnect.
+function silentLogin() {
+  if (!currentUser) return Promise.resolve(null);
+  return loadGis().then(() => {
+    if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) return null;
+    return new Promise(resolve => {
+      let done = false;
+      const finish = () => { if (done) return; done = true; resolve(null); };
+      const timer = setTimeout(finish, 8000);
+      try {
+        google.accounts.id.initialize({
+          client_id: CONFIG.GOOGLE_CLIENT_ID,
+          callback: (resp) => {
+            if (done) return; done = true; clearTimeout(timer);
+            if (resp && resp.credential) {
+              currentUser.token = resp.credential;
+              loginBackend(resp.credential).then(d => {
+                if (d && typeof applyAccessGating === 'function') applyAccessGating();
+                resolve(d);
+              });
+            } else { resolve(null); }
+          },
+        });
+        google.accounts.id.prompt({ auto_select: true });
+      } catch { clearTimeout(timer); resolve(null); }
+    });
+  }).catch(() => null);
+}
+
 // Refresh the caller's role/permissions from the backend (boot + after access
 // changes). Best-effort — a failure leaves the previous access in place.
 function refreshMyAccess() {
@@ -113,6 +148,8 @@ function refreshMyAccess() {
 }
 
 const _origFetch = window.fetch.bind(window);
+let _authToastShown = false;       // one "Reconnect" hint per session, not per call
+let _sessionMinting = false;       // guard so the opportunistic mint runs once
 window.fetch = function (input, init) {
   return (async () => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -132,6 +169,17 @@ window.fetch = function (input, init) {
     const idToken = (currentUser && currentUser.token) || null;
     const email = (currentUser && currentUser.email) || '';
 
+    // Opportunistic session mint: if we have an in-memory ID token but no stored
+    // session yet (e.g. signed in under the old backend, then it was redeployed),
+    // convert that token into a persisted session on the next backend call. Skips
+    // the login call itself (avoid recursion) and runs once.
+    const isLoginCall = url.indexOf('action=login') >= 0 ||
+      (init && init.body && init.body instanceof FormData && init.body.has && init.body.has('action') && init.body.get('action') === 'login');
+    if (idToken && !sessionToken && !isLoginCall && !_sessionMinting) {
+      _sessionMinting = true;
+      loginBackend(idToken).then(() => { _sessionMinting = false; if (typeof applyAccessGating === 'function') applyAccessGating(); });
+    }
+
     const isFormData = init && init.body && init.body instanceof FormData;
     const origBody = isFormData ? init.body : null;
 
@@ -141,21 +189,36 @@ window.fetch = function (input, init) {
       if (email) fd.append('userEmail', email);
     };
 
+    let resp;
     if (isFormData) {
       // FormData() only accepts an HTMLFormElement, so copy entries by hand.
       const fd = new FormData();
       for (const [k, v] of origBody.entries()) fd.append(k, v);
       appendAuth(fd);
-      return _origFetch(url, Object.assign({}, init, { body: fd }));
+      resp = await _origFetch(url, Object.assign({}, init, { body: fd }));
+    } else {
+      // GET-style: append creds to the URL.
+      const sep = url.indexOf('?') >= 0 ? '&' : '?';
+      let q = '';
+      if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
+      if (idToken) q += (q ? '&' : '') + 'idToken=' + encodeURIComponent(idToken);
+      if (email) q += (q ? '&' : '') + 'userEmail=' + encodeURIComponent(email);
+      resp = await _origFetch(url + (q ? sep + q : ''), init);
     }
 
-    // GET-style: append creds to the URL.
-    const sep = url.indexOf('?') >= 0 ? '&' : '?';
-    let q = '';
-    if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
-    if (idToken) q += (q ? '&' : '') + 'idToken=' + encodeURIComponent(idToken);
-    if (email) q += (q ? '&' : '') + 'userEmail=' + encodeURIComponent(email);
-    return _origFetch(url + (q ? sep + q : ''), init);
+    // If the call went out with NO credential at all and the backend rejected it,
+    // surface ONE non-blocking hint to Reconnect (which mints a fresh session).
+    // No pop-up is triggered automatically — the user taps Reconnect themselves.
+    if (resp && resp.ok && !sessionToken && !idToken && !_authToastShown) {
+      try {
+        const data = await resp.clone().json();
+        if (data && data.status === 'error' && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
+          _authToastShown = true;
+          showToast('Sign in expired — tap avatar → Reconnect to Google');
+        }
+      } catch { /* not JSON */ }
+    }
+    return resp;
   })();
 };
 let allIRs      = [];          // master list fetched from GAS
@@ -320,6 +383,10 @@ window.addEventListener('load', () => {
         // Refresh role/permissions from the backend (drives access gating +
         // request-access screen). Best-effort; gating has a safe fallback.
         refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
+        // No stored session yet (e.g. signed in before the backend was redeployed):
+        // try ONE silent re-login to mint one. If it can't, the interceptor's
+        // Unauthorized toast will point the user to a manual Reconnect.
+        if (!currentUser.sessionToken) silentLogin();
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
         persistUser(currentUser, false); // dev bypass: this tab only
@@ -549,7 +616,8 @@ function openAccessModal() {
         </div>
         <div class="access-section">
           <h3>Users &amp; permissions</h3>
-          <p class="access-hint">Set each section to None / View / Comment / Edit per user. Admins (customer.relations@ / monish.raza@) always have full edit.</p>
+          <p class="access-hint">Set each section (A–I) to None / View / Comment / Edit per user. Use the quick buttons to set all sections at once, then fine-tune individual cells. Admins (customer.relations@ / monish.raza@) always have full edit.</p>
+          <p class="access-legend"><span class="acc-lv none">None</span> no access · <span class="acc-lv view">View</span> read-only · <span class="acc-lv comment">Comment</span> view + comment · <span class="acc-lv edit">Edit</span> view + comment + edit</p>
           <div class="access-add-row">
             <input type="email" id="access-new-email" class="form-input" placeholder="add user email @indrones.com" />
             <button type="button" class="btn" id="access-add-btn">+ Add</button>
@@ -611,8 +679,14 @@ function renderAccessUsers() {
       const opts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
       return `<td><select class="access-cell" data-row="${idx}" data-sec="${s}">${opts}</select></td>`;
     }).join('');
+    const quick = ['','view','comment','edit'].map(l =>
+      `<button type="button" class="acc-quick${l ? ' lv-' + l : ' lv-none'}" onclick="quickSetRow(${idx},'${l}')">${ACCESS_LABEL[l]}</button>`
+    ).join('');
     return `<tr class="access-user-row">
-      <td class="access-email-cell">${escHtml(u.email)}</td>
+      <td class="access-email-cell">
+        <div class="access-email-line">${escHtml(u.email)}</div>
+        <div class="access-quickset" title="Set all sections at once">all: ${quick}</div>
+      </td>
       ${cells}
       <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button></td>
     </tr>`;
@@ -622,6 +696,18 @@ function renderAccessUsers() {
       <thead><tr><th>User</th>${colHead}<th></th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>` : '<div class="access-empty">No users yet — add one above.</div>';
+}
+
+// Set every section dropdown in one row to the same level (then the admin can
+// fine-tune individual cells). Updates the DOM + the local cache; saved on
+// "Save all changes".
+function quickSetRow(idx, level) {
+  SECTION_IDS.forEach(s => {
+    const sel = document.querySelector(`.access-cell[data-row="${idx}"][data-sec="${s}"]`);
+    if (sel) sel.value = level;
+  });
+  const u = accessCache.users[idx];
+  if (u) { u.permissions = u.permissions || {}; SECTION_IDS.forEach(s => { u.permissions[s] = level; }); }
 }
 
 // Read the current dropdown selections for a row from the DOM (captures the
@@ -652,10 +738,12 @@ function addAccessUser() {
   const perms = {}; SECTION_IDS.forEach(s => { perms[s] = ''; });
   accessCache.users.push({ email, permissions: perms });
   inp.value = '';
+  // Render the new row locally WITHOUT reloading from the server — a reload
+  // would wipe any unsaved dropdown edits the admin made in other rows. The
+  // new user is persisted on "Save all changes" (or immediately below).
   renderAccessUsers();
   saveAccessRow(email, perms).then(d => {
-    showToast(d && d.status === 'ok' ? 'Added ' + email + ' (no access — set permissions)' : 'Add failed: ' + ((d && d.message) || 'error'));
-    loadAccessData();
+    showToast(d && d.status === 'ok' ? 'Added ' + email + ' — set permissions, then Save all changes' : 'Add pending: ' + ((d && d.message) || 'will save with Save all'));
   });
 }
 
@@ -663,11 +751,17 @@ function removeAccessUser(idx) {
   const u = accessCache.users[idx];
   if (!u) return;
   if (!confirm('Remove access for ' + u.email + '?')) return;
+  // Remove locally + re-render (no server reload, which would wipe unsaved
+  // edits in other rows). The delete is persisted immediately below.
+  accessCache.users.splice(idx, 1);
+  renderAccessUsers();
   const fd = new FormData();
   fd.append('action', 'saveACL');
   fd.append('email', u.email);
   fd.append('mode', 'remove');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(() => { showToast('Removed ' + u.email); loadAccessData(); });
+  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
+    showToast(d && d.status === 'ok' ? 'Removed ' + u.email : 'Remove pending: ' + ((d && d.message) || 'will clear on next reload'));
+  });
 }
 
 function saveAllAccess() {

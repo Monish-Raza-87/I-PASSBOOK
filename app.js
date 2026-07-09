@@ -619,11 +619,11 @@ function openAccessModal() {
           <div id="access-requests"><div class="access-loading">Loading…</div></div>
         </div>
         <div class="access-section">
-          <h3>Users &amp; permissions</h3>
-          <p class="access-hint">Set each section (A–I) to None / View / Comment / Edit per user. Use the quick buttons to set all sections at once, then fine-tune individual cells. Admins (customer.relations@ / monish.raza@) always have full edit.</p>
-          <p class="access-legend"><span class="acc-lv none">None</span> no access · <span class="acc-lv view">View</span> read-only · <span class="acc-lv comment">Comment</span> view + comment · <span class="acc-lv edit">Edit</span> view + comment + edit</p>
+          <h3>Users</h3>
+          <p class="access-hint">Add a teammate's @indrones.com email and pick one access level for all sections. Need finer control? Choose <strong>Custom…</strong> to set sections A–I separately.</p>
+          <p class="access-legend"><span class="acc-lv none">None</span> no access · <span class="acc-lv view">View</span> read-only · <span class="acc-lv comment">Comment</span> view + comment · <span class="acc-lv edit">Edit</span> view + comment + edit · <strong>Custom…</strong> per section</p>
           <div class="access-add-row">
-            <input type="email" id="access-new-email" class="form-input" placeholder="add user email @indrones.com" />
+            <input type="email" id="access-new-email" class="form-input" placeholder="teammate@indrones.com" />
             <button type="button" class="btn" id="access-add-btn">+ Add</button>
           </div>
           <div id="access-users"><div class="access-loading">Loading…</div></div>
@@ -703,45 +703,60 @@ function renderAccessRequests() {
     </div>`).join('');
 }
 
+// A user's effective single access level when all 9 sections are equal. If the
+// sections differ, the user is in "Custom…" mode (mixed per-section perms).
+function userAccessLevel(u) {
+  const p = (u && u.permissions) || {};
+  const first = (p[SECTION_IDS[0]] || '');
+  return SECTION_IDS.every(s => (p[s] || '') === first) ? first : '__custom__';
+}
+
 function renderAccessUsers() {
   const el = document.getElementById('access-users');
   const users = accessCache.users || [];
-  const colHead = SECTION_IDS.map(s => `<th title="${escHtml(SECTIONS[s]?.title || s)}">${SECTION_LABELS[s]}</th>`).join('');
-  const rows = users.map((u, idx) => {
+  if (!users.length) { el.innerHTML = '<div class="access-empty">No users yet — add one above.</div>'; return; }
+  el.innerHTML = users.map((u, idx) => {
+    const level = userAccessLevel(u);
+    const isCustom = level === '__custom__';
+    // Primary access-level selector: None / View / Comment / Edit / Custom…
+    const levelOpts = ['', 'view', 'comment', 'edit', '__custom__']
+      .map(l => `<option value="${l}"${l === level ? ' selected' : ''}>${l === '__custom__' ? 'Custom…' : ACCESS_LABEL[l]}</option>`).join('');
+    // Per-section grid (only shown in Custom mode). Selects always exist in the
+    // DOM so readRowPermsFromDom works in both modes.
     const cells = SECTION_IDS.map(s => {
       const v = (u.permissions && u.permissions[s]) || '';
-      const opts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
-      return `<td><select class="access-cell" data-row="${idx}" data-sec="${s}">${opts}</select></td>`;
+      const sopts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
+      return `<label class="acc-sec"><span>${SECTION_LABELS[s]}</span>
+        <select class="access-cell" data-row="${idx}" data-sec="${s}">${sopts}</select></label>`;
     }).join('');
-    const quick = ['','view','comment','edit'].map(l =>
-      `<button type="button" class="acc-quick${l ? ' lv-' + l : ' lv-none'}" onclick="quickSetRow(${idx},'${l}')">${ACCESS_LABEL[l]}</button>`
-    ).join('');
-    return `<tr class="access-user-row">
-      <td class="access-email-cell">
+    return `<div class="access-user-card" data-row="${idx}">
+      <div class="access-user-top">
         <div class="access-email-line">${escHtml(u.email)}</div>
-        <div class="access-quickset" title="Set all sections at once">all: ${quick}</div>
-      </td>
-      ${cells}
-      <td><button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button></td>
-    </tr>`;
+        <div class="access-user-controls">
+          <select class="access-level" data-row="${idx}">${levelOpts}</select>
+          <button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button>
+        </div>
+      </div>
+      <div class="access-perms-grid" style="${isCustom ? '' : 'display:none;'}">${cells}</div>
+    </div>`;
   }).join('');
-  el.innerHTML = users.length ? `
-    <div class="access-table-wrap"><table class="access-table">
-      <thead><tr><th>User</th>${colHead}<th></th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>` : '<div class="access-empty">No users yet — add one above.</div>';
-}
-
-// Set every section dropdown in one row to the same level (then the admin can
-// fine-tune individual cells). Updates the DOM + the local cache; saved on
-// "Save all changes".
-function quickSetRow(idx, level) {
-  SECTION_IDS.forEach(s => {
-    const sel = document.querySelector(`.access-cell[data-row="${idx}"][data-sec="${s}"]`);
-    if (sel) sel.value = level;
+  // Wire each row's access-level selector.
+  el.querySelectorAll('.access-level').forEach(sel => {
+    sel.addEventListener('change', () => {
+      const idx = Number(sel.dataset.row);
+      const val = sel.value;
+      const card = el.querySelector(`.access-user-card[data-row="${idx}"]`);
+      const grid = card && card.querySelector('.access-perms-grid');
+      if (val === '__custom__') { if (grid) grid.style.display = ''; return; }
+      // One level for all sections: update cache + every per-section dropdown so a
+      // later "Custom…" expand reflects the chosen level. readRowPermsFromDom reads
+      // those dropdowns, so this is what gets saved.
+      if (grid) grid.style.display = 'none';
+      const u = accessCache.users[idx];
+      if (u) { u.permissions = u.permissions || {}; SECTION_IDS.forEach(s => { u.permissions[s] = val; }); }
+      el.querySelectorAll(`.access-cell[data-row="${idx}"]`).forEach(c => { c.value = val; });
+    });
   });
-  const u = accessCache.users[idx];
-  if (u) { u.permissions = u.permissions || {}; SECTION_IDS.forEach(s => { u.permissions[s] = level; }); }
 }
 
 // Read the current dropdown selections for a row from the DOM (captures the
@@ -904,15 +919,19 @@ function reconnectGoogle() {
       return resolve(false);
     }
     let settled = false;
-    const done = (ok) => { if (settled) return; settled = true; resolve(ok); };
+    // The safety timer is cleared ONLY inside done() — never when the credential
+    // arrives. This guarantees the promise ALWAYS resolves (no stuck "Connecting…"
+    // button) even if GIS or loginBackend hangs forever.
+    const done = (ok) => { if (settled) return; settled = true; clearTimeout(timer); resolve(ok); };
     const timer = setTimeout(() => {
-      if (!settled) { settled = true; showToast('Reconnect timed out — try again'); resolve(false); }
+      showToast('Reconnect timed out — try again, or Sign Out and sign back in');
+      done(false);
     }, 20000);
     try {
       google.accounts.id.initialize({
         client_id: CONFIG.GOOGLE_CLIENT_ID,
         callback: (resp) => {
-          if (settled) return; settled = true; clearTimeout(timer);
+          if (settled) return;
           if (resp && resp.credential) {
             currentUser.token = resp.credential;
             // keep the stored profile's email in sync if the re-signed account differs
@@ -920,11 +939,17 @@ function reconnectGoogle() {
               const p = parseJwt(resp.credential);
               if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
             } catch { /* keep existing */ }
-            showToast('✓ Reconnected to Google — saves enabled');
-            // Re-mint the server session with the fresh ID token.
-            loginBackend(resp.credential).then(d => {
-              if (d) showToast('✓ Session restored');
+            showToast('✓ Reconnected to Google — restoring session…');
+            // Re-mint the server session with the fresh ID token. Wrap in a race
+            // with a 12s timeout so a hung network call can't stall the button;
+            // the 20s outer timer still backstops the whole flow.
+            Promise.race([
+              loginBackend(resp.credential),
+              new Promise(r => setTimeout(() => r(null), 12000)),
+            ]).then(d => {
               if (typeof applyAccessGating === 'function') applyAccessGating();
+              if (d) showToast('✓ Session restored — you can save again');
+              else showToast('Signed in, but the session could not be confirmed — try again');
               done(!!d);
             });
           } else {
@@ -932,10 +957,14 @@ function reconnectGoogle() {
             done(false);
           }
         },
+        // Notification callback intentionally omitted: prompt() fires its
+        // notification callback on several moments and the method checks can
+        // over-fire toasts. The 20s timer backstop already guarantees the
+        // promise resolves, so a suppressed prompt just times out with a clear
+        // message rather than hanging.
       });
-      google.accounts.id.prompt(); // visible One-Tap — reliable when user-initiated
+      google.accounts.id.prompt();
     } catch (e) {
-      clearTimeout(timer);
       showToast('Reconnect failed — try Sign Out and sign in again');
       done(false);
     }

@@ -1478,6 +1478,20 @@ select.form-input option { background: #0f172a; }
 .access-section { margin-bottom: 1.5rem; }
 .access-section h3 { font-size: 1rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text); }
 .access-hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem; }
+.access-legend { font-size: 0.78rem; color: var(--muted); margin: 0 0 0.75rem; line-height: 1.6; }
+.access-legend .acc-lv { display: inline-block; padding: 1px 7px; border-radius: 6px; font-weight: 600; margin: 0 2px; font-size: 0.72rem; }
+.access-legend .acc-lv.none { background: var(--glass); color: var(--muted); }
+.access-legend .acc-lv.view { background: rgba(14,98,255,0.15); color: var(--primary); }
+.access-legend .acc-lv.comment { background: rgba(245,158,11,0.18); color: #b45309; }
+.access-legend .acc-lv.edit { background: rgba(16,185,129,0.18); color: #047857; }
+.access-quickset { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: 0.68rem; color: var(--muted); }
+.acc-quick { padding: 1px 6px; border-radius: 6px; border: 1px solid var(--glass-border); background: var(--bg); color: var(--muted-strong); cursor: pointer; font-size: 0.68rem; font-weight: 600; }
+.acc-quick:hover { border-color: var(--primary); }
+.acc-quick.lv-none { color: var(--muted); }
+.acc-quick.lv-view { color: var(--primary); }
+.acc-quick.lv-comment { color: #b45309; }
+.acc-quick.lv-edit { color: #047857; }
+.access-email-line { font-weight: 600; white-space: nowrap; color: var(--text); font-size: 0.82rem; }
 .access-loading, .access-empty { font-size: 0.85rem; color: var(--muted); padding: 0.5rem 0; }
 .access-error { font-size: 0.85rem; color: var(--danger); padding: 0.5rem 0; }
 .access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
@@ -1493,7 +1507,7 @@ select.form-input option { background: #0f172a; }
 .access-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
 .access-table th, .access-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid var(--glass-border); }
 .access-table th { font-weight: 600; color: var(--muted-strong); background: var(--glass); }
-.access-table td.access-email-cell { text-align: left; font-weight: 600; white-space: nowrap; color: var(--text); }
+.access-table td.access-email-cell { text-align: left; white-space: nowrap; color: var(--text); }
 .access-cell { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--glass-border);
   background: var(--bg); color: var(--text); font-size: 0.78rem; }
 .btn-sm { padding: 5px 10px; font-size: 0.8rem; }

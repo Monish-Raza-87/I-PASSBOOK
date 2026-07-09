@@ -491,7 +491,10 @@ function handleCredential(response) {
   showApp();
   // Mint a server session token so the app stays signed in across reopens
   // (non-blocking — the in-memory ID token keeps things working meanwhile).
-  loginBackend(response.credential).then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
+  loginBackend(response.credential).then(d => {
+    if (!d) showToast('Signed in, but the session was not minted — tap avatar → Reconnect to Google');
+    if (typeof applyAccessGating === 'function') applyAccessGating();
+  });
 }
 
 function parseJwt(token) {
@@ -609,6 +612,7 @@ function openAccessModal() {
         <div class="inward-options-title">👥 User Access &amp; Requests</div>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
+      <div class="access-status" id="access-status"></div>
       <div class="access-body">
         <div class="access-section">
           <h3>Pending requests</h3>
@@ -631,11 +635,27 @@ function openAccessModal() {
   modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
   document.getElementById('access-add-btn').addEventListener('click', addAccessUser);
   document.getElementById('access-save-all').addEventListener('click', saveAllAccess);
+  updateAccessStatus();
   loadAccessData();
+}
+function updateAccessStatus() {
+  const el = document.getElementById('access-status');
+  if (!el) return;
+  const hasSession = !!(currentUser && currentUser.sessionToken);
+  const hasId = !!(currentUser && currentUser.token);
+  const cred = hasSession ? 'session ✓' : (hasId ? 'ID token (1h) ✓' : 'no credential ✗');
+  el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}`;
 }
 function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
 
 let accessCache = { users: [], requests: [] };
+function accessReconnectHtml() {
+  return `<div class="access-error">
+    <div>Your sign-in session isn't active, so the backend rejected this request.</div>
+    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Reconnect to Google</button>
+    <div class="access-hint" style="margin-top:0.5rem;">Tap it, sign in, and this list reloads automatically.</div>
+  </div>`;
+}
 function loadAccessData() {
   fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listACL')
     .then(r => r.json())
@@ -644,9 +664,23 @@ function loadAccessData() {
         accessCache = { users: data.users || [], requests: data.requests || [] };
         renderAccessRequests();
         renderAccessUsers();
-      } else {
-        document.getElementById('access-requests').innerHTML = '<div class="access-error">Could not load — is the backend redeployed?</div>';
-        document.getElementById('access-users').innerHTML = '';
+        return;
+      }
+      const unauthorized = data && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
+      const html = unauthorized
+        ? accessReconnectHtml()
+        : '<div class="access-error">Could not load — is the backend redeployed?</div>';
+      document.getElementById('access-requests').innerHTML = html;
+      document.getElementById('access-users').innerHTML = '';
+      if (unauthorized) {
+        const rb = document.getElementById('access-reconnect-btn');
+        if (rb) rb.addEventListener('click', () => {
+          rb.disabled = true; rb.textContent = 'Connecting…';
+          reconnectGoogle().then(ok => {
+            if (ok) { updateAccessStatus(); loadAccessData(); }
+            else { rb.disabled = false; rb.textContent = 'Reconnect to Google'; }
+          });
+        });
       }
     })
     .catch(() => {
@@ -864,14 +898,15 @@ function signOut() {
 // shows the real One-Tap card (a tap, not a silent moment), which is reliable,
 // then refreshes the token-gated data. Reachable from the user menu.
 function reconnectGoogle() {
-  return loadGis().then(() => {
+  return loadGis().then(() => new Promise(resolve => {
     if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
       showToast('Google sign-in unavailable — check your connection');
-      return;
+      return resolve(false);
     }
     let settled = false;
+    const done = (ok) => { if (settled) return; settled = true; resolve(ok); };
     const timer = setTimeout(() => {
-      if (!settled) { settled = true; showToast('Reconnect timed out — try again'); }
+      if (!settled) { settled = true; showToast('Reconnect timed out — try again'); resolve(false); }
     }, 20000);
     try {
       google.accounts.id.initialize({
@@ -890,9 +925,11 @@ function reconnectGoogle() {
             loginBackend(resp.credential).then(d => {
               if (d) showToast('✓ Session restored');
               if (typeof applyAccessGating === 'function') applyAccessGating();
+              done(!!d);
             });
           } else {
             showToast('Reconnect cancelled — saves need a Google sign-in');
+            done(false);
           }
         },
       });
@@ -900,8 +937,9 @@ function reconnectGoogle() {
     } catch (e) {
       clearTimeout(timer);
       showToast('Reconnect failed — try Sign Out and sign in again');
+      done(false);
     }
-  });
+  }));
 }
 
 // ─── MASTER INDEX ────────────────────────────────────────────────────────────

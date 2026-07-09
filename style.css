@@ -1475,6 +1475,8 @@ select.form-input option { background: #0f172a; }
   border-radius: 16px; overflow: hidden; display: flex; flex-direction: column;
   box-shadow: 0 20px 60px rgba(0,0,0,0.4); }
 .access-body { padding: 1rem 1.25rem 1.25rem; overflow-y: auto; }
+.access-status { padding: 0.5rem 1.25rem; font-size: 0.78rem; color: var(--muted);
+  border-bottom: 1px solid var(--glass-border); background: var(--glass); }
 .access-section { margin-bottom: 1.5rem; }
 .access-section h3 { font-size: 1rem; font-weight: 700; margin: 0 0 0.5rem; color: var(--text); }
 .access-hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.75rem; }

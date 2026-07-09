@@ -74,16 +74,27 @@ function loadSession() {
 }
 
 // Exchange a fresh Google ID token for a server session token + access payload.
-// Called right after sign-in and after an explicit Reconnect. Non-blocking: the
-// app is already usable (in-memory ID token keeps the old backend happy during
-// the redeploy window); the session just makes it survive a reopen.
+// Called right after sign-in and after an explicit Reconnect.
+//
+// Design notes (why this is the way it is):
+//  - GET, not POST: the backend handles `action=login` in doGet too (backend.gs),
+//    and a GET with the ~1KB idToken in the URL is well within URL-length limits
+//    and avoids the multipart-POST redirect/Content-Length issues that can hang
+//    or 411 against Apps Script. This is the most reliable transport.
+//  - 15s hard timeout: a hung network call can never stall the Reconnect button.
+//  - Never swallows the error: returns the backend's parsed {status,message} (or a
+//    synthetic one on timeout/network failure) so callers can surface the REAL
+//    reason — that's how we tell a transport issue from "the deployed backend is
+//    rejecting the token" (aud mismatch / old build). Truthy return ONLY on ok.
 function loginBackend(idToken) {
-  if (!idToken) return Promise.resolve(null);
-  const fd = new FormData();
-  fd.append('action', 'login');
-  fd.append('idToken', idToken);
-  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.ok ? r.json() : null)
+  if (!idToken) return Promise.resolve({ status: 'error', message: 'No ID token.' });
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
+    + 'action=login&idToken=' + encodeURIComponent(idToken);
+  const doFetch = fetch(url, { method: 'GET' })
+    .then(r => r.text().then(t => {
+      // Apps Script returns JSON after a redirect; parse what came back.
+      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
+    }))
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
@@ -91,9 +102,18 @@ function loginBackend(idToken) {
         persistSession(data.sessionToken);
         return data;
       }
-      return null;
+      // Pass the backend's own error message through (e.g. "Invalid or expired
+      // sign-in token." — the key diagnostic for a backend/aud mismatch).
+      return data && data.message
+        ? { status: 'error', message: data.message }
+        : { status: 'error', message: 'Login failed.' };
     })
-    .catch(() => null);
+    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+  // 15s hard backstop — a hung fetch can never leave the caller waiting forever.
+  return Promise.race([
+    doFetch,
+    new Promise(r => setTimeout(() => r({ status: 'error', message: 'Login timed out — check your connection' }), 15000)),
+  ]);
 }
 
 // One-shot silent re-login at boot for a reopened "keep me logged in" app that
@@ -119,8 +139,9 @@ function silentLogin() {
             if (resp && resp.credential) {
               currentUser.token = resp.credential;
               loginBackend(resp.credential).then(d => {
-                if (d && typeof applyAccessGating === 'function') applyAccessGating();
-                resolve(d);
+                // d is now always an object; only re-gate on a successful mint.
+                if (d && d.status === 'ok' && typeof applyAccessGating === 'function') applyAccessGating();
+                resolve(d && d.status === 'ok' ? d : null);
               });
             } else { resolve(null); }
           },
@@ -492,7 +513,10 @@ function handleCredential(response) {
   // Mint a server session token so the app stays signed in across reopens
   // (non-blocking — the in-memory ID token keeps things working meanwhile).
   loginBackend(response.credential).then(d => {
-    if (!d) showToast('Signed in, but the session was not minted — tap avatar → Reconnect to Google');
+    // d is always an object now; surface the real backend reason on failure so a
+    // fresh sign-in is as diagnosable as a Reconnect (e.g. "Invalid or expired
+    // sign-in token." → deployed backend is rejecting the token).
+    if (!d || d.status !== 'ok') showToast('Signed in, but the session was not minted: ' + (d && d.message ? d.message : 'try avatar → Reconnect to Google'));
     if (typeof applyAccessGating === 'function') applyAccessGating();
   });
 }
@@ -940,17 +964,15 @@ function reconnectGoogle() {
               if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
             } catch { /* keep existing */ }
             showToast('✓ Reconnected to Google — restoring session…');
-            // Re-mint the server session with the fresh ID token. Wrap in a race
-            // with a 12s timeout so a hung network call can't stall the button;
-            // the 20s outer timer still backstops the whole flow.
-            Promise.race([
-              loginBackend(resp.credential),
-              new Promise(r => setTimeout(() => r(null), 12000)),
-            ]).then(d => {
+            // Re-mint the server session with the fresh ID token. loginBackend has
+            // its own 15s timeout, so it always resolves; the 20s outer timer still
+            // backstops the whole flow. d is always an object — check status==='ok'.
+            loginBackend(resp.credential).then(d => {
+              const ok = !!(d && d.status === 'ok');
               if (typeof applyAccessGating === 'function') applyAccessGating();
-              if (d) showToast('✓ Session restored — you can save again');
-              else showToast('Signed in, but the session could not be confirmed — try again');
-              done(!!d);
+              if (ok) showToast('✓ Session restored — you can save again');
+              else showToast('Session restore failed: ' + (d && d.message ? d.message : 'no response'));
+              done(ok);
             });
           } else {
             showToast('Reconnect cancelled — saves need a Google sign-in');

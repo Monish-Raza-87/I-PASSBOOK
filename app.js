@@ -29,9 +29,10 @@ const CONFIG = {
   IR_REPO_GID:      '335027370',   // numeric gid — more reliable than the tab name
   IR_REPO_TAB:      'Form Responses',
 
-  // Legacy I-PASSBOOK workbook (pre-app records, IR1–IR441). Link-shared, so it
-  // embeds read-only with NO Google sign-in / token / backend — shown via the
-  // 🏛 Legacy button on the home screen. Each IR is its own tab in this workbook.
+  // Legacy I-PASSBOOK workbook (pre-app records, kept current until the app is
+  // released and the user confirms go-live). Link-shared, so it embeds read-only
+  // with NO Google sign-in / token / backend — shown via the 🏛 Legacy button on
+  // the home screen. Each IR is its own tab in this workbook.
   LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 };
 
@@ -98,12 +99,21 @@ function loginBackend(idToken) {
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
-        currentUser.access = { role: data.role, permissions: data.permissions, pendingRequest: !!data.pendingRequest };
+        // backend doLogin nests the access payload under data.access (the
+        // getMyAccess return); fall back to the top-level shape for older
+        // deployed builds that return it flat. Without this, a successful
+        // Reconnect left currentUser.access all-undefined → admin lockout.
+        const a = (data && data.access) || {};
+        currentUser.access = { role: a.role || data.role, permissions: a.permissions || data.permissions, pendingRequest: !!(a.pendingRequest || data.pendingRequest) };
+        currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
       }
       // Pass the backend's own error message through (e.g. "Invalid or expired
-      // sign-in token." — the key diagnostic for a backend/aud mismatch).
+      // sign-in token." — the key diagnostic for a backend/aud mismatch). Store
+      // it on the user so the access modal can surface WHY session minting failed
+      // instead of the generic "session isn't active" dead-loop.
+      currentUser.sessionError = (data && data.message) ? data.message : 'Login failed.';
       return data && data.message
         ? { status: 'error', message: data.message }
         : { status: 'error', message: 'Login failed.' };
@@ -198,7 +208,18 @@ window.fetch = function (input, init) {
       (init && init.body && init.body instanceof FormData && init.body.has && init.body.has('action') && init.body.get('action') === 'login');
     if (idToken && !sessionToken && !isLoginCall && !_sessionMinting) {
       _sessionMinting = true;
-      loginBackend(idToken).then(() => { _sessionMinting = false; if (typeof applyAccessGating === 'function') applyAccessGating(); });
+      // On failure KEEP _sessionMinting true so this background mint runs ONCE per
+      // page load, not silently on every subsequent backend call (the dead-loop).
+      // Reconnect calls loginBackend directly (bypassing this guard), so recovery
+      // stays user-initiated. On success, re-arm so a later sign-out/reconnect can mint again.
+      loginBackend(idToken).then(d => {
+        if (d && d.status === 'ok') {
+          _sessionMinting = false;
+          if (typeof applyAccessGating === 'function') applyAccessGating();
+        } else if (document.getElementById('access-modal')) {
+          updateAccessStatus();   // surface the failed-mint reason in the open admin modal
+        }
+      });
     }
 
     const isFormData = init && init.body && init.body instanceof FormData;
@@ -667,17 +688,29 @@ function updateAccessStatus() {
   if (!el) return;
   const hasSession = !!(currentUser && currentUser.sessionToken);
   const hasId = !!(currentUser && currentUser.token);
-  const cred = hasSession ? 'session ✓' : (hasId ? 'ID token (1h) ✓' : 'no credential ✗');
+  let cred;
+  if (hasSession) cred = 'session ✓';
+  else if (hasId && currentUser.sessionError) cred = 'ID token only — session NOT minted: ' + escHtml(currentUser.sessionError);
+  else if (hasId) cred = 'ID token (1h) — no server session yet';
+  else cred = 'no credential ✗';
   el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}`;
 }
 function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
 
 let accessCache = { users: [], requests: [] };
-function accessReconnectHtml() {
+function accessReconnectHtml(reason) {
+  // reason = the REAL backend rejection (from the failed mint or this call's
+  // message). Showing it turns the old generic "session isn't active" dead-loop
+  // into an actionable diagnostic — usually "redeploy GAS, the deployed backend
+  // is an older build than app.js (aud mismatch / Unknown action)".
+  const why = reason ? escHtml(String(reason)) : 'Your sign-in session isn’t active, so the backend rejected this request.';
+  const hint = reason
+    ? 'This usually means the deployed Apps Script backend is an older build than app.js (aud mismatch / "Unknown action"). Redeploy the GAS web app from backend.gs (edit the EXISTING deployment so the /exec URL stays the same) and confirm backend CONFIG.GOOGLE_CLIENT_ID matches the frontend, then Reconnect.'
+    : 'Tap it, sign in, and this list reloads automatically.';
   return `<div class="access-error">
-    <div>Your sign-in session isn't active, so the backend rejected this request.</div>
+    <div id="access-reconnect-reason">${why}</div>
     <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Reconnect to Google</button>
-    <div class="access-hint" style="margin-top:0.5rem;">Tap it, sign in, and this list reloads automatically.</div>
+    <div class="access-hint" style="margin-top:0.5rem;">${hint}</div>
   </div>`;
 }
 function loadAccessData() {
@@ -691,9 +724,12 @@ function loadAccessData() {
         return;
       }
       const unauthorized = data && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
+      // Surface the REAL backend rejection reason (from the failed mint or this
+      // call's message) instead of the generic "session isn't active" dead-loop.
+      const reason = (currentUser && currentUser.sessionError) || (data && data.message) || '';
       const html = unauthorized
-        ? accessReconnectHtml()
-        : '<div class="access-error">Could not load — is the backend redeployed?</div>';
+        ? accessReconnectHtml(reason)
+        : '<div class="access-error">Could not load — is the backend redeployed? ' + escHtml((data && data.message) || '') + '</div>';
       document.getElementById('access-requests').innerHTML = html;
       document.getElementById('access-users').innerHTML = '';
       if (unauthorized) {
@@ -702,7 +738,15 @@ function loadAccessData() {
           rb.disabled = true; rb.textContent = 'Connecting…';
           reconnectGoogle().then(ok => {
             if (ok) { updateAccessStatus(); loadAccessData(); }
-            else { rb.disabled = false; rb.textContent = 'Reconnect to Google'; }
+            else {
+              // Don't full-re-render (would wipe the button + need re-wiring). Update
+              // the reason in place from the failed mint, reset the button, and refresh
+              // the status line so the admin sees WHY it still failed.
+              rb.disabled = false; rb.textContent = 'Reconnect to Google';
+              const rEl = document.getElementById('access-reconnect-reason');
+              if (rEl && currentUser && currentUser.sessionError) rEl.textContent = currentUser.sessionError;
+              updateAccessStatus();
+            }
           });
         });
       }
@@ -963,7 +1007,6 @@ function reconnectGoogle() {
               const p = parseJwt(resp.credential);
               if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
             } catch { /* keep existing */ }
-            showToast('✓ Reconnected to Google — restoring session…');
             // Re-mint the server session with the fresh ID token. loginBackend has
             // its own 15s timeout, so it always resolves; the 20s outer timer still
             // backstops the whole flow. d is always an object — check status==='ok'.
@@ -1329,7 +1372,7 @@ function openLegacyWorkbook() {
   const id = CONFIG.LEGACY_SHEET_ID;
   const embedUrl = `https://docs.google.com/spreadsheets/d/${id}/preview?rm=minimal`;
   const openUrl  = `https://docs.google.com/spreadsheets/d/${id}/edit`;
-  openLegacyModal(embedUrl, 'IR1–IR441 · switch tabs at the bottom', openUrl);
+  openLegacyModal(embedUrl, 'All pre-app records · switch tabs at the bottom', openUrl);
 }
 
 // Back button

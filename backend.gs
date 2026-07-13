@@ -44,12 +44,36 @@ var CONFIG = {
   ADMIN_EMAILS: ['customer.relations@indrones.com', 'monish.raza@indrones.com'],
 
   // Session lifetime (days). A server-issued session token lets the PWA stay
-  // signed in across reopens without repeated Google One-Tap pop-ups.
+  // signed in across reopens with no repeated sign-in pop-ups.
   SESSION_DAYS: 30,
 
-  // Google OAuth web client ID (same one the frontend uses for GIS sign-in).
-  // Used server-side to verify the ID token's audience.
-  GOOGLE_CLIENT_ID: '719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com',
+  // ALLOWLIST — the ONLY emails that may CREATE an account via the sign-up
+  // flow. The user maintains this list. An email NOT listed here (and not an
+  // admin below) is rejected at sign-up before any USERS row is created. Once an
+  // account exists, the user signs in with email + password. Add one email per
+  // line, lowercase. NOTE: the *deployed* backend is an older build than this
+  // file — keep this list in sync with the live deployment.
+  ALLOWED_EMAILS: [
+    'monish.raza@indrones.com',
+    'ganesh.suryavanshi@indrones.com',
+    'ravi@indrones.com',
+    'harshad@indrones.com',
+    'vaibhav.panchal@indrones.com',
+    'angad.kumbhar@indrones.com',
+    'mansi.sisale@indrones.com',
+    'adhik.nair@indrones.com',
+    'satish.dhanawade@indrones.com',
+    'mukesh.mane@indrones.com',
+    'nilesh.pawar@indrones.com',
+    'tushar.kadam@indrones.com',
+    'vicky.malekar@indrones.com',
+    'ankit.prajapati@indrones.com',
+    'vipin@indrones.com',
+    'omkar.surekar@indrones.com',
+    'sanket.gaikwad@indrones.com',
+    'kishor.salunkhe@uavgarage.com',
+    'customer.relations@indrones.com',
+  ],
 
   // Legacy I-PASSBOOK sheet (the pre-app workbook used till ~IR441). Each IR is
   // its own tab named like "IR310 | S25P023". Surfaced read-only in the app so
@@ -61,81 +85,131 @@ var CONFIG = {
 // ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
-// AUTH — verify the caller. Two credential forms are accepted:
-//   1) sessionToken — a server-issued, revocable, ~30-day session (the normal
-//      path for a reopened "keep me logged in" PWA — no Google pop-up needed).
-//   2) idToken — a fresh Google ID token (sign-in / reconnect / the login call).
-// Both resolve to the verified @indrones.com email, read from the credential
-// itself — never from a client-supplied parameter — so the Indrones-only gate
-// cannot be spoofed by passing a known email.
+// AUTH — verify the caller by a server-issued, revocable session token.
+// The token is minted at sign-in (doLoginPassword) / sign-up (doSignup) and
+// stored on the SESSIONS tab; the frontend persists it and attaches it to every
+// call. The caller's email is read FROM the token (never from a client param),
+// so the allowlist / @indrones-only gate can't be spoofed by passing a known
+// email. No Google ID token is involved anywhere — this backend makes no
+// outbound network calls (so it needs no script.external_request scope).
 function requireAuth(e) {
   var st = (e.parameter.sessionToken || '').toString().trim();
-  if (st) { var em = lookupSession(st); if (em) return em; }
-  var idt = (e.parameter.idToken || '').toString().trim();
-  if (idt) return verifyIdToken(idt);
+  if (st) return lookupSession(st);
   return null;
 }
 
-// Last verifyIdToken failure reason. Surfaced via doLogin so the frontend can
-// show WHY a login was rejected (instead of a generic "invalid token") — this
-// is what lets us diagnose a deployed-backend mismatch without console access.
-// Safe to expose: the client ID is already public in the frontend (public repo).
-var _idTokenVerifyError = '';
+// ──────────────────────────────────────────────────────────────────────────────
+// USERS + PASSWORD AUTH (allowlist-gated sign-up)
+// ──────────────────────────────────────────────────────────────────────────────
+// Sign-up is gated by CONFIG.ALLOWED_EMAILS: only a listed email (or an admin)
+// can create an account. Passwords are stored as SHA-256(salt + password) with a
+// per-account random salt — the plain password is never stored. After sign-up or
+// sign-in, the backend mints a revocable 30-day session token (see SESSIONS)
+// that the frontend persists. No Google sign-in at any point.
 
-function verifyIdToken(idToken) {
-  _idTokenVerifyError = '';
-  if (!idToken) { _idTokenVerifyError = 'no idToken supplied'; return null; }
-  try {
-    var url = 'https://oauth2.googleapis.com/tokeninfo?id_token=' + encodeURIComponent(idToken);
-    var resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    var code = resp.getResponseCode();
-    if (code !== 200) {
-      var errBody = '';
-      try { errBody = resp.getContentText(); } catch (e) {}
-      _idTokenVerifyError = 'tokeninfo returned HTTP ' + code + (errBody ? (': ' + errBody.substring(0, 160)) : '');
-      return null;
-    }
-    var info = JSON.parse(resp.getContentText());
+function isAllowedEmail(email) {
+  email = (email || '').toLowerCase().trim();
+  if (!email) return false;
+  var list = (CONFIG.ALLOWED_EMAILS || []).map(function (x) { return String(x).toLowerCase().trim(); });
+  if (list.indexOf(email) > -1) return true;
+  return isAdminEmail(email);   // admins can always sign up
+}
 
-    // aud is normally a string, but Google may return an array in some flows —
-    // accept the token if our client ID is present in either form.
-    var aud = info.aud;
-    var audOk = aud === CONFIG.GOOGLE_CLIENT_ID ||
-      (Array.isArray(aud) && aud.indexOf(CONFIG.GOOGLE_CLIENT_ID) >= 0);
-    if (!audOk) {
-      _idTokenVerifyError = 'aud mismatch — token aud=' + JSON.stringify(aud) + ', backend expects ' + CONFIG.GOOGLE_CLIENT_ID;
-      return null;
-    }
-    var ev = info.email_verified;
-    if (ev !== 'true' && ev !== true) { _idTokenVerifyError = 'email_verified is ' + JSON.stringify(ev); return null; }
-    var email = (info.email || '').toLowerCase().trim();
-    var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
-    if (!email || email.indexOf(suffix) !== email.length - suffix.length) {
-      _idTokenVerifyError = 'email not @' + CONFIG.ALLOWED_DOMAIN + ': ' + email;
-      return null;
-    }
-    var now = Math.floor(Date.now() / 1000);
-    if (info.exp && Number(info.exp) < now) { _idTokenVerifyError = 'token expired (exp=' + info.exp + ', now=' + now + ')'; return null; }
-    return email;
-  } catch (err) {
-    _idTokenVerifyError = 'verifyIdToken threw: ' + err.message;
-    return null;
+function getOrCreateUsersTab(ss) {
+  var tab = ss.getSheetByName('USERS');
+  if (!tab) {
+    tab = ss.insertSheet('USERS');
+    tab.getRange(1, 1, 1, 5).setValues([['Email', 'PasswordHash', 'Salt', 'Created At', 'Created By']]);
+    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
   }
+  return tab;
+}
+
+// SHA-256 digest of (salt + password), returned as a lowercase hex string.
+// Utilities.computeDigest returns signed-byte arrays, so normalize to hex.
+function hashPassword(password, salt) {
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(salt) + String(password));
+  return raw.map(function (b) {
+    var h = (b < 0 ? b + 256 : b).toString(16);
+    return h.length < 2 ? '0' + h : h;
+  }).join('');
+}
+
+// Find a USERS row by email (case-insensitive). Returns the row values or null.
+function findUserRow(ss, email) {
+  email = (email || '').toLowerCase().trim();
+  var tab = getOrCreateUsersTab(ss);
+  var data = tab.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase().trim() === email) return data[i];
+  }
+  return null;
+}
+
+// Mint a fresh session token for an email and append it to SESSIONS.
+function mintSession(email) {
+  var ss    = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab   = getOrCreateSessionsTab(ss);
+  var token = Utilities.getUuid();
+  var now   = new Date();
+  var exp   = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
+  tab.appendRow([token, email, now, exp, '']);
+  return token;
+}
+
+// Sign up: allowlist-gated account creation. On success, mints a session.
+function doSignup(params) {
+  var email    = (params.email || '').toString().toLowerCase().trim();
+  var password = (params.password || '').toString();
+  if (!email)    return { status: 'error', message: 'Enter your email.' };
+  if (!isAllowedEmail(email)) {
+    return { status: 'error', message: 'This email is not on the allowed list. Ask an admin to add you.' };
+  }
+  if (!password || password.length < 6) return { status: 'error', message: 'Password must be at least 6 characters.' };
+
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  if (findUserRow(ss, email)) return { status: 'error', message: 'An account already exists for this email — sign in instead.' };
+
+  var salt = Utilities.getUuid();
+  var hash = hashPassword(password, salt);
+  var tab  = getOrCreateUsersTab(ss);
+  tab.appendRow([email, hash, salt, new Date(), 'self-signup']);
+
+  var token = mintSession(email);
+  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+}
+
+// Sign in: verify email + password against the USERS tab, then mint a session.
+function doLoginPassword(params) {
+  var email    = (params.email || '').toString().toLowerCase().trim();
+  var password = (params.password || '').toString();
+  if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
+
+  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var row = findUserRow(ss, email);
+  if (!row) return { status: 'error', message: 'No account found for this email — sign up first.' };
+
+  var salt     = String(row[2]);
+  var expected = String(row[1]);
+  if (hashPassword(password, salt) !== expected) return { status: 'error', message: 'Wrong password.' };
+
+  var token = mintSession(email);
+  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
 function doGet(e) {
   var action = e.parameter.action || '';
-  // login verifies its own idToken and issues a session (no prior auth needed).
-  if (action === 'login') return buildResponse(doLogin(e.parameter.idToken));
-  // getMyAccess needs identity but is valid even for users with no access yet.
+  // getMyAccess needs identity (session token) but is valid for users with no
+  // access yet (so the request-access screen can render after sign-up/sign-in).
   if (action === 'getMyAccess') {
     var email = requireAuth(e);
-    if (!email) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
+    if (!email) return buildResponse({ status: 'error', message: 'Unauthorized: a valid sign-in is required.' });
     return buildResponse(getMyAccess(email));
   }
 
   var authEmail = requireAuth(e);
-  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
+  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid sign-in is required.' });
   var result;
   try {
     if      (action === 'listIRs')        result = listIRs();
@@ -153,10 +227,9 @@ function doGet(e) {
 function doPost(e) {
   var params = e.parameter;
   var action = params.action || '';
-  // login verifies its own idToken and issues a session (no prior auth needed).
-  // Accepted on POST as well as GET so the frontend can send the (long) idToken
-  // in the form body instead of the URL, avoiding URL-length limits.
-  if (action === 'login') return buildResponse(doLogin(params.idToken));
+  // signup / login are self-authenticating (email + password) — no prior session.
+  if (action === 'signup') return buildResponse(doSignup(params));
+  if (action === 'login')  return buildResponse(doLoginPassword(params));
   // logout revokes the session itself (handled before the auth gate).
   if (action === 'logout') return buildResponse(doLogout(params.sessionToken));
   // requestAccess needs identity but is valid for users with no access yet.
@@ -224,19 +297,6 @@ function lookupSession(token) {
     }
     return null;
   } catch (e) { return null; }
-}
-
-// Exchange a fresh Google ID token for a new session token (login).
-function doLogin(idToken) {
-  var email = verifyIdToken(idToken);
-  if (!email) return { status: 'error', message: 'Invalid or expired sign-in token — ' + (_idTokenVerifyError || 'unknown reason') };
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateSessionsTab(ss);
-  var token = Utilities.getUuid();
-  var now = new Date();
-  var exp = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
-  tab.appendRow([token, email, now, exp, '']);
-  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
 function doLogout(sessionToken) {

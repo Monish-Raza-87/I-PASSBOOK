@@ -9,10 +9,7 @@ const CONFIG = {
   // Google Apps Script Web App URL (v2 — correct column mappings)
   GAS_URL: 'https://script.google.com/macros/s/AKfycbz-borqx_TeCTh1Ibc70vv9SIHaFxRvVGs4XolbJG0EG2qEg4kVQ0hyclDOeLM8kCDP/exec',
 
-  // Google OAuth Client ID — restricts login to @indrones.com accounts
-  GOOGLE_CLIENT_ID: '719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com',
-
-  // Allowed domain — only @indrones.com emails can log in
+  // Allowed domain — only @indrones.com (plus explicitly-allowlisted) accounts
   ALLOWED_DOMAIN: 'indrones.com',
 
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
@@ -39,31 +36,14 @@ const CONFIG = {
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
 
-// ─── GAS CALL AUTH (server-issued session token) ──────────────────────────────
-// One Google sign-in verifies the caller's identity; the backend then mints a
-// revocable, app-scoped SESSION TOKEN (30-day) that the frontend persists. Every
-// backend call carries that session token — so a reopened "keep me logged in"
-// PWA just works, with no Google sign-in pop-up. The Google ID token itself is
-// NEVER persisted; only the short-lived in-memory one (during sign-in/reconnect)
-// is sent on the `login` call to obtain the session.
-//
-// The backend reads the caller's email FROM the credential (session token or ID
-// token), never from a client param — so the @indrones-only gate can't be
-// spoofed. See [[auth-token-gate]].
-let _gisReady = null;
-function loadGis() {
-  if (_gisReady) return _gisReady;
-  _gisReady = new Promise((resolve) => {
-    if (typeof google !== 'undefined' && google.accounts && google.accounts.id) return resolve();
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => resolve(); // resolve anyway; reconnect fails gracefully
-    document.head.appendChild(s);
-  });
-  return _gisReady;
-}
+// ─── EMAIL + PASSWORD AUTH (allowlist-gated, no Google) ───────────────────────
+// No Google sign-in anywhere. A user signs UP with email + password — the
+// backend only lets emails on CONFIG.ALLOWED_EMAILS create an account. Sign-in
+// exchanges email + password for a revocable 30-day server SESSION TOKEN, which
+// the frontend persists (localStorage) and attaches to every backend call. A
+// reopened "keep me logged in" PWA just works — no pop-ups, no Reconnect. The
+// caller's email is read FROM the session token by the backend, never from a
+// client param, so the allowlist gate can't be spoofed. See [[auth-token-gate]].
 
 // Persist/restore the session token (localStorage only — "keep me logged in").
 const SESSION_KEY = 'ipb_session';
@@ -74,24 +54,19 @@ function loadSession() {
   try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
 }
 
-// Exchange a fresh Google ID token for a server session token + access payload.
-// Called right after sign-in and after an explicit Reconnect.
-//
-// Design notes (why this is the way it is):
-//  - GET, not POST: the backend handles `action=login` in doGet too (backend.gs),
-//    and a GET with the ~1KB idToken in the URL is well within URL-length limits
-//    and avoids the multipart-POST redirect/Content-Length issues that can hang
-//    or 411 against Apps Script. This is the most reliable transport.
-//  - 15s hard timeout: a hung network call can never stall the Reconnect button.
-//  - Never swallows the error: returns the backend's parsed {status,message} (or a
-//    synthetic one on timeout/network failure) so callers can surface the REAL
-//    reason — that's how we tell a transport issue from "the deployed backend is
-//    rejecting the token" (aud mismatch / old build). Truthy return ONLY on ok.
-function loginBackend(idToken) {
-  if (!idToken) return Promise.resolve({ status: 'error', message: 'No ID token.' });
-  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
-    + 'action=login&idToken=' + encodeURIComponent(idToken);
-  const doFetch = fetch(url, { method: 'GET' })
+// Exchange email + password for a server session token + access payload.
+// Called from the Sign in button. Stores the session, clears any stale
+// sessionError, and returns the backend's parsed {status,...} so the caller can
+// surface the real rejection reason (e.g. "Wrong password."). Uses _origFetch
+// (not the intercepted fetch) so the login call isn't subject to the session
+// gate, and so a bad password can't trigger the "session expired" auto-logout.
+function loginBackend(email, password) {
+  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
+  const fd = new FormData();
+  fd.append('action', 'login');
+  fd.append('email', email);
+  fd.append('password', password);
+  const doFetch = _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       // Apps Script returns JSON after a redirect; parse what came back.
       try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
@@ -99,20 +74,18 @@ function loginBackend(idToken) {
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
-        // backend doLogin nests the access payload under data.access (the
-        // getMyAccess return); fall back to the top-level shape for older
-        // deployed builds that return it flat. Without this, a successful
-        // Reconnect left currentUser.access all-undefined → admin lockout.
+        // backend doLoginPassword nests the access payload under data.access
+        // (the getMyAccess return). Without this, currentUser.access would be
+        // all-undefined and lock the user out of sections.
         const a = (data && data.access) || {};
-        currentUser.access = { role: a.role || data.role, permissions: a.permissions || data.permissions, pendingRequest: !!(a.pendingRequest || data.pendingRequest) };
+        currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
         currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
       }
-      // Pass the backend's own error message through (e.g. "Invalid or expired
-      // sign-in token." — the key diagnostic for a backend/aud mismatch). Store
-      // it on the user so the access modal can surface WHY session minting failed
-      // instead of the generic "session isn't active" dead-loop.
+      // Pass the backend's own error message through (e.g. "Wrong password." /
+      // "No account found for this email — sign up first."). Store it so the UI
+      // can surface the real reason instead of a generic "login failed".
       currentUser.sessionError = (data && data.message) ? data.message : 'Login failed.';
       return data && data.message
         ? { status: 'error', message: data.message }
@@ -126,46 +99,26 @@ function loginBackend(idToken) {
   ]);
 }
 
-// One-shot silent re-login at boot for a reopened "keep me logged in" app that
-// has a stored profile but no session token (e.g. signed in under the old
-// backend before it was redeployed). Asks GIS for a fresh ID token via
-// auto_select (silent for returning users — no pop-up card), then exchanges it
-// for a session. This is a SINGLE attempt per boot, not per backend call (which
-// is what caused the old pop-up storm). If it doesn't fire in time, the
-// interceptor's Unauthorized toast tells the user to tap Reconnect.
-function silentLogin() {
-  if (!currentUser) return Promise.resolve(null);
-  return loadGis().then(() => {
-    if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) return null;
-    return new Promise(resolve => {
-      let done = false;
-      const finish = () => { if (done) return; done = true; resolve(null); };
-      const timer = setTimeout(finish, 8000);
-      try {
-        google.accounts.id.initialize({
-          client_id: CONFIG.GOOGLE_CLIENT_ID,
-          callback: (resp) => {
-            if (done) return; done = true; clearTimeout(timer);
-            if (resp && resp.credential) {
-              currentUser.token = resp.credential;
-              loginBackend(resp.credential).then(d => {
-                // d is now always an object; only re-gate on a successful mint.
-                if (d && d.status === 'ok' && typeof applyAccessGating === 'function') applyAccessGating();
-                resolve(d && d.status === 'ok' ? d : null);
-              });
-            } else { resolve(null); }
-          },
-        });
-        google.accounts.id.prompt({ auto_select: true });
-      } catch { clearTimeout(timer); resolve(null); }
-    });
-  }).catch(() => null);
+// Create an account (allowlist-gated on the backend), then mint a session.
+// Returns the backend's parsed {status,...}. The caller wires the resulting
+// session into currentUser on success.
+function signupBackend(email, password) {
+  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
+  const fd = new FormData();
+  fd.append('action', 'signup');
+  fd.append('email', email);
+  fd.append('password', password);
+  return _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => {
+      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
+    }))
+    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
 }
 
 // Refresh the caller's role/permissions from the backend (boot + after access
 // changes). Best-effort — a failure leaves the previous access in place.
 function refreshMyAccess() {
-  if (!currentUser || (!currentUser.sessionToken && !currentUser.token)) return Promise.resolve(null);
+  if (!currentUser || !currentUser.sessionToken) return Promise.resolve(null);
   const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getMyAccess';
   return fetch(url).then(r => r.ok ? r.json() : null)
     .then(data => {
@@ -179,60 +132,39 @@ function refreshMyAccess() {
 }
 
 const _origFetch = window.fetch.bind(window);
-let _authToastShown = false;       // one "Reconnect" hint per session, not per call
-let _sessionMinting = false;       // guard so the opportunistic mint runs once
+let _authToastShown = false;       // one "session expired" hint per session, not per call
 window.fetch = function (input, init) {
   return (async () => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const isGAS = url.indexOf(CONFIG.GAS_URL) === 0;
     if (!isGAS) return _origFetch(input, init);
 
-    // Dev bypass (localhost + ?dev=1): no real Google account, so backend calls
-    // aren't authorized and fall back to demo data. Intentional — real testing
-    // happens signed-in on the live site.
+    // Dev bypass (localhost + ?dev=1): no real account, so backend calls aren't
+    // authorized and fall back to demo data. Intentional — real testing happens
+    // signed-in on the live site.
     if (shouldUseDevAuthBypass()) return _origFetch(input, init);
 
-    // Credentials to attach. sessionToken is the normal path (works on reopen).
-    // idToken is only present in memory right after sign-in/reconnect; sending
-    // it too keeps calls working during the backend redeploy window (old gate
-    // only understands idToken). userEmail is for logging only.
-    const sessionToken = (currentUser && currentUser.sessionToken) || null;
-    const idToken = (currentUser && currentUser.token) || null;
-    const email = (currentUser && currentUser.email) || '';
+    // login / signup are self-authenticating (email+password in the body) — do
+    // NOT attach a session token to them (there isn't one yet, and they must not
+    // trip the session-expired auto-logout below).
+    const isAuthCall = url.indexOf('action=login') >= 0 || url.indexOf('action=signup') >= 0;
 
-    // Opportunistic session mint: if we have an in-memory ID token but no stored
-    // session yet (e.g. signed in under the old backend, then it was redeployed),
-    // convert that token into a persisted session on the next backend call. Skips
-    // the login call itself (avoid recursion) and runs once.
-    const isLoginCall = url.indexOf('action=login') >= 0 ||
-      (init && init.body && init.body instanceof FormData && init.body.has && init.body.has('action') && init.body.get('action') === 'login');
-    if (idToken && !sessionToken && !isLoginCall && !_sessionMinting) {
-      _sessionMinting = true;
-      // On failure KEEP _sessionMinting true so this background mint runs ONCE per
-      // page load, not silently on every subsequent backend call (the dead-loop).
-      // Reconnect calls loginBackend directly (bypassing this guard), so recovery
-      // stays user-initiated. On success, re-arm so a later sign-out/reconnect can mint again.
-      loginBackend(idToken).then(d => {
-        if (d && d.status === 'ok') {
-          _sessionMinting = false;
-          if (typeof applyAccessGating === 'function') applyAccessGating();
-        } else if (document.getElementById('access-modal')) {
-          updateAccessStatus();   // surface the failed-mint reason in the open admin modal
-        }
-      });
-    }
+    const sessionToken = (currentUser && currentUser.sessionToken) || null;
+    const email = (currentUser && currentUser.email) || '';
 
     const isFormData = init && init.body && init.body instanceof FormData;
     const origBody = isFormData ? init.body : null;
 
     const appendAuth = (fd) => {
       if (sessionToken) fd.append('sessionToken', sessionToken);
-      if (idToken) fd.append('idToken', idToken);
       if (email) fd.append('userEmail', email);
     };
 
     let resp;
-    if (isFormData) {
+    if (isAuthCall) {
+      // Pass the FormData auth call through untouched (uses _origFetch directly).
+      resp = await _origFetch(input, init);
+    } else if (isFormData) {
       // FormData() only accepts an HTMLFormElement, so copy entries by hand.
       const fd = new FormData();
       for (const [k, v] of origBody.entries()) fd.append(k, v);
@@ -243,20 +175,27 @@ window.fetch = function (input, init) {
       const sep = url.indexOf('?') >= 0 ? '&' : '?';
       let q = '';
       if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
-      if (idToken) q += (q ? '&' : '') + 'idToken=' + encodeURIComponent(idToken);
       if (email) q += (q ? '&' : '') + 'userEmail=' + encodeURIComponent(email);
       resp = await _origFetch(url + (q ? sep + q : ''), init);
     }
 
-    // If the call went out with NO credential at all and the backend rejected it,
-    // surface ONE non-blocking hint to Reconnect (which mints a fresh session).
-    // No pop-up is triggered automatically — the user taps Reconnect themselves.
-    if (resp && resp.ok && !sessionToken && !idToken && !_authToastShown) {
+    // If the session is gone (expired / revoked / backend redeployed with a fresh
+    // SESSIONS tab), surface ONE hint and bounce back to the login screen so the
+    // user just signs in again — no "Reconnect" step, fully automatic. This is
+    // the "auto mode" recovery: a dead session never leaves the user stuck.
+    if (resp && resp.ok && !isAuthCall && !_authToastShown) {
       try {
         const data = await resp.clone().json();
         if (data && data.status === 'error' && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
           _authToastShown = true;
-          showToast('Sign in expired — tap avatar → Reconnect to Google');
+          showToast('Session expired — please sign in again');
+          try {
+            localStorage.removeItem('ipb_user');
+            localStorage.removeItem(SESSION_KEY);
+            sessionStorage.removeItem('ipb_user');
+          } catch { /* non-fatal */ }
+          currentUser = null;
+          if (typeof showAuth === 'function') showAuth();
         }
       } catch { /* not JSON */ }
     }
@@ -404,9 +343,9 @@ const toast       = document.getElementById('toast');
 
 // ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
 window.addEventListener('load', () => {
-  // Check for local file protocol (Google Auth won't work)
+  // Check for local file protocol (login + backend calls won't work)
   if (window.location.protocol === 'file:') {
-    alert('⚠️ GOOGLE AUTH WARNING: You are running this app directly from a local file. Google Login will NOT work unless you serve the app via a local server (http://localhost) or deploy it to Netlify.');
+    alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
   }
 
   // Give the splash video time to play (4 seconds for the Indrones intro)
@@ -416,24 +355,25 @@ window.addEventListener('load', () => {
     setTimeout(() => {
       splash.style.display = 'none';
       const stored = loadStoredUser();
-      if (stored) {
+      const storedSession = loadSession();
+      if (stored && storedSession) {
         currentUser = stored;
-        // Restore the server session token so backend calls are authorized
-        // without another Google sign-in pop-up.
-        currentUser.sessionToken = loadSession();
+        // Restore the server session token so backend calls are authorized with
+        // no sign-in pop-up — the "keep me logged in" auto-reopen path.
+        currentUser.sessionToken = storedSession;
         showApp();
         // Refresh role/permissions from the backend (drives access gating +
-        // request-access screen). Best-effort; gating has a safe fallback.
+        // request-access screen). Best-effort; gating has a safe fallback. If
+        // the session is dead, the interceptor bounces back to the login screen.
         refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
-        // No stored session yet (e.g. signed in before the backend was redeployed):
-        // try ONE silent re-login to mint one. If it can't, the interceptor's
-        // Unauthorized toast will point the user to a manual Reconnect.
-        if (!currentUser.sessionToken) silentLogin();
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
         persistUser(currentUser, false); // dev bypass: this tab only
         showApp();
       } else {
+        // Stale profile with no session = effectively signed out. Drop the
+        // stale profile and show the login screen so the user signs in fresh.
+        if (stored) { try { localStorage.removeItem('ipb_user'); } catch { /* non-fatal */ } }
         showAuth();
       }
     }, 800);
@@ -487,65 +427,102 @@ function loadStoredUser() {
   return null;
 }
 
-// ─── GOOGLE AUTH ─────────────────────────────────────────────────────────────
+// ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
 function showAuth() {
   authCont.style.display = 'flex';
-  // Load Google Identity Services dynamically
-  const script = document.createElement('script');
-  script.src = 'https://accounts.google.com/gsi/client';
-  script.async = true;
-  script.onload = initGoogleAuth;
-  document.head.appendChild(script);
+  appCont.style.display  = 'none';
+  const err = document.getElementById('auth-error');
+  if (err) err.style.display = 'none';
+  wireAuthForm();
 }
 
-function initGoogleAuth() {
-  // Render a hidden Google button and click programmatically for custom styling
-  google.accounts.id.initialize({
-    client_id: CONFIG.GOOGLE_CLIENT_ID,
-    callback: handleCredential,
-    auto_select: false,
-  });
-  // Also set up the manual button
-  document.getElementById('google-signin-btn').addEventListener('click', () => {
-    google.accounts.id.prompt(); // show One Tap
-  });
-}
+let _authFormWired = false;
+function wireAuthForm() {
+  if (_authFormWired) return;
+  const form = document.getElementById('auth-form');
+  if (!form) return;
+  _authFormWired = true;
 
-function handleCredential(response) {
-  // Decode the JWT to read user info
-  const payload = parseJwt(response.credential);
-  const email = payload.email || '';
+  const emailIn   = document.getElementById('auth-email');
+  const passIn    = document.getElementById('auth-password');
+  const signInBtn = document.getElementById('auth-signin-btn');
+  const signUpBtn = document.getElementById('auth-signup-btn');
+  const toggleBtn = document.getElementById('auth-toggle-mode');
+  const errEl     = document.getElementById('auth-error');
 
-  if (!email.endsWith('@' + CONFIG.ALLOWED_DOMAIN)) {
-    document.getElementById('auth-error').style.display = 'block';
-    return;
-  }
+  const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; } };
 
-  currentUser = {
-    name:    payload.name,
-    email:   payload.email,
-    picture: payload.picture,
-    initial: payload.name?.charAt(0)?.toUpperCase() || '?',
-    token:   response.credential,
+  const finishSuccess = (email, d) => {
+    const name = (email.split('@')[0] || 'User');
+    currentUser.name    = name;
+    currentUser.email   = email;
+    currentUser.initial = name.charAt(0).toUpperCase() || '?';
+    delete currentUser.picture;
+    currentUser.sessionToken = d.sessionToken;
+    const a = (d && d.access) || {};
+    currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
+    persistSession(d.sessionToken);
+    persistUser(currentUser, true);
+    showApp();
+    refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
   };
-  const keepBox = document.getElementById('keep-signin');
-  persistUser(currentUser, keepBox ? keepBox.checked !== false : true);
-  showApp();
-  // Mint a server session token so the app stays signed in across reopens
-  // (non-blocking — the in-memory ID token keeps things working meanwhile).
-  loginBackend(response.credential).then(d => {
-    // d is always an object now; surface the real backend reason on failure so a
-    // fresh sign-in is as diagnosable as a Reconnect (e.g. "Invalid or expired
-    // sign-in token." → deployed backend is rejecting the token).
-    if (!d || d.status !== 'ok') showToast('Signed in, but the session was not minted: ' + (d && d.message ? d.message : 'try avatar → Reconnect to Google'));
-    if (typeof applyAccessGating === 'function') applyAccessGating();
-  });
+
+  const submitLogin = () => {
+    const email = (emailIn.value || '').trim().toLowerCase();
+    const password = passIn.value || '';
+    if (!email || !password) { showError('Enter your email and password.'); return; }
+    signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
+    showError('');
+    currentUser = currentUser || { email: email };
+    currentUser.email = email;
+    loginBackend(email, password).then(d => {
+      signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
+      if (d && d.status === 'ok' && d.sessionToken) finishSuccess(email, d);
+      else showError((d && d.message) || 'Login failed.');
+    });
+  };
+
+  const submitSignup = () => {
+    const email = (emailIn.value || '').trim().toLowerCase();
+    const password = passIn.value || '';
+    if (!email || !password) { showError('Enter your email and a password.'); return; }
+    if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
+    signUpBtn.disabled = true; signUpBtn.textContent = 'Creating…';
+    showError('');
+    currentUser = { email: email };
+    signupBackend(email, password).then(d => {
+      signUpBtn.disabled = false; signUpBtn.textContent = 'Sign up';
+      if (d && d.status === 'ok' && d.sessionToken) finishSuccess(email, d);
+      else showError((d && d.message) || 'Sign up failed.');
+    });
+  };
+
+  signInBtn.addEventListener('click', submitLogin);
+  signUpBtn.addEventListener('click', submitSignup);
+  if (toggleBtn) toggleBtn.addEventListener('click', toggleAuthMode);
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); submitLogin(); });
 }
 
-function parseJwt(token) {
-  try {
-    return JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
-  } catch { return {}; }
+function toggleAuthMode() {
+  const nameWrap  = document.getElementById('auth-name-wrap');
+  const toggleBtn = document.getElementById('auth-toggle-mode');
+  const signInBtn = document.getElementById('auth-signin-btn');
+  const signUpBtn = document.getElementById('auth-signup-btn');
+  if (!nameWrap) return;
+  const isSignup = nameWrap.style.display !== 'none';
+  if (isSignup) {
+    // → Sign in mode
+    nameWrap.style.display = 'none';
+    signInBtn.style.display = '';
+    signUpBtn.style.display = 'none';
+    if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
+  } else {
+    // → Sign up mode
+    nameWrap.style.display = '';
+    signInBtn.style.display = 'none';
+    signUpBtn.style.display = '';
+    if (toggleBtn) toggleBtn.textContent = 'Already have an account? Sign in';
+  }
 }
 
 // ─── APP BOOT ────────────────────────────────────────────────────────────────
@@ -687,29 +664,22 @@ function updateAccessStatus() {
   const el = document.getElementById('access-status');
   if (!el) return;
   const hasSession = !!(currentUser && currentUser.sessionToken);
-  const hasId = !!(currentUser && currentUser.token);
-  let cred;
-  if (hasSession) cred = 'session ✓';
-  else if (hasId && currentUser.sessionError) cred = 'ID token only — session NOT minted: ' + escHtml(currentUser.sessionError);
-  else if (hasId) cred = 'ID token (1h) — no server session yet';
-  else cred = 'no credential ✗';
+  const cred = hasSession
+    ? 'session ✓'
+    : ('no active session — ' + escHtml((currentUser && currentUser.sessionError) || 'sign in again'));
   el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}`;
 }
 function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
 
 let accessCache = { users: [], requests: [] };
 function accessReconnectHtml(reason) {
-  // reason = the REAL backend rejection (from the failed mint or this call's
-  // message). Showing it turns the old generic "session isn't active" dead-loop
-  // into an actionable diagnostic — usually "redeploy GAS, the deployed backend
-  // is an older build than app.js (aud mismatch / Unknown action)".
+  // reason = the REAL backend rejection (expired/revoked session). With
+  // email+password auth there is no "Reconnect" — the user just signs in again.
   const why = reason ? escHtml(String(reason)) : 'Your sign-in session isn’t active, so the backend rejected this request.';
-  const hint = reason
-    ? 'This usually means the deployed Apps Script backend is an older build than app.js (aud mismatch / "Unknown action"). Redeploy the GAS web app from backend.gs (edit the EXISTING deployment so the /exec URL stays the same) and confirm backend CONFIG.GOOGLE_CLIENT_ID matches the frontend, then Reconnect.'
-    : 'Tap it, sign in, and this list reloads automatically.';
+  const hint = 'Your session expired. Sign in again and this list reloads automatically.';
   return `<div class="access-error">
     <div id="access-reconnect-reason">${why}</div>
-    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Reconnect to Google</button>
+    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Sign in again</button>
     <div class="access-hint" style="margin-top:0.5rem;">${hint}</div>
   </div>`;
 }
@@ -724,8 +694,7 @@ function loadAccessData() {
         return;
       }
       const unauthorized = data && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
-      // Surface the REAL backend rejection reason (from the failed mint or this
-      // call's message) instead of the generic "session isn't active" dead-loop.
+      // Surface the REAL backend rejection reason instead of a generic message.
       const reason = (currentUser && currentUser.sessionError) || (data && data.message) || '';
       const html = unauthorized
         ? accessReconnectHtml(reason)
@@ -734,21 +703,7 @@ function loadAccessData() {
       document.getElementById('access-users').innerHTML = '';
       if (unauthorized) {
         const rb = document.getElementById('access-reconnect-btn');
-        if (rb) rb.addEventListener('click', () => {
-          rb.disabled = true; rb.textContent = 'Connecting…';
-          reconnectGoogle().then(ok => {
-            if (ok) { updateAccessStatus(); loadAccessData(); }
-            else {
-              // Don't full-re-render (would wipe the button + need re-wiring). Update
-              // the reason in place from the failed mint, reset the button, and refresh
-              // the status line so the admin sees WHY it still failed.
-              rb.disabled = false; rb.textContent = 'Reconnect to Google';
-              const rEl = document.getElementById('access-reconnect-reason');
-              if (rEl && currentUser && currentUser.sessionError) rEl.textContent = currentUser.sessionError;
-              updateAccessStatus();
-            }
-          });
-        });
+        if (rb) rb.addEventListener('click', () => { signOut(); });
       }
     })
     .catch(() => {
@@ -934,11 +889,9 @@ function createUserMenu() {
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
       ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access &amp; Requests</button>' : ''}
-      <button class="signout-btn" id="reconnect-btn">⟳ Reconnect to Google</button>
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
-    document.getElementById('reconnect-btn').addEventListener('click', () => { menu.style.display = 'none'; reconnectGoogle(); });
     document.getElementById('signout-btn').addEventListener('click', signOut);
     const adminBtn = document.getElementById('access-admin-btn');
     if (adminBtn) adminBtn.addEventListener('click', () => { menu.style.display = 'none'; openAccessModal(); });
@@ -970,71 +923,11 @@ function signOut() {
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');
   } catch { }
-  if (typeof google !== 'undefined') google.accounts.id.disableAutoSelect();
+  currentUser = null;
   location.reload();
 }
 
-// ─── RECONNECT TO GOOGLE ─────────────────────────────────────────────────────
-// The silent One-Tap (auto_select) used at boot is unreliable on mobile PWAs —
-// it often doesn't fire on a reopened app, so the backend's token gate rejects
-// saves and the legacy archive with "Unauthorized". This user-initiated flow
-// shows the real One-Tap card (a tap, not a silent moment), which is reliable,
-// then refreshes the token-gated data. Reachable from the user menu.
-function reconnectGoogle() {
-  return loadGis().then(() => new Promise(resolve => {
-    if (typeof google === 'undefined' || !google.accounts || !google.accounts.id) {
-      showToast('Google sign-in unavailable — check your connection');
-      return resolve(false);
-    }
-    let settled = false;
-    // The safety timer is cleared ONLY inside done() — never when the credential
-    // arrives. This guarantees the promise ALWAYS resolves (no stuck "Connecting…"
-    // button) even if GIS or loginBackend hangs forever.
-    const done = (ok) => { if (settled) return; settled = true; clearTimeout(timer); resolve(ok); };
-    const timer = setTimeout(() => {
-      showToast('Reconnect timed out — try again, or Sign Out and sign back in');
-      done(false);
-    }, 20000);
-    try {
-      google.accounts.id.initialize({
-        client_id: CONFIG.GOOGLE_CLIENT_ID,
-        callback: (resp) => {
-          if (settled) return;
-          if (resp && resp.credential) {
-            currentUser.token = resp.credential;
-            // keep the stored profile's email in sync if the re-signed account differs
-            try {
-              const p = parseJwt(resp.credential);
-              if (p.email) { currentUser.email = p.email; currentUser.name = p.name || currentUser.name; }
-            } catch { /* keep existing */ }
-            // Re-mint the server session with the fresh ID token. loginBackend has
-            // its own 15s timeout, so it always resolves; the 20s outer timer still
-            // backstops the whole flow. d is always an object — check status==='ok'.
-            loginBackend(resp.credential).then(d => {
-              const ok = !!(d && d.status === 'ok');
-              if (typeof applyAccessGating === 'function') applyAccessGating();
-              if (ok) showToast('✓ Session restored — you can save again');
-              else showToast('Session restore failed: ' + (d && d.message ? d.message : 'no response'));
-              done(ok);
-            });
-          } else {
-            showToast('Reconnect cancelled — saves need a Google sign-in');
-            done(false);
-          }
-        },
-        // Notification callback intentionally omitted: prompt() fires its
-        // notification callback on several moments and the method checks can
-        // over-fire toasts. The 20s timer backstop already guarantees the
-        // promise resolves, so a suppressed prompt just times out with a clear
-        // message rather than hanging.
-      });
-      google.accounts.id.prompt();
-    } catch (e) {
-      showToast('Reconnect failed — try Sign Out and sign in again');
-      done(false);
-    }
-  }));
-}
+// ─── (Reconnect to Google removed — auth is now email + password) ────────────
 
 // ─── MASTER INDEX ────────────────────────────────────────────────────────────
 function showIndex() {
@@ -1222,13 +1115,12 @@ async function loadLegacyIndex() {
         showToast(`🏛 Legacy archive linked — ${Object.keys(legacyMap).length} IRs`);
       }
     } else {
-      // Surface the real reason. "Unauthorized" = no valid Google token on this
-      // device (silent sign-in didn't fire) — saves will fail the same way; the
-      // fix is Reconnect to Google from the user menu. Anything else is a backend
-      // error (e.g. the deployer can't open the legacy sheet) — show it verbatim.
+      // Surface the real reason. "Unauthorized" = the session expired; the user
+      // should sign in again from the user menu. Anything else is a backend error
+      // (e.g. the deployer can't open the legacy sheet) — show it verbatim.
       var msg = (data.message || 'unknown error').toLowerCase();
       if (msg.indexOf('unauthorized') === 0) {
-        showToast('Legacy needs Google sign-in — tap avatar → Reconnect to Google');
+        showToast('Legacy archive needs a sign-in — sign out and sign back in');
       } else {
         showToast('Legacy archive error: ' + (data.message || 'unknown'));
       }

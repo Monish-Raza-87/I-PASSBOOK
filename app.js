@@ -39,19 +39,69 @@ let currentUser = null;
 // ─── EMAIL + PASSWORD AUTH (allowlist-gated, no Google) ───────────────────────
 // No Google sign-in anywhere. A user signs UP with email + password — the
 // backend only lets emails on CONFIG.ALLOWED_EMAILS create an account. Sign-in
-// exchanges email + password for a revocable 30-day server SESSION TOKEN, which
-// the frontend persists (localStorage) and attaches to every backend call. A
-// reopened "keep me logged in" PWA just works — no pop-ups, no Reconnect. The
-// caller's email is read FROM the session token by the backend, never from a
-// client param, so the allowlist gate can't be spoofed. See [[auth-token-gate]].
+// exchanges email + password for a revocable server SESSION TOKEN (12h), which
+// the frontend holds in sessionStorage and attaches to every backend call. A
+// refresh within a session stays signed in, but a FULL app close wipes
+// sessionStorage — so reopening the app ALWAYS requires signing in again,
+// regardless of who was logged in before (a handed-off device can't inherit a
+// session). The caller's email is read FROM the session token by the backend,
+// never a client param, so the allowlist gate can't be spoofed. An idle timeout
+// also forces re-sign-in after inactivity. See [[auth-token-gate]].
 
-// Persist/restore the session token (localStorage only — "keep me logged in").
+// Persist/restore the session token in sessionStorage (NOT localStorage) — this
+// is what makes "close the app → must sign in again" work.
 const SESSION_KEY = 'ipb_session';
 function persistSession(token) {
-  try { if (token) localStorage.setItem(SESSION_KEY, token); else localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+  try { if (token) sessionStorage.setItem(SESSION_KEY, token); else sessionStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
 }
 function loadSession() {
-  try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+  try { return sessionStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+}
+
+// ─── IDLE TIMEOUT / FORCED RE-AUTH ───────────────────────────────────────────
+// After IDLE_MS of no user activity, the session is revoked and the user is
+// bounced to the login screen (no page reload — the toast stays visible). This
+// is a "basic reason for re-sign-in": a device left open doesn't stay signed in
+// forever, which matters on a shared / handed-off device.
+const IDLE_MS = 15 * 60 * 1000;   // 15 minutes
+let _idleTimer = null;
+let _idleListenersAdded = false;
+function resetIdleTimer() {
+  if (_idleTimer) clearTimeout(_idleTimer);
+  if (!currentUser || !currentUser.sessionToken) return;   // only arm when signed in
+  _idleTimer = setTimeout(() => {
+    showToast('Signed out due to inactivity — please sign in again');
+    forceReauth();
+  }, IDLE_MS);
+}
+function startIdleTimer() {
+  if (!_idleListenersAdded) {
+    _idleListenersAdded = true;
+    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev =>
+      window.addEventListener(ev, resetIdleTimer, { passive: true }));
+  }
+  resetIdleTimer();
+}
+// Revoke the server session, clear in-session state, and show the login screen
+// (no reload). Used by the idle timeout and the session-expired path.
+function forceReauth() {
+  const st = currentUser && currentUser.sessionToken;
+  if (st) {
+    try {
+      const fd = new FormData();
+      fd.append('action', 'logout');
+      fd.append('sessionToken', st);
+      _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
+    } catch { /* non-fatal */ }
+  }
+  try {
+    sessionStorage.removeItem('ipb_user');
+    sessionStorage.removeItem(SESSION_KEY);
+  } catch { /* non-fatal */ }
+  currentUser = null;
+  _authToastShown = false;
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
+  if (typeof showAuth === 'function') showAuth();
 }
 
 // Exchange email + password for a server session token + access payload.
@@ -115,13 +165,35 @@ function postAuth(action, fields) {
     }))
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
 }
-function requestSignupBackend(email, password, t, website) {
+function requestSignupBackend(email, password, t, website, captchaId, captchaAnswer) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
-  return postAuth('requestSignup', { email, password, t: String(t || 0), website: website || '' });
+  return postAuth('requestSignup', {
+    email, password, t: String(t || 0), website: website || '',
+    captchaId: captchaId || '', captchaAnswer: captchaAnswer || ''
+  });
 }
 function verifySignupBackend(email, password, code) {
   if (!email || !password || !code) return Promise.resolve({ status: 'error', message: 'Enter your email, password, and the code.' });
   return postAuth('verifySignup', { email, password, code });
+}
+
+// Fetch a self-hosted captcha challenge (server-generated SVG image). The answer
+// stays on the server; the client only gets the image + an id to reference it.
+let _captchaId = null;
+function fetchCaptcha(imgEl) {
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getCaptcha';
+  return _origFetch(url).then(r => r.text().then(t => {
+    try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response.' }; }
+  })).then(d => {
+    if (d && d.status === 'ok' && d.captchaId && d.svg && imgEl) {
+      _captchaId = d.captchaId;
+      imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.svg);
+      imgEl.style.display = '';
+    } else if (imgEl) {
+      imgEl.src = ''; imgEl.alt = 'Captcha unavailable';
+    }
+    return d;
+  }).catch(() => null);
 }
 
 // Refresh the caller's role/permissions from the backend (boot + after access
@@ -199,9 +271,9 @@ window.fetch = function (input, init) {
           _authToastShown = true;
           showToast('Session expired — please sign in again');
           try {
-            localStorage.removeItem('ipb_user');
-            localStorage.removeItem(SESSION_KEY);
             sessionStorage.removeItem('ipb_user');
+            sessionStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
           } catch { /* non-fatal */ }
           currentUser = null;
           if (typeof showAuth === 'function') showAuth();
@@ -368,13 +440,16 @@ window.addEventListener('load', () => {
       if (stored && storedSession) {
         currentUser = stored;
         // Restore the server session token so backend calls are authorized with
-        // no sign-in pop-up — the "keep me logged in" auto-reopen path.
+        // no sign-in pop-up. This only happens on a refresh WITHIN a session — a
+        // full app close wipes sessionStorage (loadStoredUser/loadSession return
+        // null) and the user must sign in again below.
         currentUser.sessionToken = storedSession;
         showApp();
         // Refresh role/permissions from the backend (drives access gating +
         // request-access screen). Best-effort; gating has a safe fallback. If
         // the session is dead, the interceptor bounces back to the login screen.
         refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
+        startIdleTimer();   // arm the inactivity auto sign-out
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
         persistUser(currentUser, false); // dev bypass: this tab only
@@ -382,7 +457,7 @@ window.addEventListener('load', () => {
       } else {
         // Stale profile with no session = effectively signed out. Drop the
         // stale profile and show the login screen so the user signs in fresh.
-        if (stored) { try { localStorage.removeItem('ipb_user'); } catch { /* non-fatal */ } }
+        if (stored) { try { sessionStorage.removeItem('ipb_user'); localStorage.removeItem('ipb_user'); } catch { /* non-fatal */ } }
         showAuth();
       }
     }, 800);
@@ -404,15 +479,13 @@ function createDevUser() {
   };
 }
 
-// ─── PERSISTENT LOGIN ("keep me logged in") ──────────────────────────────────
-// Stores the signed-in profile so the app reopens already logged in on the
-// device. `persist=true` (the checkbox) writes to localStorage (survives app
-// close / phone restart); `persist=false` writes to sessionStorage only (this
-// tab, cleared on close). Only the profile is persisted — the raw ID token is
-// NEVER written to storage (it's unused after sign-in; the backend gate relies
-// on the verified email, and keeping the token out of storage limits exposure
-// if the device is shared or lost).
-function persistUser(user, persist) {
+// ─── IN-SESSION PROFILE (sessionStorage — NOT persistent across app close) ────
+// The profile + session token live in sessionStorage only, so a full app close
+// wipes them and the next open forces a fresh sign-in (a handed-off device can't
+// inherit the previous user's session). A refresh within a session keeps the
+// user signed in. The server session token is the real credential; this profile
+// is just the display name/email. The raw password is NEVER stored.
+function persistUser(user /* persist flag ignored — always sessionStorage */) {
   const safe = {
     name:    user.name,
     email:   user.email,
@@ -421,17 +494,20 @@ function persistUser(user, persist) {
   };
   try {
     sessionStorage.setItem('ipb_user', JSON.stringify(safe));
-    if (persist) localStorage.setItem('ipb_user', JSON.stringify(safe));
-    else localStorage.removeItem('ipb_user');
+    // Deliberately do NOT write localStorage — that would survive app close and
+    // defeat the "reopen → must sign in again" security model.
+    localStorage.removeItem('ipb_user');
   } catch { /* storage may be unavailable in private mode — non-fatal */ }
 }
 
 function loadStoredUser() {
   try {
-    const persisted = localStorage.getItem('ipb_user');
-    if (persisted) return JSON.parse(persisted);
+    // sessionStorage only — a full app close clears it, forcing re-sign-in.
     const session = sessionStorage.getItem('ipb_user');
     if (session) return JSON.parse(session);
+    // If a very old localStorage profile lingers from the prior "keep me logged
+    // in" model, ignore (and clean) it — we never restore a cross-close session.
+    localStorage.removeItem('ipb_user');
   } catch { }
   return null;
 }
@@ -442,6 +518,18 @@ function showAuth() {
   appCont.style.display  = 'none';
   const err = document.getElementById('auth-error');
   if (err) err.style.display = 'none';
+  // Reset to a clean Sign-in form (showAuth can be called mid-session by the
+  // idle timeout / session-expired path, when the form may be in signup/OTP mode).
+  const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
+  const show = (id) => { const el = document.getElementById(id); if (el) el.style.display = ''; };
+  hide('auth-name-wrap'); hide('auth-otp-wrap'); hide('auth-captcha-wrap');
+  show('auth-signin-btn'); hide('auth-signup-btn');
+  const toggleBtn = document.getElementById('auth-toggle-mode');
+  if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
+  _authMode = 'login'; _pendingSignup = null;
+  ['auth-email', 'auth-password', 'auth-otp', 'auth-captcha'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
   wireAuthForm();
 }
 
@@ -467,14 +555,23 @@ function wireAuthForm() {
   const otpNote     = document.getElementById('auth-otp-note');
   const verifyBtn   = document.getElementById('auth-verify-btn');
   const resendLink  = document.getElementById('auth-resend-link');
+  const captchaWrap = document.getElementById('auth-captcha-wrap');
+  const captchaImg  = document.getElementById('auth-captcha-img');
+  const captchaIn   = document.getElementById('auth-captcha');
+  const captchaRefresh = document.getElementById('auth-captcha-refresh');
   const errEl       = document.getElementById('auth-error');
 
   const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; } };
+  const refreshCaptcha = () => { if (captchaImg) fetchCaptcha(captchaImg); if (captchaIn) captchaIn.value = ''; };
   const setOtpStep = (on, note) => {
     if (otpWrap) otpWrap.style.display = on ? 'flex' : 'none';
     if (on && otpNote && note) otpNote.textContent = note;
     if (on) _authMode = 'otp'; else if (_authMode === 'otp') _authMode = 'signup';
-    if (on) { signUpBtn.style.display = 'none'; if (otpIn) setTimeout(() => otpIn.focus(), 50); }
+    if (on) {
+      signUpBtn.style.display = 'none';
+      if (captchaWrap) captchaWrap.style.display = 'none';   // captcha already validated
+      if (otpIn) setTimeout(() => otpIn.focus(), 50);
+    }
   };
 
   const finishSuccess = (email, d) => {
@@ -490,6 +587,7 @@ function wireAuthForm() {
     persistUser(currentUser, true);
     showApp();
     refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
+    startIdleTimer();   // arm the inactivity auto sign-out
   };
 
   const submitLogin = () => {
@@ -508,12 +606,13 @@ function wireAuthForm() {
   };
 
   // Step 1: ask the backend to email a 6-digit code to the allowlisted address.
-  // The honeypot + time-to-submit are checked server-side as a bot guard.
+  // The honeypot + time-to-submit + captcha are all checked server-side.
   const requestCode = (email, password) => {
     const t = Date.now() - _authFormReadyTs;
     const website = (honeyIn && honeyIn.value) || '';
     if (website) return Promise.resolve({ status: 'error', message: 'Sign-up could not be completed.' });
-    return requestSignupBackend(email, password, t, website);
+    const answer = (captchaIn && captchaIn.value) || '';
+    return requestSignupBackend(email, password, t, website, _captchaId, answer);
   };
 
   const submitSignup = () => {
@@ -521,6 +620,7 @@ function wireAuthForm() {
     const password = passIn.value || '';
     if (!email || !password) { showError('Enter your email and a password.'); return; }
     if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
+    if (captchaIn && !captchaIn.value) { showError('Please solve the captcha.'); return; }
     signUpBtn.disabled = true; signUpBtn.textContent = 'Sending code…';
     showError('');
     requestCode(email, password).then(d => {
@@ -531,6 +631,8 @@ function wireAuthForm() {
         setOtpStep(true, 'Enter the 6-digit code sent to ' + email);
         if (d.message) showToast(d.message);
       } else {
+        // A wrong/expired captcha is refreshed so the user gets a fresh image.
+        if (d && d.captchaRefresh) refreshCaptcha();
         showError((d && d.message) || 'Sign up failed.');
       }
     });
@@ -573,6 +675,7 @@ function wireAuthForm() {
   signUpBtn.addEventListener('click', submitSignup);
   if (verifyBtn) verifyBtn.addEventListener('click', submitVerify);
   if (resendLink) resendLink.addEventListener('click', resendCode);
+  if (captchaRefresh) captchaRefresh.addEventListener('click', (e) => { e.preventDefault(); refreshCaptcha(); });
   if (toggleBtn) toggleBtn.addEventListener('click', toggleAuthMode);
   // Enter submits the CURRENT mode (login / signup / otp), not always login.
   form.addEventListener('submit', (ev) => {
@@ -589,21 +692,25 @@ function toggleAuthMode() {
   const signInBtn = document.getElementById('auth-signin-btn');
   const signUpBtn = document.getElementById('auth-signup-btn');
   const otpWrap   = document.getElementById('auth-otp-wrap');
+  const captchaWrap = document.getElementById('auth-captcha-wrap');
+  const captchaImg  = document.getElementById('auth-captcha-img');
   if (!nameWrap) return;
   const isSignup = nameWrap.style.display !== 'none';
   if (isSignup) {
     // → Sign in mode
     nameWrap.style.display = 'none';
     if (otpWrap) otpWrap.style.display = 'none';
+    if (captchaWrap) captchaWrap.style.display = 'none';
     signInBtn.style.display = '';
     signUpBtn.style.display = 'none';
     _authMode = 'login';
     _pendingSignup = null;
     if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
   } else {
-    // → Sign up mode
+    // → Sign up mode (captcha is required, so fetch a fresh challenge now)
     nameWrap.style.display = '';
     if (otpWrap) otpWrap.style.display = 'none';
+    if (captchaWrap) { captchaWrap.style.display = ''; if (captchaImg) fetchCaptcha(captchaImg); }
     signInBtn.style.display = 'none';
     signUpBtn.style.display = '';
     _authMode = 'signup';
@@ -1005,9 +1112,9 @@ function signOut() {
     } catch { /* non-fatal */ }
   }
   try {
-    localStorage.removeItem('ipb_user');
-    localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');
+    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
   } catch { }
   currentUser = null;
   location.reload();

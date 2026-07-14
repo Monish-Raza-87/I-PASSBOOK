@@ -49,6 +49,16 @@
         </div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+        <!-- Captcha (sign-up only): server-generated image challenge, answer kept on the server. -->
+        <div id="auth-captcha-wrap" style="display:none; flex-direction:column; gap:0.5rem;">
+          <label for="auth-captcha" style="color:var(--muted); font-size:0.8rem; margin:0;">Solve to continue:</label>
+          <div style="display:flex; align-items:center; gap:0.5rem;">
+            <img id="auth-captcha-img" alt="Captcha challenge" style="height:46px; width:130px; border-radius:8px; background:#eef3ff; flex:0 0 auto;" />
+            <button type="button" id="auth-captcha-refresh" title="New challenge"
+                    style="background:none; border:1px solid var(--border,#d0d7e2); color:var(--primary); cursor:pointer; font-size:1.1rem; border-radius:8px; padding:0.35rem 0.6rem; flex:0 0 auto;">↻</button>
+          </div>
+          <input class="form-input" type="text" id="auth-captcha" inputmode="numeric" pattern="[0-9\-]*" placeholder="Answer" autocomplete="off" />
+        </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
         <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none;">Sign up</button>
         <!-- OTP step (shown after Sign up requests a code). -->

@@ -86,7 +86,7 @@ var CONFIG = {
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
 // AUTH — verify the caller by a server-issued, revocable session token.
-// The token is minted at sign-in (doLoginPassword) / sign-up (doSignup) and
+// The token is minted at sign-in (doLoginPassword) / sign-up (doVerifySignup) and
 // stored on the SESSIONS tab; the frontend persists it and attaches it to every
 // call. The caller's email is read FROM the token (never from a client param),
 // so the allowlist / @indrones-only gate can't be spoofed by passing a known
@@ -158,23 +158,145 @@ function mintSession(email) {
   return token;
 }
 
-// Sign up: allowlist-gated account creation. On success, mints a session.
-function doSignup(params) {
+// ──────────────────────────────────────────────────────────────────────────────
+// EMAIL VERIFICATION (OTP) + BOT GUARD (honeypot + time-gate) — no external calls
+// ──────────────────────────────────────────────────────────────────────────────
+// Sign-up is TWO steps now: (1) requestSignup — allowlist gate + bot checks, then
+// email a 6-digit OTP via MailApp (the script.send_mail scope already granted for
+// sendNudgeEmail — NO new scope, NO UrlFetchApp, so NO external_request). (2)
+// verifySignup — the user enters the code from their mailbox; only then is the
+// USERS row created and a session minted. This proves the signer-upper actually
+// OWNS the allowlisted email (closing the "someone else signs up with your email
+// first" gap) without reintroducing the scope that broke Google sign-in.
+//
+// Bot guard (server-enforced, zero network): a hidden honeypot field humans never
+// fill, plus a minimum time-to-submit (a human can't type email+password in <2s).
+// Checked on the SERVER, not just the client, so it can't be bypassed by skipping
+// the UI. Genuine reCAPTCHA/Turnstile was rejected on purpose: verifying their
+// token needs UrlFetchApp.fetch → script.external_request → the deploy trap again.
+var OTP_TTL_MIN        = 10;
+var OTP_MIN_SUBMIT_MS  = 2000;     // a human can't fill the form faster than this
+var OTP_RESEND_GAP_MS = 60 * 1000; // min gap between code (re)issues per email
+var OTP_MAX_RESENDS   = 5;
+
+function getOrCreatePendingTab(ss) {
+  var tab = ss.getSheetByName('PENDING_SIGNUPS');
+  if (!tab) {
+    tab = ss.insertSheet('PENDING_SIGNUPS');
+    tab.getRange(1, 1, 1, 5).setValues([['Email', 'OTP Code', 'Created At', 'Expires At', 'Resend Count']]);
+    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+// 6-digit numeric code (100000–999999). GAS server runtime: Math.random is fine.
+function makeOtp() {
+  return String(Math.floor(Math.random() * 900000) + 100000);
+}
+
+// Return [rowValues, rowIndex] for a pending sign-up by email, or null.
+function findPendingRow(ss, email) {
+  email = (email || '').toLowerCase().trim();
+  var tab = getOrCreatePendingTab(ss);
+  var data = tab.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase().trim() === email) return [data[i], i + 1];
+  }
+  return null;
+}
+
+// Step 1 of sign-up: validate + bot-check, email a 6-digit code. No account yet.
+function doRequestSignup(params) {
   var email    = (params.email || '').toString().toLowerCase().trim();
   var password = (params.password || '').toString();
+  var honey    = (params.website || '').toString();          // honeypot — must stay empty
+  var tMs      = parseInt(params.t || '0', 10) || 0;          // ms since form became ready
+
+  // Bot guard (server-enforced). Don't reveal which check tripped.
+  if (honey) return { status: 'error', message: 'Sign-up could not be completed.' };
+  if (tMs < OTP_MIN_SUBMIT_MS) return { status: 'error', message: 'Please slow down and fill the form, then try again.' };
+
   if (!email)    return { status: 'error', message: 'Enter your email.' };
-  if (!isAllowedEmail(email)) {
-    return { status: 'error', message: 'This email is not on the allowed list. Ask an admin to add you.' };
-  }
+  if (!isAllowedEmail(email)) return { status: 'error', message: 'This email is not on the allowed list. Ask an admin to add you.' };
   if (!password || password.length < 6) return { status: 'error', message: 'Password must be at least 6 characters.' };
 
   var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
   if (findUserRow(ss, email)) return { status: 'error', message: 'An account already exists for this email — sign in instead.' };
 
+  var tab = getOrCreatePendingTab(ss);
+  var now = new Date();
+  var existing = findPendingRow(ss, email);
+  var resendCount = 0;
+  if (existing) {
+    var row = existing[0];
+    var createdMs = row[2] ? new Date(row[2]).getTime() : 0;
+    resendCount = Number(row[4]) || 0;
+    if ((now.getTime() - createdMs) < OTP_RESEND_GAP_MS) {
+      return { status: 'error', message: 'A code was already sent — wait a moment, then resend.' };
+    }
+    if (resendCount >= OTP_MAX_RESENDS) {
+      return { status: 'error', message: 'Too many code requests — please try again later.' };
+    }
+    resendCount += 1;
+  } else {
+    resendCount = 1;
+  }
+
+  var code = makeOtp();
+  var expires = new Date(now.getTime() + OTP_TTL_MIN * 60 * 1000);
+
+  if (existing) {
+    tab.getRange(existing[1], 2, 1, 4).setValues([[code, now, expires, resendCount]]);   // update OTP/Created/Expires/Resend
+  } else {
+    tab.appendRow([email, code, now, expires, resendCount]);
+  }
+
+  // Send the OTP via the already-authorized MailApp (script.send_mail). Best-effort:
+  // if the daily mail quota is hit, surface it so the user isn't left waiting.
+  try {
+    MailApp.sendEmail(
+      email,
+      'Your I-PASSBOOK sign-up code',
+      'Your I-PASSBOOK verification code is ' + code + '.\n\nIt expires in ' + OTP_TTL_MIN +
+        ' minutes. If you did not request this, you can safely ignore this email.',
+      { name: 'I-PASSBOOK' }
+    );
+  } catch (e) {
+    return { status: 'error', message: 'Could not send the verification email right now (mail quota reached). Please try again later.' };
+  }
+  return { status: 'ok', message: 'A verification code was sent to ' + email + '. Enter it below to finish sign-up.' };
+}
+
+// Step 2 of sign-up: verify the emailed code, then create the account + mint session.
+function doVerifySignup(params) {
+  var email    = (params.email || '').toString().toLowerCase().trim();
+  var password = (params.password || '').toString();
+  var code     = (params.code || '').toString().trim();
+
+  if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
+  if (!code) return { status: 'error', message: 'Enter the verification code from your email.' };
+  if (password.length < 6) return { status: 'error', message: 'Password must be at least 6 characters.' };
+
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  if (findUserRow(ss, email)) {
+    // Account appeared since requestSignup (race / duplicate verify) — clean up.
+    var p = findPendingRow(ss, email); if (p) getOrCreatePendingTab(ss).deleteRow(p[1]);
+    return { status: 'error', message: 'An account already exists for this email — sign in instead.' };
+  }
+
+  var existing = findPendingRow(ss, email);
+  if (!existing) return { status: 'error', message: 'No pending sign-up — request a code first.' };
+  var row = existing[0];
+  var expires = row[3] ? new Date(row[3]) : null;
+  if (expires && expires < new Date()) return { status: 'error', message: 'The code expired — request a new one.' };
+  if (String(row[1]).trim() !== code) return { status: 'error', message: 'Wrong verification code.' };
+
+  // Create the account.
   var salt = Utilities.getUuid();
   var hash = hashPassword(password, salt);
-  var tab  = getOrCreateUsersTab(ss);
-  tab.appendRow([email, hash, salt, new Date(), 'self-signup']);
+  getOrCreateUsersTab(ss).appendRow([email, hash, salt, new Date(), 'self-signup']);
+  getOrCreatePendingTab(ss).deleteRow(existing[1]);   // consume the pending row
 
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
@@ -228,7 +350,8 @@ function doPost(e) {
   var params = e.parameter;
   var action = params.action || '';
   // signup / login are self-authenticating (email + password) — no prior session.
-  if (action === 'signup') return buildResponse(doSignup(params));
+  if (action === 'requestSignup') return buildResponse(doRequestSignup(params));
+  if (action === 'verifySignup')   return buildResponse(doVerifySignup(params));
   if (action === 'login')  return buildResponse(doLoginPassword(params));
   // logout revokes the session itself (handled before the auth gate).
   if (action === 'logout') return buildResponse(doLogout(params.sessionToken));

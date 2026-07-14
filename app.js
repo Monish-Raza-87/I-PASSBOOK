@@ -99,20 +99,29 @@ function loginBackend(email, password) {
   ]);
 }
 
-// Create an account (allowlist-gated on the backend), then mint a session.
-// Returns the backend's parsed {status,...}. The caller wires the resulting
-// session into currentUser on success.
-function signupBackend(email, password) {
-  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
+// Sign-up is two steps (email verification via OTP):
+//   1) requestSignupBackend — backend emails a 6-digit code to the allowlisted
+//      address (MailApp, already scoped — no new permission). No account yet.
+//   2) verifySignupBackend  — user enters the code; backend creates the account
+//      and mints a session. `t` = ms since the form became ready (server-enforced
+//      bot time-gate). `website` is a honeypot — must stay empty.
+function postAuth(action, fields) {
   const fd = new FormData();
-  fd.append('action', 'signup');
-  fd.append('email', email);
-  fd.append('password', password);
+  fd.append('action', action);
+  Object.keys(fields).forEach(k => fd.append(k, fields[k]));
   return _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
     }))
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+}
+function requestSignupBackend(email, password, t, website) {
+  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
+  return postAuth('requestSignup', { email, password, t: String(t || 0), website: website || '' });
+}
+function verifySignupBackend(email, password, code) {
+  if (!email || !password || !code) return Promise.resolve({ status: 'error', message: 'Enter your email, password, and the code.' });
+  return postAuth('verifySignup', { email, password, code });
 }
 
 // Refresh the caller's role/permissions from the backend (boot + after access
@@ -147,7 +156,7 @@ window.fetch = function (input, init) {
     // login / signup are self-authenticating (email+password in the body) — do
     // NOT attach a session token to them (there isn't one yet, and they must not
     // trip the session-expired auto-logout below).
-    const isAuthCall = url.indexOf('action=login') >= 0 || url.indexOf('action=signup') >= 0;
+    const isAuthCall = url.indexOf('action=login') >= 0 || url.indexOf('action=requestSignup') >= 0 || url.indexOf('action=verifySignup') >= 0;
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
@@ -437,20 +446,36 @@ function showAuth() {
 }
 
 let _authFormWired = false;
+let _authFormReadyTs = 0;          // for the server-enforced bot time-gate
+let _authMode = 'login';           // 'login' | 'signup' | 'otp'
+let _pendingSignup = null;         // { email, password } held between OTP request & verify
 function wireAuthForm() {
   if (_authFormWired) return;
   const form = document.getElementById('auth-form');
   if (!form) return;
   _authFormWired = true;
+  _authFormReadyTs = Date.now();
 
-  const emailIn   = document.getElementById('auth-email');
-  const passIn    = document.getElementById('auth-password');
-  const signInBtn = document.getElementById('auth-signin-btn');
-  const signUpBtn = document.getElementById('auth-signup-btn');
-  const toggleBtn = document.getElementById('auth-toggle-mode');
-  const errEl     = document.getElementById('auth-error');
+  const emailIn    = document.getElementById('auth-email');
+  const passIn     = document.getElementById('auth-password');
+  const honeyIn    = document.getElementById('auth-website');   // honeypot — humans leave empty
+  const signInBtn   = document.getElementById('auth-signin-btn');
+  const signUpBtn   = document.getElementById('auth-signup-btn');
+  const toggleBtn   = document.getElementById('auth-toggle-mode');
+  const otpWrap     = document.getElementById('auth-otp-wrap');
+  const otpIn       = document.getElementById('auth-otp');
+  const otpNote     = document.getElementById('auth-otp-note');
+  const verifyBtn   = document.getElementById('auth-verify-btn');
+  const resendLink  = document.getElementById('auth-resend-link');
+  const errEl       = document.getElementById('auth-error');
 
   const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; } };
+  const setOtpStep = (on, note) => {
+    if (otpWrap) otpWrap.style.display = on ? 'flex' : 'none';
+    if (on && otpNote && note) otpNote.textContent = note;
+    if (on) _authMode = 'otp'; else if (_authMode === 'otp') _authMode = 'signup';
+    if (on) { signUpBtn.style.display = 'none'; if (otpIn) setTimeout(() => otpIn.focus(), 50); }
+  };
 
   const finishSuccess = (email, d) => {
     const name = (email.split('@')[0] || 'User');
@@ -482,25 +507,80 @@ function wireAuthForm() {
     });
   };
 
+  // Step 1: ask the backend to email a 6-digit code to the allowlisted address.
+  // The honeypot + time-to-submit are checked server-side as a bot guard.
+  const requestCode = (email, password) => {
+    const t = Date.now() - _authFormReadyTs;
+    const website = (honeyIn && honeyIn.value) || '';
+    if (website) return Promise.resolve({ status: 'error', message: 'Sign-up could not be completed.' });
+    return requestSignupBackend(email, password, t, website);
+  };
+
   const submitSignup = () => {
     const email = (emailIn.value || '').trim().toLowerCase();
     const password = passIn.value || '';
     if (!email || !password) { showError('Enter your email and a password.'); return; }
     if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
-    signUpBtn.disabled = true; signUpBtn.textContent = 'Creating…';
+    signUpBtn.disabled = true; signUpBtn.textContent = 'Sending code…';
     showError('');
-    currentUser = { email: email };
-    signupBackend(email, password).then(d => {
+    requestCode(email, password).then(d => {
       signUpBtn.disabled = false; signUpBtn.textContent = 'Sign up';
-      if (d && d.status === 'ok' && d.sessionToken) finishSuccess(email, d);
-      else showError((d && d.message) || 'Sign up failed.');
+      if (d && d.status === 'ok') {
+        _pendingSignup = { email, password };
+        currentUser = { email: email };
+        setOtpStep(true, 'Enter the 6-digit code sent to ' + email);
+        if (d.message) showToast(d.message);
+      } else {
+        showError((d && d.message) || 'Sign up failed.');
+      }
+    });
+  };
+
+  // Step 2: verify the code → backend creates the account + mints a session.
+  const submitVerify = () => {
+    if (!_pendingSignup) { showError('Please request a code first.'); return; }
+    const code = (otpIn && otpIn.value || '').trim();
+    if (!code) { showError('Enter the 6-digit code from your email.'); return; }
+    verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying…';
+    showError('');
+    verifySignupBackend(_pendingSignup.email, _pendingSignup.password, code).then(d => {
+      verifyBtn.disabled = false; verifyBtn.textContent = 'Verify & create account';
+      if (d && d.status === 'ok' && d.sessionToken) {
+        const email = _pendingSignup ? _pendingSignup.email : (currentUser && currentUser.email || '');
+        _pendingSignup = null;
+        setOtpStep(false);
+        finishSuccess(email, d);
+      } else {
+        showError((d && d.message) || 'Verification failed.');
+      }
+    });
+  };
+
+  const resendCode = () => {
+    if (!_pendingSignup) return;
+    resendLink.textContent = 'Sending…';
+    resendLink.style.pointerEvents = 'none';
+    showError('');
+    requestCode(_pendingSignup.email, _pendingSignup.password).then(d => {
+      resendLink.textContent = 'Resend code';
+      resendLink.style.pointerEvents = '';
+      if (d && d.status === 'ok') showToast(d.message || 'New code sent');
+      else showError((d && d.message) || 'Could not resend.');
     });
   };
 
   signInBtn.addEventListener('click', submitLogin);
   signUpBtn.addEventListener('click', submitSignup);
+  if (verifyBtn) verifyBtn.addEventListener('click', submitVerify);
+  if (resendLink) resendLink.addEventListener('click', resendCode);
   if (toggleBtn) toggleBtn.addEventListener('click', toggleAuthMode);
-  form.addEventListener('submit', (ev) => { ev.preventDefault(); submitLogin(); });
+  // Enter submits the CURRENT mode (login / signup / otp), not always login.
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    if (_authMode === 'otp') submitVerify();
+    else if (_authMode === 'signup') submitSignup();
+    else submitLogin();
+  });
 }
 
 function toggleAuthMode() {
@@ -508,19 +588,25 @@ function toggleAuthMode() {
   const toggleBtn = document.getElementById('auth-toggle-mode');
   const signInBtn = document.getElementById('auth-signin-btn');
   const signUpBtn = document.getElementById('auth-signup-btn');
+  const otpWrap   = document.getElementById('auth-otp-wrap');
   if (!nameWrap) return;
   const isSignup = nameWrap.style.display !== 'none';
   if (isSignup) {
     // → Sign in mode
     nameWrap.style.display = 'none';
+    if (otpWrap) otpWrap.style.display = 'none';
     signInBtn.style.display = '';
     signUpBtn.style.display = 'none';
+    _authMode = 'login';
+    _pendingSignup = null;
     if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
   } else {
     // → Sign up mode
     nameWrap.style.display = '';
+    if (otpWrap) otpWrap.style.display = 'none';
     signInBtn.style.display = 'none';
     signUpBtn.style.display = '';
+    _authMode = 'signup';
     if (toggleBtn) toggleBtn.textContent = 'Already have an account? Sign in';
   }
 }

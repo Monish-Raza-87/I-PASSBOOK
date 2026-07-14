@@ -40,6 +40,10 @@
         <p style="color:var(--muted); margin-top:0.5rem; font-size:0.9rem;">Sign in with your @indrones.com account.</p>
       </div>
       <form id="auth-form" autocomplete="on" style="display:flex; flex-direction:column; gap:0.75rem;">
+        <!-- Honeypot: hidden from humans, filled by bots → server rejects. -->
+        <input type="text" id="auth-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
+               placeholder="Leave this empty"
+               style="position:absolute; left:-9999px; top:0; width:1px; height:1px; opacity:0;" />
         <div id="auth-name-wrap" style="display:none;">
           <input class="form-input" type="text" id="auth-name" placeholder="Your name (optional)" autocomplete="name" />
         </div>
@@ -47,6 +51,15 @@
         <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
         <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none;">Sign up</button>
+        <!-- OTP step (shown after Sign up requests a code). -->
+        <div id="auth-otp-wrap" style="display:none; flex-direction:column; gap:0.5rem;">
+          <p id="auth-otp-note" style="color:var(--muted); font-size:0.85rem; margin:0;"></p>
+          <input class="form-input" type="text" id="auth-otp" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                 placeholder="6-digit code" autocomplete="one-time-code" />
+          <button type="button" class="btn" id="auth-verify-btn">Verify &amp; create account</button>
+          <button type="button" id="auth-resend-link"
+                  style="background:none; border:none; color:var(--primary); font-size:0.8rem; cursor:pointer; width:100%;">Resend code</button>
+        </div>
       </form>
       <button type="button" id="auth-toggle-mode" style="background:none; border:none; color:var(--primary); margin-top:1rem; font-size:0.85rem; cursor:pointer; width:100%;">Need an account? Sign up</button>
       <p id="auth-error" style="color:var(--danger); text-align:center; margin-top:1rem; font-size:0.85rem; display:none;"></p>

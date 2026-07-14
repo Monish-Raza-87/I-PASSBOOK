@@ -43,9 +43,11 @@ var CONFIG = {
   // permission checks). Must match the frontend ADMIN_EMAILS.
   ADMIN_EMAILS: ['customer.relations@indrones.com', 'monish.raza@indrones.com'],
 
-  // Session lifetime (days). A server-issued session token lets the PWA stay
-  // signed in across reopens with no repeated sign-in pop-ups.
-  SESSION_DAYS: 30,
+  // Session lifetime (HOURS). Minted at sign-in; bounds how long a (possibly
+  // stolen) token stays valid. The frontend does NOT persist the token across a
+  // full app close — the user re-signs-in each time the app is reopened — so this
+  // TTL is the backstop for a token intercepted mid-session. 12h = one working day.
+  SESSION_HOURS: 12,
 
   // ALLOWLIST — the ONLY emails that may CREATE an account via the sign-up
   // flow. The user maintains this list. An email NOT listed here (and not an
@@ -153,7 +155,7 @@ function mintSession(email) {
   var tab   = getOrCreateSessionsTab(ss);
   var token = Utilities.getUuid();
   var now   = new Date();
-  var exp   = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
+  var exp   = new Date(now.getTime() + CONFIG.SESSION_HOURS * 60 * 60 * 1000);
   tab.appendRow([token, email, now, exp, '']);
   return token;
 }
@@ -206,16 +208,22 @@ function findPendingRow(ss, email) {
   return null;
 }
 
-// Step 1 of sign-up: validate + bot-check, email a 6-digit code. No account yet.
+// Step 1 of sign-up: validate + bot-check + captcha, email a 6-digit code.
 function doRequestSignup(params) {
   var email    = (params.email || '').toString().toLowerCase().trim();
   var password = (params.password || '').toString();
   var honey    = (params.website || '').toString();          // honeypot — must stay empty
   var tMs      = parseInt(params.t || '0', 10) || 0;          // ms since form became ready
+  var captchaId = (params.captchaId || '').toString();
+  var captchaAnswer = (params.captchaAnswer || '').toString().trim();
 
   // Bot guard (server-enforced). Don't reveal which check tripped.
   if (honey) return { status: 'error', message: 'Sign-up could not be completed.' };
   if (tMs < OTP_MIN_SUBMIT_MS) return { status: 'error', message: 'Please slow down and fill the form, then try again.' };
+  // Captcha (server-generated image, answer kept only on the server).
+  if (!verifyCaptcha(captchaId, captchaAnswer)) {
+    return { status: 'error', message: 'Captcha incorrect — please try the new one.', captchaRefresh: true };
+  }
 
   if (!email)    return { status: 'error', message: 'Enter your email.' };
   if (!isAllowedEmail(email)) return { status: 'error', message: 'This email is not on the allowed list. Ask an admin to add you.' };
@@ -302,6 +310,134 @@ function doVerifySignup(params) {
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// CAPTCHA — self-hosted, server-validated, ZERO external network calls.
+// ──────────────────────────────────────────────────────────────────────────────
+// A real reCAPTCHA/Turnstile would need UrlFetchApp.fetch to verify the token
+// server-side → script.external_request → the deploy trap again. Instead we
+// generate a math challenge server-side, render it as an SVG IMAGE (so the
+// answer is NOT in the page as parseable text — a bot must OCR the rendered
+// image), and keep the expected answer only in a CHALLENGES tab. The client
+// never sees the answer. Combined with the allowlist + OTP + honeypot + time-gate
+// + login lockout, this is ample for this app's threat model.
+var CAPTCHA_TTL_MIN = 5;
+
+function getOrCreateChallengesTab(ss) {
+  var tab = ss.getSheetByName('CAPTCHA');
+  if (!tab) {
+    tab = ss.insertSheet('CAPTCHA');
+    tab.getRange(1, 1, 1, 4).setValues([['Challenge Id', 'Answer', 'Created At', 'Expires At']]);
+    tab.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+// Build a challenge: a ± b. Returns {captchaId, answer, svg} — answer is kept
+// server-side only; the client gets the SVG image to display.
+function makeCaptcha() {
+  var a = Math.floor(Math.random() * 8) + 1;     // 1..8
+  var b = Math.floor(Math.random() * 8) + 1;     // 1..8
+  var add = Math.random() < 0.5;
+  var op = add ? '+' : '−';
+  var answer = add ? (a + b) : (a - b);
+  var id = Utilities.getUuid();
+
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateChallengesTab(ss);
+  var now = new Date();
+  tab.appendRow([id, String(answer), now, new Date(now.getTime() + CAPTCHA_TTL_MIN * 60 * 1000)]);
+
+  // Render the challenge as an SVG image with mild noise + rotation so it isn't
+  // trivially OCR'd, while staying readable for humans.
+  var rot = Math.floor(Math.random() * 7) - 3;            // -3..3 degrees
+  var noise = '';
+  for (var i = 0; i < 4; i++) {
+    var x1 = Math.floor(Math.random() * 120), y1 = Math.floor(Math.random() * 40);
+    var x2 = Math.floor(Math.random() * 120), y2 = Math.floor(Math.random() * 40);
+    noise += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#c9d8ff" stroke-width="1"/>';
+  }
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46" viewBox="0 0 130 46">' +
+    '<rect width="130" height="46" fill="#eef3ff" rx="8"/>' + noise +
+    '<text x="65" y="31" font-family="Georgia, Times, serif" font-size="24" font-weight="bold" ' +
+    'text-anchor="middle" fill="#1f3a8a" transform="rotate(' + rot + ' 65 23)">' +
+    a + ' ' + op + ' ' + b + ' =</text></svg>';
+
+  return { status: 'ok', captchaId: id, svg: svg };
+}
+
+// Verify + consume a captcha challenge. Returns true on a match.
+function verifyCaptcha(captchaId, answer) {
+  if (!captchaId || answer === '' || answer === null || answer === undefined) return false;
+  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var tab = getOrCreateChallengesTab(ss);
+  var data = tab.getDataRange().getValues();
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]) !== String(captchaId)) continue;
+    var ok = String(data[i][1]).trim() === String(answer).trim();
+    var expired = data[i][3] ? (new Date(data[i][3]) < new Date()) : true;
+    tab.deleteRow(i + 1);   // consume (one-shot)
+    return ok && !expired;
+  }
+  return false;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// LOGIN LOCKOUT — brute-force guard (matters on a shared/handed-off device).
+// ──────────────────────────────────────────────────────────────────────────────
+// After MAX wrong passwords within a rolling window, the account is locked for
+// LOCK_MIN. Tracked per email in LOGIN_ATTEMPTS. Successful login clears it.
+var LOGIN_MAX_FAILS = 5;
+var LOGIN_WINDOW_MS = 10 * 60 * 1000;   // 10-min rolling window
+var LOGIN_LOCK_MS   = 15 * 60 * 1000;   // 15-min lockout
+
+function getOrCreateAttemptsTab(ss) {
+  var tab = ss.getSheetByName('LOGIN_ATTEMPTS');
+  if (!tab) {
+    tab = ss.insertSheet('LOGIN_ATTEMPTS');
+    tab.getRange(1, 1, 1, 4).setValues([['Email', 'Fail Count', 'Window Start', 'Locked Until']]);
+    tab.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+    tab.setFrozenRows(1);
+  }
+  return tab;
+}
+
+// Return [rowValues, rowIndex] for an email's attempt record, or null.
+function findAttemptRow(ss, email) {
+  var tab = getOrCreateAttemptsTab(ss);
+  var data = tab.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase().trim() === email) return [data[i], i + 1];
+  }
+  return null;
+}
+
+// Record a failed attempt. Returns the lockout-until Date (null = not locked).
+function recordFailedLogin(ss, email) {
+  var tab = getOrCreateAttemptsTab(ss);
+  var now = new Date();
+  var existing = findAttemptRow(ss, email);
+  var count = 1, windowStart = now, lockedUntil = null;
+  if (existing) {
+    var row = existing[0];
+    var ws = row[2] ? new Date(row[2]) : now;
+    if ((now.getTime() - ws.getTime()) > LOGIN_WINDOW_MS) { count = 1; windowStart = now; }
+    else { count = (Number(row[1]) || 0) + 1; windowStart = ws; }
+    if (count >= LOGIN_MAX_FAILS) lockedUntil = new Date(now.getTime() + LOGIN_LOCK_MS);
+    tab.getRange(existing[1], 2, 1, 3).setValues([[count, windowStart, lockedUntil]]);
+  } else {
+    if (count >= LOGIN_MAX_FAILS) lockedUntil = new Date(now.getTime() + LOGIN_LOCK_MS);
+    tab.appendRow([email, count, windowStart, lockedUntil]);
+  }
+  return lockedUntil;
+}
+
+// Clear the attempt record on a successful login (best-effort).
+function clearFailedLogin(ss, email) {
+  var existing = findAttemptRow(ss, email);
+  if (existing) getOrCreateAttemptsTab(ss).deleteRow(existing[1]);
+}
+
 // Sign in: verify email + password against the USERS tab, then mint a session.
 function doLoginPassword(params) {
   var email    = (params.email || '').toString().toLowerCase().trim();
@@ -309,19 +445,44 @@ function doLoginPassword(params) {
   if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
 
   var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+
+  // Lockout check (applies whether or not the account exists — avoids leaking
+  // which emails have accounts, and stops password guessing on a shared device).
+  var att = findAttemptRow(ss, email);
+  if (att) {
+    var locked = att[0][3] ? new Date(att[0][3]) : null;
+    if (locked && locked > new Date()) {
+      var mins = Math.max(1, Math.ceil((locked.getTime() - Date.now()) / 60000));
+      return { status: 'error', message: 'Too many wrong attempts. Try again in ' + mins + ' min.' };
+    }
+  }
+
   var row = findUserRow(ss, email);
-  if (!row) return { status: 'error', message: 'No account found for this email — sign up first.' };
+  if (!row) {
+    recordFailedLogin(ss, email);
+    return { status: 'error', message: 'No account found for this email — sign up first.' };
+  }
 
   var salt     = String(row[2]);
   var expected = String(row[1]);
-  if (hashPassword(password, salt) !== expected) return { status: 'error', message: 'Wrong password.' };
+  if (hashPassword(password, salt) !== expected) {
+    var until = recordFailedLogin(ss, email);
+    if (until) {
+      var mins2 = Math.max(1, Math.round(LOGIN_LOCK_MS / 60000));
+      return { status: 'error', message: 'Wrong password. Account locked for ' + mins2 + ' min after too many attempts.' };
+    }
+    return { status: 'error', message: 'Wrong password.' };
+  }
 
+  clearFailedLogin(ss, email);
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
 function doGet(e) {
   var action = e.parameter.action || '';
+  // getCaptcha is pre-auth: the sign-up form needs a challenge before any session.
+  if (action === 'getCaptcha') return buildResponse(makeCaptcha());
   // getMyAccess needs identity (session token) but is valid for users with no
   // access yet (so the request-access screen can render after sign-up/sign-in).
   if (action === 'getMyAccess') {

@@ -181,19 +181,41 @@ function verifySignupBackend(email, password, code) {
 // stays on the server; the client only gets the image + an id to reference it.
 let _captchaId = null;
 function fetchCaptcha(imgEl) {
+  const errEl = document.getElementById('auth-captcha-error');
+  if (imgEl) imgEl.style.display = 'none';
+  if (errEl) { errEl.style.display = ''; errEl.textContent = 'Loading challenge…'; }
   const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getCaptcha';
   return _origFetch(url).then(r => r.text().then(t => {
-    try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response.' }; }
+    try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
   })).then(d => {
     if (d && d.status === 'ok' && d.captchaId && d.svg && imgEl) {
       _captchaId = d.captchaId;
-      imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.svg);
+      // Base64 data-URI is the most broadly compatible way to render an SVG in <img>
+      // (handles the U+2212 minus sign and any other non-Latin1 char without encoding drama).
+      try { imgEl.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(d.svg))); }
+      catch (e) { imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.svg); }
+      imgEl.alt = 'Captcha challenge';
       imgEl.style.display = '';
+      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
     } else if (imgEl) {
-      imgEl.src = ''; imgEl.alt = 'Captcha unavailable';
+      // Surface the REAL reason instead of silently showing a blank box. The most common
+      // cause is the GAS backend not yet redeployed with the getCaptcha action.
+      const reason = (d && d.message) ? d.message : 'no response from server';
+      if (errEl) {
+        errEl.style.display = '';
+        errEl.textContent = /Unknown action/i.test(reason)
+          ? 'Backend needs redeploy — captcha action missing. Tap ↻ after redeploying.'
+          : 'Captcha unavailable — tap ↻ to retry. (' + reason + ')';
+      }
+      console.warn('fetchCaptcha: challenge not loaded', d);
     }
     return d;
-  }).catch(() => null);
+  }).catch(err => {
+    const e2 = document.getElementById('auth-captcha-error');
+    if (e2) { e2.style.display = ''; e2.textContent = 'Captcha unavailable — check your connection, then tap ↻.'; }
+    console.warn('fetchCaptcha: network error', err);
+    return null;
+  });
 }
 
 // Refresh the caller's role/permissions from the backend (boot + after access

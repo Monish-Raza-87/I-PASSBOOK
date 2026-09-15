@@ -210,8 +210,11 @@
           <!-- Unsaved-draft notice -->
           <div id="draft-banner" class="draft-banner" style="display:none"></div>
 
-          <!-- Scrollable section tabs -->
+          <!-- Scrollable section tabs. The 📋 Report tab is the client's own
+               report, read-only; `data-intake` keeps it out of the access-gating
+               fallback (it is never hidden, so it would always win). -->
           <div class="tabs-container" id="section-tabs">
+            <div class="tab tab-intake" data-section="sec-intake" data-intake="1">📋 Report</div>
             <div class="tab active" data-section="sec-a">A: Preliminary</div>
             <div class="tab" data-section="sec-b">B: Inward</div>
             <div class="tab" data-section="sec-c">C: IQC</div>
@@ -225,6 +228,13 @@
 
           <!-- Section contents -->
           <div id="sections-wrapper">
+
+            <!-- Client's original report. Not a SECTIONS entry: it is rendered
+                 by renderIntake(), never saved, never gated and never drafted. -->
+            <div id="sec-intake" class="section-content">
+              <h2 class="section-title">Client's Original Report</h2>
+              <div id="sec-intake-body"></div>
+            </div>
 
             <!-- Section A: Preliminary Details -->
             <div id="sec-a" class="section-content active">

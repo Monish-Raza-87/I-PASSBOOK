@@ -21,7 +21,7 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (31 KB) |
+| Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (~4,900 lines) |
 | Styling | Hand-written CSS, layered, no build step | Frappe-derived design tokens, light + dark |
 | Backend | Google Apps Script (GAS) | Deployed as web app, in `backend.gs` |
 | Database | Google Sheets | `APP_DATA` tab for passbook data, `Form Responses` tab for IR records |
@@ -34,12 +34,16 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 ```
 i-passbook-app/
 ├── index.html          # App shell: splash, auth, sidebar, ticket list, detail pane
-├── app.js              # All frontend logic (~4,500 lines)
+├── app.js              # All frontend logic (~4,900 lines)
 ├── tokens.css          # Design tokens — generated, see docs/09
 ├── base.css            # Reset, typography, splash/auth, app shell, breakpoints
 ├── components.css      # Buttons, inputs, pills, dropdowns, modals
-├── views.css           # Ticket list, ticket detail, section tables, admin UI
-├── tools/gen-tokens.mjs # Regenerates tokens.css from frappe/frappe-ui
+├── views.css           # Ticket list, sync bar, ticket detail, intake report, section tables
+├── tools/
+│   ├── gen-tokens.mjs     # Regenerates tokens.css from frappe/frappe-ui
+│   ├── harness.mjs        # Shared smoke-test harness
+│   ├── smoke-all.mjs      # Runs every suite — the whole test command
+│   └── smoke-*.mjs        # suites: shell, ir-state, intake, boot
 ├── backend.gs          # Google Apps Script backend (~1,240 lines)
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest

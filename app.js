@@ -1585,6 +1585,18 @@ function toDisplayDate(val) {
   return `${String(d.getDate()).padStart(2,'0')} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+// 'DD MONTH YYYY, HH:MM'. The Sheet's Timestamp carries the time the client
+// raised the IR and the ticket has never shown it — only the date. Falls back to
+// the raw cell when unparseable, so nothing is ever rendered as NaN.
+function toDisplayDateTime(val) {
+  if (!val) return '';
+  const d = new Date(val);
+  if (isNaN(d.getTime())) return String(val).trim();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${toDisplayDate(val)}, ${hh}:${mm}`;
+}
+
 // Split "Who's Reporting?" (Col L) into a name and a phone number.
 // Col L typically looks like "SREENIVAS PAI 7828148298" or "Monish Raza, 9424485787".
 function splitNamePhone(text) {
@@ -1598,6 +1610,140 @@ function splitNamePhone(text) {
   return { name: text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim(), phone: '' };
 }
 
+// ─── CLIENT INTAKE: the Sheet's columns ──────────────────────────────────────
+// The client's Google Form is the front door and the Sheet it writes to is the
+// immutable record of what they said. This table is the app's whole view of that
+// record: one entry per column the Form is known to write, naming the IR record
+// field it lands on and the header it is matched against. Headers are matched by
+// SUBSTRING so a small rewording of a Form question does not break the map — and
+// anything the Form writes that is NOT in this table is captured generically and
+// surfaced on the intake view rather than silently dropped.
+//
+// `needle` omitted → the value is derived from another column, not read directly.
+// Order here is the order the intake view renders, not the Sheet's column order.
+const INTAKE_FIELDS = [
+  { field: 'dateRaised',              needle: 'Timestamp',                    label: 'Raised on',                 kind: 'datetime' },
+  { field: 'incidentDate',            needle: 'Date of Incident',             label: 'Date of incident',          kind: 'date' },
+  { field: 'droneId',                 needle: 'Drone Serial No',              label: 'Drone serial no.',          kind: 'text' },
+  { field: 'companyName',             needle: 'Where Do You Work',            label: 'Company',                   kind: 'text' },
+  { field: 'customerName',            needle: "Who's Reporting",              label: 'Reported by',               kind: 'text' },
+  { field: 'contactPhone',            derive: true,                           label: 'Contact phone',             kind: 'text' },
+  { field: 'contactEmail',            needle: 'Email Address',                label: 'Email',                     kind: 'email' },
+  { field: 'spoc',                    needle: 'SPOC',                         label: 'SPOC',                      kind: 'text' },
+  { field: 'issueType',               needle: 'What Support',                 label: 'Support required',          kind: 'text' },
+  { field: 'issueDesc',               needle: 'Please Describe',              label: 'Description',               kind: 'longtext' },
+  { field: 'incidentLocationWeather', needle: 'Incident Location and Weather', label: 'Location and weather',     kind: 'longtext' },
+  { field: 'evidenceFormN',           needle: 'Evidence: Attach Files From The Incident', label: 'Evidence — incident files', kind: 'links' },
+  { field: 'evidenceFormQ',           needle: 'Evidence: Attach Screenshot of UAV Forecast', label: 'Evidence — UAV forecast',  kind: 'links' },
+  { field: 'summaryLink',             needle: 'Summary',                      label: 'Summary document',          kind: 'raw' },
+];
+
+// Columns the app reads but does not list in the intake view: the IR number and
+// the status are the ticket's identity and its workflow, and priority is
+// app-owned (Stage 1 triage) — the Form has no Priority question yet. Named here
+// so the audit below does not report them as dropped.
+const INTAKE_HIDDEN_NEEDLES = ['IR Number', 'Issue Status', 'Priority'];
+
+// Header row → { field: columnIndex }, plus which columns the map consumed and
+// which it did not. `unmapped` is the audit: backend.gs's column constants
+// account for A–D, F–I, K–N and P–R, so a column at E, J or O — or anything the
+// Form grows later — lands here instead of vanishing.
+function buildIntakeMap(headers) {
+  const idxOf = needle => headers.findIndex(h => h.includes(needle));
+  const map = {};
+  const consumed = new Set();
+  INTAKE_FIELDS.forEach(f => {
+    if (!f.needle) return;                 // derived — nothing to consume
+    const i = idxOf(f.needle);
+    map[f.field] = i;
+    if (i >= 0) consumed.add(i);
+  });
+  INTAKE_HIDDEN_NEEDLES.forEach(n => {
+    const i = idxOf(n);
+    if (i >= 0) consumed.add(i);
+  });
+  const unmapped = [];
+  headers.forEach((h, i) => { if (h && !consumed.has(i)) unmapped.push(h); });
+  return { map, consumed, unmapped };
+}
+
+// The last header row read from the Sheet, so the intake view can name columns
+// the Form writes that the app does not model. Refreshed on every sync.
+let lastSheetAudit = { headers: [], unmapped: [] };
+
+// Rows (as parseCSV returns them) → IR records, latest first.
+// Pure: no fetch and no DOM, so tools/smoke-intake.mjs can assert the whole
+// mapping — including a reordered or extended header row — with neither.
+function mapSheetRows(rows) {
+  const headers = (rows && rows[0] ? rows[0] : []).map(h => String(h).trim());
+  const { map, consumed, unmapped } = buildIntakeMap(headers);
+  lastSheetAudit = { headers, unmapped };
+
+  const idxOf = needle => headers.findIndex(h => h.includes(needle));
+  const iIrNo = idxOf('IR Number');
+  const iStat = idxOf('Issue Status');
+  const iPrio = idxOf('Priority');
+  const cell = (row, i) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '');
+
+  const records = [];
+  for (let r = 1; r < (rows ? rows.length : 0); r++) {
+    const row = rows[r];
+    if (!row) continue;
+    const irNumber = cell(row, iIrNo);
+    if (!irNumber) continue;
+
+    const ts   = cell(row, map.dateRaised);
+    const inc  = cell(row, map.incidentDate);
+    const stat = cell(row, iStat) || 'Open';
+    // Col L carries the name and the phone together ("SREENIVAS PAI 7828148298").
+    const { name, phone } = splitNamePhone(cell(row, map.customerName));
+
+    // The raw cell text for every ingested column, so the intake view shows
+    // exactly what the Sheet holds — the typed fields below are the parsed
+    // projection the rest of the app reads, and some of them (the Timestamp) are
+    // lossy on purpose.
+    const intake = {};
+    INTAKE_FIELDS.forEach(f => { if (f.needle) intake[f.field] = cell(row, map[f.field]); });
+    intake.customerName = name;     // the phone is split out of it…
+    intake.contactPhone = phone;    // …onto its own row
+
+    // Anything the Form writes that the table above does not model. Non-empty
+    // values only: a column that exists but is blank for this ticket would just
+    // be noise on every card.
+    const extra = [];
+    headers.forEach((h, i) => {
+      const v = cell(row, i);
+      if (v && !consumed.has(i)) extra.push({ label: h, value: v });
+    });
+
+    records.push({
+      irNumber,
+      droneId:       cell(row, map.droneId),
+      dateRaised:    toDisplayDate(ts),
+      dateRaisedISO: toISODate(ts),
+      status:        stat,
+      summaryLink:   cell(row, map.summaryLink),
+      customerName:  name,
+      contactPhone:  phone,
+      contactEmail:  cell(row, map.contactEmail),
+      issueType:     cell(row, map.issueType),
+      issueDesc:     cell(row, map.issueDesc),
+      spoc:          cell(row, map.spoc),
+      priority:      cell(row, iPrio),
+      initialStatus: stat,
+      incidentDate:  toISODate(inc),
+      // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
+      incidentLocationWeather: cell(row, map.incidentLocationWeather),
+      evidenceFormN:            cell(row, map.evidenceFormN),
+      evidenceFormQ:            cell(row, map.evidenceFormQ),
+      companyName:              cell(row, map.companyName),
+      intake,
+      extra,
+    });
+  }
+  return records.reverse();   // latest first
+}
+
 async function fetchIRsFromSheet() {
   const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${CONFIG.IR_REPO_GID}`;
   const controller = new AbortController();
@@ -1605,68 +1751,7 @@ async function fetchIRsFromSheet() {
   const res = await fetch(url, { signal: controller.signal });
   clearTimeout(timeout);
   const text = await res.text();
-  const rows = parseCSV(text);
-  if (rows.length < 2) return [];
-
-  const headers = rows[0].map(h => h.trim());
-  // Match by substring so minor wording changes in the form headers don't break it
-  const col = needle => headers.findIndex(h => h.includes(needle));
-  const C = {
-    summary:    col('Summary'),
-    irNo:       col('IR Number'),
-    timestamp:  col('Timestamp'),
-    status:     col('Issue Status'),
-    spoc:       col('SPOC'),
-    category:   col('What Support'),
-    desc:       col('Please Describe'),
-    incident:   col('Date of Incident'),
-    uas:        col('Drone Serial No'),
-    reportedBy: col("Who's Reporting"),
-    email:      col('Email Address'),
-    // Section A intake fields (auto-populated, read-only in the app):
-    incidentLoc: col('Incident Location and Weather'),
-    evidenceN:   col('Evidence: Attach Files From The Incident'),
-    evidenceQ:   col('Evidence: Attach Screenshot of UAV Forecast'),
-    company:     col('Where Do You Work'),
-    // Optional. No Priority column exists on the form yet — when one is added,
-    // it flows straight through to the list pill with no code change.
-    priority:    col('Priority'),
-  };
-  const cell = (row, i) => (i >= 0 && row[i] != null ? row[i].trim() : '');
-
-  const records = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const irNumber = cell(row, C.irNo);
-    if (!irNumber) continue;
-    const ts   = cell(row, C.timestamp);
-    const inc  = cell(row, C.incident);
-    const stat = cell(row, C.status) || 'Open';
-    const { name, phone } = splitNamePhone(cell(row, C.reportedBy));
-    records.push({
-      irNumber,
-      droneId:       cell(row, C.uas),
-      dateRaised:    toDisplayDate(ts),
-      dateRaisedISO: toISODate(ts),
-      status:        stat,
-      summaryLink:   cell(row, C.summary),
-      customerName:  name,
-      contactPhone:  phone,
-      contactEmail:  cell(row, C.email),
-      issueType:     cell(row, C.category),
-      issueDesc:     cell(row, C.desc),
-      spoc:          cell(row, C.spoc),
-      priority:      cell(row, C.priority),
-      initialStatus: stat,
-      incidentDate:  toISODate(inc),
-      // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
-      incidentLocationWeather: cell(row, C.incidentLoc),
-      evidenceFormN:            cell(row, C.evidenceN),
-      evidenceFormQ:            cell(row, C.evidenceQ),
-      companyName:              cell(row, C.company),
-    });
-  }
-  return records.reverse();   // latest first
+  return mapSheetRows(parseCSV(text));
 }
 
 async function fetchIRs() {
@@ -1717,6 +1802,18 @@ async function refreshIRList() {
   try {
     await fetchIRs();
     await loadIRState();
+    // A ticket can be open while the list refreshes. Adopt the freshly-read
+    // record so the banner and the client report stop showing stale Sheet data —
+    // app-owned fields are already merged onto it by setAllIRs(). If the ticket
+    // is gone from the Sheet, the open record is kept rather than blanked.
+    if (currentView === 'detail' && currentIR?.irNumber) {
+      const fresh = allIRs.find(x => x.irNumber === currentIR.irNumber);
+      if (fresh) {
+        currentIR = fresh;
+        renderBannerMeta();
+        renderIntake();
+      }
+    }
   } finally {
     _refreshing = false;
   }
@@ -1975,6 +2072,10 @@ async function openPassbook(irNumber) {
   // Build all section forms
   buildSectionForms(irNumber);
 
+  // The client's original report. Read-only and Sheet-only, so it needs no
+  // reload after a section save — only after the ticket itself changes.
+  renderIntake();
+
   // Load saved data for this IR, then restore any unsaved drafts on top
   await loadSectionData(irNumber);
   if (seq !== _openSeq) return;   // superseded by a newer openPassbook()
@@ -2006,6 +2107,107 @@ async function openPassbook(irNumber) {
   } else if (legacyBtn) {
     legacyBtn.style.display = 'none';
   }
+}
+
+// ─── CLIENT INTAKE VIEW (the 📋 Report tab) ──────────────────────────────────
+// Read-only by construction — nothing here writes anywhere. This is the client's
+// own words, and the entire point of the tab is that nobody opens the Sheet to
+// read them. So it lists every ingested column, including the ones no section
+// ever displayed (the raised time, the email, the SPOC), and names any column
+// the Form writes that the app does not model.
+function intakeValueHtml(kind, raw) {
+  const v = raw == null ? '' : String(raw).trim();
+  if (!v) return '<span class="intake-empty">—</span>';
+  if (kind === 'datetime') return escHtml(toDisplayDateTime(v) || v);
+  if (kind === 'date')     return escHtml(toDisplayDate(v) || v);
+  if (kind === 'email')    return `<a href="mailto:${escHtml(v)}" class="intake-link">${escHtml(v)}</a>`;
+  if (kind === 'links') {
+    // A Drive evidence cell can hold several URLs (and occasionally stray text),
+    // so each token gets its own line rather than one unreadable blob. The
+    // original URL is kept as the link's title — the label is a courtesy.
+    const tokens = v.split(/[\s,]+/).map(t => t.trim()).filter(Boolean);
+    if (!tokens.length) return '<span class="intake-empty">—</span>';
+    return tokens.map((t, i) => {
+      const e = escHtml(t);
+      return /^https?:\/\//i.test(t)
+        ? `<div class="intake-ev"><span class="intake-ev-icon" aria-hidden="true">📎</span>` +
+          `<a href="${e}" target="_blank" rel="noopener" class="intake-link" title="${e}">Evidence file ${i + 1} ↗</a></div>`
+        : `<div class="intake-ev"><span class="intake-plain">${e}</span></div>`;
+    }).join('');
+  }
+  return escHtml(v).replace(/\n/g, '<br/>');
+}
+
+function renderIntake() {
+  const body = document.getElementById('sec-intake-body');
+  if (!body) return;
+  const ir = currentIR;
+  if (!ir || !ir.irNumber) {
+    body.innerHTML = '<p class="intake-audit">No ticket selected.</p>';
+    return;
+  }
+
+  // `intake` holds the raw cells for a Sheet-sourced ticket. Legacy and demo
+  // records have no Sheet row, so fall back to the parsed fields the record does
+  // carry — the tab must be honest about what it has, not show blanks.
+  const intake = ir.intake || {};
+  const fallback = {
+    dateRaised: ir.dateRaised, incidentDate: ir.incidentDate, droneId: ir.droneId,
+    companyName: ir.companyName, customerName: ir.customerName, contactPhone: ir.contactPhone,
+    contactEmail: ir.contactEmail, spoc: ir.spoc, issueType: ir.issueType,
+    issueDesc: ir.issueDesc, incidentLocationWeather: ir.incidentLocationWeather,
+    evidenceFormN: ir.evidenceFormN, evidenceFormQ: ir.evidenceFormQ, summaryLink: ir.summaryLink,
+  };
+  const valueOf = field => {
+    const v = intake[field];
+    return (v !== undefined && v !== null && v !== '') ? v : (fallback[field] || '');
+  };
+
+  const rows = INTAKE_FIELDS
+    .filter(f => f.field !== 'summaryLink')     // rendered as the header link
+    .map(f => {
+      const wide = f.kind === 'longtext' || f.kind === 'links';
+      return `<div class="intake-row${wide ? ' intake-row-wide' : ''}">` +
+             `<div class="intake-label">${escHtml(f.label)}</div>` +
+             `<div class="intake-value">${intakeValueHtml(f.kind, valueOf(f.field))}</div>` +
+             `</div>`;
+    }).join('');
+
+  const report = String(valueOf('summaryLink') || '').trim();
+  const openLink = report
+    ? `<a href="${escHtml(report)}" target="_blank" rel="noopener" class="intake-open">Open original report ↗</a>`
+    : '';
+
+  const extras = Array.isArray(ir.extra) ? ir.extra : [];
+  const extrasHtml = extras.length
+    ? `<div class="intake-extras">
+         <div class="intake-extras-head">Other columns from the Sheet</div>
+         ${extras.map(x =>
+            `<div class="intake-row"><div class="intake-label">${escHtml(x.label)}</div>` +
+            `<div class="intake-value">${intakeValueHtml('text', x.value)}</div></div>`).join('')}
+       </div>`
+    : '';
+
+  // Columns the Form writes that the app does not model AND that are blank on
+  // this ticket — named so the gap is visible rather than assumed away.
+  const unmapped = (lastSheetAudit.unmapped || [])
+    .filter(h => !extras.some(x => x.label === h));
+  const auditNote = unmapped.length
+    ? `<p class="intake-audit">The client's form also writes ${unmapped.map(escHtml).join(', ')} — empty on this ticket.</p>`
+    : '';
+  const noSheetNote = ir.intake
+    ? ''
+    : `<p class="intake-audit">No Sheet row for this ticket — showing only the fields the app holds. ` +
+      `Records from before the app (🏛 Legacy) live in the old workbook.</p>`;
+
+  body.innerHTML =
+    `<div class="intake-head">
+       <p class="intake-note">Read-only — exactly what the client submitted through the Google Form. The app never edits these values.</p>
+       ${openLink}
+     </div>` +
+    noSheetNote + auditNote +
+    `<div class="intake-list">${rows}</div>` +
+    extrasHtml;
 }
 
 // The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
@@ -2410,11 +2612,14 @@ function applySectionAccessGating() {
     // Tab + pane visibility
     if (tab) tab.style.display = view ? '' : 'none';
     // If the hidden pane is the currently-active tab, fall back to the first
-    // visible one so the user never lands on a blank hidden section.
+    // visible one so the user never lands on a blank hidden section. The 📋
+    // Report tab is excluded: it is never gated, so it would always win the
+    // fallback and land a user on the client report instead of their first
+    // permitted section.
     if (!view && tab && tab.classList.contains('active')) {
       tab.classList.remove('active');
       pane.classList.remove('active');
-      const firstVisible = document.querySelector('.tab:not([style*="display: none"])');
+      const firstVisible = document.querySelector('.tab:not([style*="display: none"]):not([data-intake])');
       if (firstVisible) { firstVisible.classList.add('active'); const fp = document.getElementById(firstVisible.dataset.section); if (fp) fp.classList.add('active'); }
     }
 
@@ -3576,6 +3781,9 @@ function sectionIdFromFieldId(fieldId) {
 }
 function saveDraft(sectionId) {
   if (!currentIR?.irNumber) return;
+  // The 📋 Report tab is read-only and not in SECTIONS, so it has no draft. This
+  // guard keeps the #sections-wrapper listener from writing empty junk for it.
+  if (!SECTIONS[sectionId]) return;
   const { fieldValues } = collectSectionValues(sectionId);
   try {
     localStorage.setItem(draftKey(sectionId), JSON.stringify({ savedAt: Date.now(), values: fieldValues }));

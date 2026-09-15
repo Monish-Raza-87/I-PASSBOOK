@@ -2,95 +2,25 @@
 //
 //   node tools/smoke-ir-state.mjs
 //
-// app.js is a plain end-of-body script with no exports, so this evaluates the
-// whole file under a stubbed DOM and then reaches into its lexical scope through
-// a harness appended to the source (see `__T` below). That makes the test
-// self-contained — no copy of the merge logic to drift out of date — and it also
-// proves app.js still evaluates top-to-bottom: every parse-time
-// getElementById call and every module-level statement runs for real here.
+// See tools/harness.mjs for how app.js is loaded and reached into.
 //
 // What it covers is the risky part of the Frappe pivot: precedence between the
 // Sheet's Col D and the app's own status, and the exact point at which the app
 // takes a ticket's status over. Stage 4 (ageing, SLA) and Stage 5 (dashboard)
 // both read these values, so a regression here is silent and expensive.
 
-import fs from 'node:fs';
+import { loadApp, makeReporter } from './harness.mjs';
 
-const APP_JS = new URL('../app.js', import.meta.url);
-
-// ── Minimal DOM ────────────────────────────────────────────────────────────────
-function el() {
-  return {
-    style: {}, dataset: {}, value: '', textContent: '', innerHTML: '',
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    addEventListener() {}, removeEventListener() {}, appendChild() {}, remove() {},
-    querySelector() { return null; }, querySelectorAll() { return []; },
-    setAttribute() {}, getAttribute() { return null; }, focus() {}, blur() {},
-    scrollIntoView() {}, children: [], insertBefore() {}, closest() { return null; },
-  };
-}
-
-const store = {};
-const storage = {
-  getItem: k => (k in store ? store[k] : null),
-  setItem: (k, v) => { store[k] = String(v); },
-  removeItem: k => { delete store[k]; },
-};
-
-const ctx = {
-  console, setTimeout, clearTimeout, setInterval, clearInterval,
-  URLSearchParams, AbortController, Date, Math, JSON, Promise, Set, Map,
-  Array, Object, String, Number, RegExp, Error, Intl,
-  alert() {},
-  // No network: every loader takes its failure branch, which is also the branch
-  // the "backend unreachable" behaviour depends on.
-  fetch: () => Promise.reject(new Error('no network in test')),
-  localStorage: storage,
-  sessionStorage: storage,
-  navigator: { userAgent: 'node', onLine: true },
-  location: { hash: '', search: '', hostname: '127.0.0.1', protocol: 'http:', href: 'http://127.0.0.1:3000/' },
-  document: {
-    getElementById: () => el(),
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    createElement: () => el(),
-    body: el(),
-    documentElement: el(),
-    addEventListener() {},
-    readyState: 'complete',
-  },
-};
-ctx.window = ctx;
-ctx.globalThis = ctx;
-ctx.matchMedia = () => ({ matches: false, addEventListener() {}, addListener() {}, removeEventListener() {} });
-ctx.window.matchMedia = ctx.matchMedia;
-ctx.window.addEventListener = () => {};
-ctx.window.location = ctx.location;
-
-// `let`/`const` at the top level of a script are not properties of the global
-// object, so reach them through getters appended in the same lexical scope.
-const HARNESS = `
-;globalThis.__T = {
+const T = loadApp(`
   setAllIRs, applyIRStateToAllIRs, appState, ownedStatus, markSectionDone, initialsOf,
   statusCategory, IR_STATUS_VALUES, TICKET_TYPES,
   get allIRs() { return allIRs; },
   get irState() { return irState; }, set irState(v) { irState = v; },
   get currentIR() { return currentIR; }, set currentIR(v) { currentIR = v; },
-};`;
-
-const { createContext, runInContext } = await import('node:vm');
-const src = fs.readFileSync(APP_JS, 'utf8') + HARNESS;
-createContext(ctx);
-runInContext(src, ctx, { filename: 'app.js' });
-const T = ctx.__T;
+`);
 
 // ── Assertions ────────────────────────────────────────────────────────────────
-let fails = 0;
-const ok = (name, cond, extra) => {
-  console.log((cond ? '  PASS  ' : '  FAIL  ') + name + (cond ? '' : '   → ' + JSON.stringify(extra)));
-  if (!cond) fails++;
-};
-const head = t => console.log('\n— ' + t + ' —');
+const { ok, head, finish } = makeReporter();
 
 head('constants');
 ok('14 status values, unchanged', T.IR_STATUS_VALUES.length === 14, T.IR_STATUS_VALUES);
@@ -162,5 +92,4 @@ T.setAllIRs([{ irNumber: 'IR900', status: 'Open' }]);
 ok('missing dateRaised survives the merge', by('IR900').dateRaised === undefined);
 ok('missing droneId survives the merge', by('IR900').droneId === undefined);
 
-console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
-process.exit(fails ? 1 : 0);
+finish();

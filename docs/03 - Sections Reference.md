@@ -1,6 +1,12 @@
 # 03 — Sections Reference
 
-All 9 passbook sections defined in `SECTIONS` object in `app.js` (line 291–436).
+All 9 passbook sections defined in the `SECTIONS` object in `app.js` (line 2423).
+
+The **tenth tab** — 📋 Report — is not a section: it is the read-only view of the
+client's original Google Form submission. It has no fields, no save button and no
+entry in `SECTIONS`, and it is documented in
+[06 — UI Components & Styling](06 - UI Components & Styling.md). Its presence is
+why Section A no longer needs to double as "what the customer said".
 
 ### Draft auto-preservation (all sections)
 Any edit within a section is auto-persisted to `localStorage` as a draft keyed
@@ -102,44 +108,61 @@ is redeployed it shows "No history yet".
 ## Section A — Preliminary Details & Activity Log
 **ID:** `sec-a`
 
+Section A is split in two by ownership, and the split is the reason the tab looks
+the way it does:
+
+- **Locked intake fields** (10) — auto-populated from the customer's Form and
+  `readonly` + `locked` for **everyone**, admins included. They are the form's
+  record of what the client reported, so nobody edits them here. See the
+  **📋 Report** tab for the same data presented in full.
+- **Editable fields** (4) — the only things Section A actually stores.
+
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
-| `a_irNumber` | IR Number | text | **Readonly** — auto-filled from IR data |
-| `a_droneId` | Drone Serial No. | text | **Readonly** — auto-filled from IR data |
-| `a_dateRaised` | Date of Incident | date | 🔒 **CR-only** · Auto-filled from Form Responses "Date of Incident" (Col I) |
-| `a_crmOwner` | Customer Relations Manager | text | 🔒 **CR-only** · Auto-filled from Form Responses SPOC (Col F) |
-| `a_customerName` | Customer / Client Name | text | 🔒 **CR-only** · Auto-filled from Form Responses "Who's Reporting?" (Col L) |
-| `a_contactEmail` | Customer Email | email | 🔒 **CR-only** · Auto-filled from Form Responses email (Col P) |
-| `a_contactPhone` | Customer Phone | tel | 🔒 **CR-only** · Auto-filled from the phone portion of "Who's Reporting?" (Col L) |
-| `a_issueType` | What Support Is Required? | text | 🔒 **CR-only** · Auto-filled from Form Responses "What Support Is Required?" (Col G) |
-| `a_issueDesc` | Issue Description | textarea | 🔒 **CR-only** · Auto-filled from Form Responses "Please Describe Your Problem..." (Col H) |
-| `a_activityLog` | Activity Log (Timeline) | activityTable | 🔒 **CR-only** · Dynamic table: Day #, Date, Activity, Remark |
-| `a_overallStatus` | IR Status | select | 🔒 **CR-only** · Auto-filled from Form Responses "Issue Status" (Col D). Options: Open, Hold, Close, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, Other |
+| `a_irNumber` | IR Number | text | 🔒 Locked intake — from Col B |
+| `a_droneId` | Drone Serial No. | text | 🔒 Locked intake — from Col K |
+| `a_dateRaised` | Date of Incident | date | 🔒 Locked intake — from **Col I "Date of Incident"**. ⚠️ The label says *Incident*, not *raised*: the Sheet's raise timestamp is Col C |
+| `a_companyName` | Company Name | text | 🔒 Locked intake — from Col R |
+| `a_customerName` | Respondant Name | text | 🔒 Locked intake — the name portion of Col L |
+| `a_contactEmail` | Respondant Email | email | 🔒 Locked intake — from Col P |
+| `a_issueType` | What Support Is Required? | text | 🔒 Locked intake — from Col G |
+| `a_issueDesc` | Issue Description | textarea | 🔒 Locked intake — from Col H |
+| `a_incidentLocationWeather` | Incident Location and Weather | textarea | 🔒 Locked intake — from Col M |
+| `a_evidence` | Evidence (from customer form) | readonlyLinks | 🔒 Locked intake — Cols N and Q as links |
+| `a_crmOwner` | Customer Relations Manager | text | **Editable** — who here owns the client relationship |
+| `a_contactPhone` | Customer Phone | tel | **Editable** — seeded from the phone portion of Col L |
+| `a_activityLog` | Activity Log (Timeline) | activityTable | **Editable** — Day #, Date, Activity, Remark |
+| `a_overallStatus` | IR Status | select | **Editable** — options are the shared `IR_STATUS_VALUES` list |
 
-### Authorization — Section A (ALL fields restricted to CR team)
-**Entire Section A** is editable only by authorized Customer Relations personnel:
-- `monish.raza@indrones.com`
-- `ravi@indrones.com`
-- `adhik.nair@indrones.com`
+### Authorization — Section A
+There is **no CR-only allowlist for Section A**. Edit access comes from the
+per-user, per-section ACL (`getEffectiveAccess` → `canEdit(permissions, 'sec-a')`),
+granted by an admin through the request-access flow, with `ADMIN_EMAILS` bypassing
+all checks. A user with `view` or `comment` sees the four editable fields disabled;
+a user without view on `sec-a` does not see the tab at all (see
+[04 — Backend API Reference](04 - Backend API Reference.md#access-control-per-user-per-section)).
 
-All other users see every Section A field as **disabled** with a 🔒 icon. This is enforced both:
-- **Frontend**: fields rendered with `disabled` attribute, "Add Row" button disabled
-- **Backend** (`backend.gs`): `saveSection()` preserves existing values for all `sec-a` field IDs when `savedBy` is not in `AUTHORIZED_CR_EMAILS`
+The backend is the authority: `saveSection` rejects a write without edit access to
+the section, so the frontend's disabled state is convenience, not the control.
 
 ### Auto-Population from the IR Repository
-Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when an IR is opened:
+Locked intake fields are pre-filled from the IDS/CR/007 sheet's **"Form
+Responses"** tab when an IR is opened:
 
 | Section A Field | Form Responses Column | Config Key |
 |---|---|---|
 | `a_irNumber` | Col B — IR Number | `IR_REPO_IR_COL` |
 | `a_droneId` | Col K — Mention the Drone Serial No (S250XX) | `IR_REPO_ID_COL` |
 | `a_dateRaised` | Col I — Date of Incident | `IR_REPO_INCIDENT_COL` |
-| `a_crmOwner` | Col F — SPOC | `IR_REPO_SPOC_COL` |
-| `a_customerName` | Col L — Who's Reporting? | `IR_REPO_REPORTER_COL` |
+| `a_companyName` | Col R — Where Do You Work? | `IR_REPO_COMPANY_COL` |
+| `a_customerName` | Col L — Who's Reporting? (name portion) | `IR_REPO_REPORTER_COL` |
 | `a_contactEmail` | Col P — Email Address | `IR_REPO_EMAIL_COL` |
 | `a_issueType` | Col G — What Support Is Required? | `IR_REPO_SUPPORT_COL` |
 | `a_issueDesc` | Col H — Please Describe Your Problem... | `IR_REPO_DESC_COL` |
+| `a_incidentLocationWeather` | Col M — Incident Location and Weather | `IR_REPO_INCIDENT_LOC_COL` |
+| `a_evidence` | Cols N and Q — Evidence links | `IR_REPO_EVIDENCE_N_COL` / `_Q_COL` |
 | `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
+| `a_crmOwner` | Col F — SPOC (seed only; editable after) | `IR_REPO_SPOC_COL` |
 
 ### Activity Log Table Format
 | Column | Field Class | Content |
@@ -154,7 +177,12 @@ Fields are pre-filled from the IDS/CR/007 sheet's **"Form Responses"** tab when 
 - Data saved as JSON array: `[{dayCount, date, activity, remark}, ...]`
 - Backward compatible: old textarea string data loads into first row's activity field
 
-> **`a_overallStatus`** is the field read by `getAllIRStatuses()` in the backend to populate the status badge on the Master Index cards.
+> **`a_overallStatus` is no longer the source of the list badge.** It reads as the
+> ticket's status on the Section A form and is what the Sheet-sourced status seeds
+> from, but the list badge is driven by `__IRS__` (app-owned state) with the Sheet
+> as fallback — see [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
+> `getAllIRStatuses()` in the backend still exists, but the frontend no longer
+> depends on it for the badge.
 
 ---
 

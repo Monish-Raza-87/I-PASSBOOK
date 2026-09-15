@@ -7,7 +7,7 @@ The stylesheet is four layered files, loaded in this order from `index.html`:
 | `tokens.css` | **Generated.** Colour ramps (light + dark), radius, typography, elevation, focus rings, layout metrics, z-index scale, semantic aliases |
 | `base.css` | Reset, typography helpers, keyframes, splash, auth, app shell (sidebar / header / panes), responsive breakpoints |
 | `components.css` | Buttons, form controls, pills, search, dropdowns, modals, loading states |
-| `views.css` | Ticket list, ticket detail, the 9 section tables, comments / history / admin UI |
+| `views.css` | Ticket list, sync bar, ticket detail, the read-only intake report, the 9 section tables, comments / history / admin UI |
 
 For provenance, the generation script and the browser-support decisions, see
 [09 — Design System](09 - Design System.md). In short: **the palette is Frappe
@@ -104,6 +104,24 @@ genuinely needed.
 `.ir-card` — flat with dividers rather than floating cards, which holds up better
 at 400 rows. `.ir-card.is-selected` marks the row open in the split pane.
 
+An `.ir-card` also carries the **assignee initials** badge (`.ir-assignee`, from
+`__IRS__`) when the ticket has been triaged to someone.
+
+### Sync bar (`#sync-status`)
+`.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +
+`.sync-refresh` (the `↻ Refresh` button), written by `renderSyncBar()`. It is a
+deliberate, permanent line of chrome rather than a transient toast: **silent
+staleness is what sends staff back to the Sheet**, so the app always says when it
+last read the data and always offers a re-read.
+
+### Triage modal (`#triage-modal`)
+Opened from the ticket banner. Reuses the `.inward-options-modal` shell (fixed
+positioning, appended to `document.body`, `--z-overlay`) with a `.triage-body`
+grid of `.triage-row` label/control pairs: Status, Assigned to, Priority, Type.
+`TICKET_PRIORITIES` and `TICKET_TYPES` are app-owned — the customer Form has
+neither column. Status options come from the single `IR_STATUS_VALUES` list, so
+the modal and Section A can never drift apart. Gated on `canEditSection('sec-a')`.
+
 ### Filter segments (`.segments` / `.segment`)
 Frappe's All / Open / Paused / Resolved / Closed strip with live counts. Each
 segment maps to a **status category**, not a status value — see below.
@@ -128,7 +146,44 @@ enough; no code change is needed.
 
 ### Section tabs (`.tabs-container` / `.tab`)
 Horizontally scrollable, `scroll-snap-type: x mandatory`, sticky under the header
-via `--header-h`. `app.js` binds one listener to the nine static `.tab` nodes.
+via `--header-h`. **Ten** tabs: the read-only **📋 Report** tab first (marked
+`data-intake="1"`), then the nine workflow sections. `app.js` binds one listener
+to the nine static section `.tab` nodes.
+
+Two things about this strip are load-bearing:
+
+- `applySectionAccessGating` falls back to the first visible tab with
+  `.tab:not([style*="display: none"]):not([data-intake])`. The intake tab is
+  **never hidden**, so without that `:not([data-intake])` it would have swallowed
+  the fallback for every restricted user and silently defaulted them onto a
+  read-only screen.
+- `renderLayout()` writes inline `display` on the panes, and the gating code reads
+  those inline values back. See *App shell* above.
+
+### Client's Report (`#sec-intake`, the 📋 tab)
+The read-only intake view: every column the customer's Google Form actually
+wrote, unedited, so staff stop opening the Sheet to see what the client said.
+Built by `renderIntake()` into `#sec-intake-body`.
+
+| Class | Role |
+|---|---|
+| `.intake-head` | Title row holding the `.intake-open` link out to Col A |
+| `.intake-open` | "Open original report ↗" — the Sheet's Summary document |
+| `.intake-note` | The standing "the app never edits these values" reassurance |
+| `.intake-list` / `.intake-row` | One ingested field per row; single column on phones, `grid-template-columns: 11rem 1fr` at ≥640px |
+| `.intake-row-wide` | Long-text rows, which stay single-column at every width |
+| `.intake-label` / `.intake-value` | The two columns |
+| `.intake-empty` | Em-dash for a blank cell |
+| `.intake-link` / `.intake-plain` / `.intake-ev` / `.intake-ev-icon` | Evidence URLs as labelled anchors (non-URL tokens fall back to plain text) |
+| `.intake-extras` / `.intake-extras-head` | "Other columns from the Sheet" — columns the app doesn't model |
+| `.intake-audit` | Names headers seen but not recognised, so a Form change is visible rather than silent |
+
+**It is read-only, and it contains no form control at all** — asserted by both
+`tools/smoke-intake.mjs` and `tools/smoke-boot.mjs`. It renders from
+`currentIR.intake` (the raw cells), never from the editable section forms, so
+there is no path by which a re-save could write these values back into
+`APP_DATA`. Every value is escaped with `escHtml` — the description, company name
+and location are free text typed by the customer.
 
 ### Buttons (`.btn`)
 Neutral solid by default (`--surface-gray-10`, which is near-black in light and

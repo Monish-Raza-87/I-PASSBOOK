@@ -745,6 +745,13 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .inward-options-foot .btn { width: auto; }
 .opt-group .opt-textarea { min-height: 84px; resize: vertical; font-size: var(--text-sm); }
 
+/* ── Triage modal (status / assignee / priority / type) ──
+   Stacked label-above-control rows so it stays readable at phone width, which
+   is where warehouse staff will actually use it. */
+.triage-body { display: flex; flex-direction: column; gap: 0.7rem; }
+.triage-row { display: flex; flex-direction: column; gap: 0.2rem; }
+.triage-row > span { font-size: var(--text-xs); color: var(--ink-gray-6); font-weight: var(--weight-medium); }
+
 /* Legacy record embed (read-only iframe into the old workbook) */
 #legacy-modal { padding: 0.5rem; }
 .legacy-card {

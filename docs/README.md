@@ -16,6 +16,7 @@
 | [[06 - UI Components & Styling]] | Design system tokens, component patterns |
 | [[07 - Known Issues & TODO]] | Current bugs, tech debt, planned features |
 | [[08 - Development Guide]] | How to run locally, dev mode, testing |
+| [[09 - Design System]] | Token provenance, the generator, why the palette ships twice |
 
 ---
 

@@ -4,10 +4,15 @@
 
 | Item | Location | Current Value | Notes |
 |---|---|---|---|
-| GAS Web App URL | `CONFIG.GAS_URL` (line 10) | `https://script.google.com/macros/s/AKfycbz.../exec` | Must be replaced on new GAS deployments |
-| Google OAuth Client ID | `CONFIG.GOOGLE_CLIENT_ID` (line 13) | `719566494973-i27l1935v7rrcatv11simfoertsf733a.apps.googleusercontent.com` | Tied to the Google Cloud project |
-| Allowed Domain | `CONFIG.ALLOWED_DOMAIN` (line 16) | `indrones.com` | Only emails ending with this domain can log in |
-| Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` (line 20) | `true` | Set to `false` in production |
+| GAS Web App URL | `CONFIG.GAS_URL` | `https://script.google.com/macros/s/AKfycbz.../exec` | Must be replaced on new GAS deployments |
+| Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Only emails ending with this domain can sign up (plus explicit allowlist entries) |
+| Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` | `true` | Set to `false` in production |
+| IR Repository CSV | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_GID` | `1MPcWvgZ...` / `335027370` | Read directly by the frontend from the link-shared sheet |
+
+There is **no Google OAuth client ID** any more. Google Sign-In was replaced by
+allowlist-gated email + password auth (OTP + captcha on sign-up, server session
+token in `sessionStorage`, idle timeout, login lockout) — so no Google Cloud
+project is needed to run this app.
 
 ## What's Hardcoded in `backend.gs`
 

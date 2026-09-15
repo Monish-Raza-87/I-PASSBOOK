@@ -444,6 +444,31 @@ const userAvatar  = document.getElementById('user-avatar');
 const syncStatus  = document.getElementById('sync-status');
 const toast       = document.getElementById('toast');
 
+// ─── SHELL REFS ──────────────────────────────────────────────────────────────
+// The Frappe-style shell (sidebar / list / split pane). These are only touched
+// by the layout + router code below — nothing in the section rendering path
+// reads them.
+const navAccess     = document.getElementById('nav-access');
+const navAdminLabel = document.getElementById('nav-admin-label');
+const navTheme      = document.getElementById('nav-theme');
+const navThemeIcon  = document.getElementById('nav-theme-icon');
+const navThemeLabel = document.getElementById('nav-theme-label');
+const navCountEl    = document.getElementById('nav-count');
+const listSegments  = document.getElementById('list-segments');
+const listCountEl   = document.getElementById('list-count');
+const bannerPills   = document.getElementById('ir-banner-pills');
+
+// ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
+// currentView is the single source of truth for which screen is showing.
+// renderLayout() translates it into the inline display values that the rest of
+// the app reads back (applyAccessGating tests detailView.style.display).
+let currentView = 'index';     // 'index' | 'detail'
+let activeSegment = 'all';     // ticket-list filter segment
+let _appBooted = false;        // showApp() guard — it re-binds listeners
+let _irsReady = null;          // promise for the first IR-list load (deep links await it)
+let _openSeq = 0;              // supersedes an in-flight openPassbook()
+const mqDesktop = window.matchMedia('(min-width: 1024px)');
+
 // ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
 window.addEventListener('load', () => {
   // Check for local file protocol (login + backend calls won't work)
@@ -740,11 +765,148 @@ function toggleAuthMode() {
   }
 }
 
+// ─── THEME ───────────────────────────────────────────────────────────────────
+// Preference is 'light' | 'dark' | 'system' under localStorage 'theme'.
+// 'system' is the default and honours the OS setting live; the nav toggle
+// switches to an explicit light/dark. The <head> script applies the stored
+// value before first paint so there is no flash.
+const THEME_KEY = 'theme';
+
+function storedTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; }
+}
+function prefersDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
+function isDarkTheme() {
+  const p = storedTheme();
+  return p === 'dark' || (p !== 'light' && prefersDark());
+}
+
+function applyTheme(animate) {
+  const dark = isDarkTheme();
+  const root = document.documentElement;
+  if (animate) {
+    // Suppress transitions for the two frames around the swap, otherwise every
+    // surface cross-fades at once and the switch reads as a flash.
+    root.classList.add('no-transition');
+    requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('no-transition')));
+  }
+  if (dark) root.setAttribute('data-theme', 'dark');
+  else root.removeAttribute('data-theme');
+
+  if (navThemeIcon)  navThemeIcon.textContent  = dark ? '☀️' : '🌙';
+  if (navThemeLabel) navThemeLabel.textContent = dark ? 'Light mode' : 'Dark mode';
+  if (navTheme)      navTheme.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+}
+
+function toggleTheme() {
+  try { localStorage.setItem(THEME_KEY, isDarkTheme() ? 'light' : 'dark'); } catch { /* non-fatal */ }
+  applyTheme(true);
+}
+
+// Follow the OS while the preference is still 'system'.
+(function watchSystemTheme() {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const onChange = () => { if (storedTheme() === 'system') applyTheme(true); };
+  if (mq.addEventListener) mq.addEventListener('change', onChange);
+  else if (mq.addListener) mq.addListener(onChange);
+})();
+
+// ─── LAYOUT ──────────────────────────────────────────────────────────────────
+// One function owns the panes' visibility. It must keep writing *inline*
+// styles: applyAccessGating reads detailView.style.display, and
+// applySectionAccessGating selects `.tab:not([style*="display: none"])`.
+//
+//   desktop (≥1024px) : list always visible, detail beside it when open
+//   mobile            : list and detail are separate full screens
+function renderLayout() {
+  const desktop = mqDesktop.matches;
+  const detail  = currentView === 'detail';
+  indexView.style.display  = (desktop || !detail) ? 'flex' : 'none';
+  detailView.style.display = detail ? 'flex' : 'none';
+  backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
+  document.body.classList.toggle('view-detail', detail);
+
+  // On desktop the list stays on screen, so mark which row is open.
+  if (irList) {
+    irList.querySelectorAll('.ir-card').forEach(card => {
+      card.classList.toggle('is-selected', detail && card.dataset.id === currentIR?.irNumber);
+    });
+  }
+}
+
+(function watchDesktop() {
+  const onChange = () => renderLayout();
+  if (mqDesktop.addEventListener) mqDesktop.addEventListener('change', onChange);
+  else if (mqDesktop.addListener) mqDesktop.addListener(onChange);
+})();
+
+// ─── ROUTER ──────────────────────────────────────────────────────────────────
+// Hash routes, because GitHub Pages is static with no server rewrite:
+//   #/tickets            → the list (desktop keeps whatever IR was open)
+//   #/tickets/IR409      → that IR's passbook
+//   #/legacy             → opens the read-only legacy workbook modal
+// showIndex()/openPassbook() stay the view functions; the router only decides
+// when to call them, so nothing here re-implements rendering.
+function currentRoute() {
+  const parts = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
+  if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'legacy') return { name: 'legacy' };
+  return { name: 'tickets' };
+}
+
+function goIndex() {
+  if (location.hash === '#/tickets' || !location.hash) { showIndex(); return; }
+  location.hash = '#/tickets';
+}
+
+function goTicket(irNumber) {
+  const hash = '#/tickets/' + encodeURIComponent(irNumber);
+  if (location.hash === hash) { handleRoute(); return; }
+  location.hash = hash;
+}
+
+async function handleRoute() {
+  if (!currentUser) return;
+  const r = currentRoute();
+
+  if (r.name === 'legacy') {
+    if (typeof openLegacyWorkbook === 'function') openLegacyWorkbook();
+    goIndex();
+    return;
+  }
+
+  if (r.name === 'ticket') {
+    // Already showing this ticket — don't rebuild every section form.
+    if (currentView === 'detail' && currentIR?.irNumber === r.irNumber) return;
+    // A deep link resolves before the IR list has loaded; wait so the banner
+    // gets the drone serial and customer name.
+    if (!allIRs.length && _irsReady) { try { await _irsReady; } catch { /* open anyway */ } }
+    if (!currentUser) return;                   // signed out while waiting
+    if (currentRoute().irNumber !== r.irNumber) return;   // superseded meanwhile
+    openPassbook(r.irNumber);
+    return;
+  }
+
+  if (currentView === 'index') return;
+  showIndex();
+}
+
+window.addEventListener('hashchange', () => { handleRoute(); });
+
 // ─── APP BOOT ────────────────────────────────────────────────────────────────
 function showApp() {
   authCont.style.display = 'none';
   appCont.style.display  = 'flex';
+
+  // Idempotent: this function binds click listeners to the avatar, the bell and
+  // the request-access buttons. A second call (re-login, router re-entry) would
+  // double-fire every one of them, so bind once and only refresh the layout.
+  if (_appBooted) { renderLayout(); syncNavAccess(); return; }
+  _appBooted = true;
+
   showIndex();
+  applyTheme();          // sync the nav toggle with the stored preference
+  syncNavAccess();
 
   // Set up user avatar
   userAvatar.textContent = currentUser?.initial || '?';
@@ -756,9 +918,12 @@ function showApp() {
 
   // User menu toggle
   userAvatar.addEventListener('click', toggleUserMenu);
+  if (navTheme) navTheme.addEventListener('click', toggleTheme);
+  if (navAccess) navAccess.addEventListener('click', openAccessModal);
 
-  // Fetch IRs
-  fetchIRs();
+  // Fetch IRs. The promise is kept so a deep link (#/tickets/IR409) can wait
+  // for the list before it opens the passbook.
+  _irsReady = fetchIRs();
   // NOTE: the token-gated legacy archive (pre-app IRs ≤ IR441) is intentionally
   // NOT loaded — it relied on a silent Google One-Tap per call, which caused
   // repeated sign-in pop-ups. Previous IRs are left in the old I-PASSBOOK sheet.
@@ -781,6 +946,18 @@ function showApp() {
   if (raBtn) raBtn.addEventListener('click', requestAccessAction);
   const raOut = document.getElementById('request-access-signout');
   if (raOut) raOut.addEventListener('click', signOut);
+
+  // Enter the route. A hash already in the URL (deep link / restored tab) wins;
+  // otherwise start on the ticket list without adding a history entry.
+  if (!location.hash) history.replaceState(null, '', '#/tickets');
+  handleRoute();
+}
+
+// Shows the Administration nav group only to admins.
+function syncNavAccess() {
+  const admin = isAdmin();
+  if (navAdminLabel) navAdminLabel.style.display = admin ? '' : 'none';
+  if (navAccess)     navAccess.style.display     = admin ? '' : 'none';
 }
 
 // ─── ACCESS GATING (boot-level: app vs request-access screen) ────────────────
@@ -792,9 +969,13 @@ function applyAccessGating() {
   const a = myAccess();
   const locked = a.role === 'none' && !isAdmin() && !a.__fallback;
   if (locked) {
+    // #request-access is a sibling of #app-container, so the whole shell
+    // (sidebar + header + panes) goes away, not just the panes.
     ra.style.display = 'flex';
+    appCont.style.display = 'none';
     indexView.style.display = 'none';
     detailView.style.display = 'none';
+    document.body.classList.remove('view-detail');
     const emailEl = document.getElementById('request-access-email');
     if (emailEl) emailEl.textContent = currentUser?.email || '';
     const pendEl = document.getElementById('request-access-pending');
@@ -805,6 +986,10 @@ function applyAccessGating() {
   }
   // Has access (or fallback during transition) → hide request-access screen.
   ra.style.display = 'none';
+  // Only restore the shell if the user is actually signed in (this runs on the
+  // access-refresh path, which can also fire while the login screen is up).
+  if (authCont.style.display === 'none') appCont.style.display = 'flex';
+  syncNavAccess();
   if (detailView.style.display === 'flex') {
     applySectionAccessGating();   // a passbook is open — re-gate with fresh access
   } else {
@@ -1146,9 +1331,8 @@ function signOut() {
 
 // ─── MASTER INDEX ────────────────────────────────────────────────────────────
 function showIndex() {
-  indexView.style.display = 'block';
-  detailView.style.display = 'none';
-  backBtn.style.display = 'none';
+  currentView = 'index';
+  renderLayout();
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
@@ -1234,6 +1418,9 @@ async function fetchIRsFromSheet() {
     evidenceN:   col('Evidence: Attach Files From The Incident'),
     evidenceQ:   col('Evidence: Attach Screenshot of UAV Forecast'),
     company:     col('Where Do You Work'),
+    // Optional. No Priority column exists on the form yet — when one is added,
+    // it flows straight through to the list pill with no code change.
+    priority:    col('Priority'),
   };
   const cell = (row, i) => (i >= 0 && row[i] != null ? row[i].trim() : '');
 
@@ -1259,6 +1446,7 @@ async function fetchIRsFromSheet() {
       issueType:     cell(row, C.category),
       issueDesc:     cell(row, C.desc),
       spoc:          cell(row, C.spoc),
+      priority:      cell(row, C.priority),
       initialStatus: stat,
       incidentDate:  toISODate(inc),
       // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
@@ -1357,13 +1545,17 @@ function mergeLegacyOnlyIRs() {
 }
 
 function renderIRList(records) {
+  renderSegments();
   if (!records || records.length === 0) {
-    irList.innerHTML = '<div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div>';
+    irList.innerHTML = allIRs.length
+      ? '<div class="empty-state"><span>🔍</span>No IRs match this filter.</div>'
+      : '<div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div>';
+    updateListCounts(0);
     return;
   }
 
   irList.innerHTML = records.map(ir => `
-    <div class="ir-card animate-slide-up" data-id="${ir.irNumber}" onclick="openPassbook('${ir.irNumber}')">
+    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${ir.irNumber}" onclick="goTicket('${ir.irNumber}')">
       <div class="ir-card-main">
         <div class="ir-title">${ir.irNumber}</div>
         <div class="ir-meta">
@@ -1373,43 +1565,136 @@ function renderIRList(records) {
       </div>
       <div class="ir-card-side">
         ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
-        <span class="badge ${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
-        ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank">View Summary ↗</a>` : ''}
+        ${ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${ir.priority}</span>` : ''}
+        <span class="${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
+        ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
   `).join('');
+  updateListCounts(records.length);
 }
 
+function updateListCounts(shown) {
+  if (navCountEl)  navCountEl.textContent = allIRs.length;
+  if (listCountEl) {
+    listCountEl.textContent = shown === allIRs.length
+      ? `${allIRs.length} total`
+      : `${shown} of ${allIRs.length}`;
+  }
+}
+
+// ─── STATUS CATEGORIES ───────────────────────────────────────────────────────
+// Frappe groups workflow statuses into three categories — Open (clock running),
+// Paused (clock suspended), Resolved (clock stopped) — and colours the pill by
+// category rather than by status. The 14 values in a_overallStatus are written
+// by the customer Google Form and read by getAllIRStatuses(), so they are
+// mapped here, never renamed.
+//
+// The old getBadgeClass() painted everything that was not Open/Hold as grey
+// "closed", so Inward, Production, PDI and Flight Test all *looked* finished
+// while they were still in the pipeline. This map fixes that.
+const STATUS_CATEGORIES = {
+  open:     ['Open', 'Inward', 'Visual Inspection', 'QC Investigation', 'Production',
+             'QC', 'Flight Test', 'PDI', 'Approval', 'Remote Support'],
+  paused:   ['Hold'],
+  resolved: ['Delivered'],
+  closed:   ['Close', 'Other'],
+};
+
+const CATEGORY_BADGE = {
+  open:     'badge badge-open',
+  paused:   'badge badge-pending',
+  resolved: 'badge badge-resolved',
+  closed:   'badge badge-closed',
+};
+
+function statusCategory(status) {
+  const s = String(status || 'Open').trim().toLowerCase();
+  for (const cat of Object.keys(STATUS_CATEGORIES)) {
+    if (STATUS_CATEGORIES[cat].some(v => v.toLowerCase() === s)) return cat;
+  }
+  return 'open';   // an unrecognised stage is still in the pipeline, not finished
+}
+
+// Stays a function rather than becoming a constant lookup: these class names
+// appear in no class="…" literal, so a grep-based dead-CSS sweep would wrongly
+// delete their rules.
 function getBadgeClass(status) {
-  if (!status || status.toLowerCase() === 'open') return 'badge badge-open';
-  if (status.toLowerCase().includes('pend'))      return 'badge badge-pending';
-  return 'badge badge-closed';
+  return CATEGORY_BADGE[statusCategory(status)];
 }
 
-// Search / filter
-searchInput.addEventListener('input', () => {
-  const q = searchInput.value.toLowerCase();
-  const filtered = allIRs.filter(ir =>
-    ir.irNumber?.toLowerCase().includes(q) ||
-    ir.droneId?.toLowerCase().includes(q)
-  );
-  renderIRList(filtered);
-});
+// ─── LIST FILTER SEGMENTS ────────────────────────────────────────────────────
+const SEGMENT_LABELS = [['all', 'All'], ['open', 'Open'], ['paused', 'Paused'],
+                        ['resolved', 'Resolved'], ['closed', 'Closed']];
+
+function segmentCounts() {
+  const c = { all: allIRs.length, open: 0, paused: 0, resolved: 0, closed: 0 };
+  allIRs.forEach(ir => { c[statusCategory(ir.status)]++; });
+  return c;
+}
+
+// Counts always come from allIRs, so they stay right while a filter is applied.
+function renderSegments() {
+  if (!listSegments) return;
+  const c = segmentCounts();
+  listSegments.innerHTML = SEGMENT_LABELS.map(([key, label]) => `
+    <button type="button" class="segment${activeSegment === key ? ' active' : ''}"
+            data-seg="${key}" role="tab" aria-selected="${activeSegment === key}">
+      ${label}<span class="segment-count">${c[key] || 0}</span>
+    </button>
+  `).join('');
+}
+
+// The one place the search box and the segment strip combine into a filter.
+function applyListFilters() {
+  const q = (searchInput.value || '').toLowerCase().trim();
+  let rows = allIRs;
+  if (activeSegment !== 'all') rows = rows.filter(ir => statusCategory(ir.status) === activeSegment);
+  if (q) {
+    rows = rows.filter(ir =>
+      ir.irNumber?.toLowerCase().includes(q) ||
+      ir.droneId?.toLowerCase().includes(q)
+    );
+  }
+  renderIRList(rows);
+}
+
+// Search / segment filter
+searchInput.addEventListener('input', applyListFilters);
+
+if (listSegments) {
+  listSegments.addEventListener('click', e => {
+    const btn = e.target.closest('.segment');
+    if (!btn) return;
+    activeSegment = btn.dataset.seg;
+    renderSegments();
+    applyListFilters();
+  });
+}
 
 // ─── PASSBOOK DETAIL ─────────────────────────────────────────────────────────
 async function openPassbook(irNumber) {
+  // Sequence token: a fast second open (list clicks, a hash change) must not let
+  // the slower first one finish and paint over it.
+  const seq = ++_openSeq;
+
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
   esignatureState = {};   // clear signatures from any previously-open IR
   evidenceState = {};     // clear image-evidence state from any previously-open IR
   dispatchChecklistState = {}; // clear Section H dispatch checklist from previous IR
 
   document.getElementById('ir-banner-title').textContent = irNumber;
+  // Drone + customer only — status moved into the pill strip beside it.
   document.getElementById('ir-banner-sub').textContent =
-    `${currentIR.droneId || '—'} · ${currentIR.customerName || '—'} · Status: ${currentIR.status || 'Open'}`;
+    [currentIR.droneId, currentIR.customerName].filter(Boolean).join(' · ') || '—';
+  if (bannerPills) {
+    bannerPills.innerHTML =
+      `<span class="${getBadgeClass(currentIR.status)}">${currentIR.status || 'Open'}</span>` +
+      (currentIR.priority ? `<span class="prio prio-${String(currentIR.priority).toLowerCase()}">${currentIR.priority}</span>` : '');
+  }
 
-  indexView.style.display = 'none';
-  detailView.style.display = 'flex';
-  backBtn.style.display = 'block';
+  currentView = 'detail';
+  renderLayout();
   headerTitle.textContent = irNumber;
 
   // Build all section forms
@@ -1417,6 +1702,8 @@ async function openPassbook(irNumber) {
 
   // Load saved data for this IR, then restore any unsaved drafts on top
   await loadSectionData(irNumber);
+  if (seq !== _openSeq) return;   // superseded by a newer openPassbook()
+
   restoreDrafts();
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
@@ -1482,8 +1769,8 @@ function openLegacyWorkbook() {
   openLegacyModal(embedUrl, 'All pre-app records · switch tabs at the bottom', openUrl);
 }
 
-// Back button
-backBtn.addEventListener('click', showIndex);
+// Back button (mobile only — the desktop split pane keeps the list on screen)
+backBtn.addEventListener('click', goIndex);
 
 // IR banner nudge / comments button
 const irNudgeBtn = document.getElementById('ir-nudge-btn');
@@ -2953,7 +3240,7 @@ function refreshDraftBanner() {
   if (!banner) return;
   if (!currentIR?.irNumber || !hasAnyDraft()) { banner.style.display = 'none'; return; }
   const label = currentIR.irNumber;
-  banner.style.display = 'block';
+  banner.style.display = 'flex';
   banner.innerHTML = `
     <span class="draft-banner-text">You have unsaved entries restored from a previous session for ${escHtml(label)}. Review each section and Save, or discard.</span>
     <button type="button" class="draft-banner-btn" onclick="discardAllDrafts()">Discard restored drafts</button>`;
@@ -3466,11 +3753,26 @@ async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
+// Toasts queue instead of overwriting: back-to-back messages used to clobber
+// each other's text, and the first timer would hide the newer message early.
+let _toastQueue = [];
+let _toastBusy = false;
+
 function showToast(msg) {
+  _toastQueue.push(msg);
+  if (!_toastBusy) drainToastQueue();
+}
+
+function drainToastQueue() {
+  const msg = _toastQueue.shift();
+  if (msg === undefined) { _toastBusy = false; return; }
+  _toastBusy = true;
   toast.textContent = msg;
-  toast.style.transform = 'translateX(-50%) translateY(0px)';
+  toast.classList.add('show');
   setTimeout(() => {
-    toast.style.transform = 'translateX(-50%) translateY(100px)';
+    toast.classList.remove('show');
+    // Let the hide transition finish before the next message slides in.
+    setTimeout(drainToastQueue, 300);
   }, 3000);
 }
 
@@ -3747,7 +4049,7 @@ function refreshBell() {
   if (!badge) return;
   const c = unreadForMe().length;
   badge.textContent = c > 9 ? '9+' : String(c);
-  badge.style.display = c > 0 ? 'block' : 'none';
+  badge.style.display = c > 0 ? 'flex' : 'none';
 }
 
 // ── Per-section / per-field comment badges ──

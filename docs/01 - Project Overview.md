@@ -22,21 +22,25 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 | Layer | Technology | Notes |
 |---|---|---|
 | Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (31 KB) |
-| Styling | Custom CSS with CSS variables | Dark glassmorphism theme |
+| Styling | Hand-written CSS, layered, no build step | Frappe-derived design tokens, light + dark |
 | Backend | Google Apps Script (GAS) | Deployed as web app, in `backend.gs` |
 | Database | Google Sheets | `APP_DATA` tab for passbook data, `Form Responses` tab for IR records |
 | File Storage | Google Drive | Photos/files stored in `IR###/Section X` folders |
-| Auth | Google OAuth 2.0 (GIS) | Restricted to `@indrones.com` domain |
+| Auth | Email + password, allowlist-gated | OTP + captcha sign-up; server session token in `sessionStorage` |
 | PWA | Service Worker + Manifest | Offline caching of static assets |
 
 ## File Structure
 
 ```
 i-passbook-app/
-├── index.html          # Main HTML shell (splash, auth, index, detail views)
-├── app.js              # All frontend logic (~663 lines)
-├── style.css           # Complete stylesheet (~540 lines)
-├── backend.gs          # Google Apps Script backend (~316 lines)
+├── index.html          # App shell: splash, auth, sidebar, ticket list, detail pane
+├── app.js              # All frontend logic (~4,500 lines)
+├── tokens.css          # Design tokens — generated, see docs/09
+├── base.css            # Reset, typography, splash/auth, app shell, breakpoints
+├── components.css      # Buttons, inputs, pills, dropdowns, modals
+├── views.css           # Ticket list, ticket detail, section tables, admin UI
+├── tools/gen-tokens.mjs # Regenerates tokens.css from frappe/frappe-ui
+├── backend.gs          # Google Apps Script backend (~1,240 lines)
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
@@ -45,10 +49,13 @@ i-passbook-app/
 └── docs/               # ← This knowledge base
 ```
 
+`style.css` no longer exists — it was replaced by the four layered stylesheets above
+(see [09 — Design System](09 - Design System.md)).
+
 ## Key Design Decisions
 
 1. **No build tools** — deployed as static files, no bundler/transpiler
 2. **No npm** — zero dependencies, runs in browser directly
 3. **Mobile-first** — designed for phone use by field/warehouse staff
 4. **Demo mode** — falls back to 5 hardcoded sample IRs when GAS backend is unreachable
-5. **Dev bypass** — `?dev=1` on localhost skips Google auth entirely
+5. **Dev bypass** — `?dev=1` on localhost skips auth entirely

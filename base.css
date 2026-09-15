@@ -1,0 +1,733 @@
+/* ============================================================
+   base.css — reset, app shell, navigation, typography
+   Load order: tokens.css → base.css → components.css → views.css
+   ============================================================ */
+
+/* ── Reset ─────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  scroll-behavior: smooth;
+  /* Frappe sets no color-scheme; we do, because this app has far more
+     native controls (date pickers, selects) than theirs. */
+  color-scheme: light;
+}
+[data-theme="dark"] { color-scheme: dark; }
+
+/* Stamped on <html> for the two frames around a theme swap, so every
+   transitioning surface doesn't cross-fade at once and read as a flash. */
+.no-transition *,
+.no-transition *::before,
+.no-transition *::after {
+  transition: none !important;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--ink-gray-8);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  font-variation-settings: 'opsz' 24, 'cv11' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Global focus ring ─────────────────────────────────────── */
+:focus { outline: none; }
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-default);
+  border-radius: var(--radius-3);
+}
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-default);
+}
+
+/* ── Typography helpers ────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-2xl);
+  letter-spacing: var(--tracking-2xl);
+  color: var(--ink-gray-9);
+}
+h1 { font-size: var(--text-2xl); }
+h2 { font-size: var(--text-xl); }
+h3 { font-size: var(--text-lg); }
+h4 { font-size: var(--text-base); }
+
+a { color: var(--ink-blue-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code, pre, kbd { font-family: var(--font-mono); }
+
+.text-muted      { color: var(--ink-gray-5); }
+.text-subtle     { color: var(--ink-gray-4); }
+.text-strong     { color: var(--ink-gray-9); }
+.text-xs         { font-size: var(--text-xs); }
+.text-sm         { font-size: var(--text-sm); }
+.text-danger     { color: var(--st-danger-fg); }
+.text-success    { color: var(--st-resolved-fg); }
+.text-warning    { color: var(--st-paused-fg); }
+
+/* ── Keyframes ─────────────────────────────────────────────── */
+@keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer { to { background-position: -200% 0; } }
+@keyframes loadbar { to { width: 100%; } }
+@keyframes spin    { to { transform: rotate(360deg); } }
+
+.animate-fade-in  { animation: fadeIn 0.25s ease-out both; }
+.animate-slide-up { animation: slideUp 0.3s var(--ease) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════
+   SPLASH
+   The Indrones intro video is brand material and stays; the
+   chrome around it goes neutral so it doesn't reintroduce the
+   blue this design deliberately drops.
+   ══════════════════════════════════════════════════════════ */
+#splash-screen {
+  position: fixed;
+  inset: 0;
+  background: #0b0b0b;
+  z-index: var(--z-splash);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+
+.splash-video {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  min-width: 100%;
+  min-height: 100%;
+  width: auto;
+  height: auto;
+  transform: translate(-50%, -50%);
+  object-fit: cover;
+  z-index: 1;
+}
+
+.splash-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(2px);
+  z-index: 2;
+}
+
+.splash-logo-wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  z-index: 3;
+  animation: slideUp 0.5s var(--ease) both;
+}
+
+.splash-logo {
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fff;
+  filter: drop-shadow(0 2px 8px rgb(0 0 0 / 0.35));
+}
+
+.splash-sub {
+  color: rgb(255 255 255 / 0.7);
+  font-size: var(--text-xs);
+  text-align: center;
+  letter-spacing: 0.02em;
+  max-width: 260px;
+}
+
+.splash-loader {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgb(255 255 255 / 0.18);
+  overflow: hidden;
+  z-index: 3;
+}
+.splash-bar {
+  height: 100%;
+  background: rgb(255 255 255 / 0.9);
+  width: 0;
+  animation: loadbar 1.85s ease-in-out forwards;
+}
+
+/* ══════════════════════════════════════════════════════════
+   AUTH SCREEN + REQUEST-ACCESS
+   ══════════════════════════════════════════════════════════ */
+#auth-container {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 1rem;
+  background: var(--surface-base);
+}
+
+.glass-card {
+  background: var(--surface-elevation-1);
+  border: 1px solid var(--outline-gray-1);
+  box-shadow: var(--elevation-lg);
+  border-radius: var(--radius-6);
+  padding: 1.75rem;
+  width: 100%;
+  max-width: 400px;
+}
+
+/* ── Auth / request-access internals ───────────────────────── */
+#auth-form { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.auth-head { text-align: center; margin-bottom: 1.5rem; }
+.auth-brand {
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-9);
+}
+.auth-hint { color: var(--ink-gray-5); font-size: var(--text-sm); margin-top: 0.4rem; }
+
+/* Bot trap: off-canvas, not display:none — some bots skip hidden fields. */
+.auth-honeypot {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.auth-captcha-label { color: var(--ink-gray-6); font-size: var(--text-xs); display: block; margin-bottom: 0.4rem; }
+.auth-captcha-row { display: flex; align-items: center; gap: 0.5rem; }
+/* The challenge is a light-on-light SVG rendered by the backend, so it keeps a
+   fixed pale backdrop in both themes rather than following the surface ramp. */
+.auth-captcha-img {
+  height: 46px;
+  width: 130px;
+  border-radius: var(--radius-3);
+  background: #f4f4f4;
+  flex: 0 0 auto;
+  border: 1px solid var(--outline-gray-1);
+}
+.auth-err { color: var(--ink-red-6); font-size: var(--text-xs); margin-top: 0.35rem; }
+.auth-error { color: var(--ink-red-6); text-align: center; margin-top: 1rem; font-size: var(--text-sm); }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--ink-blue-link);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  width: 100%;
+  padding: 0.4rem 0;
+  margin-top: 0.6rem;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.req-pending { margin-top: 1rem; color: var(--ink-green-7); font-size: var(--text-sm); }
+
+#request-access {
+  display: none;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+  background: var(--surface-base);
+}
+#request-access .glass-card { text-align: center; max-width: 460px; }
+#request-access .btn { margin-top: 0.75rem; }
+#request-access-email { margin: 1rem 0; color: var(--ink-gray-8); }
+
+/* ══════════════════════════════════════════════════════════
+   APP SHELL
+   Desktop ≥1024px : sidebar · list · detail (split pane)
+   Below           : header · list, full-screen detail, bottom nav
+   ══════════════════════════════════════════════════════════ */
+#app-container {
+  display: none;
+  flex: 1;
+  flex-direction: row;
+  min-height: 0;
+}
+
+/* ── Sidebar (becomes the bottom nav on small screens) ─────── */
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--sidebar-w);
+  flex: 0 0 var(--sidebar-w);
+  background: var(--surface-sidebar);
+  border-right: 1px solid var(--outline-gray-1);
+  z-index: var(--z-sidebar);
+}
+
+[data-theme="dark"] #sidebar {
+  background: var(--surface-base);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0 0.9rem;
+  height: var(--header-h);
+  flex: 0 0 var(--header-h);
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-3);
+  background: var(--surface-gray-10);
+  color: var(--ink-base);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.brand-text {
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+  color: var(--ink-gray-9);
+  white-space: nowrap;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.6rem 0.5rem;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.sidebar-section-label {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-gray-4);
+  padding: 0.7rem 0.6rem 0.3rem;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-3);
+  color: var(--ink-gray-7);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  transition: background 0.12s var(--ease), color 0.12s var(--ease);
+}
+.nav-item:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); text-decoration: none; }
+.nav-item.active { background: var(--surface-gray-3); color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+.nav-icon { font-size: var(--text-md); line-height: 1; flex: 0 0 auto; width: 18px; text-align: center; }
+.nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-count {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-5);
+  background: var(--surface-gray-3);
+  border-radius: var(--radius-9);
+  padding: 1px 6px;
+}
+.nav-item.active .nav-count { background: var(--surface-gray-5); color: var(--ink-gray-9); }
+
+.sidebar-foot {
+  border-top: 1px solid var(--outline-gray-1);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--radius-3);
+  cursor: pointer;
+  min-width: 0;
+}
+.sidebar-user:hover { background: var(--surface-gray-2); }
+.sidebar-user-meta { min-width: 0; flex: 1; }
+.sidebar-user-name {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-user-email {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Workspace (header + panes) ────────────────────────────── */
+#workspace {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-header);
+  background: var(--surface-base);
+  border-bottom: 1px solid var(--outline-gray-1);
+  padding: 0 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  height: var(--header-h);
+  flex: 0 0 var(--header-h);
+}
+
+/* Search lives in the list toolbar (views.css), not the header — the list
+   column is where a service-desk user looks for it. */
+
+#header-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+#back-btn {
+  display: none;
+  cursor: pointer;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 5px 10px 5px 7px;
+  border-radius: var(--radius-3);
+  background: transparent;
+  border: 1px solid var(--outline-gray-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  color: var(--ink-gray-7);
+  font-weight: var(--weight-medium);
+}
+#back-btn:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-3);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-gray-6);
+  font-size: var(--text-md);
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex: 0 0 auto;
+}
+.icon-btn:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+
+#user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-9);
+  background: var(--surface-gray-9);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-base);
+  cursor: pointer;
+  flex: 0 0 auto;
+  border: 1px solid var(--outline-gray-2);
+}
+#user-avatar:hover { border-color: var(--outline-gray-4); }
+
+.nudge-bell {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-3);
+  background: transparent;
+  border: 1px solid transparent;
+  font-size: var(--text-md);
+  cursor: pointer;
+  position: relative;
+  flex: 0 0 auto;
+}
+.nudge-bell:hover { background: var(--surface-gray-2); }
+.nudge-bell-icon { line-height: 1; }
+.nudge-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-9);
+  background: var(--surface-red-7);
+  color: #fff;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-bold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--surface-base);
+}
+
+/* ── Panes (list + detail) ─────────────────────────────────── */
+#panes {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#index-view {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#detail-view {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
+/* Desktop-only; the media block below turns it back on. */
+#detail-placeholder { display: none; }
+
+/* ── Toast ─────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1.25rem + var(--safe-b));
+  transform: translateX(-50%) translateY(140%);
+  background: var(--surface-gray-10);
+  color: var(--ink-base);
+  border-radius: var(--radius-4);
+  padding: 9px 16px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  z-index: var(--z-toast);
+  transition: transform 0.28s var(--ease), opacity 0.2s var(--ease);
+  box-shadow: var(--elevation-xl);
+  max-width: min(420px, calc(100vw - 2rem));
+  text-align: center;
+  pointer-events: none;
+}
+/* app.js toggles this class rather than writing a transform inline, so the
+   queue in showToast() can never fight the stylesheet. */
+#toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE — below lg the sidebar becomes a bottom bar
+   ══════════════════════════════════════════════════════════ */
+@media (max-width: 1023px) {
+  #app-container { flex-direction: column; }
+
+  #sidebar {
+    order: 2;
+    flex-direction: row;
+    width: 100%;
+    flex: 0 0 auto;
+    height: calc(var(--bottombar-h) + var(--safe-b));
+    padding-bottom: var(--safe-b);
+    background: var(--surface-base);
+    border-right: none;
+    border-top: 1px solid var(--outline-gray-1);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: var(--z-bottombar);
+  }
+
+  .sidebar-brand,
+  .sidebar-foot .sidebar-user,
+  .sidebar-section-label,
+  .nav-count { display: none; }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex: 1;
+    padding: 0;
+    gap: 0;
+    overflow: visible;
+  }
+
+  .nav-item {
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 0.35rem 0.25rem;
+    border-radius: var(--radius-2);
+    flex: 1;
+    text-align: center;
+  }
+  .nav-icon { font-size: var(--text-lg); width: auto; }
+  .nav-label {
+    font-size: var(--text-2xs);
+    letter-spacing: 0.01em;
+    flex: 0 0 auto;
+    max-width: 100%;
+  }
+  .nav-item.active { background: transparent; color: var(--ink-gray-9); }
+  .nav-item.active .nav-icon { transform: translateY(-1px); }
+
+  .sidebar-foot {
+    flex-direction: row;
+    border-top: none;
+    padding: 0 0.25rem;
+    gap: 0;
+  }
+  .sidebar-foot .nav-item { flex: 0 0 auto; padding-inline: 0.6rem; }
+
+  #workspace { order: 1; padding-bottom: 0; }
+
+  #panes { overflow: hidden; }
+
+  /* List and detail are separate screens below lg — the JS sets
+     display on both; these rules only handle the scroll container. */
+  #index-view { display: flex; }
+  #detail-view { display: none; }
+
+  #toast { bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE — desktop split pane
+   ══════════════════════════════════════════════════════════ */
+@media (min-width: 1024px) {
+  #panes { flex-direction: row; }
+
+  #index-view {
+    flex: 0 0 var(--list-w);
+    width: var(--list-w);
+    border-right: 1px solid var(--outline-gray-1);
+  }
+
+  #detail-view { display: none; }
+  body.view-detail #detail-view { display: flex; }
+
+  /* The list stays alongside the detail pane — the whole point of the
+     split view. JS still owns display:none/flex so inline-style reads
+     in the app keep working. */
+
+  /* Desktop has no "back" affordance: the list never leaves the screen.
+     JS toggles the inline display on mobile, so this has to outrank it. */
+  #back-btn { display: none !important; }
+
+  /* Empty state for the detail pane. A sibling of #detail-view, not a child,
+     so #detail-view's own display stays a truthful "a ticket is open" flag
+     (applyAccessGating reads it). */
+  #detail-placeholder {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 2rem;
+    text-align: center;
+    background: var(--surface-gray-1);
+  }
+  body.view-detail #detail-placeholder { display: none; }
+  .ph-icon { font-size: var(--text-5xl); opacity: 0.45; line-height: 1; }
+  .ph-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
+  .ph-sub { font-size: var(--text-sm); color: var(--ink-gray-5); }
+}
+
+/* ══════════════════════════════════════════════════════════
+   RESPONSIVE — extra room
+   ══════════════════════════════════════════════════════════ */
+@media (min-width: 1440px) {
+  :root { --list-w: 440px; }
+}
+
+/* Frappe's own breakpoint scale, adopted wholesale:
+   sm 640 · md 768 · lg 1024 · xl 1280
+   The previous stylesheet used 640 max / 600 min / 1000 min / 599 max,
+   whose 600–640 band applied both rule sets at once. */

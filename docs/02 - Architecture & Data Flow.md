@@ -11,9 +11,8 @@
       │ Auth via
       ▼
 ┌─────────────┐
-│ Google       │
-│ Identity     │  (GIS — @indrones.com only)
-│ Services     │
+│ Auth backend │  (GAS — email + password, @indrones.com
+│ (GAS action) │   allowlist, OTP sign-up, server session token)
 └─────────────┘
 ```
 
@@ -21,18 +20,24 @@
 
 ### 1. Splash Screen
 - Plays `assets/Indrones Intro v2.mp4` for ~2 seconds
-- Blue gradient overlay with "I-PASSBOOK" branding
+- Neutral dark chrome with the "I-PASSBOOK" wordmark
 - Fades out, then checks auth state
 
 ### 2. Auth Screen
-- Google Sign-In button (GIS One Tap)
-- Domain restriction: only `@indrones.com` emails
+- Email + password sign-in; sign-up adds OTP verification and a server captcha
+- Domain restriction: only `@indrones.com` emails (plus explicit allowlist entries)
 - Dev bypass: `localhost` + `?dev=1` → auto-creates "Dev Tester" user
-- Stores user in `sessionStorage` as `ipb_user`
+- Stores the display profile in `sessionStorage` as `ipb_user`; the real
+  credential is the server session token, cleared when the app closes
 
-### 3. Main App — Two Views
-- **Master Index** (default) — lists all IRs, search by IR# or drone ID
-- **Passbook Detail** — opens when an IR card is tapped, shows 9 tabbed sections
+### 3. Main App
+- **Sidebar** (≥1024px) or **bottom nav** (<1024px) — Tickets, Legacy Records,
+  User Access (admins), theme toggle
+- **Ticket list** — search + All/Open/Paused/Resolved/Closed filter segments
+- **Passbook detail** — 9 tabbed sections. On desktop it opens beside the list
+  (split pane); below 1024px it is a full screen with a Back button.
+- Routing is hash-based (`#/tickets`, `#/tickets/IR409`) so deep links and the
+  browser back button work on a static host
 
 ## Data Flow
 

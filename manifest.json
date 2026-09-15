@@ -4,8 +4,8 @@
   "description": "Indrones Product After-Sales Summary Book Intelligence Platform.",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#001B4B",
-  "theme_color": "#0E62FF",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "icons": [
     {
       "src": "assets/logo.png",

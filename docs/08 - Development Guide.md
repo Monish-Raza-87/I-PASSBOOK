@@ -18,7 +18,17 @@ npx serve -l 3000 -s
 
 Then open: `http://localhost:3000/?dev=1`
 
-The `?dev=1` query parameter activates **dev auth bypass** — you'll be logged in as "Dev Tester" without needing a real Google account. This only works on `localhost`/`127.0.0.1`/`::1`.
+The `?dev=1` query parameter activates **dev auth bypass** — you'll be logged in as "Dev Tester" without needing a real account. This only works on `localhost`/`127.0.0.1`/`::1`.
+
+Deep links work too, because routing is hash-based:
+
+```
+http://localhost:3000/#/tickets          → the ticket list
+http://localhost:3000/#/tickets/IR409    → that IR's passbook open
+```
+
+Note the service worker caches the shell aggressively. While editing CSS or JS,
+either use a hard reload or unregister the SW in DevTools → Application.
 
 ## Deploying the Frontend
 
@@ -44,15 +54,11 @@ No build step required — deploy the files as-is.
 
 ## Google Cloud Setup
 
-The Google OAuth Client ID in `app.js` comes from a Google Cloud project. To recreate:
-
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a project (or use existing)
-3. Enable **Google Identity** API
-4. Create OAuth 2.0 Client ID (Web application)
-5. Add authorized JavaScript origins (your deployment domain)
-6. Add authorized redirect URIs
-7. Copy the Client ID to `CONFIG.GOOGLE_CLIENT_ID`
+**Not required.** Auth is allowlist-gated email + password handled entirely by
+`backend.gs`; there is no `CONFIG.GOOGLE_CLIENT_ID` and no OAuth client to
+create. The only Google Cloud–adjacent requirement is that the Apps Script
+deployment runs as an account that can read the Sheets and Drive folders listed
+in `CONFIG` at the top of `backend.gs`.
 
 ## Google Sheets Setup
 
@@ -71,7 +77,18 @@ Two Google Sheets are needed:
 ## Project Conventions
 
 - **No semicolons** in `app.js` (mostly) — consistent with the existing style
-- **CSS custom properties** for all colors/sizes — use `var(--primary)` etc.
+- **Design tokens for all colours and sizes** — never a raw hex or px in
+  `base.css` / `components.css` / `views.css`; see [09 — Design System](09 - Design System.md)
 - **Mobile-first** — always test on phone viewport first
 - **Dev bypass** — always use `?dev=1` for local development
-- **Status field** — `a_overallStatus` is the source of truth for IR status on the index
+- **Status field** — `a_overallStatus` is the source of truth for IR status on the
+  index. Its 14 values are mapped to Frappe's Open/Paused/Resolved/Closed
+  **categories** by `STATUS_CATEGORIES` in `app.js` for pill colouring — the
+  values themselves are never renamed, because the customer Google Form writes them
+- **Shell DOM is static** — `app.js` captures twelve element references at parse
+  time (`app.js:434-445`), so `index.html` must keep those ids and `app.js` must
+  stay a plain end-of-body `<script src>` (never `type="module"`/`defer`)
+- **View state is inline** — `renderLayout()` is the only place that writes
+  `indexView`/`detailView`/`backBtn` display, and it must keep writing *inline*
+  styles: `applyAccessGating` reads `detailView.style.display`, and
+  `applySectionAccessGating` selects `.tab:not([style*="display: none"])`

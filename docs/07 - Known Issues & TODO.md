@@ -25,7 +25,7 @@
 - ⚠️ **No confirmation dialog** — save button has no "are you sure?" for critical sections
 
 ### Technical Debt
-- 🔧 **Single-file frontend** — all logic in one `app.js` file (663 lines, growing)
+- 🔧 **Large single-file frontend** — all logic in one `app.js` (~4,500 lines and growing); the CSS is now split into four layered files (see docs/09)
 - 🔧 **No build pipeline** — no minification, no bundling, no tree-shaking
 - 🔧 **No tests** — zero test coverage
 - 🔧 **No type safety** — vanilla JS, no TypeScript or JSDoc

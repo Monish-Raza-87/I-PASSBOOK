@@ -177,6 +177,7 @@
               <span class="list-title">Tickets</span>
               <span class="list-count" id="list-count"></span>
             </div>
+
             <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" />
             <div class="segments" id="list-segments" role="tablist"></div>
           </div>
@@ -199,6 +200,7 @@
               <div class="banner-pills" id="ir-banner-pills"></div>
             </div>
             <div class="banner-actions">
+              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this ticket">🎯 Triage</button>
               <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none">0</span></button>
               <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR">🕓 History</button>
               <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK">🏛 Legacy Record</button>

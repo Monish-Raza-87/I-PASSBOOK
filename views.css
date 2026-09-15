@@ -74,8 +74,29 @@
   color: var(--ink-gray-5);
   letter-spacing: var(--tracking-2xs);
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 #sync-status:empty { display: none; }
+/* The message can be long ("⚠ Could not sync — showing demo data"); the time
+   and the refresh control must never be pushed off-screen, so the message is
+   the only part that truncates. */
+#sync-status .sync-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#sync-status .sync-meta { color: var(--ink-gray-4); font-variant-numeric: tabular-nums; white-space: nowrap; }
+#sync-status .sync-refresh {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3);
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  padding: 0.1rem 0.45rem;
+}
+#sync-status .sync-refresh:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
 
 .ir-list {
   flex: 1;
@@ -88,8 +109,9 @@
 
 .ir-card {
   position: relative;
-  display: grid;
-  grid-template-columns: 1fr auto;
+  /* Flex, not the previous `1fr auto` grid: a card may now carry a third child
+     (the assignee avatar) and a 3-child, 2-column grid reflows the whole row. */
+  display: flex;
   align-items: center;
   gap: 0.6rem;
   padding: 0.6rem 0.9rem;
@@ -113,8 +135,25 @@
   background: var(--surface-gray-10);
 }
 
-.ir-card-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.ir-card-side { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
+.ir-card-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+.ir-card-side { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto; }
+
+/* Who owns this ticket. Initials only — the full name is in the title attr. */
+.assignee-avatar {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-9);
+  display: grid;
+  place-items: center;
+  background: var(--surface-gray-3);
+  border: 1px solid var(--outline-gray-1);
+  color: var(--ink-gray-8);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0;
+  user-select: none;
+}
 
 .ir-title {
   font-size: var(--text-base);
@@ -134,6 +173,20 @@
 .ir-sn { color: var(--ink-gray-6); font-weight: var(--weight-medium); }
 .ir-dot { opacity: 0.5; }
 .ir-summary-link { font-size: var(--text-xs); color: var(--ink-blue-link); white-space: nowrap; }
+
+/* Banner pills for the app-owned triage fields (type, assignee). Status and
+   priority reuse the existing .badge-* / .prio-* classes. */
+.meta-pill {
+  font-size: var(--text-2xs);
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--radius-9);
+  border: 1px solid var(--outline-gray-1);
+  background: var(--surface-gray-1);
+  color: var(--ink-gray-6);
+  white-space: nowrap;
+}
+.meta-owner { color: var(--ink-gray-8); }
+.meta-unassigned { color: var(--ink-gray-4); border-style: dashed; }
 
 /* ══════════════════════════════════════════════════════════
    TICKET DETAIL

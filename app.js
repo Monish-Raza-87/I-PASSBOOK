@@ -347,6 +347,195 @@ function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 
+// ─── SENTINEL STORES ─────────────────────────────────────────────────────────
+// App-owned records that live outside the 9 workflow sections. They are saved
+// under an `irNumber` beginning with `__`, which backend.gs exempts from ALL
+// per-section ACL checks — so a brand-new store works against the deployed
+// backend with no redeploy, exactly as __CONFIG__ and __NUDGES__ already do.
+// `sectionId` becomes each record's own key:
+//
+//   __CONFIG__ / team-directory    → { entries: [{name,email}] }
+//   __CONFIG__ / inward-options    → { options: {…} }
+//   __CONFIG__ / iqc-config        → { zones, resultOptions }
+//   __CONFIG__ / canned-responses  → { items: [{id,label,body}] }   (Stage 6)
+//   __CONFIG__ / sla               → { targets, pausedStatuses }    (Stage 4)
+//   __IRS__    / <irNumber>        → app-owned workflow state       (Stage 1)
+//   __KB__     / <articleId>       → { title, body, … }             (Stage 7)
+//   __NUDGES__ / all               → { items: [comment, …] }
+//
+// getPassbook returns EVERY row matching one irNumber, keyed by sectionId, so a
+// single request reads a whole store. That is why per-IR workflow state is one
+// row per IR rather than one map record: each record gets its own ~50,000-char
+// cell (no ceiling), and two people editing two different tickets never clobber
+// each other.
+//
+// Caveat worth knowing before adding more: a sentinel-irNumber row is readable
+// and writable by ANY signed-in user. Treat these as shared scratch space, not
+// as access-controlled storage.
+
+// Read one record. Resolves to the parsed fields object, or null when the
+// record does not exist or the backend is unreachable.
+function loadSentinel(irNumber, sectionId) {
+  return fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${encodeURIComponent(irNumber)}`)
+    .then(r => r.json())
+    .then(data => (data && data.status === 'ok' && data.sections) ? (data.sections[sectionId] || null) : null)
+    .catch(() => null);
+}
+
+// Read every row of a store in one request, keyed by sectionId. Resolves to
+// `null` when the read FAILED and `{}` when it succeeded but the store is empty
+// — callers must tell those apart before treating a store as authoritative.
+function loadSentinelAll(irNumber) {
+  return fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=${encodeURIComponent(irNumber)}`)
+    .then(r => r.json())
+    .then(data => (data && data.status === 'ok' && data.sections) ? data.sections : null)
+    .catch(() => null);
+}
+
+// Upsert one record. Never rejects — resolves to {ok:false} on a dead backend so
+// an optimistic local write is not rolled back by an unrelated network blip.
+function saveSentinel(irNumber, sectionId, fields) {
+  const fd = new FormData();
+  fd.append('action', 'saveSection');
+  fd.append('irNumber', irNumber);
+  fd.append('sectionId', sectionId);
+  fd.append('savedBy', myEmail() || 'unknown');
+  fd.append('fields', JSON.stringify(fields));
+  fd.append('files', JSON.stringify([]));
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .catch(() => ({ status: 'error' }));
+}
+
+// ─── __IRS__ — APP-OWNED WORKFLOW STATE ──────────────────────────────────────
+// The Sheet is the immutable client intake (what the customer wrote); the app
+// owns everything mutable — status, assignee, priority, type, which sections are
+// done, CSAT. One row per IR, keyed by irNumber.
+//
+// Ownership of a ticket's status begins the moment a human changes the STATUS in
+// the app (statusOwned). Until then the Sheet's Col D is still what the list
+// shows, so an edit made in the Sheet on an untriaged ticket still works — it
+// only stops mattering once somebody has taken the ticket in hand here. Note
+// that assigning or categorising does NOT take over the status.
+const IR_STATE_IR = '__IRS__';
+let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
+                              //              assignee, priority, type, done[], … }
+let irStateSyncedAt = null;   // Date of the last successful __IRS__ read
+
+// The row for one IR, but only if a human has actually edited it. A row that
+// holds nothing but the first-sight seed is a marker, not an edit.
+function appState(irNumber) {
+  const s = irState[irNumber];
+  if (!s || !s.updatedBy) return null;
+  return s;
+}
+
+// The status this app has actually taken ownership of, or '' while the Sheet is
+// still the authority for the ticket. Deliberately separate from appState():
+// saving Section B is not triage, so a ticket whose Section B was saved must go
+// on following the Sheet's Col D until somebody changes the status here.
+function ownedStatus(irNumber) {
+  const s = irState[irNumber];
+  return (s && s.statusOwned && s.status) ? s.status : '';
+}
+
+// Record that the app has seen this IR, without claiming ownership of its
+// status yet. Written once per ticket, on first open. Records `seededAt` rather
+// than a `statusAt`, because we genuinely do not know when the Sheet's status
+// was set and Stage 4's ageing must not be built on an invented timestamp.
+function seedIRState(irNumber) {
+  if (irState[irNumber]) return;
+  irState[irNumber] = {
+    status: '',
+    seededAt: Date.now(),
+    seededFrom: 'sheet',
+    seededBy: myEmail() || 'unknown',
+  };
+  saveSentinel(IR_STATE_IR, irNumber, irState[irNumber]);
+}
+
+// Read the whole store once at boot. On failure the existing `irState` is kept
+// rather than wiped — an empty store and an unreachable backend look identical
+// from here, and treating a failed read as "no app state" is exactly how an
+// app-owned status gets silently re-seeded from the Sheet.
+async function loadIRState() {
+  const sections = await loadSentinelAll(IR_STATE_IR);
+  if (sections === null) return;
+  irState = {};
+  Object.keys(sections).forEach(ir => {
+    const row = sections[ir];
+    if (row && typeof row === 'object' && !Array.isArray(row)) irState[ir] = row;
+  });
+  irStateSyncedAt = new Date();
+  applyIRStateToAllIRs();
+  if (currentView === 'detail' && currentIR) renderBannerMeta();
+  // Re-render only once the list has actually arrived. This runs alongside the
+  // first fetchIRs(), and rendering an empty list here would replace the boot
+  // skeletons with "0 total" for a frame.
+  if (allIRs.length) applyListFilters();
+}
+
+// The single writer of `allIRs`. Every fetchIRs() path goes through it so
+// app-owned state is merged exactly once, after the Sheet/demo data lands, and
+// the three paths can never disagree about precedence.
+function setAllIRs(records) {
+  allIRs = Array.isArray(records) ? records : [];
+  applyIRStateToAllIRs();
+  return allIRs;
+}
+
+// Overlay app-owned state on the Sheet-derived records. Precedence: app > Sheet.
+// This is what fixes the badge bug — the list badge used to read Col D while an
+// in-app status edit wrote to a field the badge never looked at.
+function applyIRStateToAllIRs() {
+  allIRs.forEach(ir => {
+    const owned = ownedStatus(ir.irNumber);
+    if (owned) ir.status = owned;
+    const s = appState(ir.irNumber);
+    if (!s) return;
+    ir.statusAt     = s.statusAt     || null;
+    ir.assignee     = s.assignee     || '';
+    ir.assigneeName = s.assigneeName || '';
+    if (s.priority) ir.priority = s.priority;
+    ir.type = s.type || '';
+    ir.done = Array.isArray(s.done) ? s.done : [];
+  });
+}
+
+// Merge a patch into one IR's row: update memory first so the UI is instant,
+// then persist. Returns the merged row.
+async function patchIRState(irNumber, patch) {
+  const next = {
+    ...(irState[irNumber] || {}),
+    ...patch,
+    updatedAt: Date.now(),
+    updatedBy: myEmail() || 'unknown',
+  };
+  // Drop the seed marker's influence — this row is now a real edit.
+  delete next.seededAt;
+  delete next.seededFrom;
+  delete next.seededBy;
+  irState[irNumber] = next;
+  applyIRStateToAllIRs();
+  if (currentView === 'detail' && currentIR?.irNumber === irNumber) renderBannerMeta();
+  // Same guard as loadIRState: a ticket can be opened by deep link before the
+  // list has loaded, and there is nothing to re-render until it does.
+  if (allIRs.length) applyListFilters();
+  const res = await saveSentinel(IR_STATE_IR, irNumber, next);
+  if (res && res.status === 'ok') irStateSyncedAt = new Date();
+  else showToast('Saved locally — backend unreachable, will not reach other users');
+  return next;
+}
+
+// Add a section to this IR's completion set. Called from the section-save path,
+// which is the only place that knows a section was actually saved.
+function markSectionDone(irNumber, sectionId) {
+  const row = irState[irNumber] || {};
+  const done = Array.isArray(row.done) ? row.done.slice() : [];
+  if (!done.includes(sectionId)) done.push(sectionId);
+  return done;
+}
+
 // The 11 particulars from the IDS master Inward Checklist.
 // `options` (a key into INWARD_OPTIONS_DEFAULTS) marks particulars whose
 // Model/Value cell is a dropdown; particulars without `options` are free text.
@@ -374,6 +563,22 @@ const INWARD_OPTIONS_DEFAULTS = {
   payload:  ['ADTI 24 mp', 'View Pro A609', 'Siyi A8 Mini', 'Share 5 Angle', 'Sony A6000', 'DID NOT COME'],
   base:     ['Emlid RS2', 'Spectra SP85', 'Spectra SP60', 'DID NOT COME'],
 };
+
+// The 14 workflow statuses. These are written by the customer Google Form into
+// the Sheet's Col D, so they are NEVER renamed here — Frappe's Open/Paused/
+// Resolved/Closed vocabulary is a mapping over them (STATUS_CATEGORIES below).
+// The status dropdown in the triage modal and the Section A form both read this
+// one list.
+const IR_STATUS_VALUES = ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'];
+
+// Ticket categories, app-owned (the Form has no such column). These are a guess
+// at Indrones' own groupings and are meant to be edited in this one line —
+// nothing else in the app depends on the specific values.
+const TICKET_TYPES = ['Repair', 'Replacement', 'Warranty', 'AMC', 'Demo', 'Training', 'Other'];
+
+// Triage priorities. `priority` is read from the Sheet's "Priority" column when
+// one exists (fetchIRsFromSheet) and from here when the app sets it.
+const TICKET_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
 
 // Runtime option lists (defaults merged with any saved overrides).
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
@@ -933,6 +1138,11 @@ function showApp() {
   loadIqcConfig();
   // Load team directory (@-mention suggestions) + nudges, and start nudge polling
   loadTeamDirectory();
+  // Load app-owned workflow state (status / assignee / priority / type per IR).
+  // Runs alongside the first fetchIRs(); setAllIRs merges whatever has arrived,
+  // and loadIRState re-merges + re-renders when it lands, so either order is
+  // correct.
+  loadIRState();
   loadNudges();
   startNudgePolling();
 
@@ -1460,14 +1670,15 @@ async function fetchIRsFromSheet() {
 }
 
 async function fetchIRs() {
-  setSyncStatus('⟳ Syncing with IR Repository...');
+  setSyncStatus('⟳ Syncing with the IR Repository…');
 
   // 1. Primary: read the sheet directly (no backend deploy needed)
   try {
     const records = await fetchIRsFromSheet();
     if (records && records.length) {
-      allIRs = records;
-      setSyncStatus(`✓ ${allIRs.length} IRs loaded from sheet · Last sync: ${new Date().toLocaleTimeString()}`);
+      setAllIRs(records);
+      _lastSyncAt = new Date();
+      setSyncStatus(`✓ ${allIRs.length} tickets loaded from the Sheet`);
       renderIRList(allIRs);
       return;
     }
@@ -1482,21 +1693,54 @@ async function fetchIRs() {
     clearTimeout(timeout);
     const data = await res.json();
     if (data.status === 'ok') {
-      allIRs = data.records || [];
-      setSyncStatus(`✓ ${allIRs.length} IRs loaded · Last sync: ${new Date().toLocaleTimeString()}`);
+      setAllIRs(data.records || []);
+      _lastSyncAt = new Date();
+      setSyncStatus(`✓ ${allIRs.length} tickets loaded`);
       renderIRList(allIRs);
       return;
     }
     throw new Error(data.message || 'Unknown error');
   } catch (err) {
-    setSyncStatus('⚠ Could not sync. Showing demo data.');
+    setSyncStatus('⚠ Could not sync — showing demo data');
     // Demo mode: render sample cards so UI is visible
-    allIRs = getDemoIRs();
+    setAllIRs(getDemoIRs());
     renderIRList(allIRs);
   }
 }
 
-function setSyncStatus(msg) { syncStatus.textContent = msg; }
+// Manual re-read of the ticket list + app-owned state. Staff should never have
+// to wonder whether what they are looking at is stale — this is the answer.
+let _refreshing = false;
+async function refreshIRList() {
+  if (_refreshing) return;
+  _refreshing = true;
+  try {
+    await fetchIRs();
+    await loadIRState();
+  } finally {
+    _refreshing = false;
+  }
+}
+
+// The list's sync line: the last status message, when the data was actually
+// fetched, and a manual refresh. Silent staleness is what drives people back to
+// the Sheet, so this is deliberately always visible.
+let _syncMsg = '';
+let _lastSyncAt = null;
+function setSyncStatus(msg) {
+  _syncMsg = msg;
+  renderSyncBar();
+}
+function renderSyncBar() {
+  if (!syncStatus) return;
+  const t = _lastSyncAt
+    ? _lastSyncAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'not yet';
+  syncStatus.innerHTML =
+    `<span class="sync-msg">${escHtml(_syncMsg)}</span>` +
+    `<span class="sync-meta">Synced ${escHtml(t)}</span>` +
+    `<button type="button" class="sync-refresh" onclick="refreshIRList()" title="Re-read the ticket list from the Sheet">↻ Refresh</button>`;
+}
 
 // ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
 // Loads the index of legacy per-IR tabs (token-gated via the backend) so the
@@ -1554,12 +1798,16 @@ function renderIRList(records) {
     return;
   }
 
-  irList.innerHTML = records.map(ir => `
+  irList.innerHTML = records.map(ir => {
+    const owner = ir.assigneeName || ir.assignee || '';
+    return `
     <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${ir.irNumber}" onclick="goTicket('${ir.irNumber}')">
+      ${owner ? `<span class="assignee-avatar" title="Assigned to ${escHtml(owner)}">${escHtml(initialsOf(owner))}</span>` : ''}
       <div class="ir-card-main">
         <div class="ir-title">${ir.irNumber}</div>
         <div class="ir-meta">
           <span class="ir-sn">${ir.droneId || ''}</span>
+          ${ir.type ? `<span class="ir-dot">·</span><span class="ir-type">${escHtml(ir.type)}</span>` : ''}
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${ir.dateRaised}</span>` : ''}
         </div>
       </div>
@@ -1570,8 +1818,21 @@ function renderIRList(records) {
         ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
-  `).join('');
+  `;
+  }).join('');
   updateListCounts(records.length);
+}
+
+// Initials for the assignee chip on a list card. Accepts a display name or an
+// email and never throws on either.
+function initialsOf(nameOrEmail) {
+  const s = String(nameOrEmail || '').trim();
+  if (!s) return '?';
+  const base = s.includes('@') ? s.split('@')[0] : s;
+  const parts = base.split(/[\s._-]+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function updateListCounts(shown) {
@@ -1688,9 +1949,23 @@ async function openPassbook(irNumber) {
   document.getElementById('ir-banner-sub').textContent =
     [currentIR.droneId, currentIR.customerName].filter(Boolean).join(' · ') || '—';
   if (bannerPills) {
-    bannerPills.innerHTML =
-      `<span class="${getBadgeClass(currentIR.status)}">${currentIR.status || 'Open'}</span>` +
-      (currentIR.priority ? `<span class="prio prio-${String(currentIR.priority).toLowerCase()}">${currentIR.priority}</span>` : '');
+    // This IR may not be in allIRs yet (deep link into a list that has not
+    // loaded), so apply its app-owned state directly instead of relying on the
+    // merge in setAllIRs.
+    const st = appState(irNumber);
+    const owned = ownedStatus(irNumber);
+    if (owned) currentIR.status = owned;
+    if (st) {
+      currentIR.assignee     = st.assignee     || '';
+      currentIR.assigneeName = st.assigneeName || '';
+      if (st.priority) currentIR.priority = st.priority;
+      currentIR.type = st.type || '';
+      currentIR.done = Array.isArray(st.done) ? st.done : [];
+    }
+    renderBannerMeta();
+    // First sight of this ticket: record that the app has seen it. Deliberately
+    // does NOT claim ownership of the status — see seedIRState.
+    seedIRState(irNumber);
   }
 
   currentView = 'detail';
@@ -1703,6 +1978,16 @@ async function openPassbook(irNumber) {
   // Load saved data for this IR, then restore any unsaved drafts on top
   await loadSectionData(irNumber);
   if (seq !== _openSeq) return;   // superseded by a newer openPassbook()
+
+  // Which sections have saved rows is exactly what getPassbook just told us, so
+  // completion is recomputed on open with no extra read. Display only — the
+  // persisted `done` list is updated by the save path (markSectionDone).
+  const loadedSecs = Object.keys(currentSectionData || {}).filter(k => SECTIONS[k]);
+  if (loadedSecs.length) {
+    currentIR.done = Array.from(new Set([...(currentIR.done || []), ...loadedSecs]));
+    const listed = allIRs.find(x => x.irNumber === irNumber);
+    if (listed) listed.done = currentIR.done;
+  }
 
   restoreDrafts();
   refreshDraftBanner();
@@ -1720,6 +2005,118 @@ async function openPassbook(irNumber) {
     if (!hasNewData) openLegacyModal(legacy.embedUrl, legacy.label, legacy.openUrl);
   } else if (legacyBtn) {
     legacyBtn.style.display = 'none';
+  }
+}
+
+// The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
+// only supplies the status a ticket starts life with.
+function renderBannerMeta() {
+  if (!bannerPills || !currentIR) return;
+  const ir    = currentIR;
+  const owner = ir.assigneeName || ir.assignee || '';
+  const canTriage = canEditSection('sec-a');
+  bannerPills.innerHTML =
+    `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
+    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
+    (ir.type ? `<span class="meta-pill">${escHtml(ir.type)}</span>` : '') +
+    (owner
+      ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
+      : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
+  const triageBtn = document.getElementById('ir-triage-btn');
+  if (triageBtn) triageBtn.style.display = canTriage ? '' : 'none';
+}
+
+// ─── TRIAGE MODAL (status / assignee / priority / type) ──────────────────────
+// Writes to `__IRS__` — the app's own record — and never touches the client's
+// Sheet, which keeps the customer's original report intact. Reuses the
+// full-screen modal pattern of the team-directory editor so it works at phone
+// width without a new layout.
+function openTriageModal() {
+  if (!currentIR) return;
+  if (!canEditSection('sec-a')) { showToast('You do not have edit access to triage tickets'); return; }
+  if (document.getElementById('triage-modal')) return;
+  const ir     = currentIR;
+  const owners = teamDirectory.slice().sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
+  const cur    = String(ir.assignee || '').toLowerCase();
+  const opt    = (v, sel) => `<option value="${escHtml(v)}"${v === sel ? ' selected' : ''}>${escHtml(v)}</option>`;
+  const modal  = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'triage-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Triage ${escHtml(ir.irNumber)}</h3>
+        <button type="button" class="inward-options-close" onclick="closeTriageModal()">&times;</button>
+      </div>
+      <p class="inward-options-hint">Recorded here in the passbook, not in the client's Google Sheet — the Sheet keeps the customer's original report untouched. Assigning someone sends them a notification.</p>
+      <div class="inward-options-body triage-body">
+        <label class="triage-row"><span>Status</span>
+          <select class="form-input" id="triage-status">${IR_STATUS_VALUES.map(v => opt(v, ir.status || 'Open')).join('')}</select>
+        </label>
+        <label class="triage-row"><span>Assigned to</span>
+          <select class="form-input" id="triage-assignee">
+            <option value="">— Unassigned —</option>
+            ${owners.map(d => `<option value="${escHtml(d.email)}"${String(d.email).toLowerCase() === cur ? ' selected' : ''}>${escHtml(d.name || d.email)}</option>`).join('')}
+          </select>
+        </label>
+        <label class="triage-row"><span>Priority</span>
+          <select class="form-input" id="triage-priority">
+            <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '')).join('')}
+          </select>
+        </label>
+        <label class="triage-row"><span>Type</span>
+          <select class="form-input" id="triage-type">
+            <option value="">— None —</option>${TICKET_TYPES.map(v => opt(v, ir.type || '')).join('')}
+          </select>
+        </label>
+      </div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeTriageModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyTriage()">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+}
+function closeTriageModal() { document.getElementById('triage-modal')?.remove(); }
+
+async function applyTriage() {
+  if (!currentIR) return;
+  const irNumber = currentIR.irNumber;
+  const status   = document.getElementById('triage-status')?.value     || '';
+  const email    = document.getElementById('triage-assignee')?.value   || '';
+  const priority = document.getElementById('triage-priority')?.value   || '';
+  const type     = document.getElementById('triage-type')?.value       || '';
+  const prev     = String(currentIR.assignee || '').toLowerCase();
+  const member   = teamDirectory.find(d => String(d.email).toLowerCase() === email.toLowerCase());
+
+  const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '', priority, type };
+  // Only a real status CHANGE moves the clock. Re-saving the same status must
+  // not reset time-in-status, or every triage edit would fake a fresh ticket.
+  if (status && status !== currentIR.status) {
+    patch.statusAt = Date.now();
+    patch.statusBy = myEmail() || 'unknown';
+  }
+  closeTriageModal();
+  await patchIRState(irNumber, patch);
+  showToast('Triage saved');
+
+  // Assignment notifies through the comment machinery already in place — the
+  // bell, the unread badge, the 90s poll and the email all work unchanged.
+  // Known wart: the email's subject is hardcoded to comment wording in
+  // backend.gs, so an assignment notification reads as a comment.
+  if (email && email.toLowerCase() !== prev) {
+    const n = {
+      id: nudgeId(), irNumber, scope: 'section', sectionId: 'sec-a', fieldId: 'a_overallStatus',
+      sectionLabel: 'A: Preliminary', fieldLabel: 'IR Status',
+      to: email,
+      from: currentUser?.email || 'unknown',
+      fromName: currentUser?.name || currentUser?.email || 'Someone',
+      message: `You have been assigned ${irNumber}.`,
+      mentions: [email], createdAt: Date.now(), readBy: [], status: 'open',
+      resolvedAt: null, resolvedBy: null,
+    };
+    await addNudge(n);
+    sendNudgeEmailBackend(n);
   }
 }
 
@@ -1841,7 +2238,7 @@ const SECTIONS = {
       { id: 'a_crmOwner',      label: 'Customer Relations Manager',  type: 'text',     placeholder: 'Name of CRM person' },
       { id: 'a_contactPhone',  label: 'Customer Phone',              type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
       { id: 'a_activityLog',   label: 'Activity Log (Timeline)',     type: 'activityTable' },
-      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'] },
+      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: IR_STATUS_VALUES },
     ]
   },
   'sec-b': {
@@ -2519,10 +2916,8 @@ function loadInwardOptions() {
     if (local) inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, JSON.parse(local));
   } catch {}
   // 2. Shared config from GAS (best-effort, non-blocking)
-  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
-    .then(r => r.json())
-    .then(data => {
-      const saved = data?.sections?.['inward-options'];
+  loadSentinel('__CONFIG__', 'inward-options')
+    .then(saved => {
       if (saved && saved.options && typeof saved.options === 'object') {
         inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, saved.options);
         try { localStorage.setItem('ipb_inward_options', JSON.stringify(saved.options)); } catch {}
@@ -2546,24 +2941,16 @@ function loadInwardOptions() {
           });
         });
       }
-    })
-    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+    });
 }
 
 function saveInwardOptions() {
   if (!isInwardAdmin()) { showToast('Not authorized'); return; }
   try { localStorage.setItem('ipb_inward_options', JSON.stringify(inwardOptions)); } catch {}
-  const fd = new FormData();
-  fd.append('action', 'saveSection');
-  fd.append('irNumber', '__CONFIG__');
-  fd.append('sectionId', 'inward-options');
-  fd.append('savedBy', currentUser?.email || 'unknown');
-  fd.append('fields', JSON.stringify({ options: inwardOptions }));
-  fd.append('files', JSON.stringify([]));
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(() => showToast('Inward options saved'))
-    .catch(() => showToast('Saved locally (backend unreachable)'));
+  saveSentinel('__CONFIG__', 'inward-options', { options: inwardOptions })
+    .then(r => showToast(r && r.status === 'ok'
+      ? 'Inward options saved'
+      : 'Saved locally (backend unreachable)'));
 }
 
 function buildInwardRowsHTML() {
@@ -2664,32 +3051,23 @@ function loadIqcConfig() {
       if (Array.isArray(cfg.resultOptions)) iqcResultOptions = cfg.resultOptions;
     }
   } catch {}
-  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
-    .then(r => r.json())
-    .then(data => {
-      const saved = data?.sections?.['iqc-config'];
+  loadSentinel('__CONFIG__', 'iqc-config')
+    .then(saved => {
       if (!saved) return;
       if (Array.isArray(saved.zones)) iqcZones = saved.zones;
       if (Array.isArray(saved.resultOptions)) iqcResultOptions = saved.resultOptions;
       try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
       reRenderIqcTables();
-    })
-    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+    });
 }
 
 function saveIqcConfig() {
+  if (!isAdmin()) { showToast('Not authorized'); return; }
   try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
-  const fd = new FormData();
-  fd.append('action', 'saveSection');
-  fd.append('irNumber', '__CONFIG__');
-  fd.append('sectionId', 'iqc-config');
-  fd.append('savedBy', currentUser?.email || 'unknown');
-  fd.append('fields', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions }));
-  fd.append('files', JSON.stringify([]));
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(() => showToast('Inspection config saved'))
-    .catch(() => showToast('Saved locally (backend unreachable)'));
+  saveSentinel('__CONFIG__', 'iqc-config', { zones: iqcZones, resultOptions: iqcResultOptions })
+    .then(r => showToast(r && r.status === 'ok'
+      ? 'Inspection config saved'
+      : 'Saved locally (backend unreachable)'));
 }
 
 // Re-render every visible IQC table, preserving already-entered values.
@@ -3315,6 +3693,9 @@ async function saveSection(sectionId, irNumber) {
       // Saving Section B changes the goods Section H verifies against — refresh
       // the dispatch checklist so it lists exactly what was received.
       if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
+      // Record this save in the app-owned workflow state: Section A owns the
+      // status, and every section save marks that section done for this IR.
+      syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues);
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -3330,6 +3711,26 @@ async function saveSection(sectionId, irNumber) {
     btn.className = 'btn';
     if (btnTop) { btnTop.textContent = btnLabel; btnTop.className = 'btn'; }
   }, 3000);
+}
+
+// A section save is the one place that knows an IR was actually touched, so it
+// is where the app takes ownership of that ticket's workflow state.
+function syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues) {
+  const patch = { done: markSectionDone(irNumber, sectionId) };
+  // Section A carries the IR Status dropdown. Mirroring it into __IRS__ is what
+  // makes an in-app status change reach the list badge: the badge reads app
+  // state, and the Section A row in APP_DATA is not where the badge looks.
+  if (sectionId === 'sec-a' && fieldValues && fieldValues.a_overallStatus) {
+    const next = String(fieldValues.a_overallStatus).trim();
+    const cur  = ownedStatus(irNumber) || currentIR?.status || '';
+    if (next && next !== cur) {
+      patch.status      = next;
+      patch.statusOwned = true;
+      patch.statusAt    = Date.now();
+      patch.statusBy    = myEmail() || 'unknown';
+    }
+  }
+  patchIRState(irNumber, patch);
 }
 
 function fileToBase64(file) {
@@ -3798,31 +4199,21 @@ function loadTeamDirectory() {
     const local = localStorage.getItem('ipb_team_directory');
     if (local) { const arr = JSON.parse(local); if (Array.isArray(arr) && arr.length) teamDirectory = arr; }
   } catch {}
-  fetch(`${CONFIG.GAS_URL}?action=getPassbook&irNumber=__CONFIG__`)
-    .then(r => r.json())
-    .then(data => {
-      const saved = data?.sections?.['team-directory'];
+  loadSentinel('__CONFIG__', 'team-directory')
+    .then(saved => {
       if (saved && Array.isArray(saved.entries) && saved.entries.length) {
         teamDirectory = saved.entries;
         try { localStorage.setItem('ipb_team_directory', JSON.stringify(saved.entries)); } catch {}
       }
-    })
-    .catch(() => { /* GAS unreachable — keep defaults/localStorage */ });
+    });
 }
 function saveTeamDirectory() {
   if (!isAdmin()) { showToast('Not authorized'); return; }
   try { localStorage.setItem('ipb_team_directory', JSON.stringify(teamDirectory)); } catch {}
-  const fd = new FormData();
-  fd.append('action', 'saveSection');
-  fd.append('irNumber', '__CONFIG__');
-  fd.append('sectionId', 'team-directory');
-  fd.append('savedBy', currentUser?.email || 'unknown');
-  fd.append('fields', JSON.stringify({ entries: teamDirectory }));
-  fd.append('files', JSON.stringify([]));
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(() => showToast('Team directory saved'))
-    .catch(() => showToast('Saved locally (backend unreachable)'));
+  saveSentinel('__CONFIG__', 'team-directory', { entries: teamDirectory })
+    .then(r => showToast(r && r.status === 'ok'
+      ? 'Team directory saved'
+      : 'Saved locally (backend unreachable)'));
 }
 function openTeamDirectoryModal() {
   if (!isAdmin()) { showToast('Only admins can edit the team directory'); return; }

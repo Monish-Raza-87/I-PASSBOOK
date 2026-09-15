@@ -7,13 +7,34 @@
   <meta name="description" content="Indrones Product After-Sales Summary Book — track, manage, and resolve customer IRs end-to-end." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="style.css" />
+  <!-- Inter Variable: the app relies on optical sizing and weight 420, so the
+       static Inter weights must be dropped for the variable axis. -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap" rel="stylesheet" />
+
+  <!-- Design system, in cascade order. Plain CSS, no build step. -->
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="base.css" />
+  <link rel="stylesheet" href="components.css" />
+  <link rel="stylesheet" href="views.css" />
+
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#0E62FF" />
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+  <!-- Apply the stored theme before first paint, so there is no light flash
+       on a dark-mode device. Kept inline and tiny on purpose. -->
+  <script>
+    (function () {
+      try {
+        var p = localStorage.getItem('theme') || 'system';
+        var dark = p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      } catch (e) { /* storage blocked — fall back to light */ }
+    })();
+  </script>
 </head>
 <body>
 
@@ -35,204 +56,258 @@
   <!-- ========== AUTH SCREEN ========== -->
   <div id="auth-container">
     <div class="glass-card animate-slide-up">
-      <div style="text-align:center; margin-bottom:1.5rem;">
-        <div class="splash-logo" style="font-size:1.8rem;">I-PASSBOOK</div>
-        <p style="color:var(--muted); margin-top:0.5rem; font-size:0.9rem;">Sign in with your @indrones.com account.</p>
+      <div class="auth-head">
+        <div class="auth-brand">I-PASSBOOK</div>
+        <p class="auth-hint">Sign in with your @indrones.com account.</p>
       </div>
-      <form id="auth-form" autocomplete="on" style="display:flex; flex-direction:column; gap:0.75rem;">
+      <form id="auth-form" autocomplete="on">
         <!-- Honeypot: hidden from humans, filled by bots → server rejects. -->
         <input type="text" id="auth-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
-               placeholder="Leave this empty"
-               style="position:absolute; left:-9999px; top:0; width:1px; height:1px; opacity:0;" />
-        <div id="auth-name-wrap" style="display:none;">
+               placeholder="Leave this empty" class="auth-honeypot" />
+        <div id="auth-name-wrap" style="display:none">
           <input class="form-input" type="text" id="auth-name" placeholder="Your name (optional)" autocomplete="name" />
         </div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
         <!-- Captcha (sign-up only): server-generated image challenge, answer kept on the server. -->
-        <div id="auth-captcha-wrap" style="display:none; flex-direction:column; gap:0.5rem;">
-          <label for="auth-captcha" style="color:var(--muted); font-size:0.8rem; margin:0;">Solve to continue:</label>
-          <div style="display:flex; align-items:center; gap:0.5rem;">
-            <img id="auth-captcha-img" alt="Captcha challenge" style="height:46px; width:130px; border-radius:8px; background:#eef3ff; flex:0 0 auto;" />
-            <button type="button" id="auth-captcha-refresh" title="New challenge"
-                    style="background:none; border:1px solid var(--border,#d0d7e2); color:var(--primary); cursor:pointer; font-size:1.1rem; border-radius:8px; padding:0.35rem 0.6rem; flex:0 0 auto;">↻</button>
+        <div id="auth-captcha-wrap" style="display:none">
+          <label for="auth-captcha" class="auth-captcha-label">Solve to continue:</label>
+          <div class="auth-captcha-row">
+            <img id="auth-captcha-img" class="auth-captcha-img" alt="Captcha challenge" />
+            <button type="button" id="auth-captcha-refresh" class="icon-btn" title="New challenge">↻</button>
           </div>
-          <div id="auth-captcha-error" style="display:none; color:var(--danger); font-size:0.75rem; margin:0;"></div>
+          <div id="auth-captcha-error" class="auth-err" style="display:none"></div>
           <input class="form-input" type="text" id="auth-captcha" inputmode="numeric" pattern="[0-9\-]*" placeholder="Answer" autocomplete="off" />
         </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
-        <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none;">Sign up</button>
+        <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none">Sign up</button>
         <!-- OTP step (shown after Sign up requests a code). -->
-        <div id="auth-otp-wrap" style="display:none; flex-direction:column; gap:0.5rem;">
-          <p id="auth-otp-note" style="color:var(--muted); font-size:0.85rem; margin:0;"></p>
+        <div id="auth-otp-wrap" style="display:none">
+          <p id="auth-otp-note" class="auth-hint"></p>
           <input class="form-input" type="text" id="auth-otp" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
           <button type="button" class="btn" id="auth-verify-btn">Verify &amp; create account</button>
-          <button type="button" id="auth-resend-link"
-                  style="background:none; border:none; color:var(--primary); font-size:0.8rem; cursor:pointer; width:100%;">Resend code</button>
+          <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
         </div>
       </form>
-      <button type="button" id="auth-toggle-mode" style="background:none; border:none; color:var(--primary); margin-top:1rem; font-size:0.85rem; cursor:pointer; width:100%;">Need an account? Sign up</button>
-      <p id="auth-error" style="color:var(--danger); text-align:center; margin-top:1rem; font-size:0.85rem; display:none;"></p>
+      <button type="button" id="auth-toggle-mode" class="link-btn">Need an account? Sign up</button>
+      <p id="auth-error" class="auth-error" style="display:none"></p>
+    </div>
+  </div>
+
+  <!-- ========== REQUEST ACCESS ========== -->
+  <!-- Deliberately a sibling of #app-container, not a child: a signed-in user
+       with no access has the whole app shell hidden, not just the panes. -->
+  <div id="request-access">
+    <div class="glass-card animate-slide-up">
+      <div class="auth-head">
+        <div class="auth-brand">I-PASSBOOK</div>
+        <p class="auth-hint">You're signed in, but your account doesn't have access yet.</p>
+      </div>
+      <div id="request-access-email" class="access-email-line"></div>
+      <button class="btn" id="request-access-btn">Request access</button>
+      <p id="request-access-pending" class="req-pending" style="display:none">✓ Access requested — an admin will review and assign your permissions.</p>
+      <button class="btn btn-secondary" id="request-access-signout">Sign Out</button>
     </div>
   </div>
 
   <!-- ========== MAIN APP ========== -->
   <div id="app-container">
 
-    <!-- ====== REQUEST ACCESS VIEW (shown when a signed-in user has no access yet) ====== -->
-    <div id="request-access" style="display:none; flex:1; align-items:center; justify-content:center; padding:2rem 1rem;">
-      <div class="glass-card animate-slide-up" style="max-width:460px; width:100%; text-align:center;">
-        <div class="splash-logo" style="font-size:1.8rem;">I-PASSBOOK</div>
-        <p style="color:var(--muted); margin-top:0.5rem; font-size:0.9rem;">You're signed in, but your account doesn't have access yet.</p>
-        <div id="request-access-email" style="margin:1rem 0; font-weight:600; color:var(--muted-strong);"></div>
-        <button class="btn" id="request-access-btn" style="width:100%;">Request access</button>
-        <p id="request-access-pending" style="display:none; margin-top:1rem; color:var(--primary); font-size:0.85rem;">✓ Access requested — an admin will review and assign your permissions.</p>
-        <button class="btn btn-secondary" id="request-access-signout" style="width:100%; margin-top:0.75rem;">Sign Out</button>
-      </div>
-    </div>
-
-    <!-- Top Header -->
-    <header>
-      <div id="back-btn" style="display:none; cursor:pointer; padding:4px 8px; border-radius:8px; background:var(--glass); border:1px solid var(--glass-border);">
-        ← Back
-      </div>
-      <div id="header-title" style="font-weight:700; font-size:1rem; flex:1; text-align:center;">I-PASSBOOK</div>
-      <div id="nudge-bell" class="nudge-bell" title="Comments &amp; notifications">
-        <span class="nudge-bell-icon">🔔</span>
-        <span id="nudge-badge" class="nudge-badge" style="display:none;">0</span>
-      </div>
-      <div id="user-avatar" style="width:32px; height:32px; border-radius:50%; background:var(--primary); display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.85rem; cursor:pointer;" title="Sign Out">?</div>
-    </header>
-
-    <!-- ====== MASTER INDEX VIEW ====== -->
-    <div id="index-view">
-      <div style="padding: 1rem 1rem 0;">
-        <p style="color:var(--muted); font-size:0.85rem;">All Information Reports — latest first</p>
-        <input type="text" id="search-input" class="search-bar" placeholder="🔍  Search by IR number or drone ID..." />
-        <button type="button" id="legacy-workbook-btn" style="margin-top:0.75rem; width:100%; padding:0.6rem 0.75rem; background:var(--glass); border:1px solid var(--glass-border); color:var(--muted-strong); border-radius:12px; font-size:0.85rem; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:0.4rem;">🏛 Legacy I-PASSBOOK — old records (until app go-live)</button>
-      </div>
-      <div id="sync-status" style="padding:0.5rem 1rem; font-size:0.75rem; color:var(--muted);"></div>
-      <div id="ir-list" class="ir-list">
-        <div class="ir-skeleton"></div>
-        <div class="ir-skeleton"></div>
-        <div class="ir-skeleton"></div>
-      </div>
-    </div>
-
-    <!-- ====== PASSBOOK DETAIL VIEW ====== -->
-    <div id="detail-view">
-
-      <!-- IR Identity Banner -->
-      <div id="ir-banner" style="padding: 1rem; background: linear-gradient(135deg, var(--primary-dark), var(--primary)); border-bottom: 1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; gap:0.75rem;">
-        <div style="min-width:0;">
-          <div id="ir-banner-title" style="font-size:1.3rem; font-weight:800;"></div>
-          <div id="ir-banner-sub" style="font-size:0.85rem; color:rgba(255,255,255,0.75); margin-top:2px;"></div>
-        </div>
-        <div style="display:flex; gap:0.5rem; flex-wrap:wrap; justify-content:flex-end;">
-          <button type="button" id="ir-nudge-btn" class="btn-ghost-light" style="position:relative;" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none;">0</span></button>
-          <button type="button" id="ir-history-btn" class="btn-ghost-light" title="Audit trail / edit history for this IR">🕓 History</button>
-          <button type="button" id="ir-legacy-btn" class="btn-ghost-light" style="display:none;" title="View this IR's original record in the legacy I-PASSBOOK">🏛 Legacy Record</button>
-        </div>
+    <!-- ====== SIDEBAR (≥1024px) / BOTTOM NAV (<1024px) ====== -->
+    <nav id="sidebar" aria-label="Main">
+      <div class="sidebar-brand">
+        <span class="brand-mark" aria-hidden="true">IP</span>
+        <span class="brand-text">I-PASSBOOK</span>
       </div>
 
-      <!-- Unsaved-draft notice -->
-      <div id="draft-banner" class="draft-banner" style="display:none;"></div>
+      <div class="sidebar-nav">
+        <div class="sidebar-section-label">Service Desk</div>
 
-      <!-- Scrollable Section Tabs -->
-      <div class="tabs-container" id="section-tabs">
-        <div class="tab active" data-section="sec-a">A: Preliminary</div>
-        <div class="tab" data-section="sec-b">B: Inward</div>
-        <div class="tab" data-section="sec-c">C: IQC</div>
-        <div class="tab" data-section="sec-d">D: Investigation</div>
-        <div class="tab" data-section="sec-e">E: Production</div>
-        <div class="tab" data-section="sec-f">F: QC</div>
-        <div class="tab" data-section="sec-g">G: Flight Test</div>
-        <div class="tab" data-section="sec-h">H: PDI</div>
-        <div class="tab" data-section="sec-i">I: Logistics</div>
+        <a class="nav-item" id="nav-tickets" href="#/tickets">
+          <span class="nav-icon" aria-hidden="true">🎫</span>
+          <span class="nav-label">Tickets</span>
+          <span class="nav-count" id="nav-count">—</span>
+        </a>
+
+        <!-- Opens the read-only legacy workbook. The id is load-bearing:
+             app.js binds openLegacyWorkbook() to it. -->
+        <button type="button" class="nav-item" id="legacy-workbook-btn"
+                title="Old I-PASSBOOK records (kept until app go-live)">
+          <span class="nav-icon" aria-hidden="true">🏛</span>
+          <span class="nav-label">Legacy Records</span>
+        </button>
+
+        <div class="sidebar-section-label" id="nav-admin-label" style="display:none">Administration</div>
+        <button type="button" class="nav-item" id="nav-access" style="display:none">
+          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span class="nav-label">User Access</span>
+        </button>
       </div>
 
-      <!-- Section Contents -->
-      <div id="sections-wrapper" style="padding:1rem; padding-bottom:6rem;">
-
-        <!-- Section A: Preliminary Details -->
-        <div id="sec-a" class="section-content active">
-          <h2 class="section-title">Section A — Preliminary Details & Activity Log</h2>
-          <button class="btn btn-top-save" id="save-sec-a-top" style="margin-bottom:1rem;">Save Section A</button>
-          <div id="sec-a-form"></div>
-          <button class="btn" id="save-sec-a" style="margin-top:1rem;">Save Section A</button>
-        </div>
-
-        <!-- Section B: Inward Checklist -->
-        <div id="sec-b" class="section-content">
-          <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
-          <div id="sec-b-form"></div>
-          <button class="btn" id="save-sec-b" style="margin-top:1rem;">Save Section B</button>
-        </div>
-
-        <!-- Section C: IQC Inspection -->
-        <div id="sec-c" class="section-content">
-          <h2 class="section-title">Section C — IQC Inspection</h2>
-          <div id="sec-c-form"></div>
-          <button class="btn" id="save-sec-c" style="margin-top:1rem;">Save Section C</button>
-        </div>
-
-        <!-- Section D: Investigation -->
-        <div id="sec-d" class="section-content">
-          <h2 class="section-title">Section D — Investigation</h2>
-          <div id="sec-d-form"></div>
-          <button class="btn" id="save-sec-d" style="margin-top:1rem;">Save Section D</button>
-          <button class="btn btn-secondary" id="download-sec-d" style="margin-top:0.5rem;">⬇ Download Investigation (PDF)</button>
-        </div>
-
-        <!-- Section E: Production -->
-        <div id="sec-e" class="section-content">
-          <h2 class="section-title">Section E — Production (Rework)</h2>
-          <div id="sec-e-form"></div>
-          <button class="btn" id="save-sec-e" style="margin-top:1rem;">Save Section E</button>
-        </div>
-
-        <!-- Section F: Quality Control -->
-        <div id="sec-f" class="section-content">
-          <h2 class="section-title">Section F — Quality Control (QC Test)</h2>
-          <div id="sec-f-form"></div>
-          <button class="btn" id="save-sec-f" style="margin-top:1rem;">Save Section F</button>
-        </div>
-
-        <!-- Section G: Flight Test -->
-        <div id="sec-g" class="section-content">
-          <h2 class="section-title">Section G — Flight Test</h2>
-          <div id="sec-g-form"></div>
-          <button class="btn" id="save-sec-g" style="margin-top:1rem;">Save Section G</button>
-        </div>
-
-        <!-- Section H: PDI -->
-        <div id="sec-h" class="section-content">
-          <h2 class="section-title">Section H — Pre-Delivery Inspection (PDI)</h2>
-          <div id="sec-h-form"></div>
-          <button class="btn" id="save-sec-h" style="margin-top:1rem;">Save Section H</button>
-        </div>
-
-        <!-- Section I: Logistics -->
-        <div id="sec-i" class="section-content">
-          <h2 class="section-title">Section I — Logistics & Dispatch</h2>
-          <div id="sec-i-form"></div>
-          <button class="btn" id="save-sec-i" style="margin-top:1rem;">Save Section I</button>
-        </div>
-
+      <div class="sidebar-foot">
+        <button type="button" class="nav-item" id="nav-theme" title="Switch between light and dark">
+          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true">🌙</span>
+          <span class="nav-label" id="nav-theme-label">Dark mode</span>
+        </button>
       </div>
-    </div><!-- end detail-view -->
+    </nav>
 
+    <!-- ====== WORKSPACE ====== -->
+    <div id="workspace">
+
+      <header>
+        <div id="back-btn">← Back</div>
+        <div id="header-title">I-PASSBOOK</div>
+        <div class="header-actions">
+          <div id="nudge-bell" class="nudge-bell" title="Comments &amp; notifications">
+            <span class="nudge-bell-icon" aria-hidden="true">🔔</span>
+            <span id="nudge-badge" class="nudge-badge" style="display:none">0</span>
+          </div>
+          <div id="user-avatar" title="Account">?</div>
+        </div>
+      </header>
+
+      <div id="panes">
+
+        <!-- ====== MASTER INDEX VIEW ====== -->
+        <div id="index-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title">Tickets</span>
+              <span class="list-count" id="list-count"></span>
+            </div>
+            <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" />
+            <div class="segments" id="list-segments" role="tablist"></div>
+          </div>
+          <div id="sync-status"></div>
+          <div id="ir-list" class="ir-list">
+            <div class="ir-skeleton"></div>
+            <div class="ir-skeleton"></div>
+            <div class="ir-skeleton"></div>
+          </div>
+        </div>
+
+        <!-- ====== PASSBOOK DETAIL VIEW ====== -->
+        <div id="detail-view">
+
+          <!-- IR Identity Banner -->
+          <div id="ir-banner">
+            <div class="banner-main">
+              <div id="ir-banner-title"></div>
+              <div id="ir-banner-sub"></div>
+              <div class="banner-pills" id="ir-banner-pills"></div>
+            </div>
+            <div class="banner-actions">
+              <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none">0</span></button>
+              <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR">🕓 History</button>
+              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK">🏛 Legacy Record</button>
+            </div>
+          </div>
+
+          <!-- Unsaved-draft notice -->
+          <div id="draft-banner" class="draft-banner" style="display:none"></div>
+
+          <!-- Scrollable section tabs -->
+          <div class="tabs-container" id="section-tabs">
+            <div class="tab active" data-section="sec-a">A: Preliminary</div>
+            <div class="tab" data-section="sec-b">B: Inward</div>
+            <div class="tab" data-section="sec-c">C: IQC</div>
+            <div class="tab" data-section="sec-d">D: Investigation</div>
+            <div class="tab" data-section="sec-e">E: Production</div>
+            <div class="tab" data-section="sec-f">F: QC</div>
+            <div class="tab" data-section="sec-g">G: Flight Test</div>
+            <div class="tab" data-section="sec-h">H: PDI</div>
+            <div class="tab" data-section="sec-i">I: Logistics</div>
+          </div>
+
+          <!-- Section contents -->
+          <div id="sections-wrapper">
+
+            <!-- Section A: Preliminary Details -->
+            <div id="sec-a" class="section-content active">
+              <h2 class="section-title">Section A — Preliminary Details &amp; Activity Log</h2>
+              <button class="btn btn-top-save" id="save-sec-a-top">Save Section A</button>
+              <div id="sec-a-form"></div>
+              <button class="btn" id="save-sec-a">Save Section A</button>
+            </div>
+
+            <!-- Section B: Inward Checklist -->
+            <div id="sec-b" class="section-content">
+              <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
+              <div id="sec-b-form"></div>
+              <button class="btn" id="save-sec-b">Save Section B</button>
+            </div>
+
+            <!-- Section C: IQC Inspection -->
+            <div id="sec-c" class="section-content">
+              <h2 class="section-title">Section C — IQC Inspection</h2>
+              <div id="sec-c-form"></div>
+              <button class="btn" id="save-sec-c">Save Section C</button>
+            </div>
+
+            <!-- Section D: Investigation -->
+            <div id="sec-d" class="section-content">
+              <h2 class="section-title">Section D — Investigation</h2>
+              <div id="sec-d-form"></div>
+              <button class="btn" id="save-sec-d">Save Section D</button>
+              <button class="btn btn-secondary" id="download-sec-d">⬇ Download Investigation (PDF)</button>
+            </div>
+
+            <!-- Section E: Production -->
+            <div id="sec-e" class="section-content">
+              <h2 class="section-title">Section E — Production (Rework)</h2>
+              <div id="sec-e-form"></div>
+              <button class="btn" id="save-sec-e">Save Section E</button>
+            </div>
+
+            <!-- Section F: Quality Control -->
+            <div id="sec-f" class="section-content">
+              <h2 class="section-title">Section F — Quality Control (QC Test)</h2>
+              <div id="sec-f-form"></div>
+              <button class="btn" id="save-sec-f">Save Section F</button>
+            </div>
+
+            <!-- Section G: Flight Test -->
+            <div id="sec-g" class="section-content">
+              <h2 class="section-title">Section G — Flight Test</h2>
+              <div id="sec-g-form"></div>
+              <button class="btn" id="save-sec-g">Save Section G</button>
+            </div>
+
+            <!-- Section H: PDI -->
+            <div id="sec-h" class="section-content">
+              <h2 class="section-title">Section H — Pre-Delivery Inspection (PDI)</h2>
+              <div id="sec-h-form"></div>
+              <button class="btn" id="save-sec-h">Save Section H</button>
+            </div>
+
+            <!-- Section I: Logistics -->
+            <div id="sec-i" class="section-content">
+              <h2 class="section-title">Section I — Logistics &amp; Dispatch</h2>
+              <div id="sec-i-form"></div>
+              <button class="btn" id="save-sec-i">Save Section I</button>
+            </div>
+
+          </div>
+        </div><!-- end detail-view -->
+
+        <!-- Desktop-only empty state, shown until a ticket is selected.
+             A sibling of #detail-view rather than a child, so that
+             #detail-view's display stays a truthful "is a ticket open" flag
+             (applyAccessGating reads it). -->
+        <div id="detail-placeholder">
+          <div class="ph-icon" aria-hidden="true">🎫</div>
+          <p class="ph-title">No ticket selected</p>
+          <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
+        </div>
+
+      </div><!-- end panes -->
+    </div><!-- end workspace -->
   </div><!-- end app-container -->
 
   <!-- Toast notification -->
-  <div id="toast" style="
-    position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(100px);
-    background: #1e293b; border: 1px solid var(--glass-border); border-radius: 12px;
-    padding: 12px 24px; color: white; font-weight:600; z-index:9999;
-    transition: transform 0.4s cubic-bezier(0.34,1.56,0.64,1); font-size:0.9rem;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-  "></div>
+  <div id="toast" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
   <script>

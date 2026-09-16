@@ -58,12 +58,16 @@ The Comments modal shows the existing thread for that context plus a composer:
 
 ### Backend (`backend.gs`) — comment email
 The `sendNudgeEmail` POST action (name kept for contract stability) sends via
-`MailApp.sendEmail`, restricted to `@indrones.com` recipients (so the app can't
-be used to mail externally). The sender's email is set as `replyTo`. Email
+`MailApp.sendEmail`, restricted to `@indrones.com` recipients plus the explicit
+`EXTERNAL_EMAILS` exceptions (so the app can't be used to mail externally) —
+`isMailRecipientAllowed()` is that guard, and `kishor.salunkhe@uavgarage.com` is the
+one address it admits. The sender's email is set as `replyTo`. Email
 subject/body read "you have a comment" / "mentioned you in a comment"
 (no "nudge" wording). **Requires redeploying** the Apps Script web app after
 adding this action (and completing the one-time `script.send_mail` OAuth consent —
-see Development Guide). Quota: Apps Script's daily MailApp limit applies.
+see Development Guide). It checks `mailQuotaOk('nudge')` before sending and reports
+a visible error if the day's mail is spent, rather than failing silently — see
+[04](04 - Backend API Reference.md).
 
 ### Storage (no backend redeploy required)
 Comments are stored via the existing generic `saveSection` / `getPassbook`
@@ -135,12 +139,13 @@ the way it does:
 | `a_overallStatus` | IR Status | select | **Editable** — options are the shared `IR_STATUS_VALUES` list |
 
 ### Authorization — Section A
-There is **no CR-only allowlist for Section A**. Edit access comes from the
-per-user, per-section ACL (`getEffectiveAccess` → `canEdit(permissions, 'sec-a')`),
-granted by an admin through the request-access flow, with `ADMIN_EMAILS` bypassing
-all checks. A user with `view` or `comment` sees the four editable fields disabled;
-a user without view on `sec-a` does not see the tab at all (see
-[04 — Backend API Reference](04 - Backend API Reference.md#access-control-per-user-per-section)).
+There is **no CR-only allowlist for Section A**. Edit access comes from
+**departments**, not from a per-user ACL: `getEffectiveAccess` gives every signed-in
+account `view` on all nine sections, then layers `edit` on for each section one of
+the user's departments grants. `ADMIN_EMAILS` bypasses all checks. A user with
+`view` sees the four editable fields disabled; nothing is hidden, because everyone
+can view every section (see
+[10 — Auth & Access Model](10 - Auth & Access Model.md)).
 
 The backend is the authority: `saveSection` rejects a write without edit access to
 the section, so the frontend's disabled state is convenience, not the control.
@@ -220,7 +225,7 @@ textarea is also at the bottom). 11 particulars from the IDS master Inward Check
 
 ### Dropdown option groups (admin-customizable)
 Defaults defined in `INWARD_OPTIONS_DEFAULTS` (`app.js`); admins
-(`monish.raza@indrones.com`, `customer.relations@indrones.com`) edit them via the
+(`ADMIN_EMAILS` — currently just `monish.raza@indrones.com`) edit them via the
 **⚙ Manage Dropdown Options** button shown on the inward table. Overrides persist
 to GAS under irNumber `__CONFIG__` / sectionId `inward-options` (shared) and to
 `localStorage` (per-device fallback). `loadInwardOptions()` runs at app start.
@@ -238,7 +243,7 @@ to GAS under irNumber `__CONFIG__` / sectionId `inward-options` (shared) and to
 Saved as `{ signedBy, signedAt, history: [{ signedBy, signedAt }, ...] }`.
 - Signing captures the signed-in user's **email + full ISO timestamp** (displayed as `DD Month YYYY, HH:MM:SS`).
 - Once signed, the field is **locked** — not editable, not deletable.
-- An authorized user (inward admin / CR / the original signer) may **Override & Re-sign**; the previous value is pushed into `history`, which is shown on the block (and as a hover tooltip on the signed cell).
+- An authorized user (the original signer, an admin, or anyone whose department grants edit on this section) may **Override & Re-sign**; the previous value is pushed into `history`, which is shown on the block (and as a hover tooltip on the signed cell).
 - `esignatureState` is reset each time a passbook is opened (`openPassbook`) and populated from saved data by `populateFieldValue`.
 
 ---
@@ -290,7 +295,7 @@ follows the same locked + override-with-history behaviour as Section B (see
 [`esignature` type](#e-signatures-esignature-type)).
 
 ### Admin customization (Section C)
-Admins (`ADMIN_EMAILS` — `monish.raza@indrones.com`, `customer.relations@indrones.com`,
+Admins (`ADMIN_EMAILS` — `monish.raza@indrones.com`,
 plus the `?dev=1` user for testing) see a **⚙ Manage Inspection Points & Dropdowns**
 button under the IQC table. The modal edits:
 - the **Result dropdown options** (one per line; defaults `PASS` / `FAIL` / `NA`),

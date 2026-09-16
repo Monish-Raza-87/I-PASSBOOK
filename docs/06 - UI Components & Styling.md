@@ -61,9 +61,9 @@ Semantic shortcuts on `:root` — these are what the component CSS actually uses
 ```
 
 **Rule for new CSS: never a raw hex, never a px font size.** Use a token. The only
-deliberate exceptions are the splash screen's fixed black (`#0b0b0b`, so the intro
-video sits on neutral chrome) and the captcha image backdrop (`#f4f4f4`, because
-the challenge is a light-rendered image).
+deliberate exception is the splash screen's fixed black (`#0b0b0b`, so the intro
+video sits on neutral chrome). There is no second one: the captcha image backdrop
+(`#f4f4f4`) went with the captcha, when sign-up was removed.
 
 ## Theming
 

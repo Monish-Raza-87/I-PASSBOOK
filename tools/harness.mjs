@@ -35,18 +35,32 @@ function el() {
  *   `'mapSheetRows, INTAKE_FIELDS, get lastSheetAudit() { return lastSheetAudit; }'`.
  *   `let`/`const` at a script's top level are not properties of the global
  *   object, so they can only be reached from inside this lexical scope.
- * @param {{capture?: boolean}} [opts] `capture: true` memoizes elements by id so
- *   a test can read back what a render wrote, and returns `{ T, byId }` instead
- *   of just `T`.
+ * @param {{capture?: boolean, splitStorage?: boolean}} [opts] `capture: true`
+ *   memoizes elements by id so a test can read back what a render wrote, and
+ *   returns `{ T, byId }` instead of just `T`. `splitStorage: true` gives
+ *   localStorage and sessionStorage SEPARATE stores (see below).
  * @returns the populated `__T` object, or `{ T, byId }` when capturing.
  */
 export function loadApp(bindings = '', opts = {}) {
-  const store = {};
-  const storage = {
-    getItem: k => (k in store ? store[k] : null),
-    setItem: (k, v) => { store[k] = String(v); },
-    removeItem: k => { delete store[k]; },
+  const makeStorage = () => {
+    const store = {};
+    return {
+      getItem: k => (k in store ? store[k] : null),
+      setItem: (k, v) => { store[k] = String(v); },
+      removeItem: k => { delete store[k]; },
+    };
   };
+  // Default: ONE shared store behind both names.
+  //
+  // That is wrong in general — in a browser they are different stores, and the
+  // session model is precisely the thing that moved from one to the other. It is
+  // kept as the default because the older suites were written against it and
+  // would otherwise see their fixture state vanish. `splitStorage: true` opts into
+  // the browser-faithful behaviour, which is what lets smoke-session.mjs prove
+  // that a session survives a sessionStorage wipe.
+  const shared = makeStorage();
+  const storage = shared;
+  const storage2 = opts.splitStorage ? makeStorage() : shared;
 
   const byId = new Map();
   const getElementById = opts.capture
@@ -63,7 +77,7 @@ export function loadApp(bindings = '', opts = {}) {
     // the "backend unreachable" behaviour depends on.
     fetch: () => Promise.reject(new Error('no network in test')),
     localStorage: storage,
-    sessionStorage: storage,
+    sessionStorage: storage2,
     navigator: { userAgent: 'node', onLine: true },
     location: { hash: '', search: '', hostname: '127.0.0.1', protocol: 'http:', href: 'http://127.0.0.1:3000/' },
     document: {

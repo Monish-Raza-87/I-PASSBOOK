@@ -54,60 +54,62 @@
   </div>
 
   <!-- ========== AUTH SCREEN ========== -->
+  <!-- No sign-up and no captcha: every account is provisioned by the admin, so
+       the only things this form does are sign in and recover a password. The
+       three modes share the one form (Enter submits whichever is showing). -->
   <div id="auth-container">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
         <div class="auth-brand">I-PASSBOOK</div>
-        <p class="auth-hint">Sign in with your @indrones.com account.</p>
+        <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
-        <!-- Honeypot: hidden from humans, filled by bots → server rejects. -->
-        <input type="text" id="auth-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
-               placeholder="Leave this empty" class="auth-honeypot" />
-        <div id="auth-name-wrap" style="display:none">
-          <input class="form-input" type="text" id="auth-name" placeholder="Your name (optional)" autocomplete="name" />
-        </div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
-        <!-- Captcha (sign-up only): server-generated image challenge, answer kept on the server. -->
-        <div id="auth-captcha-wrap" style="display:none">
-          <label for="auth-captcha" class="auth-captcha-label">Solve to continue:</label>
-          <div class="auth-captcha-row">
-            <img id="auth-captcha-img" class="auth-captcha-img" alt="Captcha challenge" />
-            <button type="button" id="auth-captcha-refresh" class="icon-btn" title="New challenge">↻</button>
-          </div>
-          <div id="auth-captcha-error" class="auth-err" style="display:none"></div>
-          <input class="form-input" type="text" id="auth-captcha" inputmode="numeric" pattern="[0-9\-]*" placeholder="Answer" autocomplete="off" />
-        </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
-        <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none">Sign up</button>
-        <!-- OTP step (shown after Sign up requests a code). -->
-        <div id="auth-otp-wrap" style="display:none">
-          <p id="auth-otp-note" class="auth-hint"></p>
-          <input class="form-input" type="text" id="auth-otp" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+        <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+
+        <!-- Forgot step: ask for the email, get a 6-digit code. -->
+        <div id="auth-forgot-wrap" style="display:none">
+          <button type="button" class="btn" id="auth-forgot-btn">Email me a code</button>
+        </div>
+
+        <!-- Reset step: the code from the email + the new password. -->
+        <div id="auth-reset-wrap" style="display:none">
+          <p id="auth-reset-note" class="auth-hint"></p>
+          <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
-          <button type="button" class="btn" id="auth-verify-btn">Verify &amp; create account</button>
+          <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+          <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
           <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
         </div>
+
+        <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
       </form>
-      <button type="button" id="auth-toggle-mode" class="link-btn">Need an account? Sign up</button>
       <p id="auth-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
 
-  <!-- ========== REQUEST ACCESS ========== -->
-  <!-- Deliberately a sibling of #app-container, not a child: a signed-in user
-       with no access has the whole app shell hidden, not just the panes. -->
-  <div id="request-access">
+  <!-- ========== FIRST-LOGIN PASSWORD CHANGE ========== -->
+  <!-- Deliberately a sibling of #app-container, not a child: while this is up the
+       whole app shell is hidden. An account signing in with its temporary
+       password gets no session token from the backend, so this screen is
+       presentation only — there is nothing behind it to reach. -->
+  <div id="password-change">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
         <div class="auth-brand">I-PASSBOOK</div>
-        <p class="auth-hint">You're signed in, but your account doesn't have access yet.</p>
+        <p class="auth-hint" id="pc-sub">Set your own password to finish setting up your account — you only do this once.</p>
       </div>
-      <div id="request-access-email" class="access-email-line"></div>
-      <button class="btn" id="request-access-btn">Request access</button>
-      <p id="request-access-pending" class="req-pending" style="display:none">✓ Access requested — an admin will review and assign your permissions.</p>
-      <button class="btn btn-secondary" id="request-access-signout">Sign Out</button>
+      <div id="pc-email" class="access-email-line"></div>
+      <form id="pc-form" autocomplete="off">
+        <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
+        <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+        <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
+      </form>
+      <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>
+      <button class="btn btn-secondary" id="pc-signout">Sign Out</button>
+      <p id="pc-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
 

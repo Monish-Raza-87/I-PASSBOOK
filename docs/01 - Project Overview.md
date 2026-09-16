@@ -21,12 +21,12 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 
 | Layer | Technology | Notes |
 |---|---|---|
-| Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (~4,900 lines) |
+| Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (~5,350 lines) |
 | Styling | Hand-written CSS, layered, no build step | Frappe-derived design tokens, light + dark |
 | Backend | Google Apps Script (GAS) | Deployed as web app, in `backend.gs` |
 | Database | Google Sheets | `APP_DATA` tab for passbook data, `Form Responses` tab for IR records |
 | File Storage | Google Drive | Photos/files stored in `IR###/Section X` folders |
-| Auth | Email + password, allowlist-gated | OTP + captcha sign-up; server session token in `sessionStorage` |
+| Auth | Email + password, **admin-provisioned** | No self-signup; 30-day session token in `localStorage` (see [10](10 - Auth & Access Model.md)) |
 | PWA | Service Worker + Manifest | Offline caching of static assets |
 
 ## File Structure
@@ -34,7 +34,7 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 ```
 i-passbook-app/
 ├── index.html          # App shell: splash, auth, sidebar, ticket list, detail pane
-├── app.js              # All frontend logic (~4,900 lines)
+├── app.js              # All frontend logic (~5,350 lines)
 ├── tokens.css          # Design tokens — generated, see docs/09
 ├── base.css            # Reset, typography, splash/auth, app shell, breakpoints
 ├── components.css      # Buttons, inputs, pills, dropdowns, modals

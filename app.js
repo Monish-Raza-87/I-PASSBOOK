@@ -36,80 +36,83 @@ const CONFIG = {
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
 
-// ─── EMAIL + PASSWORD AUTH (allowlist-gated, no Google) ───────────────────────
-// No Google sign-in anywhere. A user signs UP with email + password — the
-// backend only lets emails on CONFIG.ALLOWED_EMAILS create an account. Sign-in
-// exchanges email + password for a revocable server SESSION TOKEN (12h), which
-// the frontend holds in sessionStorage and attaches to every backend call. A
-// refresh within a session stays signed in, but a FULL app close wipes
-// sessionStorage — so reopening the app ALWAYS requires signing in again,
-// regardless of who was logged in before (a handed-off device can't inherit a
-// session). The caller's email is read FROM the session token by the backend,
-// never a client param, so the allowlist gate can't be spoofed. An idle timeout
-// also forces re-sign-in after inactivity. See [[auth-token-gate]].
+// ─── EMAIL + PASSWORD AUTH (admin-provisioned, no self-signup) ────────────────
+// The admin creates every account and hands over a temporary password. On first
+// sign-in the user is forced to set their own password before a session is minted.
+// Sign-in exchanges email + password for a revocable server SESSION TOKEN, which
+// the frontend holds in localStorage and attaches to every backend call.
+//
+// localStorage, NOT sessionStorage, and no idle timeout: the owner asked for the
+// behaviour a Google Sheet has — sign in once, stay signed in for weeks, never be
+// asked again mid-task. The token slides forward on use server-side, so an active
+// person is effectively never signed out. The trade-off (a shared/handed-off
+// device keeps the session) is the owner's explicit call; the Sign Out button and
+// the server-side revoke are the answer to it. See [[auth-token-gate]].
 
-// Persist/restore the session token in sessionStorage (NOT localStorage) — this
-// is what makes "close the app → must sign in again" work.
+// Persist/restore the session token. localStorage so reopening the app resumes
+// the session instead of demanding a fresh sign-in.
 const SESSION_KEY = 'ipb_session';
 function persistSession(token) {
-  try { if (token) sessionStorage.setItem(SESSION_KEY, token); else sessionStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+  try { if (token) localStorage.setItem(SESSION_KEY, token); else localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
 }
 function loadSession() {
-  try { return sessionStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+  try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
 }
 
-// ─── IDLE TIMEOUT / FORCED RE-AUTH ───────────────────────────────────────────
-// After IDLE_MS of no user activity, the session is revoked and the user is
-// bounced to the login screen (no page reload — the toast stays visible). This
-// is a "basic reason for re-sign-in": a device left open doesn't stay signed in
-// forever, which matters on a shared / handed-off device.
-const IDLE_MS = 15 * 60 * 1000;   // 15 minutes
-let _idleTimer = null;
-let _idleListenersAdded = false;
-function resetIdleTimer() {
-  if (_idleTimer) clearTimeout(_idleTimer);
-  if (!currentUser || !currentUser.sessionToken) return;   // only arm when signed in
-  _idleTimer = setTimeout(() => {
-    showToast('Signed out due to inactivity — please sign in again');
-    forceReauth();
-  }, IDLE_MS);
-}
-function startIdleTimer() {
-  if (!_idleListenersAdded) {
-    _idleListenersAdded = true;
-    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev =>
-      window.addEventListener(ev, resetIdleTimer, { passive: true }));
-  }
-  resetIdleTimer();
-}
-// Revoke the server session, clear in-session state, and show the login screen
-// (no reload). Used by the idle timeout and the session-expired path.
-function forceReauth() {
-  const st = currentUser && currentUser.sessionToken;
-  if (st) {
-    try {
-      const fd = new FormData();
-      fd.append('action', 'logout');
-      fd.append('sessionToken', st);
-      _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
-    } catch { /* non-fatal */ }
-  }
+// The ONE place local auth state is torn down, so it can never be half-cleared.
+// A stale profile with no token (or a token with no profile) is itself a cause of
+// spurious "please sign in again" screens at boot — every clear site used to
+// remember a different subset of keys. Also stops the comment poll, which would
+// otherwise keep firing an unauthorized request every 90s and re-trigger the
+// ejection path for as long as the login screen is up.
+function clearLocalAuth() {
   try {
-    sessionStorage.removeItem('ipb_user');
+    localStorage.removeItem('ipb_user');
+    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem('ipb_user');   // legacy key from the sessionStorage build
     sessionStorage.removeItem(SESSION_KEY);
   } catch { /* non-fatal */ }
-  currentUser = null;
-  _authToastShown = false;
-  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
-  if (typeof showAuth === 'function') showAuth();
+  try { if (typeof stopNudgePolling === 'function') stopNudgePolling(); } catch { /* non-fatal */ }
+}
+
+// NOTE — there is deliberately no `forceReauth()` here. An earlier build had one
+// that revoked the server session, cleared local state and showed the login
+// screen; nothing ever called it, and its comment claimed two call sites that did
+// not exist. Do not reintroduce it: the only path that would want it is rule 4 of
+// the interceptor below, and by then `confirmSessionAlive()` has already proved
+// the token is dead, so the revoke is a wasted round trip. Sign Out (`signOut()`)
+// is the one place a live token is deliberately revoked.
+
+// Ask the backend whether our token is still alive. This is the ONLY thing allowed
+// to conclude that a session has died.
+//
+// It resolves TRUE on a network failure, and that default is the whole point: the
+// bug this replaces ejected people on a flaky connection, on a CORS hiccup, and on
+// any HTML error page. "I could not reach the server" is not "you are signed out",
+// and treating it as one is what produced the repeated sign-in prompts.
+function confirmSessionAlive() {
+  const st = currentUser && currentUser.sessionToken;
+  if (!st) return Promise.resolve(false);
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
+    + 'action=sessionCheck&sessionToken=' + encodeURIComponent(st);
+  return _origFetch(url)
+    .then(r => r.text().then(t => {
+      try {
+        const d = JSON.parse(t);
+        return !!(d && d.status === 'ok' && d.alive);
+      } catch { return true; }        // unparseable → assume alive, do not eject
+    }))
+    .catch(() => true);               // unreachable → assume alive, do not eject
 }
 
 // Exchange email + password for a server session token + access payload.
-// Called from the Sign in button. Stores the session, clears any stale
-// sessionError, and returns the backend's parsed {status,...} so the caller can
-// surface the real rejection reason (e.g. "Wrong password."). Uses _origFetch
-// (not the intercepted fetch) so the login call isn't subject to the session
-// gate, and so a bad password can't trigger the "session expired" auto-logout.
+// Stores the session, clears any stale sessionError, and returns the backend's
+// parsed {status,...} so the caller can surface the real rejection reason.
+// Uses _origFetch (not the intercepted fetch) so the login call isn't subject to
+// the session gate, and so a bad password can't trigger the auto-logout path.
+//
+// A successful login on a temporary password returns mustChangePassword with NO
+// token — the caller must route to the password-change screen, not into the app.
 function loginBackend(email, password) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
   const fd = new FormData();
@@ -124,18 +127,15 @@ function loginBackend(email, password) {
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
-        // backend doLoginPassword nests the access payload under data.access
-        // (the getMyAccess return). Without this, currentUser.access would be
-        // all-undefined and lock the user out of sections.
+        // backend nests the access payload under data.access (the getMyAccess
+        // return). Without this, currentUser.access would be all-undefined.
         const a = (data && data.access) || {};
-        currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
+        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [] };
         currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
       }
-      // Pass the backend's own error message through (e.g. "Wrong password." /
-      // "No account found for this email — sign up first."). Store it so the UI
-      // can surface the real reason instead of a generic "login failed".
+      // Pass the backend's own error message through (e.g. "Wrong password.").
       currentUser.sessionError = (data && data.message) ? data.message : 'Login failed.';
       return data && data.message
         ? { status: 'error', message: data.message }
@@ -149,12 +149,9 @@ function loginBackend(email, password) {
   ]);
 }
 
-// Sign-up is two steps (email verification via OTP):
-//   1) requestSignupBackend — backend emails a 6-digit code to the allowlisted
-//      address (MailApp, already scoped — no new permission). No account yet.
-//   2) verifySignupBackend  — user enters the code; backend creates the account
-//      and mints a session. `t` = ms since the form became ready (server-enforced
-//      bot time-gate). `website` is a honeypot — must stay empty.
+// POST helper for every self-authenticating auth call (the password lifecycle).
+// Goes through _origFetch so it carries no session token and can never trip the
+// session gate — a wrong reset code must not look like an expired session.
 function postAuth(action, fields) {
   const fd = new FormData();
   fd.append('action', action);
@@ -165,68 +162,50 @@ function postAuth(action, fields) {
     }))
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
 }
-function requestSignupBackend(email, password, t, website, captchaId, captchaAnswer) {
-  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
-  return postAuth('requestSignup', {
-    email, password, t: String(t || 0), website: website || '',
-    captchaId: captchaId || '', captchaAnswer: captchaAnswer || ''
-  });
-}
-function verifySignupBackend(email, password, code) {
-  if (!email || !password || !code) return Promise.resolve({ status: 'error', message: 'Enter your email, password, and the code.' });
-  return postAuth('verifySignup', { email, password, code });
+
+// Set a new password. Used both for the forced first-login change (currentPassword
+// is the admin's temporary password) and for a password the user chose to change.
+// Returns a session token on success — the only path that mints one for an account
+// still flagged Must Change Password.
+function changePasswordBackend(email, currentPassword, newPassword) {
+  if (!email || !currentPassword || !newPassword) {
+    return Promise.resolve({ status: 'error', message: 'Enter your current and new password.' });
+  }
+  if (newPassword.length < 8) {
+    return Promise.resolve({ status: 'error', message: 'New password must be at least 8 characters.' });
+  }
+  return postAuth('changePassword', { email, currentPassword, newPassword });
 }
 
-// Fetch a self-hosted captcha challenge (server-generated SVG image). The answer
-// stays on the server; the client only gets the image + an id to reference it.
-let _captchaId = null;
-function fetchCaptcha(imgEl) {
-  const errEl = document.getElementById('auth-captcha-error');
-  if (imgEl) imgEl.style.display = 'none';
-  if (errEl) { errEl.style.display = ''; errEl.textContent = 'Loading challenge…'; }
-  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getCaptcha';
-  return _origFetch(url).then(r => r.text().then(t => {
-    try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-  })).then(d => {
-    if (d && d.status === 'ok' && d.captchaId && d.svg && imgEl) {
-      _captchaId = d.captchaId;
-      // Base64 data-URI is the most broadly compatible way to render an SVG in <img>
-      // (handles the U+2212 minus sign and any other non-Latin1 char without encoding drama).
-      try { imgEl.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(d.svg))); }
-      catch (e) { imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.svg); }
-      imgEl.alt = 'Captcha challenge';
-      imgEl.style.display = '';
-      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    } else if (imgEl) {
-      // Surface the REAL reason instead of silently showing a blank box. The most common
-      // cause is the GAS backend not yet redeployed with the getCaptcha action.
-      const reason = (d && d.message) ? d.message : 'no response from server';
-      if (errEl) {
-        errEl.style.display = '';
-        errEl.textContent = /Unknown action/i.test(reason)
-          ? 'Backend needs redeploy — captcha action missing. Tap ↻ after redeploying.'
-          : 'Captcha unavailable — tap ↻ to retry. (' + reason + ')';
-      }
-      console.warn('fetchCaptcha: challenge not loaded', d);
-    }
-    return d;
-  }).catch(err => {
-    const e2 = document.getElementById('auth-captcha-error');
-    if (e2) { e2.style.display = ''; e2.textContent = 'Captcha unavailable — check your connection, then tap ↻.'; }
-    console.warn('fetchCaptcha: network error', err);
-    return null;
-  });
+function forgotPasswordBackend(email) {
+  if (!email) return Promise.resolve({ status: 'error', message: 'Enter your email.' });
+  return postAuth('forgotPassword', { email });
 }
 
-// Refresh the caller's role/permissions from the backend (boot + after access
-// changes). Best-effort — a failure leaves the previous access in place.
+function resetPasswordBackend(email, code, newPassword) {
+  if (!email || !code || !newPassword) {
+    return Promise.resolve({ status: 'error', message: 'Enter the code and your new password.' });
+  }
+  if (newPassword.length < 8) {
+    return Promise.resolve({ status: 'error', message: 'New password must be at least 8 characters.' });
+  }
+  return postAuth('resetPassword', { email, code, newPassword });
+}
+
+// Refresh the caller's role/permissions from the backend (boot + after department
+// changes). Best-effort — a failure leaves the previous access in place, and the
+// gating fallback is view-only, so a failed refresh can never grant edit.
 function refreshMyAccess() {
   if (!currentUser || !currentUser.sessionToken) return Promise.resolve(null);
   const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getMyAccess';
   return fetch(url).then(r => r.ok ? r.json() : null)
     .then(data => {
       if (data && data.status === 'ok') {
-        currentUser.access = { role: data.role, permissions: data.permissions, pendingRequest: !!data.pendingRequest };
+        currentUser.access = {
+          role: data.role,
+          permissions: data.permissions,
+          departments: data.departments || [],
+        };
         return data;
       }
       return null;
@@ -235,7 +214,25 @@ function refreshMyAccess() {
 }
 
 const _origFetch = window.fetch.bind(window);
-let _authToastShown = false;       // one "session expired" hint per session, not per call
+let _authToastShown = false;       // one "session expired" hint per page session
+let _authSuspect = false;          // latched — at most one liveness probe per suspicion
+
+// Attaches the session token + email to every backend call, and decides what a
+// rejection MEANS. Four rules, and the first three exist to make the fourth rare:
+//
+//   1. Any good response clears suspicion.
+//   2. Only a PARSEABLE JSON `unauthorized`, on a call that actually carried a
+//      token, may even start an ejection. An HTTP error, an HTML error page
+//      (which is what a GAS failure returns) or a CORS failure never can.
+//   3. On suspicion, touch NOTHING locally — ask the server via
+//      confirmSessionAlive(), which answers "alive" when it cannot reach it.
+//   4. Only then eject: an inline retry inside the admin modal (where a full
+//      sign-out would lose the admin's unsaved work), a re-login elsewhere.
+//
+// What this replaces: a single unauthorized anywhere wiped storage and showed the
+// login screen, while the 90-second comment poll kept firing into a dead session
+// and re-arming it. That loop — not the token's lifetime — is why the User Access
+// page kept demanding a sign-in.
 window.fetch = function (input, init) {
   return (async () => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -243,18 +240,17 @@ window.fetch = function (input, init) {
     if (!isGAS) return _origFetch(input, init);
 
     // Dev bypass (localhost + ?dev=1): no real account, so backend calls aren't
-    // authorized and fall back to demo data. Intentional — real testing happens
-    // signed-in on the live site.
+    // authorized and fall back to demo data. MUST stay before the token logic —
+    // there is no session to attach and nothing to eject. smoke-boot.mjs depends
+    // on this ordering.
     if (shouldUseDevAuthBypass()) return _origFetch(input, init);
 
-    // login / signup are self-authenticating (email+password in the body) — do
-    // NOT attach a session token to them (there isn't one yet, and they must not
-    // trip the session-expired auto-logout below).
-    const isAuthCall = url.indexOf('action=login') >= 0 || url.indexOf('action=requestSignup') >= 0 || url.indexOf('action=verifySignup') >= 0;
+    // The auth calls authenticate themselves (credentials in the body) and must
+    // never be subject to the session gate below.
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
-
     const isFormData = init && init.body && init.body instanceof FormData;
     const origBody = isFormData ? init.body : null;
 
@@ -265,7 +261,6 @@ window.fetch = function (input, init) {
 
     let resp;
     if (isAuthCall) {
-      // Pass the FormData auth call through untouched (uses _origFetch directly).
       resp = await _origFetch(input, init);
     } else if (isFormData) {
       // FormData() only accepts an HTMLFormElement, so copy entries by hand.
@@ -274,7 +269,6 @@ window.fetch = function (input, init) {
       appendAuth(fd);
       resp = await _origFetch(url, Object.assign({}, init, { body: fd }));
     } else {
-      // GET-style: append creds to the URL.
       const sep = url.indexOf('?') >= 0 ? '&' : '?';
       let q = '';
       if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
@@ -282,26 +276,38 @@ window.fetch = function (input, init) {
       resp = await _origFetch(url + (q ? sep + q : ''), init);
     }
 
-    // If the session is gone (expired / revoked / backend redeployed with a fresh
-    // SESSIONS tab), surface ONE hint and bounce back to the login screen so the
-    // user just signs in again — no "Reconnect" step, fully automatic. This is
-    // the "auto mode" recovery: a dead session never leaves the user stuck.
-    if (resp && resp.ok && !isAuthCall && !_authToastShown) {
-      try {
-        const data = await resp.clone().json();
-        if (data && data.status === 'error' && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
-          _authToastShown = true;
-          showToast('Session expired — please sign in again');
-          try {
-            sessionStorage.removeItem('ipb_user');
-            sessionStorage.removeItem(SESSION_KEY);
-            localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
-          } catch { /* non-fatal */ }
-          currentUser = null;
-          if (typeof showAuth === 'function') showAuth();
-        }
-      } catch { /* not JSON */ }
+    // Rule 2 — nothing below may run unless a token was actually presented.
+    if (!resp || !resp.ok || isAuthCall || !sessionToken) return resp;
+
+    let data = null;
+    try { data = await resp.clone().json(); }
+    catch { _authSuspect = false; return resp; }        // HTML/opaque body → never eject
+
+    const isUnauthorized = data && data.status === 'error'
+      && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
+    if (!isUnauthorized) { _authSuspect = false; return resp; }   // rule 1
+
+    // Rule 3 — ask the server, having changed nothing locally.
+    if (_authSuspect) return resp;                       // a probe is already in flight
+    _authSuspect = true;
+    const alive = await confirmSessionAlive();
+    _authSuspect = false;
+    if (alive) return resp;                              // a false alarm — carry on
+
+    // Rule 4 — confirmed dead.
+    if (!_authToastShown) {
+      _authToastShown = true;
+      showToast('Session expired — please sign in again');
     }
+    // Inside the admin modal, a full sign-out would throw away unsaved edits and
+    // is what made this page feel like it was nagging. Offer a retry instead.
+    if (document.getElementById('access-modal')) {
+      renderAccessReconnect(String(data.message || ''));
+      return resp;
+    }
+    clearLocalAuth();
+    currentUser = null;
+    if (typeof showAuth === 'function') showAuth();
     return resp;
   })();
 };
@@ -311,40 +317,47 @@ let currentSectionData = {};   // cached data for open passbook
 let legacyMap   = {};          // irNumber -> { label, gid, embedUrl, openUrl } for legacy IRs (≤~IR441)
 
 // ─── ADMIN (config editors + access managers) ─────────────────────────────────
-// Admins manage users & per-section access, and bypass every permission check.
-// Must match backend CONFIG.ADMIN_EMAILS.
+// Admins bypass every permission check and are the only accounts that can
+// provision people or set department grants. Must match backend
+// CONFIG.ADMIN_EMAILS.
 const ADMIN_EMAILS = [
   'monish.raza@indrones.com',
-  'customer.relations@indrones.com',
 ];
 function isAdmin() {
   const email = currentUser?.email?.toLowerCase().trim();
   if (!email) return false;
   if (ADMIN_EMAILS.includes(email)) return true;
-  // Allow the local dev user (?dev=1) to test admin features.
-  if (email === `dev@${CONFIG.ALLOWED_DOMAIN}`) return true;
+  // The local dev user (?dev=1) needs admin UI to test the access modal. The guard
+  // must match the bypass's own conditions EXACTLY — it used to be just the email,
+  // so a tampered `ipb_user` in localStorage made isAdmin() true on the live site
+  // even though shouldUseDevAuthBypass() was false. That only showed admin chrome
+  // (every backend call still returned Unauthorized, since the backend knows one
+  // admin) but two definitions of "admin" that disagree is a trap for later.
+  if (email === `dev@${CONFIG.ALLOWED_DOMAIN}` && shouldUseDevAuthBypass()) return true;
   return false;
 }
 // Kept as an alias so existing Section B code reads naturally.
 const isInwardAdmin = isAdmin;
 
-// ─── ACCESS CONTROL (per-section view / comment / edit) ───────────────────────
+// ─── ACCESS CONTROL (view + comment for everyone; edit from departments) ──────
 // `currentUser.access` is populated by loginBackend / refreshMyAccess:
-//   { role: 'admin'|'user'|'none', permissions: { 'sec-a':'edit', ... }, pendingRequest }
-// During the backend redeploy window (or a transient getMyAccess failure) access
-// may be undefined — we fall back to a permissive profile so the app keeps
-// working exactly as it did before ACLs existed. The backend enforces
-// independently once redeployed, so this frontend leniency is safe in transition.
+//   { role: 'admin'|'user', permissions: { 'sec-a':'edit', ... }, departments: [] }
+//
+// The fallback below must fail CLOSED on writes and OPEN on reads: view+comment
+// everywhere, edit nowhere. If access hasn't arrived yet (first paint, a
+// transient getMyAccess failure) the worst case is a disabled Save button the
+// user retries — never an unauthorised write, and never a locked-out screen.
+// The backend enforces independently, so a wrong guess here costs a button.
 const SECTION_IDS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
 function myAccess() {
   if (currentUser && currentUser.access) return currentUser.access;
-  // Permissive fallback: treat as a user with edit on every section.
-  const all = {};
-  SECTION_IDS.forEach(s => { all[s] = 'edit'; });
-  return { role: isAdmin() ? 'admin' : 'user', permissions: all, pendingRequest: false, __fallback: true };
+  const viewOnly = {};
+  SECTION_IDS.forEach(s => { viewOnly[s] = 'view'; });
+  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], __fallback: true };
 }
 function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
-function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'comment' || v === 'edit'; }
+// Comment comes WITH view — every signed-in user can comment on every section.
+function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 
 // ─── SENTINEL STORES ─────────────────────────────────────────────────────────
@@ -666,7 +679,7 @@ const bannerPills   = document.getElementById('ir-banner-pills');
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
 // renderLayout() translates it into the inline display values that the rest of
-// the app reads back (applyAccessGating tests detailView.style.display).
+// the app reads back (applySectionAccessGating tests detailView.style.display).
 let currentView = 'index';     // 'index' | 'detail'
 let activeSegment = 'all';     // ticket-list filter segment
 let _appBooted = false;        // showApp() guard — it re-binds listeners
@@ -691,25 +704,27 @@ window.addEventListener('load', () => {
       const storedSession = loadSession();
       if (stored && storedSession) {
         currentUser = stored;
-        // Restore the server session token so backend calls are authorized with
-        // no sign-in pop-up. This only happens on a refresh WITHIN a session — a
-        // full app close wipes sessionStorage (loadStoredUser/loadSession return
-        // null) and the user must sign in again below.
+        // Restore the server session token so backend calls are authorized with no
+        // sign-in prompt. localStorage, so this survives a full app close.
         currentUser.sessionToken = storedSession;
         showApp();
-        // Refresh role/permissions from the backend (drives access gating +
-        // request-access screen). Best-effort; gating has a safe fallback. If
-        // the session is dead, the interceptor bounces back to the login screen.
-        refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
-        startIdleTimer();   // arm the inactivity auto sign-out
+        // Refresh role/permissions + departments (drives per-section save-button
+        // gating). Best-effort; the gating fallback is view-only.
+        // No mustChangePassword handling here: a stored session can only exist for
+        // an account whose flag is already cleared — the backend mints no token
+        // while it is set — so a stale stored session simply fails sessionCheck and
+        // takes the ordinary expiry path.
+        refreshMyAccess().then(() => {
+          if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+        });
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
-        persistUser(currentUser, false); // dev bypass: this tab only
+        persistUser(currentUser);
         showApp();
       } else {
-        // Stale profile with no session = effectively signed out. Drop the
-        // stale profile and show the login screen so the user signs in fresh.
-        if (stored) { try { sessionStorage.removeItem('ipb_user'); localStorage.removeItem('ipb_user'); } catch { /* non-fatal */ } }
+        // Half-restored state (a profile with no token, or a token with no
+        // profile) is a stale fragment. Clear BOTH and show the login screen.
+        if (stored || storedSession) clearLocalAuth();
         showAuth();
       }
     }, 800);
@@ -723,251 +738,295 @@ function shouldUseDevAuthBypass() {
 }
 
 function createDevUser() {
+  // The dev bypass must be as capable as a real admin, because that is the only
+  // way to exercise the admin modal in a real browser (smoke-boot.mjs relies on
+  // this path entirely). It carries a sessionToken so refreshMyAccess() actually
+  // runs instead of returning early — that early return used to hide the fact
+  // that a dev user had no token at all.
+  const all = {};
+  SECTION_IDS.forEach(s => { all[s] = 'edit'; });
   return {
     name: 'Dev Tester',
     email: `dev@${CONFIG.ALLOWED_DOMAIN}`,
     initial: 'D',
     token: 'local-dev',
+    sessionToken: 'local-dev',
+    access: { role: 'admin', permissions: all, departments: [] },
   };
 }
 
-// ─── IN-SESSION PROFILE (sessionStorage — NOT persistent across app close) ────
-// The profile + session token live in sessionStorage only, so a full app close
-// wipes them and the next open forces a fresh sign-in (a handed-off device can't
-// inherit the previous user's session). A refresh within a session keeps the
-// user signed in. The server session token is the real credential; this profile
-// is just the display name/email. The raw password is NEVER stored.
-function persistUser(user /* persist flag ignored — always sessionStorage */) {
+// ─── LOCAL PROFILE (localStorage — survives an app close) ────────────────────
+// The profile + session token live in localStorage so reopening the app resumes
+// the session instead of demanding a sign-in. The server session token is the
+// real credential and is revocable; this profile is just the display name/email.
+// The raw password is NEVER stored.
+function persistUser(user) {
   const safe = {
     name:    user.name,
     email:   user.email,
     picture: user.picture,
     initial: user.initial,
   };
-  try {
-    sessionStorage.setItem('ipb_user', JSON.stringify(safe));
-    // Deliberately do NOT write localStorage — that would survive app close and
-    // defeat the "reopen → must sign in again" security model.
-    localStorage.removeItem('ipb_user');
-  } catch { /* storage may be unavailable in private mode — non-fatal */ }
+  try { localStorage.setItem('ipb_user', JSON.stringify(safe)); } catch { /* private mode */ }
 }
 
 function loadStoredUser() {
   try {
-    // sessionStorage only — a full app close clears it, forcing re-sign-in.
-    const session = sessionStorage.getItem('ipb_user');
-    if (session) return JSON.parse(session);
-    // If a very old localStorage profile lingers from the prior "keep me logged
-    // in" model, ignore (and clean) it — we never restore a cross-close session.
-    localStorage.removeItem('ipb_user');
-  } catch { }
-  return null;
+    return JSON.parse(localStorage.getItem('ipb_user') || 'null');
+  } catch { return null; }
 }
 
 // ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
+// Three modes share one form: 'login' | 'forgot' | 'reset'. There is no sign-up
+// mode — accounts are provisioned by the admin — so the only two things a person
+// can do here are sign in, and recover a forgotten password via an emailed code.
+let _authFormWired = false;
+let _authMode = 'login';     // 'login' | 'forgot' | 'reset'
+let _resetEmail = '';
+
+// Establish a signed-in session from a backend payload. Shared by the login form
+// and the forced password change, so both land in exactly the same state.
+function finishAuth(email, d) {
+  const fallbackName = (email.split('@')[0] || 'User');
+  currentUser = currentUser || {};
+  currentUser.name    = currentUser.name || fallbackName;
+  currentUser.email   = email;
+  currentUser.initial = String(currentUser.name).charAt(0).toUpperCase() || '?';
+  delete currentUser.picture;
+  currentUser.sessionToken = d.sessionToken;
+  // The backend nests the access payload under data.access (getMyAccess).
+  const a = (d && d.access) || {};
+  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [] };
+  currentUser.sessionError = null;
+  persistSession(d.sessionToken);
+  persistUser(currentUser);
+  _authToastShown = false;   // fresh session — allow one expiry hint again
+  showApp();
+  refreshMyAccess().then(() => { if (typeof applySectionAccessGating === 'function') applySectionAccessGating(); });
+}
+
 function showAuth() {
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
+  const pc = document.getElementById('password-change');
+  if (pc) pc.style.display = 'none';
+  document.body.classList.remove('view-detail');
+  _resetEmail = '';
+  setAuthMode('login');
   const err = document.getElementById('auth-error');
-  if (err) err.style.display = 'none';
-  // Reset to a clean Sign-in form (showAuth can be called mid-session by the
-  // idle timeout / session-expired path, when the form may be in signup/OTP mode).
-  const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
-  const show = (id) => { const el = document.getElementById(id); if (el) el.style.display = ''; };
-  hide('auth-name-wrap'); hide('auth-otp-wrap'); hide('auth-captcha-wrap');
-  show('auth-signin-btn'); hide('auth-signup-btn');
-  const toggleBtn = document.getElementById('auth-toggle-mode');
-  if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
-  _authMode = 'login'; _pendingSignup = null;
-  ['auth-email', 'auth-password', 'auth-otp', 'auth-captcha'].forEach(id => {
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   wireAuthForm();
 }
 
-let _authFormWired = false;
-let _authFormReadyTs = 0;          // for the server-enforced bot time-gate
-let _authMode = 'login';           // 'login' | 'signup' | 'otp'
-let _pendingSignup = null;         // { email, password } held between OTP request & verify
+// Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
+// the browser's own Enter-to-submit keeps working in all three modes.
+function setAuthMode(mode) {
+  _authMode = mode;
+  const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  set('auth-password',      mode === 'login');
+  set('auth-signin-btn',    mode === 'login');
+  set('auth-forgot-link',   mode === 'login');
+  set('auth-forgot-wrap',   mode === 'forgot');
+  set('auth-reset-wrap',    mode === 'reset');
+  set('auth-back-link',     mode !== 'login');
+  set('auth-email',         true);          // every mode needs the email
+  // `required` follows visibility explicitly rather than relying on browsers
+  // agreeing that a display:none control is barred from constraint validation —
+  // a hidden required input that still validated would make the forgot and reset
+  // steps unsubmittable.
+  const passIn = document.getElementById('auth-password');
+  if (passIn) passIn.required = (mode === 'login');
+  const hint = document.getElementById('auth-hint-text');
+  if (hint) {
+    hint.textContent = mode === 'forgot'
+      ? 'Enter your email and we’ll send you a reset code.'
+      : mode === 'reset'
+        ? 'Enter the code from your email and choose a new password.'
+        : 'Sign in with the credentials your admin gave you.';
+  }
+  const err = document.getElementById('auth-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+}
+
+// ─── FORCED FIRST-LOGIN PASSWORD CHANGE ──────────────────────────────────────
+// A full-screen sibling of #app-container: while it is up, nothing in the shell
+// is reachable.
+//
+// It is presentation only. A temp-password sign-in returns NO session token (see
+// backend doLoginPassword), so there is nothing to skip TO — removing this screen
+// in devtools leaves you signed out with no way in. The temporary password is held
+// in a module-local variable and never touches storage.
+let _pcEmail = '';
+let _pcTemp = null;
+let _pcWired = false;
+
+function showPasswordChange(email, forced, tempPassword) {
+  _pcEmail = (email || '').toLowerCase().trim();
+  if (forced) _pcTemp = tempPassword || _pcTemp;
+  else _pcTemp = null;
+  authCont.style.display = 'none';
+  appCont.style.display  = 'none';
+  document.body.classList.remove('view-detail');
+  const pc = document.getElementById('password-change');
+  if (!pc) { showAuth(); return; }
+  pc.style.display = 'flex';
+  const em = document.getElementById('pc-email');
+  if (em) em.textContent = _pcEmail;
+  const sub = document.getElementById('pc-sub');
+  if (sub) {
+    sub.textContent = forced
+      ? 'Welcome. Set your own password to finish setting up your account — you only do this once.'
+      : 'Choose a new password for your account.';
+  }
+  ['pc-new', 'pc-confirm'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const err = document.getElementById('pc-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+  wirePasswordChange();
+  const first = document.getElementById('pc-new');
+  if (first) setTimeout(() => first.focus(), 60);
+}
+
+function wirePasswordChange() {
+  if (_pcWired) return;
+  _pcWired = true;
+  const form   = document.getElementById('pc-form');
+  const save   = document.getElementById('pc-save');
+  const out    = document.getElementById('pc-signout');
+  const errEl  = document.getElementById('pc-error');
+  const showErr = m => { if (errEl) { errEl.textContent = m; errEl.style.display = m ? 'block' : 'none'; } };
+
+  if (out) out.addEventListener('click', () => { _pcTemp = null; signOut(); });
+
+  const submit = () => {
+    const a = (document.getElementById('pc-new') || {}).value || '';
+    const b = (document.getElementById('pc-confirm') || {}).value || '';
+    if (a.length < 8) { showErr('Password must be at least 8 characters.'); return; }
+    if (a !== b) { showErr('The two passwords do not match.'); return; }
+    if (!_pcTemp) { showErr('Your sign-in expired — please sign in again.'); showAuth(); return; }
+    if (save) { save.disabled = true; save.textContent = 'Setting…'; }
+    showErr('');
+    changePasswordBackend(_pcEmail, _pcTemp, a).then(d => {
+      if (save) { save.disabled = false; save.textContent = 'Set password & continue'; }
+      if (d && d.status === 'ok' && d.sessionToken) {
+        _pcTemp = null;
+        finishAuth(_pcEmail, d);
+      } else {
+        showErr((d && d.message) || 'Could not set the password.');
+      }
+    });
+  };
+  if (save) save.addEventListener('click', submit);
+  if (form) form.addEventListener('submit', ev => { ev.preventDefault(); submit(); });
+}
+
 function wireAuthForm() {
   if (_authFormWired) return;
   const form = document.getElementById('auth-form');
   if (!form) return;
   _authFormWired = true;
-  _authFormReadyTs = Date.now();
 
   const emailIn    = document.getElementById('auth-email');
   const passIn     = document.getElementById('auth-password');
-  const honeyIn    = document.getElementById('auth-website');   // honeypot — humans leave empty
-  const signInBtn   = document.getElementById('auth-signin-btn');
-  const signUpBtn   = document.getElementById('auth-signup-btn');
-  const toggleBtn   = document.getElementById('auth-toggle-mode');
-  const otpWrap     = document.getElementById('auth-otp-wrap');
-  const otpIn       = document.getElementById('auth-otp');
-  const otpNote     = document.getElementById('auth-otp-note');
-  const verifyBtn   = document.getElementById('auth-verify-btn');
-  const resendLink  = document.getElementById('auth-resend-link');
-  const captchaWrap = document.getElementById('auth-captcha-wrap');
-  const captchaImg  = document.getElementById('auth-captcha-img');
-  const captchaIn   = document.getElementById('auth-captcha');
-  const captchaRefresh = document.getElementById('auth-captcha-refresh');
-  const errEl       = document.getElementById('auth-error');
-
-  const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; } };
-  const refreshCaptcha = () => { if (captchaImg) fetchCaptcha(captchaImg); if (captchaIn) captchaIn.value = ''; };
-  const setOtpStep = (on, note) => {
-    if (otpWrap) otpWrap.style.display = on ? 'flex' : 'none';
-    if (on && otpNote && note) otpNote.textContent = note;
-    if (on) _authMode = 'otp'; else if (_authMode === 'otp') _authMode = 'signup';
-    if (on) {
-      signUpBtn.style.display = 'none';
-      if (captchaWrap) captchaWrap.style.display = 'none';   // captcha already validated
-      if (otpIn) setTimeout(() => otpIn.focus(), 50);
-    }
-  };
-
-  const finishSuccess = (email, d) => {
-    const name = (email.split('@')[0] || 'User');
-    currentUser.name    = name;
-    currentUser.email   = email;
-    currentUser.initial = name.charAt(0).toUpperCase() || '?';
-    delete currentUser.picture;
-    currentUser.sessionToken = d.sessionToken;
-    const a = (d && d.access) || {};
-    currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
-    persistSession(d.sessionToken);
-    persistUser(currentUser, true);
-    showApp();
-    refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
-    startIdleTimer();   // arm the inactivity auto sign-out
-  };
+  const codeIn     = document.getElementById('auth-code');
+  const newIn      = document.getElementById('auth-new-password');
+  const signInBtn  = document.getElementById('auth-signin-btn');
+  const forgotBtn  = document.getElementById('auth-forgot-btn');
+  const resetBtn   = document.getElementById('auth-reset-btn');
+  const resendLink = document.getElementById('auth-resend-link');
+  const errEl      = document.getElementById('auth-error');
+  const showError  = m => { if (errEl) { errEl.textContent = m; errEl.style.display = m ? 'block' : 'none'; } };
+  const emailOf    = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
 
   const submitLogin = () => {
-    const email = (emailIn.value || '').trim().toLowerCase();
-    const password = passIn.value || '';
+    const email = emailOf();
+    const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
     signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
     showError('');
-    currentUser = currentUser || { email: email };
+    currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, password).then(d => {
       signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
-      if (d && d.status === 'ok' && d.sessionToken) finishSuccess(email, d);
-      else showError((d && d.message) || 'Login failed.');
+      // A temporary password is correct but not yet a session — the change is the
+      // only way forward, and the password just typed is the credential for it.
+      if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
+      if (d && d.status === 'ok' && d.sessionToken) finishAuth(email, d);
+      else showError((d && d.message) || 'Sign in failed.');
     });
   };
 
-  // Step 1: ask the backend to email a 6-digit code to the allowlisted address.
-  // The honeypot + time-to-submit + captcha are all checked server-side.
-  const requestCode = (email, password) => {
-    const t = Date.now() - _authFormReadyTs;
-    const website = (honeyIn && honeyIn.value) || '';
-    if (website) return Promise.resolve({ status: 'error', message: 'Sign-up could not be completed.' });
-    const answer = (captchaIn && captchaIn.value) || '';
-    return requestSignupBackend(email, password, t, website, _captchaId, answer);
-  };
-
-  const submitSignup = () => {
-    const email = (emailIn.value || '').trim().toLowerCase();
-    const password = passIn.value || '';
-    if (!email || !password) { showError('Enter your email and a password.'); return; }
-    if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
-    if (captchaIn && !captchaIn.value) { showError('Please solve the captcha.'); return; }
-    signUpBtn.disabled = true; signUpBtn.textContent = 'Sending code…';
+  const submitForgot = () => {
+    const email = emailOf();
+    if (!email) { showError('Enter your email first.'); return; }
+    forgotBtn.disabled = true; forgotBtn.textContent = 'Sending…';
     showError('');
-    requestCode(email, password).then(d => {
-      signUpBtn.disabled = false; signUpBtn.textContent = 'Sign up';
-      if (d && d.status === 'ok') {
-        _pendingSignup = { email, password };
-        currentUser = { email: email };
-        setOtpStep(true, 'Enter the 6-digit code sent to ' + email);
-        if (d.message) showToast(d.message);
-      } else {
-        // A wrong/expired captcha is refreshed so the user gets a fresh image.
-        if (d && d.captchaRefresh) refreshCaptcha();
-        showError((d && d.message) || 'Sign up failed.');
-      }
+    forgotPasswordBackend(email).then(d => {
+      forgotBtn.disabled = false; forgotBtn.textContent = 'Email me a code';
+      // The backend answers identically whether or not the account exists, so the
+      // UI must not imply otherwise — always move on to the code step.
+      _resetEmail = email;
+      setAuthMode('reset');
+      const note = document.getElementById('auth-reset-note');
+      if (note) note.textContent = 'If ' + email + ' has an account, a 6-digit code is on its way.';
+      showToast((d && d.message) || 'Check your inbox for the reset code');
     });
   };
 
-  // Step 2: verify the code → backend creates the account + mints a session.
-  const submitVerify = () => {
-    if (!_pendingSignup) { showError('Please request a code first.'); return; }
-    const code = (otpIn && otpIn.value || '').trim();
+  const submitReset = () => {
+    const email = _resetEmail || emailOf();
+    const code  = ((codeIn && codeIn.value) || '').trim();
+    const pw    = (newIn && newIn.value) || '';
     if (!code) { showError('Enter the 6-digit code from your email.'); return; }
-    verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying…';
+    if (pw.length < 8) { showError('New password must be at least 8 characters.'); return; }
+    resetBtn.disabled = true; resetBtn.textContent = 'Setting…';
     showError('');
-    verifySignupBackend(_pendingSignup.email, _pendingSignup.password, code).then(d => {
-      verifyBtn.disabled = false; verifyBtn.textContent = 'Verify & create account';
-      if (d && d.status === 'ok' && d.sessionToken) {
-        const email = _pendingSignup ? _pendingSignup.email : (currentUser && currentUser.email || '');
-        _pendingSignup = null;
-        setOtpStep(false);
-        finishSuccess(email, d);
+    resetPasswordBackend(email, code, pw).then(d => {
+      resetBtn.disabled = false; resetBtn.textContent = 'Set new password';
+      if (d && d.status === 'ok') {
+        // No token is returned on purpose: signing in with the new password is
+        // what proves it was typed the way the user meant.
+        if (codeIn) codeIn.value = '';
+        if (newIn) newIn.value = '';
+        if (emailIn) emailIn.value = email;
+        setAuthMode('login');
+        showError('');
+        showToast('Password set — sign in with your new password');
       } else {
-        showError((d && d.message) || 'Verification failed.');
+        showError((d && d.message) || 'Could not reset the password.');
       }
     });
   };
 
-  const resendCode = () => {
-    if (!_pendingSignup) return;
+  const resend = () => {
+    if (!resendLink) return;
     resendLink.textContent = 'Sending…';
     resendLink.style.pointerEvents = 'none';
-    showError('');
-    requestCode(_pendingSignup.email, _pendingSignup.password).then(d => {
+    forgotPasswordBackend(_resetEmail || emailOf()).then(d => {
       resendLink.textContent = 'Resend code';
       resendLink.style.pointerEvents = '';
-      if (d && d.status === 'ok') showToast(d.message || 'New code sent');
-      else showError((d && d.message) || 'Could not resend.');
+      showToast((d && d.message) || 'If that account exists, a new code is on its way');
     });
   };
 
-  signInBtn.addEventListener('click', submitLogin);
-  signUpBtn.addEventListener('click', submitSignup);
-  if (verifyBtn) verifyBtn.addEventListener('click', submitVerify);
-  if (resendLink) resendLink.addEventListener('click', resendCode);
-  if (captchaRefresh) captchaRefresh.addEventListener('click', (e) => { e.preventDefault(); refreshCaptcha(); });
-  if (toggleBtn) toggleBtn.addEventListener('click', toggleAuthMode);
-  // Enter submits the CURRENT mode (login / signup / otp), not always login.
-  form.addEventListener('submit', (ev) => {
+  if (signInBtn)  signInBtn.addEventListener('click', submitLogin);
+  if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
+  if (resetBtn)   resetBtn.addEventListener('click', submitReset);
+  if (resendLink) resendLink.addEventListener('click', resend);
+  const forgotLink = document.getElementById('auth-forgot-link');
+  if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
+  const backLink = document.getElementById('auth-back-link');
+  if (backLink) backLink.addEventListener('click', () => setAuthMode('login'));
+
+  // Enter submits the CURRENT mode, not always login.
+  form.addEventListener('submit', ev => {
     ev.preventDefault();
-    if (_authMode === 'otp') submitVerify();
-    else if (_authMode === 'signup') submitSignup();
+    if (_authMode === 'forgot') submitForgot();
+    else if (_authMode === 'reset') submitReset();
     else submitLogin();
   });
-}
-
-function toggleAuthMode() {
-  const nameWrap  = document.getElementById('auth-name-wrap');
-  const toggleBtn = document.getElementById('auth-toggle-mode');
-  const signInBtn = document.getElementById('auth-signin-btn');
-  const signUpBtn = document.getElementById('auth-signup-btn');
-  const otpWrap   = document.getElementById('auth-otp-wrap');
-  const captchaWrap = document.getElementById('auth-captcha-wrap');
-  const captchaImg  = document.getElementById('auth-captcha-img');
-  if (!nameWrap) return;
-  const isSignup = nameWrap.style.display !== 'none';
-  if (isSignup) {
-    // → Sign in mode
-    nameWrap.style.display = 'none';
-    if (otpWrap) otpWrap.style.display = 'none';
-    if (captchaWrap) captchaWrap.style.display = 'none';
-    signInBtn.style.display = '';
-    signUpBtn.style.display = 'none';
-    _authMode = 'login';
-    _pendingSignup = null;
-    if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
-  } else {
-    // → Sign up mode (captcha is required, so fetch a fresh challenge now)
-    nameWrap.style.display = '';
-    if (otpWrap) otpWrap.style.display = 'none';
-    if (captchaWrap) { captchaWrap.style.display = ''; if (captchaImg) fetchCaptcha(captchaImg); }
-    signInBtn.style.display = 'none';
-    signUpBtn.style.display = '';
-    _authMode = 'signup';
-    if (toggleBtn) toggleBtn.textContent = 'Already have an account? Sign in';
-  }
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
@@ -1018,8 +1077,7 @@ function toggleTheme() {
 
 // ─── LAYOUT ──────────────────────────────────────────────────────────────────
 // One function owns the panes' visibility. It must keep writing *inline*
-// styles: applyAccessGating reads detailView.style.display, and
-// applySectionAccessGating selects `.tab:not([style*="display: none"])`.
+// styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
 //   desktop (≥1024px) : list always visible, detail beside it when open
 //   mobile            : list and detail are separate full screens
@@ -1099,33 +1157,11 @@ async function handleRoute() {
 window.addEventListener('hashchange', () => { handleRoute(); });
 
 // ─── APP BOOT ────────────────────────────────────────────────────────────────
-function showApp() {
-  authCont.style.display = 'none';
-  appCont.style.display  = 'flex';
-
-  // Idempotent: this function binds click listeners to the avatar, the bell and
-  // the request-access buttons. A second call (re-login, router re-entry) would
-  // double-fire every one of them, so bind once and only refresh the layout.
-  if (_appBooted) { renderLayout(); syncNavAccess(); return; }
-  _appBooted = true;
-
-  showIndex();
-  applyTheme();          // sync the nav toggle with the stored preference
-  syncNavAccess();
-
-  // Set up user avatar
-  userAvatar.textContent = currentUser?.initial || '?';
-  if (currentUser?.picture) {
-    userAvatar.style.backgroundImage = `url(${currentUser.picture})`;
-    userAvatar.style.backgroundSize  = 'cover';
-    userAvatar.textContent = '';
-  }
-
-  // User menu toggle
-  userAvatar.addEventListener('click', toggleUserMenu);
-  if (navTheme) navTheme.addEventListener('click', toggleTheme);
-  if (navAccess) navAccess.addEventListener('click', openAccessModal);
-
+// Everything the signed-in app loads, and the poll it starts. Split out of
+// showApp() so the in-page re-login path can run it a second time: that path
+// stops the nudge poll during teardown, and a signed-in user who never gets it
+// back has a silently dead comment bell for the life of the page.
+function startAppData() {
   // Fetch IRs. The promise is kept so a deep link (#/tickets/IR409) can wait
   // for the list before it opens the passbook.
   _irsReady = fetchIRs();
@@ -1145,17 +1181,58 @@ function showApp() {
   loadIRState();
   loadNudges();
   startNudgePolling();
+}
+
+function showApp() {
+  // Guard: an account still holding a temporary password must never reach the
+  // shell. This is belt-and-braces — the backend mints no session in that state,
+  // so finishAuth() cannot be reached with mustChangePassword set — but a guard
+  // here means any future caller that gets it wrong diverts instead of showing a
+  // half-usable app whose every save would be rejected.
+  if (currentUser && currentUser.access && currentUser.access.mustChangePassword) {
+    showPasswordChange(currentUser.email, true);
+    return;
+  }
+  authCont.style.display = 'none';
+  appCont.style.display  = 'flex';
+  const pc = document.getElementById('password-change');
+  if (pc) pc.style.display = 'none';
+
+  // Idempotent: this function binds click listeners to the avatar, the bell and
+  // the nav. A second call (re-login, router re-entry) would double-fire every
+  // one of them, so bind once and only refresh the layout + the data.
+  //
+  // The data reload is not optional. A second call means an IN-PAGE re-login: the
+  // interceptor's confirmed-expiry path calls showAuth() and the user signs in
+  // again without the page ever reloading, so `_appBooted` is still true. The
+  // teardown that got them there (clearLocalAuth) STOPS the nudge poll — so
+  // returning here without restarting it left a freshly signed-in user with no
+  // comment polling, no IR refresh and no app state, silently and permanently.
+  if (_appBooted) { renderLayout(); syncNavAccess(); startAppData(); return; }
+  _appBooted = true;
+
+  showIndex();
+  applyTheme();          // sync the nav toggle with the stored preference
+  syncNavAccess();
+
+  // Set up user avatar
+  userAvatar.textContent = currentUser?.initial || '?';
+  if (currentUser?.picture) {
+    userAvatar.style.backgroundImage = `url(${currentUser.picture})`;
+    userAvatar.style.backgroundSize  = 'cover';
+    userAvatar.textContent = '';
+  }
+
+  // User menu toggle
+  userAvatar.addEventListener('click', toggleUserMenu);
+  if (navTheme) navTheme.addEventListener('click', toggleTheme);
+  if (navAccess) navAccess.addEventListener('click', openAccessModal);
+
+  startAppData();
 
   // Bell toggle
   const bell = document.getElementById('nudge-bell');
   if (bell) bell.addEventListener('click', toggleNudgePanel);
-
-  // Wire the request-access screen buttons (shown later by applyAccessGating
-  // if the signed-in user has no access yet).
-  const raBtn = document.getElementById('request-access-btn');
-  if (raBtn) raBtn.addEventListener('click', requestAccessAction);
-  const raOut = document.getElementById('request-access-signout');
-  if (raOut) raOut.addEventListener('click', signOut);
 
   // Enter the route. A hash already in the URL (deep link / restored tab) wins;
   // otherwise start on the ticket list without adding a history entry.
@@ -1170,66 +1247,109 @@ function syncNavAccess() {
   if (navAccess)     navAccess.style.display     = admin ? '' : 'none';
 }
 
-// ─── ACCESS GATING (boot-level: app vs request-access screen) ────────────────
-// Called after login / refreshMyAccess. A signed-in user with role 'none'
-// (and not an admin) gets the request-access screen instead of the IR index.
-function applyAccessGating() {
-  const ra = document.getElementById('request-access');
-  if (!ra) return;
-  const a = myAccess();
-  const locked = a.role === 'none' && !isAdmin() && !a.__fallback;
-  if (locked) {
-    // #request-access is a sibling of #app-container, so the whole shell
-    // (sidebar + header + panes) goes away, not just the panes.
-    ra.style.display = 'flex';
-    appCont.style.display = 'none';
-    indexView.style.display = 'none';
-    detailView.style.display = 'none';
-    document.body.classList.remove('view-detail');
-    const emailEl = document.getElementById('request-access-email');
-    if (emailEl) emailEl.textContent = currentUser?.email || '';
-    const pendEl = document.getElementById('request-access-pending');
-    if (pendEl) pendEl.style.display = a.pendingRequest ? 'block' : 'none';
-    const btn = document.getElementById('request-access-btn');
-    if (btn) { btn.disabled = !!a.pendingRequest; btn.textContent = a.pendingRequest ? 'Access requested' : 'Request access'; }
-    return;
-  }
-  // Has access (or fallback during transition) → hide request-access screen.
-  ra.style.display = 'none';
-  // Only restore the shell if the user is actually signed in (this runs on the
-  // access-refresh path, which can also fire while the login screen is up).
-  if (authCont.style.display === 'none') appCont.style.display = 'flex';
-  syncNavAccess();
-  if (detailView.style.display === 'flex') {
-    applySectionAccessGating();   // a passbook is open — re-gate with fresh access
-  } else {
-    showIndex();
-  }
-}
+// ─── ACCESS GATING (retired) ─────────────────────────────────────────────────
+// There is no boot-level gate any more. Every signed-in account gets view +
+// comment on all nine sections the moment it exists, so the old
+// "you don't have access — request it and wait for an admin" screen had nothing
+// left to enforce and is gone, along with requestAccessAction().
+//
+// What remains is per-section EDIT gating inside an open passbook, which is
+// applySectionAccessGating() below. Edit rights come from departments only, and
+// the backend enforces them independently of anything rendered here.
 
-// Submit an access request. The backend records it as pending + emails admins.
-function requestAccessAction() {
-  const fd = new FormData();
-  fd.append('action', 'requestAccess');
-  fd.append('name', currentUser?.name || '');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.json())
-    .then(data => {
-      if (data && data.status === 'ok') {
-        if (currentUser.access) currentUser.access.pendingRequest = true;
-        applyAccessGating();
-        showToast('Access requested — an admin will review it');
-      } else {
-        showToast('Could not request access: ' + ((data && data.message) || 'backend error'));
-      }
-    })
-    .catch(() => showToast('Could not reach the backend — try again'));
-}
-
-// ─── ADMIN: User Access & Requests modal ─────────────────────────────────────
-const ACCESS_LEVELS = ['', 'view', 'comment', 'edit'];
-const ACCESS_LABEL  = { '': 'None', 'view': 'View', 'comment': 'Comment', 'edit': 'Edit' };
+// ─── ADMIN: User Access modal ────────────────────────────────────────────────
+// Three tabs, one backend call. `listUsers` returns every account AND every
+// department in a single response, so switching tabs never re-fetches and the
+// People matrix can draw people × departments from one consistent snapshot.
 const SECTION_LABELS = { 'sec-a':'A','sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G','sec-h':'H','sec-i':'I' };
+// Human names for the tick grids. Kept as a literal rather than derived from
+// SECTIONS (defined much further down, and lazily) so the admin UI never depends
+// on the section-form builder having been evaluated.
+const SECTION_SHORT = {
+  'sec-a': 'Preliminary Details',
+  'sec-b': 'Inward Checklist',
+  'sec-c': 'IQC Visual Inspection',
+  'sec-d': 'Investigation',
+  'sec-e': 'Production (Rework)',
+  'sec-f': 'Quality Control',
+  'sec-g': 'Flight Test',
+  'sec-h': 'Pre-Delivery Inspection',
+  'sec-i': 'Logistics & Dispatch',
+};
+
+let accessCache = { users: [], departments: [], apiVersion: 0 };
+let accessTab = 'people';
+
+// Every admin action is a POST carrying the session token, so it goes through the
+// intercepted fetch (which appends the token) — never _origFetch.
+function adminPost(action, fields) {
+  const fd = new FormData();
+  fd.append('action', action);
+  Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.json())
+    .catch(() => ({ status: 'error', message: 'Could not reach the backend.' }));
+}
+
+function copyText(text) {
+  const ok = () => showToast('Copied to clipboard');
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok();
+    } catch { showToast('Copy failed — select the text and copy manually'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(fallback);
+  } else fallback();
+}
+
+// The owner's handover document. One block per person, to be pasted into a txt
+// and delivered individually. It contains the ONE moment the temporary password
+// is visible — the backend stores only its hash, so if this is lost the admin
+// issues a new one with Reset password.
+function credentialsTxt(email, tempPassword, name) {
+  const link = location.origin + location.pathname;
+  return [
+    'I-PASSBOOK — your sign-in details',
+    '=================================',
+    '',
+    (name ? 'Name:  ' + name : ''),
+    'Email: ' + email,
+    'Temporary password: ' + tempPassword,
+    '',
+    'How to get in (first time only)',
+    '-------------------------------',
+    '1. Open: ' + link,
+    '2. Sign in with the email and temporary password above.',
+    '3. You will be asked to set your OWN password. Do that — the temporary',
+    '   one stops working immediately afterwards.',
+    '',
+    'On a phone: open the link, then use your browser menu →',
+    '"Add to Home screen" so it opens like an app.',
+    '',
+    'What you can do',
+    '---------------',
+    '• You can VIEW every ticket and COMMENT on any section right away.',
+    '• You can EDIT the sections your department owns. If you need edit',
+    '  access somewhere else, ask the admin — it is a department setting.',
+    '',
+    'Forgot your password?',
+    '---------------------',
+    'On the sign-in screen click "Forgot password?", enter this email, and a',
+    '6-digit code will arrive by email. Enter the code and choose a new one.',
+    '',
+    'Keep this safe and do not forward it.',
+  ].filter(l => l !== '').join('\n');
+}
 
 function openAccessModal() {
   if (!isAdmin()) { showToast('Admins only'); return; }
@@ -1241,252 +1361,428 @@ function openAccessModal() {
   modal.innerHTML = `
     <div class="access-card">
       <div class="inward-options-head">
-        <div class="inward-options-title">👥 User Access &amp; Requests</div>
+        <div class="inward-options-title">👥 User Access</div>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
       <div class="access-status" id="access-status"></div>
-      <div class="access-body">
-        <div class="access-section">
-          <h3>Pending requests</h3>
-          <div id="access-requests"><div class="access-loading">Loading…</div></div>
-        </div>
-        <div class="access-section">
-          <h3>Users</h3>
-          <p class="access-hint">Add a teammate's @indrones.com email and pick one access level for all sections. Need finer control? Choose <strong>Custom…</strong> to set sections A–I separately.</p>
-          <p class="access-legend"><span class="acc-lv none">None</span> no access · <span class="acc-lv view">View</span> read-only · <span class="acc-lv comment">Comment</span> view + comment · <span class="acc-lv edit">Edit</span> view + comment + edit · <strong>Custom…</strong> per section</p>
-          <div class="access-add-row">
-            <input type="email" id="access-new-email" class="form-input" placeholder="teammate@indrones.com" />
-            <button type="button" class="btn" id="access-add-btn">+ Add</button>
-          </div>
-          <div id="access-users"><div class="access-loading">Loading…</div></div>
-          <button type="button" class="btn" id="access-save-all" style="margin-top:0.75rem;">💾 Save all changes</button>
-        </div>
+      <div class="access-tabs">
+        <button type="button" class="access-tab" data-tab="people">People &amp; departments</button>
+        <button type="button" class="access-tab" data-tab="depts">Departments</button>
+        <button type="button" class="access-tab" data-tab="create">Create people</button>
       </div>
+      <div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
-  document.getElementById('access-add-btn').addEventListener('click', addAccessUser);
-  document.getElementById('access-save-all').addEventListener('click', saveAllAccess);
-  updateAccessStatus();
+  modal.querySelectorAll('.access-tab').forEach(btn => {
+    btn.addEventListener('click', () => { accessTab = btn.dataset.tab; renderAccessTabs(); });
+  });
+  renderAccessTabs();
   loadAccessData();
 }
+function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
+
+function renderAccessTabs() {
+  const modal = document.getElementById('access-modal');
+  if (!modal) return;
+  modal.querySelectorAll('.access-tab').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.tab === accessTab);
+  });
+}
+
 function updateAccessStatus() {
   const el = document.getElementById('access-status');
   if (!el) return;
   const hasSession = !!(currentUser && currentUser.sessionToken);
-  const cred = hasSession
-    ? 'session ✓'
-    : ('no active session — ' + escHtml((currentUser && currentUser.sessionError) || 'sign in again'));
-  el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}`;
+  const cred = hasSession ? 'session ✓' : 'no active session';
+  const v = accessCache.apiVersion ? ' · API v' + accessCache.apiVersion : '';
+  el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}${v}`;
 }
-function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
 
-let accessCache = { users: [], requests: [] };
+// The reconnect panel. Rendered INSIDE the modal, because a full sign-out here
+// would throw away whatever the admin was mid-way through — and that ejector is
+// what made this page feel like it was nagging for a sign-in. The button retries
+// the load instead of signing out.
 function accessReconnectHtml(reason) {
-  // reason = the REAL backend rejection (expired/revoked session). With
-  // email+password auth there is no "Reconnect" — the user just signs in again.
-  const why = reason ? escHtml(String(reason)) : 'Your sign-in session isn’t active, so the backend rejected this request.';
-  const hint = 'Your session expired. Sign in again and this list reloads automatically.';
+  const why = reason
+    ? escHtml(String(reason))
+    : 'Your sign-in session isn’t active, so the backend rejected this request.';
   return `<div class="access-error">
-    <div id="access-reconnect-reason">${why}</div>
-    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Sign in again</button>
-    <div class="access-hint" style="margin-top:0.5rem;">${hint}</div>
+    <div>${why}</div>
+    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Retry</button>
+    <div class="access-hint" style="margin-top:0.5rem;">Nothing you have typed here has been lost. Retry to reload — sign out only if the retry keeps failing.</div>
   </div>`;
 }
+function renderAccessReconnect(reason) {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  panels.innerHTML = accessReconnectHtml(reason);
+  const rb = document.getElementById('access-reconnect-btn');
+  if (rb) rb.addEventListener('click', () => { panels.innerHTML = '<div class="access-loading">Loading…</div>'; loadAccessData(); });
+}
+
 function loadAccessData() {
-  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listACL')
+  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listUsers')
     .then(r => r.json())
     .then(data => {
       if (data && data.status === 'ok') {
-        accessCache = { users: data.users || [], requests: data.requests || [] };
-        renderAccessRequests();
-        renderAccessUsers();
+        accessCache = { users: data.users || [], departments: data.departments || [], apiVersion: data.apiVersion || 0 };
+        updateAccessStatus();
+        renderAccessPanel();
         return;
       }
       const unauthorized = data && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
       // Surface the REAL backend rejection reason instead of a generic message.
       const reason = (currentUser && currentUser.sessionError) || (data && data.message) || '';
-      const html = unauthorized
-        ? accessReconnectHtml(reason)
-        : '<div class="access-error">Could not load — is the backend redeployed? ' + escHtml((data && data.message) || '') + '</div>';
-      document.getElementById('access-requests').innerHTML = html;
-      document.getElementById('access-users').innerHTML = '';
-      if (unauthorized) {
-        const rb = document.getElementById('access-reconnect-btn');
-        if (rb) rb.addEventListener('click', () => { signOut(); });
-      }
+      if (unauthorized) { renderAccessReconnect(reason); return; }
+      const panels = document.getElementById('access-panels');
+      if (panels) panels.innerHTML = '<div class="access-error">Could not load — is the backend redeployed? ' + escHtml((data && data.message) || '') + '</div>';
     })
     .catch(() => {
-      document.getElementById('access-requests').innerHTML = '<div class="access-error">Could not reach the backend.</div>';
-      document.getElementById('access-users').innerHTML = '';
+      const panels = document.getElementById('access-panels');
+      if (panels) panels.innerHTML = '<div class="access-error">Could not reach the backend. <button type="button" class="btn btn-sm" id="access-reconnect-btn" style="margin-left:0.5rem;">Retry</button></div>';
+      const rb = document.getElementById('access-reconnect-btn');
+      if (rb) rb.addEventListener('click', () => loadAccessData());
     });
 }
 
-function renderAccessRequests() {
-  const el = document.getElementById('access-requests');
-  const reqs = accessCache.requests || [];
-  if (!reqs.length) { el.innerHTML = '<div class="access-empty">No pending requests.</div>'; return; }
-  el.innerHTML = reqs.map(r => `
-    <div class="access-request-row">
-      <div><div class="access-req-name">${escHtml(r.name || '—')}</div><div class="access-req-email">${escHtml(r.email)}</div><div class="access-req-time">${escHtml(r.requestedAt || '')}</div></div>
-      <div class="access-req-actions">
-        <button type="button" class="btn btn-sm" onclick="approveRequest('${escHtml(r.email)}')">Approve</button>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="rejectRequest('${escHtml(r.email)}')">Reject</button>
-      </div>
-    </div>`).join('');
+function renderAccessPanel() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  if (accessTab === 'depts')       renderDepartmentsTab();
+  else if (accessTab === 'create') renderCreateTab();
+  else                             renderPeopleTab();
 }
 
-// A user's effective single access level when all 9 sections are equal. If the
-// sections differ, the user is in "Custom…" mode (mixed per-section perms).
-function userAccessLevel(u) {
-  const p = (u && u.permissions) || {};
-  const first = (p[SECTION_IDS[0]] || '');
-  return SECTION_IDS.every(s => (p[s] || '') === first) ? first : '__custom__';
-}
-
-function renderAccessUsers() {
-  const el = document.getElementById('access-users');
+// ─── TAB 1: people × departments matrix ──────────────────────────────────────
+function renderPeopleTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
   const users = accessCache.users || [];
-  if (!users.length) { el.innerHTML = '<div class="access-empty">No users yet — add one above.</div>'; return; }
-  el.innerHTML = users.map((u, idx) => {
-    const level = userAccessLevel(u);
-    const isCustom = level === '__custom__';
-    // Primary access-level selector: None / View / Comment / Edit / Custom…
-    const levelOpts = ['', 'view', 'comment', 'edit', '__custom__']
-      .map(l => `<option value="${l}"${l === level ? ' selected' : ''}>${l === '__custom__' ? 'Custom…' : ACCESS_LABEL[l]}</option>`).join('');
-    // Per-section grid (only shown in Custom mode). Selects always exist in the
-    // DOM so readRowPermsFromDom works in both modes.
-    const cells = SECTION_IDS.map(s => {
-      const v = (u.permissions && u.permissions[s]) || '';
-      const sopts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
-      return `<label class="acc-sec"><span>${SECTION_LABELS[s]}</span>
-        <select class="access-cell" data-row="${idx}" data-sec="${s}">${sopts}</select></label>`;
-    }).join('');
-    return `<div class="access-user-card" data-row="${idx}">
-      <div class="access-user-top">
+  const depts = accessCache.departments || [];
+  if (!users.length) {
+    panels.innerHTML = '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
+    return;
+  }
+  const head = depts.map(d => `<th title="${escHtml(d.name)}">${escHtml(d.name || d.key)}</th>`).join('');
+  const rows = users.map(u => {
+    const mine = u.departments || [];
+    const cells = depts.map(d => `
+      <td><input type="checkbox" class="acc-dept-tick" data-email="${escHtml(u.email)}" data-key="${escHtml(d.key)}"${mine.indexOf(d.key) >= 0 ? ' checked' : ''} /></td>`).join('');
+    const badge = u.isAdmin
+      ? '<span class="acc-badge acc-badge-admin">admin</span>'
+      : (u.status === 'disabled' ? '<span class="acc-badge acc-badge-off">disabled</span>' : '');
+    const pending = u.mustChangePassword ? '<span class="acc-badge acc-badge-temp">temp password</span>' : '';
+    return `<tr data-email="${escHtml(u.email)}">
+      <td class="acc-matrix-name">
         <div class="access-email-line">${escHtml(u.email)}</div>
+        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${pending}</div>
+        <div class="acc-matrix-actions">
+          <button type="button" class="btn btn-sm btn-secondary acc-reset" data-email="${escHtml(u.email)}">Reset password</button>
+          ${u.isAdmin ? '' : `<button type="button" class="btn btn-sm btn-secondary acc-toggle" data-email="${escHtml(u.email)}" data-status="${u.status === 'disabled' ? 'active' : 'disabled'}">${u.status === 'disabled' ? 'Enable' : 'Disable'}</button>`}
+        </div>
+      </td>
+      ${depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>'}
+    </tr>`;
+  }).join('');
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>Who is in which department</h3>
+      <p class="access-hint">Tick the departments a person belongs to. <strong>Everyone</strong> signed in can view and comment on every section — a tick here only adds <strong>edit</strong> rights, on the sections that department owns (set in the <em>Departments</em> tab).</p>
+      <div class="acc-matrix-wrap">
+        <table class="acc-matrix">
+          <thead><tr><th>Person</th>${head}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn" id="access-save-all" style="margin-top:0.75rem;">💾 Save all changes</button>
+    </div>`;
+
+  panels.querySelectorAll('.acc-reset').forEach(b => b.addEventListener('click', () => resetPasswordAction(b.dataset.email)));
+  panels.querySelectorAll('.acc-toggle').forEach(b => b.addEventListener('click', () => setStatusAction(b.dataset.email, b.dataset.status)));
+  const save = document.getElementById('access-save-all');
+  if (save) save.addEventListener('click', savePeopleMatrix);
+}
+
+// One POST per CHANGED person. Unchanged rows are skipped, so a 19-person grid
+// with one edit is one write, not nineteen.
+function savePeopleMatrix() {
+  const btn = document.getElementById('access-save-all');
+  const ticks = document.querySelectorAll('.acc-dept-tick');
+  const byEmail = {};
+  ticks.forEach(t => {
+    const e = t.dataset.email;
+    if (!byEmail[e]) byEmail[e] = [];
+    if (t.checked) byEmail[e].push(t.dataset.key);
+  });
+  const jobs = [];
+  (accessCache.users || []).forEach(u => {
+    const next = (byEmail[u.email] || []).slice().sort();
+    const prev = (u.departments || []).slice().sort();
+    if (next.join('|') === prev.join('|')) return;      // unchanged — don't write
+    jobs.push(adminPost('setUserDepartments', { email: u.email, departments: JSON.stringify(next) }));
+  });
+  if (!jobs.length) { showToast('Nothing changed'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  Promise.all(jobs).then(results => {
+    const failed = results.filter(d => !d || d.status !== 'ok').length;
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save all changes'; }
+    showToast(failed ? `Saved ${results.length - failed}, ${failed} failed` : `Saved ${results.length} change${results.length === 1 ? '' : 's'}`);
+    loadAccessData();
+  });
+}
+
+function resetPasswordAction(email) {
+  if (!confirm('Issue a NEW temporary password for ' + email + '?\n\nTheir current password stops working and their devices are signed out.')) return;
+  adminPost('resetUserPassword', { email: email }).then(d => {
+    if (d && d.status === 'ok') { showCredentials([{ email: d.email, tempPassword: d.tempPassword, name: '' }]); loadAccessData(); }
+    else showToast((d && d.message) || 'Could not reset the password.');
+  });
+}
+
+function setStatusAction(email, status) {
+  if (status === 'disabled' && !confirm('Disable ' + email + '?\n\nThey are signed out immediately and cannot sign in again until re-enabled.')) return;
+  adminPost('setUserStatus', { email: email, status: status }).then(d => {
+    showToast((d && d.message) || (d && d.status === 'ok' ? 'Done' : 'Could not change the status.'));
+    loadAccessData();
+  });
+}
+
+// ─── TAB 2: department → section grants ──────────────────────────────────────
+function renderDepartmentsTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  const depts = accessCache.departments || [];
+  const cards = depts.map(d => {
+    const ticks = SECTION_IDS.map(s => `
+      <label class="acc-sec" title="${escHtml(SECTION_SHORT[s])}">
+        <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="${s}"${d.grants && d.grants[s] ? ' checked' : ''} />
+        <span>${SECTION_LABELS[s]}</span>
+        <span class="acc-sec-name">${escHtml(SECTION_SHORT[s])}</span>
+      </label>`).join('');
+    return `<div class="access-user-card" data-key="${escHtml(d.key)}">
+      <div class="access-user-top">
+        <div>
+          <div class="access-email-line">${escHtml(d.name || d.key)}</div>
+          <div class="acc-matrix-sub">${d.members || 0} ${d.members === 1 ? 'person' : 'people'}${d.active ? '' : ' · inactive'}</div>
+        </div>
         <div class="access-user-controls">
-          <select class="access-level" data-row="${idx}">${levelOpts}</select>
-          <button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button>
+          <button type="button" class="btn btn-sm acc-save-dept" data-key="${escHtml(d.key)}">Save</button>
+          <button type="button" class="btn btn-sm btn-danger acc-del-dept" data-key="${escHtml(d.key)}">Delete</button>
         </div>
       </div>
-      <div class="access-perms-grid" style="${isCustom ? '' : 'display:none;'}">${cells}</div>
+      <div class="access-perms-grid">${ticks}</div>
     </div>`;
   }).join('');
-  // Wire each row's access-level selector.
-  el.querySelectorAll('.access-level').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const idx = Number(sel.dataset.row);
-      const val = sel.value;
-      const card = el.querySelector(`.access-user-card[data-row="${idx}"]`);
-      const grid = card && card.querySelector('.access-perms-grid');
-      if (val === '__custom__') { if (grid) grid.style.display = ''; return; }
-      // One level for all sections: update cache + every per-section dropdown so a
-      // later "Custom…" expand reflects the chosen level. readRowPermsFromDom reads
-      // those dropdowns, so this is what gets saved.
-      if (grid) grid.style.display = 'none';
-      const u = accessCache.users[idx];
-      if (u) { u.permissions = u.permissions || {}; SECTION_IDS.forEach(s => { u.permissions[s] = val; }); }
-      el.querySelectorAll(`.access-cell[data-row="${idx}"]`).forEach(c => { c.value = val; });
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>What each department may edit</h3>
+      <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
+      <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
+      <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
+      <div class="access-add-row" style="margin-top:0.75rem;">
+        <input type="text" id="access-new-dept" class="form-input" placeholder="New department name" />
+        <button type="button" class="btn" id="access-add-dept">+ Add department</button>
+      </div>
+    </div>`;
+
+  panels.querySelectorAll('.acc-save-dept').forEach(b => b.addEventListener('click', () => saveDepartmentAction(b.dataset.key)));
+  panels.querySelectorAll('.acc-del-dept').forEach(b => b.addEventListener('click', () => deleteDepartmentAction(b.dataset.key)));
+  const add = document.getElementById('access-add-dept');
+  if (add) add.addEventListener('click', () => {
+    const inp = document.getElementById('access-new-dept');
+    const name = (inp && inp.value || '').trim();
+    if (!name) { showToast('Enter a department name'); return; }
+    const existing = (accessCache.departments || []).find(d => (d.name || '').toLowerCase() === name.toLowerCase());
+    if (existing) { showToast('That department already exists'); return; }
+    adminPost('saveDepartment', { name: name, grants: '{}' }).then(d => {
+      showToast((d && d.message) || 'Created');
+      loadAccessData();
     });
   });
 }
 
-// Read the current dropdown selections for a row from the DOM (captures the
-// admin's edits before saving).
-function readRowPermsFromDom(idx) {
-  const perms = {};
-  SECTION_IDS.forEach(s => {
-    const sel = document.querySelector(`.access-cell[data-row="${idx}"][data-sec="${s}"]`);
-    perms[s] = sel ? sel.value : '';
-  });
-  return perms;
+function readDeptGrants(key) {
+  const grants = {};
+  document.querySelectorAll(`.acc-grant[data-key="${key}"]`).forEach(t => { grants[t.dataset.sec] = t.checked ? 'edit' : ''; });
+  return grants;
+}
+function saveDepartmentAction(key) {
+  const d = (accessCache.departments || []).find(x => x.key === key);
+  adminPost('saveDepartment', {
+    key: key,
+    name: (d && d.name) || key,
+    active: (d && d.active === false) ? 'no' : 'yes',
+    grants: JSON.stringify(readDeptGrants(key)),
+  }).then(r => { showToast((r && r.message) || 'Saved'); loadAccessData(); });
+}
+function deleteDepartmentAction(key) {
+  if (!confirm('Delete the department "' + key + '"?\n\nEveryone in it loses the edit rights it granted. This cannot be undone.')) return;
+  adminPost('deleteDepartment', { key: key }).then(d => { showToast((d && d.message) || 'Deleted'); loadAccessData(); });
 }
 
-function saveAccessRow(email, perms) {
-  const fd = new FormData();
-  fd.append('action', 'saveACL');
-  fd.append('email', email);
-  fd.append('permissions', JSON.stringify(perms));
-  fd.append('mode', 'upsert');
-  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json());
+// ─── TAB 3: create people (single + bulk) ────────────────────────────────────
+function renderCreateTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>One person</h3>
+      <div class="access-add-row">
+        <input type="email" id="access-new-email" class="form-input" placeholder="teammate@indrones.com" />
+        <input type="text" id="access-new-name" class="form-input" placeholder="Full name (optional)" />
+        <button type="button" class="btn" id="access-create-one">+ Create account</button>
+      </div>
+    </div>
+    <div class="access-section">
+      <h3>Several people</h3>
+      <p class="access-hint">One email per line. Commas and semicolons work too. Duplicates and existing accounts are skipped and reported — one typo will not stop the rest.</p>
+      <textarea id="access-bulk-emails" class="form-input" rows="6" placeholder="a@indrones.com&#10;b@indrones.com&#10;c@indrones.com"></textarea>
+      <p class="access-hint" style="margin-top:0.5rem;">Optional: one <code>email, Full Name</code> per line, to set display names.</p>
+      <textarea id="access-bulk-names" class="form-input" rows="3" placeholder="a@indrones.com, Asha Rao"></textarea>
+      <button type="button" class="btn" id="access-bulk-create" style="margin-top:0.75rem;">Create accounts</button>
+    </div>
+    <div id="access-creds"></div>
+    <div class="access-section acc-danger">
+      <h3>Danger zone</h3>
+      <p class="access-hint">Delete <strong>every</strong> account except the admins. Used once when the app was re-provisioned. It cannot be undone, so it happens in two steps: review the list, copy it, then confirm.</p>
+      <div class="access-add-row">
+        <input type="text" id="access-purge-confirm" class="form-input" placeholder="Type PURGE to confirm" />
+        <button type="button" class="btn btn-danger" id="access-purge">Review what will be deleted</button>
+      </div>
+      <div id="access-purge-out"></div>
+    </div>`;
+
+  const one = document.getElementById('access-create-one');
+  if (one) one.addEventListener('click', () => {
+    const inp = document.getElementById('access-new-email');
+    const nm  = document.getElementById('access-new-name');
+    const email = (inp && inp.value || '').trim().toLowerCase();
+    if (!email) { showToast('Enter an email address'); return; }
+    one.disabled = true; one.textContent = 'Creating…';
+    adminPost('createUser', { email: email, name: (nm && nm.value || '').trim() }).then(d => {
+      one.disabled = false; one.textContent = '+ Create account';
+      if (d && d.status === 'ok') {
+        if (inp) inp.value = '';
+        if (nm) nm.value = '';
+        showCredentials([{ email: d.email, tempPassword: d.tempPassword, name: d.name }]);
+        loadAccessData();
+      } else showToast((d && d.message) || 'Could not create the account.');
+    });
+  });
+
+  const bulk = document.getElementById('access-bulk-create');
+  if (bulk) bulk.addEventListener('click', () => {
+    const eInp = document.getElementById('access-bulk-emails');
+    const nInp = document.getElementById('access-bulk-names');
+    const emails = (eInp && eInp.value || '').trim();
+    if (!emails) { showToast('Paste at least one email address'); return; }
+    bulk.disabled = true; bulk.textContent = 'Creating…';
+    adminPost('bulkCreateUsers', { emails: emails, names: (nInp && nInp.value) || '' }).then(d => {
+      bulk.disabled = false; bulk.textContent = 'Create accounts';
+      if (d && d.status === 'ok') {
+        if (eInp) eInp.value = '';
+        if (nInp) nInp.value = '';
+        showCredentials(d.created || [], d.skipped || []);
+        loadAccessData();
+      } else showToast((d && d.message) || 'Could not create the accounts.');
+    });
+  });
+
+  const purge = document.getElementById('access-purge');
+  if (purge) purge.addEventListener('click', () => {
+    const c = document.getElementById('access-purge-confirm');
+    const out = document.getElementById('access-purge-out');
+    const typed = (c && c.value || '').trim();
+    if (typed !== 'PURGE') { showToast('Type PURGE exactly to confirm'); return; }
+    purge.disabled = true; purge.textContent = 'Checking…';
+    // Step 1 — PLAN ONLY. The backend writes nothing here, so this is safe to press
+    // by accident and safe to close the page on. It used to delete first and hand
+    // back a "backup" in the same response, which is not a backup: a dropped
+    // connection took the only record of those accounts with them.
+    adminPost('purgeUsers', { confirm: 'PURGE', dryRun: '1' }).then(d => {
+      purge.disabled = false; purge.textContent = 'Review what will be deleted';
+      if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Purge refused.'); return; }
+      const rows = d.removed || [];
+      if (!out) return;
+      if (!rows.length) {
+        out.innerHTML = '<p class="access-hint" style="margin-top:0.6rem;">Nothing to delete — there are no non-admin accounts.</p>';
+        return;
+      }
+      // Tab-separated so it pastes straight into a Sheet as columns.
+      const backup = rows.map(r => [r.email, r.name, r.createdBy, r.createdAt].join('\t')).join('\n');
+      out.innerHTML = `<p class="access-hint" style="margin-top:0.6rem;">Nothing has been deleted yet — copy this list first.</p>
+        <textarea class="form-input" rows="6" readonly>${escHtml(backup)}</textarea>
+        <div class="access-add-row" style="margin-top:0.5rem;">
+          <button type="button" class="btn btn-sm btn-secondary" id="access-purge-copy">Copy backup</button>
+          <button type="button" class="btn btn-sm btn-danger" id="access-purge-go">Delete these ${rows.length} account(s)</button>
+        </div>`;
+      const cp = document.getElementById('access-purge-copy');
+      if (cp) cp.addEventListener('click', () => copyText(backup));
+      const go = document.getElementById('access-purge-go');
+      if (go) go.addEventListener('click', () => {
+        if (!confirm(`Delete ${rows.length} account(s) permanently?`)) return;
+        go.disabled = true; go.textContent = 'Deleting…';
+        // `expect` pins the reviewed count. If an account was created or removed
+        // between the two steps the backend refuses and nothing is deleted.
+        adminPost('purgeUsers', { confirm: 'PURGE', expect: String(rows.length) }).then(res => {
+          if (res && res.status === 'ok') {
+            out.innerHTML = `<p class="access-hint" style="margin-top:0.6rem;">Deleted ${(res.removed || []).length} account(s).</p>`;
+            if (c) c.value = '';
+            showToast(res.message || 'Accounts removed.');
+            loadAccessData();
+          } else {
+            go.disabled = false; go.textContent = `Delete these ${rows.length} account(s)`;
+            showToast((res && res.message) || 'Purge refused.');
+          }
+        });
+      });
+    });
+  });
 }
 
-function addAccessUser() {
-  const inp = document.getElementById('access-new-email');
-  const email = (inp?.value || '').trim().toLowerCase();
-  if (!email.endsWith('@' + CONFIG.ALLOWED_DOMAIN)) { showToast('Enter a valid @' + CONFIG.ALLOWED_DOMAIN + ' email'); return; }
-  if (accessCache.users.some(u => u.email === email)) { showToast('That user is already listed'); return; }
-  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = ''; });
-  accessCache.users.push({ email, permissions: perms });
-  inp.value = '';
-  // Render the new row locally WITHOUT reloading from the server — a reload
-  // would wipe any unsaved dropdown edits the admin made in other rows. The
-  // new user is persisted on "Save all changes" (or immediately below).
-  renderAccessUsers();
-  saveAccessRow(email, perms).then(d => {
-    showToast(d && d.status === 'ok' ? 'Added ' + email + ' — set permissions, then Save all changes' : 'Add pending: ' + ((d && d.message) || 'will save with Save all'));
-  });
+// The credentials panel. This is the ONLY time a temporary password is visible —
+// the sheet holds its hash — so it warns, and offers both a human block and a CSV.
+function showCredentials(created, skipped) {
+  const wrap = document.getElementById('access-creds');
+  if (!wrap) return;
+  if (!created || !created.length) {
+    wrap.innerHTML = skipped && skipped.length
+      ? `<div class="access-section"><h3>Nothing created</h3>${skippedHtml(skipped)}</div>`
+      : '';
+    return;
+  }
+  const blocks = created.map(c => credentialsTxt(c.email, c.tempPassword, c.name)).join('\n\n' + '-'.repeat(60) + '\n\n');
+  const csv = created.map(c => c.email + ',' + c.tempPassword).join('\n');
+  const cards = created.map(c => `
+    <div class="cred-card">
+      <div class="cred-email">${escHtml(c.email)}${c.name ? ' · ' + escHtml(c.name) : ''}</div>
+      <div class="cred-pw"><code>${escHtml(c.tempPassword)}</code>
+        <button type="button" class="btn btn-sm btn-secondary cred-copy-pw" data-pw="${escHtml(c.tempPassword)}">Copy password</button>
+      </div>
+    </div>`).join('');
+  wrap.innerHTML = `
+    <div class="access-section">
+      <h3>${created.length} temporary password${created.length === 1 ? '' : 's'}</h3>
+      <p class="access-hint">⚠️ <strong>Shown once.</strong> Only the hash is stored — if you lose these, use <em>Reset password</em> to issue new ones. Nothing here has been written to the sheet or to any file.</p>
+      ${cards}
+      <div class="access-add-row" style="margin-top:0.75rem;">
+        <button type="button" class="btn" id="cred-copy-all">📋 Copy all handover texts</button>
+        <button type="button" class="btn btn-secondary" id="cred-copy-csv">Copy as CSV (email,password)</button>
+      </div>
+      ${skipped && skipped.length ? skippedHtml(skipped) : ''}
+    </div>`;
+  const all = document.getElementById('cred-copy-all');
+  if (all) all.addEventListener('click', () => copyText(blocks));
+  const csvBtn = document.getElementById('cred-copy-csv');
+  if (csvBtn) csvBtn.addEventListener('click', () => copyText(csv));
+  wrap.querySelectorAll('.cred-copy-pw').forEach(b => b.addEventListener('click', () => copyText(b.dataset.pw)));
 }
-
-function removeAccessUser(idx) {
-  const u = accessCache.users[idx];
-  if (!u) return;
-  if (!confirm('Remove access for ' + u.email + '?')) return;
-  // Remove locally + re-render (no server reload, which would wipe unsaved
-  // edits in other rows). The delete is persisted immediately below.
-  accessCache.users.splice(idx, 1);
-  renderAccessUsers();
-  const fd = new FormData();
-  fd.append('action', 'saveACL');
-  fd.append('email', u.email);
-  fd.append('mode', 'remove');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? 'Removed ' + u.email : 'Remove pending: ' + ((d && d.message) || 'will clear on next reload'));
-  });
-}
-
-function saveAllAccess() {
-  const users = accessCache.users || [];
-  let done = 0, failed = 0;
-  const total = users.length;
-  if (!total) { showToast('Nothing to save'); return; }
-  const btn = document.getElementById('access-save-all');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  Promise.all(users.map((u, idx) => saveAccessRow(u.email, readRowPermsFromDom(idx))
-    .then(d => { if (d && d.status === 'ok') done++; else failed++; })
-    .catch(() => failed++)
-  )).then(() => {
-    btn.disabled = false; btn.textContent = '💾 Save all changes';
-    showToast(failed ? `Saved ${done}, ${failed} failed` : `Saved access for ${done} user${done === 1 ? '' : 's'}`);
-    loadAccessData();
-  });
-}
-
-function approveRequest(email) {
-  // Approve with default View on every section — the admin can fine-tune in the
-  // users table below. Keeps the request flow one click.
-  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = 'view'; });
-  const fd = new FormData();
-  fd.append('action', 'decideRequest');
-  fd.append('email', email);
-  fd.append('decision', 'approve');
-  fd.append('permissions', JSON.stringify(perms));
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? `Approved ${email} — default View access. Adjust below.` : 'Approve failed: ' + ((d && d.message) || 'error'));
-    loadAccessData();
-  });
-}
-function rejectRequest(email) {
-  if (!confirm('Reject access request from ' + email + '?')) return;
-  const fd = new FormData();
-  fd.append('action', 'decideRequest');
-  fd.append('email', email);
-  fd.append('decision', 'reject');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? `Rejected ${email}` : 'Reject failed: ' + ((d && d.message) || 'error'));
-    loadAccessData();
-  });
+function skippedHtml(skipped) {
+  return `<div class="access-hint" style="margin-top:0.6rem;"><strong>Skipped:</strong><ul>` +
+    skipped.map(s => `<li>${escHtml(s.email)} — ${escHtml(s.reason || '')}</li>`).join('') + `</ul></div>`;
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -1498,7 +1794,7 @@ function createUserMenu() {
     menu.innerHTML = `
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
-      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access &amp; Requests</button>' : ''}
+      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access</button>' : ''}
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
@@ -1525,14 +1821,12 @@ function signOut() {
       const fd = new FormData();
       fd.append('action', 'logout');
       fd.append('sessionToken', st);
-      fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
+      // _origFetch, not the intercepted one: the interceptor's rules are built
+      // around keeping a live session, and this call is deliberately ending one.
+      _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
     } catch { /* non-fatal */ }
   }
-  try {
-    sessionStorage.removeItem('ipb_user');
-    sessionStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
-  } catch { }
+  clearLocalAuth();
   currentUser = null;
   location.reload();
 }
@@ -1897,22 +2191,29 @@ function renderIRList(records) {
 
   irList.innerHTML = records.map(ir => {
     const owner = ir.assigneeName || ir.assignee || '';
+    // Everything below is escaped, and that is load-bearing rather than tidy:
+    // `droneId` is Form Responses column K, written by whoever submits the public
+    // customer form, and `status`/`priority` can be rewritten by any signed-in user
+    // through the `__IRS__` sentinel store. Before this, an unauthenticated
+    // attacker could put an `onerror` payload in the serial field and steal the
+    // admin's session token the moment the list rendered.
+    const sumUrl = safeUrl(ir.summaryLink);
     return `
-    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${ir.irNumber}" onclick="goTicket('${ir.irNumber}')">
+    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
       ${owner ? `<span class="assignee-avatar" title="Assigned to ${escHtml(owner)}">${escHtml(initialsOf(owner))}</span>` : ''}
       <div class="ir-card-main">
-        <div class="ir-title">${ir.irNumber}</div>
+        <div class="ir-title">${escHtml(ir.irNumber)}</div>
         <div class="ir-meta">
-          <span class="ir-sn">${ir.droneId || ''}</span>
+          <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
           ${ir.type ? `<span class="ir-dot">·</span><span class="ir-type">${escHtml(ir.type)}</span>` : ''}
-          ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${ir.dateRaised}</span>` : ''}
+          ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
         </div>
       </div>
       <div class="ir-card-side">
         ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
-        ${ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${ir.priority}</span>` : ''}
-        <span class="${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
-        ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
+        ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(ir.priority)}</span>` : ''}
+        <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
+        ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
   `;
@@ -2708,7 +3009,7 @@ function buildField(field, irNumber, sectionId) {
       </div>`;
   } else if (field.type === 'file') {
     control = `
-      <div class="file-upload-wrapper" onclick="document.getElementById('${id}').click()">
+      <div class="file-upload-wrapper" onclick="document.getElementById('${escJsAttr(id)}').click()">
         <span style="font-size:1.5rem;">📎</span>
         <span style="font-size:0.85rem; margin-top:4px;">Tap to attach photo or file</span>
         <input type="file" id="${id}" class="file-upload-input" accept="image/*,application/pdf" ${field.multiple ? 'multiple' : ''} />
@@ -2749,7 +3050,7 @@ function buildField(field, irNumber, sectionId) {
         <div class="activity-table-body" id="${id}-body">
           ${rowsHtml}
         </div>
-        <button type="button" class="btn-add-row" onclick="addActivityRow('${id}')">+ Add Row</button>
+        <button type="button" class="btn-add-row" onclick="addActivityRow('${escJsAttr(id)}')">+ Add Row</button>
       </div>
     `;
   } else if (field.type === 'costTable') {
@@ -2770,7 +3071,7 @@ function buildField(field, irNumber, sectionId) {
           <span class="cost-del-h"></span>
         </div>
         <div class="cost-table-body" id="${id}-body">${rowsHtml}</div>
-        <button type="button" class="btn-add-row" onclick="addCostRow('${id}')">+ Add Row</button>
+        <button type="button" class="btn-add-row" onclick="addCostRow('${escJsAttr(id)}')">+ Add Row</button>
         <div class="cost-total">Total Repair Cost: ₹<span id="${id}-total">0.00</span></div>
       </div>
     `;
@@ -2836,8 +3137,8 @@ function buildField(field, irNumber, sectionId) {
       <div class="image-evidence" id="${id}-wrap" data-field="${id}">
         <div class="image-evidence-list" id="${id}-list"></div>
         <div class="evidence-actions">
-          <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${id}')">+ Add image / PDF</button>
-          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${id}')">📷 Capture photo</button>
+          <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(id)}')">+ Add image / PDF</button>
+          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(id)}')">📷 Capture photo</button>
         </div>
         <input type="file" id="${id}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
         <input type="file" id="${id}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${id}', this)" />
@@ -2856,8 +3157,8 @@ function buildField(field, irNumber, sectionId) {
         <div class="image-evidence" id="${attachId}-wrap" data-field="${attachId}">
           <div class="image-evidence-list" id="${attachId}-list"></div>
           <div class="evidence-actions">
-            <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escHtml(attachId)}')">+ Add image / PDF</button>
-            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escHtml(attachId)}')">📷 Capture photo</button>
+            <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(attachId)}')">+ Add image / PDF</button>
+            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(attachId)}')">📷 Capture photo</button>
           </div>
           <input type="file" id="${attachId}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
           <input type="file" id="${attachId}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
@@ -2902,7 +3203,7 @@ function buildField(field, irNumber, sectionId) {
   // commentable for this user (skipped for read-only analysis notes too).
   const canFieldComment = sectionId ? canCommentSection(sectionId) : true;
   const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
-    ? `<button type="button" class="field-nudge-btn" data-field-id="${escHtml(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
+    ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   const labelHtml = field.label
     ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
@@ -3054,6 +3355,34 @@ function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Escaper for a value interpolated into an INLINE HANDLER, e.g.
+//   onclick="goTicket('${escJsAttr(ir.irNumber)}')"
+// escHtml is NOT enough there: it does not touch `'`, and every handler in this
+// file is a single-quoted JS string inside a double-quoted attribute — so a value
+// containing a quote closes the JS string and the rest runs as code. That is a
+// live hole, because these values come from the Sheet (a member of the public
+// writes the customer Form) and from sentinel stores any signed-in user can write.
+// Escaping order matters: entities first, then the backslash, then the quote that
+// the backslash protects.
+function escJsAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r?\n/g, '\\n');
+}
+
+// An href built from stored data must be a real http(s) URL — otherwise
+// `javascript:` is a link the user clicks. Anything else becomes '' and the
+// caller omits the anchor.
+function safeUrl(u) {
+  const s = String(u == null ? '' : u).trim();
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
 function renderESignatureHTML(fieldId, role) {
   const sig = esignatureState[fieldId];
   const email = currentUser?.email || '';
@@ -3066,7 +3395,7 @@ function renderESignatureHTML(fieldId, role) {
   if (sig && sig.signedBy) {
     const canOverride = isAdmin() || sig.signedBy === email;
     const overrideBtn = canOverride
-      ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${fieldId}')">Override &amp; Re-sign</button>`
+      ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${escJsAttr(fieldId)}')">Override &amp; Re-sign</button>`
       : '';
     return `
       <div class="esignature-signed" title="${escHtml(historyTitle)}">
@@ -3083,7 +3412,7 @@ function renderESignatureHTML(fieldId, role) {
   }
   // Unsigned
   const signBtn = email
-    ? `<button type="button" class="btn-esign btn-esign-sign" onclick="signESignature('${fieldId}')">Sign as ${escHtml(email)}</button>`
+    ? `<button type="button" class="btn-esign btn-esign-sign" onclick="signESignature('${escJsAttr(fieldId)}')">Sign as ${escJsAttr(email)}</button>`
     : `<span class="esignature-muted">Sign in to sign.</span>`;
   return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span>${signBtn}</div>`;
 }
@@ -4156,7 +4485,7 @@ function renderImageEvidence(fieldId) {
                value="${escHtml(e.caption || '')}"
                oninput="updateEvidenceCaption('${escHtml(fieldId)}', ${i}, this.value)" />
         <button type="button" class="evidence-remove"
-                onclick="removeEvidenceImage('${escHtml(fieldId)}', ${i})" title="Remove">&#10005;</button>
+                onclick="removeEvidenceImage('${escJsAttr(fieldId)}', ${i})" title="Remove">&#10005;</button>
       </div>`;
   }).join('');
 }
@@ -4394,11 +4723,14 @@ function drainToastQueue() {
 // irNumber '__NUDGES__' / sectionId 'all' (same mechanism as the admin config).
 
 // ── Team directory (admin-editable; used for @-mention autocomplete) ──
+// A seed only — the admin owns this list from the editor. `customer.relations@`
+// was removed from the seed with the Sept 2026 rewrite: it is no longer an
+// account (see ADMIN_EMAILS), and a directory entry that resolves to no mailbox
+// turns an @-mention into a silent bounce.
 const TEAM_DIRECTORY_DEFAULTS = [
   { name: 'Monish Raza',        email: 'monish.raza@indrones.com' },
   { name: 'Ravi Singh',         email: 'ravi@indrones.com' },
   { name: 'Adhik Nair',          email: 'adhik.nair@indrones.com' },
-  { name: 'Customer Relations', email: 'customer.relations@indrones.com' },
 ];
 let teamDirectory = TEAM_DIRECTORY_DEFAULTS.map(d => ({ ...d }));
 
@@ -4747,8 +5079,8 @@ function renderNudgePanel() {
       ? `<span class="nudge-status resolved">✓ Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
-      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
     return `<div class="nudge-item ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
@@ -4759,7 +5091,7 @@ function renderNudgePanel() {
       <div class="nudge-actions">
         ${statusChip}
         ${actionBtn}
-        ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escHtml(n.irNumber)}')">Open IR</button>` : ''}
+        ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escJsAttr(n.irNumber)}')">Open IR</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -4850,10 +5182,10 @@ function renderNudgeThread() {
       ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">✓ Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
-      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
     const editBtn = editable && !editing
-      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escHtml(n.id)}')" title="Edit comment">✏ Edit</button>`
+      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escJsAttr(n.id)}')" title="Edit comment">✏ Edit</button>`
       : '';
     const editedTag = n.editedAt
       ? `<span class="nudge-edited" title="Edited${n.editedBy ? ' by ' + n.editedBy : ''} · ${relativeTime(n.editedAt)}">(edited)</span>`
@@ -4861,7 +5193,7 @@ function renderNudgeThread() {
     const msgOrEditor = editing
       ? `<div class="nudge-edit-wrap">
            <textarea class="nudge-edit-input" id="nudge-edit-${escHtml(n.id)}">${escHtml(n.message || '')}</textarea>
-           <button type="button" class="nudge-mini primary" onclick="editNudge('${escHtml(n.id)}', document.getElementById('nudge-edit-${escHtml(n.id)}').value)">Save</button>
+           <button type="button" class="nudge-mini primary" onclick="editNudge('${escJsAttr(n.id)}', document.getElementById('nudge-edit-${escJsAttr(n.id)}').value)">Save</button>
            <button type="button" class="nudge-mini" onclick="cancelEditNudge()">Cancel</button>
          </div>`
       : `<div class="nudge-msg">${escHtml(n.message || '')}${editedTag}</div>`;
@@ -4892,7 +5224,7 @@ function onNudgeRecipientInput(value) {
     .slice(0, 6);
   if (!matches.length) { suggest.innerHTML = '<div class="nudge-suggest-empty">No match — type a full email to tag anyway.</div>'; suggest.style.display = 'block'; return; }
   suggest.innerHTML = matches.map((d, i) =>
-    `<button type="button" class="nudge-suggest-item" data-idx="${i}" data-email="${escHtml(d.email)}" data-name="${escHtml((d.name||'').replace(/"/g, '&quot;'))}" onclick="selectNudgeRecipient('${escHtml(d.email)}','${escHtml((d.name||'').replace(/'/g, ''))}')">
+    `<button type="button" class="nudge-suggest-item" data-idx="${i}" data-email="${escJsAttr(d.email)}" data-name="${escJsAttr((d.name||'').replace(/"/g, '&quot;'))}" onclick="selectNudgeRecipient('${escJsAttr(d.email)}','${escJsAttr(d.name || '')}')">
       <span class="nudge-suggest-name">${escHtml(d.name || '')}</span>
       <span class="nudge-suggest-email">${escHtml(d.email || '')}</span>
     </button>`).join('');

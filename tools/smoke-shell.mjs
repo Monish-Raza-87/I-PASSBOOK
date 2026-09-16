@@ -86,5 +86,47 @@ ok('intake styles present', intakeCss.includes('.intake-row'), intakeCss.slice(0
 ok('no raw hex colours', !/#[0-9a-fA-F]{3,8}\b/.test(intakeCss), intakeCss.match(/#[0-9a-fA-F]{3,8}\b/g));
 ok('no px font sizes', !/font-size:\s*[\d.]+px/.test(intakeCss), intakeCss.match(/font-size:\s*[\d.]+px/g));
 
+// ── The irreversible action is two-step in the UI, not just in the backend ────
+// purgeUsers deletes every non-admin account and cannot be undone. Its button used
+// to delete on the first press and render a "backup" from the response — which is
+// not a backup if the response never arrives. Now: press once to REVIEW, copy the
+// list, press again to DELETE. Asserted here rather than only in the backend suite
+// because a two-phase endpoint behind a one-phase button is still one-phase.
+head('the purge button reviews before it deletes');
+// Anchored to the enclosing function: from the purge button's listener to the
+// column-0 `}` that closes the tab renderer. A fixed-length window would silently
+// start passing on a truncated slice as soon as the handler grew.
+const purgeAt = appJs.indexOf("getElementById('access-purge')");
+const purgeEnd = purgeAt < 0 ? -1 : appJs.indexOf('\n}', purgeAt);
+const purgeUI = purgeAt < 0 ? '' : appJs.slice(purgeAt, purgeEnd + 2);
+ok('the purge handler is present', purgeUI.length > 500, purgeUI.length);
+ok('the slice is the whole enclosing function, not a truncated window',
+  purgeUI.trimEnd().endsWith('}') && (purgeUI.match(/adminPost\('purgeUsers'/g) || []).length === 2,
+  { tail: purgeUI.trimEnd().slice(-60), calls: (purgeUI.match(/adminPost\('purgeUsers'/g) || []).length });
+ok('the first call is a dry run', /dryRun: '1'/.test(purgeUI),
+  (purgeUI.match(/dryRun[^\n]*/) || [''])[0]);
+const posts = [...purgeUI.matchAll(/adminPost\('purgeUsers'[^)]*\)/g)].map(m => m[0]);
+ok('there are exactly two purgeUsers calls (review, then delete)', posts.length === 2, posts);
+ok('the dry run comes first, the real delete second',
+  /dryRun/.test(posts[0] || '') && !/dryRun/.test(posts[1] || ''), posts);
+ok('the delete pins the reviewed count, so a changed list is refused',
+  /expect:/.test(posts[1] || ''), posts[1]);
+ok('the list is rendered before the delete button exists',
+  purgeUI.indexOf('readonly>') < purgeUI.indexOf('access-purge-go'),
+  { list: purgeUI.indexOf('readonly>'), del: purgeUI.indexOf('access-purge-go') });
+// The button must not promise deletion, or the first press reads as the last one.
+// These two live in the tab markup, which is above the handler, so they are
+// asserted against the whole file.
+ok('the button says "Review", not "Delete"',
+  /Review what will be deleted/.test(appJs) && !/Delete all non-admin accounts/.test(appJs),
+  (appJs.match(/id="access-purge"[^>]*>[^<]*/) || [''])[0]);
+// And the copy may not claim the rows are shown before they are removed unless the
+// markup actually does that — the old copy claimed it while showing them after.
+ok('the danger-zone copy describes the two steps',
+  /It cannot be undone, so it happens in two steps/.test(appJs),
+  (appJs.match(/[^>]*two steps[^<]*/) || [''])[0]);
+ok('the old "shown below first" claim is gone',
+  !/shown below first/.test(appJs), (appJs.match(/[^\n]*shown below[^\n]*/) || [''])[0]);
+
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

@@ -11,8 +11,8 @@
       │ Auth via
       ▼
 ┌─────────────┐
-│ Auth backend │  (GAS — email + password, @indrones.com
-│ (GAS action) │   allowlist, OTP sign-up, server session token)
+│ Auth backend │  (GAS — email + password, admin-provisioned
+│ (GAS action) │   accounts, 30-day sliding session token)
 └─────────────┘
 ```
 
@@ -24,11 +24,14 @@
 - Fades out, then checks auth state
 
 ### 2. Auth Screen
-- Email + password sign-in; sign-up adds OTP verification and a server captcha
-- Domain restriction: only `@indrones.com` emails (plus explicit allowlist entries)
+- Email + password sign-in. **There is no sign-up** — an admin provisions every
+  account and hands over a temporary password (see
+  [10 — Auth & Access Model](10 - Auth & Access Model.md)).
+- Also lives here: the **forgot-password** flow (email → reset code → new
+  password) and the **forced password change** screen a first-time account lands on.
 - Dev bypass: `localhost` + `?dev=1` → auto-creates "Dev Tester" user
-- Stores the display profile in `sessionStorage` as `ipb_user`; the real
-  credential is the server session token, cleared when the app closes
+- Stores the display profile in `localStorage` as `ipb_user` and the server
+  session token alongside it, slid forward on use, good for 30 days of activity
 
 ### 3. Main App
 - **Sidebar** (≥1024px) or **bottom nav** (<1024px) — Tickets, Legacy Records,

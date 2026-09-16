@@ -783,8 +783,8 @@
 .hist-new { color: var(--ink-green-7); }
 
 /* ══════════════════════════════════════════════════════════
-   ADMIN — User Access & Requests
-   The --bg bug: these three rules used var(--bg), which was never
+   ADMIN — User Access
+   The --bg bug: these rules used var(--bg), which was never
    defined, so the card had NO background and sat on the raw scrim.
    ══════════════════════════════════════════════════════════ */
 .access-card {
@@ -806,107 +806,127 @@
   border-bottom: 1px solid var(--outline-gray-1);
   background: var(--surface-gray-1);
 }
+/* Tab strip. Three panes, one listUsers snapshot — see openAccessModal(). */
+.access-tabs { display: flex; gap: 2px; padding: 0.5rem 1.2rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.access-tab {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-4) var(--radius-4) 0 0;
+  background: none;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.access-tab:hover { color: var(--ink-gray-8); background: var(--surface-gray-2); }
+.access-tab.is-active {
+  color: var(--ink-gray-9);
+  font-weight: var(--weight-medium);
+  background: var(--surface-base);
+  border-color: var(--outline-gray-1);
+}
 .access-body { padding: 1rem 1.2rem 1.2rem; overflow-y: auto; }
 .access-section { margin-bottom: 1.4rem; }
 .access-section h3 { font-size: var(--text-md); font-weight: var(--weight-semibold); margin: 0 0 0.45rem; color: var(--ink-gray-9); }
 .access-hint { font-size: var(--text-sm); color: var(--ink-gray-5); margin: 0 0 0.7rem; }
-.access-legend { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0 0 0.7rem; line-height: 1.7; }
-.access-legend .acc-lv {
+.access-hint ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.access-hint code { font-size: var(--text-xs); }
+.access-danger { border-top: 1px solid var(--outline-gray-1); padding-top: 1rem; }
+
+.access-email-line { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); white-space: nowrap; }
+.access-loading, .access-empty { font-size: var(--text-sm); color: var(--ink-gray-5); padding: 0.4rem 0; }
+.access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
+.access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+.access-add-row .form-input { flex: 1; min-width: 160px; }
+.access-add-row .btn { width: auto; flex: 0 0 auto; }
+.access-body textarea.form-input { width: 100%; font-family: var(--font-mono, monospace); font-size: var(--text-xs); }
+
+/* ── People × departments matrix ──────────────────────────── */
+/* Its own scroll container: six-plus departments will not fit a phone, and a
+   squashed grid is worse than a sideways scroll. */
+.acc-matrix-wrap { overflow-x: auto; border: 1px solid var(--outline-gray-1); border-radius: var(--radius-4); }
+.acc-matrix { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+.acc-matrix th {
+  padding: 0.4rem 0.6rem;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  background: var(--surface-gray-1);
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.acc-matrix th:first-child { text-align: left; }
+.acc-matrix td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--outline-gray-1); text-align: center; vertical-align: middle; }
+.acc-matrix tr:last-child td { border-bottom: none; }
+.acc-matrix td.acc-matrix-name { text-align: left; min-width: 240px; }
+.acc-matrix-sub { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 2px; }
+.acc-matrix-actions { display: flex; gap: 0.35rem; margin-top: 0.35rem; flex-wrap: wrap; }
+.acc-dept-tick, .acc-grant { width: 16px; height: 16px; cursor: pointer; accent-color: var(--ink-gray-8); }
+
+/* Status chips on a person row: admin / disabled / temp password. */
+.acc-badge {
   display: inline-block;
   padding: 1px 6px;
   border-radius: var(--radius-2);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
-  margin: 0 2px;
+  margin-left: 3px;
 }
-.access-legend .acc-lv.none    { background: var(--surface-gray-2); color: var(--ink-gray-6); }
-.access-legend .acc-lv.view    { background: var(--surface-blue-2); color: var(--ink-blue-6); }
-.access-legend .acc-lv.comment { background: var(--surface-amber-2); color: var(--ink-amber-8); }
-.access-legend .acc-lv.edit    { background: var(--surface-green-2); color: var(--ink-green-7); }
+.acc-badge-admin { background: var(--surface-blue-2); color: var(--ink-blue-6); }
+.acc-badge-off   { background: var(--surface-red-2); color: var(--ink-red-7); }
+.acc-badge-temp  { background: var(--surface-amber-2); color: var(--ink-amber-8); }
 
-.access-quickset { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: var(--text-2xs); color: var(--ink-gray-5); }
-.acc-quick {
-  padding: 1px 6px;
-  border-radius: var(--radius-2);
-  border: 1px solid var(--outline-gray-2);
-  background: var(--surface-base);
-  color: var(--ink-gray-7);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-}
-.acc-quick:hover { border-color: var(--outline-gray-4); background: var(--surface-gray-2); }
-.acc-quick.lv-none    { color: var(--ink-gray-6); }
-.acc-quick.lv-view    { color: var(--ink-blue-6); }
-.acc-quick.lv-comment { color: var(--ink-amber-8); }
-.acc-quick.lv-edit    { color: var(--ink-green-7); }
-
-.access-email-line { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); white-space: nowrap; }
-.access-loading, .access-empty { font-size: var(--text-sm); color: var(--ink-gray-5); padding: 0.4rem 0; }
-.access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
-.access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
-.access-add-row .form-input { flex: 1; min-width: 160px; }
-.access-add-row .btn { width: auto; flex: 0 0 auto; }
-
-.access-request-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.55rem 0.7rem;
-  background: var(--surface-gray-1);
-  border: 1px solid var(--outline-gray-1);
-  border-radius: var(--radius-4);
-  margin-bottom: 0.45rem;
-}
-.access-req-name  { font-size: var(--text-base); font-weight: var(--weight-medium); color: var(--ink-gray-8); }
-.access-req-email { font-size: var(--text-sm); color: var(--ink-gray-6); }
-.access-req-time  { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.access-req-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
-
+/* ── Department → section grant grid ─────────────────────── */
 .access-user-card {
-  background: var(--surface-gray-1);
   border: 1px solid var(--outline-gray-1);
   border-radius: var(--radius-4);
-  padding: 0.65rem 0.8rem;
-  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.6rem;
+  background: var(--surface-base);
 }
 .access-user-top { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .access-user-controls { display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0; }
-.access-level {
-  padding: 0 0.5rem;
-  height: 30px;
-  border-radius: var(--radius-3);
-  border: 1px solid var(--outline-gray-2);
-  background: var(--surface-base);
-  color: var(--ink-gray-8);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-.access-level:focus { outline: none; border-color: var(--outline-gray-4); box-shadow: var(--focus-default); }
 .access-perms-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 0.4rem 0.5rem;
-  margin-top: 0.55rem;
-  padding-top: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
   border-top: 1px solid var(--outline-gray-1);
 }
-.acc-sec { display: flex; flex-direction: column; gap: 2px; }
-.acc-sec > span { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-5); }
-.access-cell {
-  padding: 0 0.35rem;
-  height: 28px;
-  border-radius: var(--radius-3);
+.acc-sec { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.acc-sec > span { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-6); }
+.acc-sec .acc-sec-name { font-size: var(--text-xs); color: var(--ink-gray-5); }
+
+/* ── One-time credentials card ───────────────────────────── */
+.cred-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.4rem;
   border: 1px solid var(--outline-gray-1);
+  border-left: 3px solid var(--ink-amber-8);
+  border-radius: var(--radius-4);
   background: var(--surface-base);
-  color: var(--ink-gray-8);
-  font-family: inherit;
-  font-size: var(--text-xs);
 }
-.acc-sec .access-cell { font-size: var(--text-xs); }
+.cred-email { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); }
+.cred-pw { display: flex; align-items: center; gap: 0.5rem; }
+.cred-pw code {
+  font-size: var(--text-md);
+  letter-spacing: 0.04em;
+  color: var(--ink-gray-9);
+  background: var(--surface-gray-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-3);
+}
 
 /* ══════════════════════════════════════════════════════════
    BELOW lg — the sidebar is a fixed bottom bar, so scroll
@@ -936,6 +956,8 @@
   .iqc-cfg-row .iqc-cfg-name,
   .iqc-cfg-row .iqc-cfg-checks { grid-column: 1 / -1; }
 
-  .access-perms-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
-  .access-req-actions { width: 100%; justify-content: flex-end; }
+  .access-perms-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  /* The people × departments matrix scrolls sideways rather than squashing
+     six departments into a phone width. */
+  .acc-matrix td.acc-matrix-name { min-width: 200px; }
 }

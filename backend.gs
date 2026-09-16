@@ -35,46 +35,49 @@ var CONFIG = {
   // Google Drive root folder for IR uploads — "I-PASSBOOK APP" folder in the
   // customer.relations@indrones.com Drive. The account that deploys this script
   // (Execute as: Me) MUST have Editor access to this folder.
+  //
+  // This address is the FOLDER'S OWNER, not an app account: it is no longer in
+  // ADMIN_EMAILS and no longer has a USERS row. Do not "tidy" this line away —
+  // the ID below resolves only for a deployer who has been granted access to that
+  // specific folder, and the note is how they know which one to ask for.
   DRIVE_ROOT_FOLDER_ID: '1sc9mXOHPaWW1wiVvtDmyYLflGUogtm06',
 
   ALLOWED_DOMAIN: 'indrones.com',
 
-  // Admins can manage users & assign per-section access (and bypass all
-  // permission checks). Must match the frontend ADMIN_EMAILS.
-  ADMIN_EMAILS: ['customer.relations@indrones.com', 'monish.raza@indrones.com'],
+  // Bump this whenever the action set or a response shape changes. `ping` reports
+  // it, so a cached frontend talking to a newer backend (or vice versa) can say so
+  // in words a human can act on instead of failing as "Unknown action".
+  API_VERSION: 2,
 
-  // Session lifetime (HOURS). Minted at sign-in; bounds how long a (possibly
-  // stolen) token stays valid. The frontend does NOT persist the token across a
-  // full app close — the user re-signs-in each time the app is reopened — so this
-  // TTL is the backstop for a token intercepted mid-session. 12h = one working day.
-  SESSION_HOURS: 12,
+  // The ONE admin. Admins bypass every permission check and are the only accounts
+  // that can provision people, set department grants or reset passwords. Must
+  // match the frontend ADMIN_EMAILS.
+  ADMIN_EMAILS: ['monish.raza@indrones.com'],
 
-  // ALLOWLIST — the ONLY emails that may CREATE an account via the sign-up
-  // flow. The user maintains this list. An email NOT listed here (and not an
-  // admin below) is rejected at sign-up before any USERS row is created. Once an
-  // account exists, the user signs in with email + password. Add one email per
-  // line, lowercase. NOTE: the *deployed* backend is an older build than this
-  // file — keep this list in sync with the live deployment.
-  ALLOWED_EMAILS: [
-    'monish.raza@indrones.com',
-    'ganesh.suryavanshi@indrones.com',
-    'ravi@indrones.com',
-    'harshad@indrones.com',
-    'vaibhav.panchal@indrones.com',
-    'angad.kumbhar@indrones.com',
-    'mansi.sisale@indrones.com',
-    'adhik.nair@indrones.com',
-    'satish.dhanawade@indrones.com',
-    'mukesh.mane@indrones.com',
-    'nilesh.pawar@indrones.com',
-    'tushar.kadam@indrones.com',
-    'vicky.malekar@indrones.com',
-    'ankit.prajapati@indrones.com',
-    'vipin@indrones.com',
-    'omkar.surekar@indrones.com',
-    'sanket.gaikwad@indrones.com',
+  // Session lifetime (DAYS). Minted at sign-in and SLID forward on use, so an
+  // active user is never signed out — matching how a Google Workspace web session
+  // behaves (default 14 days, admin-settable to 30). The frontend keeps the token
+  // in localStorage, so reopening the app resumes the session with no sign-in.
+  // Bounds how long a (possibly stolen) token stays valid.
+  SESSION_DAYS: 30,
+
+  // How stale a session's Last Seen At may get before lookupSession rewrites its
+  // Expires At (the "slide"). The frontend polls comments every 90s, so an
+  // unthrottled slide would be ~40 sheet writes per hour per user; 6h caps it at
+  // <=1 write per 6h while still sliding long before the 30-day expiry.
+  SESSION_SLIDE_HOURS: 6,
+
+  // A temporary password handed over by the admin stops being a credential after
+  // this many days, whether or not it was ever used. The forced first-login change
+  // handles "it lives forever"; this handles "it was read off a WhatsApp message".
+  TEMP_PW_TTL_DAYS: 14,
+
+  // NON-Indrones addresses that are allowed to exist as accounts. There is no
+  // self-signup any more, so this is NOT an allowlist — it exists so the
+  // @indrones.com recipient guard in sendNudgeEmail doesn't silently lock these
+  // people out of their own comment notifications. Add one email per line.
+  EXTERNAL_EMAILS: [
     'kishor.salunkhe@uavgarage.com',
-    'customer.relations@indrones.com',
   ],
 
   // Legacy I-PASSBOOK sheet (the pre-app workbook used till ~IR441). Each IR is
@@ -88,11 +91,11 @@ var CONFIG = {
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
 // AUTH — verify the caller by a server-issued, revocable session token.
-// The token is minted at sign-in (doLoginPassword) / sign-up (doVerifySignup) and
-// stored on the SESSIONS tab; the frontend persists it and attaches it to every
-// call. The caller's email is read FROM the token (never from a client param),
-// so the allowlist / @indrones-only gate can't be spoofed by passing a known
-// email. No Google ID token is involved anywhere — this backend makes no
+// The token is minted at sign-in (doLoginPassword) or after the forced first
+// password change (changePassword) and stored on the SESSIONS tab; the frontend
+// persists it and attaches it to every call. The caller's email is read FROM the
+// token (never from a client param), so an identity can't be spoofed by passing a
+// known email. No Google ID token is involved anywhere — this backend makes no
 // outbound network calls (so it needs no script.external_request scope).
 function requireAuth(e) {
   var st = (e.parameter.sessionToken || '').toString().trim();
@@ -101,31 +104,60 @@ function requireAuth(e) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// USERS + PASSWORD AUTH (allowlist-gated sign-up)
+// USERS + PASSWORD AUTH (admin-provisioned accounts)
 // ──────────────────────────────────────────────────────────────────────────────
-// Sign-up is gated by CONFIG.ALLOWED_EMAILS: only a listed email (or an admin)
-// can create an account. Passwords are stored as SHA-256(salt + password) with a
-// per-account random salt — the plain password is never stored. After sign-up or
-// sign-in, the backend mints a revocable 30-day session token (see SESSIONS)
-// that the frontend persists. No Google sign-in at any point.
+// There is NO self-signup. The admin creates every account from the app, which
+// returns a one-time temporary password the admin hands over out-of-band. On
+// first sign-in the user is FORCED to set their own password before any session
+// is minted (see changePassword). Passwords are stored as SHA-256(salt+password)
+// with a per-account random salt — the plain password is never stored, and a
+// temporary password reaches the sheet only as a hash plus an issued-at stamp.
+//
+// Everyone who signs in gets VIEW + COMMENT on all nine sections by default;
+// EDIT comes only from department membership (see getEffectiveAccess).
 
-function isAllowedEmail(email) {
-  email = (email || '').toLowerCase().trim();
-  if (!email) return false;
-  var list = (CONFIG.ALLOWED_EMAILS || []).map(function (x) { return String(x).toLowerCase().trim(); });
-  if (list.indexOf(email) > -1) return true;
-  return isAdminEmail(email);   // admins can always sign up
+// Per-execution Sheet memo. Apps Script gives every execution a fresh global
+// scope, so this cannot leak an open Sheet across requests — it only stops
+// doPost from paying openById() two or three times in the same request.
+var _ssMemo = null;
+function getSs() {
+  if (!_ssMemo) _ssMemo = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  return _ssMemo;
 }
+
+// Widen a tab's header row IN PLACE without touching a single data row. Columns
+// are append-only by design (positional readers such as doLoginPassword read
+// row[1]/row[2]), so this is the whole migration for an existing tab. Safe to
+// call on every getOrCreate*, and a no-op once the header already matches.
+function ensureHeaders(tab, heads) {
+  var have = tab.getLastColumn();
+  var row = have > 0 ? tab.getRange(1, 1, 1, have).getValues()[0] : [];
+  var same = row.length === heads.length;
+  if (same) {
+    for (var i = 0; i < heads.length; i++) {
+      if (String(row[i]) !== heads[i]) { same = false; break; }
+    }
+  }
+  if (same) return tab;
+  tab.getRange(1, 1, 1, heads.length).setValues([heads]);
+  tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
+  tab.setFrozenRows(1);
+  return tab;
+}
+
+// Column order is a CONTRACT: A–E are read positionally by doLoginPassword and
+// the forced-change path, so never reorder them — append only.
+var USER_HEADS = ['Email', 'PasswordHash', 'Salt', 'Created At', 'Created By',
+                  'Must Change Password', 'Password Changed At', 'Status',
+                  'Name', 'Last Login At', 'Temp Password Issued At'];
+// Columns B..H — hash, salt, Created At, Created By, Must Change Password,
+// Password Changed At, Status. The block every password write touches at once.
+var USER_ID_BLOCK_COLS = 7;
 
 function getOrCreateUsersTab(ss) {
   var tab = ss.getSheetByName('USERS');
-  if (!tab) {
-    tab = ss.insertSheet('USERS');
-    tab.getRange(1, 1, 1, 5).setValues([['Email', 'PasswordHash', 'Salt', 'Created At', 'Created By']]);
-    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+  if (!tab) tab = ss.insertSheet('USERS');
+  return ensureHeaders(tab, USER_HEADS);
 }
 
 // SHA-256 digest of (salt + password), returned as a lowercase hex string.
@@ -141,245 +173,408 @@ function hashPassword(password, salt) {
 // Find a USERS row by email (case-insensitive). Returns the row values or null.
 function findUserRow(ss, email) {
   email = (email || '').toLowerCase().trim();
-  var tab = getOrCreateUsersTab(ss);
-  var data = tab.getDataRange().getValues();
+  var data = getOrCreateUsersTab(ss).getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]).toLowerCase().trim() === email) return data[i];
   }
   return null;
 }
 
+// Same lookup, but returns the 1-indexed SHEET row number (0 = not found).
+function findUserRowIndex(ss, email) {
+  email = (email || '').toLowerCase().trim();
+  var data = getOrCreateUsersTab(ss).getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase().trim() === email) return i + 1;
+  }
+  return 0;
+}
+
+// Read one optional USERS column by its header name, tolerant of a row shorter
+// than the header (getDataRange returns rows only as wide as the last column,
+// so an un-widened tab yields undefined rather than throwing).
+function userCol(row, name) {
+  var i = USER_HEADS.indexOf(name);
+  return (i >= 0 && row && i < row.length) ? String(row[i] == null ? '' : row[i]).trim() : '';
+}
+
 // Mint a fresh session token for an email and append it to SESSIONS.
 function mintSession(email) {
-  var ss    = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab   = getOrCreateSessionsTab(ss);
+  var tab   = getOrCreateSessionsTab(getSs());
   var token = Utilities.getUuid();
   var now   = new Date();
-  var exp   = new Date(now.getTime() + CONFIG.SESSION_HOURS * 60 * 60 * 1000);
-  tab.appendRow([token, email, now, exp, '']);
+  var exp   = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
+  tab.appendRow([token, email, now, exp, '', now, '']);
+  // Opportunistic prune of long-expired rows — never from inside lookupSession,
+  // where a delete would race the row scan it is iterating.
+  try { pruneSessions(); } catch (e) { /* non-fatal */ }
   return token;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// EMAIL VERIFICATION (OTP) + BOT GUARD (honeypot + time-gate) — no external calls
-// ──────────────────────────────────────────────────────────────────────────────
-// Sign-up is TWO steps now: (1) requestSignup — allowlist gate + bot checks, then
-// email a 6-digit OTP via MailApp (the script.send_mail scope already granted for
-// sendNudgeEmail — NO new scope, NO UrlFetchApp, so NO external_request). (2)
-// verifySignup — the user enters the code from their mailbox; only then is the
-// USERS row created and a session minted. This proves the signer-upper actually
-// OWNS the allowlisted email (closing the "someone else signs up with your email
-// first" gap) without reintroducing the scope that broke Google sign-in.
+// Serialise a read-snapshot-then-mutate-rows sequence.
 //
-// Bot guard (server-enforced, zero network): a hidden honeypot field humans never
-// fill, plus a minimum time-to-submit (a human can't type email+password in <2s).
-// Checked on the SERVER, not just the client, so it can't be bypassed by skipping
-// the UI. Genuine reCAPTCHA/Turnstile was rejected on purpose: verifying their
-// token needs UrlFetchApp.fetch → script.external_request → the deploy trap again.
-var OTP_TTL_MIN        = 10;
-var OTP_MIN_SUBMIT_MS  = 2000;     // a human can't fill the form faster than this
-var OTP_RESEND_GAP_MS = 60 * 1000; // min gap between code (re)issues per email
-var OTP_MAX_RESENDS   = 5;
-
-function getOrCreatePendingTab(ss) {
-  var tab = ss.getSheetByName('PENDING_SIGNUPS');
-  if (!tab) {
-    tab = ss.insertSheet('PENDING_SIGNUPS');
-    tab.getRange(1, 1, 1, 5).setValues([['Email', 'OTP Code', 'Created At', 'Expires At', 'Resend Count']]);
-    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
+// Every deleteRow() in this file is index-based and every index comes from a
+// getValues() snapshot taken earlier. Deleting bottom-up keeps OUR OWN deletes
+// from invalidating each other, but it does nothing about a CONCURRENT writer: if
+// another admin appends or deletes a row between our snapshot and our deletes,
+// every index below it shifts and we delete the wrong row — silently. In
+// purgeUsers that is unrecoverable.
+//
+// Apps Script has no transactions and SpreadsheetApp has no row identity, so a
+// script lock is the only mutual exclusion available. It is applied to the
+// destructive admin paths, where a mis-indexed delete cannot be undone. The
+// ordinary write paths (saveSection, comments) are deliberately NOT locked — they
+// append and overwrite by scanned key rather than by remembered index, and
+// serialising every save would make the app slower for no safety gain.
+function withRowLock(fn) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    // Could not get the lock: refuse rather than proceed unprotected. For a
+    // destructive action, "try again in a moment" is the correct answer.
+    return { status: 'error', message: 'The backend is busy with another admin change — try again in a moment.' };
   }
-  return tab;
+  try {
+    return fn();
+  } finally {
+    try { lock.releaseLock(); } catch (e2) { /* execution ending anyway */ }
+  }
+}
+
+// Revoke every session belonging to an email. Called on password change/reset and
+// when an account is disabled — the cheap alternative to checking Status on every
+// single authenticated request.
+function revokeAllSessions(email) {
+  email = (email || '').toLowerCase().trim();
+  if (!email) return 0;
+  var tab = getOrCreateSessionsTab(getSs());
+  var data = tab.getDataRange().getValues();
+  var now = new Date();
+  var n = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][1]).toLowerCase().trim() !== email) continue;
+    if (!String(data[i][0])) continue;
+    tab.getRange(i + 1, 5).setValue('revoked');
+    tab.getRange(i + 1, 7).setValue(now);
+    n++;
+  }
+  return n;
+}
+
+// Delete SESSIONS rows that expired more than 7 days ago. Bottom-up so earlier
+// deletes don't shift the indices of later ones.
+function pruneSessions() {
+  var tab = getOrCreateSessionsTab(getSs());
+  var data = tab.getDataRange().getValues();
+  var cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (!String(data[i][0])) { tab.deleteRow(i + 1); continue; }
+    var exp = data[i][3] ? new Date(data[i][3]) : null;
+    if (exp && exp < cutoff) tab.deleteRow(i + 1);
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// TEMPORARY PASSWORDS (admin hands these over; the sheet only ever sees a hash)
+// ──────────────────────────────────────────────────────────────────────────────
+// 5 letters + '-' + 4 digits, e.g. "Kx7Qm-4392". The alphabet drops I, O, 0 and 1
+// because these are read off a screen and typed by hand — the ambiguous glyphs
+// are the ones that produce "wrong password" support calls.
+var TEMP_PW_LETTERS = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+var TEMP_PW_DIGITS  = '23456789';
+
+function makeTempPassword() {
+  var out = '';
+  for (var i = 0; i < 5; i++) out += TEMP_PW_LETTERS.charAt(Math.floor(Math.random() * TEMP_PW_LETTERS.length));
+  out += '-';
+  for (var j = 0; j < 4; j++) out += TEMP_PW_DIGITS.charAt(Math.floor(Math.random() * TEMP_PW_DIGITS.length));
+  return out;
+}
+
+// Create a USERS row with a temp password. Returns the plaintext ONCE — it is
+// never written anywhere and cannot be recovered afterwards.
+function createUserRow(email, name, createdBy) {
+  var ss  = getSs();
+  var tab = getOrCreateUsersTab(ss);
+  var pw  = makeTempPassword();
+  var salt = Utilities.getUuid();
+  var now  = new Date();
+  tab.appendRow([email, hashPassword(pw, salt), salt, now, createdBy,
+                 'yes', '', 'active', name || '', '', now]);
+  return pw;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// RESET CODES — one generic store for the forgot-password flow. No external calls.
+// ──────────────────────────────────────────────────────────────────────────────
+// Replaces the old PENDING_SIGNUPS (sign-up is gone) with a single-purpose store
+// for emailed 6-digit codes. `Attempts` is the important column: without it a
+// 6-digit code is a million guesses against an endpoint anyone can reach, so a
+// code dies after CODE_MAX_ATTEMPTS wrong tries regardless of its TTL.
+var CODE_TTL_MIN        = 15;
+var CODE_RESEND_GAP_MS  = 60 * 1000;   // min gap between code (re)issues per email
+var CODE_MAX_PER_HOUR   = 3;           // throttle: codes issued per email per hour
+var CODE_MAX_PER_HOUR_GLOBAL = 12;     // throttle: codes issued across ALL emails per hour
+var CODE_MAX_ATTEMPTS   = 5;           // wrong guesses before the code is burned
+var MAIL_DAILY_CAP      = 400;         // ceiling on ALL app-sent mail per day (see mailQuotaOk)
+
+var CODE_HEADS = ['Email', 'Code', 'Purpose', 'Created At', 'Expires At', 'Attempts', 'Used'];
+
+function getOrCreateCodesTab(ss) {
+  var tab = (ss || getSs()).getSheetByName('CODES');
+  if (!tab) tab = (ss || getSs()).insertSheet('CODES');
+  return ensureHeaders(tab, CODE_HEADS);
 }
 
 // 6-digit numeric code (100000–999999). GAS server runtime: Math.random is fine.
-function makeOtp() {
+function makeResetCode() {
   return String(Math.floor(Math.random() * 900000) + 100000);
 }
 
-// Return [rowValues, rowIndex] for a pending sign-up by email, or null.
-function findPendingRow(ss, email) {
+// Daily mail ceiling, covering EVERY mail this script sends. MailApp quota is
+// per-script and shared, so an uncapped path does not merely annoy — it burns the
+// day's quota and silently disables every OTHER mail, including the reset code
+// that is the only way back into a locked account.
+//
+// `kind` is the caller's class, and it exists so that a busy comment day cannot
+// starve password resets: 'nudge' (comment notifications, the high-volume path)
+// stops short of the ceiling, leaving MAIL_AUTH_RESERVE slots that only auth mail
+// may spend. Everything else — auth, and any future caller that forgets to pass a
+// kind — may use the whole ceiling.
+//
+// This used to be reachable only from sendAuthMail, which meant the cap covered
+// the low-volume path and left the high-volume one open: any signed-in user could
+// loop sendNudgeEmail and take out password recovery for the whole company.
+var MAIL_AUTH_RESERVE = 40;
+
+function mailQuotaOk(kind) {
+  var props = PropertiesService.getScriptProperties();
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var key   = 'mailcount:' + today;
+  var n = Number(props.getProperty(key) || 0);
+  var ceiling = (kind === 'nudge') ? Math.max(0, MAIL_DAILY_CAP - MAIL_AUTH_RESERVE) : MAIL_DAILY_CAP;
+  if (n >= ceiling) return false;
+  props.setProperty(key, String(n + 1));
+  return true;
+}
+
+// Send one auth email. Returns true on success; never throws (a mail failure must
+// not turn into a 500 that reveals whether the account exists).
+function sendAuthMail(to, subject, body) {
+  if (!mailQuotaOk('auth')) return false;
+  try {
+    MailApp.sendEmail(to, subject, body, { name: 'I-PASSBOOK' });
+    return true;
+  } catch (e) { return false; }
+}
+
+// Return [rowValues, rowIndex] for the newest live code for an email+purpose.
+function findCodeRow(ss, email, purpose) {
   email = (email || '').toLowerCase().trim();
-  var tab = getOrCreatePendingTab(ss);
+  var tab  = getOrCreateCodesTab(ss);
   var data = tab.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase().trim() === email) return [data[i], i + 1];
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0]).toLowerCase().trim() !== email) continue;
+    if (String(data[i][2]) !== purpose) continue;
+    if (String(data[i][6]).toLowerCase() === 'yes') continue;   // already used
+    return [data[i], i + 1];
   }
   return null;
 }
 
-// Step 1 of sign-up: validate + bot-check + captcha, email a 6-digit code.
-function doRequestSignup(params) {
-  var email    = (params.email || '').toString().toLowerCase().trim();
-  var password = (params.password || '').toString();
-  var honey    = (params.website || '').toString();          // honeypot — must stay empty
-  var tMs      = parseInt(params.t || '0', 10) || 0;          // ms since form became ready
-  var captchaId = (params.captchaId || '').toString();
-  var captchaAnswer = (params.captchaAnswer || '').toString().trim();
+// ──────────────────────────────────────────────────────────────────────────────
+// PASSWORD LIFECYCLE — forced first change, forgot, reset
+// ──────────────────────────────────────────────────────────────────────────────
 
-  // Bot guard (server-enforced). Don't reveal which check tripped.
-  if (honey) return { status: 'error', message: 'Sign-up could not be completed.' };
-  if (tMs < OTP_MIN_SUBMIT_MS) return { status: 'error', message: 'Please slow down and fill the form, then try again.' };
-  // Captcha (server-generated image, answer kept only on the server).
-  if (!verifyCaptcha(captchaId, captchaAnswer)) {
-    return { status: 'error', message: 'Captcha incorrect — please try the new one.', captchaRefresh: true };
-  }
-
-  if (!email)    return { status: 'error', message: 'Enter your email.' };
-  if (!isAllowedEmail(email)) return { status: 'error', message: 'This email is not on the allowed list. Ask an admin to add you.' };
-  if (!password || password.length < 6) return { status: 'error', message: 'Password must be at least 6 characters.' };
-
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  if (findUserRow(ss, email)) return { status: 'error', message: 'An account already exists for this email — sign in instead.' };
-
-  var tab = getOrCreatePendingTab(ss);
-  var now = new Date();
-  var existing = findPendingRow(ss, email);
-  var resendCount = 0;
-  if (existing) {
-    var row = existing[0];
-    var createdMs = row[2] ? new Date(row[2]).getTime() : 0;
-    resendCount = Number(row[4]) || 0;
-    if ((now.getTime() - createdMs) < OTP_RESEND_GAP_MS) {
-      return { status: 'error', message: 'A code was already sent — wait a moment, then resend.' };
-    }
-    if (resendCount >= OTP_MAX_RESENDS) {
-      return { status: 'error', message: 'Too many code requests — please try again later.' };
-    }
-    resendCount += 1;
-  } else {
-    resendCount = 1;
-  }
-
-  var code = makeOtp();
-  var expires = new Date(now.getTime() + OTP_TTL_MIN * 60 * 1000);
-
-  if (existing) {
-    tab.getRange(existing[1], 2, 1, 4).setValues([[code, now, expires, resendCount]]);   // update OTP/Created/Expires/Resend
-  } else {
-    tab.appendRow([email, code, now, expires, resendCount]);
-  }
-
-  // Send the OTP via the already-authorized MailApp (script.send_mail). Best-effort:
-  // if the daily mail quota is hit, surface it so the user isn't left waiting.
-  try {
-    MailApp.sendEmail(
-      email,
-      'Your I-PASSBOOK sign-up code',
-      'Your I-PASSBOOK verification code is ' + code + '.\n\nIt expires in ' + OTP_TTL_MIN +
-        ' minutes. If you did not request this, you can safely ignore this email.',
-      { name: 'I-PASSBOOK' }
-    );
-  } catch (e) {
-    return { status: 'error', message: 'Could not send the verification email right now (mail quota reached). Please try again later.' };
-  }
-  return { status: 'ok', message: 'A verification code was sent to ' + email + '. Enter it below to finish sign-up.' };
+// ── TEMP-PASSWORD FRESHNESS: ONE GATE, EVERY ENTRY POINT ─────────────────────
+// A temp password is a credential the admin reads off a screen and sends by chat,
+// so it must stop working on a clock. That check lives here, in ONE place, and is
+// called from every endpoint that accepts a temp password as proof of identity:
+// doLoginPassword AND changePassword.
+//
+// It used to live only in doLoginPassword. changePassword is unauthenticated and
+// takes the same credential, so an expired temp password could be posted straight
+// to it: it verified the hash, then minted a full 30-day session. The TTL was
+// decorative — it closed the login door while the change-password door stood open
+// beside it. If a third endpoint ever accepts this credential, call these too.
+function isTempPasswordAccount(row) {
+  return String(userCol(row, 'Must Change Password')).toLowerCase() === 'yes';
 }
 
-// Step 2 of sign-up: verify the emailed code, then create the account + mint session.
-function doVerifySignup(params) {
+// Returns an error object when the temp password is past its life, else null.
+function tempPasswordExpired(row) {
+  var issued = userCol(row, 'Temp Password Issued At');
+  if (!issued) return null;                 // never stamped → never expires
+  var ageDays = (Date.now() - new Date(issued).getTime()) / 86400000;
+  if (ageDays > CONFIG.TEMP_PW_TTL_DAYS) {
+    return { status: 'error', message: 'That temporary password has expired — ask an admin to issue a new one.' };
+  }
+  return null;
+}
+
+// POST changePassword — the forced first-login change, and the ordinary one.
+// Unauthenticated by design: a temp-password holder has NO session token (see
+// doLoginPassword), so the credential being presented IS the password itself.
+// That makes this endpoint exactly as guessable as login, so it shares login's
+// lockout rather than inventing a second, weaker throttle.
+function changePassword(params) {
   var email    = (params.email || '').toString().toLowerCase().trim();
-  var password = (params.password || '').toString();
-  var code     = (params.code || '').toString().trim();
+  var current  = (params.currentPassword || '').toString();
+  var next     = (params.newPassword || '').toString();
+  if (!email || !current || !next) return { status: 'error', message: 'Enter your email, current password and a new password.' };
+  if (next.length < 8) return { status: 'error', message: 'New password must be at least 8 characters.' };
+  if (next === current) return { status: 'error', message: 'New password must be different from the current one.' };
 
-  if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
-  if (!code) return { status: 'error', message: 'Enter the verification code from your email.' };
-  if (password.length < 6) return { status: 'error', message: 'Password must be at least 6 characters.' };
+  var ss = getSs();
+  var locked = lockoutRemaining(ss, email);
+  if (locked) return locked;
 
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  if (findUserRow(ss, email)) {
-    // Account appeared since requestSignup (race / duplicate verify) — clean up.
-    var p = findPendingRow(ss, email); if (p) getOrCreatePendingTab(ss).deleteRow(p[1]);
-    return { status: 'error', message: 'An account already exists for this email — sign in instead.' };
+  var row = findUserRow(ss, email);
+  // Generic on purpose: "no account" and "wrong password" must be the same
+  // response, or this endpoint enumerates who has an I-PASSBOOK account.
+  if (!row) { recordFailedLogin(ss, email); return { status: 'error', message: 'Email or password is incorrect.' }; }
+  if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') {
+    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+  }
+  // The temp-password clock applies HERE TOO — see the note above. Without this
+  // line an expired temp password still buys a session through this door.
+  if (isTempPasswordAccount(row)) {
+    var stale = tempPasswordExpired(row);
+    if (stale) return stale;
+  }
+  if (hashPassword(current, String(row[2])) !== String(row[1])) {
+    var until = recordFailedLogin(ss, email);
+    if (until) return { status: 'error', message: 'Wrong password. Account locked for ' + Math.round(LOGIN_LOCK_MS / 60000) + ' min after too many attempts.' };
+    return { status: 'error', message: 'Email or password is incorrect.' };
   }
 
-  var existing = findPendingRow(ss, email);
-  if (!existing) return { status: 'error', message: 'No pending sign-up — request a code first.' };
-  var row = existing[0];
-  var expires = row[3] ? new Date(row[3]) : null;
-  if (expires && expires < new Date()) return { status: 'error', message: 'The code expired — request a new one.' };
-  if (String(row[1]).trim() !== code) return { status: 'error', message: 'Wrong verification code.' };
-
-  // Create the account.
+  var idx  = findUserRowIndex(ss, email);
   var salt = Utilities.getUuid();
-  var hash = hashPassword(password, salt);
-  getOrCreateUsersTab(ss).appendRow([email, hash, salt, new Date(), 'self-signup']);
-  getOrCreatePendingTab(ss).deleteRow(existing[1]);   // consume the pending row
-
+  var tab  = getOrCreateUsersTab(ss);
+  var now  = new Date();
+  // One write for the whole identity block — columns B..H, i.e. hash, salt, the
+  // preserved Created At/By, and every flag that must flip together with them.
+  tab.getRange(idx, 2, 1, USER_ID_BLOCK_COLS).setValues([[
+    hashPassword(next, salt), salt, row[3] || now, row[4] || '', '', now, 'active'
+  ]]);
+  clearFailedLogin(ss, email);
+  // Any session the temp password ever minted dies here. (It shouldn't have been
+  // able to mint one, but a revoked-anything is cheaper than trusting that.)
+  revokeAllSessions(email);
   var token = mintSession(email);
-  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+  return { status: 'ok', sessionToken: token, email: email, mustChangePassword: false, access: getMyAccess(email) };
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// CAPTCHA — self-hosted, server-validated, ZERO external network calls.
-// ──────────────────────────────────────────────────────────────────────────────
-// A real reCAPTCHA/Turnstile would need UrlFetchApp.fetch to verify the token
-// server-side → script.external_request → the deploy trap again. Instead we
-// generate a math challenge server-side, render it as an SVG IMAGE (so the
-// answer is NOT in the page as parseable text — a bot must OCR the rendered
-// image), and keep the expected answer only in a CHALLENGES tab. The client
-// never sees the answer. Combined with the allowlist + OTP + honeypot + time-gate
-// + login lockout, this is ample for this app's threat model.
-var CAPTCHA_TTL_MIN = 5;
+// POST forgotPassword — email a 6-digit reset code. Deliberately GENERIC: the
+// response is byte-identical whether or not the account exists, so this cannot be
+// used to enumerate who has an I-PASSBOOK account.
+function forgotPassword(params) {
+  var email = (params.email || '').toString().toLowerCase().trim();
+  var generic = { status: 'ok', message: 'If that email has an account, a reset code is on its way.' };
+  if (!email) return { status: 'error', message: 'Enter your email.' };
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return generic;
 
-function getOrCreateChallengesTab(ss) {
-  var tab = ss.getSheetByName('CAPTCHA');
-  if (!tab) {
-    tab = ss.insertSheet('CAPTCHA');
-    tab.getRange(1, 1, 1, 4).setValues([['Challenge Id', 'Answer', 'Created At', 'Expires At']]);
-    tab.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+  try {
+    var ss  = getSs();
+    var row = findUserRow(ss, email);
+    if (!row) return generic;                       // no enumeration
+    if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') return generic;
+
+    var tab  = getOrCreateCodesTab(ss);
+    var data = tab.getDataRange().getValues();
+    var now  = new Date();
+    var hourAgo = now.getTime() - 60 * 60 * 1000;
+    var recent = 0, newestMs = 0, recentAnyEmail = 0;
+    for (var i = data.length - 1; i >= 1; i--) {
+      var createdMs = data[i][3] ? new Date(data[i][3]).getTime() : 0;
+      if (createdMs > hourAgo) recentAnyEmail++;
+      if (String(data[i][0]).toLowerCase().trim() !== email) continue;
+      if (createdMs > hourAgo) recent++;
+      if (createdMs > newestMs) newestMs = createdMs;
+    }
+    if (recent >= CODE_MAX_PER_HOUR) return generic;                 // throttled — same answer
+    if (newestMs && (now.getTime() - newestMs) < CODE_RESEND_GAP_MS) return generic;
+    // A SECOND, GLOBAL ceiling. The per-email throttle above is the one a person
+    // can hit by accident; this is the one that stops an unauthenticated caller
+    // walking the whole staff list and pulling 3 codes per address — ~20 addresses
+    // × 3 would spend the day's entire mail budget inside an hour, and because the
+    // response is generic nobody would notice the reset mail had stopped.
+    // (GAS web apps expose no reliable client IP, so this is global rather than
+    // per-source. Normal traffic is a handful of resets an hour.)
+    if (recentAnyEmail >= CODE_MAX_PER_HOUR_GLOBAL) return generic;
+
+    var code = makeResetCode();
+    // Retire any earlier live code so only the newest one can be redeemed.
+    for (var j = 1; j < data.length; j++) {
+      if (String(data[j][0]).toLowerCase().trim() === email && String(data[j][2]) === 'reset'
+          && String(data[j][6]).toLowerCase() !== 'yes') {
+        tab.getRange(j + 1, 7).setValue('yes');
+      }
+    }
+    tab.appendRow([email, code, 'reset', now, new Date(now.getTime() + CODE_TTL_MIN * 60 * 1000), 0, '']);
+    sendAuthMail(email, 'Your I-PASSBOOK password reset code',
+      'Your I-PASSBOOK password reset code is ' + code + '.\n\n' +
+      'It expires in ' + CODE_TTL_MIN + ' minutes. If you did not ask to reset your password, ' +
+      'you can ignore this email — your current password still works.');
+  } catch (e) { /* never reveal a failure — same generic answer */ }
+  return generic;
 }
 
-// Build a challenge: a ± b. Returns {captchaId, answer, svg} — answer is kept
-// server-side only; the client gets the SVG image to display.
-function makeCaptcha() {
-  var a = Math.floor(Math.random() * 8) + 1;     // 1..8
-  var b = Math.floor(Math.random() * 8) + 1;     // 1..8
-  var add = Math.random() < 0.5;
-  var op = add ? '+' : '−';
-  var answer = add ? (a + b) : (a - b);
-  var id = Utilities.getUuid();
+// POST resetPassword — redeem a reset code and set a new password. Returns NO
+// session token: the user signs in with the password they just chose, which is
+// what proves it was typed correctly (and matches what they'll type next time).
+function resetPassword(params) {
+  var email = (params.email || '').toString().toLowerCase().trim();
+  var code  = (params.code || '').toString().trim();
+  var next  = (params.newPassword || '').toString();
+  if (!email || !code || !next) return { status: 'error', message: 'Enter your email, the code and a new password.' };
+  if (next.length < 8) return { status: 'error', message: 'New password must be at least 8 characters.' };
 
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateChallengesTab(ss);
-  var now = new Date();
-  tab.appendRow([id, String(answer), now, new Date(now.getTime() + CAPTCHA_TTL_MIN * 60 * 1000)]);
+  var ss = getSs();
+  var found = findCodeRow(ss, email, 'reset');
+  if (!found) return { status: 'error', message: 'No reset code is outstanding for this email — request a new one.' };
 
-  // Render the challenge as an SVG image with mild noise + rotation so it isn't
-  // trivially OCR'd, while staying readable for humans.
-  var rot = Math.floor(Math.random() * 7) - 3;            // -3..3 degrees
-  var noise = '';
-  for (var i = 0; i < 4; i++) {
-    var x1 = Math.floor(Math.random() * 120), y1 = Math.floor(Math.random() * 40);
-    var x2 = Math.floor(Math.random() * 120), y2 = Math.floor(Math.random() * 40);
-    noise += '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#c9d8ff" stroke-width="1"/>';
+  var tab = getOrCreateCodesTab(ss);
+  var row = found[0], idx = found[1];
+  var expires = row[4] ? new Date(row[4]) : null;
+  if (expires && expires < new Date()) {
+    tab.getRange(idx, 7).setValue('yes');
+    return { status: 'error', message: 'That code expired — request a new one.' };
   }
-  var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="130" height="46" viewBox="0 0 130 46">' +
-    '<rect width="130" height="46" fill="#eef3ff" rx="8"/>' + noise +
-    '<text x="65" y="31" font-family="Georgia, Times, serif" font-size="24" font-weight="bold" ' +
-    'text-anchor="middle" fill="#1f3a8a" transform="rotate(' + rot + ' 65 23)">' +
-    a + ' ' + op + ' ' + b + ' =</text></svg>';
-
-  return { status: 'ok', captchaId: id, svg: svg };
-}
-
-// Verify + consume a captcha challenge. Returns true on a match.
-function verifyCaptcha(captchaId, answer) {
-  if (!captchaId || answer === '' || answer === null || answer === undefined) return false;
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateChallengesTab(ss);
-  var data = tab.getDataRange().getValues();
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][0]) !== String(captchaId)) continue;
-    var ok = String(data[i][1]).trim() === String(answer).trim();
-    var expired = data[i][3] ? (new Date(data[i][3]) < new Date()) : true;
-    tab.deleteRow(i + 1);   // consume (one-shot)
-    return ok && !expired;
+  if (String(row[1]).trim() !== code) {
+    var tries = (Number(row[5]) || 0) + 1;
+    if (tries >= CODE_MAX_ATTEMPTS) {
+      tab.getRange(idx, 7).setValue('yes');   // burn it — a 6-digit code gets 5 guesses
+      return { status: 'error', message: 'Too many wrong codes — request a new one.' };
+    }
+    tab.getRange(idx, 6).setValue(tries);
+    return { status: 'error', message: 'Wrong code. ' + (CODE_MAX_ATTEMPTS - tries) + ' attempt(s) left.' };
   }
-  return false;
+
+  var uidx = findUserRowIndex(ss, email);
+  if (!uidx) return { status: 'error', message: 'No account found for this email.' };
+  var urow = findUserRow(ss, email);
+  // A disabled account stays disabled. Without this, "Disable" was reversible by
+  // the person it was aimed at: forgotPassword refuses to ISSUE a code to a
+  // disabled account, but a code issued shortly BEFORE the disable is still live
+  // for its full window — redeeming it used to flip Status back to 'active' and
+  // hand them a working password. Offboarding a person mid-reset is exactly the
+  // case that hits this, so the guard is on the redeem, not just the issue.
+  if (String(userCol(urow, 'Status')).toLowerCase() === 'disabled') {
+    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+  }
+  var salt = Utilities.getUuid();
+  var now  = new Date();
+  // Status is PRESERVED, never written as a literal 'active' — this endpoint has
+  // no business changing whether an account is enabled.
+  getOrCreateUsersTab(ss).getRange(uidx, 2, 1, USER_ID_BLOCK_COLS)
+    .setValues([[hashPassword(next, salt), salt, urow[3] || now, urow[4] || '',
+                 '', now, userCol(urow, 'Status') || 'active']]);
+  tab.getRange(idx, 7).setValue('yes');      // consume the code
+  clearFailedLogin(ss, email);
+  revokeAllSessions(email);                  // a reset signs every other device out
+  return { status: 'ok', message: 'Password set. Sign in with your new password.' };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -438,29 +633,47 @@ function clearFailedLogin(ss, email) {
   if (existing) getOrCreateAttemptsTab(ss).deleteRow(existing[1]);
 }
 
+// Shared lockout gate. Returns a ready-to-return error object while the account
+// is locked, else null. Used by BOTH login and changePassword — the forced
+// first-login change takes a password too, so it must be throttled identically.
+function lockoutRemaining(ss, email) {
+  var att = findAttemptRow(ss, email);
+  if (!att) return null;
+  var locked = att[0][3] ? new Date(att[0][3]) : null;
+  if (!locked || locked <= new Date()) return null;
+  var mins = Math.max(1, Math.ceil((locked.getTime() - Date.now()) / 60000));
+  return { status: 'error', message: 'Too many wrong attempts. Try again in ' + mins + ' min.' };
+}
+
 // Sign in: verify email + password against the USERS tab, then mint a session.
+//
+// A user whose row still says "Must Change Password" gets NO session token back —
+// only the flag. That is what makes the forced first change unskippable: there is
+// no credential to skip to, so deleting the screen in devtools buys nothing.
 function doLoginPassword(params) {
   var email    = (params.email || '').toString().toLowerCase().trim();
   var password = (params.password || '').toString();
   if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
 
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss  = getSs();
 
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
-  var att = findAttemptRow(ss, email);
-  if (att) {
-    var locked = att[0][3] ? new Date(att[0][3]) : null;
-    if (locked && locked > new Date()) {
-      var mins = Math.max(1, Math.ceil((locked.getTime() - Date.now()) / 60000));
-      return { status: 'error', message: 'Too many wrong attempts. Try again in ' + mins + ' min.' };
-    }
-  }
+  var locked = lockoutRemaining(ss, email);
+  if (locked) return locked;
 
   var row = findUserRow(ss, email);
   if (!row) {
     recordFailedLogin(ss, email);
-    return { status: 'error', message: 'No account found for this email — sign up first.' };
+    // Deliberately specific, and the one place this app enumerates. There is no
+    // self-signup, so a new hire who mistypes their address has NO other way to
+    // learn why they cannot get in — "wrong password" would send them to retry a
+    // password that cannot work, and then to the admin anyway. The cost is that an
+    // unauthenticated caller can learn which @indrones.com addresses have accounts,
+    // in a domain whose addresses are guessable anyway. Judged worth it for a
+    // 20-person internal tool; revisit if the staff list ever becomes sensitive.
+    // NOTE changePassword is generic — only this human-facing door is specific.
+    return { status: 'error', message: 'No account found for this email — ask an admin to create one.' };
   }
 
   var salt     = String(row[2]);
@@ -474,35 +687,88 @@ function doLoginPassword(params) {
     return { status: 'error', message: 'Wrong password.' };
   }
 
+  if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') {
+    recordFailedLogin(ss, email);
+    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+  }
+
+  // First sign-in on an admin-issued temporary password: stop here and force the
+  // change. A temp password also EXPIRES, so one read off a chat message stops
+  // being a credential after TEMP_PW_TTL_DAYS whether or not it was ever used.
+  if (isTempPasswordAccount(row)) {
+    var stale = tempPasswordExpired(row);
+    if (stale) return stale;
+    clearFailedLogin(ss, email);
+    return { status: 'ok', mustChangePassword: true, email: email, name: userCol(row, 'Name') };
+  }
+
   clearFailedLogin(ss, email);
+  var idx = findUserRowIndex(ss, email);
+  if (idx) { try { getOrCreateUsersTab(ss).getRange(idx, 10).setValue(new Date()); } catch (e) { /* non-fatal */ } }
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// ROUTING
+// ──────────────────────────────────────────────────────────────────────────────
+// Every dispatch lives INSIDE the try. The old build had the pre-auth branches
+// above it, which is how a thrown error there became an HTML error page that the
+// frontend could only report as "Could not reach the backend".
+//
+// Each dispatcher has two maps: `preAuth` (self-authenticating — login, the
+// password flows, the liveness probe) and `authed` (everything that needs an
+// identity). Adding an action means adding one entry, not another if-branch in
+// an unprotected zone.
+
+function ping() {
+  return { status: 'ok', apiVersion: CONFIG.API_VERSION, serverTime: new Date().toISOString() };
+}
+
+// Cheap liveness probe used by the frontend before it ejects anyone. Answers
+// ok/alive either way — a false answer must be distinguishable from a failure.
+function sessionCheck(e) {
+  var email = requireAuth(e);
+  return { status: 'ok', alive: !!email, email: email || '' };
+}
+
+function unauthorizedResponse() {
+  // The frontend's interceptor keys on this message starting with "unauthorized".
+  return { status: 'error', message: 'Unauthorized: a valid sign-in is required.' };
+}
+
+// A stale cached frontend calling an action this build doesn't have gets a message
+// a human can act on, instead of a bare "Unknown action".
+function unknownAction(action) {
+  return { status: 'error', message: 'This action is not available on the backend (' + action +
+           '). The backend has been upgraded — reload the app.' };
+}
+
 function doGet(e) {
   var action = e.parameter.action || '';
-  // getCaptcha is pre-auth: the sign-up form needs a challenge before any session.
-  if (action === 'getCaptcha') return buildResponse(makeCaptcha());
-  // getMyAccess needs identity (session token) but is valid for users with no
-  // access yet (so the request-access screen can render after sign-up/sign-in).
-  if (action === 'getMyAccess') {
-    var email = requireAuth(e);
-    if (!email) return buildResponse({ status: 'error', message: 'Unauthorized: a valid sign-in is required.' });
-    return buildResponse(getMyAccess(email));
-  }
-
-  var authEmail = requireAuth(e);
-  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid sign-in is required.' });
   var result;
   try {
-    if      (action === 'listIRs')        result = listIRs();
-    else if (action === 'getPassbook')    result = getPassbook(e.parameter.irNumber, authEmail);
-    else if (action === 'getAuditLog')    result = getAuditLog(e.parameter.irNumber);
-    else if (action === 'listLegacyIRs')  result = listLegacyIRs();
-    else if (action === 'listACL')        result = listACL(authEmail);
-    else                                  result = { status: 'error', message: 'Unknown action: ' + action };
+    var preAuth = {
+      ping:         function () { return ping(); },
+      sessionCheck: function () { return sessionCheck(e); },
+    };
+    if (preAuth[action]) return buildResponse(preAuth[action]());
+
+    var email = requireAuth(e);
+    if (!email) return buildResponse(unauthorizedResponse());
+
+    var authed = {
+      // getMyAccess is valid for ANY signed-in user — everyone has at least view.
+      getMyAccess:   function () { return getMyAccess(email); },
+      listIRs:       function () { return listIRs(); },
+      getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
+      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber); },
+      listLegacyIRs: function () { return listLegacyIRs(); },
+      listUsers:     function () { return listUsers(email); },
+    };
+    result = authed[action] ? authed[action]() : unknownAction(action);
   } catch (err) {
-    result = { status: 'error', message: err.message };
+    result = { status: 'error', message: (err && err.message) || String(err) };
   }
   return buildResponse(result);
 }
@@ -510,73 +776,92 @@ function doGet(e) {
 function doPost(e) {
   var params = e.parameter;
   var action = params.action || '';
-  // signup / login are self-authenticating (email + password) — no prior session.
-  if (action === 'requestSignup') return buildResponse(doRequestSignup(params));
-  if (action === 'verifySignup')   return buildResponse(doVerifySignup(params));
-  if (action === 'login')  return buildResponse(doLoginPassword(params));
-  // logout revokes the session itself (handled before the auth gate).
-  if (action === 'logout') return buildResponse(doLogout(params.sessionToken));
-  // requestAccess needs identity but is valid for users with no access yet.
-  if (action === 'requestAccess') {
-    var em = requireAuth(e);
-    if (!em) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
-    return buildResponse(requestAccess(em, params));
-  }
-
-  var authEmail = requireAuth(e);
-  if (!authEmail) return buildResponse({ status: 'error', message: 'Unauthorized: a valid @indrones.com sign-in is required.' });
   var result;
   try {
-    if (action === 'saveSection') {
-      var fields    = JSON.parse(params.fields  || '{}');
-      var files     = JSON.parse(params.files   || '[]');
-      // savedBy is the VERIFIED email from the credential — never a client value.
-      result = saveSection(params.irNumber, params.sectionId, fields, files, authEmail);
-    } else if (action === 'sendNudgeEmail') {
-      result = sendNudgeEmail(params, authEmail);
-    } else if (action === 'saveACL') {
-      result = saveACL(params, authEmail);
-    } else if (action === 'decideRequest') {
-      result = decideRequest(params, authEmail);
-    } else {
-      result = { status: 'error', message: 'Unknown action: ' + action };
-    }
+    var preAuth = {
+      // Self-authenticating: the credential is in the body, not a session token.
+      login:          function () { return doLoginPassword(params); },
+      changePassword: function () { return changePassword(params); },
+      forgotPassword: function () { return forgotPassword(params); },
+      resetPassword:  function () { return resetPassword(params); },
+      // logout revokes the session it is handed, so it authenticates itself.
+      logout:         function () { return doLogout(params.sessionToken); },
+      ping:           function () { return ping(); },
+      sessionCheck:   function () { return sessionCheck(e); },
+    };
+    if (preAuth[action]) return buildResponse(preAuth[action]());
+
+    var email = requireAuth(e);
+    if (!email) return buildResponse(unauthorizedResponse());
+
+    var authed = {
+      saveSection: function () {
+        var fields = JSON.parse(params.fields || '{}');
+        var files  = JSON.parse(params.files  || '[]');
+        // savedBy is the VERIFIED email from the credential — never a client value.
+        return saveSection(params.irNumber, params.sectionId, fields, files, email);
+      },
+      sendNudgeEmail:    function () { return sendNudgeEmail(params, email); },
+
+      // Admin-only (each re-checks isAdminEmail — the gate here is only routing).
+      createUser:        function () { return createUser(params, email); },
+      bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
+      resetUserPassword: function () { return resetUserPassword(params, email); },
+      setUserStatus:     function () { return setUserStatus(params, email); },
+      listUsers:         function () { return listUsers(email); },
+      saveDepartment:    function () { return saveDepartment(params, email); },
+      deleteDepartment:  function () { return deleteDepartment(params, email); },
+      setUserDepartments: function () { return setUserDepartments(params, email); },
+      purgeUsers:        function () { return purgeUsers(params, email); },
+    };
+    result = authed[action] ? authed[action]() : unknownAction(action);
   } catch (err) {
-    result = { status: 'error', message: err.message };
+    result = { status: 'error', message: (err && err.message) || String(err) };
   }
   return buildResponse(result);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// SESSIONS — server-issued session tokens (so the PWA stays signed in without
-// repeated Google One-Tap pop-ups). Stored on the data sheet's SESSIONS tab.
+// SESSIONS — server-issued session tokens, so a signed-in device stays signed in
+// without repeated sign-in prompts. Stored on the data sheet's SESSIONS tab.
 // ──────────────────────────────────────────────────────────────────────────────
 var SECTION_KEYS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+var SESSION_HEADS = ['Session Token', 'Email', 'Created At', 'Expires At', 'Revoked',
+                     'Last Seen At', 'Revoked At'];
 
 function getOrCreateSessionsTab(ss) {
-  var tab = ss.getSheetByName('SESSIONS');
-  if (!tab) {
-    tab = ss.insertSheet('SESSIONS');
-    tab.getRange(1, 1, 1, 5).setValues([['Session Token', 'Email', 'Created At', 'Expires At', 'Revoked']]);
-    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+  var tab = (ss || getSs()).getSheetByName('SESSIONS');
+  if (!tab) tab = (ss || getSs()).insertSheet('SESSIONS');
+  return ensureHeaders(tab, SESSION_HEADS);
 }
 
 // Verify a session token and return its email, or null if missing/expired/revoked.
+//
+// The expiry SLIDES on every use, so an active user is never signed out — the
+// behaviour the owner asked for, and what a Google Workspace web session does.
+// The rewrite is throttled to CONFIG.SESSION_SLIDE_HOURS because the frontend
+// polls comments every 90s; unthrottled it would be ~40 sheet writes per hour per
+// user for no benefit, since the window is 30 days.
 function lookupSession(token) {
   if (!token) return null;
   try {
-    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-    var tab = getOrCreateSessionsTab(ss);
+    var tab  = getOrCreateSessionsTab(getSs());
     var data = tab.getDataRange().getValues();
-    var now = new Date();
+    var now  = new Date();
     for (var i = 1; i < data.length; i++) {
       if (String(data[i][0]) !== token) continue;
       if (String(data[i][4]).toLowerCase() === 'revoked') return null;
       var exp = data[i][3] ? new Date(data[i][3]) : null;
       if (exp && exp < now) return null;
+      try {
+        var lastSeen = data[i][5] ? new Date(data[i][5]) : null;
+        var stale = !lastSeen ||
+          (now.getTime() - lastSeen.getTime()) > CONFIG.SESSION_SLIDE_HOURS * 60 * 60 * 1000;
+        if (stale) {
+          tab.getRange(i + 1, 4).setValue(new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000));
+          tab.getRange(i + 1, 6).setValue(now);
+        }
+      } catch (e2) { /* the slide is best-effort — never fail a lookup for it */ }
       return String(data[i][1]).toLowerCase().trim();
     }
     return null;
@@ -586,196 +871,462 @@ function lookupSession(token) {
 function doLogout(sessionToken) {
   if (!sessionToken) return { status: 'ok' };
   try {
-    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-    var tab = getOrCreateSessionsTab(ss);
+    var tab  = getOrCreateSessionsTab(getSs());
     var data = tab.getDataRange().getValues();
     for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]) === sessionToken) { tab.getRange(i + 1, 5).setValue('revoked'); break; }
+      if (String(data[i][0]) === sessionToken) {
+        tab.getRange(i + 1, 5).setValue('revoked');
+        tab.getRange(i + 1, 7).setValue(new Date());
+        break;
+      }
     }
   } catch (e) { /* non-fatal */ }
   return { status: 'ok' };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ACCESS CONTROL — per-user, per-section permission levels.
-// Level hierarchy: '' (none) < 'view' < 'comment' < 'edit'.
-// Admins (CONFIG.ADMIN_EMAILS) bypass everything: full edit, view all, manage.
+// ACCESS CONTROL — two levels, and only two.
+//
+//   VIEW + COMMENT  — every signed-in user, on every section. No row anywhere.
+//   EDIT            — granted by DEPARTMENT membership only.
+//
+// Departments are MANY-TO-MANY in both directions: a person may hold several
+// departments, a department holds many people (USER_DEPARTMENTS is the edge list),
+// and each department grants edit on a subset of the nine sections (DEPARTMENTS).
+// So a person's edit rights are the UNION of their departments' grants.
+//
+// These two tabs hold AUTHORITY, so they must stay real Sheets tabs and never move
+// into a `__`-prefixed sentinel store: sentinel irNumbers skip every ACL check in
+// saveSection (see the isSentinel branches there), so a sentinel would let any
+// signed-in user rewrite the grant matrix and hand themselves edit everywhere.
 // ──────────────────────────────────────────────────────────────────────────────
 function isAdminEmail(email) {
   email = (email || '').toLowerCase().trim();
   return CONFIG.ADMIN_EMAILS.map(function (a) { return a.toLowerCase(); }).indexOf(email) > -1;
 }
 
-function getOrCreateAclTab(ss) {
-  var tab = ss.getSheetByName('ACL');
-  if (!tab) {
-    var heads = ['Email'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By']);
-    tab = ss.insertSheet('ACL');
-    tab.getRange(1, 1, 1, heads.length).setValues([heads]);
-    tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+var DEPT_HEADS = ['Key', 'Name', 'Active'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By']);
+var USERDEPT_HEADS = ['Email', 'Department Key', 'Added At', 'Added By'];
+
+function getOrCreateDeptTab(ss) {
+  var tab = (ss || getSs()).getSheetByName('DEPARTMENTS');
+  if (!tab) tab = (ss || getSs()).insertSheet('DEPARTMENTS');
+  return ensureHeaders(tab, DEPT_HEADS);
+}
+function getOrCreateUserDeptTab(ss) {
+  var tab = (ss || getSs()).getSheetByName('USER_DEPARTMENTS');
+  if (!tab) tab = (ss || getSs()).insertSheet('USER_DEPARTMENTS');
+  return ensureHeaders(tab, USERDEPT_HEADS);
 }
 
-function getOrCreateRequestsTab(ss) {
-  var tab = ss.getSheetByName('ACCESS_REQUESTS');
-  if (!tab) {
-    var heads = ['Email', 'Name', 'Requested At', 'Status', 'Decided By', 'Decided At'];
-    tab = ss.insertSheet('ACCESS_REQUESTS');
-    tab.getRange(1, 1, 1, heads.length).setValues([heads]);
-    tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+// "Flight Test" -> "flight-test". Stable keys mean renaming a department in the UI
+// never orphans the people mapped to it.
+function deptKeyFromName(name) {
+  return String(name || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
-// Resolve a user's role + per-section permissions.
-// role: 'admin' (full edit, bypass) | 'user' (ACL entry exists) | 'none' (no entry).
+// Every department key a person holds (whether or not the department is active).
+function getUserDepartments(email) {
+  email = (email || '').toLowerCase().trim();
+  var data = getOrCreateUserDeptTab(getSs()).getDataRange().getValues();
+  var keys = [];
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).toLowerCase().trim() !== email) continue;
+    var k = String(data[i][1]).trim();
+    if (k && keys.indexOf(k) < 0) keys.push(k);
+  }
+  return keys;
+}
+
+// The union of section edits granted by the departments a person holds.
+// Deactivated departments grant nothing, which is how a department is retired
+// without deleting its history.
+function departmentEditGrants(email) {
+  var out = {};
+  var keys = getUserDepartments(email);
+  if (!keys.length) return out;          // short-circuit: no departments, no 2nd scan
+  var data = getOrCreateDeptTab(getSs()).getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    var k = String(data[i][0]).trim();
+    if (keys.indexOf(k) < 0) continue;
+    if (String(data[i][2] || '').trim().toLowerCase() === 'no') continue;
+    for (var j = 0; j < SECTION_KEYS.length; j++) {
+      if (String(data[i][3 + j] || '').trim().toLowerCase() === 'edit') out[SECTION_KEYS[j]] = true;
+    }
+  }
+  return out;
+}
+
+// Resolve a user's role + per-section permissions. There is no 'none' any more:
+// view+comment is universal, so the only question this answers is which sections
+// are editable.
 function getEffectiveAccess(email) {
   email = (email || '').toLowerCase().trim();
   if (isAdminEmail(email)) {
     var all = {};
     SECTION_KEYS.forEach(function (s) { all[s] = 'edit'; });
-    return { role: 'admin', permissions: all };
+    return { role: 'admin', permissions: all, departments: [] };
   }
+  // Default: view + comment everywhere. Built BEFORE the department read so that
+  // any failure below still leaves a usable, minimum-privilege profile — the
+  // catch fails open on reads and closed on writes, never to locked-out.
+  var perms = {};
+  SECTION_KEYS.forEach(function (s) { perms[s] = 'view'; });
+  var depts = [];
   try {
-    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-    var tab = getOrCreateAclTab(ss);
-    var data = tab.getDataRange().getValues();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]).toLowerCase().trim() === email) {
-        var perms = {};
-        for (var j = 0; j < SECTION_KEYS.length; j++) perms[SECTION_KEYS[j]] = String(data[i][j + 1] || '').trim();
-        return { role: 'user', permissions: perms };
-      }
-    }
-  } catch (e) { /* fall through to none */ }
-  return { role: 'none', permissions: {} };
+    depts = getUserDepartments(email);
+    var grants = departmentEditGrants(email);
+    SECTION_KEYS.forEach(function (s) { if (grants[s]) perms[s] = 'edit'; });
+  } catch (e) { /* keep view-only */ }
+  return { role: 'user', permissions: perms, departments: depts };
 }
 
+// Comment now comes WITH view — the owner's rule is "view and comment are for
+// everyone". Kept as named helpers because they are the semantic seam the call
+// sites below are written against.
 function canView(perms, sec)    { var v = perms && perms[sec]; return v === 'view' || v === 'comment' || v === 'edit'; }
-function canComment(perms, sec) { var v = perms && perms[sec]; return v === 'comment' || v === 'edit'; }
+function canComment(perms, sec) { var v = perms && perms[sec]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEdit(perms, sec)    { return !!(perms && perms[sec] === 'edit'); }
 
-// GET getMyAccess — the caller's own role/permissions + whether they have a
-// pending access request. Used at boot to decide app vs request-access screen.
+// GET getMyAccess — the caller's own role/permissions. Drives the frontend's
+// per-section save-button gating. Valid for every signed-in user.
 function getMyAccess(email) {
   email = (email || '').toLowerCase().trim();
   var access = getEffectiveAccess(email);
-  var pending = false;
+  var mustChange = false;
   try {
-    var rt = getOrCreateRequestsTab(SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID));
-    var data = rt.getDataRange().getValues();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending') { pending = true; break; }
-    }
+    var row = findUserRow(getSs(), email);
+    if (row) mustChange = String(userCol(row, 'Must Change Password')).toLowerCase() === 'yes';
   } catch (e) { /* ignore */ }
-  return { status: 'ok', role: access.role, permissions: access.permissions, pendingRequest: pending };
+  return {
+    status: 'ok',
+    role: access.role,
+    permissions: access.permissions,
+    departments: access.departments,
+    mustChangePassword: mustChange,
+    apiVersion: CONFIG.API_VERSION
+  };
 }
 
-// GET listACL (admin) — all users + their perms, plus pending requests.
-function listACL(authEmail) {
-  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var atab = getOrCreateAclTab(ss);
-  var rtab = getOrCreateRequestsTab(ss);
-  var adata = atab.getDataRange().getValues();
+// ──────────────────────────────────────────────────────────────────────────────
+// ADMIN ACTIONS — provisioning, departments, and the reset
+// ──────────────────────────────────────────────────────────────────────────────
+function requireAdmin(authEmail) {
+  if (!isAdminEmail(authEmail)) throw new Error('Forbidden: admins only.');
+}
+function validEmail(email) {
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || '').trim());
+}
+
+// GET/POST listUsers (admin) — everything the three admin tabs need, in one call.
+function listUsers(authEmail) {
+  requireAdmin(authEmail);
+  var ss = getSs();
+  var udata = getOrCreateUsersTab(ss).getDataRange().getValues();
   var users = [];
-  for (var i = 1; i < adata.length; i++) {
-    var email = String(adata[i][0] || '').trim();
+  for (var i = 1; i < udata.length; i++) {
+    var email = String(udata[i][0] || '').toLowerCase().trim();
     if (!email) continue;
-    var perms = {};
-    for (var j = 0; j < SECTION_KEYS.length; j++) perms[SECTION_KEYS[j]] = String(adata[i][j + 1] || '').trim();
-    users.push({ email: email, permissions: perms });
-  }
-  var rdata = rtab.getDataRange().getValues();
-  var requests = [];
-  for (var k = 1; k < rdata.length; k++) {
-    if (String(rdata[k][3]) !== 'pending') continue;
-    requests.push({
-      email: String(rdata[k][0] || '').trim(),
-      name:  String(rdata[k][1] || '').trim(),
-      requestedAt: rdata[k][2] ? Utilities.formatDate(new Date(rdata[k][2]), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : ''
+    var access = getEffectiveAccess(email);
+    users.push({
+      email: email,
+      name: userCol(udata[i], 'Name'),
+      status: userCol(udata[i], 'Status') || 'active',
+      mustChangePassword: userCol(udata[i], 'Must Change Password').toLowerCase() === 'yes',
+      createdAt: udata[i][3] ? Utilities.formatDate(new Date(udata[i][3]), 'Asia/Kolkata', 'dd-MMM-yyyy') : '',
+      lastLoginAt: userCol(udata[i], 'Last Login At') ? Utilities.formatDate(new Date(userCol(udata[i], 'Last Login At')), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : '',
+      isAdmin: isAdminEmail(email),
+      departments: access.departments,
+      permissions: access.permissions
     });
   }
-  return { status: 'ok', users: users, requests: requests };
-}
+  users.sort(function (a, b) { return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0); });
 
-// POST saveACL (admin) — upsert or remove one user's per-section permissions.
-function saveACL(params, authEmail) {
-  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
-  var email = (params.email || '').toString().toLowerCase().trim();
-  if (!email) return { status: 'error', message: 'Email required.' };
-  var mode = (params.mode || 'upsert').toString();
-  var perms = {};
-  try { perms = JSON.parse(params.permissions || '{}'); } catch (e) { perms = {}; }
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateAclTab(ss);
-  var data = tab.getDataRange().getValues();
-  var ts  = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var rowIdx = -1;
-  for (var i = 1; i < data.length; i++) { if (String(data[i][0]).toLowerCase().trim() === email) { rowIdx = i; break; } }
-  if (mode === 'remove') {
-    if (rowIdx > 0) tab.deleteRow(rowIdx + 1);
-    return { status: 'ok', message: 'Removed ' + email };
+  var ddata = getOrCreateDeptTab(ss).getDataRange().getValues();
+  var departments = [];
+  for (var r = 1; r < ddata.length; r++) {
+    var key = String(ddata[r][0] || '').trim();
+    if (!key) continue;
+    var grants = {};
+    for (var j = 0; j < SECTION_KEYS.length; j++) {
+      grants[SECTION_KEYS[j]] = String(ddata[r][3 + j] || '').trim().toLowerCase() === 'edit';
+    }
+    departments.push({
+      key: key,
+      name: String(ddata[r][1] || '').trim(),
+      active: String(ddata[r][2] || '').trim().toLowerCase() !== 'no',
+      grants: grants,
+      members: 0
+    });
   }
-  var row = [email];
-  for (var j = 0; j < SECTION_KEYS.length; j++) {
-    var v = perms[SECTION_KEYS[j]];
-    row.push((v === 'view' || v === 'comment' || v === 'edit') ? v : '');
-  }
-  row.push(ts); row.push(authEmail);
-  if (rowIdx > 0) tab.getRange(rowIdx + 1, 1, 1, row.length).setValues([row]);
-  else tab.appendRow(row);
-  return { status: 'ok', message: 'Saved access for ' + email };
-}
-
-// POST requestAccess (any verified @indrones user) — record a pending request
-// and email the admins.
-function requestAccess(email, params) {
-  email = (email || '').toLowerCase().trim();
-  var name = (params.name || '').toString().trim();
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateRequestsTab(ss);
-  var data = tab.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending')
-      return { status: 'ok', message: 'Your access request is already pending.' };
-  }
-  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  tab.appendRow([email, name, ts, 'pending', '', '']);
-  try {
-    var subj = '[I-PASSBOOK] Access request from ' + email;
-    var body = (name ? name + '\n' : '') + email + ' requested access to I-PASSBOOK.\n\nApprove it from the app: avatar menu → User Access & Requests → Pending.';
-    CONFIG.ADMIN_EMAILS.forEach(function (a) { MailApp.sendEmail(a, subj, body, { name: 'I-PASSBOOK' }); });
-  } catch (e) { /* email is best-effort; the request row is enough */ }
-  return { status: 'ok', message: 'Access request sent to the admins.' };
-}
-
-// POST decideRequest (admin) — approve (optionally with initial perms) or reject.
-function decideRequest(params, authEmail) {
-  if (!isAdminEmail(authEmail)) return { status: 'error', message: 'Forbidden: admins only.' };
-  var email    = (params.email || '').toString().toLowerCase().trim();
-  var decision = (params.decision || '').toString();           // 'approve' | 'reject'
-  var perms = {};
-  try { perms = JSON.parse(params.permissions || '{}'); } catch (e) { perms = {}; }
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  var tab = getOrCreateRequestsTab(ss);
-  var data = tab.getDataRange().getValues();
-  var ts  = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase() === email && String(data[i][3]) === 'pending') {
-      tab.getRange(i + 1, 4).setValue(decision);
-      tab.getRange(i + 1, 5).setValue(authEmail);
-      tab.getRange(i + 1, 6).setValue(ts);
-      break;
+  // Member counts, so the Departments tab can show who a change would affect.
+  var edge = getOrCreateUserDeptTab(ss).getDataRange().getValues();
+  for (var e = 1; e < edge.length; e++) {
+    var ek = String(edge[e][1] || '').trim();
+    for (var d = 0; d < departments.length; d++) {
+      if (departments[d].key === ek) { departments[d].members++; break; }
     }
   }
-  if (decision === 'approve') {
-    saveACL({ email: email, permissions: JSON.stringify(perms), mode: 'upsert' }, authEmail);
+  return { status: 'ok', users: users, departments: departments, apiVersion: CONFIG.API_VERSION };
+}
+
+// POST createUser (admin) — one account + a one-time temporary password.
+function createUser(params, authEmail) {
+  requireAdmin(authEmail);
+  var email = (params.email || '').toString().toLowerCase().trim();
+  var name  = (params.name || '').toString().trim();
+  if (!validEmail(email)) return { status: 'error', message: 'Enter a valid email address.' };
+  var ss = getSs();
+  if (findUserRow(ss, email)) return { status: 'error', message: 'An account already exists for ' + email + '.' };
+  if (isAdminEmail(email)) return { status: 'error', message: 'That address is already an admin.' };
+  var pw = createUserRow(email, name, authEmail);
+  return { status: 'ok', email: email, name: name, tempPassword: pw,
+           message: 'Account created. Copy the temporary password now — it cannot be shown again.' };
+}
+
+// POST bulkCreateUsers (admin) — paste a list of emails.
+// Split on anything whitespace/comma/semicolon, dedupe, and SKIP-AND-REPORT rather
+// than abort: one typo in a 19-person paste must not throw away the other 18.
+function bulkCreateUsers(params, authEmail) {
+  requireAdmin(authEmail);
+  var raw = (params.emails || '').toString();
+  var names = (params.names || '').toString();
+  var list = raw.split(/[\s,;]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean);
+  // Unique, order preserved.
+  var seen = {}, emails = [];
+  list.forEach(function (e2) { if (!seen[e2]) { seen[e2] = true; emails.push(e2); } });
+  if (!emails.length) return { status: 'error', message: 'Paste at least one email address.' };
+  if (emails.length > 200) return { status: 'error', message: 'That is more than 200 addresses — split it into batches.' };
+
+  // "email, Name" lines in the optional names box, so bulk onboarding can carry
+  // display names without turning the main box into a CSV parser.
+  var nameMap = {};
+  names.split('\n').forEach(function (line) {
+    var m = line.split(',');
+    if (m.length >= 2) nameMap[m[0].trim().toLowerCase()] = m.slice(1).join(',').trim();
+  });
+
+  var ss = getSs();
+  var created = [], skipped = [];
+  emails.forEach(function (em) {
+    if (!validEmail(em))          { skipped.push({ email: em, reason: 'not a valid email address' }); return; }
+    if (isAdminEmail(em))         { skipped.push({ email: em, reason: 'already an admin' }); return; }
+    if (findUserRow(ss, em))      { skipped.push({ email: em, reason: 'account already exists' }); return; }
+    try {
+      created.push({ email: em, name: nameMap[em] || '', tempPassword: createUserRow(em, nameMap[em] || '', authEmail) });
+    } catch (err) {
+      skipped.push({ email: em, reason: (err && err.message) || 'failed' });
+    }
+  });
+  return { status: 'ok', created: created, skipped: skipped,
+           message: created.length + ' account(s) created' + (skipped.length ? ', ' + skipped.length + ' skipped' : '') + '.' };
+}
+
+// POST resetUserPassword (admin) — issue a fresh temporary password and force the
+// change again. Also signs the user's existing devices out.
+function resetUserPassword(params, authEmail) {
+  requireAdmin(authEmail);
+  var email = (params.email || '').toString().toLowerCase().trim();
+  var ss = getSs();
+  var idx = findUserRowIndex(ss, email);
+  if (!idx) return { status: 'error', message: 'No account found for ' + email + '.' };
+  var row = findUserRow(ss, email);
+  var pw = makeTempPassword();
+  var salt = Utilities.getUuid();
+  var now = new Date();
+  // Columns B..H, then column K for the issued-at stamp the temp-password expiry
+  // is measured from. Created At/By are preserved — this is not a new account.
+  getOrCreateUsersTab(ss).getRange(idx, 2, 1, USER_ID_BLOCK_COLS)
+    .setValues([[hashPassword(pw, salt), salt, row[3] || now, row[4] || authEmail, 'yes', '', 'active']]);
+  getOrCreateUsersTab(ss).getRange(idx, 11).setValue(now);
+  revokeAllSessions(email);
+  clearFailedLogin(ss, email);
+  return { status: 'ok', email: email, tempPassword: pw,
+           message: 'New temporary password issued. Copy it now — it cannot be shown again.' };
+}
+
+// POST setUserStatus (admin) — enable/disable without deleting the account.
+function setUserStatus(params, authEmail) {
+  requireAdmin(authEmail);
+  var email  = (params.email || '').toString().toLowerCase().trim();
+  var status = (params.status || '').toString().toLowerCase() === 'disabled' ? 'disabled' : 'active';
+  if (isAdminEmail(email) && status === 'disabled') {
+    return { status: 'error', message: 'You cannot disable an admin account.' };
   }
-  return { status: 'ok', message: 'Request ' + decision + 'd.' };
+  var ss  = getSs();
+  var idx = findUserRowIndex(ss, email);
+  if (!idx) return { status: 'error', message: 'No account found for ' + email + '.' };
+  getOrCreateUsersTab(ss).getRange(idx, 8).setValue(status);
+  // Revoke rather than checking Status on every authenticated request.
+  if (status === 'disabled') revokeAllSessions(email);
+  return { status: 'ok', email: email, status: status, message: email + ' is now ' + status + '.' };
+}
+
+// POST saveDepartment (admin) — create or update one department's section grants.
+function saveDepartment(params, authEmail) {
+  requireAdmin(authEmail);
+  var name = (params.name || '').toString().trim();
+  var key  = (params.key || '').toString().trim() || deptKeyFromName(name);
+  if (!name && !key) return { status: 'error', message: 'A department needs a name.' };
+  if (!key) return { status: 'error', message: 'Could not derive a key from that name — use letters or digits.' };
+  var grants = {};
+  try { grants = JSON.parse(params.grants || '{}'); } catch (e) { grants = {}; }
+
+  var ss = getSs();
+  var tab = getOrCreateDeptTab(ss);
+  var data = tab.getDataRange().getValues();
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var row = [key, name || key, (params.active === 'no' ? 'no' : 'yes')];
+  SECTION_KEYS.forEach(function (s) { row.push(grants[s] ? 'edit' : ''); });
+  row.push(ts); row.push(authEmail);
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]).trim() === key) { tab.getRange(i + 1, 1, 1, row.length).setValues([row]); return { status: 'ok', key: key, message: 'Saved ' + key }; }
+  }
+  tab.appendRow(row);
+  return { status: 'ok', key: key, message: 'Created ' + key };
+}
+
+// POST deleteDepartment (admin) — remove the department AND every membership edge,
+// so no one keeps edit rights through a department that no longer exists.
+function deleteDepartment(params, authEmail) {
+  requireAdmin(authEmail);
+  var key = (params.key || '').toString().trim();
+  if (!key) return { status: 'error', message: 'Department key required.' };
+  return withRowLock(function () {
+    var ss = getSs();
+    var tab = getOrCreateDeptTab(ss);
+    var data = tab.getDataRange().getValues();
+    var removed = 0;
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).trim() === key) { tab.deleteRow(i + 1); removed++; }
+    }
+    var edges = getOrCreateUserDeptTab(ss);
+    var edata = edges.getDataRange().getValues();
+    for (var j = edata.length - 1; j >= 1; j--) {
+      if (String(edata[j][1]).trim() === key) edges.deleteRow(j + 1);
+    }
+    return { status: 'ok', message: removed ? 'Deleted ' + key : 'No such department: ' + key };
+  });
+}
+
+// POST setUserDepartments (admin) — replace one person's department memberships.
+function setUserDepartments(params, authEmail) {
+  requireAdmin(authEmail);
+  var email = (params.email || '').toString().toLowerCase().trim();
+  if (!email) return { status: 'error', message: 'Email required.' };
+  var keys = [];
+  try { keys = JSON.parse(params.departments || '[]'); } catch (e) { keys = []; }
+  if (!(keys instanceof Array)) keys = [];
+  keys = keys.map(function (k) { return String(k).trim(); }).filter(Boolean);
+
+  return withRowLock(function () {
+    var ss = getSs();
+    var tab = getOrCreateUserDeptTab(ss);
+    var data = tab.getDataRange().getValues();
+    // Delete bottom-up so earlier deletes can't shift later row numbers.
+    for (var i = data.length - 1; i >= 1; i--) {
+      if (String(data[i][0]).toLowerCase().trim() === email) tab.deleteRow(i + 1);
+    }
+    var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    keys.forEach(function (k) { tab.appendRow([email, k, ts, authEmail]); });
+    return { status: 'ok', email: email, departments: keys, message: email + ': ' + keys.length + ' department(s)' };
+  });
+}
+
+// POST purgeUsers (admin) — the "treat this as new development" reset: remove
+// every account except the admins.
+//
+// IRREVERSIBLE, so it is deliberately TWO calls in one endpoint:
+//
+//   params.dryRun === '1'  → plan only. Returns the rows that WOULD go, deletes
+//                            nothing. This is what the UI calls first, so the
+//                            admin can copy the backup before anything is lost.
+//   otherwise              → deletes exactly that plan.
+//
+// It used to do both at once: the rows were deleted and the "backup" came back in
+// the same response, so a dropped connection or a closed tab meant the only record
+// of what had existed was gone along with the accounts — while the UI told the
+// admin the rows were "shown below first". A response is not a backup. Nothing is
+// destroyed now until a human has seen the list.
+function purgeUsers(params, authEmail) {
+  requireAdmin(authEmail);
+  if (String(params.confirm || '') !== 'PURGE') {
+    return { status: 'error', message: 'Refused: confirmation text did not match.' };
+  }
+  var dryRun = String(params.dryRun || '') === '1';
+
+  return withRowLock(function () {
+    var ss = getSs();
+    var tab = getOrCreateUsersTab(ss);
+    var data = tab.getDataRange().getValues();
+
+    // Pass 1 — PLAN ONLY. No writes. Rows are collected in ascending index order
+    // and deleted in reverse, so a delete never invalidates an index still to come.
+    var plan = [], blanks = [];
+    for (var i = 1; i < data.length; i++) {
+      var email = String(data[i][0] || '').toLowerCase().trim();
+      if (!email) { blanks.push(i + 1); continue; }        // a stray empty row
+      if (isAdminEmail(email)) continue;
+      plan.push({
+        row: i + 1,
+        email: email,
+        name: userCol(data[i], 'Name'),
+        createdBy: String(data[i][4] || ''),
+        createdAt: data[i][3] ? Utilities.formatDate(new Date(data[i][3]), 'Asia/Kolkata', 'dd-MMM-yyyy') : ''
+      });
+    }
+    var asRows = plan.map(function (p) {
+      return { email: p.email, name: p.name, createdBy: p.createdBy, createdAt: p.createdAt };
+    });
+
+    if (dryRun) {
+      // Counts only, plus the list. Nothing is written and nothing is locked in.
+      var edgeCount = 0;
+      var etab = getOrCreateUserDeptTab(ss);
+      var edata = etab.getDataRange().getValues();
+      for (var j = 1; j < edata.length; j++) {
+        var e2 = String(edata[j][0] || '').toLowerCase().trim();
+        if (e2 && !isAdminEmail(e2)) edgeCount++;
+      }
+      return { status: 'ok', dryRun: true, removed: asRows, count: asRows.length,
+               blankRows: blanks.length, edges: edgeCount,
+               message: 'Nothing deleted. ' + asRows.length + ' account(s), '
+                        + edgeCount + ' membership(s) and ' + blanks.length
+                        + ' empty row(s) would be removed. Copy the list, then confirm.' };
+    }
+
+    // Pass 2 — delete, in reverse, exactly what was planned.
+    // If the caller reviewed a list, refuse when the world has changed under it:
+    // an irreversible delete must remove what was SEEN, or nothing at all.
+    var expect = (params.expect === undefined || params.expect === '') ? null : Number(params.expect);
+    if (expect !== null && expect !== plan.length) {
+      return { status: 'error', message: 'The account list changed while you were reviewing it ('
+               + plan.length + ' now, ' + expect + ' when you looked). Nothing was deleted — review it again.' };
+    }
+    for (var k = plan.length - 1; k >= 0; k--) tab.deleteRow(plan[k].row);
+    for (var b = blanks.length - 1; b >= 0; b--) tab.deleteRow(blanks[b]);
+
+    // Every membership edge for a removed account goes too.
+    var edges = getOrCreateUserDeptTab(ss);
+    var ed = edges.getDataRange().getValues();
+    for (var m = ed.length - 1; m >= 1; m--) {
+      var em = String(ed[m][0] || '').toLowerCase().trim();
+      if (em && !isAdminEmail(em)) edges.deleteRow(m + 1);
+    }
+    // And every session, so a still-open tab can't keep working on a dead account.
+    var st = getOrCreateSessionsTab(ss);
+    var sdata = st.getDataRange().getValues();
+    for (var n = sdata.length - 1; n >= 1; n--) {
+      var se = String(sdata[n][1] || '').toLowerCase().trim();
+      if (!se || isAdminEmail(se)) continue;
+      st.getRange(n + 1, 5).setValue('revoked');
+      st.getRange(n + 1, 7).setValue(new Date());
+    }
+    return { status: 'ok', removed: asRows, count: asRows.length,
+             message: 'Removed ' + asRows.length + ' account(s). Admins were kept.' };
+  });
 }
 // Reads Form Responses tab from IR Repository and returns IR list, latest first
 // ──────────────────────────────────────────────────────────────────────────────
@@ -830,7 +1381,7 @@ function listIRs() {
 function getAllIRStatuses() {
   var map = {};
   try {
-    var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+    var ss  = getSs();
     var tab = ss.getSheetByName('APP_DATA');
     if (!tab) return map;
     
@@ -851,6 +1402,45 @@ function getAllIRStatuses() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// SENTINEL STORE ALLOWLIST
+// ──────────────────────────────────────────────────────────────────────────────
+// Sentinel (`__`-prefixed) irNumbers skip every per-section ACL check, which is
+// what lets a new app store ship without a backend redeploy. The allowlist below
+// IS the access control for them, and it is load-bearing rather than tidy:
+//
+// Before it, ANY signed-in account — including one with no edit grant anywhere —
+// could write any `__` store through saveSection, and saveSection replaces the
+// whole row. One POST could therefore:
+//   • blank `__NUDGES__/all` and delete every comment on every ticket, company-wide
+//   • rewrite `__IRS__/<ir>` status/assignee/priority — the fields the UI treats as
+//     authoritative workflow state, so decision "edit comes from departments" was
+//     simply not true for them
+//   • rewrite the shared dropdowns, IQC zones and @-mention directory in `__CONFIG__`
+//   • host arbitrary files in the company Drive under the deployer's quota
+//
+// Adding a store here is a deliberate act. Prefer the narrowest key list that
+// works; '*' means "keyed by a real-world id" and still validates the shape.
+var SENTINEL_SECTIONS = {
+  '__CONFIG__': ['team-directory', 'inward-options', 'iqc-config'],
+  '__NUDGES__': ['all'],
+  '__IRS__':    '*',   // one row per IR number
+  '__KB__':     '*'    // one row per article id (Stage 7 — not yet written)
+};
+
+function assertSentinelWritable(irNumber, sectionId) {
+  var allowed = SENTINEL_SECTIONS[irNumber];
+  if (!allowed) throw new Error('Unknown app store: ' + irNumber);
+  var key = String(sectionId);
+  if (allowed === '*') {
+    // A real-world id, and nothing else: no whitespace, quotes or slashes, so a
+    // key cannot escape its namespace or become a path segment in Drive.
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(key)) throw new Error('Invalid key for ' + irNumber + ': ' + key);
+    return;
+  }
+  if (allowed.indexOf(key) < 0) throw new Error('Unknown key for ' + irNumber + ': ' + key);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ACTION: getPassbook
 // Returns all saved section data for a given IR number
 // ──────────────────────────────────────────────────────────────────────────────
@@ -858,13 +1448,13 @@ function getPassbook(irNumber, authEmail) {
   if (!irNumber) throw new Error('irNumber is required.');
 
   var access = getEffectiveAccess(authEmail);
-  // No-access users see nothing (defence in depth — the frontend keeps them on
-  // the request-access screen, but the backend never trusts that).
-  if (access.role === 'none') return { status: 'ok', sections: {} };
+  // Everyone signed in has view on every section, so this filter no longer hides
+  // anything today — it is kept as the seam that re-tightens reads in one line if
+  // the owner ever wants view restricted again.
 
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__ app stores
 
-  var ss   = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss   = getSs();
   var tab  = getOrCreateDataTab(ss);
   var data = tab.getDataRange().getValues();
 
@@ -892,13 +1482,23 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 
   var access = getEffectiveAccess(savedBy);
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__
-  // Real sections require edit permission (admins bypass). Sentinel app stores
-  // (comments read-marks, dropdown config) are writable by any authenticated
-  // user with access — the comment UI itself is gated client-side by canComment.
-  if (!isSentinel && access.role === 'none')
-    throw new Error('Forbidden: you do not have access to this IR.');
-  if (!isSentinel && access.role !== 'admin' && !canEdit(access.permissions, sectionId))
+  // Real sections require EDIT permission (admins bypass). This is the check that
+  // makes "everyone can view" not become "everyone can write" — the frontend
+  // disables the save buttons, but the backend never trusts a client gate.
+  // Sentinel app stores (comments, dropdown config) stay writable by any signed-in
+  // user: they ARE shared app data, and comments are part of view access. That
+  // openness is bounded by the allowlist — see SENTINEL_SECTIONS — because an
+  // unbounded sentinel write is a write to the app's own control plane.
+  if (isSentinel) assertSentinelWritable(irNumber, sectionId);
+  else if (access.role !== 'admin' && !canEdit(access.permissions, sectionId))
     throw new Error('Forbidden: you do not have edit access to ' + sectionId + '.');
+
+  // App stores never carry files. Rejecting uploads here closes the last sentinel
+  // hole: the upload branch runs before any ACL is consulted and sets every file to
+  // ANYONE_WITH_LINK, so a sentinel write was an unauthenticated-quota way to host
+  // arbitrary public files in the company Drive.
+  if (isSentinel && files && files.length > 0)
+    throw new Error('App stores cannot carry file uploads.');
 
   // 1. Handle file uploads first — create IR folder / Section subfolder
   var fileLinks = {};
@@ -919,7 +1519,7 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   }
 
   // 2. Write to APP_DATA tab (upsert row for irNumber + sectionId)
-  var ss   = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss   = getSs();
   var tab  = getOrCreateDataTab(ss);
   var data = tab.getDataRange().getValues();
 
@@ -962,9 +1562,19 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ACTION: sendNudgeEmail
-// Sends an automatic nudge email via MailApp (no operator clicks). Restricted
-// to the allowed domain so the app can't be used to mail outside Indrones.
+// Sends an automatic nudge email via MailApp (no operator clicks). Restricted so
+// the app can't be used to mail outside Indrones.
 // ──────────────────────────────────────────────────────────────────────────────
+function isMailRecipientAllowed(to) {
+  var addr = String(to || '').toLowerCase().trim();
+  if (!addr) return false;
+  var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
+  if (addr.indexOf(suffix) === addr.length - suffix.length) return true;
+  var ext = (CONFIG.EXTERNAL_EMAILS || []).map(function (x) { return String(x).toLowerCase().trim(); });
+  if (ext.indexOf(addr) > -1) return true;
+  try { return !!findUserRow(getSs(), addr); } catch (e) { return false; }
+}
+
 function sendNudgeEmail(params, authEmail) {
   var to       = (params.to || '').trim();
   var fromName = (params.fromName || authEmail || 'Someone');
@@ -975,9 +1585,8 @@ function sendNudgeEmail(params, authEmail) {
   // Sender is the verified caller — a client can't spoof the reply-to address.
   var from     = authEmail || '';
 
-  // Comment permission gate. Admins bypass. Otherwise the caller must have
-  // 'comment'/'edit' on the comment's target section; an IR-scope comment (no
-  // sectionId) requires comment access on at least one section.
+  // No comment gate: comment comes WITH view, so every signed-in user may post one.
+  // (Kept as a call to canComment so the seam survives if that ever changes.)
   var access = getEffectiveAccess(authEmail);
   var allowed = access.role === 'admin';
   if (!allowed) {
@@ -992,10 +1601,12 @@ function sendNudgeEmail(params, authEmail) {
 
   if (!to) throw new Error('Recipient (to) is required.');
 
-  // Only allow @indrones.com recipients (prevents abuse / external leaks).
-  var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
-  if (to.toLowerCase().indexOf(suffix) !== to.length - suffix.length) {
-    throw new Error('Email can only be sent to @' + CONFIG.ALLOWED_DOMAIN + ' addresses.');
+  // Recipient guard — this app must not become a way to mail outside Indrones.
+  // Allowed: any @indrones.com address, anyone who actually has an account here,
+  // and anything in EXTERNAL_EMAILS. That last list is the escape hatch for a
+  // non-Indrones colleague who needs the mail but has no account.
+  if (!isMailRecipientAllowed(to)) {
+    throw new Error('Email can only be sent to @' + CONFIG.ALLOWED_DOMAIN + ' addresses or to someone with an I-PASSBOOK account.');
   }
 
   var subject = '[I-PASSBOOK] ' + irNumber + ' — you have a comment';
@@ -1013,6 +1624,12 @@ function sendNudgeEmail(params, authEmail) {
   var options = { name: 'I-PASSBOOK' };
   if (from) options.replyTo = from;
 
+  // Counted against the same daily ceiling as auth mail, from the nudge side of
+  // the reserve. A visible error beats a silent one: if the day's mail is spent,
+  // the comment still posts and the sender is told the notification did not go.
+  if (!mailQuotaOk('nudge')) {
+    return { status: 'error', message: 'Daily notification limit reached — the comment was saved, but no email was sent.' };
+  }
   MailApp.sendEmail(to, subject, body, options);
   return { status: 'ok', message: 'Email sent to ' + to };
 }
@@ -1059,13 +1676,8 @@ function getSectionLabel(sectionId) {
 // ──────────────────────────────────────────────────────────────────────────────
 function getOrCreateDataTab(ss) {
   var tab = ss.getSheetByName('APP_DATA');
-  if (!tab) {
-    tab = ss.insertSheet('APP_DATA');
-    tab.getRange(1, 1, 1, 5).setValues([['IR Number', 'Section ID', 'Saved By', 'Fields (JSON)', 'Last Updated']]);
-    tab.getRange(1, 1, 1, 5).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+  if (!tab) tab = ss.insertSheet('APP_DATA');
+  return ensureHeaders(tab, ['IR Number', 'Section ID', 'Saved By', 'Fields (JSON)', 'Last Updated']);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1073,7 +1685,7 @@ function getOrCreateDataTab(ss) {
 // Safe to run repeatedly (no-op if the tab already exists).
 // ──────────────────────────────────────────────────────────────────────────────
 function setupAuditLog() {
-  var ss = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss = getSs();
   getOrCreateAuditTab(ss);
   getOrCreateDataTab(ss);
   return 'APP_DATA + AUDIT_LOG tabs ready on sheet ' + CONFIG.PASSBOOK_SHEET_ID;
@@ -1130,7 +1742,7 @@ function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, ne
 // ──────────────────────────────────────────────────────────────────────────────
 function getAuditLog(irNumber) {
   if (!irNumber) throw new Error('irNumber is required.');
-  var ss  = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss  = getSs();
   var tab = ss.getSheetByName('AUDIT_LOG');
   if (!tab) return { status: 'ok', entries: [] };
   var data = tab.getDataRange().getValues();
@@ -1183,7 +1795,7 @@ function listLegacyIRs() {
 // Use this to crawl old tabs (IR409, etc) and populate APP_DATA
 // ──────────────────────────────────────────────────────────────────────────────
 function importLegacyData() {
-  var ss   = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
+  var ss   = getSs();
   var tabs = ss.getSheets();
   var count = 0;
   
@@ -1228,6 +1840,116 @@ function importSingleTab(ss, tab) {
         var rowData = [irNumber, secId, 'MigrationBot', JSON.stringify(fields), timestamp];
         dataTab.appendRow(rowData);
     });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ONE-TIME SETUP + MIGRATIONS — run these from the Apps Script editor.
+//
+// Apps Script separates the editor's code from the version serving /exec, so
+// these can run against the new code HOURS BEFORE the new deployment goes live,
+// with zero impact on anyone using the app. That is the whole point of doing the
+// sheet work in this order: the data model is ready before the switch, and the
+// switch is a single deployment edit.
+//
+// Run order: migrateAddColumns() → migrateAclReport() → seedDepartments() →
+//            bootstrapAdmin().  After go-live: maintenancePruneSessions() anytime.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// Widen every tab this build reads to its current header set. Touches ONLY row 1,
+// so it is safe on live data and safe to re-run.
+function migrateAddColumns() {
+  var ss = getSs();
+  var done = [];
+  getOrCreateUsersTab(ss);      done.push('USERS → 11 cols');
+  getOrCreateSessionsTab(ss);   done.push('SESSIONS → 7 cols');
+  getOrCreateDeptTab(ss);       done.push('DEPARTMENTS → 15 cols');
+  getOrCreateUserDeptTab(ss);   done.push('USER_DEPARTMENTS → 4 cols');
+  getOrCreateCodesTab(ss);      done.push('CODES → 7 cols');
+  getOrCreateAttemptsTab(ss);
+  getOrCreateDataTab(ss);
+  return 'Migrated: ' + done.join(', ') + '.';
+}
+
+// READ-ONLY report of the retired ACL tab — the last chance to see the grants that
+// were hand-assigned before departments replaced them. Changes nothing.
+function migrateAclReport() {
+  var tab = getSs().getSheetByName('ACL');
+  if (!tab) return 'No ACL tab — nothing to migrate (this is expected on a fresh sheet).';
+  var data = tab.getDataRange().getValues();
+  var lines = ['Old per-user ACL (ACL tab) — ' + Math.max(0, data.length - 1) + ' row(s):', ''];
+  for (var i = 1; i < data.length; i++) {
+    var email = String(data[i][0] || '').trim();
+    if (!email) continue;
+    var granted = [];
+    for (var j = 0; j < SECTION_KEYS.length; j++) {
+      var v = String(data[i][j + 1] || '').trim();
+      if (v) granted.push(SECTION_KEYS[j] + '=' + v);
+    }
+    lines.push(email + '  →  ' + (granted.length ? granted.join(' ') : '(nothing)'));
+  }
+  lines.push('', 'Nobody needs migrating: everyone gets view+comment automatically, and edit now');
+  lines.push('comes from department membership. Use this only to check nobody had edit you');
+  lines.push('want to preserve — then set it up in the Departments tab.');
+  var out = lines.join('\n');
+  console.log(out);
+  return out;
+}
+
+// Create the department names as EMPTY rows — names only, NO section grants.
+// Deliberately no grants: which department may edit which section is the owner's
+// call, and a guess here would hand out edit rights nobody asked for. Tick them in
+// the app's Departments tab.
+var SEED_DEPARTMENTS = [
+  'Production', 'QC', 'Flight Test', 'IQC', 'Purchase',
+  'Inventory', 'CR', 'Compliance', 'Engineering', 'Management'
+];
+
+function seedDepartments() {
+  var ss = getSs();
+  var tab = getOrCreateDeptTab(ss);
+  var data = tab.getDataRange().getValues();
+  var have = {};
+  for (var i = 1; i < data.length; i++) have[String(data[i][0] || '').trim()] = true;
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var added = [];
+  SEED_DEPARTMENTS.forEach(function (name) {
+    var key = deptKeyFromName(name);
+    if (have[key]) return;
+    var row = [key, name, 'yes'];
+    SECTION_KEYS.forEach(function () { row.push(''); });   // no grants — the owner ticks these
+    row.push(ts); row.push('seed');
+    tab.appendRow(row);
+    added.push(key);
+  });
+  return added.length
+    ? 'Created ' + added.length + ' department(s): ' + added.join(', ') + '. Now tick their sections in the app.'
+    : 'All ' + SEED_DEPARTMENTS.length + ' departments already exist — nothing to do.';
+}
+
+// Ensure the admin has a usable account. If the row is missing it is created with
+// a temporary password (returned ONCE — copy it out of the execution log); if it
+// exists, its password is left alone and only the flags are normalised so the
+// admin isn't forced through the first-login change.
+function bootstrapAdmin() {
+  var ss = getSs();
+  var email = (CONFIG.ADMIN_EMAILS[0] || '').toLowerCase().trim();
+  if (!email) return 'No CONFIG.ADMIN_EMAILS configured.';
+  var idx = findUserRowIndex(ss, email);
+  if (idx) {
+    getOrCreateUsersTab(ss).getRange(idx, 6).setValue('');      // Must Change Password = no
+    getOrCreateUsersTab(ss).getRange(idx, 8).setValue('active');
+    return 'Admin ' + email + ' already exists — flags normalised, existing password untouched.';
+  }
+  var pw = createUserRow(email, 'Monish Raza', 'bootstrap');
+  return 'Created admin ' + email + '.\nTEMPORARY PASSWORD: ' + pw +
+         '\nSign in with it, set your own password, and delete this log line afterwards.';
+}
+
+// Delete long-expired session rows. Safe anytime; nothing calls it automatically
+// except a best-effort prune at sign-in.
+function maintenancePruneSessions() {
+  pruneSessions();
+  return 'Pruned expired sessions.';
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

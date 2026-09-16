@@ -191,7 +191,7 @@ code, pre, kbd { font-family: var(--font-mono); }
 }
 
 /* ══════════════════════════════════════════════════════════
-   AUTH SCREEN + REQUEST-ACCESS
+   AUTH SCREEN + FIRST-LOGIN PASSWORD CHANGE
    ══════════════════════════════════════════════════════════ */
 #auth-container {
   display: none;
@@ -213,8 +213,8 @@ code, pre, kbd { font-family: var(--font-mono); }
   max-width: 400px;
 }
 
-/* ── Auth / request-access internals ───────────────────────── */
-#auth-form { display: flex; flex-direction: column; gap: 0.75rem; }
+/* ── Auth / password-change internals ──────────────────────── */
+#auth-form, #pc-form { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .auth-head { text-align: center; margin-bottom: 1.5rem; }
 .auth-brand {
@@ -225,29 +225,6 @@ code, pre, kbd { font-family: var(--font-mono); }
 }
 .auth-hint { color: var(--ink-gray-5); font-size: var(--text-sm); margin-top: 0.4rem; }
 
-/* Bot trap: off-canvas, not display:none — some bots skip hidden fields. */
-.auth-honeypot {
-  position: absolute;
-  left: -9999px;
-  top: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-}
-
-.auth-captcha-label { color: var(--ink-gray-6); font-size: var(--text-xs); display: block; margin-bottom: 0.4rem; }
-.auth-captcha-row { display: flex; align-items: center; gap: 0.5rem; }
-/* The challenge is a light-on-light SVG rendered by the backend, so it keeps a
-   fixed pale backdrop in both themes rather than following the surface ramp. */
-.auth-captcha-img {
-  height: 46px;
-  width: 130px;
-  border-radius: var(--radius-3);
-  background: #f4f4f4;
-  flex: 0 0 auto;
-  border: 1px solid var(--outline-gray-1);
-}
-.auth-err { color: var(--ink-red-6); font-size: var(--text-xs); margin-top: 0.35rem; }
 .auth-error { color: var(--ink-red-6); text-align: center; margin-top: 1rem; font-size: var(--text-sm); }
 
 .link-btn {
@@ -263,9 +240,8 @@ code, pre, kbd { font-family: var(--font-mono); }
 }
 .link-btn:hover { text-decoration: underline; }
 
-.req-pending { margin-top: 1rem; color: var(--ink-green-7); font-size: var(--text-sm); }
-
-#request-access {
+/* Sibling of #app-container: while this is up the whole shell is hidden. */
+#password-change {
   display: none;
   flex: 1;
   align-items: center;
@@ -273,9 +249,10 @@ code, pre, kbd { font-family: var(--font-mono); }
   padding: 2rem 1rem;
   background: var(--surface-base);
 }
-#request-access .glass-card { text-align: center; max-width: 460px; }
-#request-access .btn { margin-top: 0.75rem; }
-#request-access-email { margin: 1rem 0; color: var(--ink-gray-8); }
+#password-change .glass-card { text-align: center; max-width: 460px; }
+#password-change .btn { margin-top: 0.75rem; }
+#password-change .auth-hint { margin-top: 1rem; text-align: left; }
+#pc-email { margin: 1rem 0; color: var(--ink-gray-8); }
 
 /* ══════════════════════════════════════════════════════════
    APP SHELL

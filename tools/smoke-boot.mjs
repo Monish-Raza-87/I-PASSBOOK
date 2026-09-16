@@ -220,6 +220,48 @@ ok('no undefined or NaN on the Sheet path', !/undefined|NaN/.test(sbody));
 head('no javascript errors on the Sheet path');
 ok('clean console', errorsIn(sheetRun.err).length === 0, errorsIn(sheetRun.err).slice(0, 5));
 
+// ── Phase 3: the signed-OUT path — what a person actually lands on first ──────
+// Phases 1 and 2 both use the ?dev=1 bypass, so neither ever renders the login
+// screen. That is exactly the gap that let a broken sign-up flow ship: the auth
+// UI was never loaded in a real engine. This loads it with the dev bypass OFF,
+// which is the state every new employee starts in.
+//
+// The stub still blocks the network, so boot finds no stored session and shows
+// the login screen. Nothing here proves sign-in WORKS (that needs a real backend);
+// it proves the screen renders, and that the deleted sign-up machinery is gone.
+head('the signed-out path');
+const anon = await runChrome('--headless=new', `${base}/`);
+const adom = /<\/html>/i.test(anon.out) ? anon.out : (await runChrome('--headless', `${base}/`)).out;
+
+ok('Chrome produced a DOM', /<\/html>/i.test(adom), adom.length);
+ok('the app shell is hidden',
+  /id="app-container"[^>]*style="[^"]*display:\s*none/.test(adom),
+  (adom.match(/id="app-container"[^>]*/) || [''])[0]);
+ok('the login screen is shown',
+  /id="auth-container"[^>]*style="[^"]*display:\s*flex/.test(adom),
+  (adom.match(/id="auth-container"[^>]*/) || [''])[0]);
+ok('the password-change screen is hidden',
+  /id="password-change"[^>]*style="[^"]*display:\s*none/.test(adom),
+  (adom.match(/id="password-change"[^>]*/) || [''])[0]);
+
+head('the sign-up machinery is gone, not merely hidden');
+// Absent from the DOM entirely — a hidden-but-present control is how the old
+// captcha/OTP flow survived three rounds of "simplify the auth screen".
+const gone = ['auth-signup-btn', 'auth-captcha-wrap', 'auth-otp-wrap', 'auth-name-wrap',
+              'request-access', 'auth-toggle-mode', 'auth-website'];
+ok('no deleted auth control remains in the DOM',
+  gone.every(id => !adom.includes('id="' + id + '"')),
+  gone.filter(id => adom.includes('id="' + id + '"')));
+
+head('the new sign-in path is present');
+['auth-form', 'auth-email', 'auth-password', 'auth-signin-btn',
+ 'auth-forgot-link', 'auth-forgot-wrap', 'auth-reset-wrap',
+ 'auth-code', 'auth-new-password', 'pc-form', 'pc-new', 'pc-confirm']
+  .forEach(id => ok('#' + id + ' exists', adom.includes('id="' + id + '"')));
+
+head('no javascript errors on the signed-out path');
+ok('clean console', errorsIn(anon.err).length === 0, errorsIn(anon.err).slice(0, 5));
+
 server.close();
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);

@@ -17,6 +17,7 @@
 | [[07 - Known Issues & TODO]] | Current bugs, tech debt, planned features, test suites |
 | [[08 - Development Guide]] | How to run locally, dev mode, tests, deploying |
 | [[09 - Design System]] | Token provenance, the generator, why the palette ships twice |
+| [[10 - Auth & Access Model]] | How someone gets in, and what they may do — the canonical write-up |
 
 ---
 

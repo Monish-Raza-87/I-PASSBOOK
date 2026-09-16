@@ -453,6 +453,17 @@ convention: **top-level, no parameters, return a human-readable string report, a
 are safe to re-run.** None of them is a key in the `doGet`/`doPost` dispatch maps,
 so none is reachable over HTTP.
 
+> ⚠️ **Every report also goes through `report()`, which logs it.** This is not
+> decoration. The Apps Script editor's execution log shows **only what the code
+> logs** — a function's *return value is never displayed*. So a function that only
+> returned its report would look, to the person running it, exactly like one that
+> did nothing: `Execution completed`, and no `dropped` grant list, no merge plan, no
+> `ERA-AMBIGUOUS` block, no backup tab name, no one-time admin password. Every one
+> of those is something an operator has to **read** to run the cutover safely.
+> Wrapping the outer call (`return report(withRowLock(…))`) rather than the inner
+> returns is deliberate: it is what makes the early refusals — *"Already merged"*,
+> *"Refusing: … already exists"* — visible too. `smoke-backend.mjs` asserts both.
+
 **The run order is forced, not chosen.** Run these in exactly this order:
 
 ```

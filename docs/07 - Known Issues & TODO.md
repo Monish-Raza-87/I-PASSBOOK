@@ -2,7 +2,7 @@
 
 > **Status of the section restructure + auth/access rewrite (Sept 2026).**
 > Code-complete, documented in [10](10 - Auth & Access Model.md), and passing all
-> **925 cases across 11 suites** — but **not deployed.** `main` holds it; gh-pages
+> **929 cases across 11 suites** — but **not deployed.** `main` holds it; gh-pages
 > and the live GAS deployment still serve the old build, and the two must cut over
 > **together** (the old frontend calls actions the new backend no longer has, and the
 > restructure re-letters the section tabs). `CACHE_NAME` is already bumped for that
@@ -73,7 +73,7 @@
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **925 cases across 11 suites**, all passing.
+`node tools/smoke-all.mjs` — **929 cases across 11 suites**, all passing.
 
 | Suite | What it proves |
 |---|---|

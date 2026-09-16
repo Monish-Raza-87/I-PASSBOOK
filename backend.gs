@@ -2078,6 +2078,24 @@ function importSingleTab(ss, tab) {
 //     the mirror image of the column-widening rationale above.
 // ──────────────────────────────────────────────────────────────────────────────
 
+// report() — MAKE AN EDITOR-FACING REPORT VISIBLE.
+//
+// These functions RETURN a human-readable report, and returning it is still right:
+// it keeps them callable from a future UI, and the suites assert on the strings.
+// But when you run one from the Apps Script editor, the execution log shows ONLY
+// what the code logs — a returned value is never displayed. So without this, a run
+// reports "Execution completed" and nothing else: no `dropped` grant list, no merge
+// plan, no ERA-AMBIGUOUS block, no one-time admin password, no backup tab name.
+// Every one of those is something an operator has to READ to run the cutover
+// safely, which makes an un-loggable report the same as no report.
+//
+// Wrap EVERY report return in this. The early refusals matter most: "refusing to
+// touch DEPARTMENTS" is exactly the message that must not be swallowed.
+function report(msg) {
+  console.log(msg);
+  return msg;
+}
+
 // Widen every tab this build reads to its current header set. Touches ONLY row 1,
 // so it is safe on live data and safe to re-run.
 //
@@ -2109,7 +2127,7 @@ function migrateAddColumns() {
   getOrCreateCodesTab(ss);      done.push('CODES → ' + CODE_HEADS.length + ' cols');
   getOrCreateAttemptsTab(ss);
   getOrCreateDataTab(ss);
-  return 'Migrated: ' + done.join(', ') + '.';
+  return report('Migrated: ' + done.join(', ') + '.');
 }
 
 // READ-ONLY report of the retired ACL tab — the last chance to see the grants that
@@ -2216,14 +2234,14 @@ function seedDepartments() {
   // A tab whose header nobody recognises cannot be safely reinterpreted: the six
   // columns no longer mean what the nine did. Refuse, and name the actual header.
   if (shape === 'unknown') {
-    return 'DEPARTMENTS has an unrecognised header — refusing to touch it.\n' +
+    return report('DEPARTMENTS has an unrecognised header — refusing to touch it.\n' +
            'Header found: ' + deptTabShapeHeader(tab) + '\n' +
            'Expected:     ' + DEPT_HEADS.join(' | ') + '\n' +
-           'Inspect it by hand; no derivation from an unknown header is trustworthy.';
+           'Inspect it by hand; no derivation from an unknown header is trustworthy.');
   }
   // Legacy nine-section layout: snapshot, then rebuild every row from SEED_GRANTS.
   // Mapping by NAME, never by position — that is the whole reason this branch exists.
-  if (shape === 'legacy-9') return seedDepartmentsRebuildLegacy(ss, tab);
+  if (shape === 'legacy-9') return report(seedDepartmentsRebuildLegacy(ss, tab));
 
   var data = tab.getDataRange().getValues();
   var byKey = {};
@@ -2288,7 +2306,7 @@ function seedDepartments() {
   lines.push('');
   lines.push('IQC and Compliance are seeded with no grants and no members — intentional.');
   lines.push('The grants are live as soon as this returns; tick any changes in the app.');
-  return lines.join('\n');
+  return report(lines.join('\n'));
 }
 
 // "flight-test" -> "Flight Test" for the display Name cell.
@@ -2414,7 +2432,7 @@ function seedMemberships() {
     ? 'Added but NOT YET SIGN-IN-ABLE (' + noAccount.length + '): ' + noAccount.join(', ') +
       ' — the edge is correct, they just have no USERS row yet.'
     : 'Every added email has a USERS row.');
-  return lines.join('\n');
+  return report(lines.join('\n'));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2660,9 +2678,9 @@ function countDistinctIRs(plan) {
 function mergeSectionsReport() {
   var ss  = getSs();
   var tab = ss.getSheetByName('APP_DATA');
-  if (!tab) return 'No APP_DATA tab — nothing to merge.';
+  if (!tab) return report('No APP_DATA tab — nothing to merge.');
   var plan = planSectionMerge(tab.getDataRange().getValues());
-  return describeMergePlan(plan, 'REPORT ONLY — nothing was written.');
+  return report(describeMergePlan(plan, 'REPORT ONLY — nothing was written.'));
 }
 
 function describeMergePlan(plan, headline) {
@@ -2722,7 +2740,7 @@ function describeMergePlan(plan, headline) {
 // point at the wrong row. That is the exact shape withRowLock's comment reserves it
 // for, and it is a new combination: no earlier migration takes a lock.
 function mergeSectionsApply() {
-  return withRowLock(function () {
+  return report(withRowLock(function () {
     var ss  = getSs();
     var tab = getOrCreateDataTab(ss);
     var data = tab.getDataRange().getValues();
@@ -2768,7 +2786,7 @@ function mergeSectionsApply() {
     out += '\nBackup: ' + backupName + ' — copy it to a private sheet before you trust this.';
     out += '\nUndo:   restoreAppDataFromBackup()';
     return out;
-  });
+  }));
 }
 
 // THE UNDO. Finds the newest APP_DATA_BACKUP_<date>, snapshots the CURRENT state to
@@ -2779,7 +2797,7 @@ function mergeSectionsApply() {
 // stale service worker may have appended real rows in the meantime; those must not
 // survive underneath a shorter restored block.
 function restoreAppDataFromBackup() {
-  return withRowLock(function () {
+  return report(withRowLock(function () {
     var ss = getSs();
     var backups = ss.getSheets().filter(function (s) {
       return /^APP_DATA_BACKUP_\d{4}-\d{2}-\d{2}$/.test(s.getName());
@@ -2814,7 +2832,7 @@ function restoreAppDataFromBackup() {
     return 'Restored APP_DATA from ' + src.getName() + ' (' + (values.length - 1) + ' row(s)).\n' +
            'The pre-restore state was saved to ' + preName + ' — that is your redo.\n' +
            'Re-run mergeSectionsReport() to confirm the store is back to its old shape.';
-  });
+  }));
 }
 
 // Grow a freshly inserted sheet if the block being written is taller than its
@@ -2832,23 +2850,23 @@ function ensureRoom(sheet, rows, cols) {
 function bootstrapAdmin() {
   var ss = getSs();
   var email = (CONFIG.ADMIN_EMAILS[0] || '').toLowerCase().trim();
-  if (!email) return 'No CONFIG.ADMIN_EMAILS configured.';
+  if (!email) return report('No CONFIG.ADMIN_EMAILS configured.');
   var idx = findUserRowIndex(ss, email);
   if (idx) {
     getOrCreateUsersTab(ss).getRange(idx, 6).setValue('');      // Must Change Password = no
     getOrCreateUsersTab(ss).getRange(idx, 8).setValue('active');
-    return 'Admin ' + email + ' already exists — flags normalised, existing password untouched.';
+    return report('Admin ' + email + ' already exists — flags normalised, existing password untouched.');
   }
   var pw = createUserRow(email, 'Monish Raza', 'bootstrap');
-  return 'Created admin ' + email + '.\nTEMPORARY PASSWORD: ' + pw +
-         '\nSign in with it, set your own password, and delete this log line afterwards.';
+  return report('Created admin ' + email + '.\nTEMPORARY PASSWORD: ' + pw +
+         '\nSign in with it, set your own password, and delete this log line afterwards.');
 }
 
 // Delete long-expired session rows. Safe anytime; nothing calls it automatically
 // except a best-effort prune at sign-in.
 function maintenancePruneSessions() {
   pruneSessions();
-  return 'Pruned expired sessions.';
+  return report('Pruned expired sessions.');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2864,7 +2882,7 @@ function maintenancePruneSessions() {
 var AUDIT_RETENTION_DAYS = 400;
 
 function maintenancePruneAuditLog() {
-  return withRowLock(function () {
+  return report(withRowLock(function () {
     var ss  = getSs();
     var tab = ss.getSheetByName('AUDIT_LOG');
     if (!tab) return 'No AUDIT_LOG tab — nothing to prune.';
@@ -2891,7 +2909,7 @@ function maintenancePruneAuditLog() {
 
     return 'Pruned ' + doomed.length + ' audit row(s) older than ' + AUDIT_RETENTION_DAYS +
            ' days. ' + (data.length - 1 - doomed.length) + ' row(s) kept.';
-  });
+  }));
 }
 
 // Parse the app's 'dd-MMM-yyyy HH:mm:ss' stamp into epoch ms, or null.

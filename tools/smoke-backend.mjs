@@ -835,4 +835,52 @@ r.ok('the idempotency guard tests BOTH counts, not deletes alone',
   /plan\.survivors\.length === 0 && plan\.deletes\.length === 0/.test(fnBody('mergeSectionsApply')),
   (fnBody('mergeSectionsApply').match(/[^\n]*survivors\.length === 0[^\n]*/) || [''])[0]);
 
+r.head('every editor-facing report is LOGGED, not merely returned');
+// The Apps Script editor's execution log shows only what the code logs — a returned
+// value is never displayed. So a function that only returns its report is, to the
+// human running it from the function dropdown, indistinguishable from one that did
+// nothing: "Execution completed" and no `dropped` grant list, no merge plan, no
+// ERA-AMBIGUOUS block, no backup tab name, no one-time admin password. Every one of
+// those is a thing the operator must READ to run the cutover safely.
+//
+// This is the same failure mode as the `→ 15 cols` strings that rotted: a report
+// nobody can read is worse than no report, and nothing asserted it.
+r.ok('report() exists and both logs and returns',
+  /function report\(msg\)\s*\{[\s\S]{0,200}console\.log\(msg\)[\s\S]{0,100}return msg;/.test(code),
+  (code.match(/[^\n]*function report\(msg\)[^\n]*/) || [''])[0]);
+
+// Every editor-facing function that produces a report must route every one of its
+// report returns through report(). Checked per-function on the real source, so a
+// new early-return cannot slip in unlogged. `describeMergePlan` is exempt: it is a
+// helper whose caller logs, and `migrateAclReport` logs directly (it predates
+// report() and its output is the one the owner must paste somewhere private).
+const REPORTING_FNS = ['migrateAddColumns', 'seedDepartments', 'seedMemberships',
+  'mergeSectionsReport', 'mergeSectionsApply', 'restoreAppDataFromBackup',
+  'bootstrapAdmin', 'maintenancePruneSessions', 'maintenancePruneAuditLog'];
+const unlogged = REPORTING_FNS.filter(fn => {
+  const body = fnBody(fn);
+  if (!body || !/report\(/.test(body)) return true;
+  if (!/return\s+(['"])/.test(body)) return false;   // no bare report return at all
+  // A LOCKED function's inner early-returns are values handed up to the single
+  // outer `return report(withRowLock(fn))`, so a bare return inside one IS logged.
+  // Outside that shape, a bare `return '…'` never reaches the log.
+  return !/return report\(withRowLock\(function/.test(body);
+});
+r.ok('no editor-facing function returns a report string unlogged',
+  unlogged.length === 0, unlogged);
+
+r.ok('the locked functions wrap the WHOLE call, not each inner return',
+  ['mergeSectionsApply', 'restoreAppDataFromBackup', 'maintenancePruneAuditLog']
+    .every(fn => /^function \w+\(\) \{\r?\n  return report\(withRowLock\(function/.test(
+      (code.slice(code.indexOf('function ' + fn + '()'))))),
+  // Wrapping the outer call is what makes every early refusal inside the lock
+  // visible too — wrapping the inner returns instead would leave the "Already
+  // merged" and "Refusing: … already exists" paths silent.
+  'the refusals inside the lock are the messages that matter most');
+
+r.ok('report() is called for the refusal paths too, not just the happy path',
+  /if \(!email\) return report\(/.test(fnBody('bootstrapAdmin')) &&
+  /if \(shape === 'unknown'\)[\s\S]{0,400}return report\(/.test(fnBody('seedDepartments')),
+  'a swallowed "refusing to touch DEPARTMENTS" is the message that matters most');
+
 r.finish();

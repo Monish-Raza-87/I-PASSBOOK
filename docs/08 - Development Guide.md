@@ -69,7 +69,14 @@ clients or the `/exec` URL.
 1. Open [script.google.com](https://script.google.com) and open the existing project
 2. Paste the contents of `backend.gs` — **do not deploy yet**
 3. Update `CONFIG` values if Sheet/Drive IDs change
-4. Run, from the editor's function dropdown, in this order:
+4. Run, from the editor's function dropdown, in this order — pick the function and
+   press **Run**. Its report appears in the **Execution log** (View → Execution log,
+   or the panel at the bottom). Nothing else is printed, so an apparently blank run
+   means *look at the log*, not that the function was silent: these functions log
+   their reports precisely because the editor never displays a return value. The
+   first run in a session asks for authorisation once — *Review permissions →
+   Advanced → Go to project (unsafe) → Allow* — which is the `script.send_mail`
+   scope the comment notifications need.
    - `migrateAddColumns()` — widens `USERS`, `SESSIONS` and the new tabs in place.
      It **refuses to widen** a `DEPARTMENTS` tab whose header it does not recognise
      (`deptTabShape` → `legacy-9`/`unknown`) rather than overwriting row 1 and
@@ -78,8 +85,9 @@ clients or the `/exec` URL.
      hand-assigned grants before they are orphaned. Paste the output somewhere
      private, never into the repo.
    - `bootstrapAdmin()` — creates the admin row if missing and prints a one-time
-     temporary password to the execution log; if the row exists it is left alone
-     and only the flags are normalised. **Run this before handing out anything.**
+     temporary password **to the execution log**; if the row exists it is left alone
+     and only the flags are normalised. **Run this before handing out anything, and
+     copy the password out of the log then** — it is not stored anywhere else.
 
    `seedDepartments()`, `seedMemberships()` and the merge are deliberately **not**
    here — see the cutover window below for why. The grants are no longer ticked by

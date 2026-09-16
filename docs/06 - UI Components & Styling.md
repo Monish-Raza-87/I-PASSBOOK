@@ -120,7 +120,11 @@ positioning, appended to `document.body`, `--z-overlay`) with a `.triage-body`
 grid of `.triage-row` label/control pairs: Status, Assigned to, Priority, Type.
 `TICKET_PRIORITIES` and `TICKET_TYPES` are app-owned — the customer Form has
 neither column. Status options come from the single `IR_STATUS_VALUES` list, so
-the modal and Section A can never drift apart. Gated on `canEditSection('sec-a')`.
+the modal and the banner pill can never drift apart. Gated on **`canTriage()`**,
+which is a **separate axis from the section grants**: CR and Management hold it
+while editing no section at all, and a department that edits Section C does not
+thereby get it. It replaced a `canEditSection('sec-a')` read when Section A stopped
+being a section — the audience is unchanged, plus Management.
 
 ### Filter segments (`.segments` / `.segment`)
 Frappe's All / Open / Paused / Resolved / Closed strip with live counts. Each
@@ -146,9 +150,12 @@ enough; no code change is needed.
 
 ### Section tabs (`.tabs-container` / `.tab`)
 Horizontally scrollable, `scroll-snap-type: x mandatory`, sticky under the header
-via `--header-h`. **Ten** tabs: the read-only **📋 Report** tab first (marked
-`data-intake="1"`), then the nine workflow sections. `app.js` binds one listener
-to the nine static section `.tab` nodes.
+via `--header-h`. **Seven** tabs: the read-only **📋 Report** tab first (marked
+`data-intake="1"`), then the six workflow sections (**B–G**). `app.js` binds one
+listener to the six static section `.tab` nodes. `sec-b` is the default selection.
+The retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane — old Section
+A is the Overview panel, which sits above this strip and is deliberately not part
+of it (see below).
 
 Two things about this strip are load-bearing:
 
@@ -159,6 +166,70 @@ Two things about this strip are load-bearing:
   read-only screen.
 - `renderLayout()` writes inline `display` on the panes, and the gating code reads
   those inline values back. See *App shell* above.
+
+### Overview panel (`#ir-overview`) — what was Section A
+Pinned **above** the tab strip, so it is always visible and always one click from a
+save. It is **not a section**: `id="ir-overview"`, not `class="section-content"`,
+and outside `#sections-wrapper`. Each of those three is load-bearing — the pane
+regexes key on `sec-`, the tab handler removes `active` from every
+`.section-content` and re-adds it only to the clicked pane (so a panel carrying that
+class would vanish on the first tab click), and the wrapper's delegated listeners
+drive `saveDraft` (so being outside it excludes the Overview from drafting
+structurally — intended, because the panel is always visible and a draft would add
+nothing).
+
+| Class | Role |
+|---|---|
+| `.overview-panel` | The outer card |
+| `.overview-head` / `.overview-title` | Title row, with `#save-overview` |
+| `.overview-facts` | Compact read-only fact strip: IR number, drone serial, date raised, company, respondent, issue type, plus a `Full report →` link that activates the 📋 Report tab |
+| `#ir-overview-editable` | The two writable fields — `a_crmOwner`, `a_contactPhone` |
+| `#ir-timeline` | The automated activity timeline |
+| `#ir-legacy-log` | The legacy hand-typed log, read-only, labelled `Legacy` |
+
+**Ten fields would have been wrong.** The two long textareas (`a_issueDesc`,
+`a_incidentLocationWeather`) are deliberately **not** pinned here: ten fields above
+the tabs pushes the strip a screen down on a phone, and they already sit
+immediately left on the Report tab. That is also why the fact strip and the Report
+tab **intentionally duplicate** the short facts — do not "dedupe" them. The strip is
+a glance; the Report tab is the record.
+
+The legacy log renders the existing four-column grid with `<span>`s instead of
+`<input>`s (`.activity-table-row.is-readonly`), plus a `.legacy-tag` styled like
+`.hist-field`. It is **not** merged into the timeline: it has no per-row timestamp,
+so folding it in would mean inventing when things happened.
+
+`saveOverview()` posts `sectionId: 'sec-a'` through the **existing** `saveSection`
+action — no new endpoint, one ACL branch, one upsert, one audit path — and the
+backend's locked-intake strip is what keeps it from writing a divergent copy of the
+customer's report. Gated on **`canTriage()`**; see the Triage modal above.
+
+### Automated timeline (`#ir-timeline` and `#history-list`)
+One pure function, two places. `buildTimeline(irNumber, auditEntries, nudgeItems, limit)`
+does no fetch, no DOM and no clock, so a suite can drive it with fixtures — and so
+the Overview panel and the 🕓 History modal can never tell different stories. The
+modal is a thin shell (fetch → build → render, `limit: 400`); the Overview calls the
+same renderer with `limit: 40`.
+
+| Source | Condition | Kind |
+|---|---|---|
+| audit, section | `saved` with no field | `save` |
+| audit, section | `added` / `changed` / `removed` | `add` / `edit` / `remove` |
+| audit, workflow | field `status` / `assignee`,`assigneeName` / `priority` / `type` | `status` / `assign` / `priority` / `type` |
+| audit, any | `event: 'uploaded'` | `upload` |
+| comment | a nudge item matching this IR | `comment` (chip `@mention` when it has mentions) |
+
+`renderTimelineInto(el, timeline, opts)` reuses the `.hist-*` classes unchanged —
+all token-based, so the design-system rule holds. Exactly two additions:
+`#ir-timeline .hist-list { max-height: 48vh }` (the modal's 64vh is wrong inline)
+and a `.hist-src` chip marking which half an entry came from.
+
+> ⚠️ **Timestamps are parsed explicitly, never with `Date.parse`.** The backend
+> stamps `'dd-MMM-yyyy HH:mm:ss'`, and `Date.parse` returns **`NaN`** for that shape
+> in V8 — which would not throw, it would silently sort the entire timeline by
+> nothing. `parseAuditTimestamp()` handles the shape directly. `SUPPRESSED_AUDIT_FIELDS`
+> also drops `done` deltas (the renderer is the belt to the backend's braces,
+> because rows written before the backend changed are still in the log).
 
 ### Client's Report (`#sec-intake`, the 📋 tab)
 The read-only intake view: every column the customer's Google Form actually
@@ -196,13 +267,22 @@ grep-based dead-CSS sweep.
 ### Form controls
 `.form-group` · `.form-label` · `.form-input` (32px, `--surface-gray-2`, focus →
 `--outline-gray-4` + `--focus-default`) · `select.form-input` (CSS-drawn chevron) ·
-`.field-locked` / `.field-lock-icon` / `.field-locked-label` (Section A intake
-fields) · `.checklist-row` · `.file-upload-wrapper` / `.photo-thumb`.
+`.field-locked` / `.field-lock-icon` / `.field-locked-label` (locked intake fields,
+still used by the Overview's fact strip) · `.checklist-row` ·
+`.file-upload-wrapper` / `.photo-thumb`.
 
 ### Section tables
 `.activity-table-*`, `.cost-table-*`, `.inward-table-*`, `.iqc-*`,
 `.crosscheck-table`. The activity, cost and IQC rows restack into single-column
 grid areas below 640px rather than scrolling horizontally.
+
+`.activity-table-*` survives the retirement of the editable activity log: the table
+machinery (the row builder, `addActivityRow`, the collect path and the
+`.btn-add-row`) is **gone**, but the grid is still what renders the **legacy log**
+in the Overview — as `.activity-table-row.is-readonly`, with `<span>`s where the
+inputs were. Keep the header/row grid and its `@media (max-width: 639px)` restack;
+the `.activity-table-row .form-input` and `.act-*` rules were deleted with the
+inputs.
 
 ### Dropdowns and modals
 `#user-menu` (`--z-dropdown`), `.nudge-panel`, `.inward-options-modal`

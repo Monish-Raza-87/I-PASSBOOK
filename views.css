@@ -434,8 +434,20 @@
   padding: 5px 0;
   border-bottom: 1px solid var(--outline-gray-1);
 }
-.activity-table-row .form-input,
+/* The row inputs are gone: .activity-table-row now renders the LEGACY hand-typed
+   log read-only, as <span>s (see buildLegacyActivityRow in app.js). Only the cost
+   table still puts inputs in a repeating row. */
 .cost-table-row .form-input { padding: 0 0.5rem; height: 30px; font-size: var(--text-sm); }
+
+/* Read-only twin of the row grid. Same columns, same restack — only the controls
+   differed, so the grid and the mobile rules below are deliberately shared. */
+.activity-table-row.is-readonly {
+  color: var(--ink-gray-8);
+  font-size: var(--text-sm);
+  align-items: start;
+}
+.activity-table-row.is-readonly > span { min-width: 0; word-break: break-word; padding: 2px 0; }
+.activity-table-row.is-readonly .act-day { padding-top: 2px; }
 
 /* Both the header cell and the read-only row input carry .cost-sn / .cost-cost,
    so the two rules below are scoped to the row where they differ. */
@@ -781,6 +793,137 @@
 .hist-old, .hist-new { font-weight: var(--weight-semibold); }
 .hist-old { color: var(--ink-red-7); }
 .hist-new { color: var(--ink-green-7); }
+
+/* Which half of the timeline an entry came from — a section save or a workflow
+   change. Reuses the .hist-field chip shape so the two read as one family. */
+.hist-src {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-gray-5);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-2);
+  padding: 0 5px;
+}
+
+/* The Overview's inline copy of the timeline. The modal's 64vh is wrong inside a
+   panel that already scrolls with the page — it would make the panel taller than
+   the viewport on its own. */
+#ir-timeline .hist-list { max-height: 48vh; }
+
+/* ══════════════════════════════════════════════════════════
+   IR OVERVIEW — pinned panel above the tabs
+   Section A's content in the form it should always have had.
+   Not a section, not a tab, never hidden by the tab handler.
+   ══════════════════════════════════════════════════════════ */
+.overview-panel {
+  margin: 0 0 0.85rem;
+  padding: 0.85rem 0.9rem 0.6rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-5);
+  background: var(--surface-base);
+}
+.overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.overview-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+}
+.overview-head .btn { width: auto; padding: 0.35rem 0.8rem; font-size: var(--text-sm); }
+
+/* Fact strip — the client's intake facts, read-only. Deliberately compact: the ten
+   full fields live on the 📋 Report tab one click away, and pinning all of them
+   here would push the tabs a screen down on a phone. */
+.overview-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.4rem 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-4);
+  background: var(--surface-gray-1);
+}
+.overview-fact { min-width: 0; }
+.overview-fact-label {
+  display: block;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-5);
+}
+.overview-fact-value {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-9);
+  word-break: break-word;
+}
+/* An empty fact renders as intakeValueHtml's em-dash placeholder, not a blank —
+   so the .intake-empty colour rule above is what mutes it. */
+
+/* Points at the 📋 Report tab rather than duplicating its long textareas here. */
+.overview-report-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-blue-7);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  text-align: left;
+}
+.overview-report-link:hover { text-decoration: underline; }
+
+/* The two fields CRM owns. Disabled for everyone else — gating is on the Triage
+   axis (see canTriage in app.js), not on any section. */
+.overview-edit-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr;
+  gap: 0.4rem 0.7rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.overview-edit-label { font-size: var(--text-sm); color: var(--ink-gray-7); }
+.overview-edit-row .form-input:disabled { background: var(--surface-gray-2); cursor: not-allowed; }
+.overview-note,
+.overview-sub-note { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0.35rem 0 0; }
+
+/* Sub-blocks (the timeline, the legacy log) inside the panel. */
+.overview-sub-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0.35rem;
+}
+.overview-sub-head .overview-sub-note { margin: 0; }
+
+/* The legacy tag marks hand-typed history the app no longer writes. Styled like
+   .hist-field so it reads as a label rather than a heading. */
+.legacy-tag {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-amber-8);
+  border: 1px solid var(--outline-amber-2);
+  border-radius: var(--radius-2);
+  padding: 0 5px;
+}
+
+@media (max-width: 639px) {
+  .overview-panel { padding: 0.7rem 0.6rem 0.5rem; }
+  .overview-head { flex-wrap: wrap; }
+  .overview-edit-row { grid-template-columns: 1fr; }
+  .overview-edit-label { margin-bottom: -0.15rem; }
+}
 
 /* ══════════════════════════════════════════════════════════
    ADMIN — User Access

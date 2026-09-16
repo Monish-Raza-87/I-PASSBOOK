@@ -43,13 +43,17 @@ const tabSection = attr => (attr.match(/data-section="([^"]+)"/) || [])[1];
 const tabIds = tabs.map(tabSection).filter(Boolean);
 const sectionTabs = tabIds.filter(id => id !== 'sec-intake');
 
-ok('exactly 9 section tabs', sectionTabs.length === 9, sectionTabs);
+ok('exactly 6 section tabs', sectionTabs.length === 6, sectionTabs);
 ok('the 📋 Report tab is present and marked data-intake',
   /data-section="sec-intake"[^>]*data-intake="1"/.test(html), tabs);
 ok('the intake tab is first, so the report reads as the cover page',
   tabIds[0] === 'sec-intake', tabIds);
 ok('the intake tab carries no section pane in SECTIONS\' shape (it is not savable)',
   !/\n\s*'sec-intake':/.test(appJs));
+// The merged section letters are a hard contract: the owner's department mapping is
+// written against B–G, so a letter drifting here silently mis-grants access.
+ok('the letters are B–G in order, with no A/H/I',
+  sectionTabs.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', sectionTabs);
 
 // The gating fallback must skip the intake tab or it would always win it: the
 // intake pane is never hidden, so it is always "the first visible tab".
@@ -59,14 +63,42 @@ ok('the active-tab fallback excludes the intake tab',
 head('section panes');
 const SECTION_IDS = (appJs.match(/const SECTION_IDS = \[([^\]]+)\]/) || [])[1];
 const sectionIds = SECTION_IDS.split(',').map(s => s.trim().replace(/'/g, '')).filter(Boolean);
-ok('SECTION_IDS has 9 entries', sectionIds.length === 9, sectionIds);
+ok('SECTION_IDS has 6 entries', sectionIds.length === 6, sectionIds);
 
 const paneIds = [...html.matchAll(/<div id="(sec-[a-z]+)" class="section-content/g)].map(m => m[1]);
 ok('every SECTION_ID has a pane', sectionIds.every(s => paneIds.includes(s)), { sectionIds, paneIds });
 ok('every SECTION_ID has a tab', sectionIds.every(s => tabIds.includes(s)), { sectionIds, tabIds });
 ok('the intake pane exists', paneIds.includes('sec-intake'), paneIds);
-ok('panes are exactly the 9 sections + the intake view',
-  paneIds.length === 10 && paneIds.filter(p => p !== 'sec-intake').length === 9, paneIds);
+ok('panes are exactly the 6 sections + the intake view',
+  paneIds.length === 7 && paneIds.filter(p => p !== 'sec-intake').length === 6, paneIds);
+
+// ── The Overview panel ────────────────────────────────────────────────────────
+// Three structural rules, each of which breaks the app in a way that is invisible
+// to a visual check. See the comment block in index.html.
+head('the Overview panel');
+// Scope to the element's own opening tag. index.html explains these three rules in
+// a comment directly above the div, and a page-wide regex matches the PROSE — the
+// comments name the very strings being asserted against.
+const ovTag = (html.match(/<div id="ir-overview"[^>]*>/) || [''])[0];
+ok('the Overview panel exists', ovTag.length > 0, html.indexOf('ir-overview'));
+ok('it is id="ir-overview", not sec-*', /id="ir-overview"/.test(ovTag) && !/\bid="sec-/.test(ovTag), ovTag);
+ok('it is NOT class="section-content" — the tab handler would hide it forever',
+  !/section-content/.test(ovTag), ovTag);
+ok('it sits outside #sections-wrapper',
+  html.indexOf('<div id="ir-overview"') < html.indexOf('id="sections-wrapper"'));
+ok('it is not in SECTION_IDS and has no tab',
+  !sectionIds.includes('sec-a') && !tabIds.includes('sec-a'));
+ok('sec-a survives as a data key (the Overview\'s APP_DATA row)',
+  /const OVERVIEW_KEY = 'sec-a'/.test(appJs));
+ok('the legacy activity log renders read-only, never as inputs',
+  /activity-table-row is-readonly/.test(appJs) && !/class="activity-table-row"[\s\S]{0,80}<input/.test(appJs));
+ok('the retired activityTable machinery is gone, not merely unused', (() => {
+  // Assert on the CODE, not the word: the comment left in populateFieldValue names
+  // the retired type on purpose, so a bare /activityTable/ scan would fail on its own
+  // explanation. A quoted literal is what a live branch would need.
+  const code = appJs.replace(/^\s*\/\/.*$/gm, '');
+  return !/'activityTable'/.test(code) && !/buildActivityRow|addActivityRow/.test(code);
+})(), (appJs.replace(/^\s*\/\/.*$/gm, '').match(/activityTable|buildActivityRow|addActivityRow/g) || []));
 
 // ── Contracts the pivot depends on ────────────────────────────────────────────
 head('load-bearing contracts');

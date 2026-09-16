@@ -26,7 +26,7 @@ was the actual onboarding bug.
 
 | Level | Who has it | Comes from |
 |---|---|---|
-| **View + comment** | every signed-in account, on all nine sections | the default in `getEffectiveAccess` — *nothing* records it |
+| **View + comment** | every signed-in account, on all six sections **and the Overview** | the default in `getEffectiveAccess` — *nothing* records it |
 | **Edit** | a section, for the people whose departments grant it | `DEPARTMENTS` + `USER_DEPARTMENTS` |
 
 Comment travels with view — there is no separate comment level to grant. The
@@ -38,6 +38,34 @@ departments; one department holds many people. `USER_DEPARTMENTS` is an edge lis
 (one row per person↔department pair) for that reason — a wide `dept1|dept2|…`
 layout was rejected because it forces a schema change every time a department is
 added.
+
+### Triage is a second axis, not a seventh section
+
+Editing the **Overview** — the customer's owner and contact phone, and the ticket
+status — is gated on a **`Triage`** flag stored as the last column of
+`DEPARTMENTS`, not on a section grant. It is granted to **CR** (who owned the
+ticket header before) and to **Management** (who asked for it).
+
+Do not model it as a seventh grant. A department may triage while editing **no
+section at all**, and that is exactly what CR and Management get — so a
+`sec-a`-as-a-section design would have forced them to hold an edit grant they must
+never have. The two axes are read in one pass (`departmentCapabilities`, whose only
+caller is `getEffectiveAccess`) and answered by two separate questions on the
+frontend: `canEditSection(id)` and `canTriage()`.
+
+`getEffectiveAccess` sets `perms['sec-a']` to `'view'` for everyone and raises it to
+`'edit'` when triage is held, so the Overview's two inputs go through the **existing**
+`canEdit` seam and are disabled for everyone else. The backend is the authority; the
+save is rejected without the flag.
+
+> **The bug that design would have shipped.** `getPassbook` filters rows with
+> `canView(access.permissions, secId)`, and `getEffectiveAccess` built that map from
+> `SECTION_KEYS`. Once `sec-a` left that list, *no* permission map had the key — so
+> the Overview's data would have been **dropped for all 18 non-admin users** and kept
+> only for the admin, and it would have looked perfectly fine to whoever tested it,
+> because the tester is the admin. `getPassbook` now names `OVERVIEW_KEY` explicitly,
+> and the cutover check in [08](08 - Development Guide.md) signs in as a CR *and* a
+> Production account rather than trusting the admin's view.
 
 ### Why the grants are not in a sentinel store
 
@@ -142,9 +170,12 @@ Three tabs, all powered by one `?action=listUsers` call:
 - **People** — a people × departments tick matrix. One "Save all" posts the grid,
   and unchanged rows are skipped, so a 19-person grid with one edit is one write.
   Per-row actions: reset password, enable/disable.
-- **Departments** — the department → section grant grid (nine checkboxes A–I) plus
-  a member count. *"Need one person to edit one section? Create a department with
-  just that person in it."*
+- **Departments** — the department → section grant grid (six checkboxes, **B–G**)
+  plus a **Triage** checkbox rendered after them and labelled `TR`, so it reads as a
+  different kind of thing, plus a member count. *"Need one person to edit one
+  section? Create a department with just that person in it."* The collector reads
+  `.acc-grant[data-key]` generically, so the Triage box is saved with no change to
+  the collector — it only needed the extra label.
 - **Create people** — single add, a bulk textarea (one email per line, split on
   `[\s,;]+`, deduped, **skip-and-report** so one typo cannot abort a 19-person
   run), and the one-time credentials panel.
@@ -183,14 +214,82 @@ The first version of this was one press that deleted immediately and returned a
 first"*. A response is not a backup: a dropped connection, or simply a closed tab,
 took the only record of those accounts with them.
 
+**The restructure's migration obeys the same rule.** `mergeSectionsApply()` writes a
+dated tab `APP_DATA_BACKUP_<yyyy-MM-dd>` holding the whole pre-merge snapshot
+**before** its first write, and refuses if that tab already exists — so a
+double-apply is impossible even if its idempotency guard somehow passed. A partial
+backup is not a backup, so it is one `setValues` of the entire snapshot.
+`restoreAppDataFromBackup()` is the undo: it finds the newest backup, saves the
+current state to `APP_DATA_PRE_RESTORE_<date>` first (so the undo is itself
+undoable — one level of redo), and then replaces the data rows. It **clears before
+writing** even though the merge only deletes, because a client on a stale service
+worker may have appended real rows in the meantime.
+
 ## Departments
 
 Production · QC · Flight Test · IQC · Purchase · Inventory · CR · Compliance ·
 Engineering · Management
 
 Departments are created in the admin UI and carry their own section grants. The
-grid is seeded **empty** — no grant is inferred from a department's name, because
-a wrong guess here grants write access silently. The owner supplies the mapping.
+**seeded** grants are the owner's mapping, not an inference — a wrong guess here
+grants write access silently, so for a release the grid was deliberately seeded
+*empty* and the mapping was requested in writing. It arrived, and now lives in
+`SEED_GRANTS` in `backend.gs`:
+
+| Department | Sections | Also |
+|---|---|---|
+| Production | B, C, D, E, G | |
+| QC | B, C, D, F | |
+| Flight Test | F | |
+| Purchase | D | |
+| Inventory | B, D, G | |
+| Engineering | D | |
+| CR | — | **Triage** |
+| Management | — | **Triage** |
+| IQC, Compliance | — | |
+
+Changing it is the owner's call; edit `SEED_GRANTS` and re-run `seedDepartments()`.
+
+**`seedDepartments()` is an upsert, never a blind append, and it reports what it
+did.** The distinction matters: "the row is present" is not "the row is correct",
+so a half-granted department would otherwise never be repaired. It prints
+`created` / `updated` (naming the delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`,
+and — critically — a **`dropped` list**: any grant the new mapping does not
+reproduce. A grants rewrite is the one operation that can lose a grant without
+anyone noticing, so the thing it might lose is printed rather than assumed.
+
+`seedMemberships()` writes the person↔department edges from `SEED_MEMBERSHIPS`.
+It **only ever adds** and says so in its report ("Nothing removed"), because it must
+not disturb an edge an admin added later — which is why it does not reuse
+`setUserDepartments()` (that deletes then re-appends, correct for one person's
+edit, wrong for a seed). Emails with no `USERS` row are printed: the edge is
+correct and harmless, but those people cannot sign in yet. **IQC and Compliance are
+deliberately omitted**, and the report says so, so the omission is visibly
+intentional.
+
+Two people hold two departments on purpose, and both are faithful rather than
+clever: the owner gave **one list for Purchase and Inventory**, and since
+`inventory` and `purchase` have *different* grants (B/D/G vs D), the three people
+get **both edges** rather than a merged department or a guess about who belongs
+where. Both are reversible in the Departments tab in seconds.
+
+### Legacy-shaped `DEPARTMENTS` tabs
+
+Shrinking `SECTION_KEYS` from nine to six **re-letters every column**, which makes
+a stale tab actively dangerous: old column 4 (`sec-a`'s grant) would be read as
+`sec-b`'s, and old column 10 (old `sec-g`'s) as `Updated At`. So `deptTabShape()`
+classifies the header before anything writes to it:
+
+| Shape | Action |
+|---|---|
+| `current` | normal upsert |
+| `absent` | create it |
+| `legacy-9` | snapshot to `DEPARTMENTS_BACKUP_<yyyy-MM-dd>` (refusing if it exists, which makes double-apply impossible), then rebuild the rows from `SEED_GRANTS` **mapped by name**, never by position — and print the old grants not reproduced |
+| `unknown` | **refuse**, naming the actual header, and change nothing. An unrecognised header means somebody hand-edited the tab, so no derivation is trustworthy |
+
+`migrateAddColumns()` calls the same classifier and refuses to widen a
+`legacy-9`/`unknown` tab, rather than letting `ensureHeaders` overwrite row 1 and
+reinterpret the columns underneath it.
 
 ## Constraints that are load-bearing
 
@@ -205,6 +304,12 @@ a wrong guess here grants write access silently. The owner supplies the mapping.
 - **`ADMIN_EMAILS` holds exactly one address.** Adding a second is a one-line edit
   plus a GAS redeploy; until then, nobody can provision or unblock anyone if that
   one person is unreachable.
+- **`DEPT_HEADS` is 12 columns, and `Triage` must stay LAST.** Section grants are
+  read **positionally** at `data[i][3 + j]`. Appending is what keeps that offset
+  true; inserting `Triage` anywhere else would silently shift every grant by one.
+  Read the triage cell with the arithmetic `3 + SECTION_KEYS.length + 2`, never a
+  magic `11`, so the next widening cannot misread it either. (`Updated At` and
+  `Updated By` follow the sections; `Triage` is after them.)
 
 ## Related
 
@@ -213,4 +318,7 @@ a wrong guess here grants write access silently. The owner supplies the mapping.
 - [05 — Configuration & Secrets](05 - Configuration & Secrets.md) — and the
   never-commit-a-credential rule (the repo is **public**)
 - [08 — Development Guide](08 - Development Guide.md) — the deploy order and why
-  the editor/deployment split lets migrations run before cutover
+  the editor/deployment split lets migrations run before cutover. The `APP_DATA`
+  merge is the **exception** and cannot be pre-flight, because it rewrites rows the
+  live app is reading; that, plus the positional `DEPARTMENTS` read above, is what
+  forces the grants, the memberships and the merge into the cutover window

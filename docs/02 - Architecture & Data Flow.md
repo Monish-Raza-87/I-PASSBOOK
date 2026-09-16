@@ -62,7 +62,10 @@ Precedence is always **app > Sheet**, merged in the single writer `setAllIRs()`
 cannot disagree. This is what fixed the original badge bug: the list badge read
 the Sheet's Col D while an in-app status edit saved to `APP_DATA`
 `sec-a.a_overallStatus` — itself auto-filled *from* Col D on every open — so an
-in-app status change never reached the badge.
+in-app status change never reached the badge. `a_overallStatus` is now **legacy**:
+it is still saved, and the legacy log still shows it, but nothing reads it back as
+the badge's truth and `getAllIRStatuses()` no longer scans `sec-a` rows at all — it
+reads `__IRS__`.
 
 The app takes ownership of a ticket's status **when someone changes the status in
 the app** (`irState[x].statusOwned`), not by opening a ticket or saving a section.
@@ -82,7 +85,7 @@ Browser → GET docs.google.com/.../gviz/tq?tqx=out:csv&gid=<Form Responses>
 ```
 > **Note:** The IR list is read directly from the **"Form Responses"** tab by the
 > frontend. The GAS `listIRs` action reads the same tab (`IR_REPO_TAB`) and is
-> kept as a fallback; it also joins `APP_DATA` for `a_overallStatus`.
+> kept as a fallback; it also joins `__IRS__` for the app-owned status.
 
 ### The intake column map (`INTAKE_FIELDS` / `mapSheetRows`)
 `mapSheetRows()` is pure — no fetch, no DOM — so the whole mapping is unit-tested
@@ -107,8 +110,13 @@ Report tab and the app records which headers it did not recognise
 ```
 Browser → GET GAS_URL?action=getPassbook&irNumber=IR409
        → GAS reads APP_DATA tab for all rows matching IR409
-       → Returns { status: "ok", sections: { "sec-a": {...}, ... } }
+       → Returns { status: "ok", sections: { "sec-a": {...}, "sec-b": {...}, ... } }
 ```
+`sec-a` here is the **Overview's data key**, not a section — it is not in
+`SECTION_KEYS`, which is why `getPassbook`'s visibility filter names
+`OVERVIEW_KEY` explicitly. Without that, the Overview's data would be returned to
+the admin alone and blank for everyone else.
+
 The same call returns the whole `__IRS__` store in one request
 (`getPassbook('__IRS__')` → `{sections: {IR409: {...}, IR410: {...}}}`), because
 that is already how `getPassbook` behaves.
@@ -127,13 +135,17 @@ Browser → POST GAS_URL with FormData:
 
 | Column | Content |
 |---|---|
-| A | IR Number (e.g., "IR409") |
-| B | Section ID (e.g., "sec-a") |
+| A | IR Number (e.g., "IR409") — or a `__`-prefixed sentinel store name, e.g. `__IRS__` |
+| B | Section ID (e.g., "sec-b"), or for a sentinel row the **record's own key** (for `__IRS__`, the real IR — the sentinel name is in column A) |
 | C | Saved By (email) |
 | D | Fields (JSON object) |
 | E | Last Updated (timestamp) |
 
-Each section save = one row. Upsert by matching IR Number + Section ID.
+Each section save = one row. Upsert by matching IR Number + Section ID. The
+`__IRS__` store therefore adds one row per IR, keyed by the real IR in column B —
+see [04](04 - Backend API Reference.md) for why one row per IR rather than one map
+record. The merge migration rewrites these rows in place and must **never** touch a
+row whose column A starts with `__`.
 
 ## Demo Mode
 

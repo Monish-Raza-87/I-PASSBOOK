@@ -1,12 +1,17 @@
 # 03 — Sections Reference
 
-All 9 passbook sections defined in the `SECTIONS` object in `app.js` (line 2423).
+All **6** passbook sections, **B–G**, defined in the `SECTIONS` object in `app.js`.
+This was nine sections (`sec-a`…`sec-i`) until the restructure: old Section A became
+the **Overview panel**, and two pairs merged — QC + Flight Test into one **Quality
+Test Report**, PDI + Dispatch into one **PDI Report/Dispatch Record**.
 
-The **tenth tab** — 📋 Report — is not a section: it is the read-only view of the
-client's original Google Form submission. It has no fields, no save button and no
-entry in `SECTIONS`, and it is documented in
-[06 — UI Components & Styling](06 - UI Components & Styling.md). Its presence is
-why Section A no longer needs to double as "what the customer said".
+Two tabs are not sections:
+
+- **📋 Report** — the read-only view of the client's original Google Form
+  submission. No fields, no save button, no entry in `SECTIONS`. Documented in
+  [06 — UI Components & Styling](06 - UI Components & Styling.md).
+- **The Overview panel** — Section A's content, pinned above the tab strip rather
+  than behind a tab. See below.
 
 ### Draft auto-preservation (all sections)
 Any edit within a section is auto-persisted to `localStorage` as a draft keyed
@@ -98,28 +103,107 @@ requirement. Backend (`backend.gs`, requires redeploy):
 
 - `saveSection` writes to an **`AUDIT_LOG`** tab on the data sheet, columns:
   `Timestamp | IR Number | Section ID | Saved By | Event | Field ID | Old Value | New Value`.
-- One row per save (`event = "saved"`) plus one row per changed field:
-  `added` (new field), `changed` (old→new — the overwrite/correction), `removed`.
-- Derived Drive-link keys (`*_links`) are skipped so upload bookkeeping isn't noise.
-- `getAuditLog(irNumber)` GET action returns the trail for one IR.
+- Events: `saved` (one marker per **human** section save), `added` / `changed` /
+  `removed` (one row per field), and `uploaded` (one row per uploaded file, with the
+  file name in New Value) — so uploads are traceable too, which they were not before.
+- Three suppressions keep the log readable, each for a stated reason: derived
+  Drive-link keys (`*_links`) and the `done` completion array are never diffed (a
+  500-character JSON diff of `done` would drown the real edits on every save), and
+  the bare `saved` marker is not written for a `__`-sentinel write — every section
+  save also fires `patchIRState`, so without that guard each save produced two marker
+  rows, one of them contentless.
+- The **`__NUDGES__` store is not audited at all.** Comment items already carry
+  their own author and timestamp, which is strictly better information than a row
+  holding a truncated copy of the whole array, and they were dominating the log.
+- `getAuditLog(irNumber)` GET action returns the trail for one IR, oldest first,
+  capped at 400 entries. It matches **two** row shapes: an ordinary section row
+  (column B is the IR) and a sentinel row (column B starts with `__` and the real IR
+  sits in the Section ID column) — which is what lets triage changes appear in the
+  same timeline as saves with no second store.
+- `AUDIT_LOG` has **no automatic cap, rotation or delete path**. The 400 cap bounds
+  the *response*, not the read. Pruning is a manual lever:
+  `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`), deliberately
+  manual because the audit trail is evidence and must not shrink behind anyone's
+  back.
 
 Frontend: the IR banner **🕓 History** button opens a modal listing the trail newest
-first, showing who saved, the event, the field, and old→new values. Until the backend
-is redeployed it shows "No history yet".
+first, showing who saved, the event, the field, and old→new values. It and the
+Overview's timeline are the **same** renderer over the same pure
+`buildTimeline(...)` — see below. Until the backend is redeployed it shows "No
+history yet".
 
 ---
 
-## Section A — Preliminary Details & Activity Log
-**ID:** `sec-a`
+## The Overview panel (what was Section A)
+**Data key:** `sec-a` — **not a section**
 
-Section A is split in two by ownership, and the split is the reason the tab looks
-the way it does:
+The Overview is **not a section**. It has no letter, no tab, no pane, and no entry
+in `SECTION_IDS` or `SECTIONS`. It is a panel pinned above the tab strip, so it is
+always visible, and it is always one click from a save.
 
-- **Locked intake fields** (10) — auto-populated from the customer's Form and
-  `readonly` + `locked` for **everyone**, admins included. They are the form's
-  record of what the client reported, so nobody edits them here. See the
-  **📋 Report** tab for the same data presented in full.
-- **Editable fields** (4) — the only things Section A actually stores.
+**Why it kept the id `sec-a`.** Renaming the data key would have forced a second
+migration for no user-visible gain. Keeping it preserves at zero cost the existing
+`a_crmOwner`/`a_contactPhone` values in `APP_DATA`, the drafts keyed
+`ipb_draft_<ir>_sec-a`, the `a_*` → `sec-a` field resolution, the backend's
+locked-intake strip, and the meaning of existing `AUDIT_LOG` rows. No UI ever shows
+the letter "A".
+
+Three structural properties, each load-bearing:
+
+1. **`id="ir-overview"`, not `sec-…`** — the test regexes that enumerate panes match
+   `<div id="(sec-[a-z]+)" class="section-content`. An `ir-` prefix makes it
+   impossible to miscount as a section.
+2. **Not `class="section-content"`** — the tab handler removes `active` from every
+   `.section-content` and re-adds it only to the clicked pane, so a panel carrying
+   that class would be hidden forever on the first tab click.
+3. **Outside `#sections-wrapper`** — the wrapper's delegated `input`/`change`
+   listeners drive `saveDraft`. Being outside excludes the Overview from drafting
+   structurally. That is intended, not an oversight: it is always visible and one
+   click from a save, so a draft adds nothing.
+
+### What it shows, in order
+
+| Block | Content |
+|---|---|
+| Fact strip | IR number, drone serial, date raised, company, respondent, issue type — read-only, plus a `Full report →` link that activates the 📋 Report tab |
+| Editable | `a_crmOwner`, `a_contactPhone` only |
+| Timeline | the automated activity timeline (see below) |
+| Legacy log | `a_activityLog`, read-only, labelled `Legacy` |
+
+The two long textareas (`a_issueDesc`, `a_incidentLocationWeather`) are **not**
+pinned here: ten fields above the tabs would push the strip a screen down on a
+phone, and they already sit immediately left in the same strip, on the Report tab.
+
+### Saving
+`saveOverview()` mirrors `saveSection` minus files and drafts, posting
+`sectionId: 'sec-a'` with `fields: { a_crmOwner, a_contactPhone }`. It reuses the
+**existing** `saveSection` action rather than adding one, so there is one ACL
+branch, one upsert, and one audit path.
+
+The **locked-key guard in `saveSection` is unchanged** and still strips the ten
+customer-form keys from any `sec-a` payload, so the Overview cannot write a second,
+divergent copy of the intake facts. That guard is why the panel is safe to make
+writable at all.
+
+### Authorization — Triage, not a department
+Editing the Overview is gated on the **`Triage`** flag, not on department grants —
+"who owns the ticket header" is one question, and CR held `sec-a` edit before. A
+department may triage while editing no section at all; that is exactly what CR and
+Management get. See [10 — Auth & Access Model](10 - Auth & Access Model.md).
+
+`getEffectiveAccess` sets `perms['sec-a']` to `'view'` for everyone and raises it to
+`'edit'` when triage is held, so the existing `canEdit` seam disables the two inputs
+for everyone else. The backend is the authority: the save is rejected without it.
+
+> **The bug this design would have shipped.** `getPassbook` drops any row the caller
+> cannot view, and it filtered on a permission map built from `SECTION_KEYS`. Once
+> `sec-a` left that list, **no** permission map had the key — so the Overview's data
+> (including the legacy log) would have been dropped for all 18 non-admin users and
+> kept only for the admin, and it would have looked perfectly fine to whoever tested
+> it, because the tester is the admin. `getPassbook` now names `OVERVIEW_KEY`
+> explicitly.
+
+### Field table
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
@@ -130,31 +214,23 @@ the way it does:
 | `a_customerName` | Respondant Name | text | 🔒 Locked intake — the name portion of Col L |
 | `a_contactEmail` | Respondant Email | email | 🔒 Locked intake — from Col P |
 | `a_issueType` | What Support Is Required? | text | 🔒 Locked intake — from Col G |
-| `a_issueDesc` | Issue Description | textarea | 🔒 Locked intake — from Col H |
-| `a_incidentLocationWeather` | Incident Location and Weather | textarea | 🔒 Locked intake — from Col M |
+| `a_issueDesc` | Issue Description | textarea | 🔒 Locked intake — from Col H. Report tab only |
+| `a_incidentLocationWeather` | Incident Location and Weather | textarea | 🔒 Locked intake — from Col M. Report tab only |
 | `a_evidence` | Evidence (from customer form) | readonlyLinks | 🔒 Locked intake — Cols N and Q as links |
 | `a_crmOwner` | Customer Relations Manager | text | **Editable** — who here owns the client relationship |
 | `a_contactPhone` | Customer Phone | tel | **Editable** — seeded from the phone portion of Col L |
-| `a_activityLog` | Activity Log (Timeline) | activityTable | **Editable** — Day #, Date, Activity, Remark |
-| `a_overallStatus` | IR Status | select | **Editable** — options are the shared `IR_STATUS_VALUES` list |
+| `a_activityLog` | Activity Log (Timeline) | activityTable | **Read-only legacy.** Rendered in the Overview with `<span>`s instead of inputs, labelled `Legacy`. Nothing writes it any more |
+| `a_overallStatus` | IR Status | select | **Legacy.** Status now lives in `__IRS__` and is edited through Triage; this is the Sheet-sourced seed value |
 
-### Authorization — Section A
-There is **no CR-only allowlist for Section A**. Edit access comes from
-**departments**, not from a per-user ACL: `getEffectiveAccess` gives every signed-in
-account `view` on all nine sections, then layers `edit` on for each section one of
-the user's departments grants. `ADMIN_EMAILS` bypasses all checks. A user with
-`view` sees the four editable fields disabled; nothing is hidden, because everyone
-can view every section (see
-[10 — Auth & Access Model](10 - Auth & Access Model.md)).
-
-The backend is the authority: `saveSection` rejects a write without edit access to
-the section, so the frontend's disabled state is convenience, not the control.
+The hand-written activity log is deliberately **not** merged into the timeline:
+synthesising entries from it would invent timestamps the data does not have. It stays
+a separate, labelled block.
 
 ### Auto-Population from the IR Repository
 Locked intake fields are pre-filled from the IDS/CR/007 sheet's **"Form
 Responses"** tab when an IR is opened:
 
-| Section A Field | Form Responses Column | Config Key |
+| Overview field (`sec-a` data key) | Form Responses Column | Config Key |
 |---|---|---|
 | `a_irNumber` | Col B — IR Number | `IR_REPO_IR_COL` |
 | `a_droneId` | Col K — Mention the Drone Serial No (S250XX) | `IR_REPO_ID_COL` |
@@ -169,25 +245,24 @@ Responses"** tab when an IR is opened:
 | `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
 | `a_crmOwner` | Col F — SPOC (seed only; editable after) | `IR_REPO_SPOC_COL` |
 
-### Activity Log Table Format
-| Column | Field Class | Content |
+### The automated timeline
+Every activity in an IR is recorded for context, from four sources, so nobody has to
+maintain it by hand:
+
+| Source | Condition | Kind |
 |---|---|---|
-| Day # | `.act-day` | Auto-incrementing number, readonly |
-| Date | `.act-date` | Date picker, first row defaults to IR filing date |
-| Activity Description | `.act-activity` | Free text |
-| Remark | `.act-remark` | Free text |
+| audit, section | `saved` with no field | `save` |
+| audit, section | `added` / `changed` / `removed` | `add` / `edit` / `remove` |
+| audit, workflow | `status` / `assignee`,`assigneeName` / `priority` / `type` | `status` / `assign` / `priority` / `type` |
+| audit, either | event `uploaded` | `upload` |
+| comment | a `__NUDGES__` item for this IR | `comment` (chip `@mention` when it carries mentions) |
 
-- Starts with 5 empty rows
-- "Add Row" button appends new row with next day number
-- Data saved as JSON array: `[{dayCount, date, activity, remark}, ...]`
-- Backward compatible: old textarea string data loads into first row's activity field
-
-> **`a_overallStatus` is no longer the source of the list badge.** It reads as the
-> ticket's status on the Section A form and is what the Sheet-sourced status seeds
-> from, but the list badge is driven by `__IRS__` (app-owned state) with the Sheet
-> as fallback — see [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
-> `getAllIRStatuses()` in the backend still exists, but the frontend no longer
-> depends on it for the badge.
+`done[]` deltas are suppressed: completion is already implied by the section save
+that caused them, and each one is a 500-character JSON array. The pure
+`buildTimeline(irNumber, auditEntries, nudgeItems, limit)` is shared by the Overview
+(`limit: 40`) and the 🕓 History modal (`limit: 400`), so the two can never disagree.
+The timestamps are `dd-MMM-yyyy HH:mm:ss`, which is **not** ISO 8601, so they are
+parsed by an explicit month-table parser rather than by `Date.parse`.
 
 ---
 
@@ -454,35 +529,43 @@ Technician e-signature.
 
 ---
 
-## Section F — Quality Control (QC)
-**ID:** `sec-f`
+## Section F — Quality Test Report
+**ID:** `sec-f` · was **QC (in-house/bench) + Flight Test**
 
-| Field ID | Label | Type |
-|---|---|---|
-| `f_qcDocs` | QC Report (Image or PDF) | imageEvidence |
-| `f_qcRemarks` | QC Remarks | textarea |
-| `f_signQc` | Digital Signature — QC Inspector | esignature |
+All QC tests, in one place: an in-house/bench QC report **and** the flight test
+reports. They always belonged to the same QA process — the split was a data-entry
+convention, not a boundary.
 
-QC report upload (shared `imageEvidence`), remarks, and a QC Inspector e-signature.
+| Field ID | Label | Type | From |
+|---|---|---|---|
+| `f_qcDocs` | QC Report (Image or PDF) | imageEvidence | old Section F |
+| `f_qcRemarks` | QC Remarks | textarea | old Section F |
+| `f_signQc` | Digital Signature — QC Inspector | esignature | old Section F |
+| `g_basicReport` | Basic Flight Test Report (Image or PDF) | imageEvidence | old Section G |
+| `g_missionReport` | Mission Flight Test Report (Image or PDF) | imageEvidence | old Section G |
+| `g_flightLogs` | Data Check — Flight Logs | checkpointEvidence | old Section G |
+| `g_postProcessing` | Data Check — Post-Processing | checkpointEvidence | old Section G |
+| `g_dataCheckRemarks` | Data Check Remarks | textarea | old Section G |
+| `g_signPilot` | Digital Signature — Test Pilot | esignature | old Section G |
 
----
+QC report upload (shared `imageEvidence`), remarks, and a QC Inspector e-signature;
+then two flight test report uploads, two **data-check checkpoints**
+(`checkpointEvidence`, see below) — one for flight logs, one for post-processing —
+each a tick the QC person marks "done" **plus** an image/PDF attachment with
+preview, a data-check remark, and a Test Pilot e-signature.
 
-## Section G — Flight Test
-**ID:** `sec-g`
-
-| Field ID | Label | Type |
-|---|---|---|
-| `g_basicReport` | Basic Flight Test Report (Image or PDF) | imageEvidence |
-| `g_missionReport` | Mission Flight Test Report (Image or PDF) | imageEvidence |
-| `g_flightLogs` | Data Check — Flight Logs | checkpointEvidence |
-| `g_postProcessing` | Data Check — Post-Processing | checkpointEvidence |
-| `g_dataCheckRemarks` | Data Check Remarks | textarea |
-| `g_signPilot` | Digital Signature — Test Pilot | esignature |
-
-Two report uploads (a. basic, b. mission) as `imageEvidence`, then two **data-check
-checkpoints** (`checkpointEvidence`, see below) — one for flight logs, one for
-post-processing — each a tick the QC person marks "done" **plus** an image/PDF attachment
-with preview. Then a data-check remark and a Test Pilot e-signature.
+> **The field ids were deliberately NOT renamed.** `sec-f` holds `f_*` **and** `g_*`
+> ids, and `sec-g` (below) holds `h_*` **and** `i_*`. Field ids are also the anchors
+> inside every `__NUDGES__` comment item (`n.fieldId`) and the `Field ID` of every
+> historical `AUDIT_LOG` row, so renaming `g_missionReport` → `f_missionReport`
+> would orphan every comment anchored to it and split its audit history across two
+> names. Keeping them is also what makes the migration a one-column rewrite instead
+> of a JSON-key rewrite.
+>
+> That wart is only survivable because a field id is resolved through
+> `FIELD_SECTION_INDEX`, an index built from `SECTIONS` itself. Resolving it by
+> prefix — the way this used to work — sends `g_missionReport` to a section that no
+> longer exists.
 
 ### Data-check checkpoint (`checkpointEvidence` type)
 A composite field grouping a **done tick** + an **image/PDF attachment**:
@@ -495,19 +578,30 @@ A composite field grouping a **done tick** + an **image/PDF attachment**:
 
 ---
 
-## Section H — Pre-Delivery Inspection (PDI)
-**ID:** `sec-h`
+## Section G — PDI Report/Dispatch Record
+**ID:** `sec-g` · was **PDI + Logistics & Dispatch**
 
-| Field ID | Label | Type | Notes |
-|---|---|---|---|
-| `h_pdiDate` | PDI Date | date | |
-| `h_pdiBy` | PDI Inspector | text | |
-| `h_pdiDocs` | PDI Report (Image or PDF) | imageEvidence | upload + 📷 capture |
-| `h_pdiRemarks` | PDI Remarks | textarea | |
-| `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) |
-| `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section B) | dispatchChecklist | dynamic, from Section B |
-| `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC |
-| `h_signPdi` | Digital Signature — PDI Inspector | esignature | |
+The pre-delivery inspection and the dispatch record are two halves of one handover:
+what was checked, then where it went.
+
+| Field ID | Label | Type | Notes | From |
+|---|---|---|---|---|
+| `h_pdiDate` | PDI Date | date | | old Section H |
+| `h_pdiBy` | PDI Inspector | text | | old Section H |
+| `h_pdiDocs` | PDI Report (Image or PDF) | imageEvidence | upload + 📷 capture | old Section H |
+| `h_pdiRemarks` | PDI Remarks | textarea | | old Section H |
+| `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) | old Section H |
+| `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section B) | dispatchChecklist | dynamic, from Section B | old Section H |
+| `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC | old Section H |
+| `h_signPdi` | Digital Signature — PDI Inspector | esignature | | old Section H |
+| `i_dispatchDate` | Dispatch Date | date | | old Section I |
+| `i_dispatchBy` | Dispatched By | text | | old Section I |
+| `i_courier` | Courier / Transporter | text | | old Section I |
+| `i_awbNo` | AWB / Docket No. | text | | old Section I |
+| `i_stNo` | Stock Transfer (ST) No. | text | | old Section I |
+| `i_deliveryAddr` | Delivery Address | textarea | | old Section I |
+| `i_estDelivery` | Expected Delivery Date | date | | old Section I |
+| `i_dispatchPhotos` | Dispatch / Packing Photos (Image or PDF) | imageEvidence | | old Section I |
 
 **Checklist items** (each has ✔ Received / ✘ Missing / ⚠ Damaged / N/A):
 1. Physical Condition – OK
@@ -526,19 +620,43 @@ the same items received go back out. The list reads the live Section B table (th
 data) and re-renders whenever Section B is edited or saved; prior selections are preserved.
 Placed before the PDI e-signature. Saved as `{ [particular]: status }`.
 
+> A "Delivery & Feedback" section was **planned, never built**, and is shelved for
+> now — it is not part of the app. The old Section I here is the *Dispatch* half of
+> the owner's Section G, not that planned section.
+
 ---
 
-## Section I — Logistics & Dispatch
-**ID:** `sec-i`
+## Merged fields, Drive folders, and the one-column rewrite
 
-| Field ID | Label | Type |
+### Where each merged field id lives
+
+| Holds | Section | Field id prefixes | Why it is not a rename |
+|---|---|---|---|
+| `sec-f` | Quality Test Report | `f_*`, `g_*` | `g_*` ids are comment anchors and audit history |
+| `sec-g` | PDI Report/Dispatch Record | `h_*`, `i_*` | same, and `h_dispatchChecklist` is read by the Section B table |
+
+### Drive folders keep their historical names
+A merged section keeps the folder of its **first-listed source**, so new uploads land
+alongside the existing files instead of starting a second folder for the same
+section:
+
+| Section | Drive folder | Status |
 |---|---|---|
-| `i_dispatchDate` | Dispatch Date | date |
-| `i_dispatchBy` | Dispatched By | text |
-| `i_courier` | Courier / Transporter | text |
-| `i_awbNo` | AWB / Docket No. | text |
-| `i_stNo` | Stock Transfer (ST) No. | text |
-| `i_deliveryAddr` | Delivery Address | textarea |
-| `i_estDelivery` | Expected Delivery Date | date |
-| `i_dispatchPhotos` | Dispatch / Packing Photos (Image or PDF) | imageEvidence |
+| `sec-f` | `Section F - Quality Control` | live — both QC and Flight Test uploads land here |
+| `sec-g` | `Section H - PDI` | live — both PDI and Dispatch uploads land here |
+| — | `Section G - Flight Test` | historical — browsable, never written again |
+| — | `Section I - Logistics Dispatch` | historical — browsable, never written again |
+
+Renaming those two folders is a Drive-wide mutation that needs its own editor
+function; it is an explicitly optional later step. Until then the folder names simply
+no longer match the section letters — a wart, recorded in
+[07 — Known Issues & TODO](07 - Known Issues & TODO.md).
+
+### Completion markers were remapped in one pass
+`done[]` holds completed section ids. Old ids were remapped **from the original
+value in a single pass**, never as sequential replaces — `sec-h → sec-g → sec-f`
+would *chain*, silently moving a historical Flight Test completion onto the wrong
+section. `sec-a` was **dropped**: the Overview is not a completable section. The
+frontend additionally filters `done[]` against `SECTION_IDS`, so a stale or
+partially-migrated store cannot reintroduce a retired id.
 | `i_remarks` | Logistics Remarks | textarea |

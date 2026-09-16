@@ -762,7 +762,7 @@ function doGet(e) {
       getMyAccess:   function () { return getMyAccess(email); },
       listIRs:       function () { return listIRs(); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
-      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber); },
+      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit); },
       listLegacyIRs: function () { return listLegacyIRs(); },
       listUsers:     function () { return listUsers(email); },
     };
@@ -825,7 +825,32 @@ function doPost(e) {
 // SESSIONS — server-issued session tokens, so a signed-in device stays signed in
 // without repeated sign-in prompts. Stored on the data sheet's SESSIONS tab.
 // ──────────────────────────────────────────────────────────────────────────────
-var SECTION_KEYS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+// The six LIVE sections, letters B–G. Section A became the Overview panel and is
+// deliberately NOT in this list — nothing grants "edit on Section A" any more,
+// because the panel is governed by the Triage flag instead.
+//
+// `sec-h` and `sec-i` no longer exist: their APP_DATA rows were merged into
+// `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch Record) by
+// mergeSectionsApply(). Their ids survive below in SEC_TARGET_MAP purely so that
+// migration — and the rejection of stale clients — can still name them.
+var SECTION_KEYS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+
+// The Overview panel's record id. It keeps the original `sec-a` so the existing
+// APP_DATA row, the existing drafts and the existing AUDIT_LOG history all keep
+// working untouched. It is NOT a section: it has no tab, no letter and no
+// completion state, and it is never in SECTION_KEYS.
+var OVERVIEW_KEY = 'sec-a';
+
+// Retired section ids → the section that absorbed them.
+//
+// The direction matters and is not symmetric: old `sec-g` (Flight Test) is a
+// SOURCE for new `sec-f`, while new `sec-g` is a TARGET for old `sec-h`/`sec-i`.
+// Anything that migrates rows must therefore compute every target from ONE
+// original snapshot — a rewrite-then-rescan pass would merge flight-test rows
+// into PDI. See planSectionMerge().
+var SEC_TARGET_MAP = { 'sec-g': 'sec-f', 'sec-h': 'sec-g', 'sec-i': 'sec-g' };
+// Derived, never a second literal — a hand-kept list would drift from the map.
+var RETIRED_SECTION_IDS = Object.keys(SEC_TARGET_MAP);
 var SESSION_HEADS = ['Session Token', 'Email', 'Created At', 'Expires At', 'Revoked',
                      'Last Seen At', 'Revoked At'];
 
@@ -892,8 +917,15 @@ function doLogout(sessionToken) {
 //
 // Departments are MANY-TO-MANY in both directions: a person may hold several
 // departments, a department holds many people (USER_DEPARTMENTS is the edge list),
-// and each department grants edit on a subset of the nine sections (DEPARTMENTS).
+// and each department grants edit on a subset of the six sections (DEPARTMENTS).
 // So a person's edit rights are the UNION of their departments' grants.
+//
+// TRIAGE is a SECOND, INDEPENDENT AXIS on the same row. A department may hold it
+// without granting edit on any section — which is exactly what CR and Management
+// do. It governs the ticket header (status, assignee, priority, type) and the
+// Overview panel's two fields. It is appended at the END of DEPT_HEADS precisely
+// so that the section offset stays `3 + j`: inserting it in the middle would
+// re-letter every grant column and silently reinterpret existing rows.
 //
 // These two tabs hold AUTHORITY, so they must stay real Sheets tabs and never move
 // into a `__`-prefixed sentinel store: sentinel irNumbers skip every ACL check in
@@ -905,7 +937,12 @@ function isAdminEmail(email) {
   return CONFIG.ADMIN_EMAILS.map(function (a) { return a.toLowerCase(); }).indexOf(email) > -1;
 }
 
-var DEPT_HEADS = ['Key', 'Name', 'Active'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By']);
+// Column index (0-based, as getValues() returns) of the Triage cell. Written as
+// arithmetic rather than the literal 11 so the next widening of DEPT_HEADS cannot
+// leave a reader quietly pointing one column to the left.
+function deptTriageIndex() { return 3 + SECTION_KEYS.length + 2; }
+
+var DEPT_HEADS = ['Key', 'Name', 'Active'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By', 'Triage']);
 var USERDEPT_HEADS = ['Email', 'Department Key', 'Added At', 'Added By'];
 
 function getOrCreateDeptTab(ss) {
@@ -917,6 +954,33 @@ function getOrCreateUserDeptTab(ss) {
   var tab = (ss || getSs()).getSheetByName('USER_DEPARTMENTS');
   if (!tab) tab = (ss || getSs()).insertSheet('USER_DEPARTMENTS');
   return ensureHeaders(tab, USERDEPT_HEADS);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// DEPARTMENTS tab SHAPE — 'absent' | 'current' | 'legacy-9' | 'unknown'
+// ──────────────────────────────────────────────────────────────────────────────
+// This exists because shrinking SECTION_KEYS from nine to six RE-LETTERS EVERY
+// GRANT COLUMN. An existing 14-column tab read positionally would be granted
+// letter-by-letter: old column 4 (which meant `sec-a`) would be read as `sec-b`,
+// and old column 10 (old `sec-g`) would land on `Updated At`. Silently. So before
+// any widening or seeding, ask what shape the tab actually is.
+//
+//   'absent'   no tab yet — a fresh install
+//   'current'  header already matches DEPT_HEADS
+//   'legacy-9' the pre-merge header: nine section columns, no Triage
+//   'unknown'  anything else — someone hand-edited it, and no derivation from an
+//              unrecognised header is trustworthy, so callers must refuse
+var LEGACY_DEPT_SECTIONS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+
+function deptTabShape(tab) {
+  if (!tab) return 'absent';
+  var last = tab.getLastColumn();
+  if (!last) return 'absent';
+  var head = tab.getRange(1, 1, 1, last).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  if (head.join('|') === DEPT_HEADS.join('|')) return 'current';
+  var legacy = ['Key', 'Name', 'Active'].concat(LEGACY_DEPT_SECTIONS).concat(['Updated At', 'Updated By']);
+  if (head.join('|') === legacy.join('|')) return 'legacy-9';
+  return 'unknown';
 }
 
 // "Flight Test" -> "flight-test". Stable keys mean renaming a department in the UI
@@ -939,47 +1003,69 @@ function getUserDepartments(email) {
   return keys;
 }
 
-// The union of section edits granted by the departments a person holds.
-// Deactivated departments grant nothing, which is how a department is retired
-// without deleting its history.
-function departmentEditGrants(email) {
-  var out = {};
+// What a person's departments grant them, on BOTH axes, from ONE read of the tab.
+//
+// Returned together rather than from two functions because they are two columns of
+// the same rows and the same memberships: reading DEPARTMENTS twice to ask two
+// questions about one row invites the two answers to disagree.
+//
+//   grants  { 'sec-c': true, … }  — the union of section edits
+//   triage  true                  — this person may edit the ticket header and
+//                                   the Overview panel
+//
+// Deactivated departments grant nothing on either axis, which is how a department
+// is retired without deleting its history.
+function departmentCapabilities(email) {
+  var out = { grants: {}, triage: false };
   var keys = getUserDepartments(email);
   if (!keys.length) return out;          // short-circuit: no departments, no 2nd scan
   var data = getOrCreateDeptTab(getSs()).getDataRange().getValues();
+  var triageCol = deptTriageIndex();
   for (var i = 1; i < data.length; i++) {
     var k = String(data[i][0]).trim();
     if (keys.indexOf(k) < 0) continue;
     if (String(data[i][2] || '').trim().toLowerCase() === 'no') continue;
     for (var j = 0; j < SECTION_KEYS.length; j++) {
-      if (String(data[i][3 + j] || '').trim().toLowerCase() === 'edit') out[SECTION_KEYS[j]] = true;
+      if (String(data[i][3 + j] || '').trim().toLowerCase() === 'edit') out.grants[SECTION_KEYS[j]] = true;
     }
+    if (String(data[i][triageCol] || '').trim().toLowerCase() === 'edit') out.triage = true;
   }
   return out;
 }
 
-// Resolve a user's role + per-section permissions. There is no 'none' any more:
-// view+comment is universal, so the only question this answers is which sections
-// are editable.
+// Resolve a user's role + per-section permissions + Triage. There is no 'none' any
+// more: view+comment is universal, so the only questions this answers are which
+// sections are editable and whether the holder may triage.
 function getEffectiveAccess(email) {
   email = (email || '').toLowerCase().trim();
   if (isAdminEmail(email)) {
     var all = {};
     SECTION_KEYS.forEach(function (s) { all[s] = 'edit'; });
-    return { role: 'admin', permissions: all, departments: [] };
+    // The Overview is not a section, but it IS a gated record, so it gets a
+    // permission key like any other. Without it, getPassbook's canView() filter
+    // would drop the `sec-a` row for every non-admin — see getPassbook.
+    all[OVERVIEW_KEY] = 'edit';
+    return { role: 'admin', permissions: all, departments: [], triage: true };
   }
   // Default: view + comment everywhere. Built BEFORE the department read so that
   // any failure below still leaves a usable, minimum-privilege profile — the
-  // catch fails open on reads and closed on writes, never to locked-out.
+  // catch fails open on reads and closed on writes, never to locked-out. `triage`
+  // is set early for the same reason: a throw must not leave it undefined-but-true.
   var perms = {};
   SECTION_KEYS.forEach(function (s) { perms[s] = 'view'; });
+  perms[OVERVIEW_KEY] = 'view';
   var depts = [];
+  var triage = false;
   try {
     depts = getUserDepartments(email);
-    var grants = departmentEditGrants(email);
-    SECTION_KEYS.forEach(function (s) { if (grants[s]) perms[s] = 'edit'; });
-  } catch (e) { /* keep view-only */ }
-  return { role: 'user', permissions: perms, departments: depts };
+    var caps = departmentCapabilities(email);
+    SECTION_KEYS.forEach(function (s) { if (caps.grants[s]) perms[s] = 'edit'; });
+    triage = caps.triage === true;
+  } catch (e) { /* keep view-only, no triage */ }
+  // Triage also turns the Overview's two inputs editable, through the SAME
+  // canEdit() seam every section uses — so the frontend needs no special case.
+  if (triage) perms[OVERVIEW_KEY] = 'edit';
+  return { role: 'user', permissions: perms, departments: depts, triage: triage };
 }
 
 // Comment now comes WITH view — the owner's rule is "view and comment are for
@@ -1004,6 +1090,7 @@ function getMyAccess(email) {
     role: access.role,
     permissions: access.permissions,
     departments: access.departments,
+    triage: access.triage === true,
     mustChangePassword: mustChange,
     apiVersion: CONFIG.API_VERSION
   };
@@ -1044,6 +1131,7 @@ function listUsers(authEmail) {
   users.sort(function (a, b) { return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0); });
 
   var ddata = getOrCreateDeptTab(ss).getDataRange().getValues();
+  var triageCol = deptTriageIndex();
   var departments = [];
   for (var r = 1; r < ddata.length; r++) {
     var key = String(ddata[r][0] || '').trim();
@@ -1057,6 +1145,9 @@ function listUsers(authEmail) {
       name: String(ddata[r][1] || '').trim(),
       active: String(ddata[r][2] || '').trim().toLowerCase() !== 'no',
       grants: grants,
+      // The second axis on the same row. Kept OUT of `grants` so no code that
+      // walks the section grants can mistake Triage for a section.
+      triage: String(ddata[r][triageCol] || '').trim().toLowerCase() === 'edit',
       members: 0
     });
   }
@@ -1180,6 +1271,10 @@ function saveDepartment(params, authEmail) {
   var row = [key, name || key, (params.active === 'no' ? 'no' : 'yes')];
   SECTION_KEYS.forEach(function (s) { row.push(grants[s] ? 'edit' : ''); });
   row.push(ts); row.push(authEmail);
+  // Triage last, matching DEPT_HEADS. The UI's grant grid posts it as a `triage`
+  // key in the same `grants` object as the sections, so it is read back out here
+  // rather than given a second parameter.
+  row.push(grants['triage'] ? 'edit' : '');
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === key) { tab.getRange(i + 1, 1, 1, row.length).setValues([row]); return { status: 'ok', key: key, message: 'Saved ' + key }; }
@@ -1384,18 +1479,25 @@ function getAllIRStatuses() {
     var ss  = getSs();
     var tab = ss.getSheetByName('APP_DATA');
     if (!tab) return map;
-    
+
     var data = tab.getDataRange().getValues();
     // APP_DATA structure: [IR Number, Section ID, Saved By, Fields, Updated]
+    //
+    // Status is app-owned (Stage 1, `__IRS__`), so this reads the sentinel store:
+    // column A is '__IRS__' and column B holds the REAL IR. The old path scanned
+    // `sec-a` rows for `a_overallStatus`, which was the pre-Stage-1 fallback and
+    // died with Section A — it would now return an empty map for every IR.
     for (var i = 1; i < data.length; i++) {
-        var irNum = data[i][0];
-        var secId = data[i][1];
-        if (secId === 'sec-a') {
-            try {
-                var fields = JSON.parse(data[i][3] || '{}');
-                map[irNum] = fields['a_overallStatus'] || 'Open';
-            } catch(e) {}
-        }
+        if (String(data[i][0]) !== '__IRS__') continue;
+        var irNum = String(data[i][1] || '');
+        if (!irNum) continue;
+        try {
+            var fields = JSON.parse(data[i][3] || '{}');
+            // Truthiness, not `|| 'Open'`: seedIRState() writes `status: ''` the
+            // first time it sees an IR, and an empty string must fall through to
+            // the caller's own default rather than overwrite it with 'Open'.
+            if (fields && fields.status) map[irNum] = fields.status;
+        } catch(e) {}
     }
   } catch(e) {}
   return map;
@@ -1464,7 +1566,15 @@ function getPassbook(irNumber, authEmail) {
     var secId = String(data[i][1] || '');
     // Hide real sections the caller can't view. Sentinel app stores (comments,
     // dropdown config) are shared app data — visible to any user with access.
-    if (!isSentinel && access.role !== 'admin' && !canView(access.permissions, secId)) continue;
+    //
+    // `secId !== OVERVIEW_KEY` is load-bearing and must not be "tidied" away.
+    // The Overview is not a section: it is absent from SECTION_KEYS, so
+    // getEffectiveAccess never puts a `sec-a` key in any permission map. Without
+    // this allowance every non-admin would lose the Overview row — the CRM fields
+    // AND the legacy activity log — while the admin, who is the one testing it,
+    // would still see everything. Blank Overview for 18 people, looks fine to the
+    // one person looking. The Overview is shared app data, like the sentinels.
+    if (!isSentinel && secId !== OVERVIEW_KEY && access.role !== 'admin' && !canView(access.permissions, secId)) continue;
     var fields = {};
     try { fields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
     sections[secId] = fields;
@@ -1490,7 +1600,20 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   // openness is bounded by the allowlist — see SENTINEL_SECTIONS — because an
   // unbounded sentinel write is a write to the app's own control plane.
   if (isSentinel) assertSentinelWritable(irNumber, sectionId);
+  else if (RETIRED_SECTION_IDS.indexOf(String(sectionId)) > -1)
+    // sec-g/sec-h/sec-i were merged into sec-f/sec-g. A client on a stale service
+    // worker still holds the old shell and will keep posting them; appending would
+    // recreate a retired row that nothing renders. The fix is a reload, not a
+    // permission, so say that instead of a bare Forbidden.
+    throw new Error('Section ' + sectionId + ' was merged into another section. Reload the app to get the current version.');
   else if (access.role !== 'admin' && !canEdit(access.permissions, sectionId))
+    // This branch also covers the Overview (sectionId === OVERVIEW_KEY). It is not
+    // a section, but getEffectiveAccess gives it a permission key like one: 'view'
+    // for everybody, 'edit' only for admins and Triage holders. So the Overview's
+    // two inputs are gated here through the SAME seam every section uses — no
+    // second check, and nothing to keep in sync. There is deliberately NO
+    // OVERVIEW_KEY exemption on this line: exempting it would let any signed-in
+    // user rewrite the ticket header, which is the one thing Triage is for.
     throw new Error('Forbidden: you do not have edit access to ' + sectionId + '.');
 
   // App stores never carry files. Rejecting uploads here closes the last sentinel
@@ -1502,6 +1625,7 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 
   // 1. Handle file uploads first — create IR folder / Section subfolder
   var fileLinks = {};
+  var uploads   = [];   // audit trail — see appendAuditEntries
   if (files && files.length > 0) {
     var sectionFolder = getOrCreateSectionFolder(irNumber, sectionId);
     files.forEach(function(file) {
@@ -1511,6 +1635,7 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
       uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       if (!fileLinks[file.fieldId]) fileLinks[file.fieldId] = [];
       fileLinks[file.fieldId].push(uploaded.getUrl());
+      uploads.push({ fieldId: file.fieldId, name: file.name });
     });
     // Merge file links back into fields as comma-separated URLs
     Object.keys(fileLinks).forEach(function(fid) {
@@ -1537,7 +1662,11 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   // are editable by NO ONE. Strip any of them from the incoming payload so a
   // crafted save can't write a divergent copy into APP_DATA. (They're displayed
   // live from the IR Repository, not from here.)
-  if (sectionId === 'sec-a') {
+  //
+  // Note what is deliberately NOT in this list: a_crmOwner and a_contactPhone,
+  // which the Overview panel does write (gated on Triage by the ACL above), and
+  // a_activityLog, which nobody writes — it survives only as read-only history.
+  if (sectionId === OVERVIEW_KEY) {
     ['a_irNumber','a_droneId','a_dateRaised','a_issueType','a_issueDesc','a_customerName',
      'a_contactEmail','a_incidentLocationWeather','a_evidence','a_companyName'].forEach(function(k) {
       delete fields[k];
@@ -1546,7 +1675,12 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 
   // 2c. Audit trail — record this save + every field overwrite (old→new) so any
   // later correction is traceable. Derived Drive-link keys (*_links) are skipped.
-  appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, fields);
+  //
+  // __NUDGES__ is excluded at the source rather than filtered later: comments
+  // already carry their own author and createdAt in the items array, and a nudge
+  // save fires on every post, resolve, edit AND markRead, each writing a 500-char
+  // copy of the whole comment array. That one store dominated the log.
+  if (irNumber !== '__NUDGES__') appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, fields, uploads);
 
   var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
   var rowData   = [irNumber, sectionId, savedBy, JSON.stringify(fields), timestamp];
@@ -1656,17 +1790,25 @@ function getOrCreateSubfolder(parent, name) {
   return parent.createFolder(name);
 }
 
+// Drive folder label for a section's uploads. NOT the section's display name, and
+// deliberate — merged sections keep the folder of their FIRST-LISTED source, so new
+// uploads land beside the files already there instead of in a second folder for the
+// same section:
+//   sec-f (Quality Test Report) keeps 'Section F - Quality Control'  ← old sec-f
+//   sec-g (PDI Report/Dispatch Record) keeps 'Section H - PDI'       ← old sec-h
+// 'Section G - Flight Test' and 'Section I - Logistics Dispatch' therefore become
+// HISTORICAL: still browsable in Drive, never written again. Renaming them is a
+// Drive-wide mutation that needs its own editor function; until then the folder
+// name simply does not match the tab letter, which is a documented wart, not a bug.
 function getSectionLabel(sectionId) {
   var labels = {
-    'sec-a': 'Section A - Preliminary Details',
+    'sec-a': 'Section A - Preliminary Details',   // Overview; no uploads in practice
     'sec-b': 'Section B - Inward Checklist',
     'sec-c': 'Section C - IQC Inspection',
     'sec-d': 'Section D - Investigation',
     'sec-e': 'Section E - Production Rework',
     'sec-f': 'Section F - Quality Control',
-    'sec-g': 'Section G - Flight Test',
-    'sec-h': 'Section H - PDI',
-    'sec-i': 'Section I - Logistics Dispatch',
+    'sec-g': 'Section H - PDI',
   };
   return labels[sectionId] || sectionId;
 }
@@ -1712,16 +1854,23 @@ function snapValue(v) {
   var s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
   return s.length > 500 ? s.substring(0, 500) + '…' : s;
 }
-function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, newFields) {
+function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, newFields, uploads) {
   var tab = getOrCreateAuditTab(ss);
   var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
   var rows = [];
-  // One row per save event (so even a no-change save is traceable).
-  rows.push([ts, irNumber, sectionId, savedBy, 'saved', '', '', '']);
+  var isSentinel = String(irNumber).indexOf('__') === 0;
+  // One "saved" marker per HUMAN section save, so even a no-change save is
+  // traceable. Sentinel writes are skipped: every section save also fires
+  // patchIRState(), so without this guard each save produced two marker rows, one
+  // of them contentless. Workflow changes are still recorded — as the field rows
+  // below, which name `status`/`assignee`/`priority`/`type` explicitly and are
+  // what the timeline actually reads.
+  if (!isSentinel) rows.push([ts, irNumber, sectionId, savedBy, 'saved', '', '', '']);
   var ex = existingFields || {};
   var nw = newFields || {};
   Object.keys(nw).forEach(function(k) {
     if (/_links$/.test(k)) return;            // derived Drive-link keys — not user edits
+    if (k === 'done') return;                 // completion is implied by the save row
     var had = ex.hasOwnProperty(k);
     var newJ = snapValue(nw[k]);
     if (!had) {
@@ -1732,15 +1881,51 @@ function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, ne
   });
   Object.keys(ex).forEach(function(k) {
     if (/_links$/.test(k)) return;
+    if (k === 'done') return;
     if (!nw.hasOwnProperty(k)) rows.push([ts, irNumber, sectionId, savedBy, 'removed', k, snapValue(ex[k]), '']);
   });
-  if (rows.length > 1) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
+
+  // Uploads leave no trace anywhere else: file keys are `*_links` (skipped above by
+  // design) and Drive is never enumerated. One row per uploaded file, sharing the
+  // save's timestamp and its single setValues below.
+  //
+  // This does NOT reintroduce the `_links`-key noise, for four independent reasons:
+  // the Field ID here is the SOURCE field (f_qcDocs), never the derived key
+  // (f_qcDocs_links); a row is emitted only when a human actually picked a file;
+  // the `/_links$/` skips above still suppress a spurious `added` delta on first
+  // upload; and 'uploaded' is its own event value, so a reader filters on the event
+  // and never on the shape of a field name. The URL is deliberately not stored: it
+  // is already in fields[<fid>_links], it is long, and it is re-derivable.
+  (uploads || []).forEach(function(u) {
+    if (!u) return;
+    rows.push([ts, irNumber, sectionId, savedBy, 'uploaded', u.fieldId || '', '', snapValue(u.name || '')]);
+  });
+
+  if (rows.length) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ACTION: getAuditLog — returns the audit trail for one IR, oldest first
+// ACTION: getAuditLog — returns the audit trail for one IR, OLDEST FIRST
 // ──────────────────────────────────────────────────────────────────────────────
-function getAuditLog(irNumber) {
+// Two kinds of row match, and the second is the whole reason the workflow half of
+// the timeline needs no new storage:
+//
+//   section row   column B === irNumber                     (an ordinary save)
+//   workflow row  column C === irNumber AND column B starts with '__'
+//
+// Sentinel writes (every __IRS__ patch) are already recorded — but with
+// IR Number = '__IRS__' and the REAL IR in the Section ID column. So they were
+// written all along and merely unreachable from here. The `__` guard on column B is
+// what keeps a future sentinel store from leaking into a real ticket's history.
+//
+// Every returned entry reports `irNumber` as the IR it is ABOUT — for a workflow row
+// that is the Section ID column, never the store name in its own column B.
+//
+// `limit` bounds the RESPONSE, not the read — the read is still the whole tab. It
+// trims from the OLDEST end, because the caller (a timeline) wants the most recent
+// activity, and the row order is append-only chronological.
+var AUDIT_RESPONSE_CAP = 400;
+function getAuditLog(irNumber, limit) {
   if (!irNumber) throw new Error('irNumber is required.');
   var ss  = getSs();
   var tab = ss.getSheetByName('AUDIT_LOG');
@@ -1748,15 +1933,29 @@ function getAuditLog(irNumber) {
   var data = tab.getDataRange().getValues();
   var entries = [];
   for (var i = 1; i < data.length; i++) {
-    if (data[i][1] === irNumber) {
-      entries.push({
-        timestamp: data[i][0], irNumber: data[i][1], sectionId: data[i][2],
-        savedBy: data[i][3], event: data[i][4], fieldId: data[i][5],
-        oldValue: data[i][6], newValue: data[i][7]
-      });
-    }
+    var colB = String(data[i][1] || '');
+    var colC = String(data[i][2] || '');
+    var isSectionRow  = (colB === irNumber);
+    var isWorkflowRow = (colC === irNumber && colB.indexOf('__') === 0);
+    if (!isSectionRow && !isWorkflowRow) continue;
+    entries.push({
+      // `irNumber` is the IR the row is ABOUT, in both halves. A workflow row's own
+      // column B says `__IRS__` — the store name, not the ticket — so reporting it
+      // verbatim would hand a consumer an entry it cannot attribute, and make any
+      // future `e.irNumber === irNumber` filter silently drop every status change.
+      timestamp: data[i][0],
+      irNumber: isWorkflowRow ? data[i][2] : data[i][1],
+      sectionId: isWorkflowRow ? '' : data[i][2],
+      source: isWorkflowRow ? 'workflow' : 'section',
+      savedBy: data[i][3], event: data[i][4], fieldId: data[i][5],
+      oldValue: data[i][6], newValue: data[i][7]
+    });
   }
-  return { status: 'ok', entries: entries };
+  var cap = parseInt(limit, 10);
+  if (isNaN(cap) || cap <= 0) cap = AUDIT_RESPONSE_CAP;
+  if (cap > AUDIT_RESPONSE_CAP) cap = AUDIT_RESPONSE_CAP;
+  if (entries.length > cap) entries = entries.slice(entries.length - cap);
+  return { status: 'ok', entries: entries, truncated: entries.length === cap };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1818,25 +2017,32 @@ function importLegacyData() {
 function importSingleTab(ss, tab) {
     var irNumber = tab.getName();
     var dataTab  = getOrCreateDataTab(ss);
-    
+
     // This is where we map the manual cells to the app sections
     // Note: User can adjust these cell mappings based on their manual format
+    //
+    // 'sec-i' is written as 'sec-g' on purpose: old Section I (Logistics Dispatch)
+    // is no longer a section — it merged into Section G (PDI Report/Dispatch
+    // Record). Appending 'sec-i' here would create a retired row that nothing
+    // renders, and saveSection now rejects that id outright.
     var mappings = {
         'sec-a': { 'a_customerName': 'B10', 'a_droneModel': 'C15' }, // Examples
         'sec-d': { 'd_rootCause': 'F50', 'd_actionTaken': 'F52' },
-        'sec-i': { 'i_dispatchDate': 'H90' }
+        'sec-g': { 'i_dispatchDate': 'H90' }
     };
-    
+
     var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-    
+
     Object.keys(mappings).forEach(function(secId) {
         var fields = {};
         Object.keys(mappings[secId]).forEach(function(fieldKey) {
             var cell = mappings[secId][fieldKey];
             fields[fieldKey] = tab.getRange(cell).getValue();
         });
-        
-        // Save to APP_DATA if not already there
+
+        // TODO: this appends unconditionally, so re-running the import duplicates
+        // every row. The comment used to claim an "if not already there" check that
+        // does not exist. Out of scope here — fix before anyone re-runs it.
         var rowData = [irNumber, secId, 'MigrationBot', JSON.stringify(fields), timestamp];
         dataTab.appendRow(rowData);
     });
@@ -1851,20 +2057,56 @@ function importSingleTab(ss, tab) {
 // sheet work in this order: the data model is ready before the switch, and the
 // switch is a single deployment edit.
 //
-// Run order: migrateAddColumns() → migrateAclReport() → seedDepartments() →
-//            bootstrapAdmin().  After go-live: maintenancePruneSessions() anytime.
+//   Pre-flight (undeployed, no user impact):
+//     migrateAddColumns() → migrateAclReport() → bootstrapAdmin()
+//
+//   Cutover window (AFTER the deploy — these two CANNOT run pre-flight):
+//     seedDepartments() → seedMemberships()
+//     → mergeSectionsReport() → mergeSectionsApply()
+//     → push gh-pages
+//
+//   Anytime after go-live:
+//     maintenancePruneSessions(), maintenancePruneAuditLog()
+//
+// Why the split: the pre-flight group only ADDS columns and CREATES tabs, which is
+// invisible to the still-live old build. The cutover group does not:
+//   • the grants/memberships must not land early, because getOrCreateDeptTab →
+//     ensureHeaders is reached on EVERY read and the still-live old backend reads
+//     DEPARTMENTS positionally — a 12-column tab read as 14 would misgrant;
+//   • the APP_DATA merge REWRITES rows the live app is currently reading. A
+//     migration that rewrites live rows cannot be pre-flight, full stop. That is
+//     the mirror image of the column-widening rationale above.
 // ──────────────────────────────────────────────────────────────────────────────
 
 // Widen every tab this build reads to its current header set. Touches ONLY row 1,
 // so it is safe on live data and safe to re-run.
+//
+// Column counts are DERIVED, never typed. The strings here used to be literals
+// ('DEPARTMENTS → 15 cols' when the tab had 14) and rotted silently because no
+// test asserted them — a report nobody can trust is worse than no report.
 function migrateAddColumns() {
   var ss = getSs();
   var done = [];
-  getOrCreateUsersTab(ss);      done.push('USERS → 11 cols');
-  getOrCreateSessionsTab(ss);   done.push('SESSIONS → 7 cols');
-  getOrCreateDeptTab(ss);       done.push('DEPARTMENTS → 15 cols');
-  getOrCreateUserDeptTab(ss);   done.push('USER_DEPARTMENTS → 4 cols');
-  getOrCreateCodesTab(ss);      done.push('CODES → 7 cols');
+
+  // DEPARTMENTS is special: shrinking SECTION_KEYS means an old tab's columns mean
+  // something different now, so widening it here would reinterpret live grants.
+  // A legacy-9 or unknown tab is left exactly as it is, and seedDepartments()
+  // rebuilds it from a backup.
+  var deptTab  = ss.getSheetByName('DEPARTMENTS');
+  var deptShape = deptTabShape(deptTab);
+  if (deptShape === 'legacy-9') {
+    done.push('DEPARTMENTS → LEFT ALONE (legacy 9-section header; seedDepartments() rebuilds it from a backup)');
+  } else if (deptShape === 'unknown') {
+    done.push('DEPARTMENTS → LEFT ALONE (unrecognised header — refusing to widen; inspect it by hand)');
+  } else {
+    getOrCreateDeptTab(ss);
+    done.push('DEPARTMENTS → ' + DEPT_HEADS.length + ' cols');
+  }
+
+  getOrCreateUsersTab(ss);      done.push('USERS → ' + USER_HEADS.length + ' cols');
+  getOrCreateSessionsTab(ss);   done.push('SESSIONS → ' + SESSION_HEADS.length + ' cols');
+  getOrCreateUserDeptTab(ss);   done.push('USER_DEPARTMENTS → ' + USERDEPT_HEADS.length + ' cols');
+  getOrCreateCodesTab(ss);      done.push('CODES → ' + CODE_HEADS.length + ' cols');
   getOrCreateAttemptsTab(ss);
   getOrCreateDataTab(ss);
   return 'Migrated: ' + done.join(', ') + '.';
@@ -1872,18 +2114,28 @@ function migrateAddColumns() {
 
 // READ-ONLY report of the retired ACL tab — the last chance to see the grants that
 // were hand-assigned before departments replaced them. Changes nothing.
+//
+// It iterates a LOCAL nine-key literal, not SECTION_KEYS. Its whole purpose is to
+// read the OLD columns; driving it off the new six-key list would label old column
+// 1 (which meant `sec-a`) as `sec-b`, never read the last three columns, and produce
+// a confidently wrong report about the one thing the owner cannot reconstruct later.
+// Shipping it broken would be worse than not having it.
+var LEGACY_ACL_SECTIONS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+
 function migrateAclReport() {
   var tab = getSs().getSheetByName('ACL');
   if (!tab) return 'No ACL tab — nothing to migrate (this is expected on a fresh sheet).';
   var data = tab.getDataRange().getValues();
   var lines = ['Old per-user ACL (ACL tab) — ' + Math.max(0, data.length - 1) + ' row(s):', ''];
+  lines.push('Columns are read against the HISTORICAL nine-section list (sec-a…sec-i),');
+  lines.push('not the current six, because these columns were written before the merge.', '');
   for (var i = 1; i < data.length; i++) {
     var email = String(data[i][0] || '').trim();
     if (!email) continue;
     var granted = [];
-    for (var j = 0; j < SECTION_KEYS.length; j++) {
+    for (var j = 0; j < LEGACY_ACL_SECTIONS.length; j++) {
       var v = String(data[i][j + 1] || '').trim();
-      if (v) granted.push(SECTION_KEYS[j] + '=' + v);
+      if (v) granted.push(LEGACY_ACL_SECTIONS[j] + '=' + v);
     }
     lines.push(email + '  →  ' + (granted.length ? granted.join(' ') : '(nothing)'));
   }
@@ -1904,27 +2156,674 @@ var SEED_DEPARTMENTS = [
   'Inventory', 'CR', 'Compliance', 'Engineering', 'Management'
 ];
 
+// ──────────────────────────────────────────────────────────────────────────────
+// SEEDED GRANTS — the owner's mapping, supplied 2026-09-16. Changing it is their
+// call, not a maintenance decision. Section letters are the CURRENT ones (B–G).
+// ──────────────────────────────────────────────────────────────────────────────
+//   Production   B C D E G      QC         B C D F     Flight Test  F
+//   Purchase     D              Inventory  B D G       Engineering  D
+//   CR           — (Triage)     Management — (Triage)  IQC / Compliance  —
+//
+// An empty list is a REAL answer, not an omission: CR and Management hold Triage
+// and edit no section at all — that is what makes this a second axis rather than a
+// seventh permission key. IQC and Compliance hold neither.
+var SEED_GRANTS = {
+  'production':  ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-g'],
+  'qc':          ['sec-b', 'sec-c', 'sec-d', 'sec-f'],
+  'flight-test': ['sec-f'],
+  'iqc':         [],
+  'purchase':    ['sec-d'],
+  'inventory':   ['sec-b', 'sec-d', 'sec-g'],
+  'cr':          [],
+  'compliance':  [],
+  'engineering': ['sec-d'],
+  'management':  []
+};
+
+// Departments that may Triage. Same cells as a section grant ('edit'/''), separate
+// axis. CR and Management: they own the ticket header, not any section's content.
+var TRIAGE_DEPARTMENTS = ['cr', 'management'];
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SEEDED MEMBERSHIPS — person ↔ department edges. Owner's list, 2026-09-16.
+// ──────────────────────────────────────────────────────────────────────────────
+// Purchase and Inventory get BOTH edges for all three people. That is deliberate,
+// not lazy: the owner gave one list covering two departments, and the codebase's own
+// rule is that inferring which person belongs to which is exactly the "a wrong guess
+// grants write access silently" failure. The two departments have DIFFERENT grants
+// (B/D/G vs D), so merging them would be wrong too. Both edges is faithful, and it is
+// reversible in the Departments tab in seconds.
+//
+// IQC and Compliance are deliberately absent — nobody was named for them. They hold
+// no grants anyway, so this changes nothing about anyone's access; seedMemberships()
+// says so in its report so the omission reads as intentional.
+var SEED_MEMBERSHIPS = {
+  'production':  ['ganesh.suryavanshi', 'satish.dhanawade', 'mukesh.mane', 'nilesh.pawar'],
+  'qc':          ['angad.kumbhar'],
+  'flight-test': ['ankit.prajapati', 'vicky.malekar', 'angad.kumbhar'],
+  'purchase':    ['vaibhav.panchal', 'purchase', 'tushar.kadam'],
+  'inventory':   ['vaibhav.panchal', 'purchase', 'tushar.kadam'],
+  'engineering': ['lavlesh.poyarekar', 'rushabh.rambhiya', 'ravi.maurya', 'shubham.jolapara', 'ravi'],
+  'cr':          ['adhik.nair', 'monish.raza'],
+  'management':  ['ravi', 'harshad']
+};
+
 function seedDepartments() {
   var ss = getSs();
   var tab = getOrCreateDeptTab(ss);
+  var shape = deptTabShape(tab);
+
+  // A tab whose header nobody recognises cannot be safely reinterpreted: the six
+  // columns no longer mean what the nine did. Refuse, and name the actual header.
+  if (shape === 'unknown') {
+    return 'DEPARTMENTS has an unrecognised header — refusing to touch it.\n' +
+           'Header found: ' + deptTabShapeHeader(tab) + '\n' +
+           'Expected:     ' + DEPT_HEADS.join(' | ') + '\n' +
+           'Inspect it by hand; no derivation from an unknown header is trustworthy.';
+  }
+  // Legacy nine-section layout: snapshot, then rebuild every row from SEED_GRANTS.
+  // Mapping by NAME, never by position — that is the whole reason this branch exists.
+  if (shape === 'legacy-9') return seedDepartmentsRebuildLegacy(ss, tab);
+
   var data = tab.getDataRange().getValues();
-  var have = {};
-  for (var i = 1; i < data.length; i++) have[String(data[i][0] || '').trim()] = true;
+  var byKey = {};
+  for (var i = 1; i < data.length; i++) {
+    var k = String(data[i][0] || '').trim();
+    if (k) byKey[k] = i + 1;                      // 1-indexed sheet row
+  }
+
   var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var added = [];
-  SEED_DEPARTMENTS.forEach(function (name) {
-    var key = deptKeyFromName(name);
-    if (have[key]) return;
-    var row = [key, name, 'yes'];
-    SECTION_KEYS.forEach(function () { row.push(''); });   // no grants — the owner ticks these
-    row.push(ts); row.push('seed');
-    tab.appendRow(row);
-    added.push(key);
+  var created = [], updated = [], unchanged = [], dropped = [];
+
+  Object.keys(SEED_GRANTS).forEach(function (key) {
+    var desiredSecs = SEED_GRANTS[key];
+    var desiredTriage = TRIAGE_DEPARTMENTS.indexOf(key) > -1;
+    var name = seedDeptName(key);
+
+    if (!byKey[key]) {
+      var row = [key, name, 'yes'];
+      SECTION_KEYS.forEach(function (s) { row.push(desiredSecs.indexOf(s) > -1 ? 'edit' : ''); });
+      row.push(ts); row.push('seed');
+      row.push(desiredTriage ? 'edit' : '');
+      tab.appendRow(row);
+      created.push(key + (desiredSecs.length ? '' : ' (no sections)') + (desiredTriage ? ' +Triage' : ''));
+      return;
+    }
+
+    // UPSERT, not blind append. `present` used to mean "nothing to do", so a
+    // half-granted or wrong row was never corrected — which is the whole failure
+    // mode this seeds against.
+    var r = byKey[key];
+    var cur = data[r - 1];
+    var deltas = [];
+    for (var j = 0; j < SECTION_KEYS.length; j++) {
+      var s = SECTION_KEYS[j];
+      var want = desiredSecs.indexOf(s) > -1 ? 'edit' : '';
+      var raw  = String(cur[3 + j] || '').trim().toLowerCase();
+      var have = raw === 'edit' ? 'edit' : (raw ? raw : '');
+      if (have === want) continue;
+      tab.getRange(r, 4 + j).setValue(want);
+      // Losing a grant is the one thing a rewrite can do silently, so it is
+      // reported separately and loudly rather than as just another delta.
+      if (want === '' && have) { dropped.push(key + ': ' + s + ' (was ' + have + ')'); deltas.push('-' + s); }
+      else deltas.push('+' + s);
+    }
+    var tCol = deptTriageIndex() + 1;             // 1-indexed
+    var haveT = String(cur[tCol - 1] || '').trim().toLowerCase() === 'edit';
+    if (haveT !== desiredTriage) {
+      tab.getRange(r, tCol).setValue(desiredTriage ? 'edit' : '');
+      deltas.push(desiredTriage ? '+Triage' : '-Triage');
+    }
+    if (deltas.length) updated.push(key + ': ' + deltas.join(', '));
+    else unchanged.push(key);
   });
-  return added.length
-    ? 'Created ' + added.length + ' department(s): ' + added.join(', ') + '. Now tick their sections in the app.'
-    : 'All ' + SEED_DEPARTMENTS.length + ' departments already exist — nothing to do.';
+
+  var lines = [];
+  lines.push(created.length  ? 'Created (' + created.length + '): ' + created.join('; ') : 'Created: none');
+  lines.push(updated.length  ? 'Updated (' + updated.length + '): ' + updated.join('; ') : 'Updated: none');
+  lines.push('Unchanged: ' + (unchanged.length ? unchanged.join(', ') : 'none'));
+  lines.push(dropped.length
+    ? 'DROPPED GRANTS (' + dropped.length + ') — read these before you trust the matrix: ' + dropped.join('; ')
+    : 'DROPPED GRANTS: none.');
+  lines.push('');
+  lines.push('IQC and Compliance are seeded with no grants and no members — intentional.');
+  lines.push('The grants are live as soon as this returns; tick any changes in the app.');
+  return lines.join('\n');
 }
+
+// "flight-test" -> "Flight Test" for the display Name cell.
+function seedDeptName(key) {
+  var i = SEED_DEPARTMENTS.map(deptKeyFromName).indexOf(key);
+  return i > -1 ? SEED_DEPARTMENTS[i] : key;
+}
+
+function deptTabShapeHeader(tab) {
+  try {
+    var last = tab.getLastColumn();
+    return last ? tab.getRange(1, 1, 1, last).getValues()[0].join(' | ') : '(empty)';
+  } catch (e) { return '(unreadable)'; }
+}
+
+// Rebuild a legacy nine-section DEPARTMENTS tab. Snapshot first (refusing if the
+// backup already exists, which makes a double-apply impossible), then write the ten
+// rows from SEED_GRANTS by NAME. Returns the old grants that the new mapping does
+// not reproduce — the one thing this could silently lose.
+function seedDepartmentsRebuildLegacy(ss, tab) {
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  var backupName = 'DEPARTMENTS_BACKUP_' + stamp;
+  if (ss.getSheetByName(backupName)) {
+    return 'Refusing: ' + backupName + ' already exists. A previous rebuild already ran today.\n' +
+           'Rename or delete that tab if you really mean to rebuild again.';
+  }
+
+  var values = tab.getDataRange().getValues();
+  ss.insertSheet(backupName).getRange(1, 1, values.length, values[0].length).setValues(values);
+
+  var oldByKey = {};
+  for (var i = 1; i < values.length; i++) {
+    var k = String(values[i][0] || '').trim();
+    if (k) oldByKey[k] = values[i];
+  }
+  var lost = [];
+  Object.keys(oldByKey).forEach(function (k) {
+    var row = oldByKey[k];
+    for (var j = 0; j < LEGACY_DEPT_SECTIONS.length; j++) {
+      var v = String(row[3 + j] || '').trim();
+      if (!v) continue;
+      var sec = LEGACY_DEPT_SECTIONS[j];
+      var now = (SEED_GRANTS[k] || []).indexOf(sec) > -1 ? 'edit' : '';
+      if (now !== v) lost.push(k + ': ' + sec + ' was ' + v + ', now ' + (now || '(none)'));
+    }
+  });
+
+  // Clear the old rows, then write the ten fresh ones. Both in one pass so a
+  // failure leaves the backup as the record rather than a half-written tab.
+  var lastRow = tab.getLastRow();
+  if (lastRow > 1) tab.getRange(2, 1, lastRow - 1, tab.getLastColumn()).clearContent();
+  ensureHeaders(tab, DEPT_HEADS);
+
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var rows = Object.keys(SEED_GRANTS).map(function (key) {
+    var row = [key, seedDeptName(key), 'yes'];
+    SECTION_KEYS.forEach(function (s) { row.push(SEED_GRANTS[key].indexOf(s) > -1 ? 'edit' : ''); });
+    row.push(ts); row.push('seed');
+    row.push(TRIAGE_DEPARTMENTS.indexOf(key) > -1 ? 'edit' : '');
+    return row;
+  });
+  tab.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+
+  return 'Rebuilt a legacy nine-section DEPARTMENTS tab as ' + DEPT_HEADS.length + ' columns.\n' +
+         'Backup: ' + backupName + ' — copy it to a private sheet before you trust this.\n' +
+         'Rows written: ' + rows.length + ' (from SEED_GRANTS, mapped by name).\n' +
+         (lost.length ? 'GRANTS NOT REPRODUCED (' + lost.length + '): ' + lost.join('; ')
+                      : 'Grants not reproduced: none — every old grant is in the new mapping.');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// seedMemberships() — add the owner's person↔department edges, ADD ONLY.
+// ──────────────────────────────────────────────────────────────────────────────
+// Deliberately NOT setUserDepartments(): that deletes then re-appends, which is
+// right for an admin editing one person and wrong for a seed, because it would wipe
+// any edge somebody added between the seed being written and being run. This only
+// ever appends, and says so in its report — "nothing removed" is the property the
+// operator needs to trust before running it on live data.
+function seedMemberships() {
+  var ss = getSs();
+  var tab = getOrCreateUserDeptTab(ss);
+  var data = tab.getDataRange().getValues();
+
+  var present = {};
+  for (var i = 1; i < data.length; i++) {
+    var e = String(data[i][0] || '').toLowerCase().trim();
+    var k = String(data[i][1] || '').trim();
+    if (e && k) present[e + '|' + k] = true;
+  }
+
+  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var rows = [], addedEmails = {}, alreadyCount = 0;
+  // Deterministic department order, so the sheet reads the same on every run.
+  Object.keys(SEED_GRANTS).forEach(function (key) {
+    var people = SEED_MEMBERSHIPS[key] || [];
+    people.forEach(function (local) {
+      var email = local.indexOf('@') > -1 ? local.toLowerCase() : local.toLowerCase() + '@' + CONFIG.ALLOWED_DOMAIN;
+      if (present[email + '|' + key]) { alreadyCount++; return; }
+      present[email + '|' + key] = true;
+      rows.push([email, key, ts, 'seed']);
+      addedEmails[email] = true;
+    });
+  });
+
+  if (rows.length) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
+
+  // Accounts that cannot sign in yet. The edge is still correct — department
+  // capabilities read USER_DEPARTMENTS directly — but User Access will list a member
+  // with no account, so say which ones.
+  var noAccount = [];
+  Object.keys(addedEmails).forEach(function (email) {
+    try { if (!findUserRow(ss, email)) noAccount.push(email); } catch (e2) { noAccount.push(email); }
+  });
+
+  var lines = [];
+  lines.push('Added ' + rows.length + ' membership(s); ' + alreadyCount + ' already present. Nothing removed.');
+  lines.push('Departments seeded: ' + Object.keys(SEED_GRANTS).filter(function (k) {
+    return (SEED_MEMBERSHIPS[k] || []).length;
+  }).join(', '));
+  lines.push('Purchase AND Inventory each list all three of vaibhav.panchal, purchase, tushar.kadam — intentional.');
+  lines.push('IQC and Compliance have no members — intentional (nobody was named for them).');
+  lines.push(noAccount.length
+    ? 'Added but NOT YET SIGN-IN-ABLE (' + noAccount.length + '): ' + noAccount.join(', ') +
+      ' — the edge is correct, they just have no USERS row yet.'
+    : 'Every added email has a USERS row.');
+  return lines.join('\n');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// APP_DATA SECTION MERGE — collapse nine sections into six
+// ──────────────────────────────────────────────────────────────────────────────
+//   old sec-g (Flight Test)  ──┐
+//   old sec-f (QC)           ──┴→ new sec-f (Quality Test Report)
+//   old sec-h (PDI)          ──┐
+//   old sec-i (Dispatch)     ──┴→ new sec-g (PDI Report/Dispatch Record)
+//
+// This REWRITES rows the live app is currently reading, so it cannot be pre-flight
+// — that is the mirror of the column-widening rationale above. It runs in the
+// cutover window, after the deploy and before gh-pages is pushed.
+//
+// The union is safe because NO FIELD ID IS RENAMED (see app.js FIELD_SECTION_INDEX):
+// `f_*` and `g_*` are disjoint by construction, as are `h_*` and `i_*`. Disjointness
+// is asserted anyway — a collision means somebody wrote a field through the API that
+// no form declares, and that must be visible rather than silently resolved.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// A SINGLE pass from the ORIGINAL value. Applying these as sequential replaces
+// would CHAIN: sec-h → sec-g → sec-f would silently move a historical Flight Test
+// completion onto the wrong section. `null` means "drop it" — the Overview is not a
+// completable section.
+var DONE_MAP = { 'sec-a': null, 'sec-g': 'sec-f', 'sec-h': 'sec-g', 'sec-i': 'sec-g' };
+
+// The parsed field NAMES of an APP_DATA row. Never throws: a row whose Fields column
+// is not JSON (or is blank) simply has no keys, and the merge still has to cope.
+function fieldKeysOf(row) {
+  var parsed = {};
+  try { parsed = JSON.parse(row[3] || '{}') || {}; } catch (e) { parsed = {}; }
+  return Object.keys(parsed);
+}
+
+// WHICH SECTION A ROW BELONGS TO AFTER THE MERGE. A row's own field ids decide it,
+// because field ids were never renamed: old Flight Test wrote `g_*`, and the new
+// Section G writes only `h_*`/`i_*` (see app.js FIELD_SECTION_INDEX).
+//
+// `sec-g` is the one ambiguous id — it is a SOURCE (old Flight Test → sec-f) and a
+// TARGET (old sec-h/sec-i → new PDI/Dispatch) at the same time. A plain
+// `SEC_TARGET_MAP[sec]` lookup therefore gets the SECOND run of this migration
+// exactly wrong: it sweeps the freshly-merged PDI rows into sec-f, silently, and
+// nothing about the result looks wrong afterwards. That is not hypothetical — it is
+// what the first version of this function did.
+//
+// The safe direction when a sec-g row carries no `g_*` key is to treat it as the new
+// Section G and leave it alone: a stray, visible, empty row somebody can delete by
+// hand beats a silent merge that destroys dispatch data. planSectionMerge names those
+// rows in `plan.ambiguous` so the operator sees them instead of having to notice.
+function mergeTargetFor(row, secId) {
+  if (secId !== 'sec-g') return SEC_TARGET_MAP.hasOwnProperty(secId) ? SEC_TARGET_MAP[secId] : secId;
+  var keys = fieldKeysOf(row);
+  for (var i = 0; i < keys.length; i++) if (keys[i].indexOf('g_') === 0) return 'sec-f';
+  return 'sec-g';
+}
+
+// PURE. Takes the APP_DATA values array exactly as getValues() returns it and
+// returns the whole plan. No SpreadsheetApp, no Utilities, no clock — so a Node test
+// can extract this source and EXECUTE it against fixture arrays, which is the only
+// real evidence available for this kind of code.
+//
+// All targets are computed from the ONE original snapshot. Never rewrite and
+// re-scan: old sec-g is a SOURCE for new sec-f while new sec-g is a TARGET for old
+// sec-h/sec-i, so a sequential pass would merge Flight Test rows into PDI.
+// `mergeTargetFor` above is what tells those two sec-g eras apart.
+function planSectionMerge(data) {
+  var plan = {
+    survivors: [],   // { row, irNumber, sectionId, rowData } — rewritten IN PLACE
+    deletes:   [],   // { row, irNumber, sectionId }          — removed
+    collisions:[],   // same field id in two source rows — needs a human, never resolved
+    duplicates:[],   // two APP_DATA rows for one (ir, target) — cannot happen normally
+    ambiguous: [],   // sec-g rows with no field to date them — left untouched, named
+    doneRemaps:[],   // human-readable log of every done[] move
+    counts:    {}
+  };
+  if (!data || data.length < 2) return plan;
+
+  // Only these four section ids move. sec-b/c/d/e are neither a source nor a target
+  // and come out of this untouched — which is what keeps the blast radius to the rows
+  // that actually merged.
+  var MOVING = {};
+  Object.keys(SEC_TARGET_MAP).forEach(function (s) { MOVING[s] = true; MOVING[SEC_TARGET_MAP[s]] = true; });
+
+  // One group per (irNumber, TARGET section). All targets come from this ONE original
+  // snapshot — never rewrite and re-scan, because old sec-g is a SOURCE for new sec-f
+  // while new sec-g is a TARGET for old sec-h/sec-i. A sequential pass would merge
+  // Flight Test rows into PDI.
+  var groups = {};
+  for (var i = 1; i < data.length; i++) {
+    var ir  = String(data[i][0] || '');
+    var sec = String(data[i][1] || '');
+    if (!ir || !sec) continue;
+    // Sentinel stores (__IRS__, __NUDGES__, __CONFIG__, __KB__): column A is the
+    // store name and column B is a real-world key that must NOT go through the map.
+    // Nothing matches today; the guard is here so a future map entry cannot corrupt them.
+    if (ir.indexOf('__') === 0) continue;
+    if (!MOVING[sec]) continue;
+
+    var tgt = mergeTargetFor(data[i], sec);
+    // A sec-g row the classifier read as the NEW Section G, but which carries no
+    // `h_*`/`i_*` field either, is a row with no evidence of its era at all — most
+    // likely an old Flight Test row so empty it identifies nothing. It is left alone,
+    // and NAMED: the alternative (merging it into sec-f on a guess) is the destructive
+    // direction, and the other alternative (saying nothing) hides it from the one
+    // check the rehearsal is built on.
+    if (sec === 'sec-g' && tgt === 'sec-g' &&
+        !fieldKeysOf(data[i]).some(function (k) {
+          return k.indexOf('h_') === 0 || k.indexOf('i_') === 0;
+        })) {
+      plan.ambiguous.push('IR ' + ir + ' (row ' + (i + 1) +
+        '): sec-g with no g_*/h_*/i_* field — era unknown, left untouched');
+    }
+
+    var gk = ir + '\t' + tgt;
+    if (!groups[gk]) groups[gk] = { irNumber: ir, sectionId: tgt, rows: [] };
+    groups[gk].rows.push(i + 1);   // 1-indexed sheet rows, ascending by construction
+  }
+
+  Object.keys(groups).forEach(function (gk) {
+    var g = groups[gk];
+    // The survivor is the row that already carries the target id, so a section that
+    // merely absorbed a neighbour keeps its own row and its position. Otherwise the
+    // first source row is RETARGETED in place — which is why this plan never creates
+    // a row: every target group is non-empty, and rewriting a row's section column is
+    // cheaper and steadier than appending one and deleting another. The row count can
+    // therefore only stay the same or shrink, which is what makes the backup's row
+    // count a meaningful check.
+    var targetRows = [], sourceRows = [];
+    for (var r = 0; r < g.rows.length; r++) {
+      if (String(data[g.rows[r] - 1][1]) === g.sectionId) targetRows.push(g.rows[r]);
+      else sourceRows.push(g.rows[r]);
+    }
+    // NOTHING TO MERGE: exactly one row, and it already carries the target id. Skipping
+    // it is what makes a second run an EMPTY plan instead of one that rewrites every
+    // already-merged row with identical content — and, for a row that never had a
+    // `done` key, silently ADDS `"done":[]`. mergeSectionsApply's "Already merged"
+    // guard tests `deletes.length === 0`, so a plan that still writes rows would walk
+    // straight past the guard it is supposed to trip. (This does not hide duplicates:
+    // two rows both carrying the target id still fall through and are de-duplicated.)
+    if (sourceRows.length === 0 && targetRows.length <= 1) return;
+    var survivorRow = targetRows.length ? targetRows[0] : sourceRows[0];
+    // More than one row already carrying the target id is an anomaly — an upsert
+    // should have prevented it — so say so rather than quietly picking one.
+    for (var t = 1; t < targetRows.length; t++) {
+      plan.duplicates.push(g.irNumber + ' ' + g.sectionId + ': rows ' + targetRows[0] +
+                           ' and ' + targetRows[t] + ' both hold this section');
+    }
+
+    var fields = {};
+    var latestRow = survivorRow, latestMs = -1;
+    for (var k = 0; k < g.rows.length; k++) {
+      var rk  = g.rows[k];
+      var row = data[rk - 1];
+      var parsed = {};
+      try { parsed = JSON.parse(row[3] || '{}') || {}; } catch (e) { parsed = {}; }
+
+      // Field ids are never renamed, and `f_*`/`g_*` (and `h_*`/`i_*`) are disjoint by
+      // construction — so a real collision means somebody wrote a field through the API
+      // that no form declares. Later wins, but it is recorded, never silently resolved.
+      Object.keys(parsed).forEach(function (fk) {
+        if (fk === 'done') return;                    // handled below, as a union
+        if (Object.prototype.hasOwnProperty.call(fields, fk)) {
+          plan.collisions.push(g.irNumber + ' ' + g.sectionId + ': field "' + fk +
+                               '" appears in more than one source row (rows ' + g.rows.join(', ') + ')');
+        }
+        fields[fk] = parsed[fk];
+      });
+
+      // done[] — remapped in ONE pass from THIS row's original value, then unioned.
+      // Sequential replaces would CHAIN (sec-h → sec-g → sec-f) and silently move a
+      // historical Flight Test completion onto the wrong section.
+      if (Object.prototype.hasOwnProperty.call(parsed, 'done')) {
+        var src = parsed.done instanceof Array ? parsed.done : [];
+        src.forEach(function (id) {
+          var sid = String(id);
+          if (!DONE_MAP.hasOwnProperty(sid)) { addDone(fields, sid); return; }
+          var to = DONE_MAP[sid];
+          if (to === null) { plan.doneRemaps.push(g.irNumber + ': done/' + sid + ' → dropped'); return; }
+          plan.doneRemaps.push(g.irNumber + ': done/' + sid + ' → ' + to);
+          addDone(fields, to);
+        });
+      }
+
+      // "Saved By" and "Last Updated" come from the NEWEST source row, so the merged
+      // row's author and stamp agree. The survivor contributes its position only.
+      var ms = parseAuditTimestamp(row[4]);
+      if (ms !== null && ms > latestMs) { latestMs = ms; latestRow = rk; }
+    }
+
+    var doneList = orderDoneBySections(fields.done || []);
+    delete fields.done;
+    fields.done = doneList;                 // always present, so the app need not guess
+
+    plan.survivors.push({
+      row: survivorRow, irNumber: g.irNumber, sectionId: g.sectionId,
+      rowData: [g.irNumber, g.sectionId, String(data[latestRow - 1][2] || ''),
+                JSON.stringify(fields), String(data[latestRow - 1][4] || '')]
+    });
+    g.rows.forEach(function (row1) {
+      if (row1 === survivorRow) return;
+      plan.deletes.push({ row: row1, irNumber: g.irNumber, sectionId: String(data[row1 - 1][1] || '') });
+    });
+  });
+
+  plan.counts = {
+    rowsScanned: Math.max(0, data.length - 1),
+    survivors:   plan.survivors.length,
+    deletes:     plan.deletes.length,
+    irsTouched:  countDistinctIRs(plan)
+  };
+  return plan;
+}
+
+// Union one done[] id onto a fields object.
+function addDone(fields, id) {
+  var list = fields.done instanceof Array ? fields.done : [];
+  if (id && list.indexOf(id) < 0) list.push(id);
+  fields.done = list;
+}
+
+// Sort a done[] by SECTION_KEYS order so the stored array is stable across runs — a
+// re-run's diff should be empty, not merely equivalent.
+function orderDoneBySections(list) {
+  return list.slice().sort(function (a, b) {
+    var ia = SECTION_KEYS.indexOf(a), ib = SECTION_KEYS.indexOf(b);
+    if (ia < 0 && ib < 0) return a < b ? -1 : (a > b ? 1 : 0);
+    if (ia < 0) return 1;
+    if (ib < 0) return -1;
+    return ia - ib;
+  });
+}
+
+function countDistinctIRs(plan) {
+  var seen = {}, n = 0;
+  function add(ir) { if (ir && !seen[ir]) { seen[ir] = true; n++; } }
+  plan.survivors.forEach(function (s) { add(s.irNumber); });
+  plan.deletes.forEach(function (d) { add(d.irNumber); });
+  return n;
+}
+
+// READ-ONLY. Prints the merge plan and changes nothing. Run this first, read it,
+// and only then run mergeSectionsApply().
+function mergeSectionsReport() {
+  var ss  = getSs();
+  var tab = ss.getSheetByName('APP_DATA');
+  if (!tab) return 'No APP_DATA tab — nothing to merge.';
+  var plan = planSectionMerge(tab.getDataRange().getValues());
+  return describeMergePlan(plan, 'REPORT ONLY — nothing was written.');
+}
+
+function describeMergePlan(plan, headline) {
+  var c = plan.counts;
+  var lines = [];
+  lines.push(headline);
+  lines.push('');
+  lines.push('Rows scanned:        ' + c.rowsScanned);
+  lines.push('IRs touched:         ' + c.irsTouched);
+  lines.push('Rows rewritten:      ' + c.survivors + '  (one per surviving IR+section)');
+  lines.push('Rows deleted:        ' + c.deletes);
+  lines.push('');
+  lines.push('Every row belongs to exactly one target group, so a row can never be both a');
+  lines.push('source for the new sec-f and a survivor of the new sec-g. The direction');
+  lines.push('collision this migration exists to avoid is impossible by construction, not');
+  lines.push('by luck — the grouping key is the TARGET section, computed from one snapshot.');
+  if (plan.duplicates.length) {
+    lines.push('');
+    lines.push('DUPLICATE ROWS (' + plan.duplicates.length + ') — an upsert should have prevented these:');
+    plan.duplicates.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
+  }
+  if (plan.ambiguous.length) {
+    lines.push('');
+    lines.push('ERA-AMBIGUOUS sec-g ROWS (' + plan.ambiguous.length + ') — left UNTOUCHED:');
+    plan.ambiguous.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
+    lines.push('  (a sec-g row with no g_*/h_*/i_* field cannot be dated. Check each one by');
+    lines.push('   hand and merge it into sec-f yourself only if it is old Flight Test data.)');
+  }
+  if (plan.collisions.length) {
+    lines.push('');
+    lines.push('FIELD COLLISIONS (' + plan.collisions.length + ') — a field id in two source rows:');
+    plan.collisions.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
+    lines.push('  (later row wins; verify none of these is a real field the forms declare)');
+  } else {
+    lines.push('');
+    lines.push('Field collisions: none — the two source sets in each group are disjoint, as expected.');
+  }
+  if (plan.doneRemaps.length) {
+    lines.push('');
+    lines.push('done[] REMAPS (' + plan.doneRemaps.length + '), first 20:');
+    plan.doneRemaps.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
+  } else {
+    lines.push('done[] remaps: none needed.');
+  }
+  var byTgt = {};
+  plan.survivors.forEach(function (s) { byTgt[s.sectionId] = (byTgt[s.sectionId] || 0) + 1; });
+  lines.push('');
+  lines.push('Survivors by section: ' + Object.keys(byTgt).sort().map(function (k) {
+    return k + '=' + byTgt[k];
+  }).join(' ') + (Object.keys(byTgt).length ? '' : ' (none)'));
+  return lines.join('\n');
+}
+
+// APPLY. Runs inside withRowLock — the snapshot is taken INSIDE the lock callback,
+// never before, because this rewrites and deletes by remembered row index and a
+// concurrent append between the scan and the delete would make every index below it
+// point at the wrong row. That is the exact shape withRowLock's comment reserves it
+// for, and it is a new combination: no earlier migration takes a lock.
+function mergeSectionsApply() {
+  return withRowLock(function () {
+    var ss  = getSs();
+    var tab = getOrCreateDataTab(ss);
+    var data = tab.getDataRange().getValues();
+    var plan = planSectionMerge(data);
+
+    // Idempotency first, before any backup is created. A second run must be a no-op,
+    // not a second backup and a second delete pass.
+    //
+    // The test is BOTH counts, not `deletes.length` alone: an IR whose only Flight Test
+    // row is old sec-g — no existing sec-f row to absorb it — is RETARGETED in place,
+    // so it yields a survivor and zero deletes. Guarding on deletes alone would answer
+    // "Already merged" to a store that still has work to do, and refuse to do it.
+    if (plan.survivors.length === 0 && plan.deletes.length === 0) {
+      return 'Already merged — no rows carry a retired section id. Nothing written.';
+    }
+
+    // A DATED TAB, not a response. "A response is not a backup" (docs/10) — a dropped
+    // connection must not be the reason the pre-merge state is gone. Refusing if it
+    // already exists makes a double-apply impossible even if the guard above misses.
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+    var backupName = 'APP_DATA_BACKUP_' + stamp;
+    if (ss.getSheetByName(backupName)) {
+      return 'Refusing: ' + backupName + ' already exists — a merge already ran today.\n' +
+             'Copy that tab somewhere private, delete it, and re-run only if you mean to.';
+    }
+    var backup = ss.insertSheet(backupName);
+    ensureRoom(backup, data.length, tab.getLastColumn());
+    backup.getRange(1, 1, data.length, tab.getLastColumn()).setValues(data);
+
+    // Rewrite the survivors, then delete — deletes in REVERSE ROW ORDER, because
+    // deleteRow shifts everything below it, so going top-down would move each
+    // remaining target up by one and skip half of them.
+    plan.survivors.forEach(function (s) {
+      tab.getRange(s.row, 1, 1, s.rowData.length).setValues([s.rowData]);
+    });
+    var doomed = plan.deletes.slice().sort(function (a, b) { return b.row - a.row; });
+    doomed.forEach(function (d) { tab.deleteRow(d.row); });
+
+    var out = describeMergePlan(plan, 'MERGE APPLIED.');
+    out += '\n\nRows before: ' + plan.counts.rowsScanned + '  Rows after: ' +
+           (plan.counts.rowsScanned - plan.counts.deletes) +
+           '  (row count can only stay or shrink — nothing is appended)';
+    out += '\nBackup: ' + backupName + ' — copy it to a private sheet before you trust this.';
+    out += '\nUndo:   restoreAppDataFromBackup()';
+    return out;
+  });
+}
+
+// THE UNDO. Finds the newest APP_DATA_BACKUP_<date>, snapshots the CURRENT state to
+// APP_DATA_PRE_RESTORE_<date> (so the undo is itself undoable — one level of redo),
+// then replaces the data rows with the backup's.
+//
+// It CLEARS first even though the merge only ever deletes, because a client on a
+// stale service worker may have appended real rows in the meantime; those must not
+// survive underneath a shorter restored block.
+function restoreAppDataFromBackup() {
+  return withRowLock(function () {
+    var ss = getSs();
+    var backups = ss.getSheets().filter(function (s) {
+      return /^APP_DATA_BACKUP_\d{4}-\d{2}-\d{2}$/.test(s.getName());
+    });
+    if (!backups.length) return 'No APP_DATA_BACKUP_<date> tab found — nothing to restore.';
+    backups.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });   // newest first
+    var src = backups[0];
+
+    var values = src.getDataRange().getValues();
+    if (values.length < 2) return 'The newest backup (' + src.getName() + ') is empty — refusing to wipe APP_DATA with it.';
+
+    var tab = getOrCreateDataTab(ss);
+    var cols = tab.getLastColumn();
+    var cur  = tab.getDataRange().getValues();
+
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+    var preName = 'APP_DATA_PRE_RESTORE_' + stamp;
+    if (ss.getSheetByName(preName)) {
+      return 'Refusing: ' + preName + ' already exists — a restore already ran today.\n' +
+             'Rename or delete that tab if you really mean to restore again.';
+    }
+    var pre = ss.insertSheet(preName);
+    ensureRoom(pre, cur.length, cols);
+    pre.getRange(1, 1, cur.length, cols).setValues(cur);
+
+    var lastRow = tab.getLastRow();
+    if (lastRow > 1) tab.getRange(2, 1, lastRow - 1, cols).clearContent();
+    ensureRoom(tab, values.length, cols);
+    tab.getRange(1, 1, values.length, Math.min(cols, values[0].length > cols ? cols : values[0].length))
+       .setValues(values.map(function (r) { return r.slice(0, cols); }));
+
+    return 'Restored APP_DATA from ' + src.getName() + ' (' + (values.length - 1) + ' row(s)).\n' +
+           'The pre-restore state was saved to ' + preName + ' — that is your redo.\n' +
+           'Re-run mergeSectionsReport() to confirm the store is back to its old shape.';
+  });
+}
+
+// Grow a freshly inserted sheet if the block being written is taller than its
+// default 1000 rows — setValues throws rather than auto-expanding.
+function ensureRoom(sheet, rows, cols) {
+  if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
+  if (cols && sheet.getMaxColumns() < cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), cols - sheet.getMaxColumns());
+}
+
 
 // Ensure the admin has a usable account. If the row is missing it is created with
 // a temporary password (returned ONCE — copy it out of the execution log); if it
@@ -1950,6 +2849,62 @@ function bootstrapAdmin() {
 function maintenancePruneSessions() {
   pruneSessions();
   return 'Pruned expired sessions.';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// MAINTENANCE: pruneAuditLog — drop AUDIT_LOG rows older than the retention window
+// ──────────────────────────────────────────────────────────────────────────────
+// MANUAL, never automatic. The audit trail is the app's evidence of who changed
+// what; shrinking it behind anyone's back would be the wrong default, so this is a
+// lever an operator pulls on purpose, alongside maintenancePruneSessions().
+//
+// 400 days, not 90: the Sheet is the system of record for a warranty period, and
+// the log is what answers "who changed this and when" a year later. Volume after
+// §1.4's other two measures is roughly 1+K rows per human save.
+var AUDIT_RETENTION_DAYS = 400;
+
+function maintenancePruneAuditLog() {
+  return withRowLock(function () {
+    var ss  = getSs();
+    var tab = ss.getSheetByName('AUDIT_LOG');
+    if (!tab) return 'No AUDIT_LOG tab — nothing to prune.';
+
+    var data = tab.getDataRange().getValues();
+    if (data.length < 2) return 'AUDIT_LOG is empty — nothing to prune.';
+
+    // The cutoff is computed from the app's own timestamp format, so it compares
+    // as a string: 'dd-MMM-yyyy HH:mm:ss' sorts chronologically only within a
+    // year, which is exactly why this parses instead of comparing text.
+    var cutoff = new Date().getTime() - (AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    var doomed = [];
+    for (var i = 1; i < data.length; i++) {
+      var ms = parseAuditTimestamp(data[i][0]);
+      if (ms === null) continue;               // unparseable — keep it, never guess
+      if (ms < cutoff) doomed.push(i + 1);     // 1-indexed sheet row
+    }
+    if (!doomed.length) return 'Nothing older than ' + AUDIT_RETENTION_DAYS + ' days. AUDIT_LOG unchanged.';
+
+    // Reverse order: deleteRow shifts everything below it, so deleting top-down
+    // would move each remaining target up by one and skip half of them. This is
+    // the same trap the user purge documents; the lock above is why it is safe.
+    for (var d = doomed.length - 1; d >= 0; d--) tab.deleteRow(doomed[d]);
+
+    return 'Pruned ' + doomed.length + ' audit row(s) older than ' + AUDIT_RETENTION_DAYS +
+           ' days. ' + (data.length - 1 - doomed.length) + ' row(s) kept.';
+  });
+}
+
+// Parse the app's 'dd-MMM-yyyy HH:mm:ss' stamp into epoch ms, or null.
+// Date.parse() returns NaN for this format in V8 — it would silently scramble any
+// ordering or cutoff built on it, so the format is parsed explicitly here.
+function parseAuditTimestamp(v) {
+  if (v instanceof Date) return v.getTime();
+  var m = String(v || '').match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})[ T](\d{1,2}):(\d{2}):(\d{2})/);
+  if (!m) return null;
+  var mon = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'].indexOf(m[2].toLowerCase());
+  if (mon < 0) return null;
+  return new Date(parseInt(m[3], 10), mon, parseInt(m[1], 10),
+                  parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6], 10)).getTime();
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

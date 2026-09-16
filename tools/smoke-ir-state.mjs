@@ -52,7 +52,7 @@ const by = n => T.allIRs.find(i => i.irNumber === n);
 ok('app status beats Sheet Col D', by('IR409').status === 'Production', by('IR409').status);
 ok('assignee lands on the record', by('IR409').assigneeName === 'Ravi Singh', by('IR409').assignee);
 ok('priority lands on the record', by('IR409').priority === 'Urgent', by('IR409').priority);
-ok('done[] lands on the record', by('IR409').done.length === 2, by('IR409').done);
+ok('done[] lands on the record', by('IR409').done.length === 1, by('IR409').done);
 ok('a bare seed does NOT claim the status', by('IR410').status === 'Visual Inspection', by('IR410').status);
 ok('a bare seed exposes no assignee', !by('IR410').assignee, by('IR410').assignee);
 ok('saving a section does NOT claim the status', by('IR411').status === 'Open', by('IR411').status);
@@ -75,10 +75,33 @@ T.setAllIRs([{ irNumber: 'IR409', status: 'Close', droneId: 'S25G-1', dateRaised
 ok('re-fetch + re-merge keeps the app value', by('IR409').status === 'Production', by('IR409').status);
 
 head('section completion');
-ok('markSectionDone adds', T.markSectionDone('IR409', 'sec-c').join(',') === 'sec-a,sec-b,sec-c', T.markSectionDone('IR409', 'sec-c'));
-ok('markSectionDone is idempotent', T.markSectionDone('IR409', 'sec-a').join(',') === 'sec-a,sec-b', T.markSectionDone('IR409', 'sec-a'));
+// `sec-a` is RETIRED and `sec-h`/`sec-i` were merged away: they must be dropped from
+// `done[]` on the way out of the store, and must not be addable. Without the filter a
+// stale or half-migrated `__IRS__` row would resurrect them, and a retired id in
+// `done[]` renders as a tick on a section that no longer has a pane.
+ok('markSectionDone adds', T.markSectionDone('IR409', 'sec-c').join(',') === 'sec-b,sec-c', T.markSectionDone('IR409', 'sec-c'));
+ok('markSectionDone drops a retired id silently',
+  T.markSectionDone('IR409', 'sec-a').join(',') === 'sec-b', T.markSectionDone('IR409', 'sec-a'));
+ok('markSectionDone is idempotent', (() => {
+  const once = T.markSectionDone('IR409', 'sec-b');
+  return once.join(',') === T.markSectionDone('IR409', 'sec-b').join(',') && once.filter(x => x === 'sec-b').length === 1;
+})(), T.markSectionDone('IR409', 'sec-b'));
 ok('markSectionDone does not mutate irState', T.irState.IR409.done.join(',') === 'sec-a,sec-b', T.irState.IR409.done);
-ok('a brand-new IR starts its done list', T.markSectionDone('IR999', 'sec-a').join(',') === 'sec-a');
+ok('a brand-new IR starts its done list', T.markSectionDone('IR999', 'sec-b').join(',') === 'sec-b');
+
+head('retired section ids are filtered out of the store');
+T.setAllIRs([{ irNumber: 'IR412', status: 'Open' }]);
+T.irState = { IR412: { done: ['sec-a', 'sec-b', 'sec-g', 'sec-h', 'sec-i'], updatedBy: 'a@indrones.com' } };
+T.applyIRStateToAllIRs();
+// sec-a/h/i are gone; sec-g is a LIVE id (the merged PDI section) and must survive —
+// which is exactly the distinction a blanket "drop anything that moved" filter gets
+// wrong, and why the filter is against SECTION_IDS and not against SEC_TARGET_MAP.
+ok('sec-a / sec-h / sec-i are filtered out of ir.done',
+  by('IR412').done.join(',') === 'sec-b,sec-g', by('IR412').done);
+T.irState = { IR412: { done: 'not-an-array', updatedBy: 'a@indrones.com' } };
+T.applyIRStateToAllIRs();
+ok('a malformed done[] becomes an empty array, not a crash', Array.isArray(by('IR412').done) && by('IR412').done.length === 0,
+  by('IR412').done);
 
 head('initials');
 ok('"Monish Raza" → MR', T.initialsOf('Monish Raza') === 'MR', T.initialsOf('Monish Raza'));

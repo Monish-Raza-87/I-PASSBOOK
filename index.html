@@ -212,20 +212,46 @@
           <!-- Unsaved-draft notice -->
           <div id="draft-banner" class="draft-banner" style="display:none"></div>
 
+          <!-- ====== IR OVERVIEW (pinned, above the tabs) ======
+               Section A's content, in the form it should always have had: the
+               client's intake facts read-only, the two fields CRM owns, the
+               automated activity timeline, and the legacy hand-typed log
+               read-only. It is NOT a section and NOT a tab.
+
+               Three structural rules, each load-bearing — do not "tidy" them:
+               1. `id="ir-overview"`, never `sec-*`. The shell/boot suites count
+                  panes by `id="sec-…" class="section-content"`, so an `ir-`
+                  prefix makes miscounting it as a section impossible.
+               2. It must NOT carry `class="section-content"`. The tab handler
+                  clears `.active` from every `.section-content` and re-adds it
+                  only to the clicked pane, so this panel would be hidden
+                  permanently the first time anybody clicked a tab.
+               3. It sits OUTSIDE `#sections-wrapper`. That excludes it from the
+                  wrapper's delegated input/change listeners, which drive
+                  saveDraft — intended, not an oversight: the panel is always
+                  visible and one click from Save, so a draft adds nothing. -->
+          <div id="ir-overview" class="overview-panel">
+            <div class="overview-head">
+              <h2 class="overview-title">Overview</h2>
+              <button type="button" class="btn" id="save-overview">Save Overview</button>
+            </div>
+            <div id="ir-overview-facts"></div>
+            <div id="ir-overview-editable"></div>
+            <div id="ir-timeline"></div>
+            <div id="ir-legacy-log"></div>
+          </div>
+
           <!-- Scrollable section tabs. The 📋 Report tab is the client's own
                report, read-only; `data-intake` keeps it out of the access-gating
                fallback (it is never hidden, so it would always win). -->
           <div class="tabs-container" id="section-tabs">
             <div class="tab tab-intake" data-section="sec-intake" data-intake="1">📋 Report</div>
-            <div class="tab active" data-section="sec-a">A: Preliminary</div>
-            <div class="tab" data-section="sec-b">B: Inward</div>
+            <div class="tab active" data-section="sec-b">B: Inward</div>
             <div class="tab" data-section="sec-c">C: IQC</div>
             <div class="tab" data-section="sec-d">D: Investigation</div>
             <div class="tab" data-section="sec-e">E: Production</div>
-            <div class="tab" data-section="sec-f">F: QC</div>
-            <div class="tab" data-section="sec-g">G: Flight Test</div>
-            <div class="tab" data-section="sec-h">H: PDI</div>
-            <div class="tab" data-section="sec-i">I: Logistics</div>
+            <div class="tab" data-section="sec-f">F: Quality Test</div>
+            <div class="tab" data-section="sec-g">G: PDI/Dispatch</div>
           </div>
 
           <!-- Section contents -->
@@ -238,16 +264,8 @@
               <div id="sec-intake-body"></div>
             </div>
 
-            <!-- Section A: Preliminary Details -->
-            <div id="sec-a" class="section-content active">
-              <h2 class="section-title">Section A — Preliminary Details &amp; Activity Log</h2>
-              <button class="btn btn-top-save" id="save-sec-a-top">Save Section A</button>
-              <div id="sec-a-form"></div>
-              <button class="btn" id="save-sec-a">Save Section A</button>
-            </div>
-
             <!-- Section B: Inward Checklist -->
-            <div id="sec-b" class="section-content">
+            <div id="sec-b" class="section-content active">
               <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <button class="btn" id="save-sec-b">Save Section B</button>
@@ -255,7 +273,7 @@
 
             <!-- Section C: IQC Inspection -->
             <div id="sec-c" class="section-content">
-              <h2 class="section-title">Section C — IQC Inspection</h2>
+              <h2 class="section-title">Section C — IQC Visual Inspection</h2>
               <div id="sec-c-form"></div>
               <button class="btn" id="save-sec-c">Save Section C</button>
             </div>
@@ -275,32 +293,18 @@
               <button class="btn" id="save-sec-e">Save Section E</button>
             </div>
 
-            <!-- Section F: Quality Control -->
+            <!-- Section F: Quality Test Report (QC + Flight Test) -->
             <div id="sec-f" class="section-content">
-              <h2 class="section-title">Section F — Quality Control (QC Test)</h2>
+              <h2 class="section-title">Section F — Quality Test Report</h2>
               <div id="sec-f-form"></div>
               <button class="btn" id="save-sec-f">Save Section F</button>
             </div>
 
-            <!-- Section G: Flight Test -->
+            <!-- Section G: PDI Report/Dispatch Record (PDI + Dispatch) -->
             <div id="sec-g" class="section-content">
-              <h2 class="section-title">Section G — Flight Test</h2>
+              <h2 class="section-title">Section G — PDI Report/Dispatch Record</h2>
               <div id="sec-g-form"></div>
               <button class="btn" id="save-sec-g">Save Section G</button>
-            </div>
-
-            <!-- Section H: PDI -->
-            <div id="sec-h" class="section-content">
-              <h2 class="section-title">Section H — Pre-Delivery Inspection (PDI)</h2>
-              <div id="sec-h-form"></div>
-              <button class="btn" id="save-sec-h">Save Section H</button>
-            </div>
-
-            <!-- Section I: Logistics -->
-            <div id="sec-i" class="section-content">
-              <h2 class="section-title">Section I — Logistics &amp; Dispatch</h2>
-              <div id="sec-i-form"></div>
-              <button class="btn" id="save-sec-i">Save Section I</button>
             </div>
 
           </div>

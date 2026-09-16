@@ -148,8 +148,8 @@ head('the 📋 Report tab is wired end to end');
 ok('the intake tab is in the strip', /data-section="sec-intake"/.test(dom));
 ok('the intake pane exists', /id="sec-intake"/.test(dom));
 // The pane's own markup is nested divs, so a `</div></div>` match truncates it.
-// Bound the capture by the NEXT pane instead — Section A follows the intake view.
-const intakeBody = html => (html.match(/<div id="sec-intake-body">([\s\S]*?)<div id="sec-a"/) || [])[1] || '';
+// Bound the capture by the NEXT pane instead — Section B follows the intake view.
+const intakeBody = html => (html.match(/<div id="sec-intake-body">([\s\S]*?)<div id="sec-b"/) || [])[1] || '';
 const intake = intakeBody(dom);
 ok('renderIntake() actually painted the pane', intake.length > 200, intake.length);
 ok('the read-only note is in the rendered page', /The app never edits these values/.test(dom));
@@ -157,17 +157,43 @@ ok('no undefined or NaN leaked into the report', !/undefined|NaN/.test(intake), 
 ok('the intake pane has no editable control',
   !/<(input|textarea|select)\b/.test(intake), (intake.match(/<(input|textarea|select)\b/g) || []).slice(0, 4));
 
-head('the 9 sections are untouched');
+head('the six sections, and the Overview above them');
 const tabStrip = (dom.match(/id="section-tabs">([\s\S]*?)<div id="sections-wrapper"/) || [])[1] || '';
-ok('10 tabs in the strip (9 sections + Report)',
-  (tabStrip.match(/class="tab/g) || []).length === 10, (tabStrip.match(/class="tab/g) || []).length);
+const SIX = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+ok('seven tabs in the strip (six sections + Report)',
+  (tabStrip.match(/class="tab/g) || []).length === 7, (tabStrip.match(/class="tab/g) || []).length);
 ok('every section tab is present',
-  ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i']
-    .every(s => tabStrip.includes(`data-section="${s}"`)));
-ok('Section A is still the default tab', /class="tab active" data-section="sec-a"/.test(tabStrip));
-ok('the 9 section panes are intact',
-  ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i']
-    .every(s => dom.includes(`id="${s}" class="section-content`)));
+  SIX.every(s => tabStrip.includes(`data-section="${s}"`)));
+ok('Section B is the default tab', /class="tab active" data-section="sec-b"/.test(tabStrip));
+ok('the six section panes are intact',
+  SIX.every(s => dom.includes(`id="${s}" class="section-content`)));
+// The three retired ids must leave no trace at all — not a tab, not a pane. A
+// leftover `sec-g` pane next to the merged `sec-f` pane is the exact shape of a
+// half-applied merge, and it would silently swallow saves into a row nothing reads.
+ok('sec-a / sec-h / sec-i have neither a tab nor a pane',
+  ['sec-a','sec-h','sec-i'].every(s =>
+    !tabStrip.includes(`data-section="${s}"`) && !dom.includes(`id="${s}" class="section-content`)),
+  ['sec-a','sec-h','sec-i'].filter(s => dom.includes(`id="${s}" class="section-content`)));
+
+head('the Overview panel is pinned above the tabs');
+// HTML comments are DOM nodes, so `--dump-dom` serialises them. index.html explains
+// these very rules in a comment directly above the panel, and that prose contains
+// both `id="ir-overview"` and `class="section-content"` with no `>` between them —
+// so a page-wide regex matches the EXPLANATION of the rule, not a violation of it.
+const domNoComments = dom.replace(/<!--[\s\S]*?-->/g, '');
+ok('the Overview panel is in the DOM', /id="ir-overview"/.test(domNoComments));
+ok('it is not a section pane (no section-content class)', (() => {
+  const tag = (domNoComments.match(/<div id="ir-overview"[^>]*>/) || [''])[0];
+  return tag.length > 0 && !/section-content/.test(tag);
+})(), (domNoComments.match(/<div id="ir-overview"[^>]*>/) || [''])[0]);
+ok('it sits outside the sections wrapper', (() => {
+  const i = domNoComments.indexOf('id="ir-overview"'), w = domNoComments.indexOf('id="sections-wrapper"');
+  return i > -1 && w > -1 && i < w;
+})());
+ok('the facts strip rendered', (dom.match(/class="overview-fact"/g) || []).length >= 4,
+  (dom.match(/class="overview-fact"/g) || []).length);
+ok('the timeline block rendered', /id="ir-timeline"/.test(dom));
+ok('the Overview save button is in the DOM', /id="save-overview"/.test(dom));
 
 head('no javascript errors');
 // Chrome logs uncaught page errors to stderr with --enable-logging.

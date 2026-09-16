@@ -10,7 +10,7 @@
 |---|---|
 | [[01 - Project Overview]] | What this app is, who it's for, tech stack |
 | [[02 - Architecture & Data Flow]] | Frontend ↔ Backend ↔ Sheets flow; who owns which data |
-| [[03 - Sections Reference]] | The 9 passbook sections + the 📋 Report intake tab, with field definitions |
+| [[03 - Sections Reference]] | The 6 passbook sections (B–G), the Overview panel, and the 📋 Report intake tab, with field definitions |
 | [[04 - Backend API Reference]] | GAS endpoint actions, params, responses, access control, sentinel stores |
 | [[05 - Configuration & Secrets]] | What's hardcoded, what needs replacing before deploy |
 | [[06 - UI Components & Styling]] | Design system tokens, component patterns |

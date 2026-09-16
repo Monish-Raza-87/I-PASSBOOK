@@ -130,7 +130,7 @@ function loginBackend(email, password) {
         // backend nests the access payload under data.access (the getMyAccess
         // return). Without this, currentUser.access would be all-undefined.
         const a = (data && data.access) || {};
-        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [] };
+        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
         currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
@@ -205,6 +205,9 @@ function refreshMyAccess() {
           role: data.role,
           permissions: data.permissions,
           departments: data.departments || [],
+          // Absent on an older backend means no Triage — the fail-closed default,
+          // which is the right direction for a permission.
+          triage: data.triage === true,
         };
         return data;
       }
@@ -341,24 +344,47 @@ const isInwardAdmin = isAdmin;
 
 // ─── ACCESS CONTROL (view + comment for everyone; edit from departments) ──────
 // `currentUser.access` is populated by loginBackend / refreshMyAccess:
-//   { role: 'admin'|'user', permissions: { 'sec-a':'edit', ... }, departments: [] }
+//   { role: 'admin'|'user', permissions: { 'sec-b':'edit', … }, departments: [], triage: bool }
+//
+// `triage` is a SEPARATE axis, not a seventh permission key: a department can hold
+// it without editing any section (CR and Management do). `permissions[OVERVIEW_KEY]`
+// still exists so the Overview's inputs gate through the ordinary canEdit() seam.
 //
 // The fallback below must fail CLOSED on writes and OPEN on reads: view+comment
 // everywhere, edit nowhere. If access hasn't arrived yet (first paint, a
 // transient getMyAccess failure) the worst case is a disabled Save button the
 // user retries — never an unauthorised write, and never a locked-out screen.
 // The backend enforces independently, so a wrong guess here costs a button.
-const SECTION_IDS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+// The six LIVE sections, letters B–G. There is no Section A: its content moved to
+// the Overview panel, whose data still lives under the `sec-a` key in APP_DATA
+// (see OVERVIEW_KEY below). `sec-h` and `sec-i` no longer exist either — they were
+// merged into `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch
+// Record), and backend.gs migrated their rows.
+const SECTION_IDS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+// The Overview panel is not a section — it has no tab, no letter and no
+// completion state — but it is still a record in APP_DATA, still gated, and
+// still resolved by field prefix. Keeping the original `sec-a` id means existing
+// rows, drafts and AUDIT_LOG history all keep working untouched.
+const OVERVIEW_KEY = 'sec-a';
 function myAccess() {
   if (currentUser && currentUser.access) return currentUser.access;
   const viewOnly = {};
   SECTION_IDS.forEach(s => { viewOnly[s] = 'view'; });
-  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], __fallback: true };
+  viewOnly[OVERVIEW_KEY] = 'view';
+  // `triage: false` is spelled out rather than left undefined so the
+  // fail-closed intent is visible at the call site: this profile is what the app
+  // uses before real access arrives, and it must never confer Triage.
+  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], triage: false, __fallback: true };
 }
 function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 // Comment comes WITH view — every signed-in user can comment on every section.
 function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
+// Triage is a SEPARATE axis from section edit rights, not a seventh "section".
+// It governs the ticket header — status, assignee, priority, type — and the two
+// Overview fields. A department can hold it without editing any section, which
+// is exactly what CR and Management do. Admin always has it.
+function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
 
 // ─── SENTINEL STORES ─────────────────────────────────────────────────────────
 // App-owned records that live outside the 9 workflow sections. They are saved
@@ -511,7 +537,11 @@ function applyIRStateToAllIRs() {
     ir.assigneeName = s.assigneeName || '';
     if (s.priority) ir.priority = s.priority;
     ir.type = s.type || '';
-    ir.done = Array.isArray(s.done) ? s.done : [];
+    // Filter against the LIVE ids. The store still holds historical `sec-a`,
+    // `sec-h` and `sec-i` entries until the migration remaps them, and a
+    // completion marker for a section that no longer exists would render as a
+    // progress row nobody can name.
+    ir.done = Array.isArray(s.done) ? s.done.filter(id => SECTION_IDS.includes(id)) : [];
   });
 }
 
@@ -544,8 +574,15 @@ async function patchIRState(irNumber, patch) {
 // which is the only place that knows a section was actually saved.
 function markSectionDone(irNumber, sectionId) {
   const row = irState[irNumber] || {};
-  const done = Array.isArray(row.done) ? row.done.slice() : [];
-  if (!done.includes(sectionId)) done.push(sectionId);
+  // Always filter against SECTION_IDS on the way OUT, in both directions. This
+  // return value is what the caller writes back via patchIRState, so an unfiltered
+  // list would let a retired id inherited from a stale or partially-migrated store
+  // survive every subsequent save — the filter would only ever run for the one
+  // retired id that happened to be passed in.
+  const done = (Array.isArray(row.done) ? row.done : []).filter(id => SECTION_IDS.includes(id));
+  // Only live sections are completable. The Overview is deliberately not one, and a
+  // retired id must never be able to re-enter the list.
+  if (SECTION_IDS.includes(sectionId) && !done.includes(sectionId)) done.push(sectionId);
   return done;
 }
 
@@ -745,13 +782,14 @@ function createDevUser() {
   // that a dev user had no token at all.
   const all = {};
   SECTION_IDS.forEach(s => { all[s] = 'edit'; });
+  all[OVERVIEW_KEY] = 'edit';
   return {
     name: 'Dev Tester',
     email: `dev@${CONFIG.ALLOWED_DOMAIN}`,
     initial: 'D',
     token: 'local-dev',
     sessionToken: 'local-dev',
-    access: { role: 'admin', permissions: all, departments: [] },
+    access: { role: 'admin', permissions: all, departments: [], triage: true },
   };
 }
 
@@ -796,7 +834,7 @@ function finishAuth(email, d) {
   currentUser.sessionToken = d.sessionToken;
   // The backend nests the access payload under data.access (getMyAccess).
   const a = (d && d.access) || {};
-  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [] };
+  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
   currentUser.sessionError = null;
   persistSession(d.sessionToken);
   persistUser(currentUser);
@@ -1261,21 +1299,23 @@ function syncNavAccess() {
 // Three tabs, one backend call. `listUsers` returns every account AND every
 // department in a single response, so switching tabs never re-fetches and the
 // People matrix can draw people × departments from one consistent snapshot.
-const SECTION_LABELS = { 'sec-a':'A','sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G','sec-h':'H','sec-i':'I' };
+const SECTION_LABELS = { 'sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G' };
 // Human names for the tick grids. Kept as a literal rather than derived from
 // SECTIONS (defined much further down, and lazily) so the admin UI never depends
 // on the section-form builder having been evaluated.
 const SECTION_SHORT = {
-  'sec-a': 'Preliminary Details',
   'sec-b': 'Inward Checklist',
   'sec-c': 'IQC Visual Inspection',
   'sec-d': 'Investigation',
   'sec-e': 'Production (Rework)',
-  'sec-f': 'Quality Control',
-  'sec-g': 'Flight Test',
-  'sec-h': 'Pre-Delivery Inspection',
-  'sec-i': 'Logistics & Dispatch',
+  'sec-f': 'Quality Test Report',
+  'sec-g': 'PDI Report/Dispatch Record',
 };
+// Triage is kept as its OWN label pair rather than a seventh `sec-*` key, so no
+// future `Object.keys(SECTION_SHORT)`/`SECTION_LABELS` walk can mistake it for a
+// section. It shares the grant grid's rendering, not its identity.
+const TRIAGE_LABEL = 'TR';
+const TRIAGE_SHORT = 'Triage (header, status & Overview)';
 
 let accessCache = { users: [], departments: [], apiVersion: 0 };
 let accessTab = 'people';
@@ -1573,6 +1613,13 @@ function renderDepartmentsTab() {
         </div>
       </div>
       <div class="access-perms-grid">${ticks}</div>
+      <div class="access-perms-grid access-perms-triage">
+        <label class="acc-sec" title="${escHtml(TRIAGE_SHORT)}">
+          <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="triage"${d.triage ? ' checked' : ''} />
+          <span>${TRIAGE_LABEL}</span>
+          <span class="acc-sec-name">${escHtml(TRIAGE_SHORT)}</span>
+        </label>
+      </div>
     </div>`;
   }).join('');
 
@@ -1580,6 +1627,7 @@ function renderDepartmentsTab() {
     <div class="access-section">
       <h3>What each department may edit</h3>
       <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change a ticket's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
       <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
       <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
       <div class="access-add-row" style="margin-top:0.75rem;">
@@ -2395,6 +2443,9 @@ async function openPassbook(irNumber) {
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
   renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section B draft values
+  // The pinned Overview needs the saved data (a_crmOwner/a_contactPhone, and the
+  // legacy activity log), so it renders only after loadSectionData has landed.
+  renderOverview();
 
   // Legacy record: show the "Legacy Record" button if this IR exists in the
   // legacy workbook, and auto-open that read-only view when there's no new-app
@@ -2511,13 +2562,218 @@ function renderIntake() {
     extrasHtml;
 }
 
+// ─── OVERVIEW PANEL ──────────────────────────────────────────────────────────
+// What used to be Section A, in the form it should always have had. It is pinned
+// above the section tabs and is not a section: no letter, no tab, no completion
+// state, and it is never drafted (it sits outside #sections-wrapper).
+//
+// Its record still lives in APP_DATA under the id `sec-a` — OVERVIEW_KEY — so the
+// existing row, the existing AUDIT_LOG history and the backend's locked-intake
+// strip all keep working unchanged. Nothing user-visible says "A" any more.
+//
+// Layout, top to bottom:
+//   facts     the intake values the customer's Google Form supplies, read-only
+//   editable  the two fields CRM actually owns (a_crmOwner, a_contactPhone)
+//   timeline  generated from what the app records — see buildTimeline
+//   legacy    the hand-typed activity log, read-only and labelled Legacy
+
+const OVERVIEW_FACTS = [
+  { field: 'irNumber',    label: 'IR Number',        kind: 'text' },
+  { field: 'droneId',     label: 'Drone Serial No.', kind: 'text' },
+  { field: 'dateRaised',  label: 'Date Raised',      kind: 'date' },
+  { field: 'companyName', label: 'Company',          kind: 'text' },
+  { field: 'customerName',label: 'Respondent',       kind: 'text' },
+  { field: 'issueType',   label: 'Support Required', kind: 'text' },
+];
+
+// Read one intake value, preferring the raw Sheet cell over the parsed record.
+// Same precedence rule as renderIntake(): the Sheet is the client's own words.
+function overviewFactValue(field) {
+  const ir = currentIR || {};
+  const raw = ir.intake && ir.intake[field];
+  if (raw !== undefined && raw !== null && raw !== '') return raw;
+  return ir[field] !== undefined && ir[field] !== null ? ir[field] : '';
+}
+
+function renderOverviewFacts() {
+  const el = document.getElementById('ir-overview-facts');
+  if (!el) return;
+  const facts = OVERVIEW_FACTS.map(f => {
+    const v = overviewFactValue(f.field);
+    return `<div class="overview-fact"><span class="overview-fact-label">${escHtml(f.label)}</span>` +
+           `<span class="overview-fact-value">${intakeValueHtml(f.kind, v)}</span></div>`;
+  }).join('');
+  el.innerHTML = `<div class="overview-facts">${facts}</div>` +
+    `<button type="button" class="overview-report-link" id="overview-report-link">` +
+    `Full report, issue description &amp; weather →</button>`;
+  // The description and the incident/weather text are long and stay on the 📋
+  // Report tab. Pinning all ten intake fields here would push the timeline a
+  // screen down on a phone, and they are already one tap away.
+  const link = document.getElementById('overview-report-link');
+  if (link) link.onclick = () => {
+    const tab = document.querySelector('.tab[data-section="sec-intake"]');
+    if (tab) tab.click();
+  };
+}
+
+function renderOverviewEditable() {
+  const el = document.getElementById('ir-overview-editable');
+  if (!el) return;
+  const saved = (currentSectionData && currentSectionData[OVERVIEW_KEY]) || {};
+  const canWrite = canTriage();
+  const val = (key, fallback) => {
+    const v = saved[key];
+    return (v === undefined || v === null) ? (fallback || '') : v;
+  };
+  const ro = canWrite ? '' : ' disabled';
+  el.innerHTML =
+    `<div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager</label>
+       <input class="form-input" type="text" id="a_crmOwner" placeholder="Name of CRM person" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
+     </div>
+     <div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_contactPhone">Customer Phone</label>
+       <input class="form-input" type="tel" id="a_contactPhone" placeholder="+91 XXXXX XXXXX" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+     </div>` +
+    (canWrite ? '' : `<p class="overview-note">Only Customer Relations and Management can edit these. Everyone can read them.</p>`);
+}
+
+// The hand-typed activity log, read-only. It is shown exactly as it was typed,
+// with the four-column grid it was typed into — spans where the inputs were, so
+// the layout needs no new CSS. Not merged into the timeline: the rows carry no
+// per-row timestamp, so any date on them would be invented.
+function renderLegacyLog() {
+  const el = document.getElementById('ir-legacy-log');
+  if (!el) return;
+  const raw = (currentSectionData && currentSectionData[OVERVIEW_KEY] || {}).a_activityLog;
+  let rows = [];
+  if (Array.isArray(raw)) {
+    rows = raw.filter(r => r && (r.activity || r.remark || r.date));
+  } else if (typeof raw === 'string' && raw.trim()) {
+    // Older records stored this field as one blob of text before it became a table.
+    rows = [{ activity: raw }];
+  }
+  if (!rows.length) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    `<div class="overview-sub-head">
+       <span class="legacy-tag">Legacy</span>
+       <span class="overview-sub-note">Hand-typed activity log from before this app recorded activity automatically. Kept for the record — the app no longer writes to it.</span>
+     </div>
+     <div class="activity-table-wrapper">
+       <div class="activity-table-header">
+         <span class="act-col-day">#</span>
+         <span class="act-col-date">Date</span>
+         <span class="act-col-activity">Activity Description</span>
+         <span class="act-col-remark">Remark</span>
+       </div>
+       <div class="activity-table-body">${rows.map(buildLegacyActivityRow).join('')}</div>
+     </div>`;
+}
+
+function applyOverviewGating() {
+  const btn = document.getElementById('save-overview');
+  if (!btn) return;
+  const canWrite = canTriage();
+  btn.disabled = !canWrite;
+  btn.style.opacity = canWrite ? '' : '0.5';
+  btn.style.cursor = canWrite ? '' : 'not-allowed';
+  btn.title = canWrite ? '' : 'You need Triage access to edit the Overview';
+}
+
+// Cached audit rows for the open IR. Comments live in a different store that the
+// bell already polls, so when they change the timeline can be re-rendered from
+// this cache with no second fetch.
+let overviewTimelineCache = { irNumber: '', entries: [] };
+
+async function loadOverviewTimeline(irNumber) {
+  const el = document.getElementById('ir-timeline');
+  if (!el) return;
+  const entries = await fetchAuditEntries(irNumber, 400, true);
+  // A newer ticket may have been opened while this was in flight.
+  if (!currentIR || currentIR.irNumber !== irNumber) return;
+  overviewTimelineCache = { irNumber: irNumber, entries: entries };
+  refreshOverviewTimelineView();
+}
+
+function refreshOverviewTimelineView() {
+  const el = document.getElementById('ir-timeline');
+  if (!el || !currentIR) return;
+  // Nothing cached for THIS ticket yet — the first fetch is still in flight, and
+  // rendering another ticket's activity would be worse than a moment of blank.
+  if (overviewTimelineCache.irNumber !== currentIR.irNumber) return;
+  renderTimelineInto(el, buildTimeline(currentIR.irNumber, overviewTimelineCache.entries, nudges, 40), {
+    emptyText: 'No activity recorded yet for this ticket.',
+  });
+}
+
+function renderOverview() {
+  const panel = document.getElementById('ir-overview');
+  if (!panel) return;
+  if (!currentIR || !currentIR.irNumber) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  renderOverviewFacts();
+  renderOverviewEditable();
+  renderLegacyLog();
+  applyOverviewGating();
+  loadOverviewTimeline(currentIR.irNumber);
+}
+
+// Mirrors the section save path, minus files and drafts, and posts to the SAME
+// `sec-a` record the Overview has always used. Deliberately reuses the existing
+// saveSection action rather than adding one: the backend's locked-intake guard
+// keeps stripping the ten customer-form keys from any `sec-a` payload, so the
+// Overview can never write a second, divergent copy of the intake facts.
+async function saveOverview() {
+  const irNumber = currentIR?.irNumber;
+  if (!irNumber) return;
+  if (!canTriage()) { showToast('You need Triage access to edit the Overview'); return; }
+  const btn = document.getElementById('save-overview');
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; }
+
+  const fields = {
+    a_crmOwner:     document.getElementById('a_crmOwner')?.value || '',
+    a_contactPhone: document.getElementById('a_contactPhone')?.value || '',
+  };
+
+  const formData = new FormData();
+  formData.append('action', 'saveSection');
+  formData.append('irNumber', irNumber);
+  formData.append('sectionId', OVERVIEW_KEY);
+  formData.append('savedBy', currentUser?.email || 'unknown');
+  formData.append('fields', JSON.stringify(fields));
+  formData.append('files', JSON.stringify([]));
+
+  try {
+    const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'Backend error');
+    if (btn) { btn.textContent = '✓ Saved!'; btn.className = 'btn saved'; }
+    showToast('Overview saved');
+    // Keep the in-memory record in step, or a re-render would revert to the old
+    // values and look like the save was lost.
+    currentSectionData[OVERVIEW_KEY] = Object.assign({}, currentSectionData[OVERVIEW_KEY] || {}, fields);
+    loadOverviewTimeline(irNumber);
+  } catch (err) {
+    if (btn) { btn.textContent = '⚠ Retry Save'; btn.className = 'btn error'; }
+    showToast('❌ Save failed: ' + err.message);
+  }
+
+  setTimeout(() => {
+    if (btn) { btn.textContent = label || 'Save Overview'; btn.className = 'btn'; }
+  }, 3000);
+}
+
 // The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
 // only supplies the status a ticket starts life with.
 function renderBannerMeta() {
   if (!bannerPills || !currentIR) return;
   const ir    = currentIR;
   const owner = ir.assigneeName || ir.assignee || '';
-  const canTriage = canEditSection('sec-a');
+  // Named `showTriage`, NOT `canTriage` — a local of that name would shadow the
+  // canTriage() function for the whole of this scope and throw a TypeError.
+  // Only a real browser run catches that; the vm suites cannot see it.
+  const showTriage = canTriage();
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
@@ -2526,7 +2782,7 @@ function renderBannerMeta() {
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
-  if (triageBtn) triageBtn.style.display = canTriage ? '' : 'none';
+  if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
 }
 
 // ─── TRIAGE MODAL (status / assignee / priority / type) ──────────────────────
@@ -2536,7 +2792,7 @@ function renderBannerMeta() {
 // width without a new layout.
 function openTriageModal() {
   if (!currentIR) return;
-  if (!canEditSection('sec-a')) { showToast('You do not have edit access to triage tickets'); return; }
+  if (!canTriage()) { showToast('You do not have Triage access — ask an admin to grant it'); return; }
   if (document.getElementById('triage-modal')) return;
   const ir     = currentIR;
   const owners = teamDirectory.slice().sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -2602,6 +2858,7 @@ async function applyTriage() {
   closeTriageModal();
   await patchIRState(irNumber, patch);
   showToast('Triage saved');
+  loadOverviewTimeline(irNumber);
 
   // Assignment notifies through the comment machinery already in place — the
   // bell, the unread badge, the 90s poll and the email all work unchanged.
@@ -2609,8 +2866,7 @@ async function applyTriage() {
   // backend.gs, so an assignment notification reads as a comment.
   if (email && email.toLowerCase() !== prev) {
     const n = {
-      id: nudgeId(), irNumber, scope: 'section', sectionId: 'sec-a', fieldId: 'a_overallStatus',
-      sectionLabel: 'A: Preliminary', fieldLabel: 'IR Status',
+      id: nudgeId(), irNumber, scope: 'ir',
       to: email,
       from: currentUser?.email || 'unknown',
       fromName: currentUser?.name || currentUser?.email || 'Someone',
@@ -2721,29 +2977,21 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 // ─── SECTION FORM BUILDER ────────────────────────────────────────────────────
+// Six sections, letters B–G. Two of them are MERGES of what used to be separate
+// sections, and the merged field ids were deliberately NOT renamed:
+//
+//   sec-f  holds  f_*  (ex-QC)        +  g_*  (ex-Flight Test)
+//   sec-g  holds  h_*  (ex-PDI)       +  i_*  (ex-Dispatch)
+//
+// Renaming them would orphan every comment anchored to a field (a `__NUDGES__`
+// item carries `fieldId`) and split each field's AUDIT_LOG history across two
+// names. Keeping them is also what makes the row migration a one-column rewrite
+// rather than a JSON-key rewrite. Field id → section id is resolved by
+// FIELD_SECTION_INDEX below, never by guessing the prefix.
+//
+// There is no `sec-a` entry: Section A became the Overview panel, which is not a
+// section and has no form.
 const SECTIONS = {
-  'sec-a': {
-    title: 'Section A — Preliminary Details & Activity Log',
-    fields: [
-      // ── Locked intake fields: auto-populated from the customer IR form,
-      //    read-only for EVERYONE (no one edits these — they're the form's record).
-      { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     readonly: true, locked: true },
-      { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     readonly: true, locked: true },
-      { id: 'a_dateRaised',    label: 'Date of Incident',             type: 'date',     readonly: true, locked: true },
-      { id: 'a_companyName',   label: 'Company Name',                type: 'text',     readonly: true, locked: true },
-      { id: 'a_customerName',  label: 'Respondant Name',             type: 'text',     readonly: true, locked: true },
-      { id: 'a_contactEmail',  label: 'Respondant Email',            type: 'email',    readonly: true, locked: true },
-      { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     readonly: true, locked: true },
-      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', readonly: true, locked: true },
-      { id: 'a_incidentLocationWeather', label: 'Incident Location and Weather', type: 'textarea', readonly: true, locked: true },
-      { id: 'a_evidence',      label: 'Evidence (from customer form)', type: 'readonlyLinks', locked: true },
-      // ── Editable (governed by Section A edit permission): CRM fills these.
-      { id: 'a_crmOwner',      label: 'Customer Relations Manager',  type: 'text',     placeholder: 'Name of CRM person' },
-      { id: 'a_contactPhone',  label: 'Customer Phone',              type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
-      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',     type: 'activityTable' },
-      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: IR_STATUS_VALUES },
-    ]
-  },
   'sec-b': {
     title: 'Section B — Inward Checklist (Inventory)',
     fields: [
@@ -2803,17 +3051,18 @@ const SECTIONS = {
       { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
     ]
   },
+  // Quality Test Report — a merge of the old QC section and the old Flight Test
+  // section. Both are QC tests, so they belong on one report. The field ids keep
+  // their original `f_`/`g_` prefixes (see the note above SECTIONS).
   'sec-f': {
-    title: 'Section F — Quality Control (QC)',
+    title: 'Section F — Quality Test Report',
     fields: [
       { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
       { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
-    ]
-  },
-  'sec-g': {
-    title: 'Section G — Flight Test',
-    fields: [
+
+      // ── Part B — Flight Test ──
+      { id: 'f_partFlight',    label: 'Flight Test', type: 'divider' },
       { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
       { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
@@ -2822,19 +3071,20 @@ const SECTIONS = {
       { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
   },
-  'sec-h': {
-    title: 'Section H — Pre-Delivery Inspection (PDI)',
+  // PDI Report/Dispatch Record — a merge of the old PDI section and the old
+  // Logistics & Dispatch section. Inspecting the packed goods and dispatching
+  // them is one handover, signed once.
+  'sec-g': {
+    title: 'Section G — PDI Report/Dispatch Record',
     fields: [
       { id: 'h_pdiDocs',     label: 'PDI Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
       { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
       { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
-    ]
-  },
-  'sec-i': {
-    title: 'Section I — Logistics & Dispatch',
-    fields: [
+
+      // ── Part B — Dispatch ──
+      { id: 'g_partDispatch', label: 'Dispatch', type: 'divider' },
       { id: 'i_dispatchDate', label: 'Dispatch Date',      type: 'date' },
       { id: 'i_courier',      label: 'Courier / Transporter', type: 'courierName', default: 'Bluedart' },
       { id: 'i_courierTrackId', label: 'Courier Tracking ID', type: 'text', placeholder: 'AWB / docket / tracking number' },
@@ -2844,6 +3094,19 @@ const SECTIONS = {
     ]
   },
 };
+
+// Field id → section id, built once from SECTIONS so a merged section resolves
+// its inherited ids correctly. `g_missionReport` belongs to `sec-f` and
+// `i_courier` to `sec-g`; the prefix says otherwise, which is exactly why this
+// index exists. Used by sectionIdFromFieldId() and by the nudge/comment anchor
+// resolution, which needs to know which section a field is rendered in.
+const FIELD_SECTION_INDEX = (() => {
+  const idx = {};
+  Object.entries(SECTIONS).forEach(([sectionId, section]) => {
+    section.fields.forEach(f => { idx[f.id] = sectionId; });
+  });
+  return idx;
+})();
 
 function buildSectionForms(irNumber) {
   Object.entries(SECTIONS).forEach(([sectionId, section]) => {
@@ -2862,13 +3125,14 @@ function buildSectionForms(irNumber) {
     if (btn) btn.onclick = () => saveSection(secId, irNumber);
   });
 
-  // Wire Section A top save button (duplicate of bottom)
-  const btnTopA = document.getElementById('save-sec-a-top');
-  if (btnTopA) btnTopA.onclick = () => saveSection('sec-a', irNumber);
-
   // Wire Section D Part A PDF download
   const dlD = document.getElementById('download-sec-d');
   if (dlD) dlD.onclick = () => downloadSectionDPartA();
+
+  // Wire the pinned Overview's save button. Not part of the SECTIONS loop above:
+  // the Overview is not a section, so it has no `save-sec-*` id to pick up.
+  const btnOverview = document.getElementById('save-overview');
+  if (btnOverview) btnOverview.onclick = () => saveOverview();
 
   // Inject a 💬 nudge button after each section title (per-section tagging)
   Object.keys(SECTIONS).forEach(secId => {
@@ -2957,31 +3221,20 @@ function applySectionAccessGating() {
     // Field 💬 buttons
     pane.querySelectorAll('.field-nudge-btn').forEach(b => { b.style.display = comment ? '' : 'none'; });
   });
+  // The Overview is not in SECTION_IDS — it has no tab to hide and no per-section
+  // grant — so it is gated separately, on the Triage flag alone.
+  applyOverviewGating();
 }
 
 function buildField(field, irNumber, sectionId) {
   const id = field.id;
   let control = '';
 
-  // Auto-fill values from the current IR (Form Responses data).
-  // Shared across textarea / url / text / date / email / tel controls.
-  const autoFill = {
-    'a_irNumber':      currentIR?.irNumber || '',
-    'a_droneId':       currentIR?.droneId || '',
-    'a_dateRaised':    toISODate(currentIR?.incidentDate || currentIR?.dateRaised),
-    'a_crmOwner':      currentIR?.spoc || '',
-    'a_customerName':  currentIR?.customerName || '',
-    'a_contactEmail':  currentIR?.contactEmail || '',
-    'a_contactPhone':  currentIR?.contactPhone || '',
-    'a_issueType':     currentIR?.issueType || '',
-    'a_issueDesc':     currentIR?.issueDesc || '',
-    'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
-    // Locked intake fields sourced from the customer form (cols M/N+Q/R):
-    'a_companyName':              currentIR?.companyName || '',
-    'a_incidentLocationWeather':  currentIR?.incidentLocationWeather || '',
-    'a_evidence':                 [currentIR?.evidenceFormN, currentIR?.evidenceFormQ].filter(Boolean).join('\n'),
-  };
-  const val = autoFill[field.id] !== undefined ? autoFill[field.id] : '';
+  // The auto-fill map that used to live here populated the ten locked intake
+  // fields of Section A. Those fields are not built any more — the Overview panel
+  // renders them from currentIR directly, read-only — so there is nothing left to
+  // pre-fill and no field here is intake-sourced.
+  const val = '';
   // Escape for safe insertion into an HTML attribute or textarea content
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -3030,29 +3283,6 @@ function buildField(field, irNumber, sectionId) {
       </div>
     `).join('');
     control = `<div>${rows}</div>`;
-  } else if (field.type === 'activityTable') {
-    const initialRows = 5;
-    const defaultDate = toISODate(currentIR?.dateRaised);
-    let rowsHtml = '';
-    // First row: pre-filled with "IR Reported" and the date
-    rowsHtml += buildActivityRow(1, defaultDate, 'IR Reported');
-    for (let i = 2; i <= initialRows; i++) {
-      rowsHtml += buildActivityRow(i, '');
-    }
-    control = `
-      <div class="activity-table-wrapper" id="${id}">
-        <div class="activity-table-header">
-          <span class="act-col-day">#</span>
-          <span class="act-col-date">Date</span>
-          <span class="act-col-activity">Activity Description</span>
-          <span class="act-col-remark">Remark</span>
-        </div>
-        <div class="activity-table-body" id="${id}-body">
-          ${rowsHtml}
-        </div>
-        <button type="button" class="btn-add-row" onclick="addActivityRow('${escJsAttr(id)}')">+ Add Row</button>
-      </div>
-    `;
   } else if (field.type === 'costTable') {
     // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B:
     // columns Particulars | Qty | Rate | Cost (auto = Qty*Rate) | Remark, plus a total.
@@ -3238,27 +3468,20 @@ function toISODate(val) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function buildActivityRow(dayCount, dateValue, activityValue) {
+// The hand-typed activity table is retired — the Overview panel's timeline is
+// generated from what the app already records, so nobody fills this in any more.
+// What was already typed is kept and shown READ-ONLY by the Overview: same
+// four-column grid, spans instead of inputs, so the layout needs no new CSS.
+function buildLegacyActivityRow(row) {
+  const r = row || {};
   return `
-    <div class="activity-table-row">
-      <input type="number" class="form-input act-day" value="${dayCount}" readonly />
-      <input type="date" class="form-input act-date" value="${dateValue}" />
-      <input type="text" class="form-input act-activity" placeholder="Activity..." value="${activityValue || ''}" />
-      <input type="text" class="form-input act-remark" placeholder="Remark..." />
+    <div class="activity-table-row is-readonly">
+      <span class="act-day">${escHtml(r.dayCount || r.day || '')}</span>
+      <span class="act-date">${escHtml(r.date || '')}</span>
+      <span class="act-activity">${escHtml(r.activity || '')}</span>
+      <span class="act-remark">${escHtml(r.remark || '')}</span>
     </div>
   `;
-}
-
-function addActivityRow(fieldId) {
-  const body = document.getElementById(fieldId + '-body');
-  if (!body) return;
-  const existingRows = body.querySelectorAll('.activity-table-row');
-  const nextDay = existingRows.length > 0
-    ? parseInt(existingRows[existingRows.length - 1].querySelector('.act-day').value || '0') + 1
-    : 1;
-  body.insertAdjacentHTML('beforeend', buildActivityRow(nextDay, ''));
-  const lastRow = body.lastElementChild;
-  if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ─── COST TABLE (Section D Part B) ────────────────────────────────────────────
@@ -3903,33 +4126,9 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
-  // Handle activityTable type
-  if (field?.type === 'activityTable') {
-    const body = document.getElementById(fieldId + '-body');
-    if (!body) return;
-
-    if (Array.isArray(value)) {
-      // New format: array of row objects
-      body.innerHTML = '';
-      value.forEach((row, i) => {
-        body.insertAdjacentHTML('beforeend', buildActivityRow(
-          row.dayCount || (i + 1),
-          row.date || ''
-        ));
-        const rows = body.querySelectorAll('.activity-table-row');
-        const lastRow = rows[rows.length - 1];
-        if (lastRow) {
-          lastRow.querySelector('.act-activity').value = row.activity || '';
-          lastRow.querySelector('.act-remark').value = row.remark || '';
-        }
-      });
-    } else if (typeof value === 'string' && value.trim()) {
-      // Backward compatibility: old textarea data
-      const firstActivity = body.querySelector('.activity-table-row:first-child .act-activity');
-      if (firstActivity) firstActivity.value = value;
-    }
-    return;
-  }
+  // No activityTable branch: the type is retired. The legacy log it used to hold is
+  // rendered read-only by the Overview, straight from currentSectionData, and no
+  // SECTIONS entry declares the type any more.
 
   // Handle costTable type — value is [{particular, qty, rate, cost, remark}, ...]
   if (field?.type === 'costTable') {
@@ -4019,20 +4218,6 @@ function collectSectionValues(sectionId) {
         if (el) checkValues[field.items[i]] = el.value;
       });
       fieldValues[field.id] = checkValues;
-    } else if (field.type === 'activityTable') {
-      const body = document.getElementById(field.id + '-body');
-      const tableData = [];
-      if (body) {
-        body.querySelectorAll('.activity-table-row').forEach(row => {
-          tableData.push({
-            dayCount: row.querySelector('.act-day')?.value || '',
-            date:     row.querySelector('.act-date')?.value || '',
-            activity: row.querySelector('.act-activity')?.value || '',
-            remark:   row.querySelector('.act-remark')?.value || '',
-          });
-        });
-      }
-      fieldValues[field.id] = tableData;
     } else if (field.type === 'costTable') {
       const body = document.getElementById(field.id + '-body');
       const rows = [];
@@ -4105,7 +4290,17 @@ function draftKey(sectionId) {
   return `ipb_draft_${currentIR?.irNumber || '_'}_${sectionId}`;
 }
 function sectionIdFromFieldId(fieldId) {
-  const letter = (fieldId || '').split('_')[0];     // 'a','b',...
+  if (!fieldId) return null;
+  // The index is authoritative. The prefix guess below is WRONG for the merged
+  // sections — `g_missionReport` lives in `sec-f`, `i_courier` in `sec-g` — so it
+  // is only a fallback for ids that no form declares (an old field, a future one).
+  const known = FIELD_SECTION_INDEX[fieldId];
+  if (known) return known;
+  const letter = String(fieldId).split('_')[0];     // 'a','b',...
+  // `a_*` fields are the Overview's; they have no section tab but they do have a
+  // home, so they resolve to OVERVIEW_KEY rather than to a non-existent `sec-a`
+  // section entry.
+  if (letter === 'a') return OVERVIEW_KEY;
   return letter ? `sec-${letter}` : null;
 }
 function saveDraft(sectionId) {
@@ -4230,9 +4425,10 @@ async function saveSection(sectionId, irNumber) {
       // Saving Section B changes the goods Section H verifies against — refresh
       // the dispatch checklist so it lists exactly what was received.
       if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
-      // Record this save in the app-owned workflow state: Section A owns the
-      // status, and every section save marks that section done for this IR.
+      // Record this save in the app-owned workflow state — every section save
+      // marks that section done for this IR, and the save is now on the timeline.
       syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues);
+      loadOverviewTimeline(irNumber);
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -4253,21 +4449,12 @@ async function saveSection(sectionId, irNumber) {
 // A section save is the one place that knows an IR was actually touched, so it
 // is where the app takes ownership of that ticket's workflow state.
 function syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues) {
-  const patch = { done: markSectionDone(irNumber, sectionId) };
-  // Section A carries the IR Status dropdown. Mirroring it into __IRS__ is what
-  // makes an in-app status change reach the list badge: the badge reads app
-  // state, and the Section A row in APP_DATA is not where the badge looks.
-  if (sectionId === 'sec-a' && fieldValues && fieldValues.a_overallStatus) {
-    const next = String(fieldValues.a_overallStatus).trim();
-    const cur  = ownedStatus(irNumber) || currentIR?.status || '';
-    if (next && next !== cur) {
-      patch.status      = next;
-      patch.statusOwned = true;
-      patch.statusAt    = Date.now();
-      patch.statusBy    = myEmail() || 'unknown';
-    }
-  }
-  patchIRState(irNumber, patch);
+  // Status is no longer mirrored from a section form. The IR Status dropdown lived
+  // in Section A, which is gone; status is now written only by the Triage modal
+  // (see applyTriage), which owns `status`/`statusOwned`/`statusAt` itself. A
+  // section save that happens to post a status key must not be able to move the
+  // workflow clock.
+  patchIRState(irNumber, { done: markSectionDone(irNumber, sectionId) });
 }
 
 function fileToBase64(file) {
@@ -4835,6 +5022,7 @@ function loadNudges() {
         refreshCommentCounts();
         if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
         rerenderOpenNudgeModal();
+        refreshOverviewTimelineView();
       }
     })
     .catch(() => { /* keep current list */ });
@@ -5362,45 +5550,256 @@ function openNudgeModalForField(fieldId) {
   openNudgeModal('field', currentIR.irNumber, sectionId, fieldId, field?.label || fieldId);
 }
 
+// ─── ACTIVITY TIMELINE ───────────────────────────────────────────────────────
+// ONE builder and ONE renderer, used twice: the Overview panel embeds the newest
+// 40 entries, the 🕓 History modal shows the newest 400. Because both go through
+// buildTimeline, a ticket can never tell two different stories depending on where
+// you look at it.
+//
+// Everything here is derived from something the app already records — nothing is
+// synthesised:
+//   section saves & field edits → AUDIT_LOG rows carrying a real section id
+//   triage changes (status / assignee / priority / type) → AUDIT_LOG rows whose
+//     column B is a `__` sentinel write; the real IR sits in the Section ID
+//     column, which is why backend.gs getAuditLog matches both shapes
+//   file uploads → the `uploaded` audit event added alongside this work
+//   comments & @mentions → the __NUDGES__ store (which already carries its own
+//     author and timestamp, better than an audit row would)
+//
+// The legacy hand-typed activity log is deliberately NOT folded in. It has no
+// per-row timestamp, so merging it would mean inventing when things happened.
+// The Overview shows it as its own labelled block instead.
+
+// Deltas the timeline never shows. `done` is the section-completion array: every
+// save rewrites it, and a 500-character JSON diff of it would drown the real
+// edits. The completion itself is not lost — the save's own marker names the
+// section. The backend skips it too; this is the belt to that pair of braces,
+// because rows written before the backend changed are still in the log.
+const SUPPRESSED_AUDIT_FIELDS = ['done'];
+
+const AUDIT_MONTHS = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+
+// 'dd-MMM-yyyy HH:mm:ss' → epoch ms.
+// Date.parse() returns NaN for this shape in V8, and a NaN would not throw — it
+// would silently sort the whole timeline by nothing. So the shape is parsed
+// explicitly. Only ORDERING matters, and the backend stamps every row from one
+// timezone, so the local-time construction below is sufficient.
+function parseAuditTimestamp(v) {
+  if (v == null || v === '') return 0;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  const s = String(v).trim();
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+  if (m) {
+    const mon = AUDIT_MONTHS[m[2].toLowerCase()];
+    if (mon !== undefined) {
+      return new Date(+m[3], mon, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).getTime();
+    }
+  }
+  const n = Date.parse(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Human name for a field id, from the forms. Falls back to the raw id for a field
+// no current form declares — a retired one, or one that exists only in history.
+function fieldLabelFor(fieldId) {
+  if (!fieldId) return '';
+  const secId = FIELD_SECTION_INDEX[fieldId];
+  if (secId && SECTIONS[secId]) {
+    const f = SECTIONS[secId].fields.find(x => x.id === fieldId);
+    if (f && f.label) return f.label;
+  }
+  return fieldId;
+}
+
+// Sections that no longer exist. History predating the merge still names them, and
+// relabelling that history with the surviving section would misattribute the work
+// that was actually done under the old letter.
+const HISTORICAL_SECTION_NAMES = {
+  'sec-a': 'Overview (formerly Section A)',
+  'sec-h': 'PDI (now part of G)',
+  'sec-i': 'Dispatch (now part of G)',
+};
+function sectionDisplayName(sectionId) {
+  if (!sectionId) return '';
+  return SECTION_SHORT[sectionId] || HISTORICAL_SECTION_NAMES[sectionId] || sectionId;
+}
+
+const TIMELINE_KINDS = {
+  save:     { icon: '💾', label: 'Section saved' },
+  add:      { icon: '➕', label: 'Added' },
+  edit:     { icon: '✏️', label: 'Edited' },
+  remove:   { icon: '➖', label: 'Removed' },
+  status:   { icon: '🎯', label: 'Status' },
+  assign:   { icon: '👤', label: 'Assignment' },
+  priority: { icon: '⚑',  label: 'Priority' },
+  type:     { icon: '🏷',  label: 'Type' },
+  upload:   { icon: '📎', label: 'File uploaded' },
+  comment:  { icon: '💬', label: 'Comment' },
+};
+
+// PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
+// Returns entries OLDEST FIRST, trimmed to the newest `limit` (0/absent = all).
+// The renderer reverses for display; the builder needs ascending order to trim
+// from the correct end.
+function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
+  const out = [];
+
+  (Array.isArray(auditEntries) ? auditEntries : []).forEach(e => {
+    if (!e) return;
+    const fid = String(e.fieldId || '');
+    if (SUPPRESSED_AUDIT_FIELDS.indexOf(fid) >= 0) return;
+    const source = e.source === 'workflow' ? 'workflow' : 'section';
+    const base = {
+      at: parseAuditTimestamp(e.timestamp),
+      timestamp: e.timestamp || '',
+      by: e.savedBy || '',
+      source,
+      // A workflow row's Section ID column holds the IR, not a section, so it
+      // must not be reported as one.
+      sectionId: source === 'workflow' ? '' : (e.sectionId || ''),
+      fieldId: source === 'workflow' ? '' : fid,
+      oldValue: e.oldValue == null ? '' : String(e.oldValue),
+      newValue: e.newValue == null ? '' : String(e.newValue),
+      // Every entry carries the SAME shape whichever half it came from. A comment
+      // row has no old/new value and an audit row has no mentions, and leaving
+      // either out means the renderer — and any future consumer — reads `undefined`
+      // off some rows and '' off others. That asymmetry is invisible until someone
+      // renders it, and it renders as the literal string "undefined".
+      message: '',
+      mentions: [],
+    };
+
+    if (e.event === 'uploaded') { out.push(Object.assign({}, base, { kind: 'upload' })); return; }
+
+    if (source === 'workflow') {
+      const kind = fid === 'status' ? 'status'
+                 : (fid === 'assignee' || fid === 'assigneeName') ? 'assign'
+                 : fid === 'priority' ? 'priority'
+                 : fid === 'type' ? 'type' : '';
+      // Everything else a sentinel write carries — a whole-store `items` array, a
+      // seed marker — is not a workflow change and must not clutter the timeline.
+      if (!kind) return;
+      out.push(Object.assign({}, base, { kind }));
+      return;
+    }
+
+    if (e.event === 'saved') {
+      // The batch marker for a save. A `saved` row that names a field carries no
+      // more than the per-field rows below it, so only the bare one is shown.
+      if (!fid) out.push(Object.assign({}, base, { kind: 'save' }));
+      return;
+    }
+
+    out.push(Object.assign({}, base, {
+      kind: e.event === 'added' ? 'add' : e.event === 'removed' ? 'remove' : 'edit',
+    }));
+  });
+
+  (Array.isArray(nudgeItems) ? nudgeItems : []).forEach(n => {
+    if (!n) return;
+    if (String(n.irNumber || '') !== String(irNumber || '')) return;
+    out.push({
+      at: Number(n.createdAt) || 0,
+      timestamp: '',
+      by: n.fromName || n.from || '',
+      source: 'comment',
+      sectionId: '',
+      fieldId: n.fieldId || '',
+      // Same shape as an audit entry — see the note on `base` above.
+      oldValue: '',
+      newValue: '',
+      kind: 'comment',
+      message: n.message || '',
+      mentions: Array.isArray(n.mentions) ? n.mentions : [],
+    });
+  });
+
+  out.sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at;
+    // One save writes a whole batch at a single timestamp. Sections before
+    // workflow, so the edit that caused a state change reads before the change.
+    const rank = s => (s === 'section' ? 0 : s === 'workflow' ? 1 : 2);
+    return rank(a.source) - rank(b.source);
+  });
+
+  const cap = Number(limit) > 0 ? Number(limit) : 0;
+  return (cap && out.length > cap) ? out.slice(out.length - cap) : out;
+}
+
+// One renderer for both consumers. Markup is the existing `.hist-*` block, reused
+// unchanged so the timeline inherits the modal's styling and the design system's
+// tokens with no new colours.
+function renderTimelineInto(el, timeline, opts) {
+  if (!el) return;
+  const o = opts || {};
+  const list = Array.isArray(timeline) ? timeline : [];
+  if (!list.length) {
+    el.innerHTML = `<div class="hist-list"><div class="nudge-empty">` +
+      escHtml(o.emptyText || 'No activity yet — save a section, triage the ticket, upload a file or leave a comment, and it appears here.') +
+      `</div></div>`;
+    return;
+  }
+  const clip = s => String(s == null ? '' : s).slice(0, 200);
+  const rows = list.slice().reverse().map(it => {
+    const meta = TIMELINE_KINDS[it.kind] || { icon: '•', label: it.kind || 'Activity' };
+    const field = it.kind === 'save'
+      ? '<span class="hist-field hist-muted">(whole section)</span>'
+      : (it.fieldId ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '');
+    const srcChip = it.source === 'workflow' ? '<span class="hist-src">workflow</span>' : '';
+
+    let body = '';
+    if (it.kind === 'comment') {
+      const mention = (it.mentions && it.mentions.length)
+        ? `<span class="hist-src">@mention</span>` : '';
+      body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
+      if (mention) body += `<div class="hist-diff">${mention}</div>`;
+    } else if (it.kind === 'edit' || it.kind === 'remove') {
+      body = `<div class="hist-diff"><span class="hist-old">old:</span> ${escHtml(clip(it.oldValue))}</div>` +
+             `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(it.newValue))}</div>`;
+    } else if (it.kind === 'add') {
+      body = `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(it.newValue))}</div>`;
+    } else if (it.newValue) {
+      body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
+    }
+
+    const when = it.timestamp || (it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : '');
+    const where = it.source === 'comment'
+      ? 'comment'
+      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'workflow' : ''));
+    return `<div class="hist-item">
+      <div class="hist-top"><span class="hist-ev">${meta.icon} ${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
+      <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
+      ${body}
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="hist-list">${rows}</div>`;
+}
+
 // ─── AUDIT TRAIL / EDIT HISTORY ───────────────────────────────────────────────
-// Shows the backend AUDIT_LOG for the open IR: every save + every field overwrite
-// (old→new), newest first — so any later correction is traceable. Requires the
-// redeployed backend (getAuditLog action).
+// Shows the whole story for the open IR: every section save, field correction,
+// upload, triage change and comment — newest first. Needs the redeployed backend
+// (the `getAuditLog` action, whose match was widened to reach sentinel writes).
+// `quiet` suppresses the toasts. The Overview calls it on every ticket open, and
+// a ticket with no history on a backend that predates the widened getAuditLog
+// match should render an empty state — not an error toast per open.
+async function fetchAuditEntries(irNumber, limit, quiet) {
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}&limit=${limit}`);
+    const data = await res.json();
+    if (data.status === 'ok') return Array.isArray(data.entries) ? data.entries : [];
+    if (data.status === 'error' && !quiet) showToast('History: ' + (data.message || 'backend error'));
+  } catch {
+    if (!quiet) showToast('History unavailable — backend not connected yet');
+  }
+  return [];
+}
+
 async function openHistoryModal() {
   if (!currentIR?.irNumber) { showToast('Open an IR first'); return; }
   const irNumber = currentIR.irNumber;
-  let entries = [];
-  try {
-    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}`);
-    const data = await res.json();
-    if (data.status === 'ok') entries = Array.isArray(data.entries) ? data.entries : [];
-    else if (data.status === 'error') { showToast('History: ' + (data.message || 'backend error')); }
-  } catch {
-    showToast('History unavailable — backend not connected yet');
-  }
-  const evLabel = e => e.event === 'changed' ? '✏️ changed'
-    : e.event === 'added' ? '➕ added'
-    : e.event === 'removed' ? '➖ removed'
-    : '💾 saved';
-  const clip = s => String(s == null ? '' : s).slice(0, 200);
-  const body = entries.length
-    ? entries.slice().reverse().map(e => {
-        const field = e.fieldId
-          ? `<span class="hist-field">${escHtml(e.fieldId)}</span>`
-          : '<span class="hist-field hist-muted">(section save)</span>';
-        let diff = '';
-        if (e.event === 'changed' || e.event === 'removed')
-          diff = `<div class="hist-diff"><span class="hist-old">old:</span> ${escHtml(clip(e.oldValue))}</div>`
-               + `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
-        else if (e.event === 'added')
-          diff = `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
-        return `<div class="hist-item">
-          <div class="hist-top"><span class="hist-ev">${evLabel(e)}</span>${field}<span class="hist-time">${escHtml(e.timestamp || '')}</span></div>
-          <div class="hist-by">by ${escHtml(e.savedBy || '')} · ${escHtml(e.sectionId || '')}</div>
-          ${diff}
-        </div>`;
-      }).join('')
-    : '<div class="nudge-empty">No history yet — saves and edits for this IR will appear here.</div>';
+  const entries = await fetchAuditEntries(irNumber, 400);
+  const timeline = buildTimeline(irNumber, entries, nudges, 400);
   const modal = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'history-modal';
@@ -5410,10 +5809,11 @@ async function openHistoryModal() {
         <h3>History · ${escHtml(irNumber)}</h3>
         <button type="button" class="inward-options-close" onclick="closeHistoryModal()">&times;</button>
       </div>
-      <div class="nudge-ctx-line">Audit trail — every save &amp; field correction (newest first).</div>
-      <div class="hist-list">${body}</div>
+      <div class="nudge-ctx-line">Everything that has happened to this ticket — saves, field edits, uploads, triage changes and comments (newest first).</div>
+      <div id="history-list"></div>
     </div>`;
   document.body.appendChild(modal);
+  renderTimelineInto(document.getElementById('history-list'), timeline);
   modal.addEventListener('click', e => { if (e.target === modal) closeHistoryModal(); });
 }
 function closeHistoryModal() { document.getElementById('history-modal')?.remove(); }

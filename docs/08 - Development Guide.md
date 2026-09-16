@@ -70,35 +70,89 @@ clients or the `/exec` URL.
 2. Paste the contents of `backend.gs` — **do not deploy yet**
 3. Update `CONFIG` values if Sheet/Drive IDs change
 4. Run, from the editor's function dropdown, in this order:
-   - `migrateAddColumns()` — widens `USERS`, `SESSIONS` and the new tabs in place
+   - `migrateAddColumns()` — widens `USERS`, `SESSIONS` and the new tabs in place.
+     It **refuses to widen** a `DEPARTMENTS` tab whose header it does not recognise
+     (`deptTabShape` → `legacy-9`/`unknown`) rather than overwriting row 1 and
+     reinterpreting columns
    - `migrateAclReport()` — **read-only.** The last chance to see the old
      hand-assigned grants before they are orphaned. Paste the output somewhere
      private, never into the repo.
-   - `seedDepartments()` — creates the ten departments with **empty** section
-     grants. No grant is inferred from a department's name: a wrong guess would
-     hand out write access silently, so every one is ticked by hand (step 3)
    - `bootstrapAdmin()` — creates the admin row if missing and prints a one-time
      temporary password to the execution log; if the row exists it is left alone
      and only the flags are normalised. **Run this before handing out anything.**
-   - then tick the department → section grants in the app's **Departments** tab
-     (see step 3 — the app is the only place the matrix can be edited)
+
+   `seedDepartments()`, `seedMemberships()` and the merge are deliberately **not**
+   here — see the cutover window below for why. The grants are no longer ticked by
+   hand: `seedDepartments()` writes the owner's mapping, and reports the deltas.
 5. Copy the credentials list to a local txt. **Never the repo — it is public.**
 
-**Step 2 — cutover.** Deploy → Manage deployments → **edit the existing
-deployment** → New version. **Never "New deployment"** — the `/exec` URL must not
-change, or `CONFIG.GAS_URL` and every installed client breaks.
+**Step 2 — cutover window (~2 minutes; announce first, and confirm nobody is mid-save).**
+
+Two facts force this order, and neither is negotiable:
+
+- The grants and memberships cannot land **before** the deploy. `getOrCreateDeptTab`
+  → `ensureHeaders` is reached on **every read**, and until the new backend is the
+  one serving `/exec` the live code still reads `DEPARTMENTS` **positionally** — so
+  a 12-column tab built for six sections would be read letter-by-letter against the
+  old nine, silently granting the wrong sections to the wrong departments.
+- The merge cannot run **before** the deploy either: it rewrites rows the live app
+  is reading. It is the mirror of the column-widening rationale — a migration that
+  rewrites live rows has no safe pre-flight.
+
+1. Deploy → Manage deployments → **edit the existing deployment** → New version.
+   **Never "New deployment"** — the `/exec` URL must not change, or
+   `CONFIG.GAS_URL` and every installed client breaks.
    - Execute as: **Me**
    - Who has access: **Anyone**
-6. If the URL did change, update `CONFIG.GAS_URL` in `app.js` and redeploy the
+2. `seedDepartments()` — writes the department → section grants, plus `Triage` for
+   CR and Management. It is an **upsert** and idempotent: it reports `created` /
+   `updated` (naming the delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`, and
+   critically a **`dropped` list** — any existing grant the new mapping does not
+   reproduce. **Read the dropped list.** A rewrite is the one thing that can lose a
+   grant silently.
+3. `seedMemberships()` — adds one `USER_DEPARTMENTS` edge per person. It **only ever
+   adds** and says so; nothing is removed. Emails with no `USERS` row are printed —
+   the edge is correct and harmless, but those people cannot sign in yet.
+4. `mergeSectionsReport()` — **read-only.** Read the plan before applying it. Check
+   that every IR with old `sec-g` rows goes to `sec-f` and every `sec-h`/`sec-i`
+   goes to `sec-g`, and read the `ERA-AMBIGUOUS` block if it appears: those are
+   `sec-g` rows with no `g_*`/`h_*`/`i_*` field to date them, which are left
+   untouched on purpose. Merge any of them by hand only if they are old Flight Test
+   data.
+5. `mergeSectionsApply()` — applies it. It snapshots **inside the row lock**, refuses
+   if it finds nothing to do, and writes a dated tab
+   `APP_DATA_BACKUP_<yyyy-MM-dd>` **before** the first write, refusing if that tab
+   already exists. Copy the backup tab to a private sheet before trusting it.
+6. `mergeSectionsReport()` again — it must report **zero** rows to rewrite and zero
+   to delete. Anything else means the first pass did not land.
+7. **Push `gh-pages`** — frontend and backend go live together.
+8. If the URL did change, update `CONFIG.GAS_URL` in `app.js` and redeploy the
    frontend in the same window.
 
 The old frontend is broken by design at this point: it calls actions that no
 longer exist. So cut over both halves together — deploy the backend, then
 immediately push `gh-pages`.
 
+**Undo.** `restoreAppDataFromBackup()` finds the newest `APP_DATA_BACKUP_<date>`,
+saves the current state to `APP_DATA_PRE_RESTORE_<date>` (so the undo is itself
+undoable — one level of redo), and replaces the data rows with the backup's. It
+clears first even though the merge only deletes, because a client on a stale
+service worker may have appended real rows in the meantime. A dated tab, not a
+response: *a response is not a backup*.
+
 **Step 3 — verify.** Hard-reload, sign in as the admin, complete the forced
 password change, and open User Access — the footer must read `API v2`. If it does
-not, the deployment was not the one `/exec` serves.
+not, the deployment was not the one `/exec` serves. Then check seven tabs
+(`📋 Report` + six lettered), `sec-b` selected by default, the Overview rendering
+its facts, timeline and legacy log, and 🕓 History opening.
+
+**Then sign in as a CR account and a Production account.** CR must see the Triage
+button and have **no** section save enabled; Production must have Triage **hidden**
+and B/C/D/E/G save-enabled with F read-only. This is the check that catches the
+`sec-a` permission gap — the Overview is dropped for every non-admin if
+`getPassbook` filters on a permission map that no longer contains `sec-a`, and the
+admin testing it would never see the bug.
+
 
 **Step 4 — users.** Every account is re-provisioned, so distributing credentials
 **is** the migration. Announce the day before and again at cutover, and deliver

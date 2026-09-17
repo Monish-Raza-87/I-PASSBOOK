@@ -947,6 +947,12 @@ function redeemCodeIn(entries, email, purpose, code, consume) {
 }
 
 // Redeem an emailed code under its own lock. See redeemCodeIn for the split.
+//
+// Writes even when nothing changed (a clean sign-in with consume=false, or a
+// "no active code" miss). That is deliberate and safe rather than sloppy: the
+// read is inside the lock, so the file being rewritten is the one just read, and
+// a concurrent issue cannot be clobbered. Tracking a dirty flag to save one small
+// write would buy less than the bug it could hide.
 function verifyAuthCode(email, purpose, code, consume) {
   return withRowLockOrThrow(function () {
     var raw = readJsonLocked('codes.json');
@@ -1006,7 +1012,7 @@ function sendAuthMail(to, subject, body) {
 //
 // It used to live only in doLoginPassword. changePassword is unauthenticated and
 // takes the same credential, so an expired temp password could be posted straight
-// to it: it verified the hash, then minted a full 30-day session. The TTL was
+// to it: it verified the hash, then minted a full session. The TTL was
 // decorative — it closed the login door while the change-password door stood open
 // beside it. If a third endpoint ever accepts this credential, call these too.
 function isTempPasswordAccount(u) {
@@ -1367,6 +1373,12 @@ function loginOtpStep(email, supplied, name) {
 
   // No code supplied: this is the first step of the flow. Reuse a live code if
   // there is one; issue only when there is not.
+  //
+  // This read is the MEMOISED one, outside any lock, and that is fine: it only
+  // decides whether to ASK for a new code, and issueAuthCode re-reads under the
+  // lock before it writes. If the memo were stale and we issued needlessly, the
+  // 60s resend gap refuses it and the user is told to use the code already sent —
+  // which is correct, because the code the memo was stale about is still live.
   var live = null;
   try {
     var found = findCodeEntry(codesEntries(), email, 'login');

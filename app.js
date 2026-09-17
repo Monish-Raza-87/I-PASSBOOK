@@ -42,15 +42,21 @@ let currentUser = null;
 // ─── EMAIL + PASSWORD AUTH (admin-provisioned, no self-signup) ────────────────
 // The admin creates every account and hands over a temporary password. On first
 // sign-in the user is forced to set their own password before a session is minted.
-// Sign-in exchanges email + password for a revocable server SESSION TOKEN, which
-// the frontend holds in localStorage and attaches to every backend call.
+// Sign-in exchanges email + password + an emailed code for a revocable server
+// SESSION TOKEN, which the frontend holds in localStorage and attaches to every
+// backend call.
 //
-// localStorage, NOT sessionStorage, and no idle timeout: the owner asked for the
-// behaviour a Google Sheet has — sign in once, stay signed in for weeks, never be
-// asked again mid-task. The token slides forward on use server-side, so an active
-// person is effectively never signed out. The trade-off (a shared/handed-off
-// device keeps the session) is the owner's explicit call; the Sign Out button and
-// the server-side revoke are the answer to it. See [[auth-token-gate]].
+// localStorage, NOT sessionStorage, and no idle timeout: reopening the app resumes
+// the session rather than demanding a fresh sign-in. But the token is good for ONE
+// WORKING DAY (8h30m) and its expiry is ABSOLUTE — it is not slid forward on use,
+// so a session does not outlive the shift that started it. The daily sign-in is
+// what the emailed code protects; a session that renewed itself on every request
+// would never expire for the people who use the app most, which is the opposite of
+// what it is for.
+//
+// The trade-off (a shared/handed-off device keeps the session until it expires) is
+// the owner's explicit call; the Sign Out button and the server-side revoke are
+// the answer to it. See [[auth-token-gate]].
 
 // Persist/restore the session token. localStorage so reopening the app resumes
 // the session instead of demanding a fresh sign-in.
@@ -114,14 +120,21 @@ function confirmSessionAlive() {
 // Uses _origFetch (not the intercepted fetch) so the login call isn't subject to
 // the session gate, and so a bad password can't trigger the auto-logout path.
 //
+// TWO-STAGE. Without `code`, a correct password does NOT buy a session: the
+// backend answers {status:'ok', otpRequired:true} and emails a 6-digit code. The
+// caller then calls again with the same password AND the code. The password is
+// re-sent rather than a half-open server-side conversation being kept, so a
+// signed-in session only ever exists at the end of a fully-verified exchange.
+//
 // A successful login on a temporary password returns mustChangePassword with NO
 // token — the caller must route to the password-change screen, not into the app.
-function loginBackend(email, password) {
+function loginBackend(email, password, code) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
   const fd = new FormData();
   fd.append('action', 'login');
   fd.append('email', email);
   fd.append('password', password);
+  if (code) fd.append('code', String(code).trim());
   const doFetch = _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       // Apps Script returns JSON after a redirect; parse what came back.
@@ -138,6 +151,10 @@ function loginBackend(email, password) {
         persistSession(data.sessionToken);
         return data;
       }
+      // Step 1 done: the password was right and a code is on its way. This has to
+      // pass through BEFORE the error branch below, like mustChangePassword —
+      // swallowing it there would report "Login failed." for a correct password.
+      if (data && data.status === 'ok' && data.otpRequired) return data;
       // A temporary password is CORRECT but is not yet a session: the backend
       // answers {status:'ok', mustChangePassword:true} with NO token, and the
       // caller routes to the password-change screen. This has to pass through
@@ -827,12 +844,19 @@ function loadStoredUser() {
 }
 
 // ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
-// Three modes share one form: 'login' | 'forgot' | 'reset'. There is no sign-up
-// mode — accounts are provisioned by the admin — so the only two things a person
-// can do here are sign in, and recover a forgotten password via an emailed code.
+// Four modes share one form: 'login' | 'otp' | 'forgot' | 'reset'. There is no
+// sign-up mode — accounts are provisioned by the admin — so the things a person
+// can do here are sign in, finish signing in with an emailed code, and recover a
+// forgotten password via a different emailed code.
 let _authFormWired = false;
-let _authMode = 'login';     // 'login' | 'forgot' | 'reset'
+let _authMode = 'login';     // 'login' | 'otp' | 'forgot' | 'reset'
 let _resetEmail = '';
+// Sign-in step 2 needs the credential from step 1, because the backend verifies
+// the password again on the second call rather than trusting a half-open
+// conversation. In memory only — same rule as _pcTemp, and for the same reason:
+// a temporary credential must not outlive the screen that asked for it.
+let _otpEmail = '';
+let _otpPassword = null;
 
 // Establish a signed-in session from a backend payload. Shared by the login form
 // and the forced password change, so both land in exactly the same state.
@@ -862,23 +886,30 @@ function showAuth() {
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
   _resetEmail = '';
+  // The password from step 1 is held here for step 2 and dies with the screen —
+  // the same rule as _pcTemp: in memory, and never written to storage.
+  _otpEmail = '';
+  _otpPassword = null;
   setAuthMode('login');
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
-  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password'].forEach(id => {
+  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   wireAuthForm();
+  wirePasswordToggles();
+  maskAllPasswords();
 }
 
 // Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
-// the browser's own Enter-to-submit keeps working in all three modes.
+// the browser's own Enter-to-submit keeps working in all four modes.
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
   set('auth-password',      mode === 'login');
   set('auth-signin-btn',    mode === 'login');
   set('auth-forgot-link',   mode === 'login');
+  set('auth-login-code-wrap',      mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
   set('auth-back-link',     mode !== 'login');
@@ -895,10 +926,71 @@ function setAuthMode(mode) {
       ? 'Enter your email and we’ll send you a reset code.'
       : mode === 'reset'
         ? 'Enter the code from your email and choose a new password.'
-        : 'Sign in with the credentials your admin gave you.';
+        : mode === 'otp'
+          ? 'One more step. Enter the code we emailed you.'
+          : 'Sign in with the credentials your admin gave you.';
   }
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
+  if (mode === 'otp') {
+    const first = document.getElementById('auth-login-code');
+    // Focused on the next tick, not now: the wrap is only just display:'' and a
+    // focus() on a node the browser has not laid out yet is silently dropped.
+    if (first) setTimeout(() => first.focus(), 60);
+  }
+}
+
+// ─── SHOW / HIDE A PASSWORD ──────────────────────────────────────────────────
+// Every password box in the app gets a reveal toggle. Four fields, one rule: the
+// button is a SIBLING of the input inside .pw-wrap, so the input is found by
+// walking to the wrapper rather than by keeping a second id in sync.
+//
+// These are the only glyphs in the app not seeded by initIcons(). initIcons runs
+// from showApp(), which is the SIGNED-IN screen — the auth card is up long before
+// it, so a toggle seeded there would be blank exactly when it is first needed.
+// maskAllPasswords() seeds them instead, from each screen's own show path.
+let _pwTogglesWired = false;
+
+function wirePasswordToggles() {
+  if (_pwTogglesWired) return;
+  _pwTogglesWired = true;
+  document.querySelectorAll('.pw-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wrap = btn.closest('.pw-wrap');
+      const input = wrap && wrap.querySelector('input');
+      if (!input) return;
+      setPasswordRevealed(btn, input.type === 'password');
+      // The caret would otherwise jump to the end, because changing `type`
+      // re-creates the input's selection — which reads as the form losing your
+      // place in the middle of typing.
+      input.focus();
+      const n = input.value.length;
+      try { input.setSelectionRange(n, n); } catch { /* no selection on type=email */ }
+    });
+  });
+}
+
+// Show ↔ hide ONE field. The two glyph names are written as literals rather than
+// picked by a ternary, because smoke-ui.mjs cross-checks every ICON_PATHS key
+// against its references and a computed name would read as a dead entry.
+function setPasswordRevealed(btn, reveal) {
+  const wrap = btn.closest('.pw-wrap');
+  const input = wrap && wrap.querySelector('input');
+  if (input) input.type = reveal ? 'text' : 'password';
+  btn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+  btn.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+  const icon = btn.querySelector('.pw-toggle-icon');
+  if (!icon) return;
+  if (reveal) icon.innerHTML = iconSvg('eye-off');
+  else        icon.innerHTML = iconSvg('eye');
+}
+
+// Put every toggle back to masked, and seed their glyphs. Called when a password
+// screen is SHOWN, not when it is left: a field left revealed must not come back
+// revealed the next time that screen appears, which on a shared machine is the
+// whole risk the mask is there for.
+function maskAllPasswords() {
+  document.querySelectorAll('.pw-toggle').forEach(btn => setPasswordRevealed(btn, false));
 }
 
 // ─── FORCED FIRST-LOGIN PASSWORD CHANGE ──────────────────────────────────────
@@ -935,6 +1027,11 @@ function showPasswordChange(email, forced, tempPassword) {
   const err = document.getElementById('pc-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
   wirePasswordChange();
+  // Same rule as the auth card: this screen is shown fresh, so any field that was
+  // left revealed last time comes back masked, and the toggles get their glyphs
+  // (initIcons has not run for a first-login screen — there is no app yet).
+  wirePasswordToggles();
+  maskAllPasswords();
   const first = document.getElementById('pc-new');
   if (first) setTimeout(() => first.focus(), 60);
 }
@@ -982,7 +1079,9 @@ function wireAuthForm() {
   const passIn     = document.getElementById('auth-password');
   const codeIn     = document.getElementById('auth-code');
   const newIn      = document.getElementById('auth-new-password');
+  const otpIn      = document.getElementById('auth-login-code');
   const signInBtn  = document.getElementById('auth-signin-btn');
+  const otpBtn     = document.getElementById('auth-login-code-btn');
   const forgotBtn  = document.getElementById('auth-forgot-btn');
   const resetBtn   = document.getElementById('auth-reset-btn');
   const resendLink = document.getElementById('auth-resend-link');
@@ -1003,8 +1102,54 @@ function wireAuthForm() {
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
+      // Stage 1 of two: the password is right and a code is on its way. Hold the
+      // password for stage 2 and move the form on rather than reporting success —
+      // there is no session yet, and pretending otherwise would sign nobody in.
+      if (d && d.status === 'ok' && d.otpRequired) { gotoOtpStep(email, password, d); return; }
       if (d && d.status === 'ok' && d.sessionToken) finishAuth(email, d);
       else showError((d && d.message) || 'Sign in failed.');
+    });
+  };
+
+  // Move to the code step, holding the credential from stage 1 in memory.
+  const gotoOtpStep = (email, password, d) => {
+    _otpEmail = email;
+    _otpPassword = password;
+    if (otpIn) otpIn.value = '';
+    setAuthMode('otp');
+    const note = document.getElementById('auth-login-code-note');
+    if (note) {
+      // codeSent:false means the backend REUSED the code it already emailed today,
+      // so claiming to have just sent one would send the user looking for a mail
+      // that is not there. Both branches name the address, because the same code
+      // may be in an inbox they have not looked at since this morning.
+      note.textContent = (d && d.codeSent === false)
+        ? 'Enter the 6-digit code we emailed to ' + email + ' earlier today. It still works — the same code covers every sign-in today.'
+        : 'We emailed a 6-digit code to ' + email + '. It works all day, so you can reuse it on another device.';
+    }
+    showToast((d && d.codeSent === false) ? 'Use the code from earlier today' : 'Check your inbox for the sign-in code');
+  };
+
+  // Stage 2: the code from the email, with the password again.
+  const submitOtp = () => {
+    const code = ((otpIn && otpIn.value) || '').trim();
+    if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
+    // The in-memory password is the only copy — a page reload between the two
+    // steps leaves nothing to send, so say so plainly and restart the flow
+    // instead of posting an empty password and reporting a bogus wrong password.
+    if (!_otpPassword) { showError('Your sign-in timed out — please sign in again.'); setAuthMode('login'); return; }
+    otpBtn.disabled = true; otpBtn.textContent = 'Verifying…';
+    showError('');
+    loginBackend(_otpEmail, _otpPassword, code).then(d => {
+      otpBtn.disabled = false; otpBtn.textContent = 'Verify code';
+      if (d && d.status === 'ok' && d.sessionToken) {
+        _otpPassword = null;
+        finishAuth(_otpEmail, d);
+        return;
+      }
+      // The code is consumed by nothing, so a mistyped one can simply be retyped.
+      // Do not clear the field: the user is comparing it with their email.
+      showError((d && d.message) || 'Could not verify the code.');
     });
   };
 
@@ -1062,6 +1207,7 @@ function wireAuthForm() {
   };
 
   if (signInBtn)  signInBtn.addEventListener('click', submitLogin);
+  if (otpBtn)     otpBtn.addEventListener('click', submitOtp);
   if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
   if (resetBtn)   resetBtn.addEventListener('click', submitReset);
   if (resendLink) resendLink.addEventListener('click', resend);
@@ -1075,6 +1221,7 @@ function wireAuthForm() {
     ev.preventDefault();
     if (_authMode === 'forgot') submitForgot();
     else if (_authMode === 'reset') submitReset();
+    else if (_authMode === 'otp') submitOtp();
     else submitLogin();
   });
 }
@@ -5801,6 +5948,11 @@ const ICON_PATHS = {
   legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
   users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
   moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
+  // Password reveal. Two glyphs, not one: `eye` shows, `eye-off` hides, and the
+  // slash is what tells a user the password is CURRENTLY visible — a single eye
+  // that never changes leaves them unable to tell which state they are in.
+  eye:            '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  'eye-off':      '<path d="M10.6 6.1A8.5 8.5 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-3 3.7"/><path d="M6.4 7.6A16.6 16.6 0 0 0 2.5 12S6 18 12 18a9 9 0 0 0 3.4-.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3.5 3.5l17 17"/>',
   sun:            '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2"/><path d="M12 19.5v2"/><path d="M2.5 12h2"/><path d="M19.5 12h2"/><path d="M5.2 5.2l1.4 1.4"/><path d="M17.4 17.4l1.4 1.4"/><path d="M18.8 5.2l-1.4 1.4"/><path d="M6.6 17.4l-1.4 1.4"/>',
   clock:          '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   report:         '<path d="M8 3.5h8a1.5 1.5 0 0 1 1.5 1.5v14A1.5 1.5 0 0 1 16 20.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5z"/><path d="M9.5 3.5V2.5h5v1"/><path d="M9.5 9h5"/><path d="M9.5 13h5"/><path d="M9.5 17h3"/>',

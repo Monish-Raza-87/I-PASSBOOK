@@ -240,6 +240,39 @@ code, pre, kbd { font-family: var(--font-mono); }
 }
 .link-btn:hover { text-decoration: underline; }
 
+/* ── Show/hide a password ────────────────────────────────────
+   The toggle is a SIBLING of the input inside .pw-wrap, never a child of a
+   <label> — a button inside a label inherits the label's click and would both
+   toggle the field and focus it.
+
+   tabindex="-1" deliberately keeps it out of the tab order. It is a convenience
+   for the pointer; a keyboard user can already read the field back, and putting
+   it in the tab path would insert a dead stop between the password box and the
+   Sign in button on a three-control form. */
+.pw-wrap { position: relative; display: block; }
+.pw-wrap .form-input { padding-right: 2.2rem; }
+.pw-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.2rem;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-4);
+  background: none;
+  color: var(--ink-gray-5);
+  cursor: pointer;
+  transition: color 0.12s var(--ease);
+}
+.pw-toggle:hover { color: var(--ink-gray-8); }
+.pw-toggle:focus-visible { outline: none; box-shadow: var(--focus-default); }
+.pw-toggle .icon { width: 1rem; height: 1rem; }
+
 /* Sibling of #app-container: while this is up the whole shell is hidden. */
 #password-change {
   display: none;

@@ -86,14 +86,51 @@ const STUB = `<script>
 <\/script>
 `;
 
+// ── The probe channel ─────────────────────────────────────────────────────────
+// Filled by the browser, read by the phase below.
+const PROBE_PATH = '/__probe';
+let probeFromBrowser = null;
+let probePosts = 0;
+let markProbeDone = null;
+const probeArrived = new Promise(res => { markProbeDone = res; });
+const probeDone = () => markProbeDone(probeFromBrowser);
+
 const server = http.createServer((req, res) => {
   const url = decodeURIComponent(String(req.url).split('?')[0].split('#')[0]);
   const send = (body, type) => { res.writeHead(200, { 'Content-Type': type }); res.end(body); };
+
+  // The auth probe reports over HTTP rather than into the DOM. Scraping a rendered
+  // <pre> meant the phase depended on Chrome deciding to EXIT: --dump-dom only prints
+  // when the virtual-time budget runs out, and a page that keeps a timer or a fetch
+  // alive can stall that indefinitely — which is what it did, dumping nothing at all.
+  // A POST cannot stall.
+  if (url === PROBE_PATH && req.method === 'POST') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      let parsed = null;
+      try { parsed = JSON.parse(body); } catch { parsed = null; }
+      if (parsed) {
+        probePosts++;
+        probeFromBrowser = parsed;      // always keep the latest, for diagnosis
+        if (parsed.done) probeDone();   // ...but only a finished run ends the wait
+      }
+      res.writeHead(204); res.end();
+    });
+    return;
+  }
 
   if (url === FIXTURE_PATH) {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     // Inject ahead of the app script so the stub is in place before it evaluates.
     return send(html.replace('<script src="app.js"></script>', STUB + '<script src="app.js"></script>'), MIME['.html']);
+  }
+
+  if (url === AUTH_PATH) {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    return send(html
+      .replace('<script src="app.js"></script>', AUTH_STUB + '<script src="app.js"></script>')
+      .replace('</body>', AUTH_DRIVER + '</body>'), MIME['.html']);
   }
 
   const file = path.join(ROOT, url === '/' ? 'index.html' : url);
@@ -105,19 +142,169 @@ const server = http.createServer((req, res) => {
 await new Promise(r => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 
+// ── The auth fixture, for the third phase ─────────────────────────────────────
+// The only way to prove the two-step sign-in and the password reveal is to run
+// them in a real engine: the vm suites stub `document.querySelectorAll` to return
+// [], so the reveal buttons there are inert, and smoke-boot's main phase boots
+// through the DEV BYPASS — which skips the form entirely.
+//
+// So this fixture answers the GAS endpoints with a scripted backend and drives the
+// form with real clicks, reporting each step back over HTTP as it happens. Chrome is
+// only ever asked to LOAD a URL here, so the probe has to be self-driving.
+const AUTH_PATH = '/__auth-fixture.html';
+
+// Injected BEFORE app.js: app.js captures window.fetch at parse time as _origFetch
+// and loginBackend posts through _origFetch, so this is the only place a stub can
+// stand. Non-login GAS calls get a benign error object rather than a rejection —
+// finishAuth() fires refreshMyAccess() immediately after a successful sign-in, and
+// an unhandled rejection there would show up as a console error this suite would
+// then blame on the app.
+const AUTH_STUB = `<script>
+  var _realFetch = window.fetch.bind(window);
+  window.fetch = function (url, init) {
+    var u = String(url);
+    // The probe reports back over the same origin. Everything else that is not a GAS
+    // endpoint stays blocked, so a real network can never make this phase pass.
+    if (u.indexOf('${PROBE_PATH}') >= 0) return _realFetch(url, init);
+    if (u.indexOf('script.google.com') < 0) return Promise.reject(new Error('blocked in test'));
+    var action = '';
+    try { action = (init && init.body && init.body.get) ? String(init.body.get('action') || '') : ''; } catch (e) {}
+    if (action !== 'login') {
+      return Promise.resolve(new Response(JSON.stringify({ status: 'error', message: 'blocked in test' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    var code = '';
+    try { code = String(init.body.get('code') || ''); } catch (e) {}
+    var payload;
+    if (!code) {
+      payload = { status: 'ok', otpRequired: true, email: 'asha@indrones.com', name: 'Asha', codeSent: true };
+    } else if (code === '424242') {
+      payload = { status: 'ok', sessionToken: 'tok-from-probe', email: 'asha@indrones.com',
+                  access: { role: 'user', permissions: { 'sec-b': 'view' }, departments: [], triage: false } };
+    } else {
+      payload = { status: 'error', message: 'Wrong code. 4 attempt(s) left.' };
+    }
+    return Promise.resolve(new Response(JSON.stringify(payload),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  };
+<\/script>
+`;
+
+// Injected AFTER app.js, so the app is fully defined before the probe starts.
+// Every step is recorded even when a later one times out, so a failure names the
+// step that broke rather than reporting one opaque timeout.
+const AUTH_DRIVER = `<script>
+// Every step is reported as it happens, so a run that dies halfway still says where.
+// The driver must be self-driving: Chrome is only ever asked to load a URL here.
+(function () {
+  var out = { steps: [] };
+  function post() {
+    try { _realFetch('${PROBE_PATH}', { method: 'POST', body: JSON.stringify(out) }); } catch (e) {}
+  }
+  function log(k, v) { out[k] = v; out.steps.push(k); post(); }
+  function el(id) { return document.getElementById(id); }
+  function shown(id) { var e = el(id); return !!e && e.style.display !== 'none'; }
+  function waitFor(fn, ms) {
+    return new Promise(function (res, rej) {
+      var t0 = Date.now();
+      (function tick() {
+        var v = false;
+        try { v = fn(); } catch (e) { v = false; }
+        if (v) return res(true);
+        if (Date.now() - t0 > ms) return rej(new Error('timeout'));
+        setTimeout(tick, 25);
+      })();
+    });
+  }
+  post();   // a synchronous first report: if nothing else arrives, the script ran
+  (async function () {
+  try {
+    // Do NOT wait on shown('auth-container'): that div is visible in the STATIC
+    // markup, before app.js has booted, so it is true the instant the HTML parses.
+    // Racing it means clicking a Sign in button with no listener — a native form
+    // submit, which reloads the page and re-runs this driver, forever. The splash
+    // going away is the app taking over: showAuth() runs in that same callback, and
+    // it is what wires the form and seeds the reveal buttons.
+    await waitFor(function () { return !shown('splash-screen') && shown('auth-container'); }, 30000);
+    log('authShown', true);
+    log('appBooted', true);
+
+    var email = el('auth-email'), pass = el('auth-password');
+    email.value = 'asha@indrones.com';
+    pass.value = 'hunter2hunter2';
+
+    // ── the reveal toggle ──
+    var eye = el('eye-auth-password');
+    log('eyeHasGlyph', /<svg/.test(eye.querySelector('.pw-toggle-icon').innerHTML));
+    log('typeBefore', pass.type);
+    eye.click();
+    log('typeAfter', pass.type);
+    log('pressedAfter', eye.getAttribute('aria-pressed'));
+    log('glyphFlipped', /<svg/.test(eye.querySelector('.pw-toggle-icon').innerHTML) &&
+                        eye.querySelector('.pw-toggle-icon').innerHTML !== '');
+    log('slashIsInTheGlyph', eye.querySelector('.pw-toggle-icon').innerHTML.indexOf('17 17') > -1);
+    log('labelAfter', eye.getAttribute('aria-label'));
+    eye.click();
+    log('typeBack', pass.type);
+    log('pressedBack', eye.getAttribute('aria-pressed'));
+
+    // ── step 1: password only ──
+    el('auth-signin-btn').click();
+    await waitFor(function () { return shown("auth-login-code-wrap"); }, 15000);
+    log('codeStepShown', true);
+    log('codeNote', el('auth-login-code-note').textContent);
+    log('passwordHiddenAtStep2', !shown('auth-password'));
+    log('signInBtnHiddenAtStep2', !shown('auth-signin-btn'));
+    log('stillNoSession', localStorage.getItem('ipb_session') === null);
+
+    // ── step 2a: a wrong code ──
+    var cin = el('auth-login-code');
+    cin.value = '000000';
+    el('auth-login-code-btn').click();
+    await waitFor(function () {
+      var e = el('auth-error');
+      return !!e && e.style.display !== 'none' && /attempt/.test(e.textContent);
+    }, 15000);
+    log('wrongCodeError', el('auth-error').textContent);
+    log('stillOnCodeStep', shown('auth-login-code-wrap'));
+    log('stillNoSessionAfterWrongCode', localStorage.getItem('ipb_session') === null);
+
+    // ── step 2b: the right code ──
+    cin.value = '424242';
+    el('auth-login-code-btn').click();
+    await waitFor(function () { return shown("app-container"); }, 15000);
+    log('signedIn', true);
+    log('token', localStorage.getItem('ipb_session'));
+    log('authGone', !shown('auth-container'));
+  } catch (e) {
+    log('failedAt', out.steps[out.steps.length - 1] || 'start');
+    log('error', String((e && e.message) || e));
+  }
+  out.done = true;
+  post();
+  })();
+})();
+<\/script>
+`;
+
 // ── Drive Chrome ──────────────────────────────────────────────────────────────
+
 // `--virtual-time-budget` lets the splash timer and the boot sequence run to
-// completion before the DOM is dumped, without a real 10-second wait.
-function runChrome(headlessFlag, url) {
+// completion before the DOM is dumped, without a real 10-second wait. It is a
+// BUDGET OF VIRTUAL TIME, and every timer fired spends some of it — including the
+// probe's own polling below, which is why the auth phase asks for a much larger
+// one. Too small and Chrome dumps the DOM mid-wait with no probe in it at all,
+// which reads as "the driver never ran" rather than "the budget ran out".
+function runChrome(headlessFlag, url, budgetMs) {
   return new Promise(resolve => {
     const args = [
       headlessFlag, '--disable-gpu', '--no-sandbox', '--no-first-run', '--disable-extensions',
       '--mute-audio', '--enable-logging=stderr', '--log-level=0',
-      '--virtual-time-budget=15000', '--dump-dom', url,
+      '--virtual-time-budget=' + (budgetMs || 15000), '--dump-dom', url,
     ];
     const proc = spawn(chromePath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
-    const timer = setTimeout(() => proc.kill(), 60000);
+    const timer = setTimeout(() => proc.kill(), 120000);
     proc.stdout.on('data', d => { out += d; });
     proc.stderr.on('data', d => { err += d; });
     proc.on('close', () => { clearTimeout(timer); resolve({ out, err }); });
@@ -332,6 +519,79 @@ head('the new sign-in path is present');
 
 head('no javascript errors on the signed-out path');
 ok('clean console', errorsIn(anon.err).length === 0, errorsIn(anon.err).slice(0, 5));
+
+// ── Phase 3: sign in for real, and reveal a password ──────────────────────────
+head('the password reveal and the two-step sign-in, driven in a real browser');
+
+// Chrome is started WITHOUT --dump-dom and WITHOUT a virtual-time budget: real
+// timers and a real network stack, because the probe reports over HTTP and the only
+// thing this waits on is that report. The process is killed once it arrives.
+async function runAuthProbe() {
+  const proc = spawn(chromePath, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
+    '--disable-extensions', '--mute-audio',
+    '--enable-logging=stderr', '--log-level=0',
+    `${base}${AUTH_PATH}`,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let log = '';
+  proc.stderr.on('data', d => { log += d; });
+  const timedOut = Symbol('timeout');
+  const settled = await Promise.race([
+    probeArrived,
+    new Promise(r => setTimeout(() => r(timedOut), 60000)),
+  ]);
+  try { proc.kill(); } catch { /* already gone */ }
+  return { probe: settled === timedOut ? probeFromBrowser : settled, timedOut: settled === timedOut, log };
+}
+
+const ap = await runAuthProbe();
+const probe = ap.probe;
+if (process.env.PROBE_DEBUG) {
+  console.log('RAW PROBE:', JSON.stringify(probe), '\nPOSTS:', probePosts);
+  console.log('CONSOLE:', (ap.log || '').split('\n').filter(l => /:CONSOLE\(/.test(l)).slice(0, 20).join('\n'));
+}
+ok('the probe ran and reported back', !!probe,
+  ap.timedOut ? 'no report within 60s' : (ap.log || '').slice(-400) || 'no report');
+ok('it reached the end without failing', probe && !probe.error,
+  probe ? { failedAt: probe.failedAt, error: probe.error, steps: probe.steps } : null);
+
+if (probe && !probe.error) {
+  head('the reveal toggle flips the field, in a real engine');
+  ok('the eye button was seeded with a glyph, not left blank', probe.eyeHasGlyph === true);
+  ok('the field starts masked', probe.typeBefore === 'password', probe.typeBefore);
+  ok('clicking it reveals the password', probe.typeAfter === 'text', probe.typeAfter);
+  ok('the button reports itself pressed', probe.pressedAfter === 'true', probe.pressedAfter);
+  ok('the glyph stays a real icon after the flip', probe.glyphFlipped === true);
+  ok('and it is the SLASHED eye, so the visible state is distinguishable',
+    probe.slashIsInTheGlyph === true, probe.slashIsInTheGlyph);
+  ok('the label switches to the action that is now available',
+    probe.labelAfter === 'Hide password', probe.labelAfter);
+  ok('clicking again masks it', probe.typeBack === 'password', probe.typeBack);
+  ok('and un-presses the button', probe.pressedBack === 'false', probe.pressedBack);
+
+  head('step 1 buys no session, only a code');
+  ok('the code step appeared', probe.codeStepShown === true, probe.steps);
+  ok('the password field is hidden at step 2', probe.passwordHiddenAtStep2 === true);
+  ok('so is the Sign in button', probe.signInBtnHiddenAtStep2 === true);
+  ok('the note names the address the code went to',
+    /asha@indrones\.com/.test(probe.codeNote || ''), probe.codeNote);
+  ok('and it says the code is reusable all day',
+    /all day|every sign-in today/.test(probe.codeNote || ''), probe.codeNote);
+  // The whole point of the two-step split: a correct password alone must not
+  // produce a session token. Asserting on the real localStorage is the only check
+  // here that a stubbed DOM could not make.
+  ok('NO token was stored after the password step', probe.stillNoSession === true,
+    probe.token);
+
+  head('step 2 refuses a wrong code and accepts the right one');
+  ok('the backend error is surfaced verbatim',
+    /attempt\(s\) left/.test(probe.wrongCodeError || ''), probe.wrongCodeError);
+  ok('a wrong code leaves you on the code step', probe.stillOnCodeStep === true);
+  ok('and stores no token', probe.stillNoSessionAfterWrongCode === true);
+  ok('the right code signs in', probe.signedIn === true, probe.steps);
+  ok('the token is now in localStorage', probe.token === 'tok-from-probe', probe.token);
+  ok('and the auth card is gone', probe.authGone === true);
+}
 
 server.close();
 

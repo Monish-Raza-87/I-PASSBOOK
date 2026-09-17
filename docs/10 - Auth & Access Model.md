@@ -14,13 +14,17 @@ copy the generated credentials block into a txt and hand it over.
 password → in.
 
 From then on: view + comment everywhere, edit on their departments' sections, and
-no re-login for 30 days of activity.
+one sign-in per working day — email + password, then the 6-digit code emailed to
+that address — because the session is 8h30m and **absolute**, so it does not carry
+someone from one shift into the next.
 
-There is **no self-signup**. No OTP, no captcha, no allowlist, no "request
+There is **no self-signup**. No captcha, no allowlist, no "request
 access" screen, no admin approval queue. Every account is created by the admin.
-The old flow asked a new hire to prove who they were three times, then parked them
-on a "you don't have access" screen until a human noticed — that parked-human step
-was the actual onboarding bug.
+The **emailed code is not a way in for a stranger** — it is a second step on an
+account whose password has *already* been verified, and it is issued only from
+behind that verification. The old flow asked a new hire to prove who they were
+three times, then parked them on a "you don't have access" screen until a human
+noticed — that parked-human step was the actual onboarding bug.
 
 ## Two levels, not three
 
@@ -113,7 +117,8 @@ revokes every session the temp password may have minted, and then mints a real o
 **Both doors enforce the same expiry.** `changePassword` accepts the same temporary
 credential `login` does, so a TTL checked only in `doLoginPassword` closed the front
 door and left the side door open: an expired temp password could be POSTed straight
-here, verified against the hash, and minted a full 30-day session. `tempPasswordExpired()`
+here, verified against the hash, and minted a full session (30 days at the time;
+8h30m today). `tempPasswordExpired()`
 is now called on both paths, before either mints anything.
 
 ## The session
@@ -121,10 +126,10 @@ is now called on both paths, before either mints anything.
 | | |
 |---|---|
 | Where | `localStorage`, under `ipb_session` — a separate key from the profile (`ipb_user`) |
-| Server side | as a **key of `sessions.json`** in `_store/` — keyed by the token itself, so a lookup is one key read and a revoke one key assignment |
-| How long | **30 days**, slid forward on each authenticated request |
-| Idle timeout | **none** — deleted |
-| Slide throttle | at most one expiry write per session per 6h |
+| Server side | as a **key of `sessions.json`** in `_store/` — keyed by the token itself, so a lookup is one key read and a revoke one key assignment. The record is `{email, createdAt, expiresAt, revokedAt}` — deliberately **no `lastSeenAt`**, because with an absolute expiry nothing would ever read or update it |
+| How long | **8h30m, absolute** — `CONFIG.SESSION_HOURS`, one working day |
+| Slide | **none.** `lookupSession` never rewrites `expiresAt`; the expiry is fixed at mint time, so a session ends one working day after sign-in however busy that day was. Removing the slide also removed the throttled write this path used to do — a lookup is now a **pure read** |
+| Idle timeout | **none** — deleted, and now bounded by the absolute expiry above, so an idle tab cannot outlive the shift |
 
 `lookupSession` deliberately distinguishes **"this token is not valid"** from **"the
 session store cannot be read"**: the first returns null (the frontend signs the user
@@ -135,12 +140,19 @@ frontend's probe trusts that answer.
 
 The owner's ask was explicit: *"No automatically sign-out. Keep it as simple as
 google-sheet."* Google's web default is 14 days (configurable 7/14/30 or never);
-native mobile apps never expire. 30 days, slid on use, was chosen to match.
+native mobile apps never expire. That is where the **30-day sliding session** came
+from — and it has since been **reversed**. The session is 8h30m and absolute,
+because a session that slides forward on every request never expires for exactly the
+people who use the app most: the daily sign-in that the emailed code protects never
+happened for them, and the code was decoration on the busiest accounts. One working
+day is also the window the sign-in code lives in, so the code and the session it
+mints now end together.
 
-The 15-minute idle timeout and the `sessionStorage` home were both **deliberate
-removals**, made after that decision. Do not reintroduce them as a hardening
-measure without re-reading this file: they were the reason people re-authenticated
-constantly, which was the complaint.
+The 15-minute idle timeout and the `sessionStorage` home are still **deliberate
+removals**, and they stay removed. Do not reintroduce them as a hardening measure
+without re-reading this file: they were the reason people re-authenticated
+constantly, which was the complaint. The absolute expiry is a different lever — it
+bounds how long a session may live, not how long it may sit idle.
 
 ### Why the repeated sign-in prompts actually happened
 
@@ -163,14 +175,117 @@ Reconnect button called `signOut()`. The fix is structural, in four parts:
 state was itself a cause of spurious re-login: a stale profile with no token took
 the `showAuth()` branch at boot.
 
+## The emailed sign-in code
+
+Sign-in is **two steps**: the password, then a 6-digit code mailed to the same
+address. The password is verified first, and everything about the code's design
+follows from that one fact — including why its limits are looser than the reset
+code's.
+
+`doLoginPassword` verifies the password and then hands to
+`loginOtpStep(email, params.code, name)`:
+
+| Call | What comes back |
+|---|---|
+| no `code`, no live code | one is issued via `issueAuthCode(email, 'login', LOGIN_OTP_TTL_MIN)` and emailed — `{status:'ok', otpRequired:true, codeSent:true, …}`, with **no token** |
+| no `code`, but a live code exists | nothing is issued and no mail is sent — `{codeSent:false, message:'Enter the sign-in code already emailed to you today.'}` |
+| `code` supplied | `verifyAuthCode(email, 'login', code, false)`; on success it returns null and the session is minted |
+
+**The code is reused, not re-issued.** Issuing a second one would retire the live
+code by design (`issueAuthCode` marks earlier live codes of the same purpose used),
+so the mail already sitting in someone's inbox would stop working — "one code per
+day" would silently become "the newest mail wins". A phone at 9am and a desktop at
+2pm take the same code from the same single mail.
+
+**The redeem does not consume it.** `consume = false` leaves the entry live. That is
+the whole feature, and its cost is named at the end of this section.
+
+**Both existing gates run first.** The OTP step sits *after* the disabled-account
+check and *after* the temp-password branch, so neither is bypassed by the new step —
+a disabled account is still refused, and a first-login user is still answered
+`mustChangePassword` with no token and is never asked for a code.
+
+### What bounds the reuse
+
+- **The attempt counter is shared across the whole day**, because the code entry is:
+  5 wrong guesses (`CODE_MAX_ATTEMPTS`) burn it and force a fresh one. It is
+  deliberately counted per code, not per IP — GAS web apps expose no reliable client
+  address, and the entry is the only thing that can be counted honestly.
+- **A code still expires.** `LOGIN_OTP_TTL_MIN` is 510 minutes, and an expired entry
+  is marked used rather than left usable.
+- **The password is re-sent with every attempt.** The frontend holds it in memory
+  only (`_otpPassword`, never persisted), so a reload between the two steps restarts
+  the flow instead of leaving a half-open conversation — a code on its own, without
+  the password, buys nothing.
+
+### Reset code and sign-in code: one machinery, opposite endings
+
+| | Reset code | Sign-in code |
+|---|---|---|
+| Issued by | `forgotPassword`, for any address, unauthenticated | `doLoginPassword`, **only after a correct password** |
+| Lives | `CODE_TTL_MIN` — **15 minutes** | `LOGIN_OTP_TTL_MIN` — **8h30m**, the same window as the session |
+| On success | **consumed** — one reset, one code (`consume=true`) | **reused** — `consume=false` |
+| Retry | 5 wrong guesses burn it | 5 wrong guesses burn it, and the count runs all day |
+| Global ceiling | `CODE_MAX_PER_HOUR_GLOBAL` — **12/hour** | `CODE_MAX_PER_HOUR_GLOBAL_LOGIN` — **120/hour** |
+| Redeem path | `redeemCodeIn(…)` inside `resetPassword`'s wider lock | `verifyAuthCode(…)`, which takes its own lock |
+
+Both are **issued** by the one `issueAuthCode(email, purpose, ttlMin)` — per-email
+budget, 60s resend gap, global ceiling, retire the earlier live code — and
+**redeemed** by the one lock-free `redeemCodeIn(entries, email, purpose, code,
+consume)`, with `verifyAuthCode` as the locking wrapper for callers that hold no
+lock. The split is why `resetPassword` calls `redeemCodeIn` directly: it redeems
+inside a lock that also covers `users.json` and `sessions.json`, because a reset is
+one event and must not half-happen, and a nested lock deadlocks rather than queues.
+Two copies of a security throttle is how one of them quietly stops working.
+
+The **per-email budget counts codes of any purpose**, so asking for a password reset
+cannot buy extra sign-in codes in the same hour. The **global ceilings are per
+purpose** (`globalCodeCap`), and the 10x gap is deliberate: `reset` is reachable by
+any unauthenticated caller for any address, while `login` cannot be walked that way
+and has to absorb the whole team between 9 and 10am. At a shared 12/hour, the app
+would refuse a code to everyone after the twelfth and look broken at exactly the
+moment everyone is trying to start work.
+
+### The one honest error
+
+When there is no live code to reuse **and** one cannot be issued — the per-email
+hourly budget, the 60s resend gap (which counts codes of *any* purpose, so a reset
+requested a moment ago is enough), or the global hourly ceiling — the sign-in path
+answers `{status:'error', message:'Could not send a sign-in code just now — wait a
+minute and try again.'}`.
+
+It has to be an error rather than a prompt: there is no code, so telling the user to
+enter "the code we emailed you" would be a plain lie with no way forward from that
+screen. The message deliberately does not say which limit was hit — that is
+admin-facing detail, not something a person signing in can act on.
+
+### The gap: a leaked code is useful all day, and nothing records its use
+
+The reuse is the feature and it has a cost worth stating plainly. A sign-in code
+read over someone's shoulder, or out of an inbox left open, stays usable for
+**8h30m** — the same window as the session it mints — and the same code will sign in
+on more than one device. A 15-minute reset code, consumed by its one use, has
+neither property.
+
+What bounds it today is the shared attempt counter and the password that must be
+presented alongside every attempt. **The intended mitigation is an audit line for
+every OTP sign-in, and it is NOT implemented.** The audit trail covers section
+saves, workflow changes and comments — not sign-ins — so there is currently no way
+to see that the same code was used at 9am and again at 4pm from two different
+places. Do not claim this exists. It is recorded as a known gap so the trade-off is
+a decision rather than an oversight.
+
 ## Password recovery
 
 `forgotPassword` → `resetPassword`. The response is byte-identical whether or not
-the account exists, so it cannot be used to enumerate staff. It is throttled to 3
-codes/hour/email with a resend gap, retires earlier live codes, and caps guessing
-at 5 attempts inside the code's 15-minute window. `resetPassword` **returns no
-token** — the user signs in with the new password afterwards, which is what proves
-it was typed correctly.
+the account exists, so it cannot be used to enumerate staff. It carries no throttle
+of its own: it calls the same `issueAuthCode(email, 'reset', CODE_TTL_MIN)` the
+sign-in path uses (see above), so the per-email budget, the resend gap, the global
+ceiling and the retire-the-older-code rule cannot drift between the two mails — and
+a throttled issue is answered with the same generic message, so the throttle is not
+itself an oracle. Guessing is capped at 5 attempts inside the code's 15-minute
+window. `resetPassword` **returns no token** — the user signs in with the new
+password afterwards, which is what proves it was typed correctly.
 
 Mail goes through `MailApp` only. **Never `UrlFetchApp`** — that scope broke
 Google Sign-In once, and the `script.send_mail` scope is already granted. One
@@ -321,6 +436,8 @@ misgrant anything.
   `getPassbook`/`saveSection`/`sendNudgeEmail` and their call sites are untouched.
   `lookupSession` **throws** when the session store cannot be read, rather than
   answering `null`, and `sessionCheck` fails open on that — see "The session" above.
+  It is also a **pure read** now: with an absolute expiry there is no slide to write
+  back, so a lookup never touches the store.
 - **Nothing dispatches outside `try`** in either router. Pre-auth dispatch used to
   sit outside it, where an exception escaped as an HTML error page — which the
   frontend's interceptor read as "your session died".

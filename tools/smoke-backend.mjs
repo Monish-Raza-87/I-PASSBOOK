@@ -419,8 +419,8 @@ r.ok('it tells the client the flag is cleared',
 r.head('a temporary password stops working on a clock — on BOTH doors that take it');
 // The TTL originally lived only in doLoginPassword. changePassword is
 // unauthenticated and accepts the same credential, so an expired temp password
-// could be POSTed straight to it: it verified the hash and minted a full 30-day
-// session. The expiry closed the front door and left the side door open.
+// could be POSTed straight to it: it verified the hash and minted a full session.
+// The expiry closed the front door and left the side door open.
 const ttl = fnBody('tempPasswordExpired');
 r.ok('the expiry is one named helper', ttl.length > 100, ttl.length);
 r.ok('it uses TEMP_PW_TTL_DAYS', /TEMP_PW_TTL_DAYS/.test(ttl),

@@ -11,10 +11,13 @@
 
 There is **no Google OAuth client ID** any more. Google Sign-In was replaced by
 admin-provisioned email + password auth — the admin creates each account and
-hands over a temporary password, the person sets their own on first sign-in, and
-the session then lasts 30 days of activity in `localStorage`. There is no
-self-signup, so there is no OTP, captcha or allowlist either. See
-[10 — Auth & Access Model](10 - Auth & Access Model.md).
+hands over a temporary password, and the person sets their own on first sign-in.
+Sign-in is then **two steps**: the password, then a 6-digit code emailed to the
+same address. The code is issued once and reused for the rest of the working day,
+so a second sign-in that day (another device) needs no second mail. The session is
+**8h30m and absolute** — one working day, not slid forward on use — so everyone
+starts the day with a sign-in. There is no self-signup, so there is no captcha or
+allowlist either. See [10 — Auth & Access Model](10 - Auth & Access Model.md).
 
 > ⚠️ **Never commit a credential to this repo.** It is **public**, and `gh-pages`
 > serves it as a live website. That means: no temp password in a commit message,
@@ -34,7 +37,7 @@ self-signup, so there is no OTP, captcha or allowlist either. See
 | Admin emails | `CONFIG.ADMIN_EMAILS` | `['monish.raza@indrones.com']` |
 | External exceptions | `CONFIG.EXTERNAL_EMAILS` | `['kishor.salunkhe@uavgarage.com']` |
 | API version | `CONFIG.API_VERSION` | `3` — the Drive-JSON store. A different deployment from v2 |
-| Session / temp-password TTL | `SESSION_DAYS` · `TEMP_PW_TTL_DAYS` | `30` · `14` |
+| Session TTL · temp-password TTL | `CONFIG.SESSION_HOURS` · `CONFIG.TEMP_PW_TTL_DAYS` | `8.5` hours (**absolute**, never slid) · `14` days |
 
 `CONFIG.PASSBOOK_SHEET_ID` and `CONFIG.DATA_TAB` are **gone**. The old
 "I-Passbook App Repository" spreadsheet is not read, written or required by
@@ -59,18 +62,22 @@ by several people, so anything in it is deletable by any of them.
    actions only.** `listIRs`, `getPassbook`, `saveSection` and every admin action
    require a session token; `ping`, `sessionCheck`, `login`, `changePassword`,
    `forgotPassword` and `resetPassword` do not, by necessity. The rate limits on
-   `login`/`changePassword` (one shared `attempts.json`) and on `forgotPassword`
-   (3/hour/email, plus a global hourly ceiling, plus a daily `MailApp` cap) are what
-   keep the open surface from being a guessing oracle — they are load-bearing, not
-   decoration.
+   `login`/`changePassword` (one shared `attempts.json`), on the emailed codes
+   (3 codes/hour/email, counted across **both** purposes, plus a 60s resend gap and
+   a **per-purpose** global hourly ceiling — 12 reset codes, 120 sign-in codes), and
+   the daily `MailApp` cap are what keep the open surface from being a guessing
+   oracle — they are load-bearing, not decoration.
 2. **No CORS restriction** — The GAS endpoint returns JSON to any origin.
 3. **File upload auth** — File uploads to Drive use the GAS service account, not the user's Google auth. All uploaded files get `ANYONE_WITH_LINK` sharing.
-4. **Persistent sessions** — The session token lives in `localStorage` for 30 days
-   of activity and there is **no idle timeout**. That is the owner's deliberate
-   choice (it is how Google's own products behave), but it means a shared or
-   handed-off device stays signed in. There is no device-level session management
-   or suspicious-login detection here; the mitigation is `logout`, or revoking
-   from the admin's User Access modal.
+4. **Sessions are one working day and never slide.** The session token lives in
+   `localStorage` for **8h30m from sign-in** and there is **no idle timeout** inside
+   that window — an unattended tab stays signed in until the absolute expiry, which
+   is the owner's deliberate choice. What is new is that the clock now bounds it: a
+   shared or handed-off device is signed out at the end of the shift whether or not
+   anyone presses `logout`. It replaced a 30-day sliding session, which never expired
+   for exactly the people who used the app most. There is still no device-level
+   session management or suspicious-login detection here; the mitigations are
+   `logout`, or revoking from the admin's User Access modal.
 5. **Temp passwords travel in plaintext** — by design, in a txt the admin hands
    over. They are stored only as a hash, expire after 14 days, and cannot become a
    session: a must-change account is minted **no token** at all until it sets its

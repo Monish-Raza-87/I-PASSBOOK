@@ -59,10 +59,10 @@ call), `createUser` / `bulkCreateUsers`, `resetUserPassword`, `setUserStatus`,
 gated by `requireAdmin`. There is no request-access flow: nobody asks, the admin
 grants.
 
-Every function that mutates the store (`saveSection`, `mintSession`, `doLogout`,
-`revokeAllSessions`, `pruneSessions`, `recordFailedLogin`, `clearFailedLogin`, the
-password flows, the user/department mutations, `purgeUsers`, `deleteDepartment`,
-`setUserDepartments`, `seedDepartments`, `seedMemberships`,
+Every function that mutates the store (`saveSection`, `mintSession`, `issueAuthCode`,
+`doLogout`, `revokeAllSessions`, `pruneSessions`, `recordFailedLogin`,
+`clearFailedLogin`, the password flows, the user/department mutations, `purgeUsers`,
+`deleteDepartment`, `setUserDepartments`, `seedDepartments`, `seedMemberships`,
 `maintenancePruneAuditLog`) runs inside `withRowLock()` — a `LockService` script lock
 taken **before** the read.
 
@@ -287,10 +287,10 @@ about an account:
 |---|---|
 | `ping` | Version handshake. Returns `API_VERSION`; a stale cached frontend uses it to explain itself instead of failing obscurely. |
 | `sessionCheck` | Cheap liveness probe. Called by `confirmSessionAlive()` — which treats an unreachable server as **alive**, because ejecting someone on a flaky connection is the bug, not the fix. **It also fails open on a store error**, with a message that never starts with `unauthorized`: the frontend's interceptor auto-logs-out on that prefix, so a `sessions.json` that cannot be read would sign out all twenty users in the same poll window. |
-| `login` | Email + password → session token (or `mustChangePassword` with **no** token — see below). |
+| `login` | Email + password → a code, then email + password + code → session token. **Two steps** — the password alone buys no token; see [`login`](#login) below. |
 | `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
-| `forgotPassword` | Mails a 6-digit reset code. Response is byte-identical whether or not the account exists (no enumeration), throttled to 3 codes/hour/email plus a global hourly ceiling with a resend gap, and it retires earlier live codes. |
-| `resetPassword` | Verifies the code (5-attempt cap), sets the new password, revokes all sessions, and **returns no token** — the user then signs in, which proves the password was typed correctly. It **preserves** the account's `Status` rather than writing `'active'`: a reset must not re-enable an account an admin deliberately disabled, and it refuses a disabled account outright. |
+| `forgotPassword` | Mails a 6-digit **reset** code. Response is byte-identical whether or not the account exists (no enumeration), and it does no throttling of its own — it calls the one shared `issueAuthCode(email, 'reset', CODE_TTL_MIN)`, which is where the per-email budget, the resend gap, the global ceiling and the retire-the-older-code rule live. |
+| `resetPassword` | Redeems the code (5-attempt cap, and a **reset** code is **consumed** by the reset it performs), sets the new password, revokes all sessions, and **returns no token** — the user then signs in, which proves the password was typed correctly. It **preserves** the account's `Status` rather than writing `'active'`: a reset must not re-enable an account an admin deliberately disabled, and it refuses a disabled account outright. It calls the lock-free `redeemCodeIn(…, consume=true)` inside its own wider lock, covering `codes.json`, `users.json` and `sessions.json` together — a redeem is one event, and a nested lock would deadlock rather than queue. |
 
 `forgotPassword` sends through `sendAuthMail`, which enforces a **global** daily
 `MAIL_DAILY_CAP` (400). That cap covers **every** mail this script sends, not just
@@ -300,10 +300,16 @@ day cannot starve the reset code. An uncapped path would not merely annoy — it
 would burn the day's quota and silently disable password recovery for the whole
 company. `mailQuotaOk()` is the single gate; add no send site that skips it.
 
-`forgotPassword` is also capped **across all emails** (`CODE_MAX_PER_HOUR_GLOBAL`)
-as well as per email, because GAS web apps expose no reliable client IP: without
-it, 3/hour/address times enough addresses spends the whole day's mail budget in an
-hour, and because the response is generic nobody would notice.
+Both emailed-code paths are capped **across all emails** as well as per email,
+because GAS web apps expose no reliable client IP: without it, 3/hour/address times
+enough addresses spends the whole day's mail budget in an hour, and because
+`forgotPassword`'s response is generic nobody would notice. The ceiling is **per
+purpose** — `globalCodeCap(purpose)`, 12/hour for `'reset'` and 120/hour for
+`'login'` — and the 10x gap is deliberate: a reset code is issued to any
+unauthenticated caller for any address, while a sign-in code is issued **only after
+a correct password**. At a shared 12/hour, a 15-person team would exhaust the
+ceiling on one morning's sign-ins and the app would look broken at exactly the
+moment everyone is trying to start work.
 
 ---
 
@@ -421,9 +427,89 @@ checks it as `'nudge'`, from the reserve side of the ceiling, and returns a visi
 sender is told the notification did not go. Failing silently would leave people
 believing a colleague had been emailed.
 
+### `login`
+Sign-in is **two steps**, and the password alone buys no session.
+
+```
+POST {BASE_URL}
+Content-Type: multipart/form-data
+```
+
+**Form Fields:**
+
+| Param | Type | Description |
+|---|---|---|
+| `action` | string | `"login"` |
+| `email` | string | |
+| `password` | string | |
+| `code` | string | **optional** — the 6-digit sign-in code. Absent on step 1, present on step 2. |
+
+**Step 1 — no `code`.** The password is verified, and then:
+
+```json
+{
+  "status": "ok",
+  "otpRequired": true,
+  "email": "asha@indrones.com",
+  "name": "Asha P",
+  "codeSent": true,
+  "message": "We emailed you a 6-digit sign-in code."
+}
+```
+
+There is **no `sessionToken`** in that response. `codeSent` distinguishes the two
+outcomes, and the frontend branches on it rather than claiming a mail that was
+never sent:
+
+| `codeSent` | Meaning |
+|---|---|
+| `true` | No live code existed, so one was issued (`issueAuthCode(email, 'login', LOGIN_OTP_TTL_MIN)`) and emailed |
+| `false` | A live, unexpired code already existed, so **nothing was issued and no mail was sent** — `message` reads *"Enter the sign-in code already emailed to you today."* One code covers every sign-in that day, on every device |
+
+When there is no live code to reuse **and** one cannot be issued — the per-email
+hourly budget, the 60s resend gap, or the global hourly ceiling — this is the one
+place the sign-in path answers with an **error** instead of a prompt:
+
+```json
+{ "status": "error", "message": "Could not send a sign-in code just now — wait a minute and try again." }
+```
+
+That has to be an error. Telling the user to enter "the code we emailed you" when
+no code was sent and none can be sent would be a plain lie, and there is no way
+forward from that screen. The message deliberately does not say which limit was
+hit — that is admin-facing detail, not something a person signing in can act on.
+
+**Step 2 — with `code`.** The same `email` and `password` are sent again, plus the
+code. A correct code mints the ordinary session:
+
+```json
+{ "status": "ok", "sessionToken": "…", "email": "asha@indrones.com", "access": { "role": "user", "permissions": { "sec-b": "view" }, "departments": [], "triage": false } }
+```
+
+The redeem is `verifyAuthCode(email, 'login', code, false)` — **`consume = false`**.
+The code is deliberately **not** marked used on success; that reuse is the whole
+feature, and it is what lets the same code work on a phone at 9am and a desktop at
+2pm. What still bounds abuse is the **attempt counter**, which is shared across the
+day because the code entry is: **5** wrong guesses (`CODE_MAX_ATTEMPTS`) burn the
+code and force a fresh one. A wrong guess answers
+`{"status":"error","message":"Wrong code. N attempt(s) left."}`.
+
+**Both existing gates run before the OTP step**, so the new step bypasses neither:
+a **disabled** account is refused, and a temp-password account is answered
+`{ status: 'ok', mustChangePassword: true, … }` with **no token and no email sent**
+— asking a first-login user for an emailed code would be a step that buys nothing.
+
+**Password checking is unchanged.** The lockout (5 failures in a 10-minute window →
+15-minute lockout), the generic `"Wrong password."`, the deliberate
+no-account-found message and the temp-password TTL all run first and exactly as
+before — the OTP step is the last thing `doLoginPassword` does before it stamps
+`lastLoginAt` and mints the session.
+
 ### Auth and access management
-`login` → (forced `changePassword` on first sign-in) → session. `forgotPassword` →
-`resetPassword` for a lost password. `logout` revokes one session.
+`login` → session, in the two steps documented above. A first sign-in on an
+admin-issued temp password stops at `mustChangePassword` and goes through
+`changePassword` instead. `forgotPassword` → `resetPassword` for a lost password.
+`logout` revokes one session.
 Access is granted only through the admin actions listed under
 [Access Control](#access-control-two-levels-viewcomment-or-edit); there is no
 self-service path in either direction.
@@ -464,8 +550,7 @@ var CONFIG = {
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   API_VERSION: 3,
-  SESSION_DAYS: 30,          // slid on use…
-  SESSION_SLIDE_HOURS: 6,    // …but at most one write per session per 6h
+  SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 };
 ```
@@ -481,12 +566,23 @@ config, because changing one is a security decision, not a setting:
 |---|---|---|
 | `MAIL_DAILY_CAP` | 400 | every `MailApp.sendEmail` in the script |
 | `MAIL_AUTH_RESERVE` | 40 | the slots the nudge path may **not** spend |
-| `CODE_MAX_PER_HOUR` | 3 | reset codes per email |
-| `CODE_MAX_PER_HOUR_GLOBAL` | 12 | reset codes across all emails |
-| `CODE_MAX_ATTEMPTS` | 5 | wrong guesses before a code is burned |
-| `CODE_TTL_MIN` | 15 | how long a reset code lives |
-| `SESSION_SLIDE_HOURS` | 6 | see above |
+| `CODE_MAX_PER_HOUR` | 3 | codes issued to **one email** per hour — counted across **both** purposes, so asking for a reset cannot buy extra sign-in codes |
+| `CODE_MAX_PER_HOUR_GLOBAL` | 12 | **reset** codes across all emails (the unauthenticated path) |
+| `CODE_MAX_PER_HOUR_GLOBAL_LOGIN` | 120 | **sign-in** codes across all emails — 10x looser, because a sign-in code is only issued after a correct password |
+| `CODE_MAX_ATTEMPTS` | 5 | wrong guesses before a code is burned — shared across the day for a sign-in code |
+| `CODE_RESEND_GAP_MS` | 60000 | the minimum gap between code issues for one email |
+| `CODE_TTL_MIN` | 15 | how long a **reset** code lives, and it is consumed on use |
+| `LOGIN_OTP_TTL_MIN` | 510 (8h30m) | how long a **sign-in** code lives, and it is **reusable** inside that window |
 | `LOGIN_MAX_FAILS` | 5 in a 10-min window → 15-min lockout | `login` **and** `changePassword`, one shared `attempts.json` |
+
+`globalCodeCap(purpose)` is the ONE reader of the two global ceilings — 120 for
+`'login'`, 12 otherwise. The asymmetry is the point: a reset code can be asked for
+by anyone for any address, while a sign-in code is issued only behind a correct
+password, and the sign-in path has to absorb the whole team arriving between 9 and
+10am.
+
+`SESSION_DAYS` and `SESSION_SLIDE_HOURS` are **gone**. The session is a fixed
+8h30m from sign-in and there is no slide to throttle: see the login flow above.
 
 `ALLOWED_EMAILS` no longer exists: with no self-signup there is no allowlist to
 consult, only the `@indrones.com` domain check plus the explicit

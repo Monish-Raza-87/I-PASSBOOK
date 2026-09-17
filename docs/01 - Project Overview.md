@@ -27,7 +27,7 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 | Database | **JSON files in Google Drive** | `_store/` in the owner's Drive folder — accounts, sessions, access, every section, the audit trail. No spreadsheet holds app data (see [02](02 - Architecture & Data Flow.md)) |
 | Sheets (inputs only) | Google Sheets — **read-only** | `Form Responses` for IR intake, the legacy workbook for the 🏛 Legacy view. Nothing is ever written to either |
 | File Storage | Google Drive | Photos/files stored in `IR###/Section X` folders |
-| Auth | Email + password, **admin-provisioned** | No self-signup; 30-day session token in `localStorage` (see [10](10 - Auth & Access Model.md)) |
+| Auth | Email + password + an **emailed 6-digit code**, admin-provisioned | No self-signup; sign-in is two steps (password, then a code that is issued once and reused for the working day); an **8h30m absolute** session token in `localStorage` (see [10](10 - Auth & Access Model.md)) |
 | PWA | Service Worker + Manifest | Offline caching of static assets |
 
 ## File Structure

@@ -65,9 +65,25 @@
       </div>
       <form id="auth-form" autocomplete="on">
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
-        <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+          <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
         <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+
+        <!-- Sign-in step 2: the code emailed for the working day. Its own input
+             rather than a share of #auth-code, because reset and sign-in can be
+             on screen moments apart and one box would carry a half-typed code
+             from one step into the other. -->
+        <div id="auth-login-code-wrap" style="display:none">
+          <p id="auth-login-code-note" class="auth-hint"></p>
+          <input class="form-input" type="text" id="auth-login-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                 placeholder="6-digit sign-in code" autocomplete="one-time-code" />
+          <button type="button" class="btn" id="auth-login-code-btn">Verify code</button>
+        </div>
 
         <!-- Forgot step: ask for the email, get a 6-digit code. -->
         <div id="auth-forgot-wrap" style="display:none">
@@ -79,7 +95,12 @@
           <p id="auth-reset-note" class="auth-hint"></p>
           <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
-          <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+          <div class="pw-wrap">
+            <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+            <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+              <span class="pw-toggle-icon" aria-hidden="true"></span>
+            </button>
+          </div>
           <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
           <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
         </div>
@@ -103,8 +124,18 @@
       </div>
       <div id="pc-email" class="access-email-line"></div>
       <form id="pc-form" autocomplete="off">
-        <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
-        <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
+          <button type="button" class="pw-toggle" id="eye-pc-new" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+          <button type="button" class="pw-toggle" id="eye-pc-confirm" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
         <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
       </form>
       <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>

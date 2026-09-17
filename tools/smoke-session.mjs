@@ -1,5 +1,5 @@
-// Smoke test for the session model: 30 days in localStorage, slid on use, and an
-// interceptor that does not eject people on a bad connection.
+// Smoke test for the session model: a token in localStorage, an absolute 8h30m
+// expiry, and an interceptor that does not eject people on a bad connection.
 //
 //   node tools/smoke-session.mjs
 //
@@ -12,6 +12,11 @@
 //      single default is what stops a flaky connection — or a GAS hiccup, or a
 //      CORS failure — from being read as "you are signed out". Ejecting on those
 //      is not a session problem; it is the bug.
+//
+// The TTL itself is NOT asserted here. It moved to 8h30m absolute with no slide,
+// and that is the BACKEND's clock — the token this file stores carries no expiry
+// of its own, so a frontend test could only restate a constant. smoke-store.mjs
+// proves the real expiry against the real mint.
 //
 // This suite needs splitStorage: by default the harness aliases localStorage and
 // sessionStorage to ONE store, which would make "survives a sessionStorage wipe"

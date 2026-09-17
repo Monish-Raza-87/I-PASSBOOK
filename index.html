@@ -65,9 +65,25 @@
       </div>
       <form id="auth-form" autocomplete="on">
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
-        <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
+          <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
         <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+
+        <!-- Sign-in step 2: the code emailed for the working day. Its own input
+             rather than a share of #auth-code, because reset and sign-in can be
+             on screen moments apart and one box would carry a half-typed code
+             from one step into the other. -->
+        <div id="auth-login-code-wrap" style="display:none">
+          <p id="auth-login-code-note" class="auth-hint"></p>
+          <input class="form-input" type="text" id="auth-login-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                 placeholder="6-digit sign-in code" autocomplete="one-time-code" />
+          <button type="button" class="btn" id="auth-login-code-btn">Verify code</button>
+        </div>
 
         <!-- Forgot step: ask for the email, get a 6-digit code. -->
         <div id="auth-forgot-wrap" style="display:none">
@@ -79,7 +95,12 @@
           <p id="auth-reset-note" class="auth-hint"></p>
           <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
-          <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+          <div class="pw-wrap">
+            <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+            <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+              <span class="pw-toggle-icon" aria-hidden="true"></span>
+            </button>
+          </div>
           <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
           <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
         </div>
@@ -103,8 +124,18 @@
       </div>
       <div id="pc-email" class="access-email-line"></div>
       <form id="pc-form" autocomplete="off">
-        <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
-        <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
+          <button type="button" class="pw-toggle" id="eye-pc-new" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <div class="pw-wrap">
+          <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+          <button type="button" class="pw-toggle" id="eye-pc-confirm" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <span class="pw-toggle-icon" aria-hidden="true"></span>
+          </button>
+        </div>
         <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
       </form>
       <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>
@@ -132,6 +163,14 @@
           <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label">IRs</span>
           <span class="nav-count" id="nav-count">—</span>
+        </a>
+
+        <!-- Counts over the same IRs, sliced by FY / month / status / category /
+             customer / drone. A plain hash link with NO JS binding, exactly like
+             #nav-tickets above: the hashchange listener is the whole mechanism. -->
+        <a class="nav-item" id="nav-insights" href="#/insights" title="Insights">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label">Insights</span>
         </a>
 
         <!-- Opens the read-only legacy workbook. The id is load-bearing:
@@ -195,6 +234,10 @@
 
             <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" />
             <div class="segments" id="list-segments" role="tablist"></div>
+            <!-- The Category strip. A SECOND .segments row rather than a new widget,
+                 so it inherits the strip's own CSS and its counts read exactly like
+                 the status counts directly above it. -->
+            <div class="segments segments-cat" id="list-categories" role="tablist"></div>
           </div>
           <div id="sync-status"></div>
           <div id="ir-list" class="ir-list">
@@ -285,6 +328,10 @@
               <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <button class="btn" id="save-sec-b">Save Section B</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-b">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-b">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section C: IQC Inspection -->
@@ -292,6 +339,10 @@
               <h2 class="section-title">Section C — IQC Visual Inspection</h2>
               <div id="sec-c-form"></div>
               <button class="btn" id="save-sec-c">Save Section C</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-c">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-c">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section D: Investigation -->
@@ -299,7 +350,10 @@
               <h2 class="section-title">Section D — Investigation</h2>
               <div id="sec-d-form"></div>
               <button class="btn" id="save-sec-d">Save Section D</button>
-              <button class="btn btn-secondary" id="download-sec-d">⬇ Download Investigation (PDF)</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-d">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-d">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section E: Production -->
@@ -307,6 +361,10 @@
               <h2 class="section-title">Section E — Production (Rework)</h2>
               <div id="sec-e-form"></div>
               <button class="btn" id="save-sec-e">Save Section E</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-e">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-e">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section F: Quality Test Report (QC + Flight Test) -->
@@ -314,6 +372,10 @@
               <h2 class="section-title">Section F — Quality Test Report</h2>
               <div id="sec-f-form"></div>
               <button class="btn" id="save-sec-f">Save Section F</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-f">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-f">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section G: PDI Report/Dispatch Record (PDI + Dispatch) -->
@@ -321,6 +383,10 @@
               <h2 class="section-title">Section G — PDI Report/Dispatch Record</h2>
               <div id="sec-g-form"></div>
               <button class="btn" id="save-sec-g">Save Section G</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-g">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-g">⬇ Download and share</button>
+              </div>
             </div>
 
           </div>
@@ -355,12 +421,32 @@
 
         <!-- Desktop-only empty state, shown until an IR is selected.
              A sibling of #detail-view rather than a child, so that
-             #detail-view's display stays a truthful "is an IR open" flag
-             (applyAccessGating reads it). -->
+             #detail-view's display stays a truthful "is an IR open" flag. -->
         <div id="detail-placeholder">
           <div class="ph-icon" aria-hidden="true"></div>
           <p class="ph-title">No IR selected</p>
           <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
+        </div>
+
+        <!-- ====== INSIGHTS VIEW ====== -->
+        <!-- A THIRD sibling pane. Not a panel inside #detail-view: on desktop the IR
+             list stays beside this one, and folding it into the detail pane would
+             make that pane's display stop meaning "an IR is open". Deliberately
+             carries no class="section-content" — the suites count panes by that
+             literal, and the nine sections are what they are counting. -->
+        <div id="insights-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title">Insights</span>
+            </div>
+          </div>
+          <div id="insights-body" class="insights-body">
+            <!-- The skeleton, so a cold #/insights deep link shows "loading" and not
+                 a dashboard of zeroes. renderInsights() re-emits the same markup. -->
+            <div class="insights-skeleton"></div>
+            <div class="insights-skeleton"></div>
+            <div class="insights-skeleton"></div>
+          </div>
         </div>
 
       </div><!-- end panes -->
@@ -370,6 +456,11 @@
   <!-- Toast notification -->
   <div id="toast" role="status" aria-live="polite"></div>
 
+  <!-- PDF export library. A plain script, deliberately: app.js stays a plain
+       end-of-body script with no module system, and this only has to expose
+       window.PDFLib before app.js runs. Vendored, not CDN — the app has to work
+       offline (it is a PWA) and must not depend on a third party at runtime. -->
+  <script src="vendor/pdf-lib.min.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on

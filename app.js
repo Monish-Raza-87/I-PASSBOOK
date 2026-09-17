@@ -42,15 +42,21 @@ let currentUser = null;
 // ─── EMAIL + PASSWORD AUTH (admin-provisioned, no self-signup) ────────────────
 // The admin creates every account and hands over a temporary password. On first
 // sign-in the user is forced to set their own password before a session is minted.
-// Sign-in exchanges email + password for a revocable server SESSION TOKEN, which
-// the frontend holds in localStorage and attaches to every backend call.
+// Sign-in exchanges email + password + an emailed code for a revocable server
+// SESSION TOKEN, which the frontend holds in localStorage and attaches to every
+// backend call.
 //
-// localStorage, NOT sessionStorage, and no idle timeout: the owner asked for the
-// behaviour a Google Sheet has — sign in once, stay signed in for weeks, never be
-// asked again mid-task. The token slides forward on use server-side, so an active
-// person is effectively never signed out. The trade-off (a shared/handed-off
-// device keeps the session) is the owner's explicit call; the Sign Out button and
-// the server-side revoke are the answer to it. See [[auth-token-gate]].
+// localStorage, NOT sessionStorage, and no idle timeout: reopening the app resumes
+// the session rather than demanding a fresh sign-in. But the token is good for ONE
+// WORKING DAY (8h30m) and its expiry is ABSOLUTE — it is not slid forward on use,
+// so a session does not outlive the shift that started it. The daily sign-in is
+// what the emailed code protects; a session that renewed itself on every request
+// would never expire for the people who use the app most, which is the opposite of
+// what it is for.
+//
+// The trade-off (a shared/handed-off device keeps the session until it expires) is
+// the owner's explicit call; the Sign Out button and the server-side revoke are
+// the answer to it. See [[auth-token-gate]].
 
 // Persist/restore the session token. localStorage so reopening the app resumes
 // the session instead of demanding a fresh sign-in.
@@ -114,14 +120,21 @@ function confirmSessionAlive() {
 // Uses _origFetch (not the intercepted fetch) so the login call isn't subject to
 // the session gate, and so a bad password can't trigger the auto-logout path.
 //
+// TWO-STAGE. Without `code`, a correct password does NOT buy a session: the
+// backend answers {status:'ok', otpRequired:true} and emails a 6-digit code. The
+// caller then calls again with the same password AND the code. The password is
+// re-sent rather than a half-open server-side conversation being kept, so a
+// signed-in session only ever exists at the end of a fully-verified exchange.
+//
 // A successful login on a temporary password returns mustChangePassword with NO
 // token — the caller must route to the password-change screen, not into the app.
-function loginBackend(email, password) {
+function loginBackend(email, password, code) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
   const fd = new FormData();
   fd.append('action', 'login');
   fd.append('email', email);
   fd.append('password', password);
+  if (code) fd.append('code', String(code).trim());
   const doFetch = _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       // Apps Script returns JSON after a redirect; parse what came back.
@@ -138,6 +151,10 @@ function loginBackend(email, password) {
         persistSession(data.sessionToken);
         return data;
       }
+      // Step 1 done: the password was right and a code is on its way. This has to
+      // pass through BEFORE the error branch below, like mustChangePassword —
+      // swallowing it there would report "Login failed." for a correct password.
+      if (data && data.status === 'ok' && data.otpRequired) return data;
       // A temporary password is CORRECT but is not yet a session: the backend
       // answers {status:'ok', mustChangePassword:true} with NO token, and the
       // caller routes to the password-change screen. This has to pass through
@@ -391,7 +408,7 @@ function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 // Triage is a SEPARATE axis from section edit rights, not a seventh "section".
-// It governs the IR header — status, assignee, priority, type — and the two
+// It governs the IR header — status, assignee, priority, category — and the two
 // Overview fields. A department can hold it without editing any section, which
 // is exactly what CR and Management do. Admin always has it.
 function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
@@ -458,8 +475,8 @@ function saveSentinel(irNumber, sectionId, fields) {
 
 // ─── __IRS__ — APP-OWNED WORKFLOW STATE ──────────────────────────────────────
 // The Sheet is the immutable client intake (what the customer wrote); the app
-// owns everything mutable — status, assignee, priority, type, which sections are
-// done, CSAT. One row per IR, keyed by irNumber.
+// owns everything mutable — status, assignee, priority, category, which sections
+// are done, CSAT. One row per IR, keyed by irNumber.
 //
 // Ownership of an IR's status begins the moment a human changes the STATUS in
 // the app (statusOwned). Until then the Sheet's Col D is still what the list
@@ -468,8 +485,13 @@ function saveSentinel(irNumber, sectionId, fields) {
 // that assigning or categorising does NOT take over the status.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
-                              //              assignee, priority, type, done[], … }
+                              //              assignee, priority, category, subCategory, done[], … }
 let irStateSyncedAt = null;   // Date of the last successful __IRS__ read
+// True while `allIRs` holds the demo sample because BOTH the Sheet and the backend
+// refused to sync. Only the Insights page reads it: a fabricated card in the IR list
+// is self-evidently a placeholder, but "CRASH: 2" on a dashboard is a number
+// somebody could quote.
+let _dataIsDemo = false;
 
 // The row for one IR, but only if a human has actually edited it. A row that
 // holds nothing but the first-sight seed is a marker, not an edit.
@@ -522,6 +544,10 @@ async function loadIRState() {
   // first fetchIRs(), and rendering an empty list here would replace the boot
   // skeletons with "0 total" for a frame.
   if (allIRs.length) applyListFilters();
+  // The overlay carries `category`, which is a dashboard dimension, and it lands
+  // AFTER the list — so the dashboard has to be repainted here too or it would
+  // count a list whose categories have not arrived yet.
+  renderInsights();
 }
 
 // The single writer of `allIRs`. Every fetchIRs() path goes through it so
@@ -530,6 +556,11 @@ async function loadIRState() {
 function setAllIRs(records) {
   allIRs = Array.isArray(records) ? records : [];
   applyIRStateToAllIRs();
+  // The dashboard counts these same rows, so every fetch path repaints it here —
+  // the Sheet read, the GAS fallback, the demo fallback and an in-page re-login.
+  // It is a no-op while the pane is not showing, and it re-emits the skeleton when
+  // the list is empty, so a failed fetch cannot leave yesterday's numbers standing.
+  renderInsights();
   return allIRs;
 }
 
@@ -546,7 +577,12 @@ function applyIRStateToAllIRs() {
     ir.assignee     = s.assignee     || '';
     ir.assigneeName = s.assigneeName || '';
     if (s.priority) ir.priority = s.priority;
-    ir.type = s.type || '';
+    // Unconditional assignment, not `if (s.category)`: a cleared category must
+    // land as '' here, or the previous value would stay on the in-memory row and
+    // the list would keep showing a category the store no longer holds.
+    ir.category      = s.category      || '';
+    ir.subCategory   = s.subCategory   || '';
+    ir.subCategoryNote = s.subCategoryNote || '';
     // Filter against the LIVE ids. The store still holds historical `sec-a`,
     // `sec-h` and `sec-i` entries until the migration remaps them, and a
     // completion marker for a section that no longer exists would render as a
@@ -631,10 +667,21 @@ const INWARD_OPTIONS_DEFAULTS = {
 // one list.
 const IR_STATUS_VALUES = ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'];
 
-// Ticket categories, app-owned (the Form has no such column). These are a guess
-// at Indrones' own groupings and are meant to be edited in this one line —
-// nothing else in the app depends on the specific values.
-const TICKET_TYPES = ['Repair', 'Replacement', 'Warranty', 'AMC', 'Demo', 'Training', 'Other'];
+// Triage Category, app-owned (the Form has no such column). This REPLACED an
+// earlier `type` field whose values (Repair/Replacement/Warranty/AMC/Demo/
+// Training/Other) described a commercial arrangement rather than the work, which
+// is not what the desk sorts by. The old key is no longer read anywhere; it is
+// dropped from an IR's row the next time CR saves that IR's Triage.
+//
+// CR (Customer Relations — the department holding the TR access axis) owns this
+// field, exactly as it owns status, assignee and priority.
+const IR_CATEGORIES = ['CRASH', 'GENERAL MAINTENANCE', 'REMOTE SUPPORT', 'REPAIR'];
+
+// Sub-categories, only meaningful under REPAIR. OTHERS is the escape hatch: it
+// carries a free-text note instead of pretending to be a tenth component.
+const REPAIR_SUBCATEGORIES =
+  ['GPS', 'TRIPOD/BIPOD', 'TOPSHELL', 'CAMERA/LENS', 'BATTERY', 'CHARGER', 'RC', 'AIRFRAME', 'OTHERS'];
+const REPAIR_OTHERS = 'OTHERS';
 
 // Triage priorities. `priority` is read from the Sheet's "Priority" column when
 // one exists (fetchIRsFromSheet) and from here when the app sets it.
@@ -642,8 +689,6 @@ const TICKET_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
 
 // Runtime option lists (defaults merged with any saved overrides).
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
-// E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
-let esignatureState = {};
 // Image-evidence control state (used by Section D + E/F/G/H/I uploads):
 // evidenceState[fieldId] = [{ caption, link, file, url, type, name }].
 // `link` = Drive URL of an already-uploaded file ('' while pending upload); `file`/`url`
@@ -701,6 +746,7 @@ const authCont    = document.getElementById('auth-container');
 const appCont     = document.getElementById('app-container');
 const indexView   = document.getElementById('index-view');
 const detailView  = document.getElementById('detail-view');
+const insightsView = document.getElementById('insights-view');
 const irList      = document.getElementById('ir-list');
 const searchInput = document.getElementById('search-input');
 const backBtn     = document.getElementById('back-btn');
@@ -720,6 +766,7 @@ const navThemeIcon  = document.getElementById('nav-theme-icon');
 const navThemeLabel = document.getElementById('nav-theme-label');
 const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
+const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
@@ -727,10 +774,10 @@ const listToggle    = document.getElementById('list-toggle');
 
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
-// renderLayout() translates it into the inline display values that the rest of
-// the app reads back (applySectionAccessGating tests detailView.style.display).
-let currentView = 'index';     // 'index' | 'detail'
+// renderLayout() translates it into the inline display of the three panes.
+let currentView = 'index';     // 'index' | 'detail' | 'insights'
 let activeSegment = 'all';     // IR-list filter segment
+let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -827,12 +874,19 @@ function loadStoredUser() {
 }
 
 // ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
-// Three modes share one form: 'login' | 'forgot' | 'reset'. There is no sign-up
-// mode — accounts are provisioned by the admin — so the only two things a person
-// can do here are sign in, and recover a forgotten password via an emailed code.
+// Four modes share one form: 'login' | 'otp' | 'forgot' | 'reset'. There is no
+// sign-up mode — accounts are provisioned by the admin — so the things a person
+// can do here are sign in, finish signing in with an emailed code, and recover a
+// forgotten password via a different emailed code.
 let _authFormWired = false;
-let _authMode = 'login';     // 'login' | 'forgot' | 'reset'
+let _authMode = 'login';     // 'login' | 'otp' | 'forgot' | 'reset'
 let _resetEmail = '';
+// Sign-in step 2 needs the credential from step 1, because the backend verifies
+// the password again on the second call rather than trusting a half-open
+// conversation. In memory only — same rule as _pcTemp, and for the same reason:
+// a temporary credential must not outlive the screen that asked for it.
+let _otpEmail = '';
+let _otpPassword = null;
 
 // Establish a signed-in session from a backend payload. Shared by the login form
 // and the forced password change, so both land in exactly the same state.
@@ -862,23 +916,30 @@ function showAuth() {
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
   _resetEmail = '';
+  // The password from step 1 is held here for step 2 and dies with the screen —
+  // the same rule as _pcTemp: in memory, and never written to storage.
+  _otpEmail = '';
+  _otpPassword = null;
   setAuthMode('login');
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
-  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password'].forEach(id => {
+  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   wireAuthForm();
+  wirePasswordToggles();
+  maskAllPasswords();
 }
 
 // Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
-// the browser's own Enter-to-submit keeps working in all three modes.
+// the browser's own Enter-to-submit keeps working in all four modes.
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
   set('auth-password',      mode === 'login');
   set('auth-signin-btn',    mode === 'login');
   set('auth-forgot-link',   mode === 'login');
+  set('auth-login-code-wrap',      mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
   set('auth-back-link',     mode !== 'login');
@@ -895,10 +956,71 @@ function setAuthMode(mode) {
       ? 'Enter your email and we’ll send you a reset code.'
       : mode === 'reset'
         ? 'Enter the code from your email and choose a new password.'
-        : 'Sign in with the credentials your admin gave you.';
+        : mode === 'otp'
+          ? 'One more step. Enter the code we emailed you.'
+          : 'Sign in with the credentials your admin gave you.';
   }
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
+  if (mode === 'otp') {
+    const first = document.getElementById('auth-login-code');
+    // Focused on the next tick, not now: the wrap is only just display:'' and a
+    // focus() on a node the browser has not laid out yet is silently dropped.
+    if (first) setTimeout(() => first.focus(), 60);
+  }
+}
+
+// ─── SHOW / HIDE A PASSWORD ──────────────────────────────────────────────────
+// Every password box in the app gets a reveal toggle. Four fields, one rule: the
+// button is a SIBLING of the input inside .pw-wrap, so the input is found by
+// walking to the wrapper rather than by keeping a second id in sync.
+//
+// These are the only glyphs in the app not seeded by initIcons(). initIcons runs
+// from showApp(), which is the SIGNED-IN screen — the auth card is up long before
+// it, so a toggle seeded there would be blank exactly when it is first needed.
+// maskAllPasswords() seeds them instead, from each screen's own show path.
+let _pwTogglesWired = false;
+
+function wirePasswordToggles() {
+  if (_pwTogglesWired) return;
+  _pwTogglesWired = true;
+  document.querySelectorAll('.pw-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const wrap = btn.closest('.pw-wrap');
+      const input = wrap && wrap.querySelector('input');
+      if (!input) return;
+      setPasswordRevealed(btn, input.type === 'password');
+      // The caret would otherwise jump to the end, because changing `type`
+      // re-creates the input's selection — which reads as the form losing your
+      // place in the middle of typing.
+      input.focus();
+      const n = input.value.length;
+      try { input.setSelectionRange(n, n); } catch { /* no selection on type=email */ }
+    });
+  });
+}
+
+// Show ↔ hide ONE field. The two glyph names are written as literals rather than
+// picked by a ternary, because smoke-ui.mjs cross-checks every ICON_PATHS key
+// against its references and a computed name would read as a dead entry.
+function setPasswordRevealed(btn, reveal) {
+  const wrap = btn.closest('.pw-wrap');
+  const input = wrap && wrap.querySelector('input');
+  if (input) input.type = reveal ? 'text' : 'password';
+  btn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+  btn.setAttribute('aria-label', reveal ? 'Hide password' : 'Show password');
+  const icon = btn.querySelector('.pw-toggle-icon');
+  if (!icon) return;
+  if (reveal) icon.innerHTML = iconSvg('eye-off');
+  else        icon.innerHTML = iconSvg('eye');
+}
+
+// Put every toggle back to masked, and seed their glyphs. Called when a password
+// screen is SHOWN, not when it is left: a field left revealed must not come back
+// revealed the next time that screen appears, which on a shared machine is the
+// whole risk the mask is there for.
+function maskAllPasswords() {
+  document.querySelectorAll('.pw-toggle').forEach(btn => setPasswordRevealed(btn, false));
 }
 
 // ─── FORCED FIRST-LOGIN PASSWORD CHANGE ──────────────────────────────────────
@@ -935,6 +1057,11 @@ function showPasswordChange(email, forced, tempPassword) {
   const err = document.getElementById('pc-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
   wirePasswordChange();
+  // Same rule as the auth card: this screen is shown fresh, so any field that was
+  // left revealed last time comes back masked, and the toggles get their glyphs
+  // (initIcons has not run for a first-login screen — there is no app yet).
+  wirePasswordToggles();
+  maskAllPasswords();
   const first = document.getElementById('pc-new');
   if (first) setTimeout(() => first.focus(), 60);
 }
@@ -982,7 +1109,9 @@ function wireAuthForm() {
   const passIn     = document.getElementById('auth-password');
   const codeIn     = document.getElementById('auth-code');
   const newIn      = document.getElementById('auth-new-password');
+  const otpIn      = document.getElementById('auth-login-code');
   const signInBtn  = document.getElementById('auth-signin-btn');
+  const otpBtn     = document.getElementById('auth-login-code-btn');
   const forgotBtn  = document.getElementById('auth-forgot-btn');
   const resetBtn   = document.getElementById('auth-reset-btn');
   const resendLink = document.getElementById('auth-resend-link');
@@ -1003,8 +1132,54 @@ function wireAuthForm() {
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
+      // Stage 1 of two: the password is right and a code is on its way. Hold the
+      // password for stage 2 and move the form on rather than reporting success —
+      // there is no session yet, and pretending otherwise would sign nobody in.
+      if (d && d.status === 'ok' && d.otpRequired) { gotoOtpStep(email, password, d); return; }
       if (d && d.status === 'ok' && d.sessionToken) finishAuth(email, d);
       else showError((d && d.message) || 'Sign in failed.');
+    });
+  };
+
+  // Move to the code step, holding the credential from stage 1 in memory.
+  const gotoOtpStep = (email, password, d) => {
+    _otpEmail = email;
+    _otpPassword = password;
+    if (otpIn) otpIn.value = '';
+    setAuthMode('otp');
+    const note = document.getElementById('auth-login-code-note');
+    if (note) {
+      // codeSent:false means the backend REUSED the code it already emailed today,
+      // so claiming to have just sent one would send the user looking for a mail
+      // that is not there. Both branches name the address, because the same code
+      // may be in an inbox they have not looked at since this morning.
+      note.textContent = (d && d.codeSent === false)
+        ? 'Enter the 6-digit code we emailed to ' + email + ' earlier today. It still works — the same code covers every sign-in today.'
+        : 'We emailed a 6-digit code to ' + email + '. It works all day, so you can reuse it on another device.';
+    }
+    showToast((d && d.codeSent === false) ? 'Use the code from earlier today' : 'Check your inbox for the sign-in code');
+  };
+
+  // Stage 2: the code from the email, with the password again.
+  const submitOtp = () => {
+    const code = ((otpIn && otpIn.value) || '').trim();
+    if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
+    // The in-memory password is the only copy — a page reload between the two
+    // steps leaves nothing to send, so say so plainly and restart the flow
+    // instead of posting an empty password and reporting a bogus wrong password.
+    if (!_otpPassword) { showError('Your sign-in timed out — please sign in again.'); setAuthMode('login'); return; }
+    otpBtn.disabled = true; otpBtn.textContent = 'Verifying…';
+    showError('');
+    loginBackend(_otpEmail, _otpPassword, code).then(d => {
+      otpBtn.disabled = false; otpBtn.textContent = 'Verify code';
+      if (d && d.status === 'ok' && d.sessionToken) {
+        _otpPassword = null;
+        finishAuth(_otpEmail, d);
+        return;
+      }
+      // The code is consumed by nothing, so a mistyped one can simply be retyped.
+      // Do not clear the field: the user is comparing it with their email.
+      showError((d && d.message) || 'Could not verify the code.');
     });
   };
 
@@ -1062,6 +1237,7 @@ function wireAuthForm() {
   };
 
   if (signInBtn)  signInBtn.addEventListener('click', submitLogin);
+  if (otpBtn)     otpBtn.addEventListener('click', submitOtp);
   if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
   if (resetBtn)   resetBtn.addEventListener('click', submitReset);
   if (resendLink) resendLink.addEventListener('click', resend);
@@ -1075,6 +1251,7 @@ function wireAuthForm() {
     ev.preventDefault();
     if (_authMode === 'forgot') submitForgot();
     else if (_authMode === 'reset') submitReset();
+    else if (_authMode === 'otp') submitOtp();
     else submitLogin();
   });
 }
@@ -1167,16 +1344,23 @@ function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeSta
 // One function owns the panes' visibility. It must keep writing *inline*
 // styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
-//   desktop (≥1024px) : list visible, detail beside it when open
+//   desktop (≥1024px) : list visible, detail/insights beside it when open
 //   mobile            : list and detail are separate full screens
 //
 // The list fold is decided HERE rather than by a stylesheet rule, because an
 // inline `display` beats any rule and this function is the one place allowed to
 // write it. Folding the list must never strand the user on an empty index screen,
 // which is why the fold only ever applies while a detail pane is open.
+//
+// `detailView.style.display` is only ever WRITTEN here, never read back. The
+// sibling-pane arrangement is still required, for a different reason: tools/
+// smoke-ui.mjs and tools/smoke-boot.mjs pin #ir-activity inside #detail-view, so
+// that pane's display is a truthful "an IR is open" flag and nothing else may
+// live in it.
 function renderLayout() {
-  const desktop = mqDesktop.matches;
-  const detail  = currentView === 'detail';
+  const desktop  = mqDesktop.matches;
+  const detail   = currentView === 'detail';
+  const insights = currentView === 'insights';
   // On mobile the list and the detail are separate full screens, so an open
   // detail always hides the list. On desktop they sit side by side, so the list
   // hides only when the user asked for the room — and only while a detail is
@@ -1184,8 +1368,17 @@ function renderLayout() {
   const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
+  // The Insights dashboard is a SIBLING pane, not a panel inside the detail one:
+  // it keeps the IR list beside it on desktop (the mobile back button is
+  // display:none there, so hiding the list would strand the user on a screen with
+  // no way back to an IR).
+  if (insightsView) insightsView.style.display = insights ? 'flex' : 'none';
   backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
+  // Suppresses #detail-placeholder's "No IR selected" empty state, which shows
+  // whenever body.view-detail is absent — including on the dashboard, where an
+  // "no IR selected" message is simply wrong.
+  document.body.classList.toggle('view-insights', insights);
 
   // On desktop the list stays on screen, so mark which row is open.
   if (irList) {
@@ -1205,13 +1398,17 @@ function renderLayout() {
 // Hash routes, because GitHub Pages is static with no server rewrite:
 //   #/tickets            → the list (desktop keeps whatever IR was open)
 //   #/tickets/IR409      → that IR's passbook
+//   #/insights           → the counts dashboard
 //   #/legacy             → opens the read-only legacy workbook modal
-// showIndex()/openPassbook() stay the view functions; the router only decides
-// when to call them, so nothing here re-implements rendering.
+// showIndex()/openPassbook()/showInsights() stay the view functions; the router
+// only decides when to call them, so nothing here re-implements rendering.
 function currentRoute() {
   const parts = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'insights') return { name: 'insights' };
   if (parts[0] === 'legacy') return { name: 'legacy' };
+  // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
+  // rather than on a blank pane, which is why `insights` had to be matched above.
   return { name: 'tickets' };
 }
 
@@ -1224,6 +1421,11 @@ function goTicket(irNumber) {
   const hash = '#/tickets/' + encodeURIComponent(irNumber);
   if (location.hash === hash) { handleRoute(); return; }
   location.hash = hash;
+}
+
+function goInsights() {
+  if (location.hash === '#/insights') { showInsights(); return; }
+  location.hash = '#/insights';
 }
 
 async function handleRoute() {
@@ -1245,6 +1447,20 @@ async function handleRoute() {
     if (!currentUser) return;                   // signed out while waiting
     if (currentRoute().irNumber !== r.irNumber) return;   // superseded meanwhile
     openPassbook(r.irNumber);
+    return;
+  }
+
+  if (r.name === 'insights') {
+    if (currentView === 'insights') return;
+    // The dashboard is counts over allIRs, so a cold #/insights deep link has
+    // nothing to count until the fetch lands. Waiting here is what stops it
+    // painting an empty dashboard for the length of an 8s abort.
+    if (!allIRs.length && _irsReady) { try { await _irsReady; } catch { /* paint anyway */ } }
+    if (!currentUser) return;                   // signed out while waiting
+    // Re-read the route AFTER the await: the user may have navigated away while
+    // the list was loading, and painting now would land on top of where they went.
+    if (currentRoute().name !== 'insights') return;
+    showInsights();
     return;
   }
 
@@ -1272,7 +1488,7 @@ function startAppData() {
   loadIqcConfig();
   // Load team directory (@-mention suggestions) + nudges, and start nudge polling
   loadTeamDirectory();
-  // Load app-owned workflow state (status / assignee / priority / type per IR).
+  // Load app-owned workflow state (status / assignee / priority / category per IR).
   // Runs alongside the first fetchIRs(); setAllIRs merges whatever has arrived,
   // and loadIRState re-merges + re-renders when it lands, so either order is
   // correct.
@@ -1309,7 +1525,17 @@ function showApp() {
   if (_appBooted) { renderLayout(); syncNavAccess(); startAppData(); return; }
   _appBooted = true;
 
-  showIndex();
+  // Enter the FIRST screen synchronously, before startAppData() assigns _irsReady
+  // and before handleRoute() runs. Calling showIndex() unconditionally here would
+  // paint the IR list on a cold #/insights and hold it there for the whole of the
+  // first fetch — up to the 8s abort — because handleRoute() cannot do better than
+  // "wait for the list" when it has nothing to count yet.
+  //
+  // A deep link to an IR deliberately keeps the old behaviour: a passbook cannot be
+  // painted before its record arrives, so showIndex() paints the placeholder the
+  // detail pane will replace. handleRoute() still owns the async path and no-ops
+  // when we are already on the right screen.
+  if (currentRoute().name === 'insights') showInsights(); else showIndex();
   applyTheme();          // sync the nav toggle with the stored preference
   initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
   applyChromeState();    // ...and the sidebar / IR-list folds
@@ -1692,7 +1918,7 @@ function renderDepartmentsTab() {
     <div class="access-section">
       <h3>What each department may edit</h3>
       <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
-      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and category</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
       <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
       <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
       <div class="access-add-row" style="margin-top:0.75rem;">
@@ -1953,6 +2179,285 @@ function showIndex() {
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
+// ─── INSIGHTS ────────────────────────────────────────────────────────────────
+// Counts over the IR list, sliced by the variables the desk actually asks about.
+// Everything here is client-side over `allIRs` + `irState`, both of which are
+// already fully in memory (one gviz CSV read, plus one `__IRS__` read), so this
+// page adds NO endpoint, no cache and no second source of truth. If the two ever
+// disagree it is because the list is stale, not because the dashboard is.
+//
+// Read-only and visible to every signed-in user: it reads the same rows the IR
+// list already shows them, so there is nothing here to gate.
+
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                      'August', 'September', 'October', 'November', 'December'];
+
+// "2025-09-28" → { y, m, d }, or null for anything else. `ir.dateRaisedISO` is the
+// only clean sortable date on a record — `ir.dateRaised` is display-only and holds
+// whatever the Sheet had, and there is no createdAt/timestamp anywhere. Returning
+// null rather than NaN is load-bearing: an unparseable date must land in its own
+// bucket, never in year 0 or in every year at once.
+function parseISODate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso).trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return { y, m: mo, d };
+}
+
+// A fiscal year is named by the calendar year it STARTS in (1 April – 31 March),
+// so FY 2025-26 covers Apr–Dec 2025 and Jan–Mar 2026. Every helper here returns or
+// takes that integer, never a formatted string, so a label change can never become
+// a filtering bug.
+function irFiscalYear(iso) {
+  const d = parseISODate(iso);
+  if (!d) return null;
+  return d.m >= 4 ? d.y : d.y - 1;
+}
+
+function irMonthNumber(iso) {
+  const d = parseISODate(iso);
+  return d ? d.m : null;
+}
+
+function fyLabel(startYear) { return startYear + '-' + String((startYear + 1) % 100).padStart(2, '0'); }
+
+// The dashboard's own filter state, separate from the IR list's strips.
+// `month` is deliberately NOT derived from `fy`: Month was asked to filter
+// independently, so `month` narrows across every year and `fy` narrows across every
+// month. Both set is their intersection, not a contradiction.
+const INSIGHTS_ALL = 'all';
+let insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
+                        category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+
+// The dropdowns' option lists, computed over the WHOLE list and never over the
+// filtered rows: a select built from filtered rows would drop every other option the
+// moment one was chosen, leaving no way to change your mind. Same reasoning as
+// segmentCounts() reading allIRs.
+function insightsFacets(irs) {
+  const rows = Array.isArray(irs) ? irs : [];
+  const years = new Set(), months = new Set(), customers = new Set(), drones = new Set();
+  let undated = 0;
+  rows.forEach(ir => {
+    const fy = irFiscalYear(ir.dateRaisedISO);
+    if (fy === null) undated++;
+    else { years.add(fy); months.add(irMonthNumber(ir.dateRaisedISO)); }
+    if (ir.customerName) customers.add(String(ir.customerName));
+    if (ir.droneId) drones.add(String(ir.droneId));
+  });
+  return {
+    years: [...years].sort((a, b) => b - a),
+    months: [...months].sort((a, b) => a - b),
+    customers: [...customers].sort((a, b) => a.localeCompare(b)),
+    drones: [...drones].sort((a, b) => a.localeCompare(b)),
+    undated,
+  };
+}
+
+// PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures, exactly
+// like buildTimeline(). Returns counts only; the caller decides how to draw them.
+function insightsSummary(irs, filters) {
+  const all = Array.isArray(irs) ? irs : [];
+  const f = filters || {};
+  const rows = all.filter(ir => {
+    // String() on both sides: a select hands back a string, and a Set-derived
+    // option list holds numbers. Comparing them raw would match nothing at all,
+    // silently, for FY and Month only.
+    if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
+    if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
+    if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
+    if (f.category !== INSIGHTS_ALL) {
+      if (f.category === UNCATEGORISED) { if (ir.category) return false; }
+      else if (ir.category !== f.category) return false;
+    }
+    if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
+    if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
+    return true;
+  });
+
+  const categories = {};
+  IR_CATEGORIES.forEach(k => { categories[k] = 0; });
+  const subcategories = {};
+  REPAIR_SUBCATEGORIES.forEach(k => { subcategories[k] = 0; });
+  const statuses = {};
+  Object.keys(STATUS_CATEGORIES).forEach(k => { statuses[k] = 0; });
+
+  let uncategorised = 0, repairUnset = 0, undated = 0;
+  rows.forEach(ir => {
+    // hasOwnProperty, not a truthiness test: an IR carrying a category that is no
+    // longer on the list is uncategorised for every purpose the dashboard has.
+    if (Object.prototype.hasOwnProperty.call(categories, ir.category)) categories[ir.category]++;
+    else uncategorised++;
+    if (ir.category === 'REPAIR') {
+      if (Object.prototype.hasOwnProperty.call(subcategories, ir.subCategory)) subcategories[ir.subCategory]++;
+      else repairUnset++;
+    }
+    statuses[statusCategory(ir.status)]++;
+    if (irFiscalYear(ir.dateRaisedISO) === null) undated++;
+  });
+
+  return { total: all.length, matched: rows.length, undated,
+           categories, uncategorised, subcategories, repairUnset, statuses };
+}
+
+// What the pane shows before the first fetch lands. A page of zeroes is not
+// "loading" — it is an answer ("nothing was raised"), and it is the wrong one.
+// Exported as a constant because it is ALSO the pane's static markup in
+// index.html: the very first frame happens before fetchIRs() is even called, so the
+// skeleton has to exist in the DOM before any script runs.
+const INSIGHTS_SKELETON = `
+  <div class="insights-skeleton"></div>
+  <div class="insights-skeleton"></div>
+  <div class="insights-skeleton"></div>`;
+
+function insightsOpt(v, sel, label) {
+  const value = String(v);
+  return `<option value="${escHtml(value)}"${value === String(sel) ? ' selected' : ''}>${escHtml(label == null ? value : label)}</option>`;
+}
+
+// SYNCHRONOUS, IDEMPOTENT and safe with an empty list. Those three properties are
+// what let four different callers use it with no sequence token: setAllIRs() (every
+// fetch path, including the demo fallback and an in-page re-login), loadIRState()
+// (the app-owned overlay, which lands after the list), refreshIRList() (the header
+// Refresh) and showInsights() itself.
+function renderInsights() {
+  const body = document.getElementById('insights-body');
+  if (!body) return;
+  if (!allIRs.length) { body.innerHTML = INSIGHTS_SKELETON; return; }
+
+  const fx = insightsFacets(allIRs);
+  const f  = insightsFilters;
+
+  // A filter whose value has left the data — a refetch without that customer, a
+  // category CR has since cleared off every IR it applied to — is RESET rather than
+  // kept. The select cannot show an option that no longer exists, so keeping the
+  // value would leave the page reporting 0 matches with every dropdown reading
+  // "All", which is the one failure a reader cannot diagnose from the screen.
+  if (f.fy !== INSIGHTS_ALL && !fx.years.some(y => String(y) === String(f.fy))) f.fy = INSIGHTS_ALL;
+  if (f.month !== INSIGHTS_ALL && !fx.months.some(m => String(m) === String(f.month))) f.month = INSIGHTS_ALL;
+  if (f.customer !== INSIGHTS_ALL && !fx.customers.includes(f.customer)) f.customer = INSIGHTS_ALL;
+  if (f.drone !== INSIGHTS_ALL && !fx.drones.includes(f.drone)) f.drone = INSIGHTS_ALL;
+
+  const sum = insightsSummary(allIRs, f);
+  const filtered = sum.matched !== sum.total;
+
+  const filterRow = (id, label, options) => `
+    <label class="insights-filter"><span>${escHtml(label)}</span>
+      <select class="form-input" id="${id}">${options}</select>
+    </label>`;
+
+  const statusOpts = SEGMENT_LABELS
+    .map(([key, label]) => insightsOpt(key, f.status, key === 'all' ? 'All statuses' : label)).join('');
+
+  body.innerHTML = `
+    <div class="insights-filters">
+      ${filterRow('ins-fy', 'Fiscal year',
+        insightsOpt(INSIGHTS_ALL, f.fy, 'All years') +
+        fx.years.map(y => insightsOpt(y, f.fy, 'FY ' + fyLabel(y))).join(''))}
+      ${filterRow('ins-month', 'Month',
+        insightsOpt(INSIGHTS_ALL, f.month, 'All months') +
+        fx.months.map(m => insightsOpt(m, f.month, MONTH_LABELS[m - 1])).join(''))}
+      ${filterRow('ins-status', 'Status', statusOpts)}
+      ${filterRow('ins-category', 'Category',
+        insightsOpt(INSIGHTS_ALL, f.category, 'All categories') +
+        IR_CATEGORIES.map(k => insightsOpt(k, f.category)).join('') +
+        (sum.uncategorised || f.category === UNCATEGORISED
+          ? insightsOpt(UNCATEGORISED, f.category, 'No category') : ''))}
+      ${filterRow('ins-customer', 'Customer',
+        insightsOpt(INSIGHTS_ALL, f.customer, 'All customers') +
+        fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
+      ${filterRow('ins-drone', 'Drone SN',
+        insightsOpt(INSIGHTS_ALL, f.drone, 'All drones') +
+        fx.drones.map(d => insightsOpt(d, f.drone)).join(''))}
+      <button type="button" class="btn btn-sm btn-secondary" id="ins-clear"
+              ${filtered ? '' : 'disabled'}>Clear filters</button>
+    </div>
+
+    <p class="insights-total">
+      <strong>${sum.matched}</strong> of ${sum.total} IR${sum.total === 1 ? '' : 's'}
+      ${filtered ? 'match these filters' : 'in the list'}.
+      ${sum.undated ? `<span class="insights-note">${sum.undated} carry no readable date, so a year or month filter excludes them.</span>` : ''}
+      ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
+    </p>
+
+    <div class="insights-cards">
+      ${IR_CATEGORIES.map(k => `
+        <button type="button" class="insights-card${f.category === k ? ' active' : ''}" data-cat="${escHtml(k)}">
+          <span class="insights-card-n">${sum.categories[k]}</span>
+          <span class="insights-card-label">${escHtml(k)}</span>
+        </button>`).join('')}
+      ${sum.uncategorised ? `
+        <button type="button" class="insights-card is-muted${f.category === UNCATEGORISED ? ' active' : ''}" data-cat="${escHtml(UNCATEGORISED)}">
+          <span class="insights-card-n">${sum.uncategorised}</span>
+          <span class="insights-card-label">No category</span>
+        </button>` : ''}
+    </div>
+
+    ${sum.categories.REPAIR ? `
+      <div class="insights-block">
+        <h3 class="insights-h">REPAIR — by sub-category</h3>
+        <div class="insights-subcats">
+          ${REPAIR_SUBCATEGORIES.map(k => `
+            <span class="insights-subcat${k === REPAIR_OTHERS ? ' is-others' : ''}">
+              ${escHtml(k)}<span class="insights-subcat-n">${sum.subcategories[k]}</span>
+            </span>`).join('')}
+          ${sum.repairUnset ? `<span class="insights-subcat is-muted">Not set<span class="insights-subcat-n">${sum.repairUnset}</span></span>` : ''}
+        </div>
+        ${sum.subcategories[REPAIR_OTHERS] ? `
+          <ul class="insights-others">
+            ${allIRs.filter(ir => ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS)
+              .slice(0, 12)
+              .map(ir => `<li><strong>${escHtml(ir.irNumber)}</strong> — ${escHtml(ir.subCategoryNote || 'no note')}</li>`).join('')}
+          </ul>` : ''}
+      </div>` : ''}
+
+    <div class="insights-block">
+      <h3 class="insights-h">Status mix</h3>
+      <div class="insights-mix">
+        ${SEGMENT_LABELS.filter(([k]) => k !== 'all').map(([k, label]) => `
+          <span class="insights-mix-row">
+            <span class="${CATEGORY_BADGE[k]}">${escHtml(label)}</span>
+            <span class="insights-mix-n">${sum.statuses[k] || 0}</span>
+          </span>`).join('')}
+      </div>
+    </div>`;
+}
+
+function showInsights() {
+  currentView = 'insights';
+  renderLayout();
+  headerTitle.textContent = 'Insights';
+  // The pane renders from whatever is in memory; handleRoute() is what waits for
+  // the list. Re-rendering here keeps a re-entry from showing a stale dashboard.
+  renderInsights();
+}
+
+if (insightsView) {
+  insightsView.addEventListener('change', e => {
+    const id = e.target && e.target.id;
+    const map = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
+                  'ins-category': 'category', 'ins-customer': 'customer', 'ins-drone': 'drone' };
+    if (!map[id]) return;
+    insightsFilters[map[id]] = e.target.value;
+    renderInsights();
+  });
+  insightsView.addEventListener('click', e => {
+    const el = e.target && e.target.closest ? e.target.closest('.insights-card') : null;
+    if (el) {
+      // A card deep-links into the IR LIST, filtered to that category — the counts
+      // are only useful if you can get from a number to the IRs behind it.
+      setCategoryFilter(el.dataset.cat);
+      goIndex();
+      return;
+    }
+    if (e.target && e.target.id === 'ins-clear') {
+      insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
+                          category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+      renderInsights();
+    }
+  });
+}
+
 // ─── IR REPOSITORY — DIRECT SHEET READ ───────────────────────────────────────
 // Reads the "Form Responses" tab straight from Google Sheets as CSV. No Apps Script
 // deploy required. Falls back to GAS / demo if the sheet is unreachable.
@@ -2163,6 +2668,10 @@ async function fetchIRsFromSheet() {
 
 async function fetchIRs() {
   setSyncStatus('⟳ Syncing with the IR Repository…');
+  // Assumed live until a path proves otherwise. Set HERE, before any setAllIRs()
+  // call, because setAllIRs() is what repaints the dashboard — a flag set after it
+  // would arrive one render too late and leave the previous answer's warning up.
+  _dataIsDemo = false;
 
   // 1. Primary: read the sheet directly (no backend deploy needed)
   try {
@@ -2194,7 +2703,11 @@ async function fetchIRs() {
     throw new Error(data.message || 'Unknown error');
   } catch (err) {
     setSyncStatus('⚠ Could not sync — showing demo data');
-    // Demo mode: render sample cards so UI is visible
+    // Demo mode: render sample cards so UI is visible. The flag exists for the
+    // Insights page, which is the one screen where fabricated rows read as
+    // statistics rather than as obviously-placeholder cards — a "CRASH: 2" built
+    // from a sample is a number somebody could quote in a meeting.
+    _dataIsDemo = true;
     setAllIRs(getDemoIRs());
     renderIRList(allIRs);
   }
@@ -2294,6 +2807,7 @@ function mergeLegacyOnlyIRs() {
 
 function renderIRList(records) {
   renderSegments();
+  renderCategorySegments();
   if (!records || records.length === 0) {
     irList.innerHTML = allIRs.length
       ? '<div class="empty-state"><span>🔍</span>No IRs match this filter.</div>'
@@ -2318,7 +2832,8 @@ function renderIRList(records) {
         <div class="ir-title">${escHtml(ir.irNumber)}</div>
         <div class="ir-meta">
           <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
-          ${ir.type ? `<span class="ir-dot">·</span><span class="ir-type">${escHtml(ir.type)}</span>` : ''}
+          ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
+          ${ir.subCategory ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.subCategory)}</span>` : ''}
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
         </div>
       </div>
@@ -2417,11 +2932,58 @@ function renderSegments() {
   `).join('');
 }
 
+// ─── LIST FILTER: CATEGORY ───────────────────────────────────────────────────
+// A second, INDEPENDENT filter axis beside the status strip. Deliberately not a
+// third row of SEGMENT_LABELS: the status strip and this one combine (a CRASH that
+// is Resolved is a real question), so they are two scalars read by the same
+// applyListFilters(), not two states of one control.
+const CATEGORY_ALL = 'all';
+const UNCATEGORISED = '__none__';   // an IR CR has not triaged yet
+
+function categoryCounts() {
+  const c = { all: allIRs.length };
+  IR_CATEGORIES.forEach(k => { c[k] = 0; });
+  c[UNCATEGORISED] = 0;
+  allIRs.forEach(ir => {
+    const k = ir.category || UNCATEGORISED;
+    // An unknown value (a category retired from the list, a hand-edited store row)
+    // must not be silently added to `all` twice over — it falls into the
+    // uncategorised bucket rather than inventing a twelfth segment.
+    c[k] = (c[k] || 0) + 1;
+  });
+  return c;
+}
+
+// Uncategorised is shown only when there is something in it. On a store where every
+// IR has been triaged the segment would read "0" forever, and CR would reasonably
+// read that as a bug rather than as good news.
+function renderCategorySegments() {
+  if (!listCategories) return;
+  const c = categoryCounts();
+  const keys = [CATEGORY_ALL, ...IR_CATEGORIES];
+  if (c[UNCATEGORISED]) keys.push(UNCATEGORISED);
+  listCategories.innerHTML = keys.map(key => {
+    const label = key === CATEGORY_ALL ? 'All categories'
+                : key === UNCATEGORISED ? 'No category'
+                : key;
+    return `
+    <button type="button" class="segment${activeCategory === key ? ' active' : ''}"
+            data-cat="${escHtml(key)}" role="tab" aria-selected="${activeCategory === key}">
+      ${escHtml(label)}<span class="segment-count">${c[key] || 0}</span>
+    </button>`;
+  }).join('');
+}
+
 // The one place the search box and the segment strip combine into a filter.
 function applyListFilters() {
   const q = (searchInput.value || '').toLowerCase().trim();
   let rows = allIRs;
   if (activeSegment !== 'all') rows = rows.filter(ir => statusCategory(ir.status) === activeSegment);
+  if (activeCategory !== CATEGORY_ALL) {
+    rows = rows.filter(ir => activeCategory === UNCATEGORISED
+      ? !ir.category
+      : ir.category === activeCategory);
+  }
   if (q) {
     rows = rows.filter(ir =>
       ir.irNumber?.toLowerCase().includes(q) ||
@@ -2444,6 +3006,22 @@ if (listSegments) {
   });
 }
 
+if (listCategories) {
+  listCategories.addEventListener('click', e => {
+    const btn = e.target.closest('.segment');
+    if (!btn) return;
+    setCategoryFilter(btn.dataset.cat);
+  });
+}
+
+// The single setter, so the Insights cards can deep-link into a filtered list
+// without duplicating the repaint order.
+function setCategoryFilter(key) {
+  activeCategory = key || CATEGORY_ALL;
+  renderCategorySegments();
+  applyListFilters();
+}
+
 // ─── PASSBOOK DETAIL ─────────────────────────────────────────────────────────
 async function openPassbook(irNumber) {
   // Sequence token: a fast second open (list clicks, a hash change) must not let
@@ -2451,7 +3029,6 @@ async function openPassbook(irNumber) {
   const seq = ++_openSeq;
 
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
-  esignatureState = {};   // clear signatures from any previously-open IR
   evidenceState = {};     // clear image-evidence state from any previously-open IR
   dispatchChecklistState = {}; // clear Section H dispatch checklist from previous IR
 
@@ -2470,7 +3047,9 @@ async function openPassbook(irNumber) {
       currentIR.assignee     = st.assignee     || '';
       currentIR.assigneeName = st.assigneeName || '';
       if (st.priority) currentIR.priority = st.priority;
-      currentIR.type = st.type || '';
+      currentIR.category        = st.category        || '';
+      currentIR.subCategory     = st.subCategory     || '';
+      currentIR.subCategoryNote = st.subCategoryNote || '';
       currentIR.done = Array.isArray(st.done) ? st.done : [];
     }
     renderBannerMeta();
@@ -2865,7 +3444,7 @@ async function saveOverview() {
   }, 3000);
 }
 
-// The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
+// The banner's triage line. Every value here is app-owned (`__IRS__`); the Sheet
 // only supplies the status an IR starts life with.
 function renderBannerMeta() {
   if (!bannerPills || !currentIR) return;
@@ -2878,7 +3457,8 @@ function renderBannerMeta() {
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
-    (ir.type ? `<span class="meta-pill">${escHtml(ir.type)}</span>` : '') +
+    (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
+    (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
@@ -2886,7 +3466,7 @@ function renderBannerMeta() {
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
 }
 
-// ─── TRIAGE MODAL (status / assignee / priority / type) ──────────────────────
+// ─── TRIAGE MODAL (status / assignee / priority / category) ──────────────────
 // Writes to `__IRS__` — the app's own record — and never touches the client's
 // Sheet, which keeps the customer's original report intact. Reuses the
 // full-screen modal pattern of the team-directory editor so it works at phone
@@ -2924,10 +3504,24 @@ function openTriageModal() {
             <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '')).join('')}
           </select>
         </label>
-        <label class="triage-row"><span>Type</span>
-          <select class="form-input" id="triage-type">
-            <option value="">— None —</option>${TICKET_TYPES.map(v => opt(v, ir.type || '')).join('')}
+        <label class="triage-row"><span>Category</span>
+          <select class="form-input" id="triage-category">
+            <option value="">— Choose —</option>${IR_CATEGORIES.map(v => opt(v, ir.category || '')).join('')}
           </select>
+        </label>
+        <!-- Sub-category exists ONLY under REPAIR. Both rows stay in the DOM and are
+             shown/hidden, rather than being added and removed, so the two selects
+             never lose the listener wired below by being replaced. -->
+        <label class="triage-row" id="triage-subcat-row"${ir.category === 'REPAIR' ? '' : ' style="display:none"'}>
+          <span>Sub-category</span>
+          <select class="form-input" id="triage-subcategory">
+            <option value="">— Choose —</option>${REPAIR_SUBCATEGORIES.map(v => opt(v, ir.subCategory || '')).join('')}
+          </select>
+        </label>
+        <label class="triage-row" id="triage-subcat-note-row"${ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS ? '' : ' style="display:none"'}>
+          <span>Mention it</span>
+          <input type="text" class="form-input" id="triage-subcat-note" maxlength="120"
+                 placeholder="What was repaired?" value="${escHtml(ir.subCategoryNote || '')}" />
         </label>
       </div>
       <div class="inward-options-foot">
@@ -2936,6 +3530,36 @@ function openTriageModal() {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  wireTriageCategoryRows();
+}
+
+// Keeps the two conditional rows honest as the CR changes their mind. The rule is
+// one-directional on purpose: leaving REPAIR CLEARS the sub-category and its note,
+// so a stale "BATTERY" can never ride along under CRASH — which is exactly the kind
+// of value that would silently corrupt the Insights counts later.
+function wireTriageCategoryRows() {
+  const catRow  = document.getElementById('triage-category');
+  const subRow  = document.getElementById('triage-subcat-row');
+  const subSel  = document.getElementById('triage-subcategory');
+  const noteRow = document.getElementById('triage-subcat-note-row');
+  const noteIn  = document.getElementById('triage-subcat-note');
+  if (!catRow || !subRow || !subSel) return;
+
+  const sync = () => {
+    const isRepair = catRow.value === 'REPAIR';
+    subRow.style.display = isRepair ? '' : 'none';
+    if (!isRepair) {
+      subSel.value = '';
+      if (noteIn) noteIn.value = '';
+    }
+    if (noteRow) {
+      noteRow.style.display = (isRepair && subSel.value === REPAIR_OTHERS) ? '' : 'none';
+      if (!isRepair || subSel.value !== REPAIR_OTHERS) { if (noteIn) noteIn.value = ''; }
+    }
+  };
+  catRow.addEventListener('change', sync);
+  subSel.addEventListener('change', sync);
+  sync();
 }
 function closeTriageModal() { document.getElementById('triage-modal')?.remove(); }
 
@@ -2945,11 +3569,42 @@ async function applyTriage() {
   const status   = document.getElementById('triage-status')?.value     || '';
   const email    = document.getElementById('triage-assignee')?.value   || '';
   const priority = document.getElementById('triage-priority')?.value   || '';
-  const type     = document.getElementById('triage-type')?.value       || '';
+  const category = document.getElementById('triage-category')?.value   || '';
   const prev     = String(currentIR.assignee || '').toLowerCase();
   const member   = teamDirectory.find(d => String(d.email).toLowerCase() === email.toLowerCase());
 
-  const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '', priority, type };
+  // Category is MANDATORY. It is the one triage field the list filter and the
+  // Insights page count by, so a triaged IR without one would be invisible to both
+  // — an "uncategorised" hole no report could explain. The sub-category is required
+  // too, but only where it exists (REPAIR); the note only under OTHERS.
+  if (!category) {
+    showToast('Choose a Category before saving Triage');
+    return;
+  }
+  const isRepair = category === 'REPAIR';
+  const subCategory = isRepair ? (document.getElementById('triage-subcategory')?.value || '') : '';
+  if (isRepair && !subCategory) {
+    showToast('Choose a Sub-category for a REPAIR');
+    return;
+  }
+  const subCategoryNote = (isRepair && subCategory === REPAIR_OTHERS)
+    ? (document.getElementById('triage-subcat-note')?.value || '').trim()
+    : '';
+  // OTHERS is the escape hatch from the nine components: it exists so CR can name a
+  // fault the list does not cover. Saving it empty turns the hatch into a blank, and
+  // nine-of-nine becomes the same unexplained bucket the categories were introduced
+  // to remove.
+  if (isRepair && subCategory === REPAIR_OTHERS && !subCategoryNote) {
+    showToast('Say what was repaired for an OTHERS sub-category');
+    return;
+  }
+
+  const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '',
+                  priority, category, subCategory, subCategoryNote };
+  // `type` is the retired field. patchIRState spread-merges into the STORED row, so
+  // simply not sending it would leave the stale key there forever. An explicit
+  // undefined is what retires it, per-IR, as CR re-triages.
+  patch.type = undefined;
   // Only a real status CHANGE moves the clock. Re-saving the same status must
   // not reset time-in-status, or every triage edit would fake a fresh IR.
   if (status && status !== currentIR.status) {
@@ -3105,9 +3760,8 @@ const SECTIONS = {
       { id: 'b_inwardBy',   label: 'Inward By (Name)', type: 'text', placeholder: 'Person who performed the inward' },
       { id: 'b_stNo',       label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number assigned by Inventory' },
       { id: 'b_inwardTable', label: 'Particulars Received', type: 'inwardTable' },
+      { id: 'b_inwardPhotos', label: 'Inward Photos (Image or PDF)', type: 'imageEvidence' },
       { id: 'b_remarks',    label: 'Remarks', type: 'textarea', placeholder: 'Condition at receiving, missing items, observations, etc.' },
-      { id: 'b_signInward',    label: 'Digital Signature — Inward Performed By',  type: 'esignature', role: 'Inward Performed By' },
-      { id: 'b_signInventory', label: 'Digital Signature — Inventory (ST No. Assigner)', type: 'esignature', role: 'Inventory (ST No. Assigner)' },
     ]
   },
   'sec-c': {
@@ -3115,10 +3769,9 @@ const SECTIONS = {
     fields: [
       { id: 'c_iqcDate',      label: 'Inspection Date', type: 'date' },
       { id: 'c_iqcBy',        label: 'Inspected By',    type: 'text', placeholder: 'IQC inspector name' },
-      { id: 'c_evidenceLink', label: 'Link to Evidence (Photo / Video) Folder', type: 'url', placeholder: 'Paste folder link...' },
       { id: 'c_iqcTable',     label: 'Visual Inspection Checklist', type: 'iqcTable' },
+      { id: 'c_iqcPhotos',    label: 'Inspection Photos (Image or PDF)', type: 'imageEvidence' },
       { id: 'c_remarks',      label: 'Remarks', type: 'textarea', placeholder: 'Overall inspection remarks, observations, summary...' },
-      { id: 'c_signIqc',      label: 'Digital Signature — IQC Inspector', type: 'esignature', role: 'IQC Inspector' },
     ]
   },
   // Section D — Investigation, in two parts:
@@ -3138,7 +3791,6 @@ const SECTIONS = {
       { id: 'd_rootCause',      label: 'Root Cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
       { id: 'd_correctiveAction',  label: 'Corrective Action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
       { id: 'd_preventiveAction',  label: 'Preventive Action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
-      { id: 'd_signQcManager',  label: 'Digital Signature — Technical Support (QC Manager)', type: 'esignature', role: 'Technical Support (QC Manager)' },
 
       // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
       { id: 'd_partB',              label: 'Part B — Cost Analysis (Repair Estimate &amp; Lead Time)', type: 'divider' },
@@ -3146,7 +3798,6 @@ const SECTIONS = {
       { id: 'd_repairTable',        label: 'Particulars For Repair / Replace', type: 'costTable' },
       { id: 'd_leadTime',           label: 'Estimated Lead Time', type: 'text', placeholder: 'e.g. 7–10 working days' },
       { id: 'd_goAhead',            label: 'Received Go Ahead By The Customer?', type: 'select', options: ['', 'Yes', 'No'] },
-      { id: 'd_signPurchaseManager', label: 'Digital Signature — Purchase Manager', type: 'esignature', role: 'Purchase Manager' },
     ]
   },
   'sec-e': {
@@ -3154,7 +3805,6 @@ const SECTIONS = {
     fields: [
       { id: 'e_prodDocs',     label: 'Route Card / Job Card (Image or PDF)', type: 'imageEvidence' },
       { id: 'e_prodRemarks',  label: 'Rework Details / Remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
-      { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
     ]
   },
   // Quality Test Report — a merge of the old QC section and the old Flight Test
@@ -3165,21 +3815,22 @@ const SECTIONS = {
     fields: [
       { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
-      { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
 
       // ── Part B — Flight Test ──
       { id: 'f_partFlight',    label: 'Flight Test', type: 'divider' },
-      { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
-      { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
+      // Basic + Mission are ONE field now. The id stays `g_basicReport` so the audit
+      // history and every anchored comment on it survive; the saved contents of the
+      // retired `g_missionReport` are folded in when this section is loaded, by the
+      // imageEvidence branch of populateFieldValue().
+      { id: 'g_basicReport',   label: 'Flight Test Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
       { id: 'g_postProcessing', label: 'Data Check — Post-Processing', type: 'checkpointEvidence', tickLabel: 'Post-processing data check performed & verified' },
       { id: 'g_dataCheckRemarks', label: 'Data Check Remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
-      { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
   },
   // PDI Report/Dispatch Record — a merge of the old PDI section and the old
   // Logistics & Dispatch section. Inspecting the packed goods and dispatching
-  // them is one handover, signed once.
+  // them is one handover, recorded once.
   'sec-g': {
     title: 'Section G — PDI Report/Dispatch Record',
     fields: [
@@ -3187,7 +3838,6 @@ const SECTIONS = {
       { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
       { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
-      { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
 
       // ── Part B — Dispatch ──
       { id: 'g_partDispatch', label: 'Dispatch', type: 'divider' },
@@ -3231,9 +3881,14 @@ function buildSectionForms(irNumber) {
     if (btn) btn.onclick = () => saveSection(secId, irNumber);
   });
 
-  // Wire Section D Part A PDF download
-  const dlD = document.getElementById('download-sec-d');
-  if (dlD) dlD.onclick = () => downloadSectionDPartA();
+  // Wire the per-section export buttons. Exporting is a READ, so these are wired
+  // for every user and exempted from the view-only disable below.
+  Object.keys(SECTIONS).forEach(secId => {
+    const dl = document.getElementById('download-' + secId);
+    if (dl) { dl.classList.add('sec-export-btn'); dl.onclick = () => exportSectionPdf(secId, { share: false }); }
+    const sh = document.getElementById('share-' + secId);
+    if (sh) { sh.classList.add('sec-export-btn'); sh.onclick = () => exportSectionPdf(secId, { share: true }); }
+  });
 
   // Wire the pinned Overview's save button. Not part of the SECTIONS loop above:
   // the Overview is not a section, so it has no `save-sec-*` id to pick up.
@@ -3309,6 +3964,9 @@ function applySectionAccessGating() {
     if (view && !edit) {
       pane.querySelectorAll('input, textarea, select, button').forEach(el => {
         if (el.id === 'nudge-bell' || el.classList.contains('sec-nudge-btn')) return;
+        // Exporting a section is a read: a view-only user may still download it or
+        // share it. Only writing is gated.
+        if (el.classList.contains('sec-export-btn')) return;
         if (el.type === 'file') { el.disabled = true; return; }
         // Don't disable the section's comment button if the user can comment.
         if (el.classList.contains('field-nudge-btn') && comment) return;
@@ -3457,8 +4115,6 @@ function buildField(field, irNumber, sectionId) {
         <div class="iqc-table-body">${buildIqcRowsHTML()}</div>
         ${adminBtn}
       </div>`;
-  } else if (field.type === 'esignature') {
-    control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
   } else if (field.type === 'analysisNote') {
     // Dynamic read-only intro line: "Dear customer, analysis of IRXXX for your
     // system with ID XXXXX has been completed. Its findings are as below."
@@ -3666,19 +4322,7 @@ function updateUrlLink(fieldId) {
   }
 }
 
-// ─── E-SIGNATURE (Section B) ───────────────────────────────────────────────────
-// Captures the signed-in user's email + full timestamp. Once signed, the cell
-// is locked (not editable, not deletable). An authorized user may override
-// (re-sign); each prior value is retained in `history` and shown on hover.
-
-function formatTimestamp(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return String(iso);
-  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const pad = n => String(n).padStart(2, '0');
-  return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
+// ─── HTML ESCAPING ─────────────────────────────────────────────────────────────
 
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -3710,84 +4354,6 @@ function escJsAttr(s) {
 function safeUrl(u) {
   const s = String(u == null ? '' : u).trim();
   return /^https?:\/\//i.test(s) ? s : '';
-}
-
-// An e-signature block is READ-ONLY. There is no "Sign as …" button any more, and
-// no "Override & Re-sign" — the block records who saved the section, and the
-// activity log records it independently. The buttons existed because the old
-// Google Sheet had no login, so a typed name column was the only way to say who
-// did the work; the app has a login now, so a second, role-specific step before
-// Save recorded nothing the audit trail does not already carry.
-//
-// The fill itself lives in saveSection() — see signSectionOnSave(). This function
-// only paints whatever state that produced.
-function renderESignatureHTML(fieldId, role) {
-  const sig = esignatureState[fieldId];
-  const history = (sig && sig.history) ? sig.history : [];
-  const historyLines = history.map(h => `• ${escHtml(h.signedBy)} — ${escHtml(formatTimestamp(h.signedAt))}`).join('<br>');
-  const historyTitle = historyLines
-    ? `Earlier:&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
-    : '';
-
-  if (sig && sig.signedBy) {
-    return `
-      <div class="esignature-signed" title="${escHtml(historyTitle)}">
-        <div class="esignature-row">
-          <span class="esignature-check">&#10003;</span>
-          <div class="esignature-info">
-            <div class="esignature-line">${escHtml(role)} — signed by <strong>${escHtml(sig.signedBy)}</strong></div>
-            <div class="esignature-stamp">${escHtml(formatTimestamp(sig.signedAt))}</div>
-          </div>
-        </div>
-        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Earlier:</span><br>${historyLines}</div>` : ''}
-      </div>`;
-  }
-  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span><span class="esignature-muted">Recorded automatically when this section is saved.</span></div>`;
-}
-
-function refreshESignature(fieldId) {
-  const block = document.getElementById(fieldId + '-block');
-  if (block) block.innerHTML = renderESignatureHTML(fieldId, block.dataset.role || '');
-}
-
-// Stamps the role line for whoever is saving, from ONE section. Called from
-// saveSection() just before the values are collected, so the payload it posts
-// already carries the signature and the normal save path does the rest — no second
-// write, and no draft (this is a real save, not a draft).
-//
-// TWO rules, and both are load-bearing:
-//
-//   1. Never overwrite. A block that already carries a name is left exactly as it
-//      is, so nobody can be relabelled by someone else's later save.
-//   2. Only ONE block per save — the first that is still empty — and only if this
-//      person has not already signed something in this section.
-//
-// Rule 2 is what keeps a two-role section separable. Section B is signed by two
-// different people: Inward, then Inventory. Filling every empty block on each save
-// would stamp "Inventory (ST No. Assigner)" with the Inward person's name, which is
-// a wrong attribution on a line that reaches a customer. Filling the first empty
-// one gives the Inward person their line and the Inventory person theirs, while the
-// "already signed here" guard stops a second save by the same person from creeping
-// onto the next role.
-function signSectionOnSave(sectionId) {
-  const section = SECTIONS[sectionId];
-  const email = currentUser?.email;
-  if (!section || !email) return;
-
-  const blocks = section.fields.filter(f => f.type === 'esignature');
-  // I have already claimed my role in this section — a re-save is not a new claim.
-  if (blocks.some(f => esignatureState[f.id]?.signedBy === email)) return;
-
-  const empty = blocks.find(f => !esignatureState[f.id]?.signedBy);
-  if (!empty) return;
-
-  const prev = esignatureState[empty.id];
-  esignatureState[empty.id] = {
-    signedBy: email,
-    signedAt: new Date().toISOString(),
-    history: (prev && prev.history) ? prev.history : [],
-  };
-  refreshESignature(empty.id);
 }
 
 // ─── INWARD DROPDOWN OPTIONS (admin-customizable) ──────────────────────────────
@@ -4115,6 +4681,52 @@ async function loadSectionData(irNumber) {
   }
 }
 
+// Resolve a saved imageEvidence field's entries: captions saved with an empty link
+// (the upload was still pending at the last save) get their Drive URLs merged in
+// from '<fieldId>_links'. That merge is SKIPPED for drafts — a draft's empty link
+// means a not-yet-uploaded image, which must not pick up a Drive URL belonging to a
+// different (saved) entry. Also seeds one entry per link for fields migrated from
+// the old `file` type, which stored nothing but links.
+function savedEvidenceEntries(sectionId, fieldId, value, isDraft) {
+  let arr = (Array.isArray(value) ? value : []).map(e => ({
+    caption: (e && e.caption) || '', link: (e && e.link) || '', type: (e && e.type) || '', name: (e && e.name) || '',
+  }));
+  if (isDraft) return arr;
+  const linksRaw = currentSectionData?.[sectionId]?.[fieldId + '_links'];
+  if (linksRaw) {
+    const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
+    let li = 0;
+    arr = arr.map(e => (e.link || li >= links.length) ? e : { caption: e.caption, link: links[li++], type: e.type, name: e.name });
+  }
+  if (!arr.length) {
+    arr = String(linksRaw || '').split(',').map(s => s.trim()).filter(Boolean).map(l => ({ caption: '', link: l, type: '', name: '' }));
+  }
+  return arr;
+}
+
+// Fold the two Flight Test upload fields into one without losing the uploads that
+// are already in the store. Deduped by link, else name, else caption — and an entry
+// with none of those is always kept, because two blanks are not the same thing.
+// Idempotent: the survivor absorbs the retired field's entries, and re-running it
+// against the same saved data collapses to the same set. Nothing is written back,
+// so no record is touched.
+function mergeFlightReportEntries(base, extra) {
+  const seen = new Set();
+  const keyOf = e => {
+    if (e.link) return 'l:' + e.link;
+    if (e.name) return 'n:' + e.name;
+    if (e.caption) return 'c:' + e.caption + '|' + (e.type || '');
+    return '';
+  };
+  const out = [];
+  [base, extra].forEach(list => (list || []).forEach(e => {
+    const key = keyOf(e);
+    if (key) { if (seen.has(key)) return; seen.add(key); }
+    out.push(e);
+  }));
+  return out;
+}
+
 function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   const section = SECTIONS[sectionId];
   const field = section?.fields.find(f => f.id === fieldId);
@@ -4126,28 +4738,15 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
 
   // Handle imageEvidence type — value is [{caption, link, type, name}]
   if (field?.type === 'imageEvidence') {
-    let arr = Array.isArray(value) ? value : [];
-    // When loading SAVED data, captions saved with empty links (pending upload at
-    // last save) get their Drive URLs merged in from '<fieldId>_links'. Skip this
-    // for drafts: a draft's empty link means a not-yet-uploaded image, which must
-    // NOT pick up a Drive URL belonging to a different (saved) entry.
-    if (!isDraft) {
-      const linksRaw = currentSectionData?.[sectionId]?.[fieldId + '_links'];
-      if (linksRaw) {
-        const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
-        let li = 0;
-        arr = arr.map(e => {
-          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++], type: e.type || '', name: e.name || '' };
-          return { caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' };
-        });
-      }
-      // Back-compat: fields migrated from the old `file` type stored only Drive
-      // links in <fieldId>_links with no entry array. Seed one entry per link so
-      // those uploads still preview after migration to imageEvidence.
-      if (!arr.length) {
-        const links = String(currentSectionData?.[sectionId]?.[fieldId + '_links'] || '').split(',').map(s => s.trim()).filter(Boolean);
-        arr = links.map(l => ({ caption: '', link: l, type: '', name: '' }));
-      }
+    let arr = savedEvidenceEntries(sectionId, fieldId, value, isDraft);
+    // The retired "Mission Flight Test Report" was merged into this field. Fold its
+    // saved uploads in here, on load only, so they stay visible instead of sitting
+    // in the store unseen. Deduped, so this cannot duplicate on a second load.
+    if (!isDraft && fieldId === 'g_basicReport') {
+      arr = mergeFlightReportEntries(
+        arr,
+        savedEvidenceEntries(sectionId, 'g_missionReport', currentSectionData?.[sectionId]?.g_missionReport, false)
+      );
     }
     evidenceState[fieldId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null, type: e.type || '', name: e.name || '' }));
     renderImageEvidence(fieldId);
@@ -4230,13 +4829,6 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
-  // Handle esignature type — value is { signedBy, signedAt, history: [] }
-  if (field?.type === 'esignature') {
-    esignatureState[fieldId] = (value && typeof value === 'object') ? value : {};
-    refreshESignature(fieldId);
-    return;
-  }
-
   // Handle iqcTable type — value is { [zoneId]: { result, remark, name?, checks? } }
   if (field?.type === 'iqcTable' && value && typeof value === 'object') {
     const wrapper = document.getElementById(fieldId);
@@ -4302,7 +4894,7 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   }
 }
 
-// Collect all field values for a section from the DOM + esignatureState.
+// Collect all field values for a section from the DOM + evidenceState.
 // Shared by saveSection and the draft auto-persist. Returns { fieldValues, fileFields }.
 function collectSectionValues(sectionId) {
   const section = SECTIONS[sectionId];
@@ -4399,8 +4991,6 @@ function collectSectionValues(sectionId) {
         });
       }
       fieldValues[field.id] = tableData;
-    } else if (field.type === 'esignature') {
-      fieldValues[field.id] = esignatureState[field.id] || {};
     } else {
       const el = document.getElementById(field.id);
       if (el) fieldValues[field.id] = el.value;
@@ -4488,7 +5078,6 @@ function discardAllDrafts() {
   // Drop drafts, rebuild forms fresh (re-applies Section A auto-fill), then
   // re-apply the saved backend data so the UI reflects the last saved state.
   Object.keys(SECTIONS).forEach(clearDraft);
-  esignatureState = {};
   buildSectionForms(currentIR.irNumber);
   if (currentSectionData) {
     Object.entries(currentSectionData).forEach(([secId, fields]) => {
@@ -4516,11 +5105,6 @@ async function saveSection(sectionId, irNumber) {
   formData.append('irNumber', irNumber);
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
-
-  // Stamp any e-signature in THIS section that nobody has filled yet, BEFORE the
-  // values are collected, so the payload below already carries it. Saving is the
-  // signature: whoever pressed Save is the person recorded.
-  signSectionOnSave(sectionId);
 
   const { fieldValues, fileFields } = collectSectionValues(sectionId);
   formData.append('fields', JSON.stringify(fieldValues));
@@ -4607,146 +5191,522 @@ function fileToDataUrl(file) {
   });
 }
 
-// ─── SECTION D — PART A PDF DOWNLOAD ──────────────────────────────────────────
-// Builds a clean, client-facing printable document of the Investigation (Part A
-// only) and opens the browser print dialog so it can be saved/shared as a PDF.
-// Part B (Cost Analysis) is deliberately excluded.
-async function downloadSectionDPartA() {
-  const irNum  = currentIR?.irNumber || 'IR';
-  const drone  = currentIR?.droneId  || '';
-  const getVal = id => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
-  const analysisBy   = getVal('d_analysisBy');
-  const analysisDate = toDisplayDate(getVal('d_analysisDate'));
-  const investigation = getVal('d_investigation');
-  const rootCause     = getVal('d_rootCause');
-  const corrective    = getVal('d_correctiveAction');
-  const preventive    = getVal('d_preventiveAction');
+// ─── PER-SECTION PDF EXPORT ───────────────────────────────────────────────────
+// Every section exports as a real PDF *file* — not a print dialog — so it can be
+// attached to an email or handed to a phone's share sheet.
+//
+// Three layers, deliberately, so the parts that can be got wrong are testable
+// without a browser and without the library:
+//
+//   sectionPdfModel()    pure. values → blocks. No DOM, no pdf-lib.
+//   collectExportMedia() resolves bytes: normalises photos, reads attached PDFs.
+//   drawSectionPdf()     the only pdf-lib code, and it takes the library by
+//                        injection so the suites can drive it with a fake.
+//
+// `PDFLib` is referenced ONLY inside a function body (through pdfLib()). The
+// suites evaluate this file under a stub DOM with no `PDFLib` in scope, so a
+// module-level mention would take all of them down.
 
-  // Evidence images: uploaded images use their Drive URL; not-yet-saved images
-  // are read as data URLs so they embed reliably in the printed document.
-  const entries = evidenceState['d_evidence'] || [];
-  const images = [];
-  for (const e of entries) {
-    if ((e.type || '') === 'pdf') continue;   // PDFs can't embed in the printed doc
-    let src = e.link || '';
-    if (!src && e.file) { try { src = await fileToDataUrl(e.file); } catch {} }
-    if (src) images.push({ caption: e.caption || '', src });
-  }
+const EXPORT_IMAGE_LONG_EDGE = 1600;
+const EXPORT_IMAGE_QUALITY = 0.82;
 
-  const esc   = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const nlbr  = s => esc(s).replace(/\n/g, '<br>');
-  const para  = (label, val) => val && val.trim()
-    ? `<h2>${esc(label)}</h2><div class="val">${nlbr(val)}</div>`
-    : `<h2>${esc(label)}</h2><div class="val muted">—</div>`;
-  const imgBlock = images.map(im => `
-    <figure>
-      <img src="${esc(im.src)}" />
-      ${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}
-    </figure>`).join('');
+// A photo goes INTO the report and a PDF is appended to it — but only if its bytes
+// can be had. A file attached in this sitting is in memory and always can be; one
+// attached earlier is only a Drive URL, and whether that can be read back is up to
+// Drive's CORS headers. Everything below treats "cannot read it back" as a thing to
+// REPORT, never as a thing to silently drop.
 
-  // QC Manager sign-off — the Investigation (Part A) authoriser. Shows the
-  // signed name + date if already signed, otherwise "Pending".
-  const qcSig = esignatureState['d_signQcManager'];
-  const qcSignBlock = (() => {
-    if (qcSig && qcSig.signedBy) {
-      const when = qcSig.signedAt ? toDisplayDate(qcSig.signedAt.split('T')[0]) : '';
-      return `<div class="signoff">
-        <h2>Investigation Authorised</h2>
-        <div class="signoff-row">
-          <div class="signoff-label">Technical Support (QC Manager)</div>
-          <div class="signoff-name">${esc(qcSig.signedBy)}</div>
-          <div class="signoff-date">${esc(when)}</div>
-        </div>
-      </div>`;
-    }
-    return `<div class="signoff">
-      <h2>Investigation Authorised</h2>
-      <div class="signoff-row">
-        <div class="signoff-label">Technical Support (QC Manager)</div>
-        <div class="signoff-name muted">Pending signature</div>
-        <div class="signoff-date"></div>
-      </div>
-    </div>`;
-  })();
+// WinAnsi — the encoding of the standard PDF fonts — cannot represent most
+// non-Latin-1 characters, and pdf-lib THROWS on one rather than dropping it, so a
+// single emoji in a Remarks box would fail the whole export. Fold the common
+// typographic characters down to ASCII and replace whatever is left.
+//
+// The table is written as code points, not as literals: the tick and the cross sit
+// in the U+2600–27BF block, which tools/smoke-ui.mjs counts as emoji in app.js, and
+// that count is a fixed ledger that may only go down.
+const PDF_CHAR_MAP = (() => {
+  const map = {};
+  [
+    [0x2013, '-'], [0x2014, '-'],           // en dash, em dash
+    [0x2018, "'"], [0x2019, "'"],           // curly single quotes
+    [0x201C, '"'], [0x201D, '"'],           // curly double quotes
+    [0x2026, '...'], [0x2022, '-'],         // ellipsis, bullet
+    [0x2713, 'v'], [0x2717, 'x'],           // tick, cross
+    [0x2192, '->'], [0x20B9, 'Rs.'],        // arrow, rupee
+  ].forEach(pair => { map[String.fromCharCode(pair[0])] = pair[1]; });
+  return map;
+})();
 
-  const html = `<!doctype html><html><head><meta charset="utf-8" />
-<title>${esc(irNum)} — Investigation</title>
-<style>
-  @page { margin: 16mm; }
-  * { box-sizing: border-box; }
-  body { font-family: 'Inter', Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; }
-  .head { border-bottom: 2px solid #0E62FF; padding-bottom: 10px; margin-bottom: 14px; }
-  h1 { font-size: 20px; margin: 0 0 4px; color: #0E62FF; }
-  .brand { font-size: 12px; color: #64748b; letter-spacing: .04em; text-transform: uppercase; }
-  .meta { font-size: 13px; color: #334155; margin: 12px 0; }
-  .meta span { display: inline-block; margin-right: 18px; }
-  .intro { background: #eef4ff; border-left: 4px solid #0E62FF; padding: 12px 14px; font-size: 14px; line-height: 1.5; margin: 6px 0 18px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #0E62FF; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin: 22px 0 8px; }
-  .val { font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
-  .val.muted { color: #94a3b8; }
-  figure { margin: 12px 0; text-align: center; page-break-inside: avoid; }
-  figure img { max-width: 100%; max-height: 600px; border: 1px solid #e2e8f0; border-radius: 8px; }
-  figcaption { font-size: 12px; color: #475569; margin-top: 6px; }
-  .signoff { margin-top: 28px; page-break-inside: avoid; }
-  .signoff h2 { margin-bottom: 12px; }
-  .signoff-row { display: flex; align-items: flex-end; gap: 28px; }
-  .signoff-label { font-size: 12px; color: #475569; border-top: 1px solid #0f172a; padding-top: 6px; min-width: 240px; }
-  .signoff-name { font-size: 14px; font-weight: 600; color: #0f172a; }
-  .signoff-name.muted { color: #94a3b8; font-weight: 400; }
-  .signoff-date { font-size: 12px; color: #475569; }
-  .foot { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
-</style></head><body>
-  <div class="head">
-    <div class="brand">Indrones After-Sales · I-PASSBOOK</div>
-    <h1>Investigation Report</h1>
-  </div>
-  <div class="meta">
-    <span><strong>IR:</strong> ${esc(irNum)}</span>
-    <span><strong>System ID:</strong> ${esc(drone)}</span>
-    <span><strong>Date:</strong> ${esc(analysisDate)}</span>
-    <span><strong>Analyst:</strong> ${esc(analysisBy)}</span>
-  </div>
-  <div class="intro">Dear customer, analysis of <strong>${esc(irNum)}</strong> for your system with ID <strong>${esc(drone)}</strong> has been completed. Its findings are as below.</div>
-  ${para('Description of Investigation', investigation)}
-  ${images.length ? `<h2>Investigation Evidence</h2>${imgBlock}` : ''}
-  ${para('Root Cause', rootCause)}
-  ${para('Corrective Action', corrective)}
-  ${para('Preventive Action', preventive)}
-  ${qcSignBlock}
-  <div class="foot">This report was generated from I-PASSBOOK · Section D (Part A — Investigation).</div>
-  <script>
-    (function(){
-      var printed = false;
-      function go(){ if (printed) return; printed = true; setTimeout(function(){ window.focus(); window.print(); }, 250); }
-      var imgs = Array.prototype.slice.call(document.images);
-      var pending = imgs.length;
-      if (!pending) { window.onload = go; return; }
-      function done(){ if (--pending <= 0) go(); }
-      imgs.forEach(function(im){
-        if (im.complete && im.naturalWidth) { done(); return; }
-        im.onload  = done;
-        im.onerror = done;
-      });
-      window.onload = function(){ setTimeout(go, 4000); };
-    })();
-  <\/script>
-</body></html>`;
-
-  const w = window.open('', '_blank');
-  if (!w) { showToast('Allow pop-ups to download the PDF'); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+// Exactly what WinAnsi can carry: printable ASCII, plus Latin-1 from 0xA0 up. A
+// replacement callback rather than a character class, so a character outside it is
+// never handed to pdf-lib raw. Two details that are easy to get wrong:
+//
+//   - A control character is not drawable at all, and a newline that reaches here —
+//     it should not, since the drawer wraps first — becomes a SPACE rather than the
+//     "?" a reader would read as a typo.
+//   - The `u` flag, so an emoji is one code point and becomes ONE "?", not the two
+//     that its surrogate halves would each produce.
+function pdfSafe(s) {
+  return String(s == null ? '' : s)
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replace(/[^\x20-\x7e\xa0-\xff]/gu, c => (c in PDF_CHAR_MAP ? PDF_CHAR_MAP[c] : '?'));
 }
 
-// ─── IMAGE EVIDENCE (Section D) ───────────────────────────────────────────────
-// Per-image evidence with a name/context caption. New images are uploaded to
-// Drive via the existing file mechanism (fieldId '_links'); captions + the
-// already-uploaded Drive URLs live in the field value `d_evidence` as
-// [{caption, link}]. The backend overwrites '_links' with only the newly-uploaded
-// URLs on each save, so already-uploaded links are carried in `d_evidence` and
-// re-sent on every save; newly-uploaded links are merged back from '_links'
-// after a save (and on load) so captions stay paired with their images.
+// Scale a w×h box so its LONG edge is at most `max`. Never upscales: a small photo
+// stays sharp rather than being blown up into a blurry one.
+function fitLongEdge(w, h, max) {
+  const width = Number(w) || 0, height = Number(h) || 0;
+  if (!(width > 0) || !(height > 0)) return { width: 0, height: 0, scale: 1 };
+  const longest = Math.max(width, height);
+  const scale = longest > max ? max / longest : 1;
+  return { width: Math.round(width * scale), height: Math.round(height * scale), scale };
+}
+
+// Greedy word wrap. Two things a naive split(' ') gets wrong and this does not: an
+// explicit newline typed into a textarea is a break the author meant, and a single
+// word wider than the column (a long URL) has to be hard-broken or it runs off the
+// page. Pure — takes a pdf-lib font because that is what knows the widths.
+//
+// The fold to WinAnsi happens HERE, not at the draw call: `widthOfTextAtSize` encodes
+// the string too, so measuring an emoji throws before anything is drawn. Folding per
+// paragraph — after the split — is what keeps a typed blank line a blank line instead
+// of letting pdfSafe turn its newline into a space.
+function wrapText(text, font, size, maxWidth) {
+  const raw = String(text == null ? '' : text);
+  if (!raw) return [];
+  const lines = [];
+  raw.split('\n').forEach(paragraphRaw => {
+    const paragraph = pdfSafe(paragraphRaw);
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (!words.length) { lines.push(''); return; }
+    let line = '';
+    for (let word of words) {
+      while (font.widthOfTextAtSize(word, size) > maxWidth && word.length > 1) {
+        let cut = 1;
+        while (cut < word.length && font.widthOfTextAtSize(word.slice(0, cut + 1), size) <= maxWidth) cut++;
+        if (line) { lines.push(line); line = ''; }
+        lines.push(word.slice(0, cut));
+        word = word.slice(cut);
+      }
+      if (!word) continue;
+      const candidate = line ? line + ' ' + word : word;
+      if (!line || font.widthOfTextAtSize(candidate, size) <= maxWidth) line = candidate;
+      else { lines.push(line); line = word; }
+    }
+    if (line) lines.push(line);
+  });
+  return lines;
+}
+
+function analysisNoteText(ir) {
+  const irNum = (ir && ir.irNumber) || 'IRXXX';
+  const drone = (ir && ir.droneId) || 'XXXXX';
+  return `Dear customer, analysis of ${irNum} for your system with ID ${drone} has been completed. Its findings are as below.`;
+}
+
+// The four table shapes the app stores, each with the columns it is shown under.
+// Row builders are defensive: a half-filled row is a row, not a crash.
+const EXPORT_TABLES = {
+  inwardTable: {
+    columns: ['Particulars', 'Model', 'Qty', 'Remark'],
+    rows: v => Object.keys(v || {}).map(k => [k, (v[k] || {}).model || '', (v[k] || {}).qty || '', (v[k] || {}).remark || '']),
+  },
+  iqcTable: {
+    columns: ['Zone / Item', 'Result', 'Remark'],
+    rows: v => Object.keys(v || {}).map(k => [(v[k] || {}).name || k, (v[k] || {}).result || '', (v[k] || {}).remark || '']),
+  },
+  costTable: {
+    columns: ['Particular', 'Qty', 'Rate', 'Cost', 'Remark'],
+    rows: v => (Array.isArray(v) ? v : []).map(r => [(r || {}).particular || '', (r || {}).qty || '', (r || {}).rate || '', (r || {}).cost || '', (r || {}).remark || '']),
+  },
+  dispatchChecklist: {
+    columns: ['Particular', 'Status'],
+    rows: v => Object.keys(v || {}).map(k => [k, v[k] || '']),
+  },
+};
+
+// values → blocks. Driven entirely by SECTIONS, so a field added to a section later
+// appears in its export without anyone touching this function.
+function sectionPdfModel(sectionId, fieldValues, ir) {
+  const section = SECTIONS[sectionId];
+  if (!section) return { title: '', irNumber: '', droneId: '', blocks: [] };
+  const values = fieldValues || {};
+  const blocks = [];
+
+  section.fields.forEach(field => {
+    const value = values[field.id];
+
+    if (field.type === 'divider') {
+      if (field.label) blocks.push({ kind: 'divider', text: field.label });
+      return;
+    }
+    if (field.type === 'analysisNote') {
+      blocks.push({ kind: 'note', text: analysisNoteText(ir) });
+      return;
+    }
+    if (field.type === 'checkpointEvidence') {
+      blocks.push({
+        kind: 'field',
+        label: field.tickLabel || field.label || '',
+        value: (value && value.done) ? 'Done' : 'Not done',
+      });
+      const items = (Array.isArray(value && value.attach) ? value.attach : []).map((e, i) => ({
+        key: `${field.id}_attach#${i}`,
+        caption: (e && e.caption) || '', name: (e && e.name) || '', type: (e && e.type) || '',
+      }));
+      if (items.length) blocks.push({ kind: 'images', label: field.label || '', items: items });
+      return;
+    }
+    if (field.type === 'imageEvidence') {
+      const items = (Array.isArray(value) ? value : []).map((e, i) => ({
+        key: `${field.id}#${i}`,
+        caption: (e && e.caption) || '', name: (e && e.name) || '', type: (e && e.type) || '',
+      }));
+      if (items.length) blocks.push({ kind: 'images', label: field.label || '', items: items });
+      return;
+    }
+    const table = EXPORT_TABLES[field.type];
+    if (table) {
+      const rows = table.rows(value);
+      if (rows.length) blocks.push({ kind: 'table', label: field.label || '', columns: table.columns, rows: rows });
+      return;
+    }
+    // text, textarea, date, select, courierName, and anything added later.
+    let out = value == null ? '' : String(value);
+    if (field.type === 'date' && out) out = toDisplayDate(out);
+    blocks.push({ kind: 'field', label: field.label || '', value: out });
+  });
+
+  return {
+    title: section.title,
+    irNumber: (ir && ir.irNumber) || '',
+    droneId: (ir && ir.droneId) || '',
+    blocks: blocks,
+  };
+}
+
+function pdfLib() {
+  return (typeof PDFLib !== 'undefined' && PDFLib) ? PDFLib : null;
+}
+
+// A saved attachment is only a Drive URL. Try the preview host first (the one the
+// app already uses for thumbnails), then the stored link itself. Either can fail on
+// CORS — that is a null, not an exception.
+async function fetchEvidenceBlob(entry) {
+  const id = driveFileId(entry && entry.link);
+  const urls = [];
+  if (id) urls.push(`https://lh3.googleusercontent.com/d/${id}`);
+  if (safeUrl(entry && entry.link)) urls.push(entry.link);
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (res.ok) return await res.blob();
+    } catch { /* try the next one */ }
+  }
+  return null;
+}
+
+// Browser-only: canvas → JPEG at the long-edge cap. Split from fitLongEdge so the
+// arithmetic is testable without a canvas.
+async function normalizeImage(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const size = fitLongEdge(bitmap.width, bitmap.height, EXPORT_IMAGE_LONG_EDGE);
+  if (!size.width || !size.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = size.width;
+  canvas.height = size.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, size.width, size.height);
+  if (bitmap.close) bitmap.close();
+  const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', EXPORT_IMAGE_QUALITY));
+  if (!out) return null;
+  return new Uint8Array(await out.arrayBuffer());
+}
+
+// Resolve every attachment in a section into either embeddable bytes or a named
+// record of what could not be read. `lib` is only used to ask "would pdf-lib accept
+// this?", so a PDF that would fail mid-draw is known to be a leftover BEFORE the
+// report is written and the user can be told.
+async function collectExportMedia(sectionId, lib) {
+  const section = SECTIONS[sectionId];
+  const images = new Map();
+  const attachments = [];
+  if (!section) return { images: images, attachments: attachments };
+
+  const keys = [];
+  section.fields.forEach(field => {
+    if (field.type === 'imageEvidence') keys.push(field.id);
+    else if (field.type === 'checkpointEvidence') keys.push(field.id + '_attach');
+  });
+
+  for (const fieldId of keys) {
+    const entries = evidenceState[fieldId] || [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const key = `${fieldId}#${i}`;
+      const isPdf = guessEvidenceType(e) === 'pdf';
+
+      if (isPdf) {
+        let bytes = null;
+        try {
+          const blob = e.file || await fetchEvidenceBlob(e);
+          if (blob) bytes = new Uint8Array(await blob.arrayBuffer());
+        } catch { bytes = null; }
+        const record = {
+          key: key,
+          name: e.name || e.caption || `Attachment ${attachments.length + 1}.pdf`,
+          bytes: bytes,
+          mergeable: false,
+        };
+        if (bytes && lib && lib.PDFDocument) {
+          try {
+            await lib.PDFDocument.load(bytes, { ignoreEncryption: true });
+            record.mergeable = true;
+          } catch { record.mergeable = false; }
+        }
+        attachments.push(record);
+      } else {
+        let jpeg = null;
+        try {
+          const blob = e.file || await fetchEvidenceBlob(e);
+          if (blob) jpeg = await normalizeImage(blob);
+        } catch { jpeg = null; }
+        if (jpeg) images.set(key, jpeg);
+      }
+    }
+  }
+  return { images: images, attachments: attachments };
+}
+
+// The only function that touches pdf-lib. A4, 40pt margins, Helvetica.
+async function drawSectionPdf(model, media, lib) {
+  if (!lib || !lib.PDFDocument) throw new Error('PDF library not loaded');
+  const { PDFDocument, StandardFonts, rgb } = lib;
+
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const PAGE_W = 595.28, PAGE_H = 841.89, M = 40;   // A4 in points
+  const CONTENT_W = PAGE_W - M * 2;
+  const INK = rgb(0.06, 0.09, 0.16);
+  const MUTED = rgb(0.45, 0.50, 0.58);
+  const RULE = rgb(0.85, 0.88, 0.92);
+  const HEAD = rgb(0.10, 0.15, 0.25);
+
+  let page = doc.addPage([PAGE_W, PAGE_H]);
+  let y = PAGE_H - M;
+  const newPage = () => { page = doc.addPage([PAGE_W, PAGE_H]); y = PAGE_H - M; };
+  const room = h => { if (y - h < M) newPage(); };
+  const gap = h => { y -= h; };
+
+  // Draw one wrapped paragraph. `y` is the TOP of the line; the baseline sits one
+  // font-size below it.
+  const line = (text, opts) => {
+    const o = opts || {};
+    const f = o.bold ? bold : font;
+    const size = o.size || 10;
+    const x = o.x != null ? o.x : M;
+    const lh = size * 1.35;
+    wrapText(text, f, size, o.width || CONTENT_W).forEach(text => {
+      room(lh);
+      page.drawText(pdfSafe(text), { x: x, y: y - size, font: f, size: size, color: o.color || INK });
+      y -= lh;
+    });
+  };
+  const rule = () => {
+    room(10);
+    page.drawLine({ start: { x: M, y: y }, end: { x: PAGE_W - M, y: y }, thickness: 0.7, color: RULE });
+    gap(10);
+  };
+
+  // ── Masthead ──
+  line('INDRONES AFTER-SALES  ·  I-PASSBOOK', { size: 8, color: MUTED });
+  gap(2);
+  line(model.title, { size: 17, bold: true, color: HEAD });
+  gap(2);
+  const meta = [model.irNumber && `IR: ${model.irNumber}`, model.droneId && `System ID: ${model.droneId}`].filter(Boolean);
+  if (meta.length) line(meta.join('     '), { size: 9.5, color: MUTED });
+  gap(4);
+  rule();
+
+  // ── Body ──
+  for (const block of model.blocks) {
+    if (block.kind === 'divider') {
+      gap(10);
+      line(block.text, { size: 12, bold: true, color: HEAD });
+      rule();
+    } else if (block.kind === 'note') {
+      gap(6);
+      line(block.text, { size: 10, color: INK, x: M + 14, width: CONTENT_W - 14 });
+      gap(6);
+    } else if (block.kind === 'field') {
+      gap(8);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      const filled = block.value != null && String(block.value).trim() !== '';
+      line(filled ? block.value : '—', { size: 10.5, color: filled ? INK : MUTED });
+    } else if (block.kind === 'images') {
+      gap(10);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      for (const item of block.items) {
+        if (item.type === 'pdf') continue;   // listed under Attached documents instead
+        const jpeg = media.images.get(item.key);
+        let embedded = null;
+        if (jpeg) { try { embedded = await doc.embedJpg(jpeg); } catch { embedded = null; } }
+        if (!embedded) {
+          line(`${item.caption || item.name || 'Image'} — not included`, { size: 9, color: MUTED });
+          continue;
+        }
+        // Fit the column, and never taller than a whole page.
+        const scale = Math.min(CONTENT_W / embedded.width, (PAGE_H - M * 2) / embedded.height, 1);
+        const w = embedded.width * scale, h = embedded.height * scale;
+        room(h + 10);
+        page.drawImage(embedded, { x: M + (CONTENT_W - w) / 2, y: y - h, width: w, height: h });
+        gap(h + 5);
+        if (item.caption) line(item.caption, { size: 8.5, color: MUTED });
+        gap(10);
+      }
+    } else if (block.kind === 'table') {
+      gap(10);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      // First column takes 30%; the rest share what is left.
+      const widths = block.columns.length === 1
+        ? [CONTENT_W]
+        : [CONTENT_W * 0.30].concat(new Array(block.columns.length - 1).fill((CONTENT_W * 0.70) / (block.columns.length - 1)));
+      const drawRow = (cells, size, f, color) => {
+        const lh = size * 1.3;
+        const wrapped = block.columns.map((_, i) => wrapText(cells[i] == null ? '' : String(cells[i]), f, size, widths[i] - 8));
+        const rowH = Math.max(1, ...wrapped.map(w => w.length)) * lh + 6;
+        room(rowH);
+        let x = M;
+        wrapped.forEach((columnLines, i) => {
+          columnLines.forEach((text, k) => {
+            page.drawText(pdfSafe(text), { x: x + 4, y: y - size - k * lh - 3, font: f, size: size, color: color });
+          });
+          x += widths[i];
+        });
+        y -= rowH;
+        page.drawLine({ start: { x: M, y: y }, end: { x: PAGE_W - M, y: y }, thickness: 0.4, color: RULE });
+      };
+      drawRow(block.columns, 8.5, bold, MUTED);
+      block.rows.forEach(row => drawRow(row, 9.5, font, INK));
+    }
+  }
+
+  // ── Attached documents ──
+  // Every attached PDF is named, whether or not it made it inside. A document that
+  // silently loses an attachment is worse than one that admits it.
+  if (media.attachments.length) {
+    gap(16);
+    line('Attached documents', { size: 12, bold: true, color: HEAD });
+    rule();
+    media.attachments.forEach(a => {
+      line(a.mergeable ? `${a.name} — included below` : `${a.name} — not included (could not be read back)`,
+           { size: 9.5, color: a.mergeable ? INK : MUTED });
+      gap(2);
+    });
+  }
+
+  // ── Append the attachments we could read ──
+  for (const a of media.attachments) {
+    if (!a.mergeable || !a.bytes) continue;
+    const source = await PDFDocument.load(a.bytes, { ignoreEncryption: true });
+    const pages = await doc.copyPages(source, source.getPageIndices());
+    pages.forEach(p => doc.addPage(p));
+  }
+
+  return await doc.save();
+}
+
+// `IR409 - Section B.pdf`, with everything a filesystem would object to removed.
+// The reserved characters are a list rather than a character class on purpose: this
+// file's comment stripper reads a double quote inside a regex literal as the start
+// of a string and then loses its place for the rest of the file.
+function sanitizeFileName(s) {
+  let out = String(s == null ? '' : s);
+  ['\\', '/', ':', '*', '?', '"', '<', '>', '|'].forEach(ch => { out = out.split(ch).join('-'); });
+  return out.replace(/[\x00-\x1f\x7f]/g, '-').replace(/\s+/g, ' ').trim() || 'export';
+}
+function exportFileName(irNumber, sectionId) {
+  const letter = String(sectionId || '').replace(/^sec-/, '').toUpperCase();
+  return sanitizeFileName(`${irNumber || 'IR'} - Section ${letter}`) + '.pdf';
+}
+
+// Hand the file(s) over. The share sheet takes them all at once; anything without
+// one falls back to a download, which is the desktop case.
+async function deliverExportFiles(files, share) {
+  if (share && navigator.canShare && navigator.canShare({ files: files })) {
+    try {
+      await navigator.share({ files: files });
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;   // the user backed out
+    }
+  }
+  files.forEach(file => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+
+function setExportBusy(btn, busy) {
+  if (!btn) return () => {};
+  const original = btn.textContent;
+  btn.disabled = busy;
+  btn.style.opacity = busy ? '0.6' : '';
+  if (busy) btn.textContent = 'Preparing…';
+  return () => { btn.disabled = false; btn.style.opacity = ''; btn.textContent = original; };
+}
+
+async function exportSectionPdf(sectionId, opts) {
+  const share = !!(opts && opts.share);
+  const lib = pdfLib();
+  if (!lib) { showToast('The PDF library did not load — reload the page and try again'); return; }
+
+  const btn = document.getElementById((share ? 'share-' : 'download-') + sectionId);
+  const done = setExportBusy(btn, true);
+  try {
+    const media = await collectExportMedia(sectionId, lib);
+    const { fieldValues } = collectSectionValues(sectionId);
+    const model = sectionPdfModel(sectionId, fieldValues, currentIR);
+
+    // Say what will be missing BEFORE the work, not after.
+    const missing = media.attachments.filter(a => !a.mergeable);
+    if (missing.length) {
+      const verb = share ? 'shared' : 'downloaded';
+      const msg = `${missing.length} attached PDF${missing.length > 1 ? 's' : ''} could not be read back from Drive, `
+        + `so ${missing.length > 1 ? 'they are' : 'it is'} NOT inside this report:\n\n`
+        + missing.map(a => `  • ${a.name}`).join('\n')
+        + `\n\nThe report itself will be ${verb} normally, and will name `
+        + `${missing.length > 1 ? 'them' : 'it'} at the end. Continue?`;
+      if (!window.confirm(msg)) return;
+    }
+
+    const bytes = await drawSectionPdf(model, media, lib);
+    const file = new File([bytes], exportFileName(currentIR && currentIR.irNumber, sectionId), { type: 'application/pdf' });
+    await deliverExportFiles([file], share);
+    if (missing.length) showToast(`Exported — ${missing.length} attachment${missing.length > 1 ? 's were' : ' was'} named, not included`);
+  } catch (err) {
+    showToast('Could not build the PDF — ' + ((err && err.message) || 'unknown error'));
+  } finally {
+    done();
+  }
+}
+
+// ─── IMAGE EVIDENCE ───────────────────────────────────────────────────────────
+// Per-image evidence with a name/context caption, used by every section that
+// carries photos (B, C, D, F, G). New images are uploaded to Drive via the
+// existing file mechanism (fieldId '_links'); captions + the already-uploaded
+// Drive URLs live in the field value as [{caption, link}]. The backend overwrites
+// '_links' with only the newly-uploaded URLs on each save, so already-uploaded
+// links are carried in the field value and re-sent on every save; newly-uploaded
+// links are merged back from '_links' after a save (and on load) so captions stay
+// paired with their images.
 // Extract a Google Drive file id from a Drive URL (for direct image preview).
 function driveFileId(link) {
   if (!link) return '';
@@ -5801,9 +6761,18 @@ const ICON_PATHS = {
   legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
   users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
   moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
+  // Password reveal. Two glyphs, not one: `eye` shows, `eye-off` hides, and the
+  // slash is what tells a user the password is CURRENTLY visible — a single eye
+  // that never changes leaves them unable to tell which state they are in.
+  eye:            '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+  'eye-off':      '<path d="M10.6 6.1A8.5 8.5 0 0 1 12 6c6 0 9.5 6 9.5 6a17 17 0 0 1-3 3.7"/><path d="M6.4 7.6A16.6 16.6 0 0 0 2.5 12S6 18 12 18a9 9 0 0 0 3.4-.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="M3.5 3.5l17 17"/>',
   sun:            '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2"/><path d="M12 19.5v2"/><path d="M2.5 12h2"/><path d="M19.5 12h2"/><path d="M5.2 5.2l1.4 1.4"/><path d="M17.4 17.4l1.4 1.4"/><path d="M18.8 5.2l-1.4 1.4"/><path d="M6.6 17.4l-1.4 1.4"/>',
   clock:          '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   report:         '<path d="M8 3.5h8a1.5 1.5 0 0 1 1.5 1.5v14A1.5 1.5 0 0 1 16 20.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5z"/><path d="M9.5 3.5V2.5h5v1"/><path d="M9.5 9h5"/><path d="M9.5 13h5"/><path d="M9.5 17h3"/>',
+  // The Insights dashboard's nav glyph. `report` was the obvious reuse and is
+  // WRONG — it already means the client's Report tab — so the counts get their own
+  // three columns, which is what the page is.
+  chart:          '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="13" y="8" width="3" height="9"/><rect x="18" y="14" width="3" height="3"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
@@ -5830,6 +6799,7 @@ function initIcons() {
     ['#ir-activity-toggle .activity-caret',  'chevron'],
     ['#nudge-bell .nudge-bell-icon',         'bell'],
     ['#nav-tickets .nav-icon',               'ir'],
+    ['#nav-insights .nav-icon',              'chart'],
     ['#legacy-workbook-btn .nav-icon',       'legacy'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
@@ -5867,7 +6837,9 @@ const TIMELINE_KINDS = {
   status:   { icon: 'target',       label: 'Status changed' },
   assign:   { icon: 'user',         label: 'Assigned to' },
   priority: { icon: 'flag',         label: 'Priority changed' },
-  type:     { icon: 'tag',          label: 'Type changed' },
+  category:    { icon: 'tag',       label: 'Category changed' },
+  subcategory: { icon: 'tag',       label: 'Sub-category changed' },
+  subcatnote:  { icon: 'tag',       label: 'Repair note' },
   upload:   { icon: 'upload',       label: 'File uploaded' },
   comment:  { icon: 'comment',      label: 'Comment' },
 };
@@ -5907,12 +6879,20 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
     if (e.event === 'uploaded') { out.push(Object.assign({}, base, { kind: 'upload' })); return; }
 
     if (source === 'workflow') {
+      // Sub-category and its note get their OWN kinds rather than folding into
+      // `category`: a REPAIR whose component changes from GPS to BATTERY leaves
+      // `category` untouched, so the audit emits only the sub-category row — and
+      // labelling that row "Category changed: REPAIR → REPAIR" would be noise.
       const kind = fid === 'status' ? 'status'
                  : (fid === 'assignee' || fid === 'assigneeName') ? 'assign'
                  : fid === 'priority' ? 'priority'
-                 : fid === 'type' ? 'type' : '';
+                 : fid === 'category' ? 'category'
+                 : fid === 'subCategory' ? 'subcategory'
+                 : fid === 'subCategoryNote' ? 'subcatnote' : '';
       // Everything else a sentinel write carries — a whole-store `items` array, a
       // seed marker — is not a workflow change and must not clutter the timeline.
+      // The retired `type` field lands here too: nothing displays it any more, so
+      // an audit row about it would be a change the reader cannot see the effect of.
       if (!kind) return;
       out.push(Object.assign({}, base, { kind }));
       return;

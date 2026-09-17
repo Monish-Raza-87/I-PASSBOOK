@@ -3,6 +3,15 @@
    comments / history / access UI
    ============================================================ */
 
+/* The category strip sits directly under the status strip and reuses it wholesale
+   (.segments/.segment/.segment-count above). One rule, because the only thing that
+   differs is that this strip must not read as a continuation of the one above. */
+.segments-cat {
+  border-top: 1px solid var(--outline-gray-1);
+  padding-top: 0.4rem;
+  margin-top: 0.1rem;
+}
+
 /* ══════════════════════════════════════════════════════════
    TICKET LIST (the master index)
    Flat rows with dividers rather than floating cards — the service-desk
@@ -599,42 +608,17 @@
   margin-bottom: 8px;
 }
 
-/* ── Section B/H — e-signature ─────────────────────────────
-   Read-only: the block records who saved the section, and no button changes it.
-   The unsigned state is a dashed placeholder; the signed state is the green
-   record with the timestamp. */
-.esignature-block { font-size: var(--text-sm); }
-.esignature-unsigned {
+/* ── Section export row ────────────────────────────────────
+   Download / Download and share, under the Save button of every section. Exporting
+   reads the section, so these stay live for view-only users (see the gating
+   exemption in app.js) — only Save is gated. */
+.sec-export-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.6rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px dashed var(--outline-gray-3);
-  border-radius: var(--radius-4);
-  background: var(--surface-gray-1);
+  gap: 0.5rem;
+  margin-top: 0.6rem;
 }
-.esignature-role { color: var(--ink-gray-7); font-weight: var(--weight-medium); font-size: var(--text-xs); }
-.esignature-muted { color: var(--ink-gray-5); font-size: var(--text-xs); }
-.esignature-signed {
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--outline-green-2);
-  border-radius: var(--radius-4);
-  background: var(--surface-green-1);
-}
-.esignature-row { display: flex; align-items: flex-start; gap: 0.55rem; }
-.esignature-check { color: var(--ink-green-7); font-weight: var(--weight-bold); font-size: var(--text-md); line-height: 1.2; }
-.esignature-line { font-size: var(--text-sm); color: var(--ink-gray-8); }
-.esignature-stamp { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 1px; }
-.esignature-info { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.esignature-history {
-  margin-top: 0.55rem;
-  padding-top: 0.55rem;
-  border-top: 1px dashed var(--outline-gray-3);
-  font-size: var(--text-xs);
-  color: var(--ink-gray-5);
-}
-.esignature-history-label { font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
+.sec-export-row .btn { flex: 0 1 auto; }
 
 /* ── Section D — image evidence ────────────────────────────── */
 .image-evidence { display: flex; flex-direction: column; gap: 0.55rem; }
@@ -1132,12 +1116,159 @@
 }
 
 /* ══════════════════════════════════════════════════════════
+   INSIGHTS (the counts dashboard)
+   Read-only, and only ever counts rows the reader can already see in the IR
+   list — which is why it needs no access rules of its own.
+   ══════════════════════════════════════════════════════════ */
+.insights-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.9rem 1rem 1.4rem;
+}
+
+.insights-skeleton {
+  height: 64px;
+  border-radius: var(--radius-4);
+  background: var(--surface-gray-2);
+  margin-bottom: 0.6rem;
+  animation: insights-pulse 1.4s ease-in-out infinite;
+}
+@keyframes insights-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+.insights-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.55rem 0.7rem;
+  align-items: end;
+  padding-bottom: 0.85rem;
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.insights-filter { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.insights-filter > span {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.insights-filters .form-input { width: 100%; }
+.insights-filters .btn { align-self: end; justify-self: start; }
+.insights-filters .btn[disabled] { opacity: 0.45; cursor: default; }
+
+.insights-total {
+  font-size: var(--text-sm);
+  color: var(--ink-gray-7);
+  margin: 0.85rem 0 0.7rem;
+}
+.insights-total strong { font-size: var(--text-md); color: var(--ink-gray-9); }
+.insights-note { display: block; color: var(--ink-gray-5); font-size: var(--text-xs); margin-top: 2px; }
+/* The demo warning. Amber and boxed, deliberately louder than .insights-note —
+   every other note refines a number; this one says the numbers are not real. */
+.insights-demo {
+  margin-top: 0.45rem;
+  padding: 6px 9px;
+  border: 1px solid var(--outline-amber-4);
+  border-radius: var(--radius-3);
+  background: var(--surface-amber-2);
+  color: var(--ink-gray-8);
+}
+
+/* One card per category. A <button>, because a card IS the way from a number to
+   the IRs behind it — the count alone answers nobody's question. */
+.insights-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 0.55rem;
+}
+.insights-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-4);
+  background: var(--surface-base);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s var(--ease), background 0.12s var(--ease);
+}
+.insights-card:hover { border-color: var(--outline-gray-3); background: var(--surface-gray-2); }
+.insights-card.active { border-color: var(--ink-gray-7); background: var(--surface-gray-3); }
+.insights-card.is-muted { border-style: dashed; }
+.insights-card-n {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+.insights-card-label {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.insights-block { margin-top: 1.1rem; }
+.insights-h {
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.45rem;
+}
+
+.insights-subcats { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.insights-subcat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3);
+  background: var(--surface-base);
+  font-size: var(--text-xs);
+  color: var(--ink-gray-8);
+}
+.insights-subcat.is-others { border-style: dashed; }
+.insights-subcat.is-muted { color: var(--ink-gray-5); }
+.insights-subcat-n { font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+
+/* The OTHERS notes, verbatim. This is the field's whole purpose — the nine
+   components are a fixed list, and OTHERS exists so CR can name a fault the list
+   does not cover. A count of them with the text hidden would defeat it. */
+.insights-others {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-xs);
+  color: var(--ink-gray-7);
+}
+.insights-others strong { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+
+.insights-mix { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.insights-mix-row { display: inline-flex; align-items: center; gap: 5px; }
+.insights-mix-n {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-8);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ══════════════════════════════════════════════════════════
    BELOW lg — the sidebar is a fixed bottom bar, so scroll
    containers need to clear it.
    ══════════════════════════════════════════════════════════ */
 @media (max-width: 1023px) {
   #sections-wrapper { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 1.5rem); }
   .ir-list { padding-bottom: calc(var(--bottombar-h) + var(--safe-b)); }
+  .insights-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
 }
 
 /* ══════════════════════════════════════════════════════════

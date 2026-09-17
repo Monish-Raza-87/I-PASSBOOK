@@ -49,14 +49,33 @@ too:
 - **Vercel** — `vercel --prod` from the project root
 - **Firebase Hosting** — `firebase deploy`
 
+**Use the tool, not `git checkout gh-pages`.** `tools/deploy-ghpages.mjs` copies
+`main`'s served files across with git plumbing, so it never checks out the branch
+and never touches your working tree:
+
+```bash
+node tools/deploy-ghpages.mjs                 # dry run — says exactly what would ship
+node tools/deploy-ghpages.mjs --commit        # writes the commit on gh-pages (local)
+node tools/deploy-ghpages.mjs --commit --push # ...and pushes. THIS IS THE DEPLOY.
+```
+
+It refuses to run with a dirty tree (deploying a file that is not committed is how
+`gh-pages` drifts from `main`), enumerates the served set rather than globbing — a
+glob over the repo would ship `backend.gs` to a public site — carries `.nojekyll`
+over, and **warns when `CACHE_NAME` has not changed**. Always dry-run first; the
+push is the one command here that reaches users.
+
 Two things not to forget on every deploy:
 
-- **Bump `CACHE_NAME` in `sw.js`** (e.g. `ipassbook-v20` → `v21`) on any deploy that
+- **Bump `CACHE_NAME` in `sw.js`** (e.g. `ipassbook-v22` → `v23`) on any deploy that
   changes a cached asset, or returning users keep the stale shell. The service
   worker is stale-while-revalidate, so existing installs pick the new version up
-  without a reinstall — one reload behind, which is why the bump matters.
+  without a reinstall — one reload behind, which is why the bump matters. The deploy
+  tool prints the old and new value and warns if they match.
 - **`gh-pages` is not `main`.** Committing on `main` deploys nothing. Confirm the
-  two are in sync before telling anyone it shipped.
+  two are in sync before telling anyone it shipped — the dry run's commit line
+  (`main <sha> → gh-pages <sha>`) is how you check, and `git ls-remote origin gh-pages`
+  confirms what is actually live.
 
 ## Deploying the Backend (GAS)
 
@@ -137,7 +156,9 @@ folder the old backend never looks at, and the store starts empty.
    which keeps the frontend pointing at a working backend for the whole window.
 5. Update `CONFIG.GAS_URL` in `app.js:13` to the new `/exec` URL, **bump
    `CACHE_NAME` in `sw.js`** (the URL constant lives in a cached asset), and
-   **push `gh-pages`**.
+   **deploy the frontend** — `node tools/deploy-ghpages.mjs` to dry-run,
+   then `--commit --push`. (The live value is `ipassbook-v19` and `main` already
+   carries `v22`, so that bump is satisfied; the tool prints both and warns.)
 
 > ⚠️ **This is the one project where "New deployment" is right.** The rule below —
 > never create a new deployment, edit the existing one — protects the **existing**

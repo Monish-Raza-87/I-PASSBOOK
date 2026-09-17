@@ -204,12 +204,46 @@ action — no new endpoint, one ACL branch, one upsert, one audit path — and t
 backend's locked-intake strip is what keeps it from writing a divergent copy of the
 customer's report. Gated on **`canTriage()`**; see the Triage modal above.
 
-### Automated timeline (`#ir-timeline` and `#history-list`)
+### Activity log (`#ir-activity` → `#ir-timeline`, and `#history-list`)
 One pure function, two places. `buildTimeline(irNumber, auditEntries, nudgeItems, limit)`
 does no fetch, no DOM and no clock, so a suite can drive it with fixtures — and so
-the Overview panel and the 🕓 History modal can never tell different stories. The
-modal is a thin shell (fetch → build → render, `limit: 400`); the Overview calls the
-same renderer with `limit: 40`.
+the activity panel and the 🕓 History modal can never tell different stories. The
+modal is a thin shell (fetch → build → render, `limit: 400`); the panel calls the
+same renderer with `ACTIVITY_LIMIT` (40).
+
+**The panel sits BELOW every section**, inside `#detail-view` and outside
+`#sections-wrapper` — it used to live in the Overview, where it was the longest
+block on the page and pushed the sections a user came for off-screen. Three
+structural rules follow from that placement, and all three are load-bearing:
+
+1. It is **not** `sec-*`, and carries **no** `class="section-content"` — the tab
+   handler clears `.active` from every `.section-content`, so either would make it
+   disappear the first time somebody clicked a tab.
+2. It is **outside `#sections-wrapper`**, which excludes it from that wrapper's
+   delegated input/change listeners (they drive `saveDraft`; the log has nothing to
+   draft).
+3. It is **inside `#detail-view`**, so `#detail-view`'s inline `display` stays a
+   truthful "is an IR open" flag — `applyAccessGating` reads exactly that.
+
+**Collapsed by default, and the fold is a CLASS, not inline `display`.** `docs/06`
+reserves inline `display` for panes (see the note under Section tabs), and
+`applySectionAccessGating` selects `.tab:not([style*="display: none"])`. So:
+
+```css
+.activity-body { display: none; }
+#ir-activity.is-open .activity-body { display: block; }
+```
+
+`applyActivityState(open)` toggles `is-open` on the panel **and** `aria-expanded` on
+`#ir-activity-toggle` together — they are one state, so they are set in one place.
+`toggleActivity()` flips the remembered preference (`localStorage['activity']`, the
+`THEME_KEY` pattern: a module-level `*_KEY` const, accessors in `try/catch /* non-fatal */`).
+The whole header row is the toggle, so the hit area is the full width.
+
+> ⚠️ **The list renders while collapsed.** `refreshActivityLog()` is never gated on
+> `is-open`, so the header count is always truthful. It builds the whole timeline and
+> slices it here rather than passing a limit to `buildTimeline`, so the count can
+> report the true total — `40 of 128`, not a bare `40`.
 
 | Source | Condition | Kind |
 |---|---|---|
@@ -217,12 +251,13 @@ same renderer with `limit: 40`.
 | audit, section | `added` / `changed` / `removed` | `add` / `edit` / `remove` |
 | audit, workflow | field `status` / `assignee`,`assigneeName` / `priority` / `type` | `status` / `assign` / `priority` / `type` |
 | audit, any | `event: 'uploaded'` | `upload` |
-| comment | a nudge item matching this IR | `comment` (chip `@mention` when it has mentions) |
+| comment | a nudge item matching this IR | `comment` |
 
 `renderTimelineInto(el, timeline, opts)` reuses the `.hist-*` classes unchanged —
-all token-based, so the design-system rule holds. Exactly two additions:
-`#ir-timeline .hist-list { max-height: 48vh }` (the modal's 64vh is wrong inline)
-and a `.hist-src` chip marking which half an entry came from.
+all token-based, so the design-system rule holds. Rows carry an icon from
+`ICON_PATHS` (below) and read in plain English: `Was` / `Now` rather than `old:` /
+`new:`, one timestamp format for both halves of the list, and the backend's internal
+`workflow` vocabulary never shown.
 
 > ⚠️ **Timestamps are parsed explicitly, never with `Date.parse`.** The backend
 > stamps `'dd-MMM-yyyy HH:mm:ss'`, and `Date.parse` returns **`NaN`** for that shape
@@ -231,7 +266,83 @@ and a `.hist-src` chip marking which half an entry came from.
 > also drops `done` deltas (the renderer is the belt to the backend's braces,
 > because rows written before the backend changed are still in the log).
 
-### Client's Report (`#sec-intake`, the 📋 tab)
+### Icons — `ICON_PATHS` / `iconSvg(name, extraClass?)`
+There is **no icon font, no sprite, and no `.svg` asset**. Every icon in the app is
+one inline `<svg>` from a single map, because the service worker caches a fixed
+`SHELL` list: a new asset file would need a `SHELL` entry *and* a `CACHE_NAME` bump,
+whereas inline markup costs the cache nothing and stays offline-correct.
+
+```js
+iconSvg('comment')  // → '<svg class="icon" viewBox="0 0 24 24" …>…</svg>'
+iconSvg('nope')     // → ''
+```
+
+All bodies are on one 24×24 grid at `stroke-width="1.75"`, `fill="none"`,
+`stroke="currentColor"` — so an icon is always its row's text colour and needs no
+token for either theme. The `.icon` rule in `base.css` owns the sizing (`1em`).
+
+> ⚠️ **`iconSvg` returns `''` for an unknown name, never `'undefined'`, and never
+> interpolates its argument.** That is what makes the unescaped `${iconSvg(…)}` in
+> `renderTimelineInto` injection-safe. The cost is that a **typo is silent**: a call
+> site asking for a name the map does not have renders a blank button with no error.
+> Two tests exist for exactly that — `smoke-ui.mjs` cross-checks every referenced
+> name against `ICON_PATHS` (in both directions, so a dead entry fails too), and
+> `smoke-boot.mjs` asserts that every icon slot in the **rendered** page is filled.
+> Add a name to the map before you reference it.
+
+Slots in `index.html` are **empty spans** (`<span class="nav-icon">`), filled by
+`initIcons()`; each is guarded by `!el.querySelector('svg')` so a re-login (which
+re-runs `showApp`) is a no-op instead of stacking a second icon. `applyTheme()` owns
+the theme glyph, since it is a state rather than a constant.
+
+### Collapsible chrome (`#sidebar-toggle`, `#list-toggle`)
+Both mirror Gmail: the sidebar folds to an icon rail, and the IR list folds away.
+The state lives in `localStorage` (`'rail'`, `'list'`) and **survives every
+re-render** — `renderIRList()` replaces `irList.innerHTML` wholesale on each
+keystroke, so no fold state may live inside the list.
+
+- **Rail** — `document.documentElement` gets `html.rail-collapsed`, and every rule
+  that acts on it sits inside `@media (min-width: 1024px)`, because under 1024px the
+  sidebar is the bottom bar (<1024px mode) and shares none of its layout. The toggle
+  is hidden at that width.
+- **List** — the fold is decided **inside `renderLayout()`**, not by a stylesheet
+  rule, because an inline `display` beats any rule and `renderLayout` is the one
+  place allowed to write it:
+
+  ```js
+  const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
+  indexView.style.display = listHidden ? 'none' : 'flex';
+  ```
+
+  The `detail &&` guard is the point: on desktop the list hides **only** while a
+  detail pane is open and the user asked for the room, and on mobile the two are
+  separate full screens so an open detail always hides the list. A user can
+  therefore never fold themselves onto an empty index screen.
+
+`applyChromeState()` sets both from storage and re-runs `renderLayout()` rather than
+duplicating the rule; `showApp()` calls it once, before the first paint.
+
+### E-signature blocks — read-only, filled by saving
+An `esignature` field renders as a role line with no button. There is no "Sign as …"
+and no "Override & Re-sign": saving the section *is* the signature, and the activity
+log records it independently. `renderESignatureHTML(fieldId, role)` only paints the
+state; `signSectionOnSave(sectionId)` produces it, called from `saveSection()` just
+before `collectSectionValues()` so the posted payload already carries the signature —
+no second write, and no draft.
+
+> ⚠️ **Two rules, both load-bearing.** (1) **Never overwrite** a block that already
+> carries a name. (2) **One role line per save** — the first still empty — and only
+> if this person has not already signed something in this section. Rule 2 is what
+> keeps Section B separable: its two lines are signed by two different people
+> (Inward, then Inventory), and filling *every* empty block on each save would stamp
+> "Inventory (ST No. Assigner)" with the Inward person's name. The "already signed
+> here" guard stops a re-save by the same person from creeping onto the next role.
+
+The nine fields are **kept, not deleted**: Section D's PDF prints "Investigation
+Authorised" from `d_signQcManager`, so removing the field would silently empty a line
+on a document that goes to a customer.
+
+### Client's Report (`#sec-intake`, the Report tab)
 The read-only intake view: every column the customer's Google Form actually
 wrote, unedited, so staff stop opening the Sheet to see what the client said.
 Built by `renderIntake()` into `#sec-intake-body`.
@@ -252,8 +363,8 @@ Built by `renderIntake()` into `#sec-intake-body`.
 **It is read-only, and it contains no form control at all** — asserted by both
 `tools/smoke-intake.mjs` and `tools/smoke-boot.mjs`. It renders from
 `currentIR.intake` (the raw cells), never from the editable section forms, so
-there is no path by which a re-save could write these values back into
-`APP_DATA`. Every value is escaped with `escHtml` — the description, company name
+there is no path by which a re-save could write these values back into the
+ticket's store file. Every value is escaped with `escHtml` — the description, company name
 and location are free text typed by the customer.
 
 ### Buttons (`.btn`)

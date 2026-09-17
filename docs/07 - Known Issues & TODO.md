@@ -1,82 +1,135 @@
 # 07 — Known Issues & TODO
 
-> **Status of the section restructure + auth/access rewrite (Sept 2026).**
-> Code-complete, documented in [10](10 - Auth & Access Model.md), and passing all
-> **929 cases across 11 suites** — but **not deployed.** `main` holds it; gh-pages
-> and the live GAS deployment still serve the old build, and the two must cut over
-> **together** (the old frontend calls actions the new backend no longer has, and the
-> restructure re-letters the section tabs). `CACHE_NAME` is already bumped for that
-> moment. **Nothing is still owed by the owner:** the department → section mapping
-> arrived, and it now lives in `SEED_GRANTS` in `backend.gs` (see
-> [10](10 - Auth & Access Model.md)). It is written by `seedDepartments()`, which
-> reports a `dropped` list — the one thing a grants rewrite can lose silently.
+> **Status of the Drive-store migration (Sept 2026).** Every byte the app owns now
+> lives in JSON files under `_store/` in the owner's Drive
+> (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
+> Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
+> workbook. Committed on `main` and green — **1144 cases across 11 suites** —
+> but **not deployed.** `app.js` still names the old `/exec`, so the live app keeps
+> talking to the old backend on the old spreadsheet; that is also the rollback. See
+> [08](08 - Development Guide.md) for the cutover, which is now just a deploy plus
+> one line in `app.js` and a `CACHE_NAME` bump.
 >
-> The restructure is what makes this one release rather than two: nine sections
-> (`sec-a`…`sec-i`) became six (**B–G**), Section A's content became the pinned
-> **Overview panel**, and the two `APP_DATA` merges are a migration that rewrites
-> rows the live app is reading — so it cannot run pre-flight. See
-> [08](08 - Development Guide.md) for the forced run order.
+> The new store starts **empty** — there was no app data to migrate, by the owner's
+> word. The old "I-Passbook App Repository" spreadsheet is **not read, written or
+> required** by anything any more; it is left on Drive untouched as an archive.
+> `CONFIG.PASSBOOK_SHEET_ID` and `CONFIG.DATA_TAB` are gone from the code.
 >
-> **Status of the Frappe Helpdesk pivot.** Phase 1 (shell + design system) and
-> Phase 2 **Stages 1 and 2** are committed on `main` and **live on `gh-pages`**
-> (`74c0298`) — app-owned workflow state (`__IRS__`) and the read-only 📋 Report
-> tab. Be precise about what that means: the deployed build carries the pivot
-> **and the pre-rewrite auth and the old nine sections**, so what is live today is
-> *not* what `main` holds. Stages 3–8 (list intelligence, SLA, dashboard, canned
-> responses, knowledge base, CSAT) are designed but unstarted; the plan is the
-> source of truth for those.
+> The restructure that came with it — nine sections (`sec-a`…`sec-i`) became six
+> (**B–G**) plus the pinned **Overview** panel — is also in this same release, and
+> `main` had never been deployed before it. So the two cut over **together**, and the
+> old nine-section shell is what is live today. That is why the stale-service-worker
+> item below still applies.
+>
+> **Status of the Frappe Helpdesk pivot.** Phase 1 (shell + design system) and Phase 2
+> **Stages 1 and 2** are committed on `main` and live on `gh-pages` (`74c0298`) —
+> app-owned workflow state (`__IRS__`) and the read-only 📋 Report tab. Stages 3–8
+> (list intelligence, SLA, dashboard, canned responses, knowledge base, CSAT) are
+> designed but unstarted; the plan is the source of truth for those.
 
 ## Known Issues
 
+### Storage — the failure modes the sheet did not have
+
+These are new, and they are the price of the move. Each is mitigated; none is closed
+completely, and the honest mitigation is named rather than implied.
+
+- ⚠️ **Drive has no transactions.** A sheet write was one row — two people saving the
+  same ticket upserted two rows and could not clobber each other. A store write is
+  **read-whole-file → merge → write-whole-file**, so a merge onto a read taken before
+  the other writer's write silently drops one of the two saves. That is why every
+  read-merge-write holds the script lock and reads *inside* it with `readJsonLocked`
+  (the memoised `readJson` is deliberately unusable there). **The residual cost:** a
+  save that cannot get the lock is **refused, not applied** — `{status:'error'}` with
+  `LOCK_BUSY_MESSAGE`, worded so it cannot be mistaken for an admin-changes message.
+  The frontend already keeps the user's entry as a local draft and shows "⚠ Retry
+  Save", so nothing is lost; the user just has to press it.
+- ⚠️ **The fixed-name store files are located by a Drive *search*.** `sections/IR*.json`
+  are protected — `sections/index.json` maps IR → file id and the read is a direct
+  `getFileById`, because a search miss right after a create would write a second
+  `IR409.json` and silently fork a ticket. The fixed-name files — `users.json`,
+  `sessions.json`, `access.json`, `irs.json`, `config.json`, `kb.json`,
+  `comments.json`, `codes.json`, `attempts.json` — have no such index: they are found
+  by `getFilesByName`, which is **eventually consistent**.
+  A miss on a file that does exist reads as `null`, and the write path creates a
+  *second* `users.json` — the store forks, and the accounts in the first copy vanish
+  from the app's view. It is bounded in practice (the file is created once by
+  `initializeStore()`, the store is small, the search is warm) and `sessions.json`
+  refuses to read as "nobody is signed in" — but it is the one place a fork is still
+  possible. The fix is the same pattern as sections: one index file holding their ids.
+- ⚠️ **`sections/index.json` is one file that every section save rewrites.** Every
+  save, on any ticket, reads and rewrites it. It is serialised by the script lock, so
+  it cannot corrupt — it is a *throughput* ceiling, not a correctness hole. Fine at
+  twenty users; if it ever bites, the index shards per IR.
+- ⚠️ **A store file that cannot be read THROWS — deliberately.** `readJson` returns
+  `null` only when the file provably does not exist; an empty or unparseable file
+  raises. Do not "fix" this into a fallback: the tempting version answers `{}` for a
+  corrupt `users.json`, reads as "no accounts", and the very next `createUser` writes
+  that emptiness back plus one account. Twenty accounts, gone. The user-visible
+  consequence is the intended one: an error, and nothing changed.
+- ⚠️ **Drive revision history is not the rollback path.** It is not durable for
+  non-Google-format files, so `restoreAppDataFromBackup()` was deleted rather than
+  re-pointed. A destructive admin operation instead writes
+  `backups/<label>-<yyyy-MM-dd-HHmmss>.json` — **always a new file**, so it can never
+  overwrite an earlier snapshot — and the response names it.
+
 ### Security
-- ⚠️ **The pre-auth surface is open by necessity.** `ping`, `sessionCheck`, `login`, `changePassword`, `forgotPassword` and `resetPassword` must answer without a session, so the GAS URL being public is not itself the boundary — the **rate limits** are. `login`/`changePassword` share `LOGIN_ATTEMPTS` (5 failures → 15-minute lockout) and `forgotPassword` is capped at 3 codes/hour/email plus a global daily mail cap. Weakening any of those re-opens a guessing oracle.
-- ✅ **Data actions require a session** — `listIRs`, `getPassbook`, `saveSection` and every admin action call `requireAuth`, and the caller's email is read **from the token**, never from a request parameter, so the identity cannot be spoofed. (`docs/05` used to list the opposite; that was the pre-rewrite build.)
-- ❌ **File uploads shared with anyone-with-link** — `ANYONE_WITH_LINK` sharing on all uploaded files
-- ❌ **The IR list is read straight from a link-shared Sheet, bypassing the token gate.** Making the app the pane of glass does not close this; it only stops staff *needing* the Sheet. Moving the read behind the authenticated `listIRs` action is a separate, worthwhile change.
-- ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the Team Directory already behave, but "assignment" implies authority it does not have. Fixing it needs a redeploy plus an ACL-tab migration. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md).) `SENTINEL_SECTIONS` + `assertSentinelWritable()` now bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design.
-- ⚠️ **Everyone signed in can view every section, including Section D and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [03](03 - Sections Reference.md).
+- ⚠️ **The pre-auth surface is open by necessity.** `ping`, `sessionCheck`, `login`, `changePassword`, `forgotPassword` and `resetPassword` must answer without a session, so the GAS URL being public is not itself the boundary — the **rate limits** are. `login`/`changePassword` share `attempts.json` (5 failures → 15-minute lockout) and `forgotPassword` is capped at 3 codes/hour/email plus a global daily mail cap. Weakening any of those re-opens a guessing oracle.
+- ✅ **Data actions require a session** — `listIRs`, `getPassbook`, `saveSection` and every admin action call `requireAuth`, and the caller's email is read **from the token**, never from a request parameter (`saveSection`'s `savedBy` is the verified email, not the posted one), so the identity cannot be spoofed.
+- ❌ **File uploads shared with anyone-with-link** — `ANYONE_WITH_LINK` sharing on all uploaded files. Deliberate: the link in a passbook has to keep working for a customer. `_store/` is the counterweight — it is `PRIVATE`/`NONE` and is a **sibling** of the upload folders, so hashes, salts and live session tokens are not readable through the Drive UI. That only holds while `_store/` is not link-shared; `initializeStore()` sets it, and re-sharing the folder by hand would undo it silently.
+- ❌ **The IR list is read straight from a link-shared Sheet, bypassing the token gate.** Making the app the pane of glass does not close this; it only stops staff *needing* the Sheet. Moving the read behind the authenticated `listIRs` action is a separate, worthwhile change — and it is now a *small* one, because `listIRs` already joins `irs.json` for the app-owned status.
+- ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
+- ⚠️ **Everyone signed in can view every section, including Section D and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [10](10 - Auth & Access Model.md).
+- ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
 
 ### Functionality
 - ❌ **No offline editing** — PWA caches static assets but can't function without GAS backend
-- ❌ **No conflict resolution** — if two users edit the same section simultaneously, last-save-wins with no warning
+- ❌ **No conflict resolution *for the user*** — the lock stops a lost write at the file level, but if two people edit the same section the second save still wins with no warning and no diff. The store being correct is not the same as the humans being told.
 - ❌ **No delete capability** — sections can be updated but never cleared/deleted
 - ❌ **No IR creation from app** — new IRs must come from the Google Form → "Form Responses" tab (deliberate; the Form is the client's front door)
 - ❌ **No validation** — forms have no required-field checks before save
-- ⚠️ **Section completion is tracked but not shown** — `__IRS__.done[]` records which sections have been saved (written on save, recomputed on every `openPassbook()`), but no progress indicator renders yet. That is Stage 3. Note `done[]` was **remapped** by the merge migration (`sec-h`/`sec-i` → `sec-g`, old `sec-g` → `sec-f`, `sec-a` dropped) from the original value in a single pass, and the frontend additionally filters it against `SECTION_IDS`, so a stale or half-migrated store cannot reintroduce a retired id.
+- ⚠️ **Section completion is tracked but not shown** — `irs.json` records which sections have been saved (`done[]`, written on save, recomputed on every `openPassbook()`), but no progress indicator renders yet. That is Stage 3. The frontend filters it against `SECTION_IDS`, so a retired id in the store cannot reappear as a phantom tab.
 - ⚠️ **The hand-typed activity log is read-only and will stay that way** — it is kept in the Overview as a labelled `Legacy` block so history is not lost, but nothing writes it any more. It is deliberately **not** folded into the generated timeline: it has no per-row timestamp, so merging it would mean inventing when things happened. The app's own record of activity is the timeline.
-- ⚠️ **A stale service worker sees the new backend with the old shell for one load.** It requests `sec-g` and receives merged data (so Flight Test labels briefly sit on correct data), cannot save `sec-h`/`sec-i` (rejected with a clear "reload the app" error), and can post `a_overallStatus` into the `sec-a` row, which nothing reads. Harmless, and the `CACHE_NAME` bump ends it on the next reload — but it is the residual cost of the frontend and backend having to cut over together.
-- ⚠️ **Three Sheet columns are unmodelled** — the Form writes columns E, J and O, for which no `IR_REPO_*_COL` constant exists. Stage 2 surfaces them on the 📋 Report tab under "Other columns from the Sheet" rather than dropping them, and the app records which headers it did not recognise (`lastSheetAudit`). A new Form question is therefore visible, but appears in a catch-all block instead of a modelled field.
-- ⚠️ **The live Sheet header row has never been verified directly** — reads from this dev environment return HTTP 401, so the header row is taken from `backend.gs`'s constants plus a test fixture. The mapper is self-auditing and matches by substring, which is why it was built that way; still, confirm against the real Sheet when convenient.
+- ⚠️ **A stale service worker sees the new backend with the old shell for one load.** The deployed build carries the old nine-section shell, so a browser still holding it will request `sec-h`/`sec-i` (refused with a clear "reload the app" error, because `RETIRED_SECTION_IDS` names them) and can post `a_overallStatus` into the `sec-a` row, which nothing reads. Harmless, and the `CACHE_NAME` bump ends it on the next reload — but it is the residual cost of the frontend and backend cutting over together.
+- ⚠️ **Three Sheet columns are unmodelled** — the Form writes columns E, J and O, for which no `IR_REPO_*_COL` constant exists. The 📋 Report tab surfaces them under "Other columns from the Sheet" rather than dropping them, and the app records which headers it did not recognise (`lastSheetAudit`). A new Form question is therefore visible, but appears in a catch-all block instead of a modelled field.
+- ⚠️ **The live Sheet header row has never been verified directly** — reads from this dev environment return HTTP 401, so the header row is taken from `backend.gs`'s constants plus a test fixture. The mapper is self-auditing and matches by substring, which is why it was built that way; still, confirm against the real Sheet when convenient. This matters **more** now, not less: the Form Responses tab is one of only two Sheets the backend reads.
 
 ### UX
+- ⚠️ **Emoji still live in the older in-panel chrome** — the app's *icons* are now one inline-SVG set (`ICON_PATHS` / `iconSvg`), and the chrome the owner walks daily is fully converted. What is left is emoji inside **prose and status text**, plus a handful of older in-panel buttons: the `⚠️` hints, the `✓`/`✘`/`⚠` option labels (`Received` / `Missing` / `Damaged`), the `📎`/`📷`/`📄` evidence affordances, and the User Access modal's `👥`/`💾`/`📋`. Converting those is a **separate pass** — the option labels are customer-facing strings and the evidence affordances are inside the upload flow. `smoke-ui.mjs` pins the count at **29 non-comment lines**, so it can only go down: a new emoji cannot be added without a test failing and somebody deciding about it.
 - ⚠️ **No loading state per section** — loading saved data is silent; user sees empty forms briefly
 - ⚠️ **No error recovery** — if save fails, the retry button appears but doesn't auto-retry
 - ⚠️ **File previews are image-only** — PDF uploads show no preview, only images get thumbnails
 - ⚠️ **Checklist UX** — checklist items use dropdown selects instead of more intuitive checkbox UX
 - ⚠️ **No confirmation dialog** — save button has no "are you sure?" for critical sections
-- ⚠️ **Assignment emails read as comments** — `sendNudgeEmail`'s subject is hardcoded to the comment wording, so the notification an assignee receives says "you have a comment". Needs a redeploy to fix.
+- ⚠️ **Assignment emails read as comments** — `sendNudgeEmail`'s subject is hardcoded to the comment wording, so the notification an assignee receives says "you have a comment". Needs a redeploy to fix — and the redeploy that fixes it is the cutover.
 
 ### Technical Debt
-- 🔧 **Large single-file frontend** — all logic in one `app.js` (~5,350 lines and growing); the CSS is now split into four layered files (see docs/09)
+- 🔧 **Large single-file frontend** — all logic in one `app.js` (~5,350 lines and growing); the CSS is split into four layered files (see [09](09 - Design System.md))
 - 🔧 **No build pipeline** — no minification, no bundling, no tree-shaking
 - 🔧 **No type safety** — vanilla JS, no TypeScript or JSDoc
 - 🔧 **30-day persistent sessions** — `localStorage`, slid on use, no idle timeout (the owner's choice; see the security item above)
 - 🔧 **One admin** — a bus factor of one. Adding another is a one-line `ADMIN_EMAILS` edit plus a GAS redeploy.
-- 🔧 **The 90-second nudge poll is ~40 authenticated GETs/hour/user**, each doing full `SESSIONS`, `APP_DATA` and `__NUDGES__` scans. The session slide is throttled to ≤1 write per session per 6h so this change does not *add* to the problem, but the polling cost itself is a pre-existing concern. Not fixed here.
+- 🔧 **The 90-second nudge poll is ~40 authenticated GETs/hour/user.** In the sheet version each one scanned the `SESSIONS`, `APP_DATA` and `__NUDGES__` tabs; now it is one memoised `sessions.json` read plus one `comments.json` read, which is strictly cheaper. The session slide is throttled to ≤1 write per session per 6h, so the poll does not *add* writes. The polling itself is a pre-existing concern and is not fixed here.
 - 🔧 **`ACL` and `ACCESS_REQUESTS` tabs are frozen, not deleted.** They are the only record of the old hand-assigned grants; leave them for 30 days after cutover, then delete.
-- 🔧 **Legacy importer hardcoded** — `importSingleTab()` has placeholder cell mappings. It also has a **pre-existing duplicate-append bug**: its comment says "if not already there", but it calls `appendRow` unconditionally, so a re-run duplicates rows. Out of scope for the restructure (only the retired `'sec-i'` id was remapped); noted here so it is not rediscovered as new.
-- 🔧 **`AUDIT_LOG` has no automatic pruning, cap, rotation or delete path.** Volume used to be dominated by `__NUDGES__` saves (one row per comment post, resolve, edit *and* markRead, each carrying a 500-character copy of the whole comment array); those are no longer audited at all, and the bare `saved` marker plus the `done` delta are suppressed — so a human section save is now `1 + K` rows and a triage change `0..3`. There is still no automatic bound, and there should not be one: the audit trail is evidence. The lever is manual and locked — `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`, default 400). The 400-entry cap in `getAuditLog` bounds the *response*, not the read.
-- 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so new uploads land alongside the existing files instead of opening a second folder for the same section: `sec-f` → `'Section F - Quality Control'` (now also holds Flight Test uploads) and `sec-g` → `'Section H - PDI'` (now also holds Dispatch uploads). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
-- 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every `__NUDGES__` item) *and* the `Field ID` of every historical `AUDIT_LOG` row, so renaming `g_missionReport` → `f_missionReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_missionReport` to a section that no longer exists.
-- 🔧 **`getAuditLog` and `getPassbook` read whole tabs.** Both do a full `getDataRange().getValues()` and filter in memory, so request cost grows with `APP_DATA` / `AUDIT_LOG`. `__IRS__` alone adds one row per IR (~450). Fine now; if it bites, read a narrower range (the `AUDIT_LOG` case is the likelier one, since that tab only ever grows).
-- 🔧 **The deployed backend is older than `backend.gs`.** `getAuditLog`, the upload audit event and the whole restructure are not live until the cutover deploy. Nothing in Stages 1–2 depends on them.
+- 🔧 **The audit has no automatic pruning, cap, rotation or delete path** — `_store/audit/` holds one append-only `.jsonl` file per subject: `IR409.jsonl` per ticket, plus `CONFIG.jsonl` / `NUDGES.jsonl` / `KB.jsonl` for the sentinel stores, whose writes belong to no ticket. There should not be an automatic bound: the audit trail is evidence. The lever is manual and locked — `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`, default 400). The 400-entry cap in `getAuditLog` bounds the *response*.
+  - The prune is **per-subject**, so it can delete history for a ticket that is still open. That is the sheet version's behaviour too — not a regression — and the audit cannot currently tell whether a ticket is closed, so a smarter rule is not available yet.
+  - `getAuditLog`'s `truncated` flag is **off by one**: it reports `truncated` when there are exactly `cap` entries, so there is nothing hidden. Nothing in `app.js` reads it.
+- 🔧 **`maintenancePruneAuditLog` reads and rewrites every audit file** it finds, under one lock. Each file is small (~40 KB for a busy ticket), so the whole sweep is bounded, but it is the one editor-run function whose cost grows with the number of tickets. Run it deliberately, not on a schedule nobody watches.
+- 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so `sec-f` writes to `'Section F - Quality Control'` (which therefore also holds Flight Test uploads) and `sec-g` to `'Section H - PDI'` (also Dispatch). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
+- 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_missionReport` → `f_missionReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_missionReport` to a section that no longer exists.
+- 🔧 **The deployed backend is older than `backend.gs`, and so is the deployed frontend.** They cut over together at the cutover deploy; nothing in Stages 1–2 depends on the parts that are missing.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **929 cases across 11 suites**, all passing.
+`node tools/smoke-all.mjs` — **1144 cases across 11 suites**, all passing.
+
+Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
+no registration step.
 
 | Suite | What it proves |
 |---|---|
+| `smoke-store.mjs` | **Executes production code.** Loads the whole of `backend.gs` into a `vm` under a fake Drive platform and calls the real functions. A second save on one IR **merges** (the first section survives); a `__IRS__` patch writes **one key** of `irs.json` and leaves every other ticket intact; saving `iqc-config` leaves `team-directory` and `inward-options` intact; comments round-trip as `sections['all'].items`; `readJson` **throws** on an unreadable or non-JSON file and answers `null` only for a file that is genuinely absent — never `[]`, never `{}`; the audit line lands **after** the data write and in the ticket's own file; a save that cannot get the lock is **refused** rather than merged onto a stale read; a name lookup that misses does **not** fork the ticket into a second file — the write goes to the file `sections/index.json` names; `initializeStore()` really creates `_store/` with its three subfolders; and the store folder is shared `PRIVATE`. It is the only suite that runs any of those paths at all |
+| `smoke-backend.mjs` | Regex over `backend.gs`, retargeted from Sheets to the store: deleted sheet machinery really gone (`getRange`, `appendRow`, every `getOrCreate*Tab`, the merge planner, the importer, the column constants); **every remaining `SpreadsheetApp.` call site walks to its enclosing function and must be one of the read-only inputs**, and the store functions contain no positional layout at all; the one-key write rule; `readJson`'s throw-don't-fallback contract; `getStoreFolder` never creating; the index and the anti-fork rule; per-IR audit, audit-last, and no early return that can skip one; the forced password change (no token before any mint, TTL on **both** doors); the mail cap on every send site; the sentinel allowlist; the lock's release-in-`finally` and refuse-rather-than-proceed wording; every locked write path named in the LOCKED list; and the editor run order printed where the editor will actually see it |
 | `smoke-shell.mjs` | Every id `app.js` reads at parse time exists in `index.html`; the **7 tabs and 7 panes** (📋 Report + six lettered); that the retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane, and that the Overview carries neither `class="section-content"` nor a `sec-` id; the plain end-of-body `<script>` contract; cascade order; token-only intake CSS; and that the **irreversible purge is two-step in the UI too** (review → copy → delete), not just in the endpoint behind it |
 | `smoke-ir-state.mjs` | `__IRS__` ownership, precedence and merge — including that a **retired** section id is filtered out of `ir.done` |
 | `smoke-intake.mjs` | The Sheet column map, the audit, degenerate/reordered input, and escaping — including **the ticket-list card rendered from two untrusted sources** (the public customer Form's serial field, and `__IRS__` status/priority, which any signed-in user can write). Asserts on real rendered output: no injected attribute, no attribute beyond the fixed set the renderer writes, and a `javascript:` link produces no anchor at all |
@@ -84,58 +137,72 @@
 | `smoke-timeline.mjs` | Drives the **pure** `buildTimeline` in the `vm` harness — behaviour, not shape. Each event kind maps correctly; `done` deltas are suppressed; an `uploaded` row carries the file name with the **source** field id; comments merge in and other IRs are excluded; a `'dd-MMM-yyyy HH:mm:ss'` fixture parses (the `Date.parse` → `NaN` trap); mixed timestamps sort with the tiebreak; `limit` trims from the newest end; and no entry ever interpolates the literal `undefined` |
 | `smoke-access.mjs` | View + comment for everyone, edit only from departments, admin bypass, the fallback **failing closed on writes**, and that the de-admined `customer.relations@` address is gone from `app.js` entirely. Also that `canTriage()` is a **separate axis**: a `sec-c` edit grant does not confer it, a CR user has `triage: true` with `canEditSection` false for all six, and `myAccess().triage === false` on the fallback |
 | `smoke-session.mjs` | The token is in `localStorage` and survives a `sessionStorage` wipe; `clearLocalAuth` is the one teardown path and stops the poll; **the poll restarts after an in-page re-login**; the dead `forceReauth()` stays deleted; and **`confirmSessionAlive()` resolves true when fetch rejects** |
-| `smoke-backend.mjs` | Regex over `backend.gs`: deleted machinery really gone, `SESSION_DAYS: 30`, one admin, the restructured router (**nothing dispatches outside `try`**), all dispatched actions, grants in real tabs, the sentinel **allowlist**, the mail cap **on every send site**, the temp-password clock on **both** doors that accept one, `resetPassword` preserving `Status`, the `LockService` guard on index-based deletes, the must-change branch returning **before** any session is minted, `DEPT_HEADS` at 12 columns with `Triage` **last** (so the section offset stays `3 + j`), and that the merge's era-classifier is used for the group key |
-| `smoke-merge-plan.mjs` | **Executes** `planSectionMerge` — the *production* function, extracted from `backend.gs`'s source and run in a `vm` with no Apps Script — over fixture arrays shaped like `getDataRange().getValues()`. An IR with `sec-g` → one `sec-f` with unioned keys; `sec-h`+`sec-i` → one `sec-g`; **an IR with all four → exactly two survivors and two deletes** (the direction-collision regression test); no `sec-g` row retains `g_*`; `sec-g` is dated by its **own field ids**, never by its section column; an unmarked `sec-g` row is **left alone and named** in `ambiguous[]`; `done[] = ['sec-a','sec-g','sec-h','sec-i'] → ['sec-f','sec-g']` (the chaining test); sentinels and `sec-a` rows untouched; and **the second run is a genuine no-op, not merely equivalent** |
-| `smoke-merge-apply.mjs` | The adversarial pass the plan asked for: loads the **whole** of `backend.gs` into a `vm` with a faked Apps Script platform (`SpreadsheetApp`/`Utilities`/`LockService`), and asserts on the *order of calls* — that the lock is taken **before** the snapshot is read and the snapshot is read **inside** the lock; that deletes run **bottom-up**, so the `__IRS__` sentinel (fixtured *below* both delete targets) survives a top-down delete; that every surviving row is exactly where it was, in its original order; that the dated backup tab is byte-identical to the pre-merge rows; that a second apply writes nothing and leaves the backup holding **pre**-merge state; `restoreAppDataFromBackup` and its same-day refusal; and the audit layer end to end (header written by the real `getOrCreateAuditTab`, rows exactly 8 wide, timestamps round-tripping, no `done`/`_links` rows, 500-char truncation) |
-| `smoke-boot.mjs` | **Real headless Chrome**: the app boots via `?dev=1`, the Overview renders its facts/timeline/legacy log, the full CSV → map → render chain reaches the DOM; and a third phase loads the **signed-out** login screen with the sign-up machinery absent from the DOM. It is also the only suite that would catch a `TypeError` from a shadowed function name — `renderBannerMeta`'s local `canTriage` had to be renamed `showTriage` for exactly that reason. Skips cleanly if no Chrome is installed |
+| `smoke-boot.mjs` | **Real headless Chrome**: the app boots via `?dev=1`, the Overview renders its facts/legacy log, the activity panel renders **below** the sections and **collapsed**, **every icon slot in the rendered page is filled**, and the full CSV → map → render chain reaches the DOM; and a third phase loads the **signed-out** login screen with the sign-up machinery absent from the DOM. It is also the only suite that would catch a `TypeError` from a shadowed function name — `renderBannerMeta`'s local `canTriage` had to be renamed `showTriage` for exactly that reason. Skips cleanly if no Chrome is installed |
+| `smoke-ui.mjs` | The five UI changes, as behaviour: saving IS signing (no `<button>` in an e-signature block, `signESignature` gone, the stamp lands **before** `collectSectionValues`); the fill **never overwrites** a person and claims **one role line per save**, so Section B's two roles stay separable; the nine role lines the Section D PDF needs all survive; the activity panel's placement, collapsed default, class-not-inline `display` fold and honest `N of M` count; **`indexView` can never be hidden while the user is on the index** (asserted on a **desktop** viewport, since the phone layout hides it legitimately); and that **every icon name the source references exists in `ICON_PATHS`** — in both directions, so a dead entry fails too |
 
 There is no build step and no test framework — suites are plain node scripts.
+`smoke-boot.mjs` stubs `window.fetch` rather than reaching the network, so the
+`CONFIG.GAS_URL` change cannot break it.
 
-### What the suite could not see, and what closed the gap
+### What a regex suite cannot see, and what closed the gap
 
-Every case above is **static**: `smoke-backend.mjs` reads `backend.gs` as text and
-`node --check` only proves it parses. No suite *executed* the backend, because it
-needs `SpreadsheetApp`, `MailApp`, `Utilities` and `PropertiesService`. Two
-adversarial review passes — the second of which built a mocked Apps Script runtime
-and actually ran the file — found three defects invisible to all 444 cases that
-existed at the time:
+`smoke-backend.mjs` reads `backend.gs` as **text**, and `node --check` only proves it
+parses. Neither can tell behaviour from shape, and the cost of that was concrete:
+**three defects shipped through 444 passing regex cases**, one of them under a heading
+that claimed the opposite.
 
 - `changePassword` had **no temp-password expiry check** (it lived only in
-  `doLoginPassword`), so an expired temp password could be posted straight to it
-  and mint a full 30-day session. The TTL was decorative.
-- `resetPassword` wrote a literal `'active'` into `Status`, so resetting the
-  password of a deliberately disabled account **re-enabled it**.
+  `doLoginPassword`), so an expired temp password could be posted straight to it and
+  mint a full 30-day session. The TTL was decorative.
+- `resetPassword` wrote a literal `'active'` into `Status`, so resetting the password
+  of a deliberately disabled account **re-enabled it**.
 - `sendNudgeEmail` called `MailApp.sendEmail` directly, bypassing the daily cap —
-  while `smoke-backend.mjs` asserted under the heading *"the mail cap is global, not
-  per-flow"* that it covered comment notifications. That assertion was false, and
-  the heading is what made it look verified.
+  while the suite asserted, under the heading *"the mail cap is global, not per-flow"*,
+  that it covered comment notifications. The assertion was false, and the heading is
+  what made it look verified.
 
-All three are fixed, and each now has an assertion that would fail if it came back.
-The lesson worth keeping: **a regex suite asserts that code is shaped a certain
-way, never that it behaves that way.** When a change is security-shaped and the
-runtime cannot be executed here, it needs an adversarial pass, not more cases.
+The lesson, which is why `smoke-store.mjs` exists: **a regex asserts that code is
+shaped a certain way, never that it behaves that way.** The storage move is exactly the
+change that lesson applies to, because it converts an atomic one-row write into a
+whole-file read-merge-write — the failure mode is a *silently dropped save*, which is
+invisible to any amount of grepping. So the suite that mocks the platform and runs the
+real functions was kept, retargeted from a fake `SpreadsheetApp` to a fake `DriveApp`,
+and it found two defects on its first honest run:
 
-**The restructure applied that lesson rather than repeating it.** Two gaps were named
-in advance and then closed the same way:
+- **`sec-g` was in `RETIRED_SECTION_IDS`**, derived from a merge map that listed
+  `sec-g: sec-f` — so the **live** Section G, which the frontend renders with a Save
+  button, had every save refused with *"was merged into another section"*. The map had
+  no other consumer once the sheet merge was deleted; it is now a literal, with a
+  comment saying `sec-g` must never be added.
+- **`writeIR` resolved the ticket's file by name search**, so a search miss would have
+  written a second `IR409.json` and forked the ticket across two files. It now goes
+  through `sections/index.json` and **refuses** to write without a file id.
 
-- *"that `mergeSectionsApply` deletes the **right** rows — the planner is tested, the
-  row-index arithmetic around it is not"* and *"that is the only thing that will
-  catch an off-by-one in the delete order."* → `smoke-merge-apply.mjs` mocked the
-  platform and asserted the **call order**: the lock is taken before the snapshot is
-  read, deletes run bottom-up, and the `__IRS__` sentinel survives — fixtured
-  deliberately *below* both delete targets, so a top-down delete eats it.
-- The `sec-a` row surviving `getPassbook` for a **non-admin** remains genuinely
-  untestable here (it needs the real Sheets plus a non-admin session), so it is not
-  asserted — it is a **named cutover check** instead, in
-  [08](08 - Development Guide.md): sign in as a CR account and a Production account
-  and confirm the Overview renders and the right tabs are gated. Testing it as the
-  admin would have proved nothing, and that is exactly how the bug would have
-  shipped.
+The same lesson repeated in the UI pass, and the shape of it is worth keeping: the icon
+map's keys were renamed (`IR`, `comment`) while the call sites were not, so **five icon
+slots rendered `''`** — the IR nav glyph, the detail placeholder, and all three comments
+buttons. Nothing threw. `iconSvg` answers an unknown name with `''` by design, which is
+correct and completely silent. A suite that asserted *"the icons are SVGs"* would have
+passed; the suite that catches it asserts *"every name the source asks for exists in the
+map"*, in both directions, and `smoke-boot.mjs` then checks it in a real browser where a
+missing icon is a blank button rather than a red test. **When a lookup can fail
+silently, the test has to be about the lookup, not the output.**
 
-**Still not automatable here:** rendering both themes at 360/768/1024/1440, the
-DEPARTMENTS positional offsets against real rows, whether Apps Script accepts a
-12-column header, whether the lock is genuinely *acquired* at runtime, Drive folder
-behaviour, and a live end-to-end sign-in.
+**Named cutover checks rather than test cases**, because they need the real Drive, a
+real session, or a non-admin account, and asserting them as the admin would have proved
+nothing:
+
+- Sign in as a CR account and a Production account and confirm the Overview renders
+  and the right tabs are gated. (The `sec-a` row surviving `getPassbook` for a
+  *non-admin* is untestable here, and it is exactly the bug that would have shipped.)
+- The first save → reload on the new store, to confirm the round trip against real
+  Drive rather than a fake.
+
+**Still not automatable here:** rendering both themes at 360/768/1024/1440; whether
+Apps Script genuinely *acquires* the lock at runtime; whether `getFilesByName` is ever
+actually stale in the wild (the spike is the only way to know); Drive revision retention;
+and a live end-to-end sign-in. See the verification list in
+[08](08 - Development Guide.md).
 
 ## Planned / Nice-to-Have Features
 
@@ -151,55 +218,56 @@ behaviour, and a live end-to-end sign-in.
 - [ ] Offline-first with local storage sync queue
 - [ ] Export to PDF
 - [ ] Multi-language support (Hindi + English)
+- [ ] Move the IR list read behind the authenticated `listIRs` action (closes the last
+      unauthenticated data path)
+- [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **App storage moved out of Google Sheets entirely.** Every byte the app owns —
+  accounts, sessions, the access matrix, saved sections, the audit trail, comments,
+  the knowledge base, backups — is a JSON file under `_store/` in the owner's Drive.
+  The only two Sheets left are inputs. The old repository spreadsheet is archive-only,
+  and the four sheet primitives that made positional rows safe (`findUserRowIndex`,
+  `userCol`, `USER_HEADS`, `deptTabShape`) are deleted rather than shimmed: a JSON
+  record has names, so every read-modify-write is a key assignment.
 - ✅ **The section restructure** — nine sections became six (**B–G**); old Section A's
   content became the pinned **Overview panel** (data key `sec-a`, no letter, no tab);
   QC + Flight Test merged into **Section F — Quality Test Report**; PDI + Dispatch
-  merged into **Section G — PDI Report/Dispatch Record**. The merge is a migration
-  (`planSectionMerge` → `mergeSectionsApply`) with a dated backup tab and an undo
-  (`restoreAppDataFromBackup`), documented in [03](03 - Sections Reference.md).
+  merged into **Section G — PDI Report/Dispatch Record**.
 - ✅ **The automated activity log.** The hand-typed table is retired to a read-only
-  `Legacy` block; activity is now generated from four sources the app already
-  records — section saves and field edits, status/assignee/priority/type changes,
-  comments and @mentions, and **file uploads** (which previously left no trace at
-  all). One pure `buildTimeline(...)` feeds both the Overview panel and the 🕓
-  History modal, so the two can never tell different stories.
-- ✅ **The department matrix is populated.** The owner's mapping now lives in
+  `Legacy` block; activity is now generated from four sources the app already records —
+  section saves and field edits, status/assignee/priority/type changes, comments and
+  @mentions, and **file uploads** (which previously left no trace at all). One pure
+  `buildTimeline(...)` feeds both the Overview panel and the 🕓 History modal, so the
+  two can never tell different stories.
+- ✅ **The department matrix is populated.** The owner's mapping lives in
   `SEED_GRANTS`; `seedDepartments()` upserts it and reports `created` / `updated` /
   `unchanged` / and a **`dropped`** list, and `seedMemberships()` adds the
-  person↔department edges while never removing one. **Triage** is a new,
-  second, independent axis — CR and Management triage without editing any section.
-- ✅ **The lesson the restructure taught, worth generalising:** *a migration that
-  rewrites rows the live app is reading cannot run pre-flight.* Column-widening can
-  (the live code keeps reading the columns it knows), but the `APP_DATA` merge
-  cannot — a client on the old build would keep writing rows the merge had already
-  collapsed. That, plus the fact that the old backend reads `DEPARTMENTS`
-  **positionally** against a list that just got shorter, is what forces the grants,
-  the memberships and the merge into the cutover window **after** the deploy and
-  before the `gh-pages` push. The run order in [08](08 - Development Guide.md) is
-  derived from those two facts, not chosen.
-- ✅ **A second review pass over the whole rewrite**, run adversarially and — in one
-  case — by actually executing `backend.gs` against a mocked Apps Script runtime.
-  It found three defects the 444 static cases could not see; all are fixed and
-  pinned (see **Tests** below). It also confirmed the property the rewrite exists
-  for held under execution: **no code path mints a session for an account on a
-  temp password except `changePassword`.**
+  person↔department edges while never removing one. **Triage** is a new, second,
+  independent axis — CR and Management triage without editing any section.
+- ✅ **The lesson this migration taught, worth generalising:** *a store with no
+  transactions makes the read part of the critical section.* `withRowLock` used to
+  guard only the write; it now guards the read, and every read inside it bypasses the
+  per-execution memo. The second half of the same lesson: *a read that cannot tell
+  "absent" from "unreadable" is a data-loss bug* — `readJson` returns `null` only for a
+  genuinely missing file and throws otherwise, because the convenient version destroys
+  the store it was meant to protect.
 - ✅ **The ticket-list card is rendered safely.** It was interpolating the public
   customer Form's serial field and the ACL-exempt `__IRS__` status straight into
   `innerHTML`, with an unescaped quote in the `onclick` — enough for an
   unauthenticated attacker to lift an admin's session token from `localStorage`.
-  `escJsAttr()` + `safeUrl()` now cover the JS and URL contexts, and the whole
-  card is asserted against real rendered output.
+  `escJsAttr()` + `safeUrl()` now cover the JS and URL contexts, and the whole card is
+  asserted against real rendered output.
 - ✅ **Admin-provisioned accounts** — no self-signup; forced password change on first sign-in; forgot-password by email; 30-day sliding session; admin bulk provisioning with a copyable credentials txt (see [10](10 - Auth & Access Model.md))
 - ✅ **Two-level access from departments** — view+comment for everyone, edit from the department↔section matrix, admin bypass
 - ✅ **The repeated sign-in prompts in User Access** — the real cause was a 90s poll re-arming the ejector after every wipe, plus a Reconnect button that called `signOut()`
 - ✅ **The irreversible account purge is two-step** — review the list, copy it, then
-  delete; the backend plans before it deletes, refuses if the list changed since
-  the review, and runs under a `LockService` lock so a concurrent write cannot make
-  an index-based `deleteRow` hit the wrong row. The old copy promised the rows were
-  "shown below first" while the code deleted them before responding.
-- ✅ **Audit trail / history for section edits** — `AUDIT_LOG` + the 🕓 History modal
+  delete; the backend plans before it deletes, refuses if the list changed since the
+  review, runs under the script lock, and writes a `backups/purge-users-<ts>.json`
+  snapshot **before** the first destructive write. A response is not a backup: the old
+  copy promised the rows were "shown below first" while the code deleted them before
+  responding.
+- ✅ **Audit trail / history for section edits** — `_store/audit/IR409.jsonl` + the 🕓 History modal
 - ✅ **Auto-calculation for the Section D repair table** — Cost = Qty × Rate, live Total Repair Cost
 - ✅ **Viewing uploaded files** — the `imageEvidence` control previews saved Drive images and links PDFs, with captions
 - ✅ **App-owned status, assignee, priority and type** — no longer read back from the Sheet (Stage 1)

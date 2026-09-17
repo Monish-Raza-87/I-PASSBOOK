@@ -78,16 +78,17 @@ a visible error if the day's mail is spent, rather than failing silently — see
 Comments are stored via the existing generic `saveSection` / `getPassbook`
 endpoints under a special irNumber `__NUDGES__` / sectionId `all`, field
 `items` = array of:
-
 ```
 { id, irNumber, scope, sectionId?, fieldId?, sectionLabel?, fieldLabel?,
   to, from, fromName, message, mentions[], createdAt, readBy[] }
 ```
 
-Adding a comment does a fresh fetch → append → save to reduce lost writes
-(concurrent last-write-wins is still possible). All comments live in one
-APP_DATA cell, so the list is bounded by the ~50,000-char cell limit (archive
-later if it grows).
+Adding a comment does a fresh fetch → append → save to reduce lost writes; the save
+holds the script lock, so a concurrent append is refused rather than silently lost.
+All comments live under one key (`all`) of `_store/comments.json`, so the list is
+bounded by how much the backend is willing to rewrite on every post — the cell limit
+that used to cap this is gone, but a whole-file rewrite is the new cost, so archive
+past a few hundred comments if it ever grows.
 
 ### Team Directory (admin-editable)
 `TEAM_DIRECTORY_DEFAULTS` seeds the @-mention suggestions; admins
@@ -101,30 +102,43 @@ Every section save records the **date of the event** and captures any
 **overwrite** (correction) so events are traceable back later — the "date of events"
 requirement. Backend (`backend.gs`, requires redeploy):
 
-- `saveSection` writes to an **`AUDIT_LOG`** tab on the data sheet, columns:
-  `Timestamp | IR Number | Section ID | Saved By | Event | Field ID | Old Value | New Value`.
+- `saveSection` appends to **`_store/audit/IR409.jsonl`** — one Drive file per ticket,
+  one JSON object per line, short-keyed:
+  `{ t, ir, sec, by, ev, fid, old, nw }` — i.e. Timestamp, IR Number, Section ID,
+  Saved By, Event, Field ID, Old Value, New Value.
 - Events: `saved` (one marker per **human** section save), `added` / `changed` /
-  `removed` (one row per field), and `uploaded` (one row per uploaded file, with the
+  `removed` (one line per field), and `uploaded` (one line per uploaded file, with the
   file name in New Value) — so uploads are traceable too, which they were not before.
 - Three suppressions keep the log readable, each for a stated reason: derived
   Drive-link keys (`*_links`) and the `done` completion array are never diffed (a
   500-character JSON diff of `done` would drown the real edits on every save), and
   the bare `saved` marker is not written for a `__`-sentinel write — every section
   save also fires `patchIRState`, so without that guard each save produced two marker
-  rows, one of them contentless.
+  lines, one of them contentless.
+- **The audit append happens AFTER the data write, inside the same lock.** It used to
+  be the other way round, so a failed save left an audit line for a save that never
+  happened.
 - The **`__NUDGES__` store is not audited at all.** Comment items already carry
-  their own author and timestamp, which is strictly better information than a row
+  their own author and timestamp, which is strictly better information than a line
   holding a truncated copy of the whole array, and they were dominating the log.
+- A sentinel write is filed under the ticket it is **about**: `__IRS__`/IR409 goes to
+  `IR409.jsonl`, while `__CONFIG__` / `__NUDGES__` / `__KB__` have no ticket and get
+  `CONFIG.jsonl` / `NUDGES.jsonl` / `KB.jsonl`. So two people on different tickets
+  never touch the same audit file.
 - `getAuditLog(irNumber)` GET action returns the trail for one IR, oldest first,
-  capped at 400 entries. It matches **two** row shapes: an ordinary section row
-  (column B is the IR) and a sentinel row (column B starts with `__` and the real IR
-  sits in the Section ID column) — which is what lets triage changes appear in the
-  same timeline as saves with no second store.
-- `AUDIT_LOG` has **no automatic cap, rotation or delete path**. The 400 cap bounds
-  the *response*, not the read. Pruning is a manual lever:
-  `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`), deliberately
-  manual because the audit trail is evidence and must not shrink behind anyone's
-  back.
+  capped at 400 entries. It reads that ticket's file and matches **two** line shapes:
+  an ordinary section line (whose `ir` is the IR) and a workflow line (whose `sec` is
+  the IR and whose `ir` is the `__IRS__` store name) — which is what lets triage
+  changes appear in the same timeline as saves with no second store. A workflow line
+  is reported with the **real** IR in `irNumber`, so a consumer filtering on it cannot
+  silently drop every status change.
+- `_store/audit/` has **no automatic cap, rotation or delete path**. The 400 cap
+  bounds the *response*, not the read. Pruning is a manual lever:
+  `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`, default 400 days),
+  deliberately manual because the audit trail is evidence and must not shrink behind
+  anyone's back. It is per-subject, so it can prune history for a ticket that is still
+  open — the audit cannot tell whether a ticket is closed. A line whose timestamp
+  cannot be parsed is **kept**, never guessed at.
 
 Frontend: the IR banner **🕓 History** button opens a modal listing the trail newest
 first, showing who saved, the event, the field, and old→new values. It and the
@@ -143,9 +157,9 @@ always visible, and it is always one click from a save.
 
 **Why it kept the id `sec-a`.** Renaming the data key would have forced a second
 migration for no user-visible gain. Keeping it preserves at zero cost the existing
-`a_crmOwner`/`a_contactPhone` values in `APP_DATA`, the drafts keyed
+`a_crmOwner`/`a_contactPhone` values in the ticket's own store file, the drafts keyed
 `ipb_draft_<ir>_sec-a`, the `a_*` → `sec-a` field resolution, the backend's
-locked-intake strip, and the meaning of existing `AUDIT_LOG` rows. No UI ever shows
+locked-intake strip, and the meaning of existing audit lines. No UI ever shows
 the letter "A".
 
 Three structural properties, each load-bearing:
@@ -557,10 +571,10 @@ preview, a data-check remark, and a Test Pilot e-signature.
 > **The field ids were deliberately NOT renamed.** `sec-f` holds `f_*` **and** `g_*`
 > ids, and `sec-g` (below) holds `h_*` **and** `i_*`. Field ids are also the anchors
 > inside every `__NUDGES__` comment item (`n.fieldId`) and the `Field ID` of every
-> historical `AUDIT_LOG` row, so renaming `g_missionReport` → `f_missionReport`
+> historical audit line, so renaming `g_missionReport` → `f_missionReport`
 > would orphan every comment anchored to it and split its audit history across two
-> names. Keeping them is also what makes the migration a one-column rewrite instead
-> of a JSON-key rewrite.
+> names. Keeping them is also what makes the merge a re-keying of existing records
+> rather than a rewrite of every field name inside them.
 >
 > That wart is only survivable because a field id is resolved through
 > `FIELD_SECTION_INDEX`, an index built from `SECTIONS` itself. Resolving it by

@@ -61,14 +61,20 @@ Two things not to forget on every deploy:
 ## Deploying the Backend (GAS)
 
 GAS separates the **editor** code from the **deployed** version that serves
-`/exec`, so sheet migrations can run hours before cutover with zero user impact.
-The order below is the one that matters — deviating from it breaks either the old
-clients or the `/exec` URL.
+`/exec`. There is no migration to sequence any more — the app's data lives in
+Drive JSON files that the *deployed* code and the *editor* code read identically,
+and the old backend never looks at `_store/`. So the order below is simply: set up
+the store, then deploy.
 
-**Step 1 — pre-flight (undeployed, no impact).**
-1. Open [script.google.com](https://script.google.com) and open the existing project
+**This is a NEW Apps Script project, under `monish.raza@indrones.com`.** The data
+and the backend sit in one account, and `customer.relations@` is out of the
+picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) for why.
+
+**Step 1 — one-time setup (run from the editor, before the deploy).**
+1. Sign in to [script.google.com](https://script.google.com) **as
+   `monish.raza@indrones.com`** and create a new project
 2. Paste the contents of `backend.gs` — **do not deploy yet**
-3. Update `CONFIG` values if Sheet/Drive IDs change
+3. Update `CONFIG` values if Drive IDs change
 4. Run, from the editor's function dropdown, in this order — pick the function and
    press **Run**. Its report appears in the **Execution log** (View → Execution log,
    or the panel at the bottom). Nothing else is printed, so an apparently blank run
@@ -77,82 +83,75 @@ clients or the `/exec` URL.
    first run in a session asks for authorisation once — *Review permissions →
    Advanced → Go to project (unsafe) → Allow* — which is the `script.send_mail`
    scope the comment notifications need.
-   - `migrateAddColumns()` — widens `USERS`, `SESSIONS` and the new tabs in place.
-     It **refuses to widen** a `DEPARTMENTS` tab whose header it does not recognise
-     (`deptTabShape` → `legacy-9`/`unknown`) rather than overwriting row 1 and
-     reinterpreting columns
-   - `migrateAclReport()` — **read-only.** The last chance to see the old
-     hand-assigned grants before they are orphaned. Paste the output somewhere
-     private, never into the repo.
-   - `bootstrapAdmin()` — creates the admin row if missing and prints a one-time
-     temporary password **to the execution log**; if the row exists it is left alone
-     and only the flags are normalised. **Run this before handing out anything, and
+   - `initializeStore()` — creates `_store/` inside `CONFIG.DRIVE_ROOT_FOLDER_ID`,
+     makes its three subfolders, sets the folder **Private (not link-shared)**, and
+     seeds the empty files. It is idempotent by guard, not by accident: an existing
+     file is left exactly as it is. **Confirm `_store/` appeared and is not shared.**
+   - `seedDepartments()` — writes the owner's department → section grants, plus
+     `Triage` for CR and Management. It reports `created` / `updated` (naming the
+     delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`, and critically a **`dropped`
+     list** — any existing grant the new mapping does not reproduce. **Read the
+     dropped list.** A rewrite is the one thing that can lose a grant silently.
+   - `seedMemberships()` — adds one department edge per person. It **only ever
+     adds** and says so; nothing is removed. Emails with no account are printed —
+     the edge is correct and harmless, but those people cannot sign in yet.
+   - `bootstrapAdmin()` — creates the admin account if missing and prints a one-time
+     temporary password **to the execution log**; if it exists it is left alone and
+     only the flags are normalised. **Run this before handing out anything, and
      copy the password out of the log then** — it is not stored anywhere else.
+   - `seedAccounts()` — creates **one account per seeded member** and prints each
+     address with its temporary password. The roster is the union of
+     `SEED_MEMBERSHIPS`, not a second list, so every department edge that
+     `seedMemberships()` created has an account behind it. It is **additive**: an
+     account that already exists is skipped and its password is left alone, so
+     re-running it is safe and cannot invalidate a password someone is using. Run it
+     **after** `bootstrapAdmin()` — admin addresses are skipped here.
+5. **Copy the credentials into a local txt now** — the admin's password from
+   `bootstrapAdmin()` and the whole `seedAccounts()` table. This is the handover
+   document for Step 4. **Never the repo — it is public.** Note that the log is not
+   a safe home for them either: anyone with editor access to the project can read it,
+   and it does not last forever. Clear those two lines from the log once copied.
 
-   `seedDepartments()`, `seedMemberships()` and the merge are deliberately **not**
-   here — see the cutover window below for why. The grants are no longer ticked by
-   hand: `seedDepartments()` writes the owner's mapping, and reports the deltas.
-5. Copy the credentials list to a local txt. **Never the repo — it is public.**
+`maintenancePruneSessions()` and `maintenancePruneAuditLog()` are **anytime after
+go-live**, not pre-flight — they are destructive and manual, and the audit trail is
+evidence that must not shrink behind anyone's back.
 
-**Step 2 — cutover window (~2 minutes; announce first, and confirm nobody is mid-save).**
+The old pre-flight order (`migrateAddColumns` → `migrateAclReport` →
+`bootstrapAdmin`, then a ~2-minute cutover window) existed because widening a
+`DEPARTMENTS` tab would be read *positionally* by the still-live old backend and
+misgrant every section, and because the `APP_DATA` merge rewrote rows the live app
+was reading. Neither exists now: there are no columns and no rows, `_store/` is a
+folder the old backend never looks at, and the store starts empty.
 
-Two facts force this order, and neither is negotiable:
-
-- The grants and memberships cannot land **before** the deploy. `getOrCreateDeptTab`
-  → `ensureHeaders` is reached on **every read**, and until the new backend is the
-  one serving `/exec` the live code still reads `DEPARTMENTS` **positionally** — so
-  a 12-column tab built for six sections would be read letter-by-letter against the
-  old nine, silently granting the wrong sections to the wrong departments.
-- The merge cannot run **before** the deploy either: it rewrites rows the live app
-  is reading. It is the mirror of the column-widening rationale — a migration that
-  rewrites live rows has no safe pre-flight.
-
-1. Deploy → Manage deployments → **edit the existing deployment** → New version.
-   **Never "New deployment"** — the `/exec` URL must not change, or
-   `CONFIG.GAS_URL` and every installed client breaks.
+**Step 2 — deployment.**
+1. Deploy → **New deployment** → Web app:
    - Execute as: **Me**
    - Who has access: **Anyone**
-2. `seedDepartments()` — writes the department → section grants, plus `Triage` for
-   CR and Management. It is an **upsert** and idempotent: it reports `created` /
-   `updated` (naming the delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`, and
-   critically a **`dropped` list** — any existing grant the new mapping does not
-   reproduce. **Read the dropped list.** A rewrite is the one thing that can lose a
-   grant silently.
-3. `seedMemberships()` — adds one `USER_DEPARTMENTS` edge per person. It **only ever
-   adds** and says so; nothing is removed. Emails with no `USERS` row are printed —
-   the edge is correct and harmless, but those people cannot sign in yet.
-4. `mergeSectionsReport()` — **read-only.** Read the plan before applying it. Check
-   that every IR with old `sec-g` rows goes to `sec-f` and every `sec-h`/`sec-i`
-   goes to `sec-g`, and read the `ERA-AMBIGUOUS` block if it appears: those are
-   `sec-g` rows with no `g_*`/`h_*`/`i_*` field to date them, which are left
-   untouched on purpose. Merge any of them by hand only if they are old Flight Test
-   data.
-5. `mergeSectionsApply()` — applies it. It snapshots **inside the row lock**, refuses
-   if it finds nothing to do, and writes a dated tab
-   `APP_DATA_BACKUP_<yyyy-MM-dd>` **before** the first write, refusing if that tab
-   already exists. Copy the backup tab to a private sheet before trusting it.
-6. `mergeSectionsReport()` again — it must report **zero** rows to rewrite and zero
-   to delete. Anything else means the first pass did not land.
-7. **Push `gh-pages`** — frontend and backend go live together.
-8. If the URL did change, update `CONFIG.GAS_URL` in `app.js` and redeploy the
-   frontend in the same window.
+2. Copy the `/exec` URL.
+3. Check `monish.raza@` has at least **view** access to the client's `Form Responses`
+   sheet and the legacy workbook — the script reads both as the executing account.
+   **Check this before the cutover, not during it.**
+4. **Test the new URL on its own before touching the frontend**: a plain
+   `?action=ping` in a browser tab, then `?action=getPassbook&irNumber=IR409` with a
+   real token. Only once it answers correctly do `app.js` and `gh-pages` change —
+   which keeps the frontend pointing at a working backend for the whole window.
+5. Update `CONFIG.GAS_URL` in `app.js:10` to the new `/exec` URL, **bump
+   `CACHE_NAME` in `sw.js`** (the URL constant lives in a cached asset), and
+   **push `gh-pages`**.
 
-The old frontend is broken by design at this point: it calls actions that no
-longer exist. So cut over both halves together — deploy the backend, then
-immediately push `gh-pages`.
-
-**Undo.** `restoreAppDataFromBackup()` finds the newest `APP_DATA_BACKUP_<date>`,
-saves the current state to `APP_DATA_PRE_RESTORE_<date>` (so the undo is itself
-undoable — one level of redo), and replaces the data rows with the backup's. It
-clears first even though the merge only deletes, because a client on a stale
-service worker may have appended real rows in the meantime. A dated tab, not a
-response: *a response is not a backup*.
+> ⚠️ **This is the one project where "New deployment" is right.** The rule below —
+> never create a new deployment, edit the existing one — protects the **existing**
+> project's `/exec` URL. This project is new, so its URL is *expected* to differ, and
+> the old project stays alive, untouched, as the rollback. For any *later* deploy of
+> **this** project, edit the existing deployment.
 
 **Step 3 — verify.** Hard-reload, sign in as the admin, complete the forced
-password change, and open User Access — the footer must read `API v2`. If it does
+password change, and open User Access — the footer must read `API v3`. If it does
 not, the deployment was not the one `/exec` serves. Then check seven tabs
 (`📋 Report` + six lettered), `sec-b` selected by default, the Overview rendering
-its facts, timeline and legacy log, and 🕓 History opening.
+its facts, timeline and legacy log, and 🕓 History opening. Then **save a section,
+reload, and confirm it came back** — that is the round trip that proves the store
+is writable, not just readable.
 
 **Then sign in as a CR account and a Production account.** CR must see the Triage
 button and have **no** section save enabled; Production must have Triage **hidden**
@@ -161,15 +160,20 @@ and B/C/D/E/G save-enabled with F read-only. This is the check that catches the
 `getPassbook` filters on a permission map that no longer contains `sec-a`, and the
 admin testing it would never see the bug.
 
-
-**Step 4 — users.** Every account is re-provisioned, so distributing credentials
-**is** the migration. Announce the day before and again at cutover, and deliver
+**Step 4 — users.** Every account is provisioned fresh, so distributing credentials
+**is** the onboarding. Announce the day before and again at cutover, and deliver
 each person's block individually — never nineteen passwords in one message.
 
 **Step 5 — hygiene.** Delete the local credentials txt (or move it to a password
-manager). Leave `ACL` and `ACCESS_REQUESTS` frozen for 30 days, then delete. Watch
-the GAS Executions panel for a day: the restructured `try/catch` now surfaces
-errors as JSON instead of silent HTML pages.
+manager). Watch the GAS Executions panel for a day: the restructured `try/catch`
+surfaces errors as JSON instead of silent HTML pages. **Keep the old Apps Script
+project and the old spreadsheet for 30 days** — reverting the one line in `app.js`
+and pushing returns the app to the old backend, with no data lost.
+
+**The ejection check** (worth running once, because it is the failure mode the
+Drive store introduced): rename `sessions.json` in `_store/`, confirm the app
+reports a store error and does **not** sign anyone out, then rename it back. A
+session store that cannot be read must never be reported as "your session died".
 
 ## Google Cloud Setup
 
@@ -179,36 +183,78 @@ Cloud–adjacent requirement is that the Apps Script deployment runs as an accou
 that can read the Sheets and Drive folders listed in `CONFIG` at the top of
 `backend.gs`, and that it holds the `script.send_mail` scope for the email flows.
 
-## Google Sheets Setup
+## Google Drive Setup
 
-Two Google Sheets are needed:
+The app's data is **JSON files in Drive**, owned by `monish.raza@indrones.com`, in
+one folder:
 
-### 1. IR Repository Sheet
-- Must have a tab named `Form Responses`
-- Columns used: A (summary link), B (IR Number), C (timestamp), K (drone serial no.)
-- Typically fed by a Google Form
+```
+1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK/          ← CONFIG.DRIVE_ROOT_FOLDER_ID
+├── IR409/  IR410/  …                       ← uploads, one FOLDER per ticket
+└── _store/                                 ← Restricted. Staff never open this.
+    ├── users.json      sessions.json       codes.json      attempts.json
+    ├── access.json     { departments: {…}, memberships: {…} }
+    ├── irs.json        { "IR409": {status, assignee, priority, …}, … }
+    ├── config.json     { "team-directory": …, "inward-options": …, "iqc-config": … }
+    ├── kb.json         { "<key>": {…} }
+    ├── comments.json   { "all": { "items": [ … ] } }
+    ├── sections/       IR409.json → { "sec-b": {…}, "sec-f": {…} }  +  index.json
+    ├── audit/          IR409.jsonl — one JSON object per line, append-only
+    └── backups/        <store>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
+```
 
-### 2. Passbook Sheet
-- Must have a tab named `APP_DATA`
-- The `getOrCreateDataTab()` function auto-creates this with headers if missing
-- Headers: `IR Number | Section ID | Saved By | Fields (JSON) | Last Updated`
+Everything is created by `initializeStore()` — there is no `getOrCreate*`
+function any more, and **no read path may create a file**. A read that silently
+brought `users.json` into existence would turn a misconfigured deploy into an empty
+store, and an empty `users.json` is every account missing at once.
 
-Every other tab is created on first use by a `getOrCreate*Tab` function, which
-calls `ensureHeaders(tab, heads)` — it writes row 1 only, and only when the header
-differs, so re-running it can never reformat a live tab:
+Three rules that the code and the suites both enforce:
 
-| Tab | Created by | Holds |
+- **`_store/` is Restricted; upload files are shared individually.** The upload
+  *folders* are link-shared (as they always were) and each uploaded **file** gets
+  `ANYONE_WITH_LINK` on itself, so links in a passbook keep working. `_store/` —
+  password hashes, salts, session tokens — is `PRIVATE` / `NONE`. This is the one
+  place where the sheet→file move could have weakened security, and it is closed by
+  folder placement rather than by a new mechanism.
+- **Every store write replaces ONE KEY, never the file.** All five subjects resolve
+  to "a JSON object that maps a key to a fields object", so `saveSection` does
+  `store[sectionId] = fields`. `writeJson('config.json', fields)` would wipe the
+  team directory and the dropdown config; `writeJson('irs.json', row)` would wipe
+  the workflow state of all 450 tickets. See "THE ONE STORE PATH" in `backend.gs`.
+- **`readJson` returns `null` only for a file that provably is not there.** An empty
+  file, an unreadable file or a `JSON.parse` failure **throws**. There is
+  deliberately no `fallback` argument: a corrupt `users.json` that read as "no
+  accounts" would have the very next `createUser` persist that emptiness plus one
+  account.
+
+Two more details that are load-bearing:
+
+- **`sections/index.json` maps IR → file id, and is read via `getFileById`** — a
+  direct fetch. `getFilesByName` is a Drive *search* and is eventually consistent:
+  a miss right after a create would write a second `IR409.json` and silently fork the
+  ticket. The name search survives only as a self-healing fallback, and a
+  multi-match is resolved by **newest**, never arbitrarily. For the same reason
+  `writeIR` **refuses** to write without a file id.
+- **The lock is not optional.** Drive has no transactions, no atomic append and no
+  compare-and-set: every write is a whole-file `setContent`, so two concurrent
+  writers that each read before the other wrote lose one of the two saves. In the
+  sheet version two saves upserted two separate *rows* and could not clobber each
+  other, so this is a genuine new cost of the move. `withRowLock` therefore covers
+  the **read** as well as the write, and inside it a read is always
+  `readJsonLocked` — never the memoised `readJson`, whose copy may predate the lock.
+
+### The two read-only input Sheets
+
+These are **inputs**, not stores. Nothing in the app writes to either.
+
+| Sheet | `CONFIG` key | Used for |
 |---|---|---|
-| `USERS` | `getOrCreateUsersTab` | One row per account: Email, Password Hash, Salt, Created At, Created By, plus Must Change Password, Password Changed At, Status, Name, Last Login At, Temp Password Issued At |
-| `SESSIONS` | `getOrCreateSessionsTab` | Session tokens, expiry, and Last Seen At / Revoked At |
-| `DEPARTMENTS` | `getOrCreateDeptTab` | One row per department + its nine section grants |
-| `USER_DEPARTMENTS` | `getOrCreateUserDeptTab` | The person↔department edge list — this *is* the access matrix |
-| `CODES` | `getOrCreateCodesTab` | Password-reset codes, with expiry, attempt count and a used flag |
-| `LOGIN_ATTEMPTS` | `getOrCreateAttemptsTab` | Failed-login counters, shared by `login` and `changePassword` |
+| Customer Support Form (External) (Responses) | `IR_REPO_SHEET_ID` | tab `Form Responses` only — columns A (summary link), B (IR Number), C (timestamp), K (drone serial no.) |
+| Legacy workbook | `LEGACY_SHEET_ID` | the 🏛 Legacy read-only view |
 
-> ⚠️ `USERS` columns A–E **must not move** — `doLoginPassword` reads `row[1]` and
-> `row[2]` by index for speed. New columns are appended from F, and the identity
-> block is written as one `getRange(idx, 2, 1, USER_ID_BLOCK_COLS)` call.
+`SpreadsheetApp` appears in exactly two functions — `listIRs()` and
+`listLegacyIRs()` — and the suites assert that, because a third appearance would
+mean the app is writing to a sheet again.
 
 ## Project Conventions
 
@@ -258,7 +304,8 @@ node tools/smoke-intake.mjs     # one suite
 | `tools/smoke-intake.mjs` | The Sheet column map, the 📋 Report rendering, and escaping — including the ticket-list card, rendered from the public Form's serial field and from `__IRS__` status/priority. Asserts on rendered output (no injected attribute, no `javascript:` anchor), not on the source |
 | `tools/smoke-access.mjs` | The access model: view+comment for everyone, edit only where a department grants it, admin bypass, and the un-loaded-access fallback failing **closed on writes** |
 | `tools/smoke-session.mjs` | Uses `splitStorage`: the token is in `localStorage` and survives a `sessionStorage` wipe; `clearLocalAuth()` empties both stores and stops the nudge poll; the poll **restarts** after an in-page re-login; and `confirmSessionAlive()` resolves **true** when fetch rejects |
-| `tools/smoke-backend.mjs` | Regex over `backend.gs`, which cannot run in Node: deleted machinery is really gone, the owner's constants hold, the router dispatches nothing outside `try`, the must-change branch returns before any session is minted, the sentinel **allowlist** is an allowlist, and **every** `MailApp.sendEmail` site is quota-checked (walked to its enclosing function — a flat scan would pass on a truncated window). Its `fnBody()` helper requires `(` after a function name, so `createUser` cannot silently match `createUserRow`. |
+| `tools/smoke-backend.mjs` | Regex over `backend.gs`, which cannot run in Node: deleted machinery is really gone, the owner's constants hold, the router dispatches nothing outside `try`, the must-change branch returns before any session is minted, the sentinel **allowlist** is an allowlist, **every** `MailApp.sendEmail` site is quota-checked (walked to its enclosing function — a flat scan would pass on a truncated window), and **no positional column layout survives**: every `SpreadsheetApp.` site is walked to its enclosing function and must be one of the two read-only inputs, and every store function is asserted free of `getRange`/`getRows`/`appendRow`/`setValues`/`USER_HEADS`/`userCol`/`ensureHeaders`. Its `fnBody()` helper requires `(` after a function name, so `createUser` cannot silently match `createUserRow`. |
+| `tools/smoke-store.mjs` | **Executes** the real `backend.gs` under a fake Drive platform in `node:vm` and calls the store functions for real — the only suite that can prove *behaviour* here. It pins both halves of the lock claim (the read is inside it, and a racing save is refused rather than lost), the one-key write (`__IRS__` patch leaves IR410 intact; `iqc-config` leaves `team-directory`), `readJson`'s throw-don't-fallback contract, the audit landing **after** the data write and per-ticket, `getPassbook` through the index, the name-lookup-miss that no longer forks a ticket, `assertRealIR` refusing a path-shaped IR, `purgeUsers` backing up before it destroys, `sessionCheck` failing **open**, and uploads landing in the root IR folder with only the **file** link-shared. |
 | `tools/smoke-boot.mjs` | **Real headless Chrome** (`--headless=new --dump-dom --virtual-time-budget`), served from a local `http.createServer`. Phase 1 boots the real app; phase 2 synthesizes a fixture page with `window.fetch` stubbed to return a crafted CSV, proving the whole chain reaches the DOM; phase 3 loads the app with the dev bypass **off** — the signed-out login screen every new employee starts on — and asserts the deleted sign-up controls are absent from the DOM entirely, not merely hidden. Exits 0 with a `SKIP` line if no Chrome is found. |
 
 `node --check` does not understand the `.gs` extension. To syntax-check the
@@ -272,11 +319,16 @@ cp backend.gs /tmp/backend-check.js && node --check /tmp/backend-check.js
 the source, so it asserts that the code is *shaped* a certain way — never that it
 *behaves* that way. Three real defects (an unenforced temp-password expiry on
 `changePassword`, `resetPassword` re-enabling a disabled account, and an uncapped
-nudge mail path) passed all 444 cases, one of them under a heading that claimed the
-opposite. If you are changing something security-shaped and have no way to execute
-it here, the honest move is to stub the Apps Script globals
-(`SpreadsheetApp` / `MailApp` / `Utilities` / `PropertiesService` / `LockService`)
-in a throwaway script and actually call the function — or hand it to a second
+nudge mail path) passed all 444 cases of the earlier version, one of them under a
+heading that claimed the opposite.
+
+For anything store-shaped or concurrency-shaped, the honest move is
+**`tools/smoke-store.mjs`**, which already stubs the Apps Script globals
+(`SpreadsheetApp` / `MailApp` / `Utilities` / `LockService` + a fake `DriveApp`) and
+*actually calls* the function. Add a case there. It found two production bugs the
+regex suite could not: `sec-g` sitting in `RETIRED_SECTION_IDS` (so every PDI
+Report save was refused), and a ticket-forking name lookup on the write path. If
+the thing you are changing cannot be executed there either, hand it to a second
 reviewer with that instruction. More regex cases will not find it.
 
 **When you add a suite, name it `tools/smoke-*.mjs`** — `smoke-all.mjs` discovers

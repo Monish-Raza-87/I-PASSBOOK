@@ -24,7 +24,8 @@ A Progressive Web App (PWA) for **Indrones** (Indian drone company) that serves 
 | Frontend | Vanilla HTML/CSS/JS | No framework, single `app.js` (~5,350 lines) |
 | Styling | Hand-written CSS, layered, no build step | Frappe-derived design tokens, light + dark |
 | Backend | Google Apps Script (GAS) | Deployed as web app, in `backend.gs` |
-| Database | Google Sheets | `APP_DATA` tab for passbook data, `Form Responses` tab for IR records |
+| Database | **JSON files in Google Drive** | `_store/` in the owner's Drive folder — accounts, sessions, access, every section, the audit trail. No spreadsheet holds app data (see [02](02 - Architecture & Data Flow.md)) |
+| Sheets (inputs only) | Google Sheets — **read-only** | `Form Responses` for IR intake, the legacy workbook for the 🏛 Legacy view. Nothing is ever written to either |
 | File Storage | Google Drive | Photos/files stored in `IR###/Section X` folders |
 | Auth | Email + password, **admin-provisioned** | No self-signup; 30-day session token in `localStorage` (see [10](10 - Auth & Access Model.md)) |
 | PWA | Service Worker + Manifest | Offline caching of static assets |

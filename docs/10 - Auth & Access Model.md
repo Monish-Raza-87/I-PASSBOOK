@@ -27,31 +27,35 @@ was the actual onboarding bug.
 | Level | Who has it | Comes from |
 |---|---|---|
 | **View + comment** | every signed-in account, on all six sections **and the Overview** | the default in `getEffectiveAccess` — *nothing* records it |
-| **Edit** | a section, for the people whose departments grant it | `DEPARTMENTS` + `USER_DEPARTMENTS` |
+| **Edit** | a section, for the people whose departments grant it | `access.json` → `departments` + `memberships` |
 
 Comment travels with view — there is no separate comment level to grant. The
 owner's words: *"Just two — view and edit. view and comment are for everyone.
 i.e., comment comes with view. and edit comes with access provided."*
 
 **Edit is many-to-many in both directions.** One person may hold several
-departments; one department holds many people. `USER_DEPARTMENTS` is an edge list
-(one row per person↔department pair) for that reason — a wide `dept1|dept2|…`
-layout was rejected because it forces a schema change every time a department is
-added.
+departments; one department holds many people. `memberships` is therefore
+`{ email: [departmentKey, …] }` — a **list per person**, so one person's departments
+are one key read rather than a scan of an edge list (which is what the sheet version
+did on every single access check, and `getEffectiveAccess` runs on every
+authenticated request). A wide `dept1|dept2|…` layout was rejected for the same
+reason it was before: it forces a schema change every time a department is added.
 
 ### Triage is a second axis, not a seventh section
 
 Editing the **Overview** — the customer's owner and contact phone, and the ticket
-status — is gated on a **`Triage`** flag stored as the last column of
-`DEPARTMENTS`, not on a section grant. It is granted to **CR** (who owned the
+status — is gated on a **`triage`** flag stored as a **sibling of `grants`** in the
+department record, not as a section grant. It is granted to **CR** (who owned the
 ticket header before) and to **Management** (who asked for it).
 
-Do not model it as a seventh grant. A department may triage while editing **no
-section at all**, and that is exactly what CR and Management get — so a
-`sec-a`-as-a-section design would have forced them to hold an edit grant they must
-never have. The two axes are read in one pass (`departmentCapabilities`, whose only
-caller is `getEffectiveAccess`) and answered by two separate questions on the
-frontend: `canEditSection(id)` and `canTriage()`.
+Do not model it as a seventh grant — and note that the storage makes that hard to do
+by accident: `triage` is not inside `grants`, so nothing iterating section grants can
+pick it up. A department may triage while editing **no section at all**, and that is
+exactly what CR and Management get — so a `sec-a`-as-a-section design would have
+forced them to hold an edit grant they must never have. The two axes are read in one
+pass (`departmentCapabilities`, whose only caller is `getEffectiveAccess`) and
+answered by two separate questions on the frontend: `canEditSection(id)` and
+`canTriage()`.
 
 `getEffectiveAccess` sets `perms['sec-a']` to `'view'` for everyone and raises it to
 `'edit'` when triage is held, so the Overview's two inputs go through the **existing**
@@ -73,7 +77,9 @@ There is an admin-editable team directory persisted to a `__CONFIG__` sentinel,
 which is a tempting home for department assignment. **Do not put a grant there.**
 `__`-prefixed irNumbers skip *every* ACL check in `saveSection`, so a grant stored
 as a sentinel could be rewritten through `saveSection` by the very people it is
-meant to restrain. Grants live in real Sheets tabs.
+meant to restrain. Grants live in `access.json` inside `_store/`, which is reached
+only through `accessStore()` and the admin actions, all behind `requireAdmin` — and
+`_store/` itself is Private, so it is not readable through the Drive UI either.
 
 ### The fallback fails closed
 
@@ -87,31 +93,45 @@ independently, so a wrong guess costs a button — never a bad write.
 ## The forced first password change
 
 **Enforced by the absence of a token.** When an account still has
-`Must Change Password = 'yes'`, `doLoginPassword` returns
+`mustChange = 'yes'`, `doLoginPassword` returns
 `{ status: 'ok', mustChangePassword: true, email, name }` — and **no
 `sessionToken`**. No code path mints a session for such an account except
 `changePassword` itself. The frontend screen is therefore pure presentation:
 deleting it in devtools changes nothing, because there is nothing to use.
 
 A `Scope='pwchange'` restricted session was evaluated and **rejected** — it would
-add a column that every `requireAuth` path must forever remember to check, and one
+add a field that every `requireAuth` path must forever remember to check, and one
 forgotten check silently promotes a temp-password holder to full user. With no
 token, there is no footgun.
 
 `changePassword` is unauthenticated (a first-login account has no token) and takes
 a password, so it is exactly as guessable as `login` — it is wired to the **same**
-`LOGIN_ATTEMPTS` limiter, not a new one. On success it re-verifies the current
-password, clears the flag as part of the one identity-block write, revokes every
-session the temp password may have minted, and then mints a real one.
+`attempts.json` limiter, not a new one. On success it re-verifies the current
+password, clears the flag on the same account record it re-read **inside the lock**,
+revokes every session the temp password may have minted, and then mints a real one.
+
+**Both doors enforce the same expiry.** `changePassword` accepts the same temporary
+credential `login` does, so a TTL checked only in `doLoginPassword` closed the front
+door and left the side door open: an expired temp password could be POSTed straight
+here, verified against the hash, and minted a full 30-day session. `tempPasswordExpired()`
+is now called on both paths, before either mints anything.
 
 ## The session
 
 | | |
 |---|---|
 | Where | `localStorage`, under `ipb_session` — a separate key from the profile (`ipb_user`) |
+| Server side | as a **key of `sessions.json`** in `_store/` — keyed by the token itself, so a lookup is one key read and a revoke one key assignment |
 | How long | **30 days**, slid forward on each authenticated request |
 | Idle timeout | **none** — deleted |
 | Slide throttle | at most one expiry write per session per 6h |
+
+`lookupSession` deliberately distinguishes **"this token is not valid"** from **"the
+session store cannot be read"**: the first returns null (the frontend signs the user
+out), the second **throws**, and `sessionCheck` catches it and fails **open** with a
+message that never starts with `unauthorized`. Without that, one bad `sessions.json`
+would answer "your session died" to all twenty users in the same poll window — the
+frontend's probe trusts that answer.
 
 The owner's ask was explicit: *"No automatically sign-out. Keep it as simple as
 google-sheet."* Google's web default is 14 days (configurable 7/14/30 or never);
@@ -181,7 +201,7 @@ Three tabs, all powered by one `?action=listUsers` call:
   run), and the one-time credentials panel.
 
 **Temp passwords are never stored.** Only the hash, the salt and the
-`Temp Password Issued At` timestamp reach the Sheet. A temp password is 5
+`tempPwIssuedAt` timestamp reach the store. A temp password is 5
 unambiguous letters (no `I O 0 1 l`) + `-` + 4 digits, e.g. `Kx7Qm-4392`, and it
 expires after 14 days. It is shown once, with a copy button and an explicit
 warning.
@@ -190,23 +210,23 @@ warning.
 the three first-sign-in steps (including "Add to Home screen"), the view+comment
 vs edit explanation, the forgot-password path, and *"Keep this safe and do not
 forward it."* A second copy button emits CSV (`email,tempPassword`) for a private
-Sheet or mail-merge.
+document or mail-merge — **never for the repo**, which is public.
 
 ### Account reset
 
-An admin action removes every `USERS` row except the admin's, plus their membership
-edges, and revokes all their sessions. It is irreversible, so it is **two steps in
-the UI, backed by two calls**:
+An admin action removes every account except the admin's, plus their memberships,
+and revokes all their sessions. It is irreversible, so it is **two steps in the
+UI, backed by two calls**:
 
-1. **Review** — `purgeUsers` with `dryRun=1` returns the rows that *would* go and
-   writes nothing, so it is safe to press by accident. The modal renders them as a
-   copyable tab-separated list.
+1. **Review** — `purgeUsers` with `dryRun=1` returns the accounts that *would* go
+   and writes nothing, so it is safe to press by accident. The modal renders them as
+   a copyable tab-separated list.
 2. **Delete** — the same call without `dryRun`, pinned with
    `expect=<reviewed count>`. If an account was created or removed in between, the
    backend refuses and nothing is deleted, so the list a human approved is the list
    that goes.
 
-It requires the literal word `PURGE`, leaves admin rows alone, and runs inside a
+It requires the literal word `PURGE`, leaves admin accounts alone, and runs inside a
 `LockService` script lock — see [04](04 - Backend API Reference.md).
 
 The first version of this was one press that deleted immediately and returned a
@@ -214,16 +234,15 @@ The first version of this was one press that deleted immediately and returned a
 first"*. A response is not a backup: a dropped connection, or simply a closed tab,
 took the only record of those accounts with them.
 
-**The restructure's migration obeys the same rule.** `mergeSectionsApply()` writes a
-dated tab `APP_DATA_BACKUP_<yyyy-MM-dd>` holding the whole pre-merge snapshot
-**before** its first write, and refuses if that tab already exists — so a
-double-apply is impossible even if its idempotency guard somehow passed. A partial
-backup is not a backup, so it is one `setValues` of the entire snapshot.
-`restoreAppDataFromBackup()` is the undo: it finds the newest backup, saves the
-current state to `APP_DATA_PRE_RESTORE_<date>` first (so the undo is itself
-undoable — one level of redo), and then replaces the data rows. It **clears before
-writing** even though the merge only deletes, because a client on a stale service
-worker may have appended real rows in the meantime.
+**The Drive store obeys the same rule.** `snapshotStore('purge-users', [...])`
+writes `backups/purge-users-<yyyy-MM-dd-HHmmss>.json` holding the whole of
+`users.json`, `access.json` and `sessions.json` — **always a new file**, so it can
+never overwrite an earlier snapshot — and it does so **before** the first destructive
+write, refusing if it cannot. The response names the backup file, so the rollback
+path is something the admin has rather than something the admin is told about. This
+replaces `restoreAppDataFromBackup()`, which was deleted with the sheet: Drive
+revision history is not a durable substitute for a JSON file's history, so the
+snapshot is a real file instead.
 
 ## Departments
 
@@ -261,10 +280,10 @@ anyone noticing, so the thing it might lose is printed rather than assumed.
 `seedMemberships()` writes the person↔department edges from `SEED_MEMBERSHIPS`.
 It **only ever adds** and says so in its report ("Nothing removed"), because it must
 not disturb an edge an admin added later — which is why it does not reuse
-`setUserDepartments()` (that deletes then re-appends, correct for one person's
-edit, wrong for a seed). Emails with no `USERS` row are printed: the edge is
-correct and harmless, but those people cannot sign in yet. **IQC and Compliance are
-deliberately omitted**, and the report says so, so the omission is visibly
+`setUserDepartments()` (that replaces one person's whole list, correct for an admin
+editing that person, wrong for a seed). Emails with no account yet are printed: the
+edge is correct and harmless, but those people cannot sign in. **IQC and Compliance
+are deliberately omitted**, and the report says so, so the omission is visibly
 intentional.
 
 Two people hold two departments on purpose, and both are faithful rather than
@@ -273,52 +292,53 @@ clever: the owner gave **one list for Purchase and Inventory**, and since
 get **both edges** rather than a merged department or a guess about who belongs
 where. Both are reversible in the Departments tab in seconds.
 
-### Legacy-shaped `DEPARTMENTS` tabs
+### Deleting a department takes its memberships with it
 
-Shrinking `SECTION_KEYS` from nine to six **re-letters every column**, which makes
-a stale tab actively dangerous: old column 4 (`sec-a`'s grant) would be read as
-`sec-b`'s, and old column 10 (old `sec-g`'s) as `Updated At`. So `deptTabShape()`
-classifies the header before anything writes to it:
+`deleteDepartment` removes the department key **and** filters that key out of every
+membership list, deleting a list that becomes empty. Otherwise a dangling membership
+would resurrect the department's grants the moment its key was recreated —
+silently, and under the same name. The access matrix and the department record are
+in the **same file**, so this is one locked write, not two that can half-fail.
 
-| Shape | Action |
-|---|---|
-| `current` | normal upsert |
-| `absent` | create it |
-| `legacy-9` | snapshot to `DEPARTMENTS_BACKUP_<yyyy-MM-dd>` (refusing if it exists, which makes double-apply impossible), then rebuild the rows from `SEED_GRANTS` **mapped by name**, never by position — and print the old grants not reproduced |
-| `unknown` | **refuse**, naming the actual header, and change nothing. An unrecognised header means somebody hand-edited the tab, so no derivation is trustworthy |
+### The re-lettering hazard is gone
 
-`migrateAddColumns()` calls the same classifier and refuses to widen a
-`legacy-9`/`unknown` tab, rather than letting `ensureHeaders` overwrite row 1 and
-reinterpret the columns underneath it.
+Shrinking `SECTION_KEYS` from nine to six **re-lettered every column** in the sheet
+version, which made a stale `DEPARTMENTS` tab actively dangerous: old column 4
+(`sec-a`'s grant) would be read as `sec-b`'s, and old column 10 (old `sec-g`'s) as
+`Updated At`. That is why `deptTabShape()` and `migrateAddColumns()` existed, and
+why they are deleted: a grant is a **key** in `access.json` now, so there is no
+position to re-letter and no header to classify. Reordering the sections cannot
+misgrant anything.
 
 ## Constraints that are load-bearing
 
-- **`USERS` columns A–E must not move.** `doLoginPassword` reads `row[1]`/`row[2]`
-  by index. New columns are appended from F. Flags are stored as the literals
-  `'yes'`/`''`, never booleans.
+- **An account's fields are named, and the ones with security meaning have fixed
+  spellings**: `mustChange`, `status`, `hash`, `salt`, `tempPwIssuedAt`. Flags are
+  stored as the literals `'yes'`/`''`, never booleans. There is no positional block
+  any more and no column that must not move — which is precisely why `saveUser`,
+  `userCol` and `USER_ID_BLOCK_COLS` are gone: a key assignment has no position.
 - **`requireAuth`/`lookupSession` keep their `→ email|null` signature**, so
   `getPassbook`/`saveSection`/`sendNudgeEmail` and their call sites are untouched.
+  `lookupSession` **throws** when the session store cannot be read, rather than
+  answering `null`, and `sessionCheck` fails open on that — see "The session" above.
 - **Nothing dispatches outside `try`** in either router. Pre-auth dispatch used to
   sit outside it, where an exception escaped as an HTML error page — which the
   frontend's interceptor read as "your session died".
 - **`ADMIN_EMAILS` holds exactly one address.** Adding a second is a one-line edit
   plus a GAS redeploy; until then, nobody can provision or unblock anyone if that
   one person is unreachable.
-- **`DEPT_HEADS` is 12 columns, and `Triage` must stay LAST.** Section grants are
-  read **positionally** at `data[i][3 + j]`. Appending is what keeps that offset
-  true; inserting `Triage` anywhere else would silently shift every grant by one.
-  Read the triage cell with the arithmetic `3 + SECTION_KEYS.length + 2`, never a
-  magic `11`, so the next widening cannot misread it either. (`Updated At` and
-  `Updated By` follow the sections; `Triage` is after them.)
+- **Every store read-merge-write holds the lock, and reads inside it with
+  `readJsonLocked`.** Drive has no transactions: two writers that each read before
+  the other wrote lose one of the two changes, and a read taken before the lock is
+  merged over whatever landed in between. `readJson`'s memo is *not* usable inside a
+  lock for exactly that reason.
 
 ## Related
 
 - [04 — Backend API Reference](04 - Backend API Reference.md) — the actions, the
-  tab schemas, the `CONFIG` block
+  `access.json` schema, the `CONFIG` block
 - [05 — Configuration & Secrets](05 - Configuration & Secrets.md) — and the
   never-commit-a-credential rule (the repo is **public**)
-- [08 — Development Guide](08 - Development Guide.md) — the deploy order and why
-  the editor/deployment split lets migrations run before cutover. The `APP_DATA`
-  merge is the **exception** and cannot be pre-flight, because it rewrites rows the
-  live app is reading; that, plus the positional `DEPARTMENTS` read above, is what
-  forces the grants, the memberships and the merge into the cutover window
+- [08 — Development Guide](08 - Development Guide.md) — the store layout, the deploy
+  order, and why the one-time setup no longer needs a cutover window: there are no
+  columns to widen and no live rows to rewrite

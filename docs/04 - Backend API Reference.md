@@ -10,8 +10,8 @@ The backend is a **Google Apps Script (GAS) web app** deployed from `backend.gs`
 
 There is **no per-user permission list**. The whole model is two sentences:
 
-- **Every signed-in account can view and comment on everything.** No row anywhere
-  records this; it is the default inside `getEffectiveAccess`. That now includes the
+- **Every signed-in account can view and comment on everything.** Nothing is stored
+  to record this; it is the default inside `getEffectiveAccess`. That now includes the
   **Overview** (`sec-a`), which is not one of the sections and so needed naming
   explicitly in `getPassbook`'s filter — see below.
 - **Edit comes from departments.** A user holds zero or more departments; a
@@ -29,23 +29,22 @@ and admins bypass every check **by role, not by the permission map** — an admi
 `getMyAccess` failed still gets edit, or they would be locked out of their own
 provisioning screen.
 
-Grants live in two real Sheets tabs (never a sentinel — see below):
+Grants live in `access.json`, in `_store/` — never in a sentinel store (see below):
 
-| Tab | Shape |
+| Key | Shape |
 |---|---|
-| `DEPARTMENTS` | `Key, Name, Active, sec-b…sec-g, Updated At, Updated By, Triage` — **12 columns**. A section column holds `'edit'` or `''`; `Triage` likewise. |
-| `USER_DEPARTMENTS` | Edge list: `Email, Department Key, Added At, Added By`. One row per (person, department). |
+| `departments` | `{ "cr": { name, active, grants: { "sec-b": true, … }, triage: true }, … }`. A section appears in `grants` only when the department has **edit**; `triage` is a sibling of `grants`, deliberately outside it. |
+| `memberships` | `{ "someone@indrones.com": ["production", "qa"], … }` — **a list per person**, so reading one person's departments is one key read rather than a scan of an edge list. |
 
-> ⚠️ **Grants are read positionally** at `data[i][3 + j]`. `Triage` is appended
-> **last** so that offset stays `3 + j`; read the triage cell with the arithmetic
-> `3 + SECTION_KEYS.length + 2`, never a magic `11`. Inserting a column anywhere
-> else silently shifts every grant by one.
+There is no positional read and no column offset to keep in sync: a section grant is
+a key, and `triage` lives in its own field precisely so that nothing iterating
+`grants` can mistake it for a seventh section.
 
 `canView(perms, sec)` accepts any non-empty level and `canComment` follows it;
 `canEdit` requires exactly `edit`. The frontend mirrors this in `canViewSection` /
 `canCommentSection` / `canEditSection`, plus `canTriage()` for the second axis.
-`departmentCapabilities(email)` reads **both** axes in one pass (one department read,
-one function) and is the only caller of the `DEPARTMENTS` tab in the access path.
+`departmentCapabilities(email)` reads **both** axes in one pass (one read of
+`access.json`, one function) and is the only department reader in the access path.
 
 > ⚠️ **The frontend's fallback (no `access` yet — first paint, or a transient
 > `getMyAccess` failure) grants view + comment everywhere and edit *nowhere*.**
@@ -60,21 +59,39 @@ call), `createUser` / `bulkCreateUsers`, `resetUserPassword`, `setUserStatus`,
 gated by `requireAdmin`. There is no request-access flow: nobody asks, the admin
 grants.
 
-The functions that mutate rows **by remembered index** (`purgeUsers`,
-`deleteDepartment`, `setUserDepartments`, `mergeSectionsApply`,
-`restoreAppDataFromBackup`, `maintenancePruneSessions`, `maintenancePruneAuditLog`)
-run inside `withRowLock()` — a `LockService` script lock taken before the
-`getDataRange()` snapshot. Deleting bottom-up only stops a function's own deletes
-from invalidating each other; it does nothing about a row another admin appends in
-between, which shifts every index below it and makes the next `deleteRow()` hit the
-wrong row. Apps Script has no transactions and `SpreadsheetApp` has no row identity,
-so a script lock is the only mutual exclusion available. If the lock cannot be taken
-the call **refuses** rather than proceeding unprotected. The snapshot must be read
-**inside** the lock callback, not before it — `smoke-merge-apply.mjs` asserts that
-ordering by the sequence of calls. `purgeUsers` additionally takes `dryRun=1`
-(returns the plan, deletes nothing) and `expect=<count>` (refuses if the account
-list changed since the plan was reviewed) — so an irreversible delete removes what
-a human actually saw, or nothing.
+Every function that mutates the store (`saveSection`, `mintSession`, `doLogout`,
+`revokeAllSessions`, `pruneSessions`, `recordFailedLogin`, `clearFailedLogin`, the
+password flows, the user/department mutations, `purgeUsers`, `deleteDepartment`,
+`setUserDepartments`, `seedDepartments`, `seedMemberships`,
+`maintenancePruneAuditLog`) runs inside `withRowLock()` — a `LockService` script lock
+taken **before** the read.
+
+The reason is specific to a file store: **Drive has no transactions, no atomic
+append and no compare-and-set.** Every write is a whole-file `setContent`, so two
+writers that each read before the other wrote lose one of the two changes. In the
+sheet version two saves upserted two separate *rows* and could not clobber each
+other, so this is a genuine new cost of the move and it is why the lock is not
+optional. Three rules follow:
+
+- The snapshot is read **inside** the lock, and always with `readJsonLocked` —
+  never the memoised `readJson`, whose copy may predate the lock. `smoke-store.mjs`
+  asserts both halves: that the read is inside, and that a racing save is refused
+  rather than lost.
+- If the lock cannot be taken the call **refuses** rather than proceeding
+  unprotected, and says so in words that tell the user the change was **not saved**
+  (`withRowLock`) or throws, for paths whose return value is not a response envelope
+  (`withRowLockOrThrow` — a session token or a count read as an error object would
+  be a truthy token that authenticates nothing).
+- Uploads — base64 decode, `createFile`, `setSharing`, `MailApp.sendEmail` — happen
+  **outside** the lock, so one person's file upload does not queue every other write.
+
+`purgeUsers` additionally takes `dryRun=1` (returns the plan, deletes nothing) and
+`expect=<count>` (refuses if the account list changed since the plan was reviewed) —
+so an irreversible delete removes what a human actually saw, or nothing. Because
+`restoreAppDataFromBackup` is gone with the sheet, it writes a
+`backups/purge-users-<timestamp>.json` snapshot of `users.json`, `access.json` and
+`sessions.json` **before** its first destructive write, and names that file in its
+response.
 
 ---
 
@@ -110,19 +127,24 @@ reads a whole store in one request (keyed by sectionId) and — importantly —
 dead backend is never mistaken for "no app state"; `saveSentinel()` upserts and
 never rejects.
 
-**Why one row per IR for `__IRS__`** rather than one map record: each record gets
-its own ~50,000-char cell, so there is no ceiling to hit where failure would be
-silent data loss, and two people editing two different tickets never clobber each
-other. `getPassbook` already returns every row matching one irNumber, so the whole
-store is still a single request.
+**Why `__IRS__` is a keyed map** rather than one record per ticket: each ticket is
+one **key** of `irs.json`, so a status change is a single key assignment and cannot
+reach any other ticket. `getPassbook` returns all of them in one request, and with a
+JSON file that read is literally one `readJson('irs.json')` — no row scan, and no
+per-cell length ceiling to hit silently.
 
-> ⚠️ **Sentinel rows are readable and writable by ANY signed-in user.** Being on
+> ⚠️ **Sentinel stores are readable and writable by ANY signed-in user.** Being on
 > the allowlist is what makes zero-redeploy keys possible, and also means these are
 > shared scratch space, not access-controlled storage. Never put anything
 > sensitive in one — and **never put a permission in one.** That is why the
-> department grants live in the real `DEPARTMENTS` / `USER_DEPARTMENTS` tabs: a
-> grant stored as a sentinel could be rewritten through `saveSection` by the very
-> people it is meant to restrain.
+> department grants live in `access.json` inside `_store/`: a grant stored as a
+> sentinel could be rewritten through `saveSection` by the very people it is meant
+> to restrain. (`access.json` is not a sentinel; it is reached only through
+> `accessStore()` and the admin actions, all behind `requireAdmin`.)
+>
+> A sentinel write is also refused if it carries a **file upload** — that branch
+> runs before any ACL and sets every file to `ANYONE_WITH_LINK`, so an unbounded
+> sentinel write would have been a way to host arbitrary public files.
 
 ---
 
@@ -206,8 +228,8 @@ how `loadSentinelAll('__IRS__')` reads every ticket's workflow state in one call
 ### `getMyAccess`
 Returns the signed-in user's `{ role, permissions: { 'sec-b': 'edit', …, 'sec-a': 'edit' }, triage, departments, mustChangePassword }`,
 used by the frontend's `canViewSection` / `canCommentSection` / `canEditSection` /
-`canTriage`. It is computed live from the department tabs, so a grant change takes
-effect on the next call — no session re-mint needed.
+`canTriage`. It is computed live from `access.json`, so a grant change takes effect
+on the next call — no session re-mint needed.
 
 `perms['sec-a']` is set to `'view'` for everyone and raised to `'edit'` when triage
 is held, so the Overview's two inputs reuse the **existing** `canEdit` seam. The
@@ -221,31 +243,37 @@ unauthorised write is not).
 ```
 GET {BASE_URL}?action=getAuditLog&irNumber=IR409
 ```
-Returns the `AUDIT_LOG` trail for one IR, **oldest first** (the frontend reverses for
-display), capped at **400** entries with a `truncated` flag. The cap bounds the
-*response*, not the read — the whole tab is still scanned and filtered in memory.
+Returns the audit trail for one IR, **oldest first** (the frontend reverses for
+display), capped at **400** entries with a `truncated` flag.
 
-It matches **two** row shapes, and the second is the whole reason the workflow half
-of the timeline needs no new storage:
+The read is **one file**: `audit/IR409.jsonl`, resolved by `auditSubjectFor(irNumber,
+sectionId)`. Per-ticket rather than per-month is deliberate — a monthly shard reaches
+~1.3 MB, and because Drive has no atomic append every audit write rewrites the whole
+file (~4 MB of I/O per save on the last day of the month, invisible in month 1 and
+severe by month 12). Per-ticket files are ~40 KB, which suits the only query that
+exists, and two people on different tickets never touch the same file.
+
+Within that file it matches **two** line shapes, and the second is the whole reason
+the workflow half of the timeline needs no new storage:
 
 | Shape | Condition | `source` |
 |---|---|---|
-| section row | column B `=== irNumber` | `'section'` |
-| workflow row | column C `=== irNumber` **and** column B starts with `__` | `'workflow'` |
+| section line | `ir === irNumber` | `'section'` |
+| workflow line | `sec === irNumber` **and** `ir` starts with `__` | `'workflow'` |
 
-Sentinel writes (every `__IRS__` patch) were already recorded — but with
-`IR Number = '__IRS__'` and the **real IR in the Section ID column**, so they were
-unreachable. The `__`-prefix guard is what keeps a *future* sentinel from leaking in.
-Row order is already chronological (the tab is append-only), so the two shapes
-interleave correctly in one pass with no sort.
+A `__IRS__` patch is **about** IR409, so it lands in IR409's own file — the
+per-ticket split is what makes the workflow half reachable, where a sheet scan with a
+`__`-prefix guard was needed to keep a *future* sentinel from leaking in. File order
+is already chronological (append-only), so the two shapes interleave with no sort.
 
 > ⚠️ **This endpoint is session-gated but not per-IR gated** — any signed-in user
 > can read the trail for any IR they know the number of. That is consistent with
 > view-is-for-everyone, and it is worth stating rather than discovering.
 
-Entries carry `source`, and for a workflow row `sectionId` is **blank**: the
-Section ID column holds the IR, not a section, and reporting it as one would
-misattribute a status change to a section that never existed.
+Entries carry `source`. For a workflow line both `sectionId` is **blank** and
+`irNumber` is the **real IR**: the line stores the sentinel in its own `ir` field,
+and reporting that verbatim would hand back `__IRS__` — the store, not the ticket —
+and quietly make any `e.irNumber === irNumber` filter drop every status change.
 
 ### `listLegacyIRs`
 Lists the pre-app per-IR tabs (legacy workbook, ~IR310–IR441) so the master list
@@ -258,9 +286,9 @@ about an account:
 | Action | Purpose |
 |---|---|
 | `ping` | Version handshake. Returns `API_VERSION`; a stale cached frontend uses it to explain itself instead of failing obscurely. |
-| `sessionCheck` | Cheap liveness probe. Called by `confirmSessionAlive()` — which treats an unreachable server as **alive**, because ejecting someone on a flaky connection is the bug, not the fix. |
+| `sessionCheck` | Cheap liveness probe. Called by `confirmSessionAlive()` — which treats an unreachable server as **alive**, because ejecting someone on a flaky connection is the bug, not the fix. **It also fails open on a store error**, with a message that never starts with `unauthorized`: the frontend's interceptor auto-logs-out on that prefix, so a `sessions.json` that cannot be read would sign out all twenty users in the same poll window. |
 | `login` | Email + password → session token (or `mustChangePassword` with **no** token — see below). |
-| `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `LOGIN_ATTEMPTS` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
+| `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
 | `forgotPassword` | Mails a 6-digit reset code. Response is byte-identical whether or not the account exists (no enumeration), throttled to 3 codes/hour/email plus a global hourly ceiling with a resend gap, and it retires earlier live codes. |
 | `resetPassword` | Verifies the code (5-attempt cap), sets the new password, revokes all sessions, and **returns no token** — the user then signs in, which proves the password was typed correctly. It **preserves** the account's `Status` rather than writing `'active'`: a reset must not re-enable an account an admin deliberately disabled, and it refuses a disabled account outright. |
 
@@ -301,14 +329,22 @@ Content-Type: multipart/form-data
 | `files` | JSON string | Array of `{fieldId, name, mimeType, base64}` objects |
 
 **File handling:**
-1. Creates `IR###/Section X` folder structure in Google Drive
+1. Creates `IR###/Section X` folder structure in Google Drive — **outside the lock**,
+   because base64 decode, `createFile` and `setSharing` are the slow part of a save
+   and none of them touches the store
 2. Decodes base64 → creates file in Drive
-3. Sets file to anyone-with-link view access
+3. Sets the **file** (never the folder) to anyone-with-link view access
 4. Appends `_links` field with comma-separated Drive URLs
 
-**Upsert logic:**
-- If a row with matching `irNumber + sectionId` exists → updates it
-- Otherwise → appends new row
+**Write logic:**
+- The subject resolves to **one JSON file** — `sections/IR409.json` via
+  `sections/index.json` → `getFileById`, or the sentinel file from
+  `sentinelStoreFile()` — and the write is `store[sectionId] = fields`.
+- **One key, never the file.** `writeJson('irs.json', row)` would wipe every other
+  ticket's workflow state; `writeJson('comments.json', …)` would wipe every comment.
+- The read that is merged onto is taken **inside the lock** and with
+  `readJsonLocked`, so a concurrent save to another section of the same IR is not
+  lost. If the lock cannot be taken the save is **refused**, not applied.
 
 **Response:**
 ```json
@@ -316,35 +352,46 @@ Content-Type: multipart/form-data
 ```
 
 **Authorisation.** Real sections require edit access on that section:
-`Forbidden: you do not have edit access to <sectionId>.` Admins bypass. Sentinel
-IRs skip the check entirely. **`sec-a` is the Overview**: it is not in
-`SECTION_KEYS`, so it is authorised on the **Triage** flag instead.
+`Forbidden: you do not have edit access to <sectionId>.` Admins bypass. Sentinel IRs
+skip the ACL — and are instead checked against `SENTINEL_SECTIONS`. **`sec-a` is the
+Overview**: it is not in `SECTION_KEYS`, but `getEffectiveAccess` gives it a
+permission key like any section (`'view'` for everyone, `'edit'` only for admins and
+Triage holders), so it is gated through the **same** `canEdit` line. There is
+deliberately no `OVERVIEW_KEY` exemption there — exempting it would let any signed-in
+user rewrite the ticket header.
 
-**Retired section ids are rejected.** `RETIRED_SECTION_IDS` (derived from
-`SEC_TARGET_MAP`, never a second literal that can drift) is checked before the
-write, so a client on a stale service worker that still posts `sec-h`/`sec-i`
-receives a clear "reload the app" error instead of quietly appending a row nothing
-reads. This is a hard rejection, not a remap: the merge migration owns that
-rewrite, and doing it implicitly on an arbitrary save would put a partial copy of
-old Dispatch data into the merged Section G.
+**Retired section ids are rejected.** `RETIRED_SECTION_IDS` is a plain literal
+(`['sec-h','sec-i']`) checked before the write, so a client on a stale service worker
+that still posts a retired id receives a clear "reload the app" error instead of
+quietly writing a key nothing reads. It was previously *derived* from
+`SEC_TARGET_MAP`, which put `sec-g` in the list — and `sec-g` is the live PDI
+Report/Dispatch Record section, so every Section G save was refused with "was merged
+into another section". The map is deleted and the list is a literal with a comment
+saying `sec-g` must never be added to it.
 
-**Audit.** Every human section save calls `appendAuditEntries(...)` with the
-collected uploads. Two carve-outs: the `__NUDGES__` store is **not audited at all**
-(comment items already carry their own author and timestamp, and a 500-char copy of
-the whole comment array per read/markRead was dominating the log), and no bare
-`saved` marker is written for a `__`-sentinel write.
+**A real IR number is shape-checked** (`/^IR\d+$/`) after the ACL and **before** any
+folder or file work, because it becomes a Drive folder and file name.
+
+**Audit.** Every section save calls `buildAuditLines(...)` — a **pure** function, so
+the caller can hold one lock across read → build → write → append — and the append
+happens **last**, inside the same lock. (It previously ran *before* the data write, so
+a save that then failed left an audit entry for a save that never happened.) Two
+carve-outs: the `__NUDGES__` store is **not audited at all** (comment items already
+carry their own author and timestamp, and a copy of the whole comment array per read /
+markRead was dominating the log), and no bare `saved` marker is written for a
+`__`-sentinel write.
 
 **Section A intake strip.** Immediately before the write, `saveSection` deletes
 these keys from any incoming `sec-a` payload, so a crafted save cannot write a
-divergent copy of the client's report into `APP_DATA`:
+divergent copy of the client's report into the store:
 
 ```js
 ['a_irNumber','a_droneId','a_dateRaised','a_issueType','a_issueDesc','a_customerName',
  'a_contactEmail','a_incidentLocationWeather','a_evidence','a_companyName']
 ```
 
-They are displayed live from the IR Repository / the 📋 Report tab, never from
-`APP_DATA`. **This list is authoritative.** Three keys are deliberately *excluded*
+They are displayed live from the IR Repository / the 📋 Report tab, never from the
+store. **This list is authoritative.** Three keys are deliberately *excluded*
 from it:
 
 | Key | Why not stripped |
@@ -353,11 +400,15 @@ from it:
 | `a_contactPhone` | Same — the other Overview-editable field |
 | `a_activityLog` | **Never written by anyone.** It is the legacy hand-typed log, shown read-only; it is in the field table for reading, not for saving |
 
-> Because the strip is a delete and the write replaces the whole row, the intake
-> keys never persist in `APP_DATA` at all. Adding a field to the Overview does not
-> put it under the strip — only the ten IDs above are protected, so **a new
-> Overview field must be added deliberately**, and the one to think twice about is
-> anything sourced from the customer's Form.
+> Because the strip is a `delete` — the only mutation `saveSection` makes to a
+> payload — and because the write replaces the whole key, the intake keys never
+> persist in the store at all. **A field key is never renamed anywhere**: a key is
+> also the anchor inside every `__NUDGES__` item and the `Field ID` of every
+> historical audit line, so renaming one would orphan every comment on it and split
+> its history. Adding a field to the Overview does not put it under the strip — only
+> the ten IDs above are protected, so **a new Overview field must be added
+> deliberately**, and the one to think twice about is anything sourced from the
+> customer's Form.
 
 ### `sendNudgeEmail`
 Relays a comment notification via `MailApp.sendEmail`. The sender is the `replyTo`.
@@ -402,20 +453,26 @@ var CONFIG = {
   IR_REPO_EVIDENCE_Q_COL:   17, // Q  "Evidence: Attach Screenshot of UAV Forecast..."
   IR_REPO_COMPANY_COL:      18, // R  "Where Do You Work?"
 
-  // App data ("I-Passbook App Repository") — APP_DATA tab
-  PASSBOOK_SHEET_ID: '141L8Wt4hrvJmN3dTtnI8VDK76NutK_7KZ_jbM2qEOwQ',
-  DATA_TAB:          'APP_DATA',
+  // The app's store — JSON files in the owner's Drive folder, under _store/
+  DRIVE_ROOT_FOLDER_ID: '1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK',
+  STORE_FOLDER_NAME:    '_store',
 
-  DRIVE_ROOT_FOLDER_ID: '1sc9mXOHPaWW1wiVvtDmyYLflGUogtm06',
+  // The two READ-ONLY input Sheets. Nothing in the app writes to either.
+  LEGACY_SHEET_ID:  '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
+
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
-  API_VERSION: 2,
+  API_VERSION: 3,
   SESSION_DAYS: 30,          // slid on use…
   SESSION_SLIDE_HOURS: 6,    // …but at most one write per session per 6h
   TEMP_PW_TTL_DAYS: 14,
 };
 ```
+
+`PASSBOOK_SHEET_ID` and `DATA_TAB` are **gone**: there is no app spreadsheet. The
+old "I-Passbook App Repository" workbook is not read or written by anything any
+more — it is left on Drive as an archive.
 
 Module-level (outside `CONFIG`) limits that are deliberately constants rather than
 config, because changing one is a security decision, not a setting:
@@ -429,14 +486,16 @@ config, because changing one is a security decision, not a setting:
 | `CODE_MAX_ATTEMPTS` | 5 | wrong guesses before a code is burned |
 | `CODE_TTL_MIN` | 15 | how long a reset code lives |
 | `SESSION_SLIDE_HOURS` | 6 | see above |
-| `LOGIN_MAX_FAILS` | 5 in a 10-min window → 15-min lockout | `login` **and** `changePassword`, shared |
+| `LOGIN_MAX_FAILS` | 5 in a 10-min window → 15-min lockout | `login` **and** `changePassword`, one shared `attempts.json` |
 
 `ALLOWED_EMAILS` no longer exists: with no self-signup there is no allowlist to
 consult, only the `@indrones.com` domain check plus the explicit
 `EXTERNAL_EMAILS` exceptions.
 
-> ⚠️ The **deployed** backend is an older build than `backend.gs` — keep
-> `PASSBOOK_SHEET_ID` and `DRIVE_ROOT_FOLDER_ID` in sync with the live deployment.
+> ⚠️ `DRIVE_ROOT_FOLDER_ID` must be the **owner's** folder
+> (`monish.raza@indrones.com`), not one shared with `customer.relations@` — that
+> account is used by several people, so anything in it is deletable by any of them.
+> Changing this ID means a new store: the existing JSON files do not follow it.
 
 **Columns A–D, F–I, K–N and P–R are accounted for; E, J and O are not.** The
 customer Form writes them, the backend has no constant for them, and until the
@@ -457,64 +516,68 @@ so none is reachable over HTTP.
 > decoration. The Apps Script editor's execution log shows **only what the code
 > logs** — a function's *return value is never displayed*. So a function that only
 > returned its report would look, to the person running it, exactly like one that
-> did nothing: `Execution completed`, and no `dropped` grant list, no merge plan, no
-> `ERA-AMBIGUOUS` block, no backup tab name, no one-time admin password. Every one
-> of those is something an operator has to **read** to run the cutover safely.
-> Wrapping the outer call (`return report(withRowLock(…))`) rather than the inner
-> returns is deliberate: it is what makes the early refusals — *"Already merged"*,
-> *"Refusing: … already exists"* — visible too. `smoke-backend.mjs` asserts both.
+> did nothing: `Execution completed`, and no `dropped` grant list, no store folder
+> name, no one-time admin password. Every one of those is something an operator has
+> to **read** to run the setup safely. Wrapping the outer call
+> (`return report(withRowLockOrThrow(…))`) rather than the inner returns is
+> deliberate: it is what makes the early refusals — *"Nothing older than …"*,
+> *"No CONFIG.ADMIN_EMAILS configured."* — visible too. `smoke-backend.mjs` asserts
+> both.
 
-**The run order is forced, not chosen.** Run these in exactly this order:
+**The run order:**
 
 ```
-Pre-flight (undeployed, no user impact):
-  migrateAddColumns() → migrateAclReport() → bootstrapAdmin()
-
-Cutover window (AFTER the deploy — these CANNOT run pre-flight):
-  seedDepartments() → seedMemberships()
-  → mergeSectionsReport() → mergeSectionsApply()
-  → push gh-pages
+One-time setup (before the deploy — no user impact):
+  initializeStore() → seedDepartments() → seedMemberships() → bootstrapAdmin() → seedAccounts()
 
 Anytime after go-live:
   maintenancePruneSessions(), maintenancePruneAuditLog()
 ```
 
+There is **no cutover window any more.** The old order existed because widening a
+`DEPARTMENTS` tab would be read *positionally* by the still-live old backend and
+misgrant every section, and because the `APP_DATA` merge rewrote rows the live app
+was reading. Neither applies: there are no columns and no rows, `_store/` is a
+folder the old backend never looks at, and the store starts empty. The whole
+pre-flight/cutover split collapses into "run five functions, then deploy".
+
 | Function | Kind | What it does |
 |---|---|---|
-| `migrateAddColumns()` | additive | Widens `USERS`, `SESSIONS` and the new tabs **in place**. Touches only row 1. Refuses to widen a `DEPARTMENTS` tab whose header it does not recognise. Column counts in its report are **derived** from the header arrays, never typed |
-| `migrateAclReport()` | **read-only** | The last chance to see the old hand-assigned grants before they are orphaned. It keeps a local nine-key `LEGACY_SECTION_KEYS` literal precisely because iterating the current six-key `SECTION_KEYS` against the old `ACL` columns would mislabel every column — in the function whose whole purpose is that report. Paste the output somewhere private, never into the repo |
-| `bootstrapAdmin()` | idempotent | Creates the admin row if missing, printing a one-time temp password to the execution log. If the row exists it is left alone and only the flags are normalised |
-| `seedDepartments()` | upsert | Writes `SEED_GRANTS` plus `Triage` for CR and Management, and rebuilds a `legacy-9` tab after snapshotting it. Reports `created`/`updated`/`unchanged` and a **`dropped`** list |
-| `seedMemberships()` | additive only | Adds one `USER_DEPARTMENTS` edge per person from `SEED_MEMBERSHIPS`. Never removes. Prints emails with no `USERS` row |
-| `mergeSectionsReport()` | **read-only** | Prints the `APP_DATA` merge plan — what moves, what merges, what deletes, `done[]` remaps, collision pairs, and an `ERA-AMBIGUOUS` block for rows it will not touch. Run it before applying, and again after |
-| `mergeSectionsApply()` | destructive, locked | Applies the plan. Snapshots inside the row lock, refuses if there is nothing to do, and writes a dated backup tab **before** its first write |
-| `restoreAppDataFromBackup()` | destructive, locked | The undo: newest `APP_DATA_BACKUP_*` → also saves `APP_DATA_PRE_RESTORE_<date>` → clears and rewrites the data rows |
+| `initializeStore()` | idempotent | Creates `_store/` inside `DRIVE_ROOT_FOLDER_ID`, makes `sections/`, `audit/` and `backups/`, sets the folder **Private (not link-shared)**, and seeds the empty files. Idempotent by **guard**, not by accident: an existing file is left exactly as it is. Prints the store's name, its sharing state, what it seeded, and the next three calls |
+| `bootstrapAdmin()` | idempotent | Creates the admin account if missing, printing a one-time temp password to the execution log. If it exists it is left alone and only the flags are normalised — re-reading the record **inside** the lock, so a concurrent password reset is not undone |
+| `seedDepartments()` | upsert | Writes `SEED_GRANTS` plus `triage` for CR and Management. Reports `created`/`updated`/`unchanged` and a **`dropped`** list — an existing grant the new mapping does not reproduce. A department the seed does not name is left untouched, never deleted |
+| `seedMemberships()` | additive only | Adds one department edge per person from `SEED_MEMBERSHIPS`. Never removes. Prints emails with no account yet, and says plainly that the IQC/Compliance omission and the Purchase/Inventory doubling are intentional |
+| `seedAccounts()` | additive only | Creates **one account per seeded member** — the roster is the union of `SEED_MEMBERSHIPS` itself, so there is no second list to drift — and prints each address with its temp password. An existing account is **skipped, never rewritten**: re-issuing would invalidate the password somebody is already using. Must run after `bootstrapAdmin()` (admin addresses are skipped) and must **not** hold the lock, because `createUserRow` takes its own and a nested lock is refused, not queued |
 | `maintenancePruneSessions()` | destructive, locked | Removes expired sessions |
-| `maintenancePruneAuditLog()` | destructive, locked | Retains `AUDIT_RETENTION_DAYS` (default 400) of audit rows. Manual on purpose — the audit trail is evidence and must not shrink behind anyone's back |
+| `maintenancePruneAuditLog()` | destructive, locked | Retains `AUDIT_RETENTION_DAYS` of audit lines, per subject file. Manual on purpose — the audit trail is evidence and must not shrink behind anyone's back. A line whose timestamp cannot be parsed is **kept**, never pruned by accident |
 
-**Two facts force the split, and neither is negotiable:**
-
-1. The grants and memberships cannot land before the deploy. `getOrCreateDeptTab` →
-   `ensureHeaders` is reached on **every read**, and until the new backend serves
-   `/exec` the live code still reads `DEPARTMENTS` **positionally** against the old
-   nine sections — so a 12-column tab would be read letter-by-letter against the
-   wrong list, silently granting the wrong sections to the wrong departments.
-2. **A migration that rewrites rows the live app is reading cannot run pre-flight.**
-   That is the mirror of the column-widening rationale: widening is invisible to the
-   old build, rewriting is not. A client on the old shell would keep writing rows the
-   merge had already collapsed.
-
-The full cutover procedure, with the verification steps, is in
+The full procedure, with the verification steps, is in
 [08 — Development Guide](08 - Development Guide.md).
 
 ---
 
-## Legacy Importer
+## Deleted with the sheet
 
-`importLegacyData()` — utility function to crawl old per-IR tabs (e.g., `IR409` tab) and migrate them into the unified `APP_DATA` format. Cell mappings are hardcoded and need manual adjustment per legacy sheet format.
+These existed only to make positional rows safe or to migrate sheet data. With no
+data to migrate they have no job, and **nothing may survive as an adapter** — a
+`getRange(i+1, 4)`-shaped shim would keep the positional layout alive, which is the
+whole thing this change removes:
 
-`importSingleTab()` maps a legacy Dispatch tab to `sec-g`, remapped from the retired
-`'sec-i'`. It has a **pre-existing** bug worth knowing before a re-run: its comment
-says "if not already there", but it calls `appendRow` unconditionally, so running it
-twice duplicates rows. Only the section id was fixed here — see
-[07 — Known Issues & TODO](07 - Known Issues & TODO.md).
+`getSs`, `ensureHeaders`, every `getOrCreate*Tab`, `migrateAddColumns`,
+`migrateAclReport`, `deptTabShape`, `deptTriageIndex`, `userCol`,
+`findUserRowIndex`, `planSectionMerge`, `mergeTargetFor`, `mergeSectionsReport`,
+`mergeSectionsApply`, `restoreAppDataFromBackup`, `importSingleTab`,
+`importLegacyData`, `setupAuditLog`, `appendAuditEntries`, `saveUser`, and the
+column constants `USER_HEADS` / `SESSION_HEADS` / `DEPT_HEADS` / `CODE_HEADS` /
+`USERDEPT_HEADS` / `USER_ID_BLOCK_COLS` / `LEGACY_DEPT_SECTIONS` /
+`LEGACY_ACL_SECTIONS` / `SEC_TARGET_MAP` / `DONE_MAP`.
+
+The one deletion that needed a replacement: `restoreAppDataFromBackup` was the
+rollback path, so `snapshotStore()` writes a
+`backups/<store>-<yyyy-MM-dd-HHmmss>.json` **new file** before every destructive
+admin operation, and `purgeUsers` names that file in its response.
+
+`SpreadsheetApp` survives in exactly **two** functions — `listIRs()` and
+`listLegacyIRs()` — and the suite asserts that by walking every call site to its
+enclosing function, because a third appearance would mean the app is writing to a
+sheet again.

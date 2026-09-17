@@ -62,7 +62,15 @@ const git = (args, opts = {}) =>
   execFileSync('git', args, { encoding: 'utf8', ...opts }).trim()
 
 const tryGit = (args, opts = {}) => {
-  try { return git(args, opts) } catch { return null }
+  // stderr 'ignore' because the expected misses here (`.nojekyll` is on `gh-pages`
+  // but not in `main`'s tree) print a `fatal:` that reads like a real failure.
+  try {
+    return execFileSync('git', args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      ...opts
+    }).trim()
+  } catch { return null }
 }
 
 function fail(msg) {

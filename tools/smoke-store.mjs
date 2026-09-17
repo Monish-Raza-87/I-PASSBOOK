@@ -669,8 +669,9 @@ r.ok('and it lives 8h30m — one working day, not the reset window',
 r.ok('the code was EMAILED, and the mail carries it',
   mails.length === 1 && mails[0].to === OTPUSER && mails[0].body.indexOf(first.code) > -1,
   mails.map(m => m.to + ' / ' + m.subject));
-r.ok('the mail tells them the same code works all day',
-  /every sign-in today/.test(mails[0].body));
+r.ok('the mail gives a DURATION from the send, not "end of the working day"',
+  /valid for 8:30 hours from now/.test(mails[0].body) &&
+  !/end of the working day|every sign-in today/.test(mails[0].body), mails[0].body);
 
 // A wrong code is refused, and says how much rope is left.
 reexec();

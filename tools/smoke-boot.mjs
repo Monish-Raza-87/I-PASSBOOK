@@ -610,8 +610,9 @@ if (probe && !probe.error) {
   ok('so is the Sign in button', probe.signInBtnHiddenAtStep2 === true);
   ok('the note names the address the code went to',
     /asha@indrones\.com/.test(probe.codeNote || ''), probe.codeNote);
-  ok('and it says the code is reusable all day',
-    /all day|every sign-in today/.test(probe.codeNote || ''), probe.codeNote);
+  ok('and it gives the lifetime as a duration, not "end of the day"',
+    /valid for 8:30 hours/.test(probe.codeNote || '') &&
+    !/all day|end of the day|every sign-in today/i.test(probe.codeNote || ''), probe.codeNote);
   // The whole point of the two-step split: a correct password alone must not
   // produce a session token. Asserting on the real localStorage is the only check
   // here that a stubbed DOM could not make.

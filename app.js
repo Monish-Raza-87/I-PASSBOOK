@@ -1151,11 +1151,12 @@ function wireAuthForm() {
     if (note) {
       // codeSent:false means the backend REUSED the code it already emailed today,
       // so claiming to have just sent one would send the user looking for a mail
-      // that is not there. Both branches name the address, because the same code
-      // may be in an inbox they have not looked at since this morning.
+      // that is not there. Both branches name the address and state the lifetime as
+      // a DURATION — never "end of the day", which is false for anyone whose first
+      // sign-in was after lunch: the window is 8h30m from the SEND.
       note.textContent = (d && d.codeSent === false)
-        ? 'Enter the 6-digit code we emailed to ' + email + ' earlier today. It still works — the same code covers every sign-in today.'
-        : 'We emailed a 6-digit code to ' + email + '. It works all day, so you can reuse it on another device.';
+        ? 'A 6-digit code was sent to ' + email + ' earlier. It is valid for 8:30 hours from when it was sent.'
+        : 'A 6-digit code is sent to ' + email + '. It is valid for 8:30 hours.';
     }
     showToast((d && d.codeSent === false) ? 'Use the code from earlier today' : 'Check your inbox for the sign-in code');
   };

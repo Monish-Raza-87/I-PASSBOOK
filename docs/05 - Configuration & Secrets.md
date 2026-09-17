@@ -13,8 +13,10 @@ There is **no Google OAuth client ID** any more. Google Sign-In was replaced by
 admin-provisioned email + password auth — the admin creates each account and
 hands over a temporary password, and the person sets their own on first sign-in.
 Sign-in is then **two steps**: the password, then a 6-digit code emailed to the
-same address. The code is issued once and reused for the rest of the working day,
-so a second sign-in that day (another device) needs no second mail. The session is
+same address. The code is issued once and reused for **8h30m from the send**, so a
+second sign-in inside that window (another device) needs no second mail. The window
+is a duration from issue, **not** "until the end of the working day" — a first
+sign-in at 2pm leaves the code live until 10:30pm. The session is
 **8h30m and absolute** — one working day, not slid forward on use — so everyone
 starts the day with a sign-in. There is no self-signup, so there is no captcha or
 allowlist either. See [10 — Auth & Access Model](10 - Auth & Access Model.md).

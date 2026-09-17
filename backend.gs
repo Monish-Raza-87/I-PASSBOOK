@@ -1401,11 +1401,18 @@ function loginOtpStep(email, supplied, name) {
       // admin-facing detail, not something a person signing in can act on.
       return { status: 'error', message: 'Could not send a sign-in code just now — wait a minute and try again.' };
     }
+    // The lifetime is stated as a DURATION from this mail, never as "end of the
+    // working day": the code expires LOGIN_OTP_TTL_MIN after it is ISSUED, so a
+    // first sign-in at 2pm leaves it live until 10:30pm, not until 5:30pm. Saying
+    // "end of the day" would be a promise the clock does not keep for anyone who
+    // starts their day late. Derived from the constant so it cannot drift.
+    var ttlLabel = Math.floor(LOGIN_OTP_TTL_MIN / 60) + ':' +
+                   ('0' + (LOGIN_OTP_TTL_MIN % 60)).slice(-2);
     sendAuthMail(email, 'Your I-PASSBOOK sign-in code',
       'Your I-PASSBOOK sign-in code is ' + issued + '.\n\n' +
-      'It works until the end of the working day (' + (LOGIN_OTP_TTL_MIN / 60) + ' hours), ' +
-      'and you can use the same code for every sign-in today — so if you are already ' +
-      'signed in on another device, you do not need a new one.\n\n' +
+      'It is valid for ' + ttlLabel + ' hours from now. You can reuse this same code for ' +
+      'every sign-in until it expires — so if you are already signed in on another ' +
+      'device, you do not need a new one.\n\n' +
       'If you did not try to sign in, someone may have your password — tell an admin.');
     return {
       status: 'ok', otpRequired: true, email: email, name: name, codeSent: true,

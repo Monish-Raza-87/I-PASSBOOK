@@ -117,6 +117,8 @@
   <div id="app-container">
 
     <!-- ====== SIDEBAR (≥1024px) / BOTTOM NAV (<1024px) ====== -->
+    <!-- The .nav-icon spans are filled from ICON_PATHS by initIcons(), never with
+         literal markup here, so every glyph in the app has exactly one source. -->
     <nav id="sidebar" aria-label="Main">
       <div class="sidebar-brand">
         <span class="brand-mark" aria-hidden="true">IP</span>
@@ -126,9 +128,9 @@
       <div class="sidebar-nav">
         <div class="sidebar-section-label">Service Desk</div>
 
-        <a class="nav-item" id="nav-tickets" href="#/tickets">
-          <span class="nav-icon" aria-hidden="true">🎫</span>
-          <span class="nav-label">Tickets</span>
+        <a class="nav-item" id="nav-tickets" href="#/tickets" title="IRs">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label">IRs</span>
           <span class="nav-count" id="nav-count">—</span>
         </a>
 
@@ -136,20 +138,20 @@
              app.js binds openLegacyWorkbook() to it. -->
         <button type="button" class="nav-item" id="legacy-workbook-btn"
                 title="Old I-PASSBOOK records (kept until app go-live)">
-          <span class="nav-icon" aria-hidden="true">🏛</span>
+          <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label">Legacy Records</span>
         </button>
 
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">
-          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label">User Access</span>
         </button>
       </div>
 
       <div class="sidebar-foot">
         <button type="button" class="nav-item" id="nav-theme" title="Switch between light and dark">
-          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true">🌙</span>
+          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true"></span>
           <span class="nav-label" id="nav-theme-label">Dark mode</span>
         </button>
       </div>
@@ -159,11 +161,22 @@
     <div id="workspace">
 
       <header>
+        <!-- Both folds live here rather than in the panes they collapse: the header
+             is static markup that is never re-rendered, so a toggle can never be
+             swallowed by the thing it hides. A control placed inside #index-view
+             would vanish mid-typing, because renderIRList() replaces the list's
+             innerHTML on every keystroke. -->
+        <button type="button" class="icon-btn" id="sidebar-toggle" title="Hide the sidebar" aria-controls="sidebar">
+          <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="icon-btn" id="list-toggle" title="Hide the IR list" aria-controls="index-view">
+          <span class="list-toggle-icon" aria-hidden="true"></span>
+        </button>
         <div id="back-btn">← Back</div>
         <div id="header-title">I-PASSBOOK</div>
         <div class="header-actions">
           <div id="nudge-bell" class="nudge-bell" title="Comments &amp; notifications">
-            <span class="nudge-bell-icon" aria-hidden="true">🔔</span>
+            <span class="nudge-bell-icon" aria-hidden="true"></span>
             <span id="nudge-badge" class="nudge-badge" style="display:none">0</span>
           </div>
           <div id="user-avatar" title="Account">?</div>
@@ -176,7 +189,7 @@
         <div id="index-view">
           <div class="list-toolbar">
             <div class="list-toolbar-top">
-              <span class="list-title">Tickets</span>
+              <span class="list-title">IRs</span>
               <span class="list-count" id="list-count"></span>
             </div>
 
@@ -202,10 +215,10 @@
               <div class="banner-pills" id="ir-banner-pills"></div>
             </div>
             <div class="banner-actions">
-              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this ticket">🎯 Triage</button>
-              <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none">0</span></button>
-              <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR">🕓 History</button>
-              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK">🏛 Legacy Record</button>
+              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Triage</button>
+              <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
+              <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>
+              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy Record</button>
             </div>
           </div>
 
@@ -214,9 +227,8 @@
 
           <!-- ====== IR OVERVIEW (pinned, above the tabs) ======
                Section A's content, in the form it should always have had: the
-               client's intake facts read-only, the two fields CRM owns, the
-               automated activity timeline, and the legacy hand-typed log
-               read-only. It is NOT a section and NOT a tab.
+               client's intake facts read-only, the two fields CRM owns, and the
+               legacy hand-typed log read-only. It is NOT a section and NOT a tab.
 
                Three structural rules, each load-bearing — do not "tidy" them:
                1. `id="ir-overview"`, never `sec-*`. The shell/boot suites count
@@ -229,7 +241,12 @@
                3. It sits OUTSIDE `#sections-wrapper`. That excludes it from the
                   wrapper's delegated input/change listeners, which drive
                   saveDraft — intended, not an oversight: the panel is always
-                  visible and one click from Save, so a draft adds nothing. -->
+                  visible and one click from Save, so a draft adds nothing.
+
+               The automated activity timeline used to live in here. It moved
+               below #sections-wrapper: it is the longest block on the page and
+               sat above the tab strip, so the sections a user came for were
+               pushed off-screen. -->
           <div id="ir-overview" class="overview-panel">
             <div class="overview-head">
               <h2 class="overview-title">Overview</h2>
@@ -237,7 +254,6 @@
             </div>
             <div id="ir-overview-facts"></div>
             <div id="ir-overview-editable"></div>
-            <div id="ir-timeline"></div>
             <div id="ir-legacy-log"></div>
           </div>
 
@@ -245,7 +261,7 @@
                report, read-only; `data-intake` keeps it out of the access-gating
                fallback (it is never hidden, so it would always win). -->
           <div class="tabs-container" id="section-tabs">
-            <div class="tab tab-intake" data-section="sec-intake" data-intake="1">📋 Report</div>
+            <div class="tab tab-intake" data-section="sec-intake" data-intake="1"><span class="tab-icon" aria-hidden="true"></span>Report</div>
             <div class="tab active" data-section="sec-b">B: Inward</div>
             <div class="tab" data-section="sec-c">C: IQC</div>
             <div class="tab" data-section="sec-d">D: Investigation</div>
@@ -308,15 +324,42 @@
             </div>
 
           </div>
+
+          <!-- ====== ACTIVITY LOG (below every section) ======
+               Moved out of #ir-overview. Collapsed by default: the log matters
+               when something looks wrong, not on every open.
+
+               It is NOT a section and NOT a pane: no `sec-*` id, no
+               `class="section-content"`, and it sits OUTSIDE #sections-wrapper so
+               the wrapper's delegated input listener never sees it (nothing in
+               here is editable, so a draft would be pointless junk).
+
+               The `id="ir-timeline"` div is the shared renderer's mount point —
+               the same one the 🕓 History modal uses via renderTimelineInto().
+               Do not move the header INSIDE it: renderTimelineInto overwrites
+               innerHTML wholesale and would delete it. -->
+          <div id="ir-activity" class="activity-panel">
+            <h2 class="activity-title">
+              <button type="button" class="activity-toggle" id="ir-activity-toggle"
+                      aria-expanded="false" aria-controls="ir-activity-body">
+                <span class="activity-caret" aria-hidden="true"></span>
+                <span>Activity</span>
+                <span class="activity-count" id="ir-activity-count"></span>
+              </button>
+            </h2>
+            <div class="activity-body" id="ir-activity-body">
+              <div id="ir-timeline"></div>
+            </div>
+          </div>
         </div><!-- end detail-view -->
 
-        <!-- Desktop-only empty state, shown until a ticket is selected.
+        <!-- Desktop-only empty state, shown until an IR is selected.
              A sibling of #detail-view rather than a child, so that
-             #detail-view's display stays a truthful "is a ticket open" flag
+             #detail-view's display stays a truthful "is an IR open" flag
              (applyAccessGating reads it). -->
         <div id="detail-placeholder">
-          <div class="ph-icon" aria-hidden="true">🎫</div>
-          <p class="ph-title">No ticket selected</p>
+          <div class="ph-icon" aria-hidden="true"></div>
+          <p class="ph-title">No IR selected</p>
           <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
         </div>
 

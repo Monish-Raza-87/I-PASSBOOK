@@ -4,7 +4,7 @@
 // ============================================================
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CONFIG — Update these Sheet IDs before deploying
+// CONFIG — Update DRIVE_ROOT_FOLDER_ID before deploying
 // ──────────────────────────────────────────────────────────────────────────────
 var CONFIG = {
   // The IR Repository sheet (Form Responses tab) — source of new IR records
@@ -26,28 +26,34 @@ var CONFIG = {
   IR_REPO_EVIDENCE_Q_COL:   17, // Column Q  — "Evidence: Attach Screenshot of UAV Forecast..."
   IR_REPO_COMPANY_COL:      18, // Column R  — "Where Do You Work?"
 
-  // The I-PASSBOOK App Data sheet ("I-Passbook App Repository") — APP_DATA tab
-  // holds all saved section data. NOTE: the *deployed* backend is an older
-  // build than this file; keep this ID in sync with the live deployment.
-  PASSBOOK_SHEET_ID: '141L8Wt4hrvJmN3dTtnI8VDK76NutK_7KZ_jbM2qEOwQ',
-  DATA_TAB:          'APP_DATA',  // Web App data goes here
-
-  // Google Drive root folder for IR uploads — "I-PASSBOOK APP" folder in the
-  // customer.relations@indrones.com Drive. The account that deploys this script
-  // (Execute as: Me) MUST have Editor access to this folder.
+  // ── THE APP'S OWN STORE ──────────────────────────────────────────────────────
+  // There is no app spreadsheet any more. Everything the app owns — accounts,
+  // sessions, the access matrix, every saved section, the audit trail — lives as
+  // JSON files in `_store/` inside the folder below. The ONLY spreadsheet left is
+  // the client's Form Responses sheet above, which is an INPUT, never a store.
   //
-  // This address is the FOLDER'S OWNER, not an app account: it is no longer in
-  // ADMIN_EMAILS and no longer has a USERS row. Do not "tidy" this line away —
-  // the ID below resolves only for a deployer who has been granted access to that
-  // specific folder, and the note is how they know which one to ask for.
-  DRIVE_ROOT_FOLDER_ID: '1sc9mXOHPaWW1wiVvtDmyYLflGUogtm06',
+  // This folder belongs to monish.raza@indrones.com, who owns it outright, so the
+  // store is not inside an account that several people share. The script must be
+  // deployed from THAT account (Deploy → Execute as: Me), because it writes here
+  // as whoever runs it.
+  DRIVE_ROOT_FOLDER_ID: '1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK',
+  // The store's own folder, a SIBLING of the per-IR upload folders (IR409/, …).
+  // It must stay Restricted: the upload FILES are set to anyone-with-link one by
+  // one, so their links keep working while this one holds password hashes. See
+  // initializeStore().
+  STORE_FOLDER_NAME: '_store',
 
   ALLOWED_DOMAIN: 'indrones.com',
 
   // Bump this whenever the action set or a response shape changes. `ping` reports
   // it, so a cached frontend talking to a newer backend (or vice versa) can say so
   // in words a human can act on instead of failing as "Unknown action".
-  API_VERSION: 2,
+  //
+  // v3 = the Drive-JSON store. The response SHAPES are unchanged from v2; what
+  // changed is where the data lives. It is bumped anyway because the store moved
+  // accounts, so a v2 client and a v3 deployment are genuinely different things
+  // and the footer check in docs/08 is how an operator tells them apart.
+  API_VERSION: 3,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -63,7 +69,7 @@ var CONFIG = {
 
   // How stale a session's Last Seen At may get before lookupSession rewrites its
   // Expires At (the "slide"). The frontend polls comments every 90s, so an
-  // unthrottled slide would be ~40 sheet writes per hour per user; 6h caps it at
+  // unthrottled slide would be ~40 store writes per hour per user; 6h caps it at
   // <=1 write per 6h while still sliding long before the 30-day expiry.
   SESSION_SLIDE_HOURS: 6,
 
@@ -92,11 +98,17 @@ var CONFIG = {
 // ──────────────────────────────────────────────────────────────────────────────
 // AUTH — verify the caller by a server-issued, revocable session token.
 // The token is minted at sign-in (doLoginPassword) or after the forced first
-// password change (changePassword) and stored on the SESSIONS tab; the frontend
+// password change (changePassword) and stored in the session store; the frontend
 // persists it and attaches it to every call. The caller's email is read FROM the
 // token (never from a client param), so an identity can't be spoofed by passing a
 // known email. No Google ID token is involved anywhere — this backend makes no
 // outbound network calls (so it needs no script.external_request scope).
+//
+// This THROWS when the session store cannot be read. That is deliberate: null
+// means "this token is not valid", which callers answer as `unauthorized` and the
+// frontend trusts by signing the user out. A store that cannot be read says
+// nothing about the token, so it must not be reported as though it did — see
+// sessionCheck, which fails open for exactly this reason.
 function requireAuth(e) {
   var st = (e.parameter.sessionToken || '').toString().trim();
   if (st) return lookupSession(st);
@@ -104,60 +116,492 @@ function requireAuth(e) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// USERS + PASSWORD AUTH (admin-provisioned accounts)
+// THE STORE — the app's own data, as JSON files in Google Drive
 // ──────────────────────────────────────────────────────────────────────────────
+// There is no app spreadsheet any more. Everything the app owns lives under
+// `_store/` inside CONFIG.DRIVE_ROOT_FOLDER_ID:
+//
+//   users.json   sessions.json  codes.json   attempts.json
+//   access.json  irs.json       config.json  kb.json   comments.json
+//   sections/    IR409.json → { 'sec-b': {…}, 'sec-f': {…} }   +  index.json
+//   audit/       IR409.jsonl — one JSON object per line, append-only
+//   backups/     <label>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
+//
+// What this buys over a sheet, and what it costs:
+//
+//   + A record has a NAME. A lookup is a key read and a write is a key
+//     assignment, so every positional hazard goes away with the layout that
+//     caused it: no rows shifting under a delete, no header that silently
+//     re-letters when a section is added, no `row[1]` read "for speed".
+//   + A whole store is one file, so a backup is a file copy.
+//   − Drive has no atomic append and no transactions. A read-merge-write must
+//     therefore hold the script lock (see withRowLock) or two saves to one IR
+//     lose one of them. That is the ONE place this design is weaker than the
+//     sheet was, and the lock is not optional because of it.
+//
+// The response SHAPES the frontend sees are unchanged. Only where the bytes live
+// changed.
+
+var STORE_SECTIONS_DIR = 'sections';
+var STORE_AUDIT_DIR    = 'audit';
+var STORE_BACKUP_DIR   = 'backups';
+var STORE_INDEX        = 'sections/index.json';
+
+// Per-execution store memo, exactly as `_ssMemo` used to memoise the spreadsheet.
+// Apps Script gives every execution a fresh global scope, so this cannot leak an
+// open store across requests; it exists because one frontend save fires four
+// backend calls and an unmemoised store would pay a Drive round trip for each.
+var _storeMemo      = {};
+var _rootFolderMemo = null;
+var _storeFolderMemo = null;
+
+function getRootFolder() {
+  if (!_rootFolderMemo) _rootFolderMemo = DriveApp.getFolderById(CONFIG.DRIVE_ROOT_FOLDER_ID);
+  return _rootFolderMemo;
+}
+
+// The `_store/` folder. Never CREATED from here: a read path that quietly made the
+// folder would turn a misconfigured deploy into an empty store, and an empty
+// users.json is every account missing. initializeStore() creates it, once, by hand.
+function getStoreFolder() {
+  if (_storeFolderMemo) return _storeFolderMemo;
+  var it = getRootFolder().getFoldersByName(CONFIG.STORE_FOLDER_NAME);
+  if (!it.hasNext()) {
+    throw new Error('The app store folder "' + CONFIG.STORE_FOLDER_NAME + '" was not found in Drive folder ' +
+                    CONFIG.DRIVE_ROOT_FOLDER_ID + '. Run initializeStore() once from the Apps Script editor.');
+  }
+  _storeFolderMemo = it.next();
+  return _storeFolderMemo;
+}
+
+// A subfolder of the store. Returns null when it is missing and `create` is false:
+// "this folder does not exist yet" is a legitimate empty answer for a READ — a
+// fresh store has no audit/ until the first save — and never a reason to create.
+function getStoreSubfolder(name, create) {
+  var it = getStoreFolder().getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return create ? getStoreFolder().createFolder(name) : null;
+}
+
+// A store path is a bare file name in `_store/`, or "sub/file.json".
+function storeFolderFor(path, create) {
+  var p = String(path);
+  var i = p.indexOf('/');
+  return i < 0 ? getStoreFolder() : getStoreSubfolder(p.substring(0, i), create);
+}
+function storeNameFor(path) {
+  var p = String(path);
+  var i = p.indexOf('/');
+  return i < 0 ? p : p.substring(i + 1);
+}
+
+function findStoreFile(path, createFolder) {
+  var folder = storeFolderFor(path, !!createFolder);
+  if (!folder) return null;
+  var it = folder.getFilesByName(storeNameFor(path));
+  return it.hasNext() ? it.next() : null;
+}
+
+function parseStoreJson(path, file) {
+  var text = file.getBlob().getDataAsString();
+  if (!text || !text.trim()) {
+    throw new Error('Store file ' + path + ' is empty — refusing to read it as "no data".');
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('Store file ' + path + ' is not valid JSON (' + e.message + '). Nothing was changed.');
+  }
+}
+
+// Read a store file, memoised per execution.
+//
+// Returns null ONLY when the file provably does not exist. A read error or a
+// JSON.parse failure THROWS, and there is deliberately no `fallback` argument:
+// the tempting version of this helper answers `{}` for an unreadable file, and
+// that version destroys data — one corrupt users.json would read as "no
+// accounts", and the very next createUser would write that emptiness back plus
+// one account. Corruption must surface as an error, never as "empty".
+function readJson(path) {
+  if (Object.prototype.hasOwnProperty.call(_storeMemo, path)) return _storeMemo[path];
+  var file = findStoreFile(path, false);
+  _storeMemo[path] = file ? parseStoreJson(path, file) : null;
+  return _storeMemo[path];
+}
+
+// Read inside a locked region. Deliberately NOT the memoised read: a memoised
+// value may have been read BEFORE the lock was taken, and reusing it would
+// clobber whatever landed in between — precisely the lost update the lock exists
+// to prevent. Inside a lock, the read must be the CURRENT file.
+function readJsonLocked(path) {
+  var file = findStoreFile(path, false);
+  var val = file ? parseStoreJson(path, file) : null;
+  _storeMemo[path] = val;
+  return val;
+}
+
+// Write a store file. ALWAYS one file, and for the keyed stores always one KEY —
+// see the note on createUserRow and THE ONE STORE PATH. Call it with the
+// lock already held on every read-merge-write path.
+function writeJson(path, obj) {
+  var file = findStoreFile(path, true);
+  if (!file) file = storeFolderFor(path, true).createFile(storeNameFor(path), '', MimeType.PLAIN_TEXT);
+  file.setContent(JSON.stringify(obj));
+  _storeMemo[path] = obj;
+}
+function writeJsonLocked(path, obj) { writeJson(path, obj); }
+
+// ── THE ONE STORE PATH ────────────────────────────────────────────────────────
+// Every subject the app stores resolves to "a JSON object that maps a key to a
+// fields object", so getPassbook and saveSection need exactly one code path and
+// not two. The mapping is:
+//
+//   real IR     sections/IR409.json   keyed by sectionId   sec-b, sec-f, sec-a
+//   __IRS__     irs.json              keyed by IR number   IR409, IR410
+//   __CONFIG__  config.json           keyed by store key   team-directory, iqc-config
+//   __NUDGES__  comments.json         keyed by 'all'       all
+//   __KB__      kb.json               keyed by article id  kb-12
+//
+// `saveSection` therefore writes `store[key] = fields` for all five, and the
+// "is this a sentinel" question survives only where it belongs: the ACCESS check.
+
+// The file a sentinel subject lives in, or null for a real IR number.
+function sentinelStoreFile(irNumber) {
+  switch (String(irNumber)) {
+    case '__IRS__':    return 'irs.json';
+    case '__CONFIG__': return 'config.json';
+    case '__NUDGES__': return 'comments.json';
+    case '__KB__':     return 'kb.json';
+  }
+  return null;
+}
+
+// IR numbers reach a Drive FILE NAME, so the shape is asserted before any folder
+// or file work happens. Without this, `../` or a `__`-prefixed string that is not
+// on the allowlist would name a store file of the caller's choosing.
+function assertRealIR(irNumber) {
+  if (!/^IR\d+$/.test(String(irNumber))) {
+    throw new Error('Invalid IR number: ' + irNumber + '. Expected the form IR409.');
+  }
+}
+
+// sections/index.json — the IR → file id map. A Drive `getFilesByName` is a
+// SEARCH and is eventually consistent: a miss right after a create writes a second
+// IR409.json and the store silently forks, with two halves of one ticket's data
+// in two files. The index is read by direct id fetch instead, and the search below
+// is only a self-healing fallback for a file the index has lost track of.
+function readSectionsIndex(locked) {
+  // Inside a lock the memo must be bypassed: an index read before the lock was
+  // taken can be missing the entry another writer just added, and re-writing it
+  // would drop that writer's ticket from the map.
+  var idx = locked ? readJsonLocked(STORE_INDEX) : readJson(STORE_INDEX);
+  if (!idx || typeof idx !== 'object') idx = {};
+  if (!idx.irs || typeof idx.irs !== 'object') idx.irs = {};
+  return idx;
+}
+function writeSectionsIndex(idx) { writeJson(STORE_INDEX, idx); }
+
+// The sections file for one IR, as { fileId, data }. `create` makes the file.
+function readIR(irNumber, create, locked) {
+  assertRealIR(irNumber);
+  var idx = readSectionsIndex(!!locked);
+  var id = idx.irs[irNumber];
+
+  if (id) {
+    // A direct fetch. A file that the index names but Drive cannot produce has
+    // been trashed or moved by hand — say so rather than silently starting over,
+    // because "start over" here means an empty section map for a live ticket.
+    var byId = null;
+    try { byId = DriveApp.getFileById(id); }
+    catch (e) { byId = null; }
+
+    if (byId) {
+      var data = parseStoreJson(STORE_SECTIONS_DIR + '/' + irNumber + '.json', byId);
+      return { fileId: id, data: (data && typeof data === 'object') ? data : {} };
+    }
+    throw new Error('sections/' + irNumber + '.json is listed in the index but is not in Drive (id ' + id + '). ' +
+                    'Nothing was changed — check the folder, or delete its index entry to start the file again.');
+  }
+
+  // Not in the index: a genuine first save for this IR, or an index that lost the
+  // entry. Look the file up by name before creating a second one.
+  var hits = findAllByName(STORE_SECTIONS_DIR + '/' + irNumber + '.json');
+  if (hits.length) {
+    // A MULTI-MATCH IS RESOLVED BY NEWEST, never by "whichever Drive listed first".
+    // Two files under one IR number means either event the index exists to prevent,
+    // and an arbitrary pick would make the app read one half of a ticket and write
+    // the other. Newest is the best guess available and it is at least deterministic.
+    var pick = hits[0];
+    hits.forEach(function (f) {
+      if (String(f.getLastUpdated()) > String(pick.getLastUpdated())) pick = f;
+    });
+    var d2 = parseStoreJson(STORE_SECTIONS_DIR + '/' + irNumber + '.json', pick);
+    idx.irs[irNumber] = pick.getId();
+    writeSectionsIndex(idx);
+    return { fileId: pick.getId(), data: (d2 && typeof d2 === 'object') ? d2 : {}, duplicates: hits.length > 1 ? hits.length : 0 };
+  }
+
+  if (!create) return { fileId: null, data: {} };
+
+  var file = storeFolderFor(STORE_SECTIONS_DIR + '/x', true)
+    .createFile(irNumber + '.json', '{}', MimeType.PLAIN_TEXT);
+  idx.irs[irNumber] = file.getId();
+  writeSectionsIndex(idx);
+  return { fileId: file.getId(), data: {} };
+}
+
+// Every file of that name, not just the first. Used only by the self-healing fallback.
+function findAllByName(path) {
+  var folder = storeFolderFor(path, false);
+  if (!folder) return [];
+  var it = folder.getFilesByName(storeNameFor(path));
+  var out = [];
+  while (it.hasNext()) out.push(it.next());
+  return out;
+}
+
+// Write a ticket's sections file.
+//
+// BY ID, NOT BY NAME, and that is the whole point. Resolving the file with a name
+// search on the WRITE path re-opens exactly the hole sections/index.json closes: a
+// Drive search is eventually consistent, so a save a moment after the file was created
+// can miss it, `createFile` a SECOND IR409.json, and fork the ticket — after which
+// reads and writes alternate between two files and each looks like the other's data
+// is missing. `writeJson` resolves by name and is therefore right for the fixed-name
+// stores and wrong for this one. The caller passes the id readIR already resolved, so
+// in practice no lookup happens here at all.
+function writeIR(irNumber, data, fileId) {
+  var path = STORE_SECTIONS_DIR + '/' + irNumber + '.json';
+  if (!fileId) throw new Error('refusing to write ' + path + ' without the file id from readIR() — ' +
+                               'a name lookup here is how a ticket gets forked in two.');
+  var file = DriveApp.getFileById(fileId);   // throws if the indexed file is gone: refuse, never fork
+  file.setContent(JSON.stringify(data));
+  _storeMemo[path] = data;
+}
+
+// ── THE APPEND-ONLY AUDIT ─────────────────────────────────────────────────────
+// audit/IR409.jsonl — one JSON object per line. Per-IR rather than per-month:
+// Drive has no atomic append, so every audit write rewrites the whole file, and a
+// monthly shard reaches ~1.3 MB (~4 MB of I/O per save, worst on the last day of
+// the month) while a ticket's own file is ~40 KB. It also kills the old
+// `colB starts with '__'` trick — a __IRS__ patch is ABOUT IR409, so it belongs in
+// IR409's log, and two people on different tickets never touch the same file.
+
+function auditFileName(irNumber) { return irNumber + '.jsonl'; }
+
+// The subject an audit line belongs to. A sentinel write is about the thing it
+// names: `__IRS__`/IR409 is IR409's history, `__CONFIG__`/iqc-config has no ticket
+// and goes to a file named for the store.
+function auditSubjectFor(irNumber, sectionId) {
+  if (String(irNumber) === '__IRS__') return String(sectionId);
+  if (String(irNumber).indexOf('__') === 0) return String(irNumber).replace(/__/g, '');
+  return String(irNumber);
+}
+
+function parseAuditLines(text, subject) {
+  var out = [];
+  String(text || '').split('\n').forEach(function (line) {
+    var t = line.trim();
+    if (!t) return;
+    try { out.push(JSON.parse(t)); }
+    catch (e) {
+      // One bad line must not hide the rest of a ticket's history. Recorded as a
+      // line the reader can SEE, never skipped silently.
+      out.push({ timestamp: '', user: '', section: '', action: 'unreadable',
+                 field: '', oldValue: '', newValue: '', note: subject + '.jsonl line skipped: ' + e.message });
+    }
+  });
+  return out;
+}
+
+function readAuditLines(subject) {
+  var folder = getStoreSubfolder(STORE_AUDIT_DIR, false);
+  if (!folder) return [];
+  var it = folder.getFilesByName(auditFileName(subject));
+  if (!it.hasNext()) return [];
+  return parseAuditLines(it.next().getBlob().getDataAsString(), subject);
+}
+
+// Appends to one subject's file. The caller HOLDS THE LOCK: this is a
+// read-whole-file → append → write-whole-file, and two concurrent appends would
+// otherwise drop one of the lines.
+function appendAuditLinesLocked(subject, lines) {
+  if (!lines || !lines.length) return 0;
+  var folder = getStoreSubfolder(STORE_AUDIT_DIR, true);
+  var name = auditFileName(subject);
+  var it = folder.getFilesByName(name);
+  var file, existing = '';
+  if (it.hasNext()) {
+    file = it.next();
+    existing = file.getBlob().getDataAsString();
+    if (existing && existing.charAt(existing.length - 1) !== '\n') existing += '\n';
+  } else {
+    file = folder.createFile(name, '', MimeType.PLAIN_TEXT);
+  }
+  var body = lines.map(function (l) { return JSON.stringify(l); }).join('\n');
+  file.setContent(existing + body + '\n');
+  return lines.length;
+}
+
+// ── BACKUPS ───────────────────────────────────────────────────────────────────
+// Always a NEW file, never an overwrite: a backup that can be overwritten by the
+// next backup is not a rollback path. This replaces the dated
+// APP_DATA_BACKUP_<date> tab the sheet version wrote before a destructive merge.
+function snapshotStore(label, paths) {
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+  var name  = String(label || 'store') + '-' + stamp + '.json';
+  var payload = { takenAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+                  label: String(label || 'store'), files: {} };
+  (paths || []).forEach(function (p) {
+    var file = findStoreFile(p, false);
+    payload.files[p] = file ? file.getBlob().getDataAsString() : null;
+  });
+  var folder = getStoreSubfolder(STORE_BACKUP_DIR, true);
+  folder.createFile(name, JSON.stringify(payload), MimeType.PLAIN_TEXT);
+  return name;
+}
+
+// ── ONE-TIME SETUP (run from the Apps Script editor) ──────────────────────────
+// Creates `_store/` and its subfolders, and seeds the files that a read path is
+// not allowed to create on its own. Nothing here is idempotent-by-accident: an
+// existing file is left exactly as it is.
+function initializeStore() {
+  var root = getRootFolder();
+  var it = root.getFoldersByName(CONFIG.STORE_FOLDER_NAME);
+  var store = it.hasNext() ? it.next() : root.createFolder(CONFIG.STORE_FOLDER_NAME);
+
+  // `_store/` must NOT be link-shared. The upload folders beside it are, and the
+  // upload FILES are shared individually — but this folder holds password hashes,
+  // salts and session tokens, so a link on it would hand them to anyone.
+  store.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+
+  getStoreSubfolder(STORE_SECTIONS_DIR, true);
+  getStoreSubfolder(STORE_AUDIT_DIR, true);
+  getStoreSubfolder(STORE_BACKUP_DIR, true);
+
+  var seeded = [];
+  [['users.json', {}], ['sessions.json', { tokens: {} }], ['codes.json', { entries: [] }],
+   ['attempts.json', {}], ['access.json', { departments: {}, memberships: {} }],
+   ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
+   [STORE_INDEX, { irs: {} }]
+  ].forEach(function (pair) {
+    if (findStoreFile(pair[0], false)) return;
+    writeJson(pair[0], pair[1]);
+    seeded.push(pair[0]);
+  });
+
+  var out = 'Store folder: ' + store.getName() + ' (id ' + store.getId() + ')\n' +
+            'Sharing: PRIVATE (not link-shared)\n' +
+            'Seeded: ' + (seeded.length ? seeded.join(', ') : '(nothing — every file already existed)') + '\n' +
+            'Next: seedDepartments() → seedMemberships() → bootstrapAdmin() → seedAccounts()';
+  report(out);
+  return out;
+}
+
+// The ONE place a stored value becomes a Date.
+//
+// Internal dates — session expiry, lockout-until, created-at, last-seen — are
+// stored as epoch MILLISECONDS, because JSON has no date type. Stored as a
+// display string instead, `exp < now` compares a string to a Date, coerces to
+// NaN, and silently ACCEPTS an expired session. Only the audit `timestamp` stays
+// a string, because the timeline prints it verbatim.
+function asDate(v) {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return v;
+  var n = Number(v);
+  if (!isNaN(n)) return new Date(n);
+  var d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// USERS — one record per account, keyed by lowercase email.
+// { "someone@indrones.com": { hash, salt, createdAt, createdBy, mustChange,
+//                             passwordChangedAt, status, name, lastLoginAt,
+//                             tempPwIssuedAt } }
+//
 // There is NO self-signup. The admin creates every account from the app, which
 // returns a one-time temporary password the admin hands over out-of-band. On
 // first sign-in the user is FORCED to set their own password before any session
 // is minted (see changePassword). Passwords are stored as SHA-256(salt+password)
 // with a per-account random salt — the plain password is never stored, and a
-// temporary password reaches the sheet only as a hash plus an issued-at stamp.
+// temporary password reaches the store only as a hash plus an issued-at stamp.
 //
-// Everyone who signs in gets VIEW + COMMENT on all nine sections by default;
-// EDIT comes only from department membership (see getEffectiveAccess).
+// Everyone who signs in gets VIEW + COMMENT on every section by default; EDIT
+// comes only from department membership (see getEffectiveAccess).
+function usersKey(email) { return String(email || '').toLowerCase().trim(); }
 
-// Per-execution Sheet memo. Apps Script gives every execution a fresh global
-// scope, so this cannot leak an open Sheet across requests — it only stops
-// doPost from paying openById() two or three times in the same request.
-var _ssMemo = null;
-function getSs() {
-  if (!_ssMemo) _ssMemo = SpreadsheetApp.openById(CONFIG.PASSBOOK_SHEET_ID);
-  return _ssMemo;
+function allUsers() {
+  var u = readJson('users.json');
+  return (u && typeof u === 'object') ? u : {};
 }
 
-// Widen a tab's header row IN PLACE without touching a single data row. Columns
-// are append-only by design (positional readers such as doLoginPassword read
-// row[1]/row[2]), so this is the whole migration for an existing tab. Safe to
-// call on every getOrCreate*, and a no-op once the header already matches.
-function ensureHeaders(tab, heads) {
-  var have = tab.getLastColumn();
-  var row = have > 0 ? tab.getRange(1, 1, 1, have).getValues()[0] : [];
-  var same = row.length === heads.length;
-  if (same) {
-    for (var i = 0; i < heads.length; i++) {
-      if (String(row[i]) !== heads[i]) { same = false; break; }
-    }
+// One account record, or null. Never creates the file — an authority store is
+// never brought into existence by a read.
+function findUser(email) {
+  var k = usersKey(email);
+  return k ? (allUsers()[k] || null) : null;
+}
+
+// One field of a record, as a trimmed string (or '' when unset). The old
+// `userCol(row, 'Name')` read a sheet column by its header; a record has names.
+function userField(u, name) {
+  if (!u) return '';
+  var v = u[name];
+  if (v === null || v === undefined) return '';
+  return typeof v === 'string' ? v.trim() : String(v);
+}
+
+// NOTE: there is deliberately no `saveUser(email, rec)` helper any more. Every
+// write to users.json is a key assignment made INLINE inside the lock that read
+// it, because the record being written has to be the one the lock protects — a
+// helper taking a record from its caller cannot promise that, and one taking its
+// own lock would be a nested lock on every path that already holds one.
+
+// SESSIONS — { tokens: { "<uuid>": { email, createdAt, expiresAt, revokedAt,
+//                                     lastSeenAt } } }
+//
+// Keyed by the token itself, so a lookup is one key read and a revoke is one key
+// assignment: no row scan, and nothing that can shift under a concurrent write.
+//
+// A MISSING or malformed sessions.json THROWS rather than reading as "nobody is
+// signed in". initializeStore() creates the file, so its absence means the store
+// is wrong, not that all twenty users logged out — and answering "no sessions"
+// there would sign out the whole company in one poll window. See lookupSession.
+function sessionsTokens() {
+  var s = readJson('sessions.json');
+  if (!s || !s.tokens || typeof s.tokens !== 'object') {
+    throw new Error('Store file sessions.json is missing or malformed — run initializeStore() from the Apps Script editor.');
   }
-  if (same) return tab;
-  tab.getRange(1, 1, 1, heads.length).setValues([heads]);
-  tab.getRange(1, 1, 1, heads.length).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-  tab.setFrozenRows(1);
-  return tab;
+  return s.tokens;
 }
 
-// Column order is a CONTRACT: A–E are read positionally by doLoginPassword and
-// the forced-change path, so never reorder them — append only.
-var USER_HEADS = ['Email', 'PasswordHash', 'Salt', 'Created At', 'Created By',
-                  'Must Change Password', 'Password Changed At', 'Status',
-                  'Name', 'Last Login At', 'Temp Password Issued At'];
-// Columns B..H — hash, salt, Created At, Created By, Must Change Password,
-// Password Changed At, Status. The block every password write touches at once.
-var USER_ID_BLOCK_COLS = 7;
+// Drop tokens that expired more than 7 days ago. Operates on an already-read
+// store; the caller holds the lock and does the write.
+function pruneSessionsIn(store) {
+  var cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  var n = 0;
+  Object.keys(store.tokens).forEach(function (t) {
+    var exp = asDate(store.tokens[t].expiresAt);
+    if (!exp || exp.getTime() < cutoff) { delete store.tokens[t]; n++; }
+  });
+  return n;
+}
 
-function getOrCreateUsersTab(ss) {
-  var tab = ss.getSheetByName('USERS');
-  if (!tab) tab = ss.insertSheet('USERS');
-  return ensureHeaders(tab, USER_HEADS);
+// Revoke every session for an email IN an already-read store. Called on password
+// change/reset and when an account is disabled — the cheap alternative to
+// checking Status on every single authenticated request.
+function revokeSessionsForIn(store, email) {
+  email = usersKey(email);
+  if (!email || !store || !store.tokens) return 0;
+  var now = Date.now(), n = 0;
+  Object.keys(store.tokens).forEach(function (t) {
+    var s = store.tokens[t];
+    if (usersKey(s.email) !== email) return;
+    if (s.revokedAt) return;
+    s.revokedAt = now;
+    n++;
+  });
+  return n;
 }
 
 // SHA-256 digest of (salt + password), returned as a lowercase hex string.
@@ -170,70 +614,69 @@ function hashPassword(password, salt) {
   }).join('');
 }
 
-// Find a USERS row by email (case-insensitive). Returns the row values or null.
-function findUserRow(ss, email) {
-  email = (email || '').toLowerCase().trim();
-  var data = getOrCreateUsersTab(ss).getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase().trim() === email) return data[i];
-  }
-  return null;
-}
-
-// Same lookup, but returns the 1-indexed SHEET row number (0 = not found).
-function findUserRowIndex(ss, email) {
-  email = (email || '').toLowerCase().trim();
-  var data = getOrCreateUsersTab(ss).getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase().trim() === email) return i + 1;
-  }
-  return 0;
-}
-
-// Read one optional USERS column by its header name, tolerant of a row shorter
-// than the header (getDataRange returns rows only as wide as the last column,
-// so an un-widened tab yields undefined rather than throwing).
-function userCol(row, name) {
-  var i = USER_HEADS.indexOf(name);
-  return (i >= 0 && row && i < row.length) ? String(row[i] == null ? '' : row[i]).trim() : '';
-}
-
-// Mint a fresh session token for an email and append it to SESSIONS.
+// Mint a fresh session token for an email and record it in the session store.
+//
+// Locked, and the read happens INSIDE the lock. In the sheet version this was an
+// atomic `appendRow` and needed no lock; as a read-merge-write, a sign-in racing
+// a session slide would lose the newly minted token and eject the user on their
+// very next request. Throws if the lock cannot be taken — a failure to mint must
+// never be mistaken for a token.
 function mintSession(email) {
-  var tab   = getOrCreateSessionsTab(getSs());
-  var token = Utilities.getUuid();
-  var now   = new Date();
-  var exp   = new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000);
-  tab.appendRow([token, email, now, exp, '', now, '']);
-  // Opportunistic prune of long-expired rows — never from inside lookupSession,
-  // where a delete would race the row scan it is iterating.
-  try { pruneSessions(); } catch (e) { /* non-fatal */ }
-  return token;
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('sessions.json');
+    if (!store || !store.tokens) store = { tokens: {} };
+    var token = Utilities.getUuid();
+    var now   = Date.now();
+    store.tokens[token] = {
+      email:      usersKey(email),
+      createdAt:  now,
+      expiresAt:  now + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000,
+      revokedAt:  null,
+      lastSeenAt: now
+    };
+    // Opportunistic prune of long-expired tokens, in the same write. Never from
+    // inside lookupSession, where a write would race the read it is serving.
+    pruneSessionsIn(store);
+    writeJsonLocked('sessions.json', store);
+    return token;
+  });
 }
 
-// Serialise a read-snapshot-then-mutate-rows sequence.
+// Serialise a read-merge-write sequence against the Drive store.
 //
-// Every deleteRow() in this file is index-based and every index comes from a
-// getValues() snapshot taken earlier. Deleting bottom-up keeps OUR OWN deletes
-// from invalidating each other, but it does nothing about a CONCURRENT writer: if
-// another admin appends or deletes a row between our snapshot and our deletes,
-// every index below it shifts and we delete the wrong row — silently. In
-// purgeUsers that is unrecoverable.
+// Drive has no transactions, no atomic append and no compare-and-set. Every store
+// write is therefore a whole-file replace, and two concurrent writers that each
+// read before the other wrote will lose one of the two changes. The sheet version
+// did not have this problem for ordinary saves — two saves upserted two separate
+// ROWS and could not clobber each other — so this lock is a genuine new cost of
+// moving to files, and it is why it is not optional.
 //
-// Apps Script has no transactions and SpreadsheetApp has no row identity, so a
-// script lock is the only mutual exclusion available. It is applied to the
-// destructive admin paths, where a mis-indexed delete cannot be undone. The
-// ordinary write paths (saveSection, comments) are deliberately NOT locked — they
-// append and overwrite by scanned key rather than by remembered index, and
-// serialising every save would make the app slower for no safety gain.
+// The scope is precise: ONLY `read → merge → write` goes inside. A single global
+// script lock is the only mutual exclusion Apps Script offers, so the goal is to
+// keep the critical section short, not to avoid it. Uploads — base64 decode,
+// createFile, setSharing, MailApp.sendEmail — all happen OUTSIDE.
+//
+// Two rules that matter, both about nesting:
+//
+//   • ONE locked entry point per action. Nested withRowLock calls are avoided by
+//     construction, never by testing whether the lock is re-entrant — that is not
+//     documented. A helper called from inside a lock takes the `*In` / `*Locked`
+//     form that assumes the lock is already held.
+//   • Read with readJsonLocked inside the lock, never readJson. readJson is
+//     memoised per execution, so a value read before the lock was taken would
+//     clobber whatever landed in between.
+//
+// Pure reads are deliberately NOT locked. getPassbook, getAuditLog, listIRs,
+// sessionCheck and ping tolerate a slightly stale snapshot — which is already true
+// today — and the frontend polls comments every 90s per user, so locking reads
+// would put ~800 requests an hour in front of one lock.
 function withRowLock(fn) {
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(20000);
   } catch (e) {
-    // Could not get the lock: refuse rather than proceed unprotected. For a
-    // destructive action, "try again in a moment" is the correct answer.
-    return { status: 'error', message: 'The backend is busy with another admin change — try again in a moment.' };
+    // Could not get the lock: refuse rather than proceed unprotected.
+    return { status: 'error', message: LOCK_BUSY_MESSAGE };
   }
   try {
     return fn();
@@ -242,37 +685,47 @@ function withRowLock(fn) {
   }
 }
 
-// Revoke every session belonging to an email. Called on password change/reset and
-// when an account is disabled — the cheap alternative to checking Status on every
-// single authenticated request.
-function revokeAllSessions(email) {
-  email = (email || '').toLowerCase().trim();
-  if (!email) return 0;
-  var tab = getOrCreateSessionsTab(getSs());
-  var data = tab.getDataRange().getValues();
-  var now = new Date();
-  var n = 0;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][1]).toLowerCase().trim() !== email) continue;
-    if (!String(data[i][0])) continue;
-    tab.getRange(i + 1, 5).setValue('revoked');
-    tab.getRange(i + 1, 7).setValue(now);
-    n++;
-  }
-  return n;
+// The same lock, for a path whose return value is NOT a response envelope — a
+// session token, a count. Handing those an error OBJECT would read as success, so
+// a failure to acquire the lock throws instead and the caller's own error
+// handling answers.
+function withRowLockOrThrow(fn) {
+  var out = withRowLock(function () { return { ok: true, value: fn() }; });
+  if (!out || out.ok !== true) throw new Error((out && out.message) || LOCK_BUSY_MESSAGE);
+  return out.value;
 }
 
-// Delete SESSIONS rows that expired more than 7 days ago. Bottom-up so earlier
-// deletes don't shift the indices of later ones.
+// Says what happened in the user's terms: the save did not reach the server, so
+// the app's "⚠ Retry Save" draft is the right thing to show. The old wording
+// blamed "another admin change", which was alarming and simply wrong for an
+// ordinary save that happened to overlap another one.
+var LOCK_BUSY_MESSAGE = 'The server was busy and this change was NOT saved — please try again.';
+
+// Revoke every session belonging to an email. Called on password change/reset and
+// when an account is disabled — the cheap alternative to checking Status on every
+// single authenticated request. Locked; see revokeSessionsForIn for the form that
+// runs inside a lock the caller already holds.
+function revokeAllSessions(email) {
+  if (!usersKey(email)) return 0;
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('sessions.json');
+    if (!store || !store.tokens) return 0;
+    var n = revokeSessionsForIn(store, email);
+    if (n) writeJsonLocked('sessions.json', store);
+    return n;
+  });
+}
+
+// Delete session tokens that expired more than 7 days ago. Safe anytime; nothing
+// calls it automatically except a best-effort prune at sign-in.
 function pruneSessions() {
-  var tab = getOrCreateSessionsTab(getSs());
-  var data = tab.getDataRange().getValues();
-  var cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (!String(data[i][0])) { tab.deleteRow(i + 1); continue; }
-    var exp = data[i][3] ? new Date(data[i][3]) : null;
-    if (exp && exp < cutoff) tab.deleteRow(i + 1);
-  }
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('sessions.json');
+    if (!store || !store.tokens) return 0;
+    var n = pruneSessionsIn(store);
+    if (n) writeJsonLocked('sessions.json', store);
+    return n;
+  });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -292,17 +745,37 @@ function makeTempPassword() {
   return out;
 }
 
-// Create a USERS row with a temp password. Returns the plaintext ONCE — it is
+// Create an account with a temp password. Returns the plaintext ONCE — it is
 // never written anywhere and cannot be recovered afterwards.
+//
+// Adds ONE key to users.json. The alternative — writing a fresh object holding
+// just this account — would delete every other account in the company, which is
+// the single most dangerous mis-reading of a keyed store.
 function createUserRow(email, name, createdBy) {
-  var ss  = getSs();
-  var tab = getOrCreateUsersTab(ss);
-  var pw  = makeTempPassword();
+  var k    = usersKey(email);
+  if (!k) throw new Error('An account needs an email address.');
+  var pw   = makeTempPassword();
   var salt = Utilities.getUuid();
-  var now  = new Date();
-  tab.appendRow([email, hashPassword(pw, salt), salt, now, createdBy,
-                 'yes', '', 'active', name || '', '', now]);
-  return pw;
+  var now  = Date.now();
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('users.json') || {};
+    store[k] = {
+      hash:              hashPassword(pw, salt),
+      salt:              salt,
+      createdAt:         now,
+      createdBy:         createdBy || '',
+      mustChange:        'yes',
+      passwordChangedAt: null,
+      status:            'active',
+      name:              name || '',
+      lastLoginAt:       null,
+      // The stamp the temp-password TTL is measured from. Null on an account
+      // whose password was set properly, and then the TTL never applies.
+      tempPwIssuedAt:    now
+    };
+    writeJsonLocked('users.json', store);
+    return pw;
+  });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -319,12 +792,42 @@ var CODE_MAX_PER_HOUR_GLOBAL = 12;     // throttle: codes issued across ALL emai
 var CODE_MAX_ATTEMPTS   = 5;           // wrong guesses before the code is burned
 var MAIL_DAILY_CAP      = 400;         // ceiling on ALL app-sent mail per day (see mailQuotaOk)
 
-var CODE_HEADS = ['Email', 'Code', 'Purpose', 'Created At', 'Expires At', 'Attempts', 'Used'];
+// CODES — { entries: [ { email, code, purpose, createdAt, expiresAt, attempts,
+//                        used } ] }, newest last.
+//
+// A LIST rather than one record per email, because the throttle needs HISTORY,
+// not the current code: "how many codes has this address asked for in the last
+// hour" is a count over issued codes, and a one-per-email record would forget
+// every code it replaced. Entries older than a day are dropped on write, so the
+// file stays small — the longest window any reader asks about is one hour.
+function codesEntries() {
+  var c = readJson('codes.json');
+  return (c && c.entries instanceof Array) ? c.entries : [];
+}
 
-function getOrCreateCodesTab(ss) {
-  var tab = (ss || getSs()).getSheetByName('CODES');
-  if (!tab) tab = (ss || getSs()).insertSheet('CODES');
-  return ensureHeaders(tab, CODE_HEADS);
+// The newest live (unused) entry for an email + purpose, or null. Returns the
+// entry OBJECT inside the store, so the caller mutates it in place and writes the
+// store once — there is no index to remember and nothing to shift.
+function findCodeEntry(entries, email, purpose) {
+  var k = usersKey(email);
+  for (var i = entries.length - 1; i >= 0; i--) {
+    var e = entries[i];
+    if (usersKey(e.email) !== k) continue;
+    if (String(e.purpose) !== purpose) continue;
+    if (e.used) continue;
+    return e;
+  }
+  return null;
+}
+
+// Drop entries older than a day. A window longer than any reader asks about, so
+// pruning can never change an answer.
+function pruneCodesIn(entries) {
+  var cutoff = Date.now() - 24 * 60 * 60 * 1000;
+  return entries.filter(function (e) {
+    var t = asDate(e.createdAt);
+    return !!t && t.getTime() >= cutoff;
+  });
 }
 
 // 6-digit numeric code (100000–999999). GAS server runtime: Math.random is fine.
@@ -369,20 +872,6 @@ function sendAuthMail(to, subject, body) {
   } catch (e) { return false; }
 }
 
-// Return [rowValues, rowIndex] for the newest live code for an email+purpose.
-function findCodeRow(ss, email, purpose) {
-  email = (email || '').toLowerCase().trim();
-  var tab  = getOrCreateCodesTab(ss);
-  var data = tab.getDataRange().getValues();
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][0]).toLowerCase().trim() !== email) continue;
-    if (String(data[i][2]) !== purpose) continue;
-    if (String(data[i][6]).toLowerCase() === 'yes') continue;   // already used
-    return [data[i], i + 1];
-  }
-  return null;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // PASSWORD LIFECYCLE — forced first change, forgot, reset
 // ──────────────────────────────────────────────────────────────────────────────
@@ -398,15 +887,17 @@ function findCodeRow(ss, email, purpose) {
 // to it: it verified the hash, then minted a full 30-day session. The TTL was
 // decorative — it closed the login door while the change-password door stood open
 // beside it. If a third endpoint ever accepts this credential, call these too.
-function isTempPasswordAccount(row) {
-  return String(userCol(row, 'Must Change Password')).toLowerCase() === 'yes';
+function isTempPasswordAccount(u) {
+  return userField(u, 'mustChange').toLowerCase() === 'yes';
 }
 
 // Returns an error object when the temp password is past its life, else null.
-function tempPasswordExpired(row) {
-  var issued = userCol(row, 'Temp Password Issued At');
+function tempPasswordExpired(u) {
+  var issued = userField(u, 'tempPwIssuedAt');
   if (!issued) return null;                 // never stamped → never expires
-  var ageDays = (Date.now() - new Date(issued).getTime()) / 86400000;
+  var at = asDate(issued);
+  if (!at) return null;                     // unreadable stamp → never expires
+  var ageDays = (Date.now() - at.getTime()) / 86400000;
   if (ageDays > CONFIG.TEMP_PW_TTL_DAYS) {
     return { status: 'error', message: 'That temporary password has expired — ask an admin to issue a new one.' };
   }
@@ -419,49 +910,64 @@ function tempPasswordExpired(row) {
 // That makes this endpoint exactly as guessable as login, so it shares login's
 // lockout rather than inventing a second, weaker throttle.
 function changePassword(params) {
-  var email    = (params.email || '').toString().toLowerCase().trim();
+  var email    = usersKey(params.email);
   var current  = (params.currentPassword || '').toString();
   var next     = (params.newPassword || '').toString();
   if (!email || !current || !next) return { status: 'error', message: 'Enter your email, current password and a new password.' };
   if (next.length < 8) return { status: 'error', message: 'New password must be at least 8 characters.' };
   if (next === current) return { status: 'error', message: 'New password must be different from the current one.' };
 
-  var ss = getSs();
-  var locked = lockoutRemaining(ss, email);
+  var locked = lockoutRemaining(email);
   if (locked) return locked;
 
-  var row = findUserRow(ss, email);
+  var u = findUser(email);
   // Generic on purpose: "no account" and "wrong password" must be the same
   // response, or this endpoint enumerates who has an I-PASSBOOK account.
-  if (!row) { recordFailedLogin(ss, email); return { status: 'error', message: 'Email or password is incorrect.' }; }
-  if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') {
+  if (!u) { recordFailedLogin(email); return { status: 'error', message: 'Email or password is incorrect.' }; }
+  if (userField(u, 'status').toLowerCase() === 'disabled') {
     return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
   }
   // The temp-password clock applies HERE TOO — see the note above. Without this
   // line an expired temp password still buys a session through this door.
-  if (isTempPasswordAccount(row)) {
-    var stale = tempPasswordExpired(row);
+  if (isTempPasswordAccount(u)) {
+    var stale = tempPasswordExpired(u);
     if (stale) return stale;
   }
-  if (hashPassword(current, String(row[2])) !== String(row[1])) {
-    var until = recordFailedLogin(ss, email);
+  if (hashPassword(current, String(u.salt)) !== String(u.hash)) {
+    var until = recordFailedLogin(email);
     if (until) return { status: 'error', message: 'Wrong password. Account locked for ' + Math.round(LOGIN_LOCK_MS / 60000) + ' min after too many attempts.' };
     return { status: 'error', message: 'Email or password is incorrect.' };
   }
 
-  var idx  = findUserRowIndex(ss, email);
   var salt = Utilities.getUuid();
-  var tab  = getOrCreateUsersTab(ss);
-  var now  = new Date();
-  // One write for the whole identity block — columns B..H, i.e. hash, salt, the
-  // preserved Created At/By, and every flag that must flip together with them.
-  tab.getRange(idx, 2, 1, USER_ID_BLOCK_COLS).setValues([[
-    hashPassword(next, salt), salt, row[3] || now, row[4] || '', '', now, 'active'
-  ]]);
-  clearFailedLogin(ss, email);
-  // Any session the temp password ever minted dies here. (It shouldn't have been
-  // able to mint one, but a revoked-anything is cheaper than trusting that.)
-  revokeAllSessions(email);
+  var now  = Date.now();
+  // ONE locked read-merge-write covering the account and the sessions. Written
+  // as one key assignment per store, and the account's identity fields (created
+  // at, created by) are carried over rather than re-derived — this is the same
+  // account, not a new one.
+  withRowLockOrThrow(function () {
+    var users = readJsonLocked('users.json') || {};
+    var rec = users[email];
+    if (!rec) throw new Error('Your account could not be read — try again in a moment.');
+    rec.hash              = hashPassword(next, salt);
+    rec.salt              = salt;
+    rec.mustChange        = '';
+    rec.passwordChangedAt = now;
+    rec.status            = rec.status || 'active';
+    rec.tempPwIssuedAt    = null;
+    writeJsonLocked('users.json', users);
+
+    // Any session the temp password ever minted dies here. (It shouldn't have
+    // been able to mint one, but a revoked-anything is cheaper than trusting
+    // that.) Done in the SAME lock so the revoke cannot interleave with a
+    // concurrent sign-in's mint.
+    var sess = readJsonLocked('sessions.json');
+    if (sess && sess.tokens) {
+      if (revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
+    }
+  });
+
+  clearFailedLogin(email);
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, mustChangePassword: false, access: getMyAccess(email) };
 }
@@ -476,47 +982,55 @@ function forgotPassword(params) {
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return generic;
 
   try {
-    var ss  = getSs();
-    var row = findUserRow(ss, email);
-    if (!row) return generic;                       // no enumeration
-    if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') return generic;
+    var u = findUser(email);
+    if (!u) return generic;                         // no enumeration
+    if (userField(u, 'status').toLowerCase() === 'disabled') return generic;
 
-    var tab  = getOrCreateCodesTab(ss);
-    var data = tab.getDataRange().getValues();
-    var now  = new Date();
-    var hourAgo = now.getTime() - 60 * 60 * 1000;
-    var recent = 0, newestMs = 0, recentAnyEmail = 0;
-    for (var i = data.length - 1; i >= 1; i--) {
-      var createdMs = data[i][3] ? new Date(data[i][3]).getTime() : 0;
-      if (createdMs > hourAgo) recentAnyEmail++;
-      if (String(data[i][0]).toLowerCase().trim() !== email) continue;
-      if (createdMs > hourAgo) recent++;
-      if (createdMs > newestMs) newestMs = createdMs;
-    }
-    if (recent >= CODE_MAX_PER_HOUR) return generic;                 // throttled — same answer
-    if (newestMs && (now.getTime() - newestMs) < CODE_RESEND_GAP_MS) return generic;
-    // A SECOND, GLOBAL ceiling. The per-email throttle above is the one a person
-    // can hit by accident; this is the one that stops an unauthenticated caller
-    // walking the whole staff list and pulling 3 codes per address — ~20 addresses
-    // × 3 would spend the day's entire mail budget inside an hour, and because the
-    // response is generic nobody would notice the reset mail had stopped.
-    // (GAS web apps expose no reliable client IP, so this is global rather than
-    // per-source. Normal traffic is a handful of resets an hour.)
-    if (recentAnyEmail >= CODE_MAX_PER_HOUR_GLOBAL) return generic;
+    // Locked: the throttle is a read-then-write judgement, so two requests
+    // arriving together must not both see "under the limit" and both issue. The
+    // MAIL is sent outside the lock — it is slow and must not hold it.
+    var issued = withRowLockOrThrow(function () {
+      var raw = readJsonLocked('codes.json');
+      var entries = pruneCodesIn((raw && raw.entries instanceof Array) ? raw.entries : []);
+      var now = Date.now();
+      var hourAgo = now - 60 * 60 * 1000;
+      var recent = 0, newestMs = 0, recentAnyEmail = 0;
+      entries.forEach(function (e) {
+        var at = asDate(e.createdAt);
+        var createdMs = at ? at.getTime() : 0;
+        if (createdMs > hourAgo) recentAnyEmail++;
+        if (usersKey(e.email) !== email) return;
+        if (createdMs > hourAgo) recent++;
+        if (createdMs > newestMs) newestMs = createdMs;
+      });
+      if (recent >= CODE_MAX_PER_HOUR) return null;                 // throttled — same answer
+      if (newestMs && (now - newestMs) < CODE_RESEND_GAP_MS) return null;
+      // A SECOND, GLOBAL ceiling. The per-email throttle above is the one a person
+      // can hit by accident; this is the one that stops an unauthenticated caller
+      // walking the whole staff list and pulling 3 codes per address — ~20 addresses
+      // × 3 would spend the day's entire mail budget inside an hour, and because the
+      // response is generic nobody would notice the reset mail had stopped.
+      // (GAS web apps expose no reliable client IP, so this is global rather than
+      // per-source. Normal traffic is a handful of resets an hour.)
+      if (recentAnyEmail >= CODE_MAX_PER_HOUR_GLOBAL) return null;
 
-    var code = makeResetCode();
-    // Retire any earlier live code so only the newest one can be redeemed.
-    for (var j = 1; j < data.length; j++) {
-      if (String(data[j][0]).toLowerCase().trim() === email && String(data[j][2]) === 'reset'
-          && String(data[j][6]).toLowerCase() !== 'yes') {
-        tab.getRange(j + 1, 7).setValue('yes');
-      }
+      // Retire any earlier live code so only the newest one can be redeemed.
+      entries.forEach(function (e) {
+        if (usersKey(e.email) === email && String(e.purpose) === 'reset' && !e.used) e.used = true;
+      });
+      var code = makeResetCode();
+      entries.push({ email: email, code: code, purpose: 'reset', createdAt: now,
+                     expiresAt: now + CODE_TTL_MIN * 60 * 1000, attempts: 0, used: false });
+      writeJsonLocked('codes.json', { entries: entries });
+      return code;
+    });
+
+    if (issued) {
+      sendAuthMail(email, 'Your I-PASSBOOK password reset code',
+        'Your I-PASSBOOK password reset code is ' + issued + '.\n\n' +
+        'It expires in ' + CODE_TTL_MIN + ' minutes. If you did not ask to reset your password, ' +
+        'you can ignore this email — your current password still works.');
     }
-    tab.appendRow([email, code, 'reset', now, new Date(now.getTime() + CODE_TTL_MIN * 60 * 1000), 0, '']);
-    sendAuthMail(email, 'Your I-PASSBOOK password reset code',
-      'Your I-PASSBOOK password reset code is ' + code + '.\n\n' +
-      'It expires in ' + CODE_TTL_MIN + ' minutes. If you did not ask to reset your password, ' +
-      'you can ignore this email — your current password still works.');
   } catch (e) { /* never reveal a failure — same generic answer */ }
   return generic;
 }
@@ -531,50 +1045,73 @@ function resetPassword(params) {
   if (!email || !code || !next) return { status: 'error', message: 'Enter your email, the code and a new password.' };
   if (next.length < 8) return { status: 'error', message: 'New password must be at least 8 characters.' };
 
-  var ss = getSs();
-  var found = findCodeRow(ss, email, 'reset');
-  if (!found) return { status: 'error', message: 'No reset code is outstanding for this email — request a new one.' };
+  // ONE locked read-merge-write covering codes.json, users.json and sessions.json
+  // together, because a redeem is a single event: the code is consumed, the
+  // password changes, and every other device is signed out. Split across separate
+  // locks, a second redeem of the same code could slip between them.
+  var outcome = withRowLockOrThrow(function () {
+    var now = Date.now();
+    var raw = readJsonLocked('codes.json');
+    var entries = (raw && raw.entries instanceof Array) ? raw.entries : [];
+    var saveCodes = function () { writeJsonLocked('codes.json', { entries: entries }); };
 
-  var tab = getOrCreateCodesTab(ss);
-  var row = found[0], idx = found[1];
-  var expires = row[4] ? new Date(row[4]) : null;
-  if (expires && expires < new Date()) {
-    tab.getRange(idx, 7).setValue('yes');
-    return { status: 'error', message: 'That code expired — request a new one.' };
-  }
-  if (String(row[1]).trim() !== code) {
-    var tries = (Number(row[5]) || 0) + 1;
-    if (tries >= CODE_MAX_ATTEMPTS) {
-      tab.getRange(idx, 7).setValue('yes');   // burn it — a 6-digit code gets 5 guesses
-      return { status: 'error', message: 'Too many wrong codes — request a new one.' };
+    var found = findCodeEntry(entries, email, 'reset');
+    if (!found) return { status: 'error', message: 'No reset code is outstanding for this email — request a new one.' };
+
+    var expires = asDate(found.expiresAt);
+    if (expires && expires.getTime() < now) {
+      found.used = true;
+      saveCodes();
+      return { status: 'error', message: 'That code expired — request a new one.' };
     }
-    tab.getRange(idx, 6).setValue(tries);
-    return { status: 'error', message: 'Wrong code. ' + (CODE_MAX_ATTEMPTS - tries) + ' attempt(s) left.' };
-  }
+    if (String(found.code).trim() !== code) {
+      var tries = (Number(found.attempts) || 0) + 1;
+      if (tries >= CODE_MAX_ATTEMPTS) {
+        found.used = true;                     // burn it — a 6-digit code gets 5 guesses
+        found.attempts = tries;
+        saveCodes();
+        return { status: 'error', message: 'Too many wrong codes — request a new one.' };
+      }
+      found.attempts = tries;
+      saveCodes();
+      return { status: 'error', message: 'Wrong code. ' + (CODE_MAX_ATTEMPTS - tries) + ' attempt(s) left.' };
+    }
 
-  var uidx = findUserRowIndex(ss, email);
-  if (!uidx) return { status: 'error', message: 'No account found for this email.' };
-  var urow = findUserRow(ss, email);
-  // A disabled account stays disabled. Without this, "Disable" was reversible by
-  // the person it was aimed at: forgotPassword refuses to ISSUE a code to a
-  // disabled account, but a code issued shortly BEFORE the disable is still live
-  // for its full window — redeeming it used to flip Status back to 'active' and
-  // hand them a working password. Offboarding a person mid-reset is exactly the
-  // case that hits this, so the guard is on the redeem, not just the issue.
-  if (String(userCol(urow, 'Status')).toLowerCase() === 'disabled') {
-    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
-  }
-  var salt = Utilities.getUuid();
-  var now  = new Date();
-  // Status is PRESERVED, never written as a literal 'active' — this endpoint has
-  // no business changing whether an account is enabled.
-  getOrCreateUsersTab(ss).getRange(uidx, 2, 1, USER_ID_BLOCK_COLS)
-    .setValues([[hashPassword(next, salt), salt, urow[3] || now, urow[4] || '',
-                 '', now, userCol(urow, 'Status') || 'active']]);
-  tab.getRange(idx, 7).setValue('yes');      // consume the code
-  clearFailedLogin(ss, email);
-  revokeAllSessions(email);                  // a reset signs every other device out
-  return { status: 'ok', message: 'Password set. Sign in with your new password.' };
+    var users = readJsonLocked('users.json') || {};
+    var rec = users[email];
+    if (!rec) return { status: 'error', message: 'No account found for this email.' };
+    // A disabled account stays disabled. Without this, "Disable" was reversible
+    // by the person it was aimed at: forgotPassword refuses to ISSUE a code to a
+    // disabled account, but a code issued shortly BEFORE the disable is still
+    // live for its full window — redeeming it used to flip Status back to
+    // 'active' and hand them a working password. Offboarding a person mid-reset
+    // is exactly the case that hits this, so the guard is on the redeem, not
+    // just the issue.
+    if (userField(rec, 'status').toLowerCase() === 'disabled') {
+      return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+    }
+
+    var salt = Utilities.getUuid();
+    rec.hash              = hashPassword(next, salt);
+    rec.salt              = salt;
+    rec.mustChange        = '';
+    rec.passwordChangedAt = now;
+    rec.tempPwIssuedAt    = null;
+    // Status is PRESERVED, never written as a literal 'active' — the guard above
+    // has already refused the only case where that would matter, and this
+    // endpoint has no business changing whether an account is enabled.
+    writeJsonLocked('users.json', users);
+
+    found.used = true;                         // consume the code
+    saveCodes();
+
+    var sess = readJsonLocked('sessions.json');
+    if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
+    return { status: 'ok', message: 'Password set. Sign in with your new password.' };
+  });
+
+  clearFailedLogin(email);
+  return outcome;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -582,66 +1119,69 @@ function resetPassword(params) {
 // ──────────────────────────────────────────────────────────────────────────────
 // After MAX wrong passwords within a rolling window, the account is locked for
 // LOCK_MIN. Tracked per email in LOGIN_ATTEMPTS. Successful login clears it.
+// After MAX wrong passwords within a rolling window, the account is locked for
+// LOCK_MIN. Tracked per email in attempts.json.
+// { "someone@indrones.com": { count, windowStart, lockedUntil } }
 var LOGIN_MAX_FAILS = 5;
 var LOGIN_WINDOW_MS = 10 * 60 * 1000;   // 10-min rolling window
 var LOGIN_LOCK_MS   = 15 * 60 * 1000;   // 15-min lockout
 
-function getOrCreateAttemptsTab(ss) {
-  var tab = ss.getSheetByName('LOGIN_ATTEMPTS');
-  if (!tab) {
-    tab = ss.insertSheet('LOGIN_ATTEMPTS');
-    tab.getRange(1, 1, 1, 4).setValues([['Email', 'Fail Count', 'Window Start', 'Locked Until']]);
-    tab.getRange(1, 1, 1, 4).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
+function attemptsStore() {
+  var a = readJson('attempts.json');
+  return (a && typeof a === 'object') ? a : {};
 }
 
-// Return [rowValues, rowIndex] for an email's attempt record, or null.
-function findAttemptRow(ss, email) {
-  var tab = getOrCreateAttemptsTab(ss);
-  var data = tab.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase().trim() === email) return [data[i], i + 1];
-  }
-  return null;
+// Record a failed attempt. Returns the lockout-until epoch ms, or null.
+//
+// Locked: it is a read-merge-write of one key, and two wrong guesses arriving
+// together must count as two rather than one, or the lockout is trivially
+// defeated by sending the guesses in parallel.
+function recordFailedLogin(email) {
+  var k = usersKey(email);
+  if (!k) return null;
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('attempts.json') || {};
+    var now = Date.now();
+    var rec = store[k];
+    var count = 1, windowStart = now, lockedUntil = null;
+    if (rec) {
+      var ws = asDate(rec.windowStart);
+      if (!ws || (now - ws.getTime()) > LOGIN_WINDOW_MS) { count = 1; windowStart = now; }
+      else { count = (Number(rec.count) || 0) + 1; windowStart = ws.getTime(); }
+    }
+    if (count >= LOGIN_MAX_FAILS) lockedUntil = now + LOGIN_LOCK_MS;
+    store[k] = { count: count, windowStart: windowStart, lockedUntil: lockedUntil };
+    writeJsonLocked('attempts.json', store);
+    return lockedUntil;
+  });
 }
 
-// Record a failed attempt. Returns the lockout-until Date (null = not locked).
-function recordFailedLogin(ss, email) {
-  var tab = getOrCreateAttemptsTab(ss);
-  var now = new Date();
-  var existing = findAttemptRow(ss, email);
-  var count = 1, windowStart = now, lockedUntil = null;
-  if (existing) {
-    var row = existing[0];
-    var ws = row[2] ? new Date(row[2]) : now;
-    if ((now.getTime() - ws.getTime()) > LOGIN_WINDOW_MS) { count = 1; windowStart = now; }
-    else { count = (Number(row[1]) || 0) + 1; windowStart = ws; }
-    if (count >= LOGIN_MAX_FAILS) lockedUntil = new Date(now.getTime() + LOGIN_LOCK_MS);
-    tab.getRange(existing[1], 2, 1, 3).setValues([[count, windowStart, lockedUntil]]);
-  } else {
-    if (count >= LOGIN_MAX_FAILS) lockedUntil = new Date(now.getTime() + LOGIN_LOCK_MS);
-    tab.appendRow([email, count, windowStart, lockedUntil]);
-  }
-  return lockedUntil;
-}
-
-// Clear the attempt record on a successful login (best-effort).
-function clearFailedLogin(ss, email) {
-  var existing = findAttemptRow(ss, email);
-  if (existing) getOrCreateAttemptsTab(ss).deleteRow(existing[1]);
+// Clear the attempt record on a successful login (best-effort — a failure here
+// must never fail the sign-in that just succeeded).
+function clearFailedLogin(email) {
+  var k = usersKey(email);
+  if (!k) return;
+  try {
+    withRowLockOrThrow(function () {
+      var store = readJsonLocked('attempts.json');
+      if (!store || !store[k]) return;
+      delete store[k];
+      writeJsonLocked('attempts.json', store);
+    });
+  } catch (e) { /* best-effort */ }
 }
 
 // Shared lockout gate. Returns a ready-to-return error object while the account
 // is locked, else null. Used by BOTH login and changePassword — the forced
 // first-login change takes a password too, so it must be throttled identically.
-function lockoutRemaining(ss, email) {
-  var att = findAttemptRow(ss, email);
-  if (!att) return null;
-  var locked = att[0][3] ? new Date(att[0][3]) : null;
-  if (!locked || locked <= new Date()) return null;
-  var mins = Math.max(1, Math.ceil((locked.getTime() - Date.now()) / 60000));
+function lockoutRemaining(email) {
+  var rec = attemptsStore()[usersKey(email)];
+  if (!rec) return null;
+  var locked = asDate(rec.lockedUntil);
+  if (!locked) return null;
+  var now = Date.now();
+  if (locked.getTime() <= now) return null;
+  var mins = Math.max(1, Math.ceil((locked.getTime() - now) / 60000));
   return { status: 'error', message: 'Too many wrong attempts. Try again in ' + mins + ' min.' };
 }
 
@@ -651,20 +1191,18 @@ function lockoutRemaining(ss, email) {
 // only the flag. That is what makes the forced first change unskippable: there is
 // no credential to skip to, so deleting the screen in devtools buys nothing.
 function doLoginPassword(params) {
-  var email    = (params.email || '').toString().toLowerCase().trim();
+  var email    = usersKey(params.email);
   var password = (params.password || '').toString();
   if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
 
-  var ss  = getSs();
-
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
-  var locked = lockoutRemaining(ss, email);
+  var locked = lockoutRemaining(email);
   if (locked) return locked;
 
-  var row = findUserRow(ss, email);
-  if (!row) {
-    recordFailedLogin(ss, email);
+  var u = findUser(email);
+  if (!u) {
+    recordFailedLogin(email);
     // Deliberately specific, and the one place this app enumerates. There is no
     // self-signup, so a new hire who mistypes their address has NO other way to
     // learn why they cannot get in — "wrong password" would send them to retry a
@@ -676,10 +1214,10 @@ function doLoginPassword(params) {
     return { status: 'error', message: 'No account found for this email — ask an admin to create one.' };
   }
 
-  var salt     = String(row[2]);
-  var expected = String(row[1]);
+  var salt     = String(u.salt);
+  var expected = String(u.hash);
   if (hashPassword(password, salt) !== expected) {
-    var until = recordFailedLogin(ss, email);
+    var until = recordFailedLogin(email);
     if (until) {
       var mins2 = Math.max(1, Math.round(LOGIN_LOCK_MS / 60000));
       return { status: 'error', message: 'Wrong password. Account locked for ' + mins2 + ' min after too many attempts.' };
@@ -687,24 +1225,32 @@ function doLoginPassword(params) {
     return { status: 'error', message: 'Wrong password.' };
   }
 
-  if (String(userCol(row, 'Status')).toLowerCase() === 'disabled') {
-    recordFailedLogin(ss, email);
+  if (userField(u, 'status').toLowerCase() === 'disabled') {
+    recordFailedLogin(email);
     return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
   }
 
   // First sign-in on an admin-issued temporary password: stop here and force the
   // change. A temp password also EXPIRES, so one read off a chat message stops
   // being a credential after TEMP_PW_TTL_DAYS whether or not it was ever used.
-  if (isTempPasswordAccount(row)) {
-    var stale = tempPasswordExpired(row);
+  if (isTempPasswordAccount(u)) {
+    var stale = tempPasswordExpired(u);
     if (stale) return stale;
-    clearFailedLogin(ss, email);
-    return { status: 'ok', mustChangePassword: true, email: email, name: userCol(row, 'Name') };
+    clearFailedLogin(email);
+    return { status: 'ok', mustChangePassword: true, email: email, name: userField(u, 'Name') };
   }
 
-  clearFailedLogin(ss, email);
-  var idx = findUserRowIndex(ss, email);
-  if (idx) { try { getOrCreateUsersTab(ss).getRange(idx, 10).setValue(new Date()); } catch (e) { /* non-fatal */ } }
+  clearFailedLogin(email);
+  // Last-login stamp. Best-effort: a failure to record it must never fail a
+  // sign-in that has already been verified.
+  try {
+    withRowLockOrThrow(function () {
+      var users = readJsonLocked('users.json');
+      if (!users || !users[email]) return;
+      users[email].lastLoginAt = Date.now();
+      writeJsonLocked('users.json', users);
+    });
+  } catch (e) { /* non-fatal */ }
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
@@ -727,8 +1273,22 @@ function ping() {
 
 // Cheap liveness probe used by the frontend before it ejects anyone. Answers
 // ok/alive either way — a false answer must be distinguishable from a failure.
+//
+// FAILS OPEN on a store error, and that is the whole point of the try/catch.
+// app.js's confirmSessionAlive() resolves `!!(status === 'ok' && alive)`, so an
+// ERROR answer here is read as "your session is dead" and the user is signed out.
+// One unreadable sessions.json would therefore eject all twenty users inside the
+// same 90-second poll window. "I could not read the store" is not "your token is
+// dead", so it answers alive. A genuinely missing, expired or revoked token still
+// answers alive:false, which is the answer that SHOULD eject.
 function sessionCheck(e) {
-  var email = requireAuth(e);
+  var email;
+  try {
+    email = requireAuth(e);
+  } catch (err) {
+    return { status: 'ok', alive: true, email: '',
+             message: 'Session store unreadable — not signing anyone out. ' + ((err && err.message) || '') };
+  }
   return { status: 'ok', alive: !!email, email: email || '' };
 }
 
@@ -823,164 +1383,150 @@ function doPost(e) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // SESSIONS — server-issued session tokens, so a signed-in device stays signed in
-// without repeated sign-in prompts. Stored on the data sheet's SESSIONS tab.
+// without repeated sign-in prompts. Kept in `_store/sessions.json`.
 // ──────────────────────────────────────────────────────────────────────────────
 // The six LIVE sections, letters B–G. Section A became the Overview panel and is
 // deliberately NOT in this list — nothing grants "edit on Section A" any more,
 // because the panel is governed by the Triage flag instead.
 //
-// `sec-h` and `sec-i` no longer exist: their APP_DATA rows were merged into
-// `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch Record) by
-// mergeSectionsApply(). Their ids survive below in SEC_TARGET_MAP purely so that
-// migration — and the rejection of stale clients — can still name them.
+// `sec-h` and `sec-i` are retired; see SEC_TARGET_MAP below.
 var SECTION_KEYS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
 
-// The Overview panel's record id. It keeps the original `sec-a` so the existing
-// APP_DATA row, the existing drafts and the existing AUDIT_LOG history all keep
-// working untouched. It is NOT a section: it has no tab, no letter and no
-// completion state, and it is never in SECTION_KEYS.
+// The Overview panel's record id. It keeps the original `sec-a` so the drafts and
+// the audit history already keyed on it keep working untouched. It is NOT a
+// section: it has no letter and no completion state, and it is never in
+// SECTION_KEYS.
 var OVERVIEW_KEY = 'sec-a';
 
-// Retired section ids → the section that absorbed them.
+// Retired section ids — ids that no longer exist as a section at all.
 //
-// The direction matters and is not symmetric: old `sec-g` (Flight Test) is a
-// SOURCE for new `sec-f`, while new `sec-g` is a TARGET for old `sec-h`/`sec-i`.
-// Anything that migrates rows must therefore compute every target from ONE
-// original snapshot — a rewrite-then-rescan pass would merge flight-test rows
-// into PDI. See planSectionMerge().
-var SEC_TARGET_MAP = { 'sec-g': 'sec-f', 'sec-h': 'sec-g', 'sec-i': 'sec-g' };
-// Derived, never a second literal — a hand-kept list would drift from the map.
-var RETIRED_SECTION_IDS = Object.keys(SEC_TARGET_MAP);
-var SESSION_HEADS = ['Session Token', 'Email', 'Created At', 'Expires At', 'Revoked',
-                     'Last Seen At', 'Revoked At'];
-
-function getOrCreateSessionsTab(ss) {
-  var tab = (ss || getSs()).getSheetByName('SESSIONS');
-  if (!tab) tab = (ss || getSs()).insertSheet('SESSIONS');
-  return ensureHeaders(tab, SESSION_HEADS);
-}
-
-// Verify a session token and return its email, or null if missing/expired/revoked.
+// `sec-h` (PDI) and `sec-i` (Logistics Dispatch) were merged away: their data now
+// lives in `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch Record).
+// These ids survive ONLY so `saveSection` can name them when rejecting a client on a
+// stale service worker that still holds the old shell and keeps posting them.
+//
+// ⚠ `sec-g` IS NOT IN THIS LIST, and it must never be added. The old `sec-g` (Flight
+// Test) was merged into `sec-f`, but the id itself was REUSED for the new PDI
+// Report/Dispatch Record section — so `sec-g` is simultaneously "an id whose old data
+// went to sec-f" and "a live section id". This list is about ids that can no longer
+// be written, and `sec-g` can. It used to be derived from a `SEC_TARGET_MAP` that
+// carried the old→new merge mapping, which listed `sec-g: sec-f` for the merge's sake
+// and thereby made the LIVE Section G unsavable — every PDI save was refused with
+// "was merged into another section", on a section the frontend still shows and still
+// offers a Save button for. The map had no other consumer once the sheet merge was
+// deleted, so it is gone and this is a literal instead of a derivation.
+var RETIRED_SECTION_IDS = ['sec-h', 'sec-i'];
+// Verify a session token and return its email, or null when the session is
+// missing, expired or revoked.
 //
 // The expiry SLIDES on every use, so an active user is never signed out — the
 // behaviour the owner asked for, and what a Google Workspace web session does.
 // The rewrite is throttled to CONFIG.SESSION_SLIDE_HOURS because the frontend
-// polls comments every 90s; unthrottled it would be ~40 sheet writes per hour per
+// polls comments every 90s; unthrottled it would be ~40 store writes per hour per
 // user for no benefit, since the window is 30 days.
+//
+// THROWS when the store cannot be read. That distinction is load-bearing: `null`
+// means "this token is not valid", which the caller answers as `unauthorized` and
+// the frontend TRUSTS by signing the user out. A store that cannot be read is not
+// a statement about the token, so it must never be reported as one.
 function lookupSession(token) {
   if (!token) return null;
-  try {
-    var tab  = getOrCreateSessionsTab(getSs());
-    var data = tab.getDataRange().getValues();
-    var now  = new Date();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]) !== token) continue;
-      if (String(data[i][4]).toLowerCase() === 'revoked') return null;
-      var exp = data[i][3] ? new Date(data[i][3]) : null;
-      if (exp && exp < now) return null;
-      try {
-        var lastSeen = data[i][5] ? new Date(data[i][5]) : null;
-        var stale = !lastSeen ||
-          (now.getTime() - lastSeen.getTime()) > CONFIG.SESSION_SLIDE_HOURS * 60 * 60 * 1000;
-        if (stale) {
-          tab.getRange(i + 1, 4).setValue(new Date(now.getTime() + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000));
-          tab.getRange(i + 1, 6).setValue(now);
-        }
-      } catch (e2) { /* the slide is best-effort — never fail a lookup for it */ }
-      return String(data[i][1]).toLowerCase().trim();
-    }
-    return null;
-  } catch (e) { return null; }
+  token = String(token).trim();
+  if (!token) return null;
+
+  var tokens = sessionsTokens();               // throws on a missing/malformed store
+  var s = tokens[token];
+  if (!s) return null;
+
+  var now = Date.now();
+  var exp = asDate(s.expiresAt);
+  if (s.revokedAt || !exp) return null;
+  if (exp.getTime() <= now) return null;
+
+  var seen = asDate(s.lastSeenAt);
+  if (!seen || (now - seen.getTime()) > CONFIG.SESSION_SLIDE_HOURS * 60 * 60 * 1000) {
+    // Best-effort: the slide must never fail a lookup. The lock is taken and the
+    // read happens INSIDE it, because a slide is a read-merge-write on a file two
+    // concurrent requests can both be editing — and the write that lost would be
+    // the OTHER request's newly minted token.
+    try {
+      withRowLock(function () {
+        var fresh = readJsonLocked('sessions.json');
+        if (!fresh || !fresh.tokens || !fresh.tokens[token]) return;
+        fresh.tokens[token].expiresAt  = now + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000;
+        fresh.tokens[token].lastSeenAt = now;
+        writeJsonLocked('sessions.json', fresh);
+      });
+    } catch (e) { /* the slide is best-effort — never fail a lookup for it */ }
+  }
+  return usersKey(s.email);
 }
 
+// Log out: revoke exactly the token that was handed over. Self-authenticating,
+// because revoking a token you already hold proves nothing else is needed.
 function doLogout(sessionToken) {
   if (!sessionToken) return { status: 'ok' };
+  var token = String(sessionToken).trim();
   try {
-    var tab  = getOrCreateSessionsTab(getSs());
-    var data = tab.getDataRange().getValues();
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][0]) === sessionToken) {
-        tab.getRange(i + 1, 5).setValue('revoked');
-        tab.getRange(i + 1, 7).setValue(new Date());
-        break;
-      }
-    }
-  } catch (e) { /* non-fatal */ }
+    withRowLockOrThrow(function () {
+      var store = readJsonLocked('sessions.json');
+      if (!store || !store.tokens || !store.tokens[token]) return;
+      store.tokens[token].revokedAt = Date.now();
+      writeJsonLocked('sessions.json', store);
+    });
+  } catch (e) { /* non-fatal — the client clears its own copy either way */ }
   return { status: 'ok' };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ACCESS CONTROL — two levels, and only two.
 //
-//   VIEW + COMMENT  — every signed-in user, on every section. No row anywhere.
+//   VIEW + COMMENT  — every signed-in user, on every section. Nothing to store.
 //   EDIT            — granted by DEPARTMENT membership only.
 //
 // Departments are MANY-TO-MANY in both directions: a person may hold several
-// departments, a department holds many people (USER_DEPARTMENTS is the edge list),
-// and each department grants edit on a subset of the six sections (DEPARTMENTS).
-// So a person's edit rights are the UNION of their departments' grants.
+// departments, a department holds many people, and each department grants edit on
+// a subset of the six sections. So a person's edit rights are the UNION of their
+// departments' grants. All of it lives in ONE file, `_store/access.json`:
 //
-// TRIAGE is a SECOND, INDEPENDENT AXIS on the same row. A department may hold it
-// without granting edit on any section — which is exactly what CR and Management
-// do. It governs the ticket header (status, assignee, priority, type) and the
-// Overview panel's two fields. It is appended at the END of DEPT_HEADS precisely
-// so that the section offset stays `3 + j`: inserting it in the middle would
-// re-letter every grant column and silently reinterpret existing rows.
+//   {
+//     "departments": { "qc": { name, active, grants: {"sec-c": true}, triage,
+//                              updatedAt, updatedBy } },
+//     "memberships": { "angad.kumbhar@indrones.com": ["qc", "flight-test"] }
+//   }
 //
-// These two tabs hold AUTHORITY, so they must stay real Sheets tabs and never move
-// into a `__`-prefixed sentinel store: sentinel irNumbers skip every ACL check in
-// saveSection (see the isSentinel branches there), so a sentinel would let any
-// signed-in user rewrite the grant matrix and hand themselves edit everywhere.
+// Memberships are a LIST PER PERSON rather than an edge table, so reading one
+// person's departments is one key read. That is the whole shape of the win: the
+// sheet version needed a full scan of USER_DEPARTMENTS for every single access
+// check, and getEffectiveAccess runs on every authenticated request.
+//
+// TRIAGE is a SECOND, INDEPENDENT AXIS beside the section grants. A department
+// may hold it without granting edit on any section — which is exactly what CR and
+// Management do. It governs the ticket header (status, assignee, priority, type)
+// and the Overview panel's two fields. It is kept OUT of `grants` so no code that
+// walks the section grants can mistake Triage for a section.
+//
+// This file holds AUTHORITY, so it must never be reachable through saveSection's
+// sentinel path: a sentinel irNumber skips every ACL check in saveSection, so a
+// sentinel that resolved here would let any signed-in user rewrite the grant
+// matrix and hand themselves edit everywhere. It is not in SENTINEL_SECTIONS and
+// must not be added there.
 // ──────────────────────────────────────────────────────────────────────────────
 function isAdminEmail(email) {
-  email = (email || '').toLowerCase().trim();
-  return CONFIG.ADMIN_EMAILS.map(function (a) { return a.toLowerCase(); }).indexOf(email) > -1;
+  email = usersKey(email);
+  return CONFIG.ADMIN_EMAILS.map(function (a) { return usersKey(a); }).indexOf(email) > -1;
 }
 
-// Column index (0-based, as getValues() returns) of the Triage cell. Written as
-// arithmetic rather than the literal 11 so the next widening of DEPT_HEADS cannot
-// leave a reader quietly pointing one column to the left.
-function deptTriageIndex() { return 3 + SECTION_KEYS.length + 2; }
-
-var DEPT_HEADS = ['Key', 'Name', 'Active'].concat(SECTION_KEYS).concat(['Updated At', 'Updated By', 'Triage']);
-var USERDEPT_HEADS = ['Email', 'Department Key', 'Added At', 'Added By'];
-
-function getOrCreateDeptTab(ss) {
-  var tab = (ss || getSs()).getSheetByName('DEPARTMENTS');
-  if (!tab) tab = (ss || getSs()).insertSheet('DEPARTMENTS');
-  return ensureHeaders(tab, DEPT_HEADS);
-}
-function getOrCreateUserDeptTab(ss) {
-  var tab = (ss || getSs()).getSheetByName('USER_DEPARTMENTS');
-  if (!tab) tab = (ss || getSs()).insertSheet('USER_DEPARTMENTS');
-  return ensureHeaders(tab, USERDEPT_HEADS);
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// DEPARTMENTS tab SHAPE — 'absent' | 'current' | 'legacy-9' | 'unknown'
-// ──────────────────────────────────────────────────────────────────────────────
-// This exists because shrinking SECTION_KEYS from nine to six RE-LETTERS EVERY
-// GRANT COLUMN. An existing 14-column tab read positionally would be granted
-// letter-by-letter: old column 4 (which meant `sec-a`) would be read as `sec-b`,
-// and old column 10 (old `sec-g`) would land on `Updated At`. Silently. So before
-// any widening or seeding, ask what shape the tab actually is.
-//
-//   'absent'   no tab yet — a fresh install
-//   'current'  header already matches DEPT_HEADS
-//   'legacy-9' the pre-merge header: nine section columns, no Triage
-//   'unknown'  anything else — someone hand-edited it, and no derivation from an
-//              unrecognised header is trustworthy, so callers must refuse
-var LEGACY_DEPT_SECTIONS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
-
-function deptTabShape(tab) {
-  if (!tab) return 'absent';
-  var last = tab.getLastColumn();
-  if (!last) return 'absent';
-  var head = tab.getRange(1, 1, 1, last).getValues()[0].map(function (h) { return String(h || '').trim(); });
-  if (head.join('|') === DEPT_HEADS.join('|')) return 'current';
-  var legacy = ['Key', 'Name', 'Active'].concat(LEGACY_DEPT_SECTIONS).concat(['Updated At', 'Updated By']);
-  if (head.join('|') === legacy.join('|')) return 'legacy-9';
-  return 'unknown';
+// The access store, normalised. Read-only helper: it answers {} for a store that
+// is absent, because "no departments configured yet" is a real state on a fresh
+// install. A malformed file still THROWS through readJson — an unreadable grant
+// matrix must never read as "everyone is a plain user" silently.
+function accessStore() {
+  var a = readJson('access.json');
+  if (!a || typeof a !== 'object') return { departments: {}, memberships: {} };
+  if (!a.departments || typeof a.departments !== 'object') a.departments = {};
+  if (!a.memberships || typeof a.memberships !== 'object') a.memberships = {};
+  return a;
 }
 
 // "Flight Test" -> "flight-test". Stable keys mean renaming a department in the UI
@@ -992,22 +1538,22 @@ function deptKeyFromName(name) {
 
 // Every department key a person holds (whether or not the department is active).
 function getUserDepartments(email) {
-  email = (email || '').toLowerCase().trim();
-  var data = getOrCreateUserDeptTab(getSs()).getDataRange().getValues();
-  var keys = [];
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).toLowerCase().trim() !== email) continue;
-    var k = String(data[i][1]).trim();
-    if (k && keys.indexOf(k) < 0) keys.push(k);
-  }
-  return keys;
+  var k = usersKey(email);
+  var m = accessStore().memberships[k];
+  if (!(m instanceof Array)) return [];
+  var out = [];
+  m.forEach(function (x) {
+    var key = String(x || '').trim();
+    if (key && out.indexOf(key) < 0) out.push(key);
+  });
+  return out;
 }
 
-// What a person's departments grant them, on BOTH axes, from ONE read of the tab.
+// What a person's departments grant them, on BOTH axes.
 //
-// Returned together rather than from two functions because they are two columns of
-// the same rows and the same memberships: reading DEPARTMENTS twice to ask two
-// questions about one row invites the two answers to disagree.
+// Returned together rather than from two functions because they come from the same
+// departments and the same memberships: asking two questions about one record
+// invites the two answers to disagree.
 //
 //   grants  { 'sec-c': true, … }  — the union of section edits
 //   triage  true                  — this person may edit the ticket header and
@@ -1018,18 +1564,16 @@ function getUserDepartments(email) {
 function departmentCapabilities(email) {
   var out = { grants: {}, triage: false };
   var keys = getUserDepartments(email);
-  if (!keys.length) return out;          // short-circuit: no departments, no 2nd scan
-  var data = getOrCreateDeptTab(getSs()).getDataRange().getValues();
-  var triageCol = deptTriageIndex();
-  for (var i = 1; i < data.length; i++) {
-    var k = String(data[i][0]).trim();
-    if (keys.indexOf(k) < 0) continue;
-    if (String(data[i][2] || '').trim().toLowerCase() === 'no') continue;
-    for (var j = 0; j < SECTION_KEYS.length; j++) {
-      if (String(data[i][3 + j] || '').trim().toLowerCase() === 'edit') out.grants[SECTION_KEYS[j]] = true;
-    }
-    if (String(data[i][triageCol] || '').trim().toLowerCase() === 'edit') out.triage = true;
-  }
+  if (!keys.length) return out;          // short-circuit: no departments, no 2nd read
+  var depts = accessStore().departments;
+  keys.forEach(function (k) {
+    var d = depts[k];
+    if (!d) return;                      // a membership naming a department that is gone
+    if (String(d.active === undefined ? 'yes' : d.active).trim().toLowerCase() === 'no') return;
+    var g = d.grants || {};
+    SECTION_KEYS.forEach(function (s) { if (g[s]) out.grants[s] = true; });
+    if (d.triage) out.triage = true;
+  });
   return out;
 }
 
@@ -1078,12 +1622,11 @@ function canEdit(perms, sec)    { return !!(perms && perms[sec] === 'edit'); }
 // GET getMyAccess — the caller's own role/permissions. Drives the frontend's
 // per-section save-button gating. Valid for every signed-in user.
 function getMyAccess(email) {
-  email = (email || '').toLowerCase().trim();
+  email = usersKey(email);
   var access = getEffectiveAccess(email);
   var mustChange = false;
   try {
-    var row = findUserRow(getSs(), email);
-    if (row) mustChange = String(userCol(row, 'Must Change Password')).toLowerCase() === 'yes';
+    mustChange = isTempPasswordAccount(findUser(email));
   } catch (e) { /* ignore */ }
   return {
     status: 'ok',
@@ -1109,67 +1652,65 @@ function validEmail(email) {
 // GET/POST listUsers (admin) — everything the three admin tabs need, in one call.
 function listUsers(authEmail) {
   requireAdmin(authEmail);
-  var ss = getSs();
-  var udata = getOrCreateUsersTab(ss).getDataRange().getValues();
+  var usersStore = allUsers();
   var users = [];
-  for (var i = 1; i < udata.length; i++) {
-    var email = String(udata[i][0] || '').toLowerCase().trim();
-    if (!email) continue;
+  Object.keys(usersStore).forEach(function (email) {
+    var u = usersStore[email] || {};
     var access = getEffectiveAccess(email);
+    var created = asDate(u.createdAt);
+    var saw     = asDate(u.lastLoginAt);
     users.push({
       email: email,
-      name: userCol(udata[i], 'Name'),
-      status: userCol(udata[i], 'Status') || 'active',
-      mustChangePassword: userCol(udata[i], 'Must Change Password').toLowerCase() === 'yes',
-      createdAt: udata[i][3] ? Utilities.formatDate(new Date(udata[i][3]), 'Asia/Kolkata', 'dd-MMM-yyyy') : '',
-      lastLoginAt: userCol(udata[i], 'Last Login At') ? Utilities.formatDate(new Date(userCol(udata[i], 'Last Login At')), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : '',
+      name: userField(u, 'name'),
+      status: userField(u, 'status') || 'active',
+      mustChangePassword: isTempPasswordAccount(u),
+      createdAt: created ? Utilities.formatDate(created, 'Asia/Kolkata', 'dd-MMM-yyyy') : '',
+      lastLoginAt: saw ? Utilities.formatDate(saw, 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : '',
       isAdmin: isAdminEmail(email),
       departments: access.departments,
       permissions: access.permissions
     });
-  }
+  });
   users.sort(function (a, b) { return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0); });
 
-  var ddata = getOrCreateDeptTab(ss).getDataRange().getValues();
-  var triageCol = deptTriageIndex();
-  var departments = [];
-  for (var r = 1; r < ddata.length; r++) {
-    var key = String(ddata[r][0] || '').trim();
-    if (!key) continue;
-    var grants = {};
-    for (var j = 0; j < SECTION_KEYS.length; j++) {
-      grants[SECTION_KEYS[j]] = String(ddata[r][3 + j] || '').trim().toLowerCase() === 'edit';
-    }
-    departments.push({
-      key: key,
-      name: String(ddata[r][1] || '').trim(),
-      active: String(ddata[r][2] || '').trim().toLowerCase() !== 'no',
-      grants: grants,
-      // The second axis on the same row. Kept OUT of `grants` so no code that
-      // walks the section grants can mistake Triage for a section.
-      triage: String(ddata[r][triageCol] || '').trim().toLowerCase() === 'edit',
-      members: 0
-    });
-  }
+  var store  = accessStore();
   // Member counts, so the Departments tab can show who a change would affect.
-  var edge = getOrCreateUserDeptTab(ss).getDataRange().getValues();
-  for (var e = 1; e < edge.length; e++) {
-    var ek = String(edge[e][1] || '').trim();
-    for (var d = 0; d < departments.length; d++) {
-      if (departments[d].key === ek) { departments[d].members++; break; }
-    }
-  }
+  var counts = {};
+  Object.keys(store.memberships).forEach(function (e2) {
+    var list = store.memberships[e2];
+    if (!(list instanceof Array)) return;
+    list.forEach(function (dk) { counts[String(dk).trim()] = (counts[String(dk).trim()] || 0) + 1; });
+  });
+
+  var departments = Object.keys(store.departments).map(function (key) {
+    var d = store.departments[key] || {};
+    var grants = {};
+    SECTION_KEYS.forEach(function (s) { grants[s] = !!(d.grants && d.grants[s]); });
+    return {
+      key: key,
+      name: String(d.name || key),
+      active: String(d.active === undefined ? 'yes' : d.active).toLowerCase() !== 'no',
+      grants: grants,
+      // The second axis on the same record. Kept OUT of `grants` so no code that
+      // walks the section grants can mistake Triage for a section.
+      triage: !!d.triage,
+      members: counts[key] || 0
+    };
+  });
+  // Deliberately NOT sorted. A JS object keeps string keys in insertion order, so
+  // this comes back in the order the departments were created — which is the order
+  // the Departments tab has always shown them in.
+
   return { status: 'ok', users: users, departments: departments, apiVersion: CONFIG.API_VERSION };
 }
 
 // POST createUser (admin) — one account + a one-time temporary password.
 function createUser(params, authEmail) {
   requireAdmin(authEmail);
-  var email = (params.email || '').toString().toLowerCase().trim();
+  var email = usersKey(params.email);
   var name  = (params.name || '').toString().trim();
   if (!validEmail(email)) return { status: 'error', message: 'Enter a valid email address.' };
-  var ss = getSs();
-  if (findUserRow(ss, email)) return { status: 'error', message: 'An account already exists for ' + email + '.' };
+  if (findUser(email)) return { status: 'error', message: 'An account already exists for ' + email + '.' };
   if (isAdminEmail(email)) return { status: 'error', message: 'That address is already an admin.' };
   var pw = createUserRow(email, name, authEmail);
   return { status: 'ok', email: email, name: name, tempPassword: pw,
@@ -1198,12 +1739,11 @@ function bulkCreateUsers(params, authEmail) {
     if (m.length >= 2) nameMap[m[0].trim().toLowerCase()] = m.slice(1).join(',').trim();
   });
 
-  var ss = getSs();
   var created = [], skipped = [];
   emails.forEach(function (em) {
     if (!validEmail(em))          { skipped.push({ email: em, reason: 'not a valid email address' }); return; }
     if (isAdminEmail(em))         { skipped.push({ email: em, reason: 'already an admin' }); return; }
-    if (findUserRow(ss, em))      { skipped.push({ email: em, reason: 'account already exists' }); return; }
+    if (findUser(em))             { skipped.push({ email: em, reason: 'account already exists' }); return; }
     try {
       created.push({ email: em, name: nameMap[em] || '', tempPassword: createUserRow(em, nameMap[em] || '', authEmail) });
     } catch (err) {
@@ -1216,116 +1756,142 @@ function bulkCreateUsers(params, authEmail) {
 
 // POST resetUserPassword (admin) — issue a fresh temporary password and force the
 // change again. Also signs the user's existing devices out.
+//
+// ONE locked read-merge-write over users.json + sessions.json. Created At/By are
+// carried over, not re-derived — this is not a new account.
 function resetUserPassword(params, authEmail) {
   requireAdmin(authEmail);
-  var email = (params.email || '').toString().toLowerCase().trim();
-  var ss = getSs();
-  var idx = findUserRowIndex(ss, email);
-  if (!idx) return { status: 'error', message: 'No account found for ' + email + '.' };
-  var row = findUserRow(ss, email);
-  var pw = makeTempPassword();
-  var salt = Utilities.getUuid();
-  var now = new Date();
-  // Columns B..H, then column K for the issued-at stamp the temp-password expiry
-  // is measured from. Created At/By are preserved — this is not a new account.
-  getOrCreateUsersTab(ss).getRange(idx, 2, 1, USER_ID_BLOCK_COLS)
-    .setValues([[hashPassword(pw, salt), salt, row[3] || now, row[4] || authEmail, 'yes', '', 'active']]);
-  getOrCreateUsersTab(ss).getRange(idx, 11).setValue(now);
-  revokeAllSessions(email);
-  clearFailedLogin(ss, email);
-  return { status: 'ok', email: email, tempPassword: pw,
-           message: 'New temporary password issued. Copy it now — it cannot be shown again.' };
+  var email = usersKey(params.email);
+  var pw    = makeTempPassword();
+  var salt  = Utilities.getUuid();
+  var now   = Date.now();
+  return withRowLockOrThrow(function () {
+    var users = readJsonLocked('users.json');
+    var rec = users ? users[email] : null;
+    if (!rec) return { status: 'error', message: 'No account found for ' + email + '.' };
+    rec.hash           = hashPassword(pw, salt);
+    rec.salt           = salt;
+    rec.mustChange     = 'yes';
+    rec.status         = 'active';
+    rec.passwordChangedAt = null;
+    rec.tempPwIssuedAt = now;
+    writeJsonLocked('users.json', users);
+
+    var sess = readJsonLocked('sessions.json');
+    if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
+
+    var att = readJsonLocked('attempts.json');
+    if (att && att[email]) { delete att[email]; writeJsonLocked('attempts.json', att); }
+
+    return { status: 'ok', email: email, tempPassword: pw,
+             message: 'New temporary password issued. Copy it now — it cannot be shown again.' };
+  });
 }
 
 // POST setUserStatus (admin) — enable/disable without deleting the account.
 function setUserStatus(params, authEmail) {
   requireAdmin(authEmail);
-  var email  = (params.email || '').toString().toLowerCase().trim();
+  var email  = usersKey(params.email);
   var status = (params.status || '').toString().toLowerCase() === 'disabled' ? 'disabled' : 'active';
   if (isAdminEmail(email) && status === 'disabled') {
     return { status: 'error', message: 'You cannot disable an admin account.' };
   }
-  var ss  = getSs();
-  var idx = findUserRowIndex(ss, email);
-  if (!idx) return { status: 'error', message: 'No account found for ' + email + '.' };
-  getOrCreateUsersTab(ss).getRange(idx, 8).setValue(status);
-  // Revoke rather than checking Status on every authenticated request.
-  if (status === 'disabled') revokeAllSessions(email);
-  return { status: 'ok', email: email, status: status, message: email + ' is now ' + status + '.' };
+  return withRowLockOrThrow(function () {
+    var users = readJsonLocked('users.json');
+    var rec = users ? users[email] : null;
+    if (!rec) return { status: 'error', message: 'No account found for ' + email + '.' };
+    rec.status = status;
+    writeJsonLocked('users.json', users);
+
+    // Revoke rather than checking Status on every authenticated request.
+    if (status === 'disabled') {
+      var sess = readJsonLocked('sessions.json');
+      if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
+    }
+    return { status: 'ok', email: email, status: status, message: email + ' is now ' + status + '.' };
+  });
 }
 
 // POST saveDepartment (admin) — create or update one department's section grants.
 function saveDepartment(params, authEmail) {
   requireAdmin(authEmail);
   var name = (params.name || '').toString().trim();
-  var key  = (params.key || '').toString().trim() || deptKeyFromName(name);
+  var key  = deptKeyFromName((params.key || '').toString().trim() || name);
   if (!name && !key) return { status: 'error', message: 'A department needs a name.' };
   if (!key) return { status: 'error', message: 'Could not derive a key from that name — use letters or digits.' };
   var grants = {};
   try { grants = JSON.parse(params.grants || '{}'); } catch (e) { grants = {}; }
 
-  var ss = getSs();
-  var tab = getOrCreateDeptTab(ss);
-  var data = tab.getDataRange().getValues();
-  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var row = [key, name || key, (params.active === 'no' ? 'no' : 'yes')];
-  SECTION_KEYS.forEach(function (s) { row.push(grants[s] ? 'edit' : ''); });
-  row.push(ts); row.push(authEmail);
-  // Triage last, matching DEPT_HEADS. The UI's grant grid posts it as a `triage`
-  // key in the same `grants` object as the sections, so it is read back out here
-  // rather than given a second parameter.
-  row.push(grants['triage'] ? 'edit' : '');
+  var sectionGrants = {};
+  SECTION_KEYS.forEach(function (s) { if (grants[s]) sectionGrants[s] = true; });
 
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]).trim() === key) { tab.getRange(i + 1, 1, 1, row.length).setValues([row]); return { status: 'ok', key: key, message: 'Saved ' + key }; }
-  }
-  tab.appendRow(row);
-  return { status: 'ok', key: key, message: 'Created ' + key };
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json') || { departments: {}, memberships: {} };
+    if (!store.departments) store.departments = {};
+    if (!store.memberships) store.memberships = {};
+    var existed = !!store.departments[key];
+    store.departments[key] = {
+      name:      name || key,
+      active:    (params.active === 'no' ? 'no' : 'yes'),
+      grants:    sectionGrants,
+      // Triage is read from the SAME `grants` object the UI posts, because that is
+      // how the grant grid submits it — but stored OUTSIDE `grants`, so no code
+      // walking the section grants can mistake it for a section.
+      triage:    !!grants['triage'],
+      updatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+      updatedBy: authEmail
+    };
+    // Replaces ONE key. Writing the whole departments object from `grants` would
+    // delete every other department, and with it every grant in the company.
+    writeJsonLocked('access.json', store);
+    return { status: 'ok', key: key, message: (existed ? 'Saved ' : 'Created ') + key };
+  });
 }
 
-// POST deleteDepartment (admin) — remove the department AND every membership edge,
-// so no one keeps edit rights through a department that no longer exists.
+// POST deleteDepartment (admin) — remove the department AND every membership edge
+// naming it, so no one keeps edit rights through a department that no longer exists.
 function deleteDepartment(params, authEmail) {
   requireAdmin(authEmail);
   var key = (params.key || '').toString().trim();
   if (!key) return { status: 'error', message: 'Department key required.' };
-  return withRowLock(function () {
-    var ss = getSs();
-    var tab = getOrCreateDeptTab(ss);
-    var data = tab.getDataRange().getValues();
-    var removed = 0;
-    for (var i = data.length - 1; i >= 1; i--) {
-      if (String(data[i][0]).trim() === key) { tab.deleteRow(i + 1); removed++; }
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json');
+    if (!store || !store.departments || !store.departments[key]) {
+      return { status: 'ok', message: 'No such department: ' + key };
     }
-    var edges = getOrCreateUserDeptTab(ss);
-    var edata = edges.getDataRange().getValues();
-    for (var j = edata.length - 1; j >= 1; j--) {
-      if (String(edata[j][1]).trim() === key) edges.deleteRow(j + 1);
-    }
-    return { status: 'ok', message: removed ? 'Deleted ' + key : 'No such department: ' + key };
+    delete store.departments[key];
+    // Every membership naming it goes too. Removing the edges here is what stops a
+    // dangling membership from resurrecting the grants if the key is ever recreated.
+    Object.keys(store.memberships || {}).forEach(function (email) {
+      var list = store.memberships[email];
+      if (!(list instanceof Array)) return;
+      var kept = list.filter(function (k) { return String(k).trim() !== key; });
+      if (kept.length) store.memberships[email] = kept;
+      else delete store.memberships[email];
+    });
+    writeJsonLocked('access.json', store);
+    return { status: 'ok', message: 'Deleted ' + key };
   });
 }
 
 // POST setUserDepartments (admin) — replace one person's department memberships.
 function setUserDepartments(params, authEmail) {
   requireAdmin(authEmail);
-  var email = (params.email || '').toString().toLowerCase().trim();
+  var email = usersKey(params.email);
   if (!email) return { status: 'error', message: 'Email required.' };
   var keys = [];
   try { keys = JSON.parse(params.departments || '[]'); } catch (e) { keys = []; }
   if (!(keys instanceof Array)) keys = [];
   keys = keys.map(function (k) { return String(k).trim(); }).filter(Boolean);
 
-  return withRowLock(function () {
-    var ss = getSs();
-    var tab = getOrCreateUserDeptTab(ss);
-    var data = tab.getDataRange().getValues();
-    // Delete bottom-up so earlier deletes can't shift later row numbers.
-    for (var i = data.length - 1; i >= 1; i--) {
-      if (String(data[i][0]).toLowerCase().trim() === email) tab.deleteRow(i + 1);
-    }
-    var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-    keys.forEach(function (k) { tab.appendRow([email, k, ts, authEmail]); });
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json') || { departments: {}, memberships: {} };
+    if (!store.memberships) store.memberships = {};
+    // ONE key assignment, replacing exactly this person's list. The sheet version
+    // deleted then re-appended rows; here the previous list is simply gone.
+    if (keys.length) store.memberships[email] = keys;
+    else delete store.memberships[email];
+    writeJsonLocked('access.json', store);
     return { status: 'ok', email: email, departments: keys, message: email + ': ' + keys.length + ' department(s)' };
   });
 }
@@ -1353,46 +1919,40 @@ function purgeUsers(params, authEmail) {
   var dryRun = String(params.dryRun || '') === '1';
 
   return withRowLock(function () {
-    var ss = getSs();
-    var tab = getOrCreateUsersTab(ss);
-    var data = tab.getDataRange().getValues();
+    // Pass 1 — PLAN ONLY. No writes. Read through the lock so the plan describes
+    // the exact snapshot the delete pass will act on.
+    var users = readJsonLocked('users.json') || {};
+    var access = readJsonLocked('access.json') || {};
+    var memberships = access.memberships || {};
 
-    // Pass 1 — PLAN ONLY. No writes. Rows are collected in ascending index order
-    // and deleted in reverse, so a delete never invalidates an index still to come.
-    var plan = [], blanks = [];
-    for (var i = 1; i < data.length; i++) {
-      var email = String(data[i][0] || '').toLowerCase().trim();
-      if (!email) { blanks.push(i + 1); continue; }        // a stray empty row
-      if (isAdminEmail(email)) continue;
+    var plan = [];
+    Object.keys(users).forEach(function (email) {
+      if (!email.trim() || isAdminEmail(email)) return;
+      var rec = users[email] || {};
       plan.push({
-        row: i + 1,
         email: email,
-        name: userCol(data[i], 'Name'),
-        createdBy: String(data[i][4] || ''),
-        createdAt: data[i][3] ? Utilities.formatDate(new Date(data[i][3]), 'Asia/Kolkata', 'dd-MMM-yyyy') : ''
+        name: userField(rec, 'Name'),
+        createdBy: userField(rec, 'Created By'),
+        createdAt: asDate(userField(rec, 'Created At'))
+          ? Utilities.formatDate(asDate(userField(rec, 'Created At')), 'Asia/Kolkata', 'dd-MMM-yyyy') : ''
       });
-    }
-    var asRows = plan.map(function (p) {
-      return { email: p.email, name: p.name, createdBy: p.createdBy, createdAt: p.createdAt };
     });
+    // Sorted so the dry-run list and the confirm count are stable and readable —
+    // a JSON object's key order is insertion order, not alphabetical.
+    plan.sort(function (a, b) { return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0); });
 
     if (dryRun) {
       // Counts only, plus the list. Nothing is written and nothing is locked in.
-      var edgeCount = 0;
-      var etab = getOrCreateUserDeptTab(ss);
-      var edata = etab.getDataRange().getValues();
-      for (var j = 1; j < edata.length; j++) {
-        var e2 = String(edata[j][0] || '').toLowerCase().trim();
-        if (e2 && !isAdminEmail(e2)) edgeCount++;
-      }
-      return { status: 'ok', dryRun: true, removed: asRows, count: asRows.length,
-               blankRows: blanks.length, edges: edgeCount,
-               message: 'Nothing deleted. ' + asRows.length + ' account(s), '
-                        + edgeCount + ' membership(s) and ' + blanks.length
-                        + ' empty row(s) would be removed. Copy the list, then confirm.' };
+      var edgeCount = Object.keys(memberships).filter(function (e) {
+        return e.trim() && !isAdminEmail(e);
+      }).length;
+      return { status: 'ok', dryRun: true, removed: plan, count: plan.length,
+               blankRows: 0, edges: edgeCount,
+               message: 'Nothing deleted. ' + plan.length + ' account(s), '
+                        + edgeCount + ' membership(s) would be removed. Copy the list, then confirm.' };
     }
 
-    // Pass 2 — delete, in reverse, exactly what was planned.
+    // Pass 2 — delete exactly what was planned.
     // If the caller reviewed a list, refuse when the world has changed under it:
     // an irreversible delete must remove what was SEEN, or nothing at all.
     var expect = (params.expect === undefined || params.expect === '') ? null : Number(params.expect);
@@ -1400,27 +1960,40 @@ function purgeUsers(params, authEmail) {
       return { status: 'error', message: 'The account list changed while you were reviewing it ('
                + plan.length + ' now, ' + expect + ' when you looked). Nothing was deleted — review it again.' };
     }
-    for (var k = plan.length - 1; k >= 0; k--) tab.deleteRow(plan[k].row);
-    for (var b = blanks.length - 1; b >= 0; b--) tab.deleteRow(blanks[b]);
 
-    // Every membership edge for a removed account goes too.
-    var edges = getOrCreateUserDeptTab(ss);
-    var ed = edges.getDataRange().getValues();
-    for (var m = ed.length - 1; m >= 1; m--) {
-      var em = String(ed[m][0] || '').toLowerCase().trim();
-      if (em && !isAdminEmail(em)) edges.deleteRow(m + 1);
-    }
+    // The rollback path. Written BEFORE the first destructive write, as a new file
+    // — the sheet version kept a dated backup tab for exactly this, and Drive
+    // revision history is not a durable substitute for these files.
+    var backup = snapshotStore('purge-users', ['users.json', 'access.json', 'sessions.json']);
+
+    plan.forEach(function (p) { delete users[p.email]; });
+    writeJsonLocked('users.json', users);
+
+    // Every membership for a removed account goes too.
+    Object.keys(memberships).forEach(function (e) {
+      if (!e.trim() || isAdminEmail(e)) return;
+      delete memberships[e];
+    });
+    access.memberships = memberships;
+    writeJsonLocked('access.json', access);
+
     // And every session, so a still-open tab can't keep working on a dead account.
-    var st = getOrCreateSessionsTab(ss);
-    var sdata = st.getDataRange().getValues();
-    for (var n = sdata.length - 1; n >= 1; n--) {
-      var se = String(sdata[n][1] || '').toLowerCase().trim();
-      if (!se || isAdminEmail(se)) continue;
-      st.getRange(n + 1, 5).setValue('revoked');
-      st.getRange(n + 1, 7).setValue(new Date());
+    // Admins are spared here for the same reason their accounts are: revoking the
+    // admin running this would sign them out mid-purge.
+    var sess = readJsonLocked('sessions.json');
+    if (sess && sess.tokens) {
+      var now = Date.now();
+      Object.keys(sess.tokens).forEach(function (t) {
+        var s = sess.tokens[t];
+        if (!s || s.revokedAt) return;
+        if (!usersKey(s.email) || isAdminEmail(s.email)) return;
+        s.revokedAt = now;
+      });
+      writeJsonLocked('sessions.json', sess);
     }
-    return { status: 'ok', removed: asRows, count: asRows.length,
-             message: 'Removed ' + asRows.length + ' account(s). Admins were kept.' };
+
+    return { status: 'ok', removed: plan, count: plan.length, backup: backup,
+             message: 'Removed ' + plan.length + ' account(s). Admins were kept. Backup: ' + backup };
   });
 }
 // Reads Form Responses tab from IR Repository and returns IR list, latest first
@@ -1476,29 +2049,17 @@ function listIRs() {
 function getAllIRStatuses() {
   var map = {};
   try {
-    var ss  = getSs();
-    var tab = ss.getSheetByName('APP_DATA');
-    if (!tab) return map;
-
-    var data = tab.getDataRange().getValues();
-    // APP_DATA structure: [IR Number, Section ID, Saved By, Fields, Updated]
-    //
-    // Status is app-owned (Stage 1, `__IRS__`), so this reads the sentinel store:
-    // column A is '__IRS__' and column B holds the REAL IR. The old path scanned
-    // `sec-a` rows for `a_overallStatus`, which was the pre-Stage-1 fallback and
-    // died with Section A — it would now return an empty map for every IR.
-    for (var i = 1; i < data.length; i++) {
-        if (String(data[i][0]) !== '__IRS__') continue;
-        var irNum = String(data[i][1] || '');
-        if (!irNum) continue;
-        try {
-            var fields = JSON.parse(data[i][3] || '{}');
-            // Truthiness, not `|| 'Open'`: seedIRState() writes `status: ''` the
-            // first time it sees an IR, and an empty string must fall through to
-            // the caller's own default rather than overwrite it with 'Open'.
-            if (fields && fields.status) map[irNum] = fields.status;
-        } catch(e) {}
-    }
+    // irs.json is the whole `__IRS__` store: one key per IR. This used to scan
+    // APP_DATA rows for the sentinel, which is the same data in a different shape.
+    var irs = readJson('irs.json') || {};
+    Object.keys(irs).forEach(function (irNum) {
+      if (!irNum) return;
+      var fields = irs[irNum];
+      // Truthiness, not `|| 'Open'`: seedIRState() writes `status: ''` the
+      // first time it sees an IR, and an empty string must fall through to
+      // the caller's own default rather than overwrite it with 'Open'.
+      if (fields && fields.status) map[irNum] = fields.status;
+    });
   } catch(e) {}
   return map;
 }
@@ -1556,14 +2117,25 @@ function getPassbook(irNumber, authEmail) {
 
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__ app stores
 
-  var ss   = getSs();
-  var tab  = getOrCreateDataTab(ss);
-  var data = tab.getDataRange().getValues();
+  // UNLOCKED read, deliberately. The frontend polls a store every 90 s per user, so
+  // locking reads would put ~800 requests an hour in front of one lock, and a
+  // slightly stale snapshot is already what today's version returns.
+  var stored;
+  if (isSentinel) {
+    var storeFile = sentinelStoreFile(irNumber);
+    if (!storeFile) throw new Error('Unknown app store: ' + irNumber);
+    stored = readJson(storeFile) || {};
+  } else if (/^IR\d+$/.test(String(irNumber))) {
+    stored = readIR(irNumber, false).data;
+  } else {
+    // Not a sentinel and not an IR number: a junk value from a stale link or a
+    // half-typed hash. Empty, exactly as the sheet version answered — reads are
+    // tolerant; the WRITE path is where the shape is asserted.
+    stored = {};
+  }
 
   var sections = {};
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] !== irNumber) continue;
-    var secId = String(data[i][1] || '');
+  Object.keys(stored).forEach(function (secId) {
     // Hide real sections the caller can't view. Sentinel app stores (comments,
     // dropdown config) are shared app data — visible to any user with access.
     //
@@ -1574,11 +2146,10 @@ function getPassbook(irNumber, authEmail) {
     // AND the legacy activity log — while the admin, who is the one testing it,
     // would still see everything. Blank Overview for 18 people, looks fine to the
     // one person looking. The Overview is shared app data, like the sentinels.
-    if (!isSentinel && secId !== OVERVIEW_KEY && access.role !== 'admin' && !canView(access.permissions, secId)) continue;
-    var fields = {};
-    try { fields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
-    sections[secId] = fields;
-  }
+    if (!isSentinel && secId !== OVERVIEW_KEY && access.role !== 'admin' && !canView(access.permissions, secId)) return;
+    var fields = stored[secId];
+    sections[secId] = (fields && typeof fields === 'object') ? fields : {};
+  });
 
   return { status: 'ok', sections: sections };
 }
@@ -1623,45 +2194,14 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   if (isSentinel && files && files.length > 0)
     throw new Error('App stores cannot carry file uploads.');
 
-  // 1. Handle file uploads first — create IR folder / Section subfolder
-  var fileLinks = {};
-  var uploads   = [];   // audit trail — see appendAuditEntries
-  if (files && files.length > 0) {
-    var sectionFolder = getOrCreateSectionFolder(irNumber, sectionId);
-    files.forEach(function(file) {
-      if (!file.base64 || !file.name || !file.mimeType) return;
-      var blob     = Utilities.newBlob(Utilities.base64Decode(file.base64), file.mimeType, file.name);
-      var uploaded = sectionFolder.createFile(blob);
-      uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      if (!fileLinks[file.fieldId]) fileLinks[file.fieldId] = [];
-      fileLinks[file.fieldId].push(uploaded.getUrl());
-      uploads.push({ fieldId: file.fieldId, name: file.name });
-    });
-    // Merge file links back into fields as comma-separated URLs
-    Object.keys(fileLinks).forEach(function(fid) {
-      fields[fid + '_links'] = fileLinks[fid].join(', ');
-    });
-  }
+  // A real IR number becomes a Drive FOLDER and FILE name below, so its shape is
+  // asserted here — after the ACL, before any folder or file work.
+  if (!isSentinel) assertRealIR(irNumber);
 
-  // 2. Write to APP_DATA tab (upsert row for irNumber + sectionId)
-  var ss   = getSs();
-  var tab  = getOrCreateDataTab(ss);
-  var data = tab.getDataRange().getValues();
-
-  var existingRow = -1;
-  var existingFields = {};
-  for (var i = 1; i < data.length; i++) {
-    if (data[i][0] === irNumber && data[i][1] === sectionId) {
-      existingRow = i + 1; // 1-indexed row in sheet
-      try { existingFields = JSON.parse(data[i][3] || '{}'); } catch(e) {}
-      break;
-    }
-  }
-
-  // 2b. Section A intake fields are auto-populated from the customer form and
-  // are editable by NO ONE. Strip any of them from the incoming payload so a
-  // crafted save can't write a divergent copy into APP_DATA. (They're displayed
-  // live from the IR Repository, not from here.)
+  // Section A intake fields are auto-populated from the customer form and are
+  // editable by NO ONE. Strip any of them from the incoming payload so a crafted
+  // save can't write a divergent copy into the store. (They're displayed live from
+  // the IR Repository, not from here.)
   //
   // Note what is deliberately NOT in this list: a_crmOwner and a_contactPhone,
   // which the Overview panel does write (gated on Triage by the ACL above), and
@@ -1673,25 +2213,78 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     });
   }
 
-  // 2c. Audit trail — record this save + every field overwrite (old→new) so any
-  // later correction is traceable. Derived Drive-link keys (*_links) are skipped.
-  //
-  // __NUDGES__ is excluded at the source rather than filtered later: comments
-  // already carry their own author and createdAt in the items array, and a nudge
-  // save fires on every post, resolve, edit AND markRead, each writing a 500-char
-  // copy of the whole comment array. That one store dominated the log.
-  if (irNumber !== '__NUDGES__') appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, fields, uploads);
-
-  var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var rowData   = [irNumber, sectionId, savedBy, JSON.stringify(fields), timestamp];
-
-  if (existingRow > 0) {
-    tab.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
-  } else {
-    tab.appendRow(rowData);
+  // 1. Handle file uploads — create IR folder / Section subfolder. OUTSIDE the lock:
+  // base64 decode, createFile and setSharing are the slow part of a save and none of
+  // them touches the store files. Holding the script lock across them would put every
+  // other writer behind a Drive upload.
+  var fileLinks = {};
+  var uploads   = [];   // audit trail — see buildAuditLines
+  if (files && files.length > 0) {
+    var sectionFolder = getOrCreateSectionFolder(irNumber, sectionId);
+    files.forEach(function(file) {
+      if (!file.base64 || !file.name || !file.mimeType) return;
+      var blob     = Utilities.newBlob(Utilities.base64Decode(file.base64), file.mimeType, file.name);
+      var uploaded = sectionFolder.createFile(blob);
+      // Per FILE, never on the folder: the upload folders stay browsable by link,
+      // while `_store/` — password hashes, salts, session tokens — is Restricted.
+      uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      if (!fileLinks[file.fieldId]) fileLinks[file.fieldId] = [];
+      fileLinks[file.fieldId].push(uploaded.getUrl());
+      uploads.push({ fieldId: file.fieldId, name: file.name });
+    });
+    // Merge file links back into fields as comma-separated URLs
+    Object.keys(fileLinks).forEach(function(fid) {
+      fields[fid + '_links'] = fileLinks[fid].join(', ');
+    });
   }
 
-  return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
+  // 2. ONE locked read → merge → write. Everything between here and the closing
+  // brace is the critical section; Drive has no transactions, so the READ must be
+  // inside it. A read taken before the lock would be merged over whatever landed in
+  // between and drop that writer's save silently.
+  return withRowLockOrThrow(function () {
+    var lines;
+    if (isSentinel) {
+      var storeFile = sentinelStoreFile(irNumber);
+      if (!storeFile) throw new Error('Unknown app store: ' + irNumber);
+      // readJsonLocked, NOT readJson: the memo may hold a copy read before the lock
+      // was taken, and merging onto that copy would clobber the newer file.
+      var store = readJsonLocked(storeFile) || {};
+      var existing = (store[sectionId] && typeof store[sectionId] === 'object') ? store[sectionId] : {};
+
+      // __NUDGES__ is excluded at the source rather than filtered later: comments
+      // already carry their own author and createdAt in the items array, and a nudge
+      // save fires on every post, resolve, edit AND markRead, each writing a 500-char
+      // copy of the whole comment array. That one store dominated the log.
+      lines = (irNumber === '__NUDGES__')
+        ? [] : buildAuditLines(irNumber, sectionId, savedBy, existing, fields, uploads);
+
+      // THE ONE KEY. writeJson(storeFile, fields) here would wipe the sibling keys:
+      // every other comment on every ticket for __NUDGES__, the team directory and
+      // the dropdown config for __CONFIG__, the workflow state of all 450 tickets
+      // for __IRS__. This single line is the most dangerous mis-reading of the
+      // design and it is deliberate that it is a key assignment and not a write.
+      store[sectionId] = fields;
+      writeJsonLocked(storeFile, store);
+
+      // The audit goes LAST, inside the same lock: a failed data write must not
+      // leave an entry for a save that never happened.
+      appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), lines);
+      return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
+    }
+
+    var ir = readIR(irNumber, true, true);
+    var data = ir.data;
+    var existingFields = (data[sectionId] && typeof data[sectionId] === 'object') ? data[sectionId] : {};
+
+    lines = buildAuditLines(irNumber, sectionId, savedBy, existingFields, fields, uploads);
+
+    data[sectionId] = fields;
+    writeIR(irNumber, data, ir.fileId);
+    appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), lines);
+
+    return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
+  });
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1706,7 +2299,7 @@ function isMailRecipientAllowed(to) {
   if (addr.indexOf(suffix) === addr.length - suffix.length) return true;
   var ext = (CONFIG.EXTERNAL_EMAILS || []).map(function (x) { return String(x).toLowerCase().trim(); });
   if (ext.indexOf(addr) > -1) return true;
-  try { return !!findUserRow(getSs(), addr); } catch (e) { return false; }
+  try { return !!findUser(addr); } catch (e) { return false; }
 }
 
 function sendNudgeEmail(params, authEmail) {
@@ -1813,59 +2406,31 @@ function getSectionLabel(sectionId) {
   return labels[sectionId] || sectionId;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// SHEET HELPER — Ensure APP_DATA tab exists with correct headers
-// ──────────────────────────────────────────────────────────────────────────────
-function getOrCreateDataTab(ss) {
-  var tab = ss.getSheetByName('APP_DATA');
-  if (!tab) tab = ss.insertSheet('APP_DATA');
-  return ensureHeaders(tab, ['IR Number', 'Section ID', 'Saved By', 'Fields (JSON)', 'Last Updated']);
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// ONE-TIME SETUP — run manually from the editor to pre-create the AUDIT_LOG tab.
-// Safe to run repeatedly (no-op if the tab already exists).
-// ──────────────────────────────────────────────────────────────────────────────
-function setupAuditLog() {
-  var ss = getSs();
-  getOrCreateAuditTab(ss);
-  getOrCreateDataTab(ss);
-  return 'APP_DATA + AUDIT_LOG tabs ready on sheet ' + CONFIG.PASSBOOK_SHEET_ID;
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// AUDIT TRAIL — records every section save + every field overwrite (old→new) so
-// corrections are traceable. Lives in an AUDIT_LOG tab on the data sheet.
-// Columns: Timestamp | IR Number | Section ID | Saved By | Event | Field ID |
-//          Old Value | New Value
-// ──────────────────────────────────────────────────────────────────────────────
-function getOrCreateAuditTab(ss) {
-  var tab = ss.getSheetByName('AUDIT_LOG');
-  if (!tab) {
-    tab = ss.insertSheet('AUDIT_LOG');
-    tab.getRange(1, 1, 1, 8).setValues([['Timestamp', 'IR Number', 'Section ID', 'Saved By', 'Event', 'Field ID', 'Old Value', 'New Value']]);
-    tab.getRange(1, 1, 1, 8).setFontWeight('bold').setBackground('#0E62FF').setFontColor('#ffffff');
-    tab.setFrozenRows(1);
-  }
-  return tab;
-}
 function snapValue(v) {
   if (v == null) return '';
   var s = (typeof v === 'object') ? JSON.stringify(v) : String(v);
   return s.length > 500 ? s.substring(0, 500) + '…' : s;
 }
-function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, newFields, uploads) {
-  var tab = getOrCreateAuditTab(ss);
+
+// BUILD the audit lines for one save. Pure — it reads nothing and writes nothing,
+// so the caller can hold the lock across "read the old value → build the lines →
+// write the data → append the lines" as one critical section. It used to write to
+// the sheet itself, and it was called BEFORE the data write, so a save that then
+// failed left an audit entry for a save that never happened.
+function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields, uploads) {
   var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var rows = [];
+  var lines = [];
   var isSentinel = String(irNumber).indexOf('__') === 0;
   // One "saved" marker per HUMAN section save, so even a no-change save is
   // traceable. Sentinel writes are skipped: every section save also fires
   // patchIRState(), so without this guard each save produced two marker rows, one
-  // of them contentless. Workflow changes are still recorded — as the field rows
+  // of them contentless. Workflow changes are still recorded — as the field lines
   // below, which name `status`/`assignee`/`priority`/`type` explicitly and are
   // what the timeline actually reads.
-  if (!isSentinel) rows.push([ts, irNumber, sectionId, savedBy, 'saved', '', '', '']);
+  function line(ev, fid, oldV, newV) {
+    return { t: ts, ir: irNumber, sec: sectionId, by: savedBy, ev: ev, fid: fid, old: oldV, nw: newV };
+  }
+  if (!isSentinel) lines.push(line('saved', '', '', ''));
   var ex = existingFields || {};
   var nw = newFields || {};
   Object.keys(nw).forEach(function(k) {
@@ -1874,83 +2439,84 @@ function appendAuditEntries(ss, irNumber, sectionId, savedBy, existingFields, ne
     var had = ex.hasOwnProperty(k);
     var newJ = snapValue(nw[k]);
     if (!had) {
-      rows.push([ts, irNumber, sectionId, savedBy, 'added', k, '', newJ]);
+      lines.push(line('added', k, '', newJ));
     } else if (snapValue(ex[k]) !== newJ) {
-      rows.push([ts, irNumber, sectionId, savedBy, 'changed', k, snapValue(ex[k]), newJ]);
+      lines.push(line('changed', k, snapValue(ex[k]), newJ));
     }
   });
   Object.keys(ex).forEach(function(k) {
     if (/_links$/.test(k)) return;
     if (k === 'done') return;
-    if (!nw.hasOwnProperty(k)) rows.push([ts, irNumber, sectionId, savedBy, 'removed', k, snapValue(ex[k]), '']);
+    if (!nw.hasOwnProperty(k)) lines.push(line('removed', k, snapValue(ex[k]), ''));
   });
 
   // Uploads leave no trace anywhere else: file keys are `*_links` (skipped above by
-  // design) and Drive is never enumerated. One row per uploaded file, sharing the
-  // save's timestamp and its single setValues below.
+  // design) and Drive is never enumerated. One line per uploaded file, sharing the
+  // save's timestamp.
   //
   // This does NOT reintroduce the `_links`-key noise, for four independent reasons:
   // the Field ID here is the SOURCE field (f_qcDocs), never the derived key
-  // (f_qcDocs_links); a row is emitted only when a human actually picked a file;
+  // (f_qcDocs_links); a line is emitted only when a human actually picked a file;
   // the `/_links$/` skips above still suppress a spurious `added` delta on first
   // upload; and 'uploaded' is its own event value, so a reader filters on the event
   // and never on the shape of a field name. The URL is deliberately not stored: it
   // is already in fields[<fid>_links], it is long, and it is re-derivable.
   (uploads || []).forEach(function(u) {
     if (!u) return;
-    rows.push([ts, irNumber, sectionId, savedBy, 'uploaded', u.fieldId || '', '', snapValue(u.name || '')]);
+    lines.push(line('uploaded', u.fieldId || '', '', snapValue(u.name || '')));
   });
-
-  if (rows.length) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 8).setValues(rows);
+  return lines;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ACTION: getAuditLog — returns the audit trail for one IR, OLDEST FIRST
 // ──────────────────────────────────────────────────────────────────────────────
-// Two kinds of row match, and the second is the whole reason the workflow half of
+// Two kinds of line match, and the second is the whole reason the workflow half of
 // the timeline needs no new storage:
 //
-//   section row   column B === irNumber                     (an ordinary save)
-//   workflow row  column C === irNumber AND column B starts with '__'
+//   section line   ir  === irNumber                      (an ordinary save)
+//   workflow line  sec === irNumber AND ir starts with '__'
 //
-// Sentinel writes (every __IRS__ patch) are already recorded — but with
-// IR Number = '__IRS__' and the REAL IR in the Section ID column. So they were
-// written all along and merely unreachable from here. The `__` guard on column B is
-// what keeps a future sentinel store from leaking into a real ticket's history.
+// Workflow writes (every __IRS__ patch) are recorded in the TICKET's own file, with
+// `ir` = '__IRS__' and the real IR in `sec`. That is not a trick to make this reader
+// work — it is where the entry belongs: a status change on IR409 IS IR409's history,
+// and in the sheet version it was written all along, merely unreachable from here
+// because the reader matched rows by one column. The `__` guard below is what keeps
+// a future sentinel store from leaking into a real ticket's history.
 //
-// Every returned entry reports `irNumber` as the IR it is ABOUT — for a workflow row
-// that is the Section ID column, never the store name in its own column B.
+// Every returned entry reports `irNumber` as the IR it is ABOUT — for a workflow
+// line that is `sec`, never the store name in `ir`.
 //
-// `limit` bounds the RESPONSE, not the read — the read is still the whole tab. It
-// trims from the OLDEST end, because the caller (a timeline) wants the most recent
-// activity, and the row order is append-only chronological.
+// The read is per-IR, so there is no whole-log scan: the file is ~40 KB and holds
+// only this ticket's activity.
+//
+// `limit` bounds the RESPONSE. It trims from the OLDEST end, because the caller (a
+// timeline) wants the most recent activity, and the file order is append-only
+// chronological.
 var AUDIT_RESPONSE_CAP = 400;
 function getAuditLog(irNumber, limit) {
   if (!irNumber) throw new Error('irNumber is required.');
-  var ss  = getSs();
-  var tab = ss.getSheetByName('AUDIT_LOG');
-  if (!tab) return { status: 'ok', entries: [] };
-  var data = tab.getDataRange().getValues();
+  var lines = readAuditLines(auditSubjectFor(irNumber, irNumber));
   var entries = [];
-  for (var i = 1; i < data.length; i++) {
-    var colB = String(data[i][1] || '');
-    var colC = String(data[i][2] || '');
-    var isSectionRow  = (colB === irNumber);
-    var isWorkflowRow = (colC === irNumber && colB.indexOf('__') === 0);
-    if (!isSectionRow && !isWorkflowRow) continue;
+  lines.forEach(function (l) {
+    var ir  = String(l.ir || '');
+    var sec = String(l.sec || '');
+    var isSectionRow  = (ir === irNumber);
+    var isWorkflowRow = (sec === irNumber && ir.indexOf('__') === 0);
+    if (!isSectionRow && !isWorkflowRow) return;
     entries.push({
-      // `irNumber` is the IR the row is ABOUT, in both halves. A workflow row's own
-      // column B says `__IRS__` — the store name, not the ticket — so reporting it
+      // `irNumber` is the IR the line is ABOUT, in both halves. A workflow line's
+      // own `ir` says `__IRS__` — the store name, not the ticket — so reporting it
       // verbatim would hand a consumer an entry it cannot attribute, and make any
       // future `e.irNumber === irNumber` filter silently drop every status change.
-      timestamp: data[i][0],
-      irNumber: isWorkflowRow ? data[i][2] : data[i][1],
-      sectionId: isWorkflowRow ? '' : data[i][2],
+      timestamp: l.t,
+      irNumber: isWorkflowRow ? sec : ir,
+      sectionId: isWorkflowRow ? '' : sec,
       source: isWorkflowRow ? 'workflow' : 'section',
-      savedBy: data[i][3], event: data[i][4], fieldId: data[i][5],
-      oldValue: data[i][6], newValue: data[i][7]
+      savedBy: l.by, event: l.ev, fieldId: l.fid,
+      oldValue: l.old, newValue: l.nw
     });
-  }
+  });
   var cap = parseInt(limit, 10);
   if (isNaN(cap) || cap <= 0) cap = AUDIT_RESPONSE_CAP;
   if (cap > AUDIT_RESPONSE_CAP) cap = AUDIT_RESPONSE_CAP;
@@ -1990,92 +2556,29 @@ function listLegacyIRs() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// STAGE 2: LEGACY DATA IMPORTER (Utility)
-// Use this to crawl old tabs (IR409, etc) and populate APP_DATA
-// ──────────────────────────────────────────────────────────────────────────────
-function importLegacyData() {
-  var ss   = getSs();
-  var tabs = ss.getSheets();
-  var count = 0;
-  
-  // We look for tabs that look like "IR###"
-  tabs.forEach(function(tab) {
-    var name = tab.getName();
-    if (/^IR\d+$/.test(name)) {
-      try {
-        importSingleTab(ss, tab);
-        count++;
-      } catch(e) {
-        console.log('Error importing ' + name + ': ' + e.message);
-      }
-    }
-  });
-  
-  return { status: 'ok', message: 'Imported ' + count + ' legacy IR records.' };
-}
-
-function importSingleTab(ss, tab) {
-    var irNumber = tab.getName();
-    var dataTab  = getOrCreateDataTab(ss);
-
-    // This is where we map the manual cells to the app sections
-    // Note: User can adjust these cell mappings based on their manual format
-    //
-    // 'sec-i' is written as 'sec-g' on purpose: old Section I (Logistics Dispatch)
-    // is no longer a section — it merged into Section G (PDI Report/Dispatch
-    // Record). Appending 'sec-i' here would create a retired row that nothing
-    // renders, and saveSection now rejects that id outright.
-    var mappings = {
-        'sec-a': { 'a_customerName': 'B10', 'a_droneModel': 'C15' }, // Examples
-        'sec-d': { 'd_rootCause': 'F50', 'd_actionTaken': 'F52' },
-        'sec-g': { 'i_dispatchDate': 'H90' }
-    };
-
-    var timestamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-
-    Object.keys(mappings).forEach(function(secId) {
-        var fields = {};
-        Object.keys(mappings[secId]).forEach(function(fieldKey) {
-            var cell = mappings[secId][fieldKey];
-            fields[fieldKey] = tab.getRange(cell).getValue();
-        });
-
-        // TODO: this appends unconditionally, so re-running the import duplicates
-        // every row. The comment used to claim an "if not already there" check that
-        // does not exist. Out of scope here — fix before anyone re-runs it.
-        var rowData = [irNumber, secId, 'MigrationBot', JSON.stringify(fields), timestamp];
-        dataTab.appendRow(rowData);
-    });
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// ONE-TIME SETUP + MIGRATIONS — run these from the Apps Script editor.
+// ONE-TIME SETUP — run these from the Apps Script editor, in this order.
 //
-// Apps Script separates the editor's code from the version serving /exec, so
-// these can run against the new code HOURS BEFORE the new deployment goes live,
-// with zero impact on anyone using the app. That is the whole point of doing the
-// sheet work in this order: the data model is ready before the switch, and the
-// switch is a single deployment edit.
+//   initializeStore()      creates _store/ and seeds the empty files
+//   seedDepartments()      writes the owner's department → section grants
+//   seedMemberships()      adds one department edge per person
+//   bootstrapAdmin()       creates the admin account, prints its temp password
+//   seedAccounts()         creates one account per seeded member, prints temp passwords
 //
-//   Pre-flight (undeployed, no user impact):
-//     migrateAddColumns() → migrateAclReport() → bootstrapAdmin()
+// There is no cutover ordering problem any more, and that is worth stating plainly
+// because the previous version of this file had a long comment explaining why there
+// WAS one. The old order existed because (a) widening a DEPARTMENTS tab would be read
+// positionally by the still-live old backend and misgrant every section, and (b) the
+// APP_DATA merge rewrote rows the live app was reading. Neither exists now: there are
+// no columns and no rows, `_store/` is a folder the old backend never looks at, and
+// the store starts empty. The whole pre-flight/cutover split collapses into "run five
+// functions, then deploy".
 //
-//   Cutover window (AFTER the deploy — these two CANNOT run pre-flight):
-//     seedDepartments() → seedMemberships()
-//     → mergeSectionsReport() → mergeSectionsApply()
-//     → push gh-pages
+// seedAccounts() is last because it skips the admin address outright (isAdminEmail),
+// so the admin's one printed password comes from bootstrapAdmin() and every other
+// person's comes from seedAccounts(). Both functions are safe to re-run.
 //
 //   Anytime after go-live:
 //     maintenancePruneSessions(), maintenancePruneAuditLog()
-//
-// Why the split: the pre-flight group only ADDS columns and CREATES tabs, which is
-// invisible to the still-live old build. The cutover group does not:
-//   • the grants/memberships must not land early, because getOrCreateDeptTab →
-//     ensureHeaders is reached on EVERY read and the still-live old backend reads
-//     DEPARTMENTS positionally — a 12-column tab read as 14 would misgrant;
-//   • the APP_DATA merge REWRITES rows the live app is currently reading. A
-//     migration that rewrites live rows cannot be pre-flight, full stop. That is
-//     the mirror image of the column-widening rationale above.
 // ──────────────────────────────────────────────────────────────────────────────
 
 // report() — MAKE AN EDITOR-FACING REPORT VISIBLE.
@@ -2084,85 +2587,15 @@ function importSingleTab(ss, tab) {
 // it keeps them callable from a future UI, and the suites assert on the strings.
 // But when you run one from the Apps Script editor, the execution log shows ONLY
 // what the code logs — a returned value is never displayed. So without this, a run
-// reports "Execution completed" and nothing else: no `dropped` grant list, no merge
-// plan, no ERA-AMBIGUOUS block, no one-time admin password, no backup tab name.
-// Every one of those is something an operator has to READ to run the cutover
-// safely, which makes an un-loggable report the same as no report.
+// reports "Execution completed" and nothing else: no `dropped` grant list, no
+// one-time admin password. Every one of those is something an operator has to READ
+// to run the setup safely, which makes an un-loggable report the same as no report.
 //
 // Wrap EVERY report return in this. The early refusals matter most: "refusing to
-// touch DEPARTMENTS" is exactly the message that must not be swallowed.
+// overwrite" is exactly the message that must not be swallowed.
 function report(msg) {
   console.log(msg);
   return msg;
-}
-
-// Widen every tab this build reads to its current header set. Touches ONLY row 1,
-// so it is safe on live data and safe to re-run.
-//
-// Column counts are DERIVED, never typed. The strings here used to be literals
-// ('DEPARTMENTS → 15 cols' when the tab had 14) and rotted silently because no
-// test asserted them — a report nobody can trust is worse than no report.
-function migrateAddColumns() {
-  var ss = getSs();
-  var done = [];
-
-  // DEPARTMENTS is special: shrinking SECTION_KEYS means an old tab's columns mean
-  // something different now, so widening it here would reinterpret live grants.
-  // A legacy-9 or unknown tab is left exactly as it is, and seedDepartments()
-  // rebuilds it from a backup.
-  var deptTab  = ss.getSheetByName('DEPARTMENTS');
-  var deptShape = deptTabShape(deptTab);
-  if (deptShape === 'legacy-9') {
-    done.push('DEPARTMENTS → LEFT ALONE (legacy 9-section header; seedDepartments() rebuilds it from a backup)');
-  } else if (deptShape === 'unknown') {
-    done.push('DEPARTMENTS → LEFT ALONE (unrecognised header — refusing to widen; inspect it by hand)');
-  } else {
-    getOrCreateDeptTab(ss);
-    done.push('DEPARTMENTS → ' + DEPT_HEADS.length + ' cols');
-  }
-
-  getOrCreateUsersTab(ss);      done.push('USERS → ' + USER_HEADS.length + ' cols');
-  getOrCreateSessionsTab(ss);   done.push('SESSIONS → ' + SESSION_HEADS.length + ' cols');
-  getOrCreateUserDeptTab(ss);   done.push('USER_DEPARTMENTS → ' + USERDEPT_HEADS.length + ' cols');
-  getOrCreateCodesTab(ss);      done.push('CODES → ' + CODE_HEADS.length + ' cols');
-  getOrCreateAttemptsTab(ss);
-  getOrCreateDataTab(ss);
-  return report('Migrated: ' + done.join(', ') + '.');
-}
-
-// READ-ONLY report of the retired ACL tab — the last chance to see the grants that
-// were hand-assigned before departments replaced them. Changes nothing.
-//
-// It iterates a LOCAL nine-key literal, not SECTION_KEYS. Its whole purpose is to
-// read the OLD columns; driving it off the new six-key list would label old column
-// 1 (which meant `sec-a`) as `sec-b`, never read the last three columns, and produce
-// a confidently wrong report about the one thing the owner cannot reconstruct later.
-// Shipping it broken would be worse than not having it.
-var LEGACY_ACL_SECTIONS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
-
-function migrateAclReport() {
-  var tab = getSs().getSheetByName('ACL');
-  if (!tab) return 'No ACL tab — nothing to migrate (this is expected on a fresh sheet).';
-  var data = tab.getDataRange().getValues();
-  var lines = ['Old per-user ACL (ACL tab) — ' + Math.max(0, data.length - 1) + ' row(s):', ''];
-  lines.push('Columns are read against the HISTORICAL nine-section list (sec-a…sec-i),');
-  lines.push('not the current six, because these columns were written before the merge.', '');
-  for (var i = 1; i < data.length; i++) {
-    var email = String(data[i][0] || '').trim();
-    if (!email) continue;
-    var granted = [];
-    for (var j = 0; j < LEGACY_ACL_SECTIONS.length; j++) {
-      var v = String(data[i][j + 1] || '').trim();
-      if (v) granted.push(LEGACY_ACL_SECTIONS[j] + '=' + v);
-    }
-    lines.push(email + '  →  ' + (granted.length ? granted.join(' ') : '(nothing)'));
-  }
-  lines.push('', 'Nobody needs migrating: everyone gets view+comment automatically, and edit now');
-  lines.push('comes from department membership. Use this only to check nobody had edit you');
-  lines.push('want to preserve — then set it up in the Departments tab.');
-  var out = lines.join('\n');
-  console.log(out);
-  return out;
 }
 
 // Create the department names as EMPTY rows — names only, NO section grants.
@@ -2227,642 +2660,254 @@ var SEED_MEMBERSHIPS = {
 };
 
 function seedDepartments() {
-  var ss = getSs();
-  var tab = getOrCreateDeptTab(ss);
-  var shape = deptTabShape(tab);
+  return report(withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json') || {};
+    if (!store.departments) store.departments = {};
+    if (!store.memberships) store.memberships = {};
 
-  // A tab whose header nobody recognises cannot be safely reinterpreted: the six
-  // columns no longer mean what the nine did. Refuse, and name the actual header.
-  if (shape === 'unknown') {
-    return report('DEPARTMENTS has an unrecognised header — refusing to touch it.\n' +
-           'Header found: ' + deptTabShapeHeader(tab) + '\n' +
-           'Expected:     ' + DEPT_HEADS.join(' | ') + '\n' +
-           'Inspect it by hand; no derivation from an unknown header is trustworthy.');
-  }
-  // Legacy nine-section layout: snapshot, then rebuild every row from SEED_GRANTS.
-  // Mapping by NAME, never by position — that is the whole reason this branch exists.
-  if (shape === 'legacy-9') return report(seedDepartmentsRebuildLegacy(ss, tab));
+    var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    var created = [], updated = [], unchanged = [], dropped = [];
 
-  var data = tab.getDataRange().getValues();
-  var byKey = {};
-  for (var i = 1; i < data.length; i++) {
-    var k = String(data[i][0] || '').trim();
-    if (k) byKey[k] = i + 1;                      // 1-indexed sheet row
-  }
+    Object.keys(SEED_GRANTS).forEach(function (key) {
+      var desiredSecs   = SEED_GRANTS[key];
+      var desiredTriage = TRIAGE_DEPARTMENTS.indexOf(key) > -1;
+      var name          = seedDeptName(key);
+      var existing      = store.departments[key];
 
-  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var created = [], updated = [], unchanged = [], dropped = [];
+      if (!existing) {
+        var grants = {};
+        SECTION_KEYS.forEach(function (s) { if (desiredSecs.indexOf(s) > -1) grants[s] = true; });
+        store.departments[key] = { name: name, active: 'yes', grants: grants,
+                                   triage: desiredTriage, updatedAt: ts, updatedBy: 'seed' };
+        created.push(key + (desiredSecs.length ? '' : ' (no sections)') + (desiredTriage ? ' +Triage' : ''));
+        return;
+      }
 
-  Object.keys(SEED_GRANTS).forEach(function (key) {
-    var desiredSecs = SEED_GRANTS[key];
-    var desiredTriage = TRIAGE_DEPARTMENTS.indexOf(key) > -1;
-    var name = seedDeptName(key);
+      // UPSERT, not "already there, skip". `present` used to mean "nothing to do", so
+      // a half-granted or wrong department was never corrected — which is the whole
+      // failure mode this seeds against.
+      var have = existing.grants || {};
+      var deltas = [];
+      SECTION_KEYS.forEach(function (s) {
+        var want = desiredSecs.indexOf(s) > -1;
+        var cur  = !!have[s];
+        if (cur === want) return;
+        if (want) { have[s] = true; deltas.push('+' + s); }
+        else {
+          delete have[s];
+          // Losing a grant is the one thing a rewrite can do silently, so it is
+          // reported separately and loudly rather than as just another delta.
+          dropped.push(key + ': ' + s);
+          deltas.push('-' + s);
+        }
+      });
+      var haveTriage = !!existing.triage;
+      if (haveTriage !== desiredTriage) deltas.push(desiredTriage ? '+Triage' : '-Triage');
 
-    if (!byKey[key]) {
-      var row = [key, name, 'yes'];
-      SECTION_KEYS.forEach(function (s) { row.push(desiredSecs.indexOf(s) > -1 ? 'edit' : ''); });
-      row.push(ts); row.push('seed');
-      row.push(desiredTriage ? 'edit' : '');
-      tab.appendRow(row);
-      created.push(key + (desiredSecs.length ? '' : ' (no sections)') + (desiredTriage ? ' +Triage' : ''));
-      return;
-    }
+      existing.name      = name;
+      existing.active    = 'yes';
+      existing.grants    = have;
+      existing.triage    = desiredTriage;
+      existing.updatedAt = ts;
+      existing.updatedBy = 'seed';
+      store.departments[key] = existing;
 
-    // UPSERT, not blind append. `present` used to mean "nothing to do", so a
-    // half-granted or wrong row was never corrected — which is the whole failure
-    // mode this seeds against.
-    var r = byKey[key];
-    var cur = data[r - 1];
-    var deltas = [];
-    for (var j = 0; j < SECTION_KEYS.length; j++) {
-      var s = SECTION_KEYS[j];
-      var want = desiredSecs.indexOf(s) > -1 ? 'edit' : '';
-      var raw  = String(cur[3 + j] || '').trim().toLowerCase();
-      var have = raw === 'edit' ? 'edit' : (raw ? raw : '');
-      if (have === want) continue;
-      tab.getRange(r, 4 + j).setValue(want);
-      // Losing a grant is the one thing a rewrite can do silently, so it is
-      // reported separately and loudly rather than as just another delta.
-      if (want === '' && have) { dropped.push(key + ': ' + s + ' (was ' + have + ')'); deltas.push('-' + s); }
-      else deltas.push('+' + s);
-    }
-    var tCol = deptTriageIndex() + 1;             // 1-indexed
-    var haveT = String(cur[tCol - 1] || '').trim().toLowerCase() === 'edit';
-    if (haveT !== desiredTriage) {
-      tab.getRange(r, tCol).setValue(desiredTriage ? 'edit' : '');
-      deltas.push(desiredTriage ? '+Triage' : '-Triage');
-    }
-    if (deltas.length) updated.push(key + ': ' + deltas.join(', '));
-    else unchanged.push(key);
-  });
+      if (deltas.length) updated.push(key + ': ' + deltas.join(', '));
+      else unchanged.push(key);
+    });
 
-  var lines = [];
-  lines.push(created.length  ? 'Created (' + created.length + '): ' + created.join('; ') : 'Created: none');
-  lines.push(updated.length  ? 'Updated (' + updated.length + '): ' + updated.join('; ') : 'Updated: none');
-  lines.push('Unchanged: ' + (unchanged.length ? unchanged.join(', ') : 'none'));
-  lines.push(dropped.length
-    ? 'DROPPED GRANTS (' + dropped.length + ') — read these before you trust the matrix: ' + dropped.join('; ')
-    : 'DROPPED GRANTS: none.');
-  lines.push('');
-  lines.push('IQC and Compliance are seeded with no grants and no members — intentional.');
-  lines.push('The grants are live as soon as this returns; tick any changes in the app.');
-  return report(lines.join('\n'));
+    // ONE key per department, written as one file. Any department in the store that
+    // SEED_GRANTS does not name is left untouched rather than deleted — a seed that
+    // removes things is not a seed.
+    writeJsonLocked('access.json', store);
+
+    var lines = [];
+    lines.push(created.length  ? 'Created (' + created.length + '): ' + created.join('; ') : 'Created: none');
+    lines.push(updated.length  ? 'Updated (' + updated.length + '): ' + updated.join('; ') : 'Updated: none');
+    lines.push('Unchanged: ' + (unchanged.length ? unchanged.join(', ') : 'none'));
+    lines.push(dropped.length
+      ? 'DROPPED GRANTS (' + dropped.length + ') — read these before you trust the matrix: ' + dropped.join('; ')
+      : 'DROPPED GRANTS: none.');
+    lines.push('');
+    lines.push('IQC and Compliance are seeded with no grants and no members — intentional.');
+    lines.push('The grants are live as soon as this returns; tick any changes in the app.');
+    return lines.join('\n');
+  }));
 }
 
-// "flight-test" -> "Flight Test" for the display Name cell.
+// "flight-test" -> "Flight Test" for the display Name.
 function seedDeptName(key) {
   var i = SEED_DEPARTMENTS.map(deptKeyFromName).indexOf(key);
   return i > -1 ? SEED_DEPARTMENTS[i] : key;
 }
 
-function deptTabShapeHeader(tab) {
-  try {
-    var last = tab.getLastColumn();
-    return last ? tab.getRange(1, 1, 1, last).getValues()[0].join(' | ') : '(empty)';
-  } catch (e) { return '(unreadable)'; }
-}
-
-// Rebuild a legacy nine-section DEPARTMENTS tab. Snapshot first (refusing if the
-// backup already exists, which makes a double-apply impossible), then write the ten
-// rows from SEED_GRANTS by NAME. Returns the old grants that the new mapping does
-// not reproduce — the one thing this could silently lose.
-function seedDepartmentsRebuildLegacy(ss, tab) {
-  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-  var backupName = 'DEPARTMENTS_BACKUP_' + stamp;
-  if (ss.getSheetByName(backupName)) {
-    return 'Refusing: ' + backupName + ' already exists. A previous rebuild already ran today.\n' +
-           'Rename or delete that tab if you really mean to rebuild again.';
-  }
-
-  var values = tab.getDataRange().getValues();
-  ss.insertSheet(backupName).getRange(1, 1, values.length, values[0].length).setValues(values);
-
-  var oldByKey = {};
-  for (var i = 1; i < values.length; i++) {
-    var k = String(values[i][0] || '').trim();
-    if (k) oldByKey[k] = values[i];
-  }
-  var lost = [];
-  Object.keys(oldByKey).forEach(function (k) {
-    var row = oldByKey[k];
-    for (var j = 0; j < LEGACY_DEPT_SECTIONS.length; j++) {
-      var v = String(row[3 + j] || '').trim();
-      if (!v) continue;
-      var sec = LEGACY_DEPT_SECTIONS[j];
-      var now = (SEED_GRANTS[k] || []).indexOf(sec) > -1 ? 'edit' : '';
-      if (now !== v) lost.push(k + ': ' + sec + ' was ' + v + ', now ' + (now || '(none)'));
-    }
-  });
-
-  // Clear the old rows, then write the ten fresh ones. Both in one pass so a
-  // failure leaves the backup as the record rather than a half-written tab.
-  var lastRow = tab.getLastRow();
-  if (lastRow > 1) tab.getRange(2, 1, lastRow - 1, tab.getLastColumn()).clearContent();
-  ensureHeaders(tab, DEPT_HEADS);
-
-  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var rows = Object.keys(SEED_GRANTS).map(function (key) {
-    var row = [key, seedDeptName(key), 'yes'];
-    SECTION_KEYS.forEach(function (s) { row.push(SEED_GRANTS[key].indexOf(s) > -1 ? 'edit' : ''); });
-    row.push(ts); row.push('seed');
-    row.push(TRIAGE_DEPARTMENTS.indexOf(key) > -1 ? 'edit' : '');
-    return row;
-  });
-  tab.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-
-  return 'Rebuilt a legacy nine-section DEPARTMENTS tab as ' + DEPT_HEADS.length + ' columns.\n' +
-         'Backup: ' + backupName + ' — copy it to a private sheet before you trust this.\n' +
-         'Rows written: ' + rows.length + ' (from SEED_GRANTS, mapped by name).\n' +
-         (lost.length ? 'GRANTS NOT REPRODUCED (' + lost.length + '): ' + lost.join('; ')
-                      : 'Grants not reproduced: none — every old grant is in the new mapping.');
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // seedMemberships() — add the owner's person↔department edges, ADD ONLY.
 // ──────────────────────────────────────────────────────────────────────────────
-// Deliberately NOT setUserDepartments(): that deletes then re-appends, which is
-// right for an admin editing one person and wrong for a seed, because it would wipe
-// any edge somebody added between the seed being written and being run. This only
-// ever appends, and says so in its report — "nothing removed" is the property the
-// operator needs to trust before running it on live data.
+// Deliberately NOT setUserDepartments(): that REPLACES one person's whole list, which
+// is right for an admin editing that person and wrong for a seed, because it would
+// wipe any edge somebody added between the seed being written and being run. This
+// only ever adds, and says so in its report — "nothing removed" is the property the
+// operator needs to trust before running it.
 function seedMemberships() {
-  var ss = getSs();
-  var tab = getOrCreateUserDeptTab(ss);
-  var data = tab.getDataRange().getValues();
+  return report(withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json') || {};
+    if (!store.departments) store.departments = {};
+    if (!store.memberships) store.memberships = {};
 
-  var present = {};
-  for (var i = 1; i < data.length; i++) {
-    var e = String(data[i][0] || '').toLowerCase().trim();
-    var k = String(data[i][1] || '').trim();
-    if (e && k) present[e + '|' + k] = true;
-  }
+    var added = 0, already = 0, addedEmails = {};
+    // Deterministic department order, so the report reads the same on every run.
+    Object.keys(SEED_GRANTS).forEach(function (key) {
+      var people = SEED_MEMBERSHIPS[key] || [];
+      people.forEach(function (local) {
+        var email = local.indexOf('@') > -1 ? local.toLowerCase() : local.toLowerCase() + '@' + CONFIG.ALLOWED_DOMAIN;
+        var list  = (store.memberships[email] instanceof Array) ? store.memberships[email] : [];
+        if (list.indexOf(key) > -1) { already++; return; }
+        list.push(key);
+        store.memberships[email] = list;
+        addedEmails[email] = true;
+        added++;
+      });
+    });
 
-  var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-  var rows = [], addedEmails = {}, alreadyCount = 0;
-  // Deterministic department order, so the sheet reads the same on every run.
+    writeJsonLocked('access.json', store);
+
+    // Accounts that cannot sign in yet. The edge is still correct — department
+    // capabilities read memberships directly — but User Access will list a member
+    // with no account, so say which ones.
+    var noAccount = Object.keys(addedEmails).filter(function (email) {
+      try { return !findUser(email); } catch (e) { return false; }
+    });
+
+    var lines = [];
+    lines.push('Added ' + added + ' membership(s); ' + already + ' already present. Nothing removed.');
+    lines.push('Departments seeded: ' + Object.keys(SEED_GRANTS).filter(function (k) {
+      return (SEED_MEMBERSHIPS[k] || []).length;
+    }).join(', '));
+    lines.push('Purchase AND Inventory each list all three of vaibhav.panchal, purchase, tushar.kadam — intentional.');
+    lines.push('IQC and Compliance have no members — intentional (nobody was named for them).');
+    lines.push(noAccount.length
+      ? 'Added but NOT YET SIGN-IN-ABLE (' + noAccount.length + '): ' + noAccount.join(', ') +
+        ' — the edge is correct, they just have no account yet.'
+      : 'Every added email already has an account.');
+    return lines.join('\n');
+  }));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// seedAccounts() — one account per seeded member, each with a temporary password.
+// ──────────────────────────────────────────────────────────────────────────────
+// Run AFTER seedDepartments() and seedMemberships(), and after bootstrapAdmin().
+//
+// The roster is the UNION OF SEED_MEMBERSHIPS ITSELF, not a second copy of it. A
+// duplicate list would drift the moment somebody joins, and this way every seeded
+// department edge is guaranteed an account to attach to — which is the one thing
+// seedMemberships() cannot do, and why it prints the addresses that have none.
+//
+// ADD ONLY, like the other seeds: an existing account is SKIPPED, never rewritten.
+// Rewriting one would be worse than useless — it would issue a fresh temp password
+// to somebody who is already using theirs, and silently invalidate the password
+// they have.
+//
+// The temp passwords are printed ONCE, to the execution log, and are stored
+// nowhere: only the hash, the salt and `tempPwIssuedAt` reach users.json, so there
+// is no way to recover one afterwards. Copy the log into the local credentials txt
+// at the time. The log is not a private place — anyone with editor access to this
+// project can read it, and it does not last forever.
+function seedAccounts() {
+  // Unique addresses, sorted, so the report reads identically on every run.
+  var emails = [];
   Object.keys(SEED_GRANTS).forEach(function (key) {
-    var people = SEED_MEMBERSHIPS[key] || [];
-    people.forEach(function (local) {
-      var email = local.indexOf('@') > -1 ? local.toLowerCase() : local.toLowerCase() + '@' + CONFIG.ALLOWED_DOMAIN;
-      if (present[email + '|' + key]) { alreadyCount++; return; }
-      present[email + '|' + key] = true;
-      rows.push([email, key, ts, 'seed']);
-      addedEmails[email] = true;
+    (SEED_MEMBERSHIPS[key] || []).forEach(function (local) {
+      var email = local.indexOf('@') > -1
+        ? local.toLowerCase()
+        : local.toLowerCase() + '@' + CONFIG.ALLOWED_DOMAIN;
+      if (emails.indexOf(email) < 0) emails.push(email);
     });
   });
+  emails.sort();
 
-  if (rows.length) tab.getRange(tab.getLastRow() + 1, 1, rows.length, 4).setValues(rows);
-
-  // Accounts that cannot sign in yet. The edge is still correct — department
-  // capabilities read USER_DEPARTMENTS directly — but User Access will list a member
-  // with no account, so say which ones.
-  var noAccount = [];
-  Object.keys(addedEmails).forEach(function (email) {
-    try { if (!findUserRow(ss, email)) noAccount.push(email); } catch (e2) { noAccount.push(email); }
+  var created = [], skipped = [];
+  emails.forEach(function (email) {
+    if (isAdminEmail(email)) {
+      skipped.push(email + ' — admin; bootstrapAdmin() creates this one');
+      return;
+    }
+    if (!validEmail(email)) {
+      skipped.push(email + ' — not a valid email address');
+      return;
+    }
+    if (findUser(email)) {
+      skipped.push(email + ' — account already exists, password left untouched');
+      return;
+    }
+    // createUserRow takes its own lock and adds ONE key to users.json, so this
+    // loop must NOT hold the lock itself — a nested lock is refused, not queued.
+    try {
+      created.push({ email: email, pw: createUserRow(email, displayNameFor(email), 'seedAccounts') });
+    } catch (err) {
+      skipped.push(email + ' — ' + ((err && err.message) || 'failed'));
+    }
   });
 
   var lines = [];
-  lines.push('Added ' + rows.length + ' membership(s); ' + alreadyCount + ' already present. Nothing removed.');
-  lines.push('Departments seeded: ' + Object.keys(SEED_GRANTS).filter(function (k) {
-    return (SEED_MEMBERSHIPS[k] || []).length;
-  }).join(', '));
-  lines.push('Purchase AND Inventory each list all three of vaibhav.panchal, purchase, tushar.kadam — intentional.');
-  lines.push('IQC and Compliance have no members — intentional (nobody was named for them).');
-  lines.push(noAccount.length
-    ? 'Added but NOT YET SIGN-IN-ABLE (' + noAccount.length + '): ' + noAccount.join(', ') +
-      ' — the edge is correct, they just have no USERS row yet.'
-    : 'Every added email has a USERS row.');
+  lines.push('Created ' + created.length + ' account(s). Each must set their own password on first sign-in.');
+  lines.push('Email' + '\t' + 'Temporary password');
+  created.forEach(function (c) { lines.push(c.email + '\t' + c.pw); });
+  if (skipped.length) {
+    lines.push('');
+    lines.push('Skipped (' + skipped.length + '):');
+    skipped.forEach(function (s) { lines.push('  ' + s); });
+  }
+  lines.push('');
+  lines.push('⚠ Shown ONCE and stored nowhere — copy this log into the local credentials txt');
+  lines.push('  now, hand each person only their own line, then clear this from the log.');
   return report(lines.join('\n'));
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// APP_DATA SECTION MERGE — collapse nine sections into six
-// ──────────────────────────────────────────────────────────────────────────────
-//   old sec-g (Flight Test)  ──┐
-//   old sec-f (QC)           ──┴→ new sec-f (Quality Test Report)
-//   old sec-h (PDI)          ──┐
-//   old sec-i (Dispatch)     ──┴→ new sec-g (PDI Report/Dispatch Record)
-//
-// This REWRITES rows the live app is currently reading, so it cannot be pre-flight
-// — that is the mirror of the column-widening rationale above. It runs in the
-// cutover window, after the deploy and before gh-pages is pushed.
-//
-// The union is safe because NO FIELD ID IS RENAMED (see app.js FIELD_SECTION_INDEX):
-// `f_*` and `g_*` are disjoint by construction, as are `h_*` and `i_*`. Disjointness
-// is asserted anyway — a collision means somebody wrote a field through the API that
-// no form declares, and that must be visible rather than silently resolved.
-// ──────────────────────────────────────────────────────────────────────────────
-
-// A SINGLE pass from the ORIGINAL value. Applying these as sequential replaces
-// would CHAIN: sec-h → sec-g → sec-f would silently move a historical Flight Test
-// completion onto the wrong section. `null` means "drop it" — the Overview is not a
-// completable section.
-var DONE_MAP = { 'sec-a': null, 'sec-g': 'sec-f', 'sec-h': 'sec-g', 'sec-i': 'sec-g' };
-
-// The parsed field NAMES of an APP_DATA row. Never throws: a row whose Fields column
-// is not JSON (or is blank) simply has no keys, and the merge still has to cope.
-function fieldKeysOf(row) {
-  var parsed = {};
-  try { parsed = JSON.parse(row[3] || '{}') || {}; } catch (e) { parsed = {}; }
-  return Object.keys(parsed);
-}
-
-// WHICH SECTION A ROW BELONGS TO AFTER THE MERGE. A row's own field ids decide it,
-// because field ids were never renamed: old Flight Test wrote `g_*`, and the new
-// Section G writes only `h_*`/`i_*` (see app.js FIELD_SECTION_INDEX).
-//
-// `sec-g` is the one ambiguous id — it is a SOURCE (old Flight Test → sec-f) and a
-// TARGET (old sec-h/sec-i → new PDI/Dispatch) at the same time. A plain
-// `SEC_TARGET_MAP[sec]` lookup therefore gets the SECOND run of this migration
-// exactly wrong: it sweeps the freshly-merged PDI rows into sec-f, silently, and
-// nothing about the result looks wrong afterwards. That is not hypothetical — it is
-// what the first version of this function did.
-//
-// The safe direction when a sec-g row carries no `g_*` key is to treat it as the new
-// Section G and leave it alone: a stray, visible, empty row somebody can delete by
-// hand beats a silent merge that destroys dispatch data. planSectionMerge names those
-// rows in `plan.ambiguous` so the operator sees them instead of having to notice.
-function mergeTargetFor(row, secId) {
-  if (secId !== 'sec-g') return SEC_TARGET_MAP.hasOwnProperty(secId) ? SEC_TARGET_MAP[secId] : secId;
-  var keys = fieldKeysOf(row);
-  for (var i = 0; i < keys.length; i++) if (keys[i].indexOf('g_') === 0) return 'sec-f';
-  return 'sec-g';
-}
-
-// PURE. Takes the APP_DATA values array exactly as getValues() returns it and
-// returns the whole plan. No SpreadsheetApp, no Utilities, no clock — so a Node test
-// can extract this source and EXECUTE it against fixture arrays, which is the only
-// real evidence available for this kind of code.
-//
-// All targets are computed from the ONE original snapshot. Never rewrite and
-// re-scan: old sec-g is a SOURCE for new sec-f while new sec-g is a TARGET for old
-// sec-h/sec-i, so a sequential pass would merge Flight Test rows into PDI.
-// `mergeTargetFor` above is what tells those two sec-g eras apart.
-function planSectionMerge(data) {
-  var plan = {
-    survivors: [],   // { row, irNumber, sectionId, rowData } — rewritten IN PLACE
-    deletes:   [],   // { row, irNumber, sectionId }          — removed
-    collisions:[],   // same field id in two source rows — needs a human, never resolved
-    duplicates:[],   // two APP_DATA rows for one (ir, target) — cannot happen normally
-    ambiguous: [],   // sec-g rows with no field to date them — left untouched, named
-    doneRemaps:[],   // human-readable log of every done[] move
-    counts:    {}
-  };
-  if (!data || data.length < 2) return plan;
-
-  // Only these four section ids move. sec-b/c/d/e are neither a source nor a target
-  // and come out of this untouched — which is what keeps the blast radius to the rows
-  // that actually merged.
-  var MOVING = {};
-  Object.keys(SEC_TARGET_MAP).forEach(function (s) { MOVING[s] = true; MOVING[SEC_TARGET_MAP[s]] = true; });
-
-  // One group per (irNumber, TARGET section). All targets come from this ONE original
-  // snapshot — never rewrite and re-scan, because old sec-g is a SOURCE for new sec-f
-  // while new sec-g is a TARGET for old sec-h/sec-i. A sequential pass would merge
-  // Flight Test rows into PDI.
-  var groups = {};
-  for (var i = 1; i < data.length; i++) {
-    var ir  = String(data[i][0] || '');
-    var sec = String(data[i][1] || '');
-    if (!ir || !sec) continue;
-    // Sentinel stores (__IRS__, __NUDGES__, __CONFIG__, __KB__): column A is the
-    // store name and column B is a real-world key that must NOT go through the map.
-    // Nothing matches today; the guard is here so a future map entry cannot corrupt them.
-    if (ir.indexOf('__') === 0) continue;
-    if (!MOVING[sec]) continue;
-
-    var tgt = mergeTargetFor(data[i], sec);
-    // A sec-g row the classifier read as the NEW Section G, but which carries no
-    // `h_*`/`i_*` field either, is a row with no evidence of its era at all — most
-    // likely an old Flight Test row so empty it identifies nothing. It is left alone,
-    // and NAMED: the alternative (merging it into sec-f on a guess) is the destructive
-    // direction, and the other alternative (saying nothing) hides it from the one
-    // check the rehearsal is built on.
-    if (sec === 'sec-g' && tgt === 'sec-g' &&
-        !fieldKeysOf(data[i]).some(function (k) {
-          return k.indexOf('h_') === 0 || k.indexOf('i_') === 0;
-        })) {
-      plan.ambiguous.push('IR ' + ir + ' (row ' + (i + 1) +
-        '): sec-g with no g_*/h_*/i_* field — era unknown, left untouched');
-    }
-
-    var gk = ir + '\t' + tgt;
-    if (!groups[gk]) groups[gk] = { irNumber: ir, sectionId: tgt, rows: [] };
-    groups[gk].rows.push(i + 1);   // 1-indexed sheet rows, ascending by construction
-  }
-
-  Object.keys(groups).forEach(function (gk) {
-    var g = groups[gk];
-    // The survivor is the row that already carries the target id, so a section that
-    // merely absorbed a neighbour keeps its own row and its position. Otherwise the
-    // first source row is RETARGETED in place — which is why this plan never creates
-    // a row: every target group is non-empty, and rewriting a row's section column is
-    // cheaper and steadier than appending one and deleting another. The row count can
-    // therefore only stay the same or shrink, which is what makes the backup's row
-    // count a meaningful check.
-    var targetRows = [], sourceRows = [];
-    for (var r = 0; r < g.rows.length; r++) {
-      if (String(data[g.rows[r] - 1][1]) === g.sectionId) targetRows.push(g.rows[r]);
-      else sourceRows.push(g.rows[r]);
-    }
-    // NOTHING TO MERGE: exactly one row, and it already carries the target id. Skipping
-    // it is what makes a second run an EMPTY plan instead of one that rewrites every
-    // already-merged row with identical content — and, for a row that never had a
-    // `done` key, silently ADDS `"done":[]`. mergeSectionsApply's "Already merged"
-    // guard tests `deletes.length === 0`, so a plan that still writes rows would walk
-    // straight past the guard it is supposed to trip. (This does not hide duplicates:
-    // two rows both carrying the target id still fall through and are de-duplicated.)
-    if (sourceRows.length === 0 && targetRows.length <= 1) return;
-    var survivorRow = targetRows.length ? targetRows[0] : sourceRows[0];
-    // More than one row already carrying the target id is an anomaly — an upsert
-    // should have prevented it — so say so rather than quietly picking one.
-    for (var t = 1; t < targetRows.length; t++) {
-      plan.duplicates.push(g.irNumber + ' ' + g.sectionId + ': rows ' + targetRows[0] +
-                           ' and ' + targetRows[t] + ' both hold this section');
-    }
-
-    var fields = {};
-    var latestRow = survivorRow, latestMs = -1;
-    for (var k = 0; k < g.rows.length; k++) {
-      var rk  = g.rows[k];
-      var row = data[rk - 1];
-      var parsed = {};
-      try { parsed = JSON.parse(row[3] || '{}') || {}; } catch (e) { parsed = {}; }
-
-      // Field ids are never renamed, and `f_*`/`g_*` (and `h_*`/`i_*`) are disjoint by
-      // construction — so a real collision means somebody wrote a field through the API
-      // that no form declares. Later wins, but it is recorded, never silently resolved.
-      Object.keys(parsed).forEach(function (fk) {
-        if (fk === 'done') return;                    // handled below, as a union
-        if (Object.prototype.hasOwnProperty.call(fields, fk)) {
-          plan.collisions.push(g.irNumber + ' ' + g.sectionId + ': field "' + fk +
-                               '" appears in more than one source row (rows ' + g.rows.join(', ') + ')');
-        }
-        fields[fk] = parsed[fk];
-      });
-
-      // done[] — remapped in ONE pass from THIS row's original value, then unioned.
-      // Sequential replaces would CHAIN (sec-h → sec-g → sec-f) and silently move a
-      // historical Flight Test completion onto the wrong section.
-      if (Object.prototype.hasOwnProperty.call(parsed, 'done')) {
-        var src = parsed.done instanceof Array ? parsed.done : [];
-        src.forEach(function (id) {
-          var sid = String(id);
-          if (!DONE_MAP.hasOwnProperty(sid)) { addDone(fields, sid); return; }
-          var to = DONE_MAP[sid];
-          if (to === null) { plan.doneRemaps.push(g.irNumber + ': done/' + sid + ' → dropped'); return; }
-          plan.doneRemaps.push(g.irNumber + ': done/' + sid + ' → ' + to);
-          addDone(fields, to);
-        });
-      }
-
-      // "Saved By" and "Last Updated" come from the NEWEST source row, so the merged
-      // row's author and stamp agree. The survivor contributes its position only.
-      var ms = parseAuditTimestamp(row[4]);
-      if (ms !== null && ms > latestMs) { latestMs = ms; latestRow = rk; }
-    }
-
-    var doneList = orderDoneBySections(fields.done || []);
-    delete fields.done;
-    fields.done = doneList;                 // always present, so the app need not guess
-
-    plan.survivors.push({
-      row: survivorRow, irNumber: g.irNumber, sectionId: g.sectionId,
-      rowData: [g.irNumber, g.sectionId, String(data[latestRow - 1][2] || ''),
-                JSON.stringify(fields), String(data[latestRow - 1][4] || '')]
-    });
-    g.rows.forEach(function (row1) {
-      if (row1 === survivorRow) return;
-      plan.deletes.push({ row: row1, irNumber: g.irNumber, sectionId: String(data[row1 - 1][1] || '') });
-    });
-  });
-
-  plan.counts = {
-    rowsScanned: Math.max(0, data.length - 1),
-    survivors:   plan.survivors.length,
-    deletes:     plan.deletes.length,
-    irsTouched:  countDistinctIRs(plan)
-  };
-  return plan;
-}
-
-// Union one done[] id onto a fields object.
-function addDone(fields, id) {
-  var list = fields.done instanceof Array ? fields.done : [];
-  if (id && list.indexOf(id) < 0) list.push(id);
-  fields.done = list;
-}
-
-// Sort a done[] by SECTION_KEYS order so the stored array is stable across runs — a
-// re-run's diff should be empty, not merely equivalent.
-function orderDoneBySections(list) {
-  return list.slice().sort(function (a, b) {
-    var ia = SECTION_KEYS.indexOf(a), ib = SECTION_KEYS.indexOf(b);
-    if (ia < 0 && ib < 0) return a < b ? -1 : (a > b ? 1 : 0);
-    if (ia < 0) return 1;
-    if (ib < 0) return -1;
-    return ia - ib;
-  });
-}
-
-function countDistinctIRs(plan) {
-  var seen = {}, n = 0;
-  function add(ir) { if (ir && !seen[ir]) { seen[ir] = true; n++; } }
-  plan.survivors.forEach(function (s) { add(s.irNumber); });
-  plan.deletes.forEach(function (d) { add(d.irNumber); });
-  return n;
-}
-
-// READ-ONLY. Prints the merge plan and changes nothing. Run this first, read it,
-// and only then run mergeSectionsApply().
-function mergeSectionsReport() {
-  var ss  = getSs();
-  var tab = ss.getSheetByName('APP_DATA');
-  if (!tab) return report('No APP_DATA tab — nothing to merge.');
-  var plan = planSectionMerge(tab.getDataRange().getValues());
-  return report(describeMergePlan(plan, 'REPORT ONLY — nothing was written.'));
-}
-
-function describeMergePlan(plan, headline) {
-  var c = plan.counts;
-  var lines = [];
-  lines.push(headline);
-  lines.push('');
-  lines.push('Rows scanned:        ' + c.rowsScanned);
-  lines.push('IRs touched:         ' + c.irsTouched);
-  lines.push('Rows rewritten:      ' + c.survivors + '  (one per surviving IR+section)');
-  lines.push('Rows deleted:        ' + c.deletes);
-  lines.push('');
-  lines.push('Every row belongs to exactly one target group, so a row can never be both a');
-  lines.push('source for the new sec-f and a survivor of the new sec-g. The direction');
-  lines.push('collision this migration exists to avoid is impossible by construction, not');
-  lines.push('by luck — the grouping key is the TARGET section, computed from one snapshot.');
-  if (plan.duplicates.length) {
-    lines.push('');
-    lines.push('DUPLICATE ROWS (' + plan.duplicates.length + ') — an upsert should have prevented these:');
-    plan.duplicates.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
-  }
-  if (plan.ambiguous.length) {
-    lines.push('');
-    lines.push('ERA-AMBIGUOUS sec-g ROWS (' + plan.ambiguous.length + ') — left UNTOUCHED:');
-    plan.ambiguous.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
-    lines.push('  (a sec-g row with no g_*/h_*/i_* field cannot be dated. Check each one by');
-    lines.push('   hand and merge it into sec-f yourself only if it is old Flight Test data.)');
-  }
-  if (plan.collisions.length) {
-    lines.push('');
-    lines.push('FIELD COLLISIONS (' + plan.collisions.length + ') — a field id in two source rows:');
-    plan.collisions.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
-    lines.push('  (later row wins; verify none of these is a real field the forms declare)');
-  } else {
-    lines.push('');
-    lines.push('Field collisions: none — the two source sets in each group are disjoint, as expected.');
-  }
-  if (plan.doneRemaps.length) {
-    lines.push('');
-    lines.push('done[] REMAPS (' + plan.doneRemaps.length + '), first 20:');
-    plan.doneRemaps.slice(0, 20).forEach(function (d) { lines.push('  ' + d); });
-  } else {
-    lines.push('done[] remaps: none needed.');
-  }
-  var byTgt = {};
-  plan.survivors.forEach(function (s) { byTgt[s.sectionId] = (byTgt[s.sectionId] || 0) + 1; });
-  lines.push('');
-  lines.push('Survivors by section: ' + Object.keys(byTgt).sort().map(function (k) {
-    return k + '=' + byTgt[k];
-  }).join(' ') + (Object.keys(byTgt).length ? '' : ' (none)'));
-  return lines.join('\n');
-}
-
-// APPLY. Runs inside withRowLock — the snapshot is taken INSIDE the lock callback,
-// never before, because this rewrites and deletes by remembered row index and a
-// concurrent append between the scan and the delete would make every index below it
-// point at the wrong row. That is the exact shape withRowLock's comment reserves it
-// for, and it is a new combination: no earlier migration takes a lock.
-function mergeSectionsApply() {
-  return report(withRowLock(function () {
-    var ss  = getSs();
-    var tab = getOrCreateDataTab(ss);
-    var data = tab.getDataRange().getValues();
-    var plan = planSectionMerge(data);
-
-    // Idempotency first, before any backup is created. A second run must be a no-op,
-    // not a second backup and a second delete pass.
-    //
-    // The test is BOTH counts, not `deletes.length` alone: an IR whose only Flight Test
-    // row is old sec-g — no existing sec-f row to absorb it — is RETARGETED in place,
-    // so it yields a survivor and zero deletes. Guarding on deletes alone would answer
-    // "Already merged" to a store that still has work to do, and refuse to do it.
-    if (plan.survivors.length === 0 && plan.deletes.length === 0) {
-      return 'Already merged — no rows carry a retired section id. Nothing written.';
-    }
-
-    // A DATED TAB, not a response. "A response is not a backup" (docs/10) — a dropped
-    // connection must not be the reason the pre-merge state is gone. Refusing if it
-    // already exists makes a double-apply impossible even if the guard above misses.
-    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-    var backupName = 'APP_DATA_BACKUP_' + stamp;
-    if (ss.getSheetByName(backupName)) {
-      return 'Refusing: ' + backupName + ' already exists — a merge already ran today.\n' +
-             'Copy that tab somewhere private, delete it, and re-run only if you mean to.';
-    }
-    var backup = ss.insertSheet(backupName);
-    ensureRoom(backup, data.length, tab.getLastColumn());
-    backup.getRange(1, 1, data.length, tab.getLastColumn()).setValues(data);
-
-    // Rewrite the survivors, then delete — deletes in REVERSE ROW ORDER, because
-    // deleteRow shifts everything below it, so going top-down would move each
-    // remaining target up by one and skip half of them.
-    plan.survivors.forEach(function (s) {
-      tab.getRange(s.row, 1, 1, s.rowData.length).setValues([s.rowData]);
-    });
-    var doomed = plan.deletes.slice().sort(function (a, b) { return b.row - a.row; });
-    doomed.forEach(function (d) { tab.deleteRow(d.row); });
-
-    var out = describeMergePlan(plan, 'MERGE APPLIED.');
-    out += '\n\nRows before: ' + plan.counts.rowsScanned + '  Rows after: ' +
-           (plan.counts.rowsScanned - plan.counts.deletes) +
-           '  (row count can only stay or shrink — nothing is appended)';
-    out += '\nBackup: ' + backupName + ' — copy it to a private sheet before you trust this.';
-    out += '\nUndo:   restoreAppDataFromBackup()';
-    return out;
-  }));
-}
-
-// THE UNDO. Finds the newest APP_DATA_BACKUP_<date>, snapshots the CURRENT state to
-// APP_DATA_PRE_RESTORE_<date> (so the undo is itself undoable — one level of redo),
-// then replaces the data rows with the backup's.
-//
-// It CLEARS first even though the merge only ever deletes, because a client on a
-// stale service worker may have appended real rows in the meantime; those must not
-// survive underneath a shorter restored block.
-function restoreAppDataFromBackup() {
-  return report(withRowLock(function () {
-    var ss = getSs();
-    var backups = ss.getSheets().filter(function (s) {
-      return /^APP_DATA_BACKUP_\d{4}-\d{2}-\d{2}$/.test(s.getName());
-    });
-    if (!backups.length) return 'No APP_DATA_BACKUP_<date> tab found — nothing to restore.';
-    backups.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });   // newest first
-    var src = backups[0];
-
-    var values = src.getDataRange().getValues();
-    if (values.length < 2) return 'The newest backup (' + src.getName() + ') is empty — refusing to wipe APP_DATA with it.';
-
-    var tab = getOrCreateDataTab(ss);
-    var cols = tab.getLastColumn();
-    var cur  = tab.getDataRange().getValues();
-
-    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
-    var preName = 'APP_DATA_PRE_RESTORE_' + stamp;
-    if (ss.getSheetByName(preName)) {
-      return 'Refusing: ' + preName + ' already exists — a restore already ran today.\n' +
-             'Rename or delete that tab if you really mean to restore again.';
-    }
-    var pre = ss.insertSheet(preName);
-    ensureRoom(pre, cur.length, cols);
-    pre.getRange(1, 1, cur.length, cols).setValues(cur);
-
-    var lastRow = tab.getLastRow();
-    if (lastRow > 1) tab.getRange(2, 1, lastRow - 1, cols).clearContent();
-    ensureRoom(tab, values.length, cols);
-    tab.getRange(1, 1, values.length, Math.min(cols, values[0].length > cols ? cols : values[0].length))
-       .setValues(values.map(function (r) { return r.slice(0, cols); }));
-
-    return 'Restored APP_DATA from ' + src.getName() + ' (' + (values.length - 1) + ' row(s)).\n' +
-           'The pre-restore state was saved to ' + preName + ' — that is your redo.\n' +
-           'Re-run mergeSectionsReport() to confirm the store is back to its old shape.';
-  }));
-}
-
-// Grow a freshly inserted sheet if the block being written is taller than its
-// default 1000 rows — setValues throws rather than auto-expanding.
-function ensureRoom(sheet, rows, cols) {
-  if (sheet.getMaxRows() < rows) sheet.insertRowsAfter(sheet.getMaxRows(), rows - sheet.getMaxRows());
-  if (cols && sheet.getMaxColumns() < cols) sheet.insertColumnsAfter(sheet.getMaxColumns(), cols - sheet.getMaxColumns());
+// A display name derived from an address, when the address is a person's:
+// "first.last" → "First Last". Role addresses ("purchase@") and bare names
+// ("ravi@") have no derivable full name and stay BLANK rather than being guessed
+// at — the admin can set any of them in User Access. Cosmetic only: nothing in the
+// app authorises on a name.
+function displayNameFor(email) {
+  var local = String(email).split('@')[0];
+  if (local.indexOf('.') < 0) return '';
+  return local.split('.').map(function (part) {
+    return part.charAt(0).toUpperCase() + part.slice(1);
+  }).join(' ');
 }
 
 
-// Ensure the admin has a usable account. If the row is missing it is created with
-// a temporary password (returned ONCE — copy it out of the execution log); if it
-// exists, its password is left alone and only the flags are normalised so the
+// Ensure the admin has a usable account. If the record is missing it is created
+// with a temporary password (returned ONCE — copy it out of the execution log); if
+// it exists, its password is left alone and only the flags are normalised so the
 // admin isn't forced through the first-login change.
 function bootstrapAdmin() {
-  var ss = getSs();
   var email = (CONFIG.ADMIN_EMAILS[0] || '').toLowerCase().trim();
   if (!email) return report('No CONFIG.ADMIN_EMAILS configured.');
-  var idx = findUserRowIndex(ss, email);
-  if (idx) {
-    getOrCreateUsersTab(ss).getRange(idx, 6).setValue('');      // Must Change Password = no
-    getOrCreateUsersTab(ss).getRange(idx, 8).setValue('active');
-    return report('Admin ' + email + ' already exists — flags normalised, existing password untouched.');
+  if (findUser(email)) {
+    return report(withRowLockOrThrow(function () {
+      // readJsonLocked, NOT findUser: findUser reads through the memoised readJson,
+      // and that copy may predate the lock. Writing it back would undo a password
+      // reset or a disable that landed in between — the whole reason the read has
+      // to be inside the lock.
+      var users = readJsonLocked('users.json') || {};
+      var rec = users[usersKey(email)];
+      if (!rec) return 'Admin ' + email + ' vanished mid-run.';
+      rec.mustChange = '';
+      rec.status     = 'active';
+      users[usersKey(email)] = rec;
+      writeJsonLocked('users.json', users);
+      return 'Admin ' + email + ' already exists — flags normalised, existing password untouched.';
+    }));
   }
   var pw = createUserRow(email, 'Monish Raza', 'bootstrap');
   return report('Created admin ' + email + '.\nTEMPORARY PASSWORD: ' + pw +
          '\nSign in with it, set your own password, and delete this log line afterwards.');
 }
 
-// Delete long-expired session rows. Safe anytime; nothing calls it automatically
+// Delete long-expired session records. Safe anytime; nothing calls it automatically
 // except a best-effort prune at sign-in.
 function maintenancePruneSessions() {
   pruneSessions();
@@ -2870,45 +2915,58 @@ function maintenancePruneSessions() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// MAINTENANCE: pruneAuditLog — drop AUDIT_LOG rows older than the retention window
+// MAINTENANCE: pruneAuditLog — drop audit entries older than the retention window
 // ──────────────────────────────────────────────────────────────────────────────
 // MANUAL, never automatic. The audit trail is the app's evidence of who changed
 // what; shrinking it behind anyone's back would be the wrong default, so this is a
 // lever an operator pulls on purpose, alongside maintenancePruneSessions().
 //
 // 400 days, not 90: the Sheet is the system of record for a warranty period, and
-// the log is what answers "who changed this and when" a year later. Volume after
-// §1.4's other two measures is roughly 1+K rows per human save.
+// the log is what answers "who changed this and when" a year later.
 var AUDIT_RETENTION_DAYS = 400;
 
+// Per-IR files made this cheaper and safer than the tab version: only the affected
+// tickets are rewritten, where the old code rewrote one whole tab. The RETENTION
+// RULE is unchanged, and so is the wart in it — pruning is per-subject, so an old
+// entry can go while its ticket is still open. The audit records no open/closed
+// state, so a smarter rule is not available here. Noted, not fixed.
 function maintenancePruneAuditLog() {
-  return report(withRowLock(function () {
-    var ss  = getSs();
-    var tab = ss.getSheetByName('AUDIT_LOG');
-    if (!tab) return 'No AUDIT_LOG tab — nothing to prune.';
+  return report(withRowLockOrThrow(function () {
+    var folder = getStoreSubfolder(STORE_AUDIT_DIR, false);
+    if (!folder) return 'No audit/ folder — nothing to prune.';
 
-    var data = tab.getDataRange().getValues();
-    if (data.length < 2) return 'AUDIT_LOG is empty — nothing to prune.';
+    var cutoff = Date.now() - (AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    var files = folder.getFiles();
+    var prunedFiles = 0, prunedLines = 0, keptLines = 0, unreadable = 0;
 
-    // The cutoff is computed from the app's own timestamp format, so it compares
-    // as a string: 'dd-MMM-yyyy HH:mm:ss' sorts chronologically only within a
-    // year, which is exactly why this parses instead of comparing text.
-    var cutoff = new Date().getTime() - (AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
-    var doomed = [];
-    for (var i = 1; i < data.length; i++) {
-      var ms = parseAuditTimestamp(data[i][0]);
-      if (ms === null) continue;               // unparseable — keep it, never guess
-      if (ms < cutoff) doomed.push(i + 1);     // 1-indexed sheet row
+    while (files.hasNext()) {
+      var file = files.next();
+      var subject = String(file.getName()).replace(/\.jsonl$/, '');
+      var lines = parseAuditLines(file.getBlob().getDataAsString(), subject);
+      if (!lines.length) continue;
+      // `parseAuditLines` turns an unparseable line into a visible placeholder with
+      // no timestamp; parseAuditTimestamp answers null for it and it is KEPT, never
+      // guessed at. Deleting a line nobody can read is how evidence disappears.
+      var keep = lines.filter(function (l) {
+        var ms = parseAuditTimestamp(l.t);
+        if (ms === null) { unreadable++; return true; }
+        return ms >= cutoff;
+      });
+      var gone = lines.length - keep.length;
+      if (!gone) { keptLines += lines.length; continue; }
+
+      // One locked rewrite of this subject's file. The lock is held across the whole
+      // loop, which is why there is no read-merge-write race between two tickets.
+      file.setContent(keep.map(function (l) { return JSON.stringify(l); }).join('\n') + (keep.length ? '\n' : ''));
+      prunedFiles++;
+      prunedLines += gone;
+      keptLines += keep.length;
     }
-    if (!doomed.length) return 'Nothing older than ' + AUDIT_RETENTION_DAYS + ' days. AUDIT_LOG unchanged.';
 
-    // Reverse order: deleteRow shifts everything below it, so deleting top-down
-    // would move each remaining target up by one and skip half of them. This is
-    // the same trap the user purge documents; the lock above is why it is safe.
-    for (var d = doomed.length - 1; d >= 0; d--) tab.deleteRow(doomed[d]);
-
-    return 'Pruned ' + doomed.length + ' audit row(s) older than ' + AUDIT_RETENTION_DAYS +
-           ' days. ' + (data.length - 1 - doomed.length) + ' row(s) kept.';
+    if (!prunedLines) return 'Nothing older than ' + AUDIT_RETENTION_DAYS + ' days. Audit unchanged.';
+    return 'Pruned ' + prunedLines + ' audit entr(y/ies) older than ' + AUDIT_RETENTION_DAYS +
+           ' days across ' + prunedFiles + ' ticket file(s). ' + keptLines + ' entr(y/ies) kept' +
+           (unreadable ? ', including ' + unreadable + ' unreadable line(s) kept on purpose.' : '.');
   }));
 }
 

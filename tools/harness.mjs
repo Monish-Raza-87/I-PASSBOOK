@@ -17,13 +17,34 @@ const APP_JS = new URL('../app.js', import.meta.url);
 
 // Minimal DOM: enough for module-level statements and the render paths to run,
 // with nothing that could pass a test the browser would fail.
+//
+// `classList` and the attribute pair are the exceptions to "minimal": they are
+// REAL, backed by a Set and a map. A stub that swallows `toggle()` would make
+// every collapse/expand assertion vacuous — the test could not fail, which is
+// worse than no test. `toggle(name, force)` follows the DOM signature exactly,
+// including the two-argument `force` form the app leans on.
 function el() {
+  const classes = new Set();
+  const attrs = new Map();
   return {
     style: {}, dataset: {}, value: '', textContent: '', innerHTML: '',
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+    classList: {
+      add(...names) { names.forEach(n => classes.add(n)); },
+      remove(...names) { names.forEach(n => classes.delete(n)); },
+      contains: n => classes.has(n),
+      toggle(n, force) {
+        const on = force === undefined ? !classes.has(n) : !!force;
+        on ? classes.add(n) : classes.delete(n);
+        return on;
+      },
+      get length() { return classes.size; },
+    },
+    _classes: classes,
     addEventListener() {}, removeEventListener() {}, appendChild() {}, remove() {},
     querySelector() { return null; }, querySelectorAll() { return []; },
-    setAttribute() {}, getAttribute() { return null; }, focus() {}, blur() {},
+    focus() {}, blur() {},
+    setAttribute(n, v) { attrs.set(n, String(v)); },
+    getAttribute(n) { return attrs.has(n) ? attrs.get(n) : null; },
     scrollIntoView() {}, children: [], insertBefore() {}, closest() { return null; },
   };
 }
@@ -75,7 +96,7 @@ export function loadApp(bindings = '', opts = {}) {
     alert() {},
     // No network: every loader takes its failure branch, which is also the branch
     // the "backend unreachable" behaviour depends on.
-    fetch: () => Promise.reject(new Error('no network in test')),
+    fetch: opts.fetch || (() => Promise.reject(new Error('no network in test'))),
     localStorage: storage,
     sessionStorage: storage2,
     navigator: { userAgent: 'node', onLine: true },
@@ -93,7 +114,20 @@ export function loadApp(bindings = '', opts = {}) {
   };
   ctx.window = ctx;
   ctx.globalThis = ctx;
-  ctx.matchMedia = () => ({ matches: false, addEventListener() {}, addListener() {}, removeEventListener() {} });
+  // Only when a suite supplies its own transport. app.js posts with FormData, so
+  // a suite that drives the real login path needs the constructor to exist; it is
+  // left undefined otherwise so no existing suite changes behaviour.
+  if (opts.fetch) {
+    ctx.FormData = class { constructor() { this.entries = []; } append(k, v) { this.entries.push([k, v]); } };
+  }
+  // `desktop: true` reports a ≥1024px viewport, which is the ONLY way to exercise
+  // the desktop half of renderLayout — the two halves put the list and the detail
+  // pane on one screen or on two, so a suite that only ever sees the default would
+  // silently test the phone layout and call it the layout.
+  ctx.matchMedia = q => ({
+    matches: !!opts.desktop && /min-width/.test(String(q)),
+    addEventListener() {}, addListener() {}, removeEventListener() {},
+  });
   ctx.window.matchMedia = ctx.matchMedia;
   ctx.window.addEventListener = () => {};
   ctx.window.location = ctx.location;

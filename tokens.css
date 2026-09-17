@@ -1037,4 +1037,9 @@
   --st-danger-bg:   var(--surface-red-2);
   --st-danger-fg:   var(--ink-red-6);
   --st-danger-bd:   var(--outline-red-1);
+
+  /* Collapsed sidebar (Gmail-style rail). A rail exactly as wide as the header is
+     tall, so the collapse toggle at the top-left and the brand mark below it
+     share one column edge. An alias, not a new value. */
+  --rail-w: var(--header-h);
 }

@@ -599,20 +599,23 @@
   margin-bottom: 8px;
 }
 
-/* ── Section B/H — e-signature ─────────────────────────────── */
+/* ── Section B/H — e-signature ─────────────────────────────
+   Read-only: the block records who saved the section, and no button changes it.
+   The unsigned state is a dashed placeholder; the signed state is the green
+   record with the timestamp. */
 .esignature-block { font-size: var(--text-sm); }
 .esignature-unsigned {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 0.6rem;
   padding: 0.7rem 0.9rem;
   border: 1px dashed var(--outline-gray-3);
   border-radius: var(--radius-4);
   background: var(--surface-gray-1);
 }
-.esignature-role { color: var(--ink-gray-5); font-size: var(--text-xs); }
-.esignature-muted { color: var(--ink-gray-5); }
+.esignature-role { color: var(--ink-gray-7); font-weight: var(--weight-medium); font-size: var(--text-xs); }
+.esignature-muted { color: var(--ink-gray-5); font-size: var(--text-xs); }
 .esignature-signed {
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--outline-green-2);
@@ -632,7 +635,6 @@
   color: var(--ink-gray-5);
 }
 .esignature-history-label { font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
-.btn-esign { margin-top: 0.55rem; }
 
 /* ── Section D — image evidence ────────────────────────────── */
 .image-evidence { display: flex; flex-direction: column; gap: 0.55rem; }
@@ -777,16 +779,17 @@
   font-size: var(--text-sm);
 }
 .hist-top { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-bottom: 2px; }
-.hist-ev { font-weight: var(--weight-semibold); color: var(--ink-gray-9); white-space: nowrap; }
+.hist-ev { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: var(--weight-semibold); color: var(--ink-gray-9); white-space: nowrap; }
+/* The glyph sits slightly quieter than the label, so ten rows read as text first
+   and as icons second. Inherits the themed colour from .icon's currentColor. */
+.hist-ev .icon { color: var(--ink-gray-6); }
 .hist-field {
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
   background: var(--surface-gray-3);
   color: var(--ink-gray-7);
   padding: 1px 5px;
   border-radius: var(--radius-2);
 }
-.hist-field.hist-muted { color: var(--ink-gray-5); background: transparent; font-family: inherit; }
 .hist-time { margin-left: auto; color: var(--ink-gray-5); font-size: var(--text-xs); white-space: nowrap; }
 .hist-by { color: var(--ink-gray-5); font-size: var(--text-xs); margin-bottom: 3px; }
 .hist-diff { font-size: var(--text-xs); word-break: break-word; margin-top: 2px; }
@@ -806,10 +809,67 @@
   padding: 0 5px;
 }
 
-/* The Overview's inline copy of the timeline. The modal's 64vh is wrong inside a
-   panel that already scrolls with the page — it would make the panel taller than
-   the viewport on its own. */
+/* The in-page activity log. The modal's 64vh is wrong inside a page that already
+   scrolls — it would make the log taller than the viewport on its own. */
 #ir-timeline .hist-list { max-height: 48vh; }
+
+/* ══════════════════════════════════════════════════════════
+   ACTIVITY LOG — one collapsible panel below every section
+   Moved out of #ir-overview: it is the longest block on the page
+   and sat above the tabs, pushing the sections off-screen.
+   ══════════════════════════════════════════════════════════ */
+.activity-panel {
+  margin: 0.85rem 0 0;
+  padding: 0.6rem 0.9rem 0.7rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-5);
+  background: var(--surface-base);
+}
+.activity-title { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+
+/* The whole header row is the toggle, so the hit area is the full width and the
+   caret is decoration rather than a control of its own. */
+.activity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.15rem 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-gray-9);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+.activity-toggle:hover { color: var(--ink-gray-7); }
+.activity-caret { display: inline-flex; color: var(--ink-gray-5); transition: transform 0.15s var(--ease); }
+#ir-activity.is-open .activity-caret { transform: rotate(90deg); }
+
+/* How many rows are behind the fold. Blank when there are none, so a fresh IR
+   does not advertise an empty log. */
+.activity-count {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--ink-gray-5);
+  font-variant-numeric: tabular-nums;
+}
+
+/* display, not a height transition: there is no accordion animation anywhere in
+   this app, and a max-height transition needs a magic number that the 48vh cap
+   inside would fight. The caret rotation is the whole affordance. */
+.activity-body { display: none; }
+#ir-activity.is-open .activity-body { display: block; }
+/* The panel supplies its own padding; the list's would double it. */
+.activity-body .hist-list { padding-inline: 0; }
+
+/* Belt-and-braces hide for "no IR open". #ir-activity lives inside #detail-view,
+   which renderLayout() already hides — so this only matters if #detail-view is
+   ever shown with currentIR cleared. A class, never an inline `display`: that
+   convention is reserved for the panes. */
+#ir-activity.is-hidden { display: none; }
 
 /* ══════════════════════════════════════════════════════════
    IR OVERVIEW — pinned panel above the tabs

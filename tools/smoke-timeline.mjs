@@ -20,7 +20,7 @@ const r = makeReporter();
 
 const T = loadApp(`
   buildTimeline, parseAuditTimestamp, SUPPRESSED_AUDIT_FIELDS, TIMELINE_KINDS,
-  renderTimelineInto, sectionDisplayName,
+  renderTimelineInto, sectionDisplayName, iconSvg, ICON_PATHS,
   renderInto: (el, tl, opts) => renderTimelineInto(el, tl, opts),
 `);
 
@@ -278,9 +278,11 @@ r.ok('an empty timeline says so, with the caller\'s wording',
   render([], { emptyText: 'Nothing here yet.' }).slice(0, 160));
 r.ok('and has a default wording for the other caller',
   /No activity yet/.test(render([], {})), render([], {}).slice(0, 160));
-r.ok('a save row names the whole section rather than a field',
-  /whole section/.test(render(built([sectionRow({})]), {})),
-  render(built([sectionRow({})]), {}).slice(0, 300));
+r.ok('a save row is labelled as a whole-section event, with no field chip repeating it',
+  (() => {
+    const h = render(built([sectionRow({})]), {});
+    return /Section saved/.test(h) && h.indexOf('hist-field') < 0;
+  })(), render(built([sectionRow({})]), {}).slice(0, 500));
 r.ok('a field row is labelled with its human name, not its id',
   (() => {
     const h = render(built([sectionRow({ event: 'changed', fieldId: 'b_remarks', oldValue: 'a', newValue: 'b' })]), {});
@@ -296,12 +298,19 @@ r.ok('an upload row shows the file name and the source field name',
     const h = render(built([sectionRow({ event: 'uploaded', fieldId: 'f_qcDocs', newValue: 'qc-report.pdf' })]), {});
     return /qc-report\.pdf/.test(h) && /File uploaded/.test(h);
   })(), render(built([sectionRow({ event: 'uploaded', fieldId: 'f_qcDocs', newValue: 'qc-report.pdf' })]), {}).slice(0, 400));
-r.ok('a workflow row is chipped so it reads as a different kind of event',
-  /hist-src">workflow/.test(render(built([workflowRow({})]), {})),
-  render(built([workflowRow({})]), {}).slice(0, 400));
-r.ok('a comment row is placed under "comment", not under a section',
-  /· comment/.test(render(built([], [comment({})]), {})),
-  render(built([], [comment({})]), {}).slice(0, 400));
+r.ok('a triage row is chipped so it reads as a different kind of event',
+  /hist-src">Triage/.test(render(built([workflowRow({})]), {})),
+  render(built([workflowRow({})]), {}).slice(0, 600));
+r.ok("the backend's internal store name is gone from what a user reads",
+  !/workflow/i.test(render(built([workflowRow({})]), {})),
+  render(built([workflowRow({})]), {}).slice(0, 600));
+r.ok('a comment row is attributed to its author, never to a section',
+  (() => {
+    const h = render(built([], [comment({})]), {});
+    return /hist-by">by Ravi</.test(h) && !/hist-by">by [^<]*·/.test(h);
+  })(), render(built([], [comment({})]), {}).slice(0, 600));
+r.ok('and it keeps the field chip, which is where its context comes from',
+  /Remarks/.test(render(built([], [comment({})]), {})));
 r.ok('a mention is chipped', /@mention/.test(render(built([], [comment({ mentions: ['x@y.com'] })]), {})));
 r.ok('a pre-merge history row is labelled by its OLD letter, not the survivor',
   (() => {
@@ -370,5 +379,63 @@ r.ok('a live section uses its current short name',
 r.ok('an unknown id falls back to itself', T.sectionDisplayName('sec-zz') === 'sec-zz');
 r.ok('and an empty id is empty, so no "(formerly" leaks into a comment row',
   T.sectionDisplayName('') === '');
+
+r.head('every kind\'s icon comes from the one inline set');
+// The app had no SVG at all before this: every icon was an emoji, which renders as
+// a different picture on every OS. These assertions pin the three properties that
+// make the replacement work offline and in both themes.
+const svgs = Object.keys(T.TIMELINE_KINDS).map(k => T.iconSvg(T.TIMELINE_KINDS[k].icon));
+r.ok('all ten icons render as inline SVG',
+  svgs.every(s => /^<svg[\s\S]*<\/svg>$/.test(s)),
+  svgs.map((s, i) => [Object.keys(T.TIMELINE_KINDS)[i], s.slice(0, 40)]));
+r.ok('every icon inherits the themed text colour instead of hardcoding one',
+  svgs.every(s => /stroke="currentColor"/.test(s)) && !/#[0-9a-fA-F]{3,8}/.test(svgs.join('')),
+  svgs.join('').match(/#[0-9a-fA-F]{3,8}/g));
+r.ok('no icon reaches for a network asset the offline shell would not have',
+  !/https?:|xlink:href|<image|<use/.test(svgs.join('')));
+r.ok('an unknown kind renders no icon rather than "undefined"',
+  T.iconSvg('nope') === '' && T.iconSvg(undefined) === '' && T.iconSvg(null) === '');
+r.ok('the set is one family — every icon on the same grid at one stroke weight',
+  svgs.every(s => /viewBox="0 0 24 24"/.test(s) && /stroke-width="1.75"/.test(s)));
+r.ok('the unknown-kind fallback resolves through the same set',
+  /<svg/.test(T.iconSvg((T.TIMELINE_KINDS.zzz || { icon: 'dot' }).icon)));
+
+r.head('the wording names the event the backend actually wrote');
+// Two vocabularies for one event is the failure mode: the audit row says `changed`
+// and the screen said "Edited", the store says `workflow` and the UI said
+// "workflow". Each label below is the Triage modal's own noun for the same field.
+r.ok('the backend verb `changed` is not relabelled "Edited"',
+  T.TIMELINE_KINDS.edit.label === 'Changed', T.TIMELINE_KINDS.edit.label);
+r.ok("the four triage events reuse the Triage modal's own nouns",
+  T.TIMELINE_KINDS.status.label === 'Status changed' &&
+  T.TIMELINE_KINDS.assign.label === 'Assigned to' &&
+  T.TIMELINE_KINDS.priority.label === 'Priority changed' &&
+  T.TIMELINE_KINDS.type.label === 'Type changed',
+  ['status', 'assign', 'priority', 'type'].map(k => T.TIMELINE_KINDS[k].label));
+r.ok('no label still says "whole section" or "workflow"',
+  !Object.values(T.TIMELINE_KINDS).some(k => /whole section|workflow/i.test(k.label)),
+  Object.values(T.TIMELINE_KINDS).map(k => k.label));
+
+r.head('one timestamp format for both halves of the list');
+// The backend stamps `dd-MMM-yyyy HH:mm:ss`; comments carry epoch ms. Both used to
+// be rendered as-is, so one newest-first list showed two formats interleaved and
+// read as two different feeds. Timezone-safe either way: parseAuditTimestamp builds
+// a LOCAL Date and toDisplayDateTime reads it back locally, so only the format
+// changes, never the instant.
+const auditRow   = render(built([sectionRow({})]), {});
+const commentRow = render(built([], [comment({})]), {});
+const timeOf = h => (h.match(/hist-time">([^<]*)/) || [])[1] || '';
+r.ok('the audit row is formatted, not raw',
+  /^\d{2} \w+ \d{4}, \d{2}:\d{2}$/.test(timeOf(auditRow)), timeOf(auditRow));
+r.ok('the comment row uses the identical shape',
+  /^\d{2} \w+ \d{4}, \d{2}:\d{2}$/.test(timeOf(commentRow)), timeOf(commentRow));
+r.ok('the raw backend stamp never reaches the screen',
+  !/\d{2}-[A-Z][a-z]{2}-\d{4} \d{2}:\d{2}:\d{2}/.test(auditRow), timeOf(auditRow));
+
+r.head('old/new read as words');
+const diffRow = render(built([sectionRow({ event: 'changed', fieldId: 'b_remarks', oldValue: 'a', newValue: 'b' })]), {});
+r.ok('the prefixes are Was / Now, not old: / new:',
+  /hist-old">Was</.test(diffRow) && /hist-new">Now</.test(diffRow) &&
+  !/\bold:/.test(diffRow) && !/\bnew:/.test(diffRow), diffRow.slice(0, 500));
 
 r.finish();

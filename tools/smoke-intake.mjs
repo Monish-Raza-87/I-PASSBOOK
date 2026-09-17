@@ -215,7 +215,7 @@ T.currentIR = {
 };
 T.renderIntake();
 const legacy = html();
-ok('it says so instead of showing blanks', legacy.includes('No Sheet row for this ticket'));
+ok('it says so instead of showing blanks', legacy.includes('No Sheet row for this IR'));
 ok('but still shows what the record does hold',
   legacy.includes('Legacy Co') && legacy.includes('Battery Issue'), legacy);
 ok('no undefined or NaN leaks into the view', !/undefined|NaN/.test(legacy));
@@ -224,7 +224,7 @@ ok('no original-report link when there is none', !legacy.includes('Open original
 head('no ticket open');
 T.currentIR = null;
 T.renderIntake();
-ok('renders a note, not a throw', html().includes('No ticket selected'), html());
+ok('renders a note, not a throw', html().includes('No IR selected'), html());
 
 // ── The list card, which is rendered from two untrusted sources ──────────────
 // The card is the WORST place in the app for this, because it renders for every

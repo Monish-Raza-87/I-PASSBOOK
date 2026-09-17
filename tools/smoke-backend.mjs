@@ -7,13 +7,28 @@
 // exist in Node, and it is deployed by hand into a different runtime. `node
 // --check` proves it parses and nothing more.
 //
-// So this suite asserts the things that are cheap to get wrong in a 1,700-line
+// So this suite asserts the things that are cheap to get wrong in a 2,900-line
 // rewrite and expensive to discover in production: that the deleted actions are
 // really gone from the dispatcher (or a stale cached frontend silently calls
 // nothing), that the security-relevant constants are what the owner decided, and
 // that the router's structure is the restructured one — with NO dispatch outside
 // the try/catch, which was the specific way errors used to surface as an HTML
 // page instead of JSON.
+//
+// WHAT IT CANNOT PROVE, and does not pretend to: it is a regex suite, so it
+// asserts the code is SHAPED a certain way, never that it BEHAVES that way. Three
+// real defects (an unenforced temp-password expiry on changePassword,
+// resetPassword re-enabling a disabled account, and an uncapped nudge mail path)
+// once passed every case here. The BEHAVIOURAL half of the backend now lives in
+// tools/smoke-store.mjs, which loads this same file under a fake Drive platform
+// and actually CALLS the store functions. When a change is concurrency-shaped or
+// store-shaped, prove it there, not here.
+//
+// Since v3 the app has no spreadsheet: everything the app owns is JSON in Drive,
+// so the assertions below about storage are about FILE SHAPES and KEY
+// ASSIGNMENTS, not about columns and rows. There is deliberately no assertion
+// anywhere below that keeps a positional column layout alive — see the "no
+// positional" block, which asserts the opposite.
 
 import fs from 'node:fs';
 import { makeReporter } from './harness.mjs';
@@ -45,7 +60,8 @@ function enclosingFn(at) {
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 r.head('the owner\'s security decisions');
-r.ok('API_VERSION is 2', /API_VERSION:\s*2\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 3 — the Drive-JSON store, a different deployment from v2',
+  /API_VERSION:\s*3\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is 30 days', /SESSION_DAYS:\s*30\b/.test(code), (code.match(/SESSION_DAYS:[^\n]*/) || [''])[0]);
 r.ok('the session slides on use', /SESSION_SLIDE_HOURS:/.test(code));
 r.ok('temporary passwords expire', /TEMP_PW_TTL_DAYS:\s*\d+/.test(code), (code.match(/TEMP_PW_TTL_DAYS:[^\n]*/) || [''])[0]);
@@ -61,6 +77,22 @@ r.ok('no ALLOWED_EMAILS array remains', !/ALLOWED_EMAILS\s*[:=]/.test(code));
 r.ok('EXTERNAL_EMAILS exists and holds uavgarage',
   /EXTERNAL_EMAILS:\s*\[[^\]]*uavgarage\.com/.test(code),
   (code.match(/EXTERNAL_EMAILS:[^\n]*/) || [''])[0]);
+
+r.head('the store is the owner\'s Drive folder, and there is no app spreadsheet');
+// The whole point of the migration: the ONLY spreadsheet left is the client's Form
+// Responses (an input) and the legacy workbook (a read-only archive). A surviving
+// PASSBOOK_SHEET_ID would mean the store did not actually move.
+r.ok('DRIVE_ROOT_FOLDER_ID is the owner\'s folder',
+  /DRIVE_ROOT_FOLDER_ID:\s*'1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK'/.test(code),
+  (code.match(/DRIVE_ROOT_FOLDER_ID:[^\n]*/) || [''])[0]);
+r.ok('the store folder is named _store',
+  /STORE_FOLDER_NAME:\s*'_store'/.test(code), (code.match(/STORE_FOLDER_NAME:[^\n]*/) || [''])[0]);
+r.ok('PASSBOOK_SHEET_ID is gone', !/PASSBOOK_SHEET_ID/.test(code),
+  (code.match(/PASSBOOK_SHEET_ID[^\n]*/) || [''])[0]);
+r.ok('DATA_TAB (the APP_DATA tab) is gone', !/\bDATA_TAB\b/.test(code),
+  (code.match(/[^\n]*DATA_TAB[^\n]*/) || [''])[0]);
+r.ok('the two read-only INPUT sheets are still configured',
+  /IR_REPO_SHEET_ID:/.test(code) && /LEGACY_SHEET_ID:/.test(code));
 
 // ── Deleted machinery ─────────────────────────────────────────────────────────
 r.head('the self-signup and request-access machinery is gone');
@@ -82,6 +114,36 @@ r.ok('no captcha image is generated', !/createCaptcha|svgChallenge|captchaAnswer
 // to the caller — the response is the same whether or not the account exists.
 r.ok('the reset code is never returned to the client',
   !/return\s*\{[^}]*\bcode\b\s*:/.test(code), (code.match(/return \{[^}]*code\s*:[^\n]*/) || [''])[0]);
+
+r.head('every sheet-shaped machine is gone, not adapted');
+// Each of these only made sense against a spreadsheet. The dangerous outcome is
+// not that one survived — it is that one survived AS AN ADAPTER, keeping the
+// positional column layout alive under a new name. So this asserts absence, and
+// the "no positional layout" block below asserts that nothing re-grew it.
+[
+  'getSs', 'ensureHeaders',
+  'getOrCreateUsersTab', 'getOrCreateSessionsTab', 'getOrCreateDeptTab',
+  'getOrCreateUserDeptTab', 'getOrCreateCodesTab', 'getOrCreateAttemptsTab',
+  'getOrCreateDataTab', 'getOrCreateAuditTab',
+  'migrateAddColumns', 'migrateAclReport', 'deptTabShapeShape', 'deptTabShapeHeader',
+  'deptTabShape', 'deptTriageIndex', 'userCol', 'findUserRowIndex',
+  'planSectionMerge', 'mergeTargetFor', 'fieldKeysOf', 'addDone',
+  'orderDoneBySections', 'countDistinctIRs', 'describeMergePlan',
+  'mergeSectionsReport', 'mergeSectionsApply', 'restoreAppDataFromBackup',
+  'importSingleTab', 'importLegacyData', 'setupAuditLog', 'appendAuditEntries',
+  'seedDepartmentsRebuildLegacy', 'deptTabShapeFor',
+].forEach(name => {
+  r.ok(name + ' is not defined', !new RegExp('function\\s+' + name + '\\s*\\(').test(code));
+});
+r.ok('no column-layout constant survived (they are field names now)',
+  !/\b(USER_HEADS|SESSION_HEADS|DEPT_HEADS|CODE_HEADS|USERDEPT_HEADS|USER_ID_BLOCK_COLS|LEGACY_DEPT_SECTIONS|LEGACY_ACL_SECTIONS|SEC_TARGET_MAP|DONE_MAP)\b/.test(code),
+  (code.match(/[^\n]*(USER_HEADS|DEPT_HEADS|SEC_TARGET_MAP|DONE_MAP|USER_ID_BLOCK_COLS)[^\n]*/g) || ['']).slice(0, 3));
+r.ok('no APP_DATA_BACKUP_ / DEPARTMENTS_BACKUP_ tab logic remains',
+  !/APP_DATA_BACKUP_|APP_DATA_PRE_RESTORE_|DEPARTMENTS_BACKUP_/.test(code),
+  (code.match(/APP_DATA_[A-Z_]*|DEPARTMENTS_BACKUP_[^\n]*/g) || ['']).slice(0, 2));
+r.ok('no getOrCreate* survives under any other name',
+  !/function\s+getOrCreate(?!Section|Subfolder)\w*/.test(code),
+  (code.match(/function\s+getOrCreate\w*/g) || ['']));
 
 // ── The dispatchers ───────────────────────────────────────────────────────────
 r.head('routing is the restructured form');
@@ -136,60 +198,60 @@ const canEditFn  = fnBody('canEdit');
 r.ok('canComment accepts a view permission', /'view'/.test(canComment), canComment);
 r.ok('canEdit requires exactly edit', /===?\s*'edit'/.test(canEditFn), canEditFn);
 
-r.head('the edit grants live in a real tab, never a sentinel');
+r.head('the edit grants live in access.json, never in a sentinel store');
 // Sentinel (__-prefixed) irNumbers skip every ACL check in saveSection, so
 // grants stored in one could be rewritten by any signed-in user.
-r.ok('a DEPARTMENTS tab is read by the ACL',
-  /getOrCreateDeptTab|'DEPARTMENTS'/.test(code));
-r.ok('a USER_DEPARTMENTS edge list exists',
-  /getOrCreateUserDeptTab|USER_DEPARTMENTS/.test(code));
+const aStore = fnBody('accessStore');
+r.ok('access.json is the one access store', /readJson\('access\.json'\)/.test(aStore),
+  (aStore.match(/[^\n]*access\.json[^\n]*/) || [''])[0]);
+r.ok('it is normalised to departments + memberships',
+  /departments:\s*\{\}/.test(aStore) && /memberships:\s*\{\}/.test(aStore));
+r.ok('a malformed access file THROWS rather than reading as "no grants"',
+  !/catch/.test(aStore),
+  (aStore.match(/[^\n]*catch[^\n]*/) || ['no catch — readJson throws through'])[0]);
 r.ok('the grant reader does not touch a sentinel store',
   !/__CONFIG__[\s\S]{0,200}(edit|grant)/i.test(gea));
 r.ok('department grants and memberships are separate readers',
-  // departmentCapabilities replaced departmentEditGrants: ONE read of DEPARTMENTS
+  // departmentCapabilities replaced departmentEditGrants: ONE read of access.json
   // answering both axes (section grants AND Triage), rather than two functions
   // re-scanning the same rows.
   /function departmentCapabilities/.test(code) && /function getUserDepartments/.test(code));
-r.ok('nothing still calls the removed departmentEditGrants', !/departmentEditGrants/.test(code));
-r.ok('the two axes are returned as one object', /\{\s*grants:\s*\{\},\s*triage:\s*false\s*\}/.test(code),
-  (code.match(/grants:\s*\{\},\s*triage[^\n]*/) || [''])[0]);
+
+r.head('a membership is a LIST PER PERSON, not a scan');
+// The structural win of the move: reading one person's departments is one key
+// read. The sheet version scanned the whole USER_DEPARTMENTS tab for every single
+// access check, and getEffectiveAccess runs on every authenticated request.
+const gud = fnBody('getUserDepartments');
+r.ok('it reads one key of the memberships map',
+  /accessStore\(\)\.memberships\[k\]/.test(gud), (gud.match(/[^\n]*memberships\[[^\n]*/) || [''])[0]);
+r.ok('and never scans a list of edges', !/forEach[\s\S]{0,80}match\(/.test(gud) || !/edge/i.test(gud),
+  (gud.match(/[^\n]*edge[^\n]*/i) || ['none'])[0]);
+r.ok('it de-duplicates, so a doubled key cannot double a grant',
+  /out\.indexOf\(key\) < 0/.test(gud), (gud.match(/[^\n]*indexOf\(key\)[^\n]*/) || [''])[0]);
 
 r.head('Triage is a second axis, not a seventh grant');
 // The distinction the whole design rests on: a department may triage without editing
 // ANY section. CR and Management get exactly that — they own the ticket header
 // (status, assignee, priority) and none of the six section forms. If Triage were
-// modelled as a seventh entry in SECTION_KEYS it would also appear as a column at
-// 3 + j, shift every real grant by one, and grant write access to a form.
+// modelled as a seventh entry in SECTION_KEYS it would also become a grantable
+// section — write access to a form nobody meant to open.
 const cap = fnBody('departmentCapabilities');
-r.ok('triage is read in the same pass, from its own cell', /out\.triage\s*=\s*true/.test(cap),
+r.ok('the two axes are returned as one object', /\{\s*grants:\s*\{\},\s*triage:\s*false\s*\}/.test(cap),
+  (cap.match(/grants:\s*\{\},\s*triage[^\n]*/) || [''])[0]);
+r.ok('triage is read in the same pass, from its own field', /out\.triage\s*=\s*true/.test(cap),
   (cap.match(/[^\n]*out\.triage[^\n]*/) || [''])[0]);
 r.ok('the section loop stays bounded by SECTION_KEYS, so Triage is not in it',
-  /j\s*<\s*SECTION_KEYS\.length/.test(cap), (cap.match(/for \(var j[^\n]*/) || [''])[0]);
-r.ok('the triage cell is read positionally through the arithmetic helper',
-  /data\[i\]\[triageCol\]/.test(cap) && /deptTriageIndex\(\)/.test(cap),
-  (cap.match(/[^\n]*triageCol[^\n]*/) || [''])[0]);
+  /SECTION_KEYS\.forEach[\s\S]{0,80}out\.grants\[s\]/.test(cap),
+  (cap.match(/[^\n]*SECTION_KEYS\.forEach[^\n]*/) || [''])[0]);
+r.ok('triage is stored OUTSIDE grants, so nothing walking grants can mistake it for a section',
+  !/grants\[.triage.\]/.test(cap) && /d\.triage/.test(cap),
+  (cap.match(/[^\n]*triage[^\n]*/g) || []).slice(0, 3));
 r.ok('a deactivated department grants neither axis',
-  /toLowerCase\(\)\s*===\s*'no'\)\s*continue/.test(cap), (cap.match(/[^\n]*'no'[^\n]*/) || [''])[0]);
-r.ok('it short-circuits before scanning when there are no departments',
+  /toLowerCase\(\)\s*===\s*'no'\)\s*return/.test(cap), (cap.match(/[^\n]*'no'[^\n]*/) || [''])[0]);
+r.ok('it short-circuits before a second read when there are no departments',
   /if \(!keys\.length\) return out/.test(cap));
-// The offset arithmetic. Triage is appended LAST precisely so `3 + j` keeps meaning
-// what it meant; inserting the column anywhere else would shift all six grants.
-const deptHeadLine = (code.match(/DEPT_HEADS\s*=[^\n]*/) || [''])[0];
-r.ok('Triage is appended after SECTION_KEYS, never inserted among them',
-  /\[[^\]]*\]\s*\.concat\(SECTION_KEYS\)\s*\.concat\(\[/.test(deptHeadLine), deptHeadLine);
-const deptTail = ((deptHeadLine.match(/\.concat\(\[([^\]]*)\]\)/) || [])[1] || '')
-  .split(',').map(s => s.trim().replace(/'/g, '')).filter(Boolean);
-const nSections = (((code.match(/SECTION_KEYS\s*=\s*\[([^\]]*)\]/) || [])[1] || '')
-  .split(',').filter(s => s.trim()).length);
-r.ok('Triage is the LAST column', deptTail[deptTail.length - 1] === 'Triage', deptTail);
-r.ok('DEPARTMENTS is 3 + 6 + 3 = 12 columns', 3 + nSections + deptTail.length === 12,
-  { lead: 3, sections: nSections, tail: deptTail.length });
-r.ok('the triage index is arithmetic, never a magic 11',
-  /function deptTriageIndex\(\)\s*\{\s*return 3 \+ SECTION_KEYS\.length \+ 2;/.test(code),
-  (code.match(/function deptTriageIndex[^\n]*/) || [''])[0]);
-r.ok('every Triage read goes through it, so the next widening cannot misread it',
-  (code.match(/deptTriageIndex\(\)/g) || []).length >= 4,
-  (code.match(/deptTriageIndex\(\)/g) || []).length);
+r.ok('a membership naming a department that is gone is skipped, not thrown on',
+  /if \(!d\) return/.test(cap), (cap.match(/[^\n]*!d[^\n]*/) || [''])[0]);
 r.ok('triage is granted by role for admins, not by a department row',
   /triage:\s*true/.test(gea), (gea.match(/[^\n]*triage[^\n]*/) || []).slice(0, 3));
 // Fail-closed: the department read happens AFTER the triage default is set, so a
@@ -198,6 +260,9 @@ r.ok('triage is granted by role for admins, not by a department row',
 r.ok('triage is defaulted BEFORE the department read',
   gea.indexOf('triage') > -1 && gea.indexOf('triage') < gea.indexOf('departmentCapabilities'),
   { triageAt: gea.indexOf('triage'), readAt: gea.indexOf('departmentCapabilities') });
+r.ok('a throw inside the department read still leaves the view-only profile',
+  /catch \(e\) \{ \/\* keep view-only/.test(src),
+  (src.match(/[^\n]*keep view-only[^\n]*/) || [''])[0]);
 // The Overview rides the ordinary permission map so ONE canEdit() seam gates it.
 r.ok('the Overview is given a permission key like any section',
   /perms\[OVERVIEW_KEY\]/.test(gea), (gea.match(/[^\n]*OVERVIEW_KEY[^\n]*/g) || []).slice(0, 3));
@@ -231,6 +296,11 @@ r.ok('and only for sentinel writes — real IRs still go through canEdit',
 r.ok('a sentinel write cannot carry a file upload into Drive',
   /App stores cannot carry file uploads/.test(sv),
   (sv.match(/cannot carry[^\n]*/) || [''])[0]);
+// An IR number becomes a Drive FOLDER and FILE name. Asserted after the ACL and
+// before any folder or file work, so `../../etc` cannot escape its namespace.
+r.ok('a real IR number is shape-checked before it reaches the filesystem',
+  /assertRealIR\(irNumber\)/.test(sv) && /\^IR\\d\+\$/.test(fnBody('assertRealIR')),
+  (fnBody('assertRealIR').match(/[^\n]*IR\\d[^\n]*/) || [''])[0]);
 
 r.head('the section keys are the six the frontend uses');
 const keys = (code.match(/SECTION_KEYS\s*=\s*\[([^\]]*)\]/) || [])[1] || '';
@@ -239,29 +309,40 @@ r.ok('six section keys', list.length === 6, list);
 r.ok('they are sec-b … sec-g in order',
   list.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', list);
 // The Overview is not a section but IS a gated record, and it keeps the historical
-// id `sec-a` so its APP_DATA row, drafts and audit rows survive untouched.
+// id `sec-a` so its key in sections/IR409.json and its audit lines survive untouched.
 r.ok('the Overview keeps the id sec-a, outside SECTION_KEYS',
   /OVERVIEW_KEY\s*=\s*'sec-a'/.test(code) && list.indexOf('sec-a') < 0);
-r.ok('the three retired ids are derived, not a second literal that can drift',
-  /RETIRED_SECTION_IDS\s*=\s*Object\.keys\(SEC_TARGET_MAP\)/.test(code),
-  (code.match(/RETIRED_SECTION_IDS[^\n]*/) || [''])[0]);
-r.ok('the merge targets are sec-g→sec-f, sec-h→sec-g, sec-i→sec-g',
-  /'sec-g'\s*:\s*'sec-f'/.test(code) && /'sec-h'\s*:\s*'sec-g'/.test(code) && /'sec-i'\s*:\s*'sec-g'/.test(code),
-  (code.match(/SEC_TARGET_MAP\s*=\s*\{[^}]*\}/) || [''])[0]);
+// THE bug this block exists for. `SEC_TARGET_MAP` carried the old→new MERGE mapping
+// (`sec-g: sec-f`), and RETIRED_SECTION_IDS was derived from its keys — so `sec-g`
+// landed in the retired list. But `sec-g` is also the LIVE PDI Report/Dispatch
+// Record section, so every Section G save was refused with "was merged into
+// another section". A plain literal, with sec-g deliberately absent.
+const retiredLine = (code.match(/RETIRED_SECTION_IDS\s*=[^\n]*/) || [''])[0];
+r.ok('the retired ids are a literal pair, sec-h and sec-i',
+  /RETIRED_SECTION_IDS\s*=\s*\['sec-h',\s*'sec-i'\]/.test(code), retiredLine);
+r.ok('SEC-G IS NOT RETIRED — it is a live section the app saves to',
+  !/sec-g/.test(retiredLine), retiredLine);
+r.ok('the derivation that made sec-g unsavable is gone', !/SEC_TARGET_MAP/.test(code),
+  (code.match(/SEC_TARGET_MAP[^\n]*/) || [''])[0]);
+// ...and the warning is in a COMMENT, so this one reads the raw source. It has to
+// say why, or the next tidy-up will "restore" the map and break Section G again.
+r.ok('the source warns that sec-g must never be added to that list',
+  /sec-g[\s\S]{0,600}never be added/i.test(src),
+  (src.match(/[^\n]*never be added[^\n]*/i) || [''])[0]);
 
 r.head('the Overview survives getPassbook for a non-admin (§2.4)');
 // The single most dangerous detail in the restructure: remove sec-a from
 // SECTION_KEYS and no permission map has a sec-a key, so this filter would drop the
-// Overview's row for all 18 non-admin users and keep it only for the admin — who is
-// the one person testing it. The fix is an explicit allowance, and this asserts it.
+// Overview's record for all 18 non-admin users and keep it only for the admin — who
+// is the one person testing it. The fix is an explicit allowance, and this asserts it.
 const gpb = fnBody('getPassbook');
-r.ok('getPassbook names OVERVIEW_KEY in its section filter', /OVERVIEW_KEY/.test(gpb),
+r.ok('getPassbook names OVERVIEW_KEY in its record filter', /OVERVIEW_KEY/.test(gpb),
   (gpb.match(/[^\n]*canView[^\n]*/) || [''])[0]);
 r.ok('the allowance is in the skip condition itself, not a comment',
   /!isSentinel\s*&&\s*secId\s*!==\s*OVERVIEW_KEY\s*&&/.test(gpb),
   (gpb.match(/if\s*\(!isSentinel[^\n]*/) || [''])[0]);
-r.ok('and it is inside the per-row loop, so it applies to every row',
-  /for\s*\([^)]*\)[\s\S]{0,600}OVERVIEW_KEY/.test(gpb));
+r.ok('and it is inside the per-key loop, so it applies to every record',
+  /Object\.keys\(stored\)\.forEach[\s\S]{0,600}OVERVIEW_KEY/.test(gpb));
 
 r.head('the Overview cannot be written by someone without Triage');
 // There is deliberately NO OVERVIEW_KEY exemption on saveSection's ACL line: the
@@ -313,12 +394,24 @@ const cp = fnBody('changePassword');
 r.ok('it re-verifies the current password', /hashPassword/.test(cp));
 r.ok('it shares the login attempt limiter', /recordFailedLogin|clearFailedLogin/.test(cp));
 r.ok('it refuses a disabled account', /disabled/i.test(cp));
-// The flag is cleared as part of the one identity-block write (columns B..H), so
-// it is the empty string in the must-change slot rather than a header name.
-r.ok('it rewrites the whole identity block in one write',
-  /getRange\(idx,\s*2,\s*1,\s*USER_ID_BLOCK_COLS\)/.test(cp), cp.match(/getRange\([^)]*\)/));
-r.ok('it revokes before minting', cp.indexOf('revokeAllSessions') < cp.indexOf('mintSession'),
-  { revoke: cp.indexOf('revokeAllSessions'), mint: cp.indexOf('mintSession') });
+// The flag is cleared as one key of the account record. There is no positional
+// block any more — the record IS the row, so the identity fields (createdAt,
+// createdBy) are carried over by not being touched.
+r.ok('it clears the flag as a key of the same account record',
+  /rec\.mustChange\s*=\s*''/.test(cp), (cp.match(/[^\n]*mustChange[^\n]*/) || [''])[0]);
+r.ok('and it re-reads the record INSIDE the lock, so a concurrent change cannot be clobbered',
+  cp.indexOf('readJsonLocked(\'users.json\')') > -1 &&
+  cp.indexOf('withRowLockOrThrow') < cp.indexOf('readJsonLocked(\'users.json\')'),
+  { lock: cp.indexOf('withRowLockOrThrow'), read: cp.indexOf("readJsonLocked('users.json')") });
+r.ok('it revokes before minting', cp.indexOf('revokeAllSessions') < cp.indexOf('mintSession') ||
+  cp.indexOf('revokeSessionsForIn') < cp.indexOf('mintSession'),
+  { revoke: Math.max(cp.indexOf('revokeAllSessions'), cp.indexOf('revokeSessionsForIn')),
+    mint: cp.indexOf('mintSession') });
+r.ok('the revoke and the password write share ONE lock',
+  /writeJsonLocked\('users\.json'[\s\S]{0,700}revokeSessionsForIn/.test(cp),
+  (cp.match(/[^\n]*revokeSessionsForIn[^\n]*/) || [''])[0]);
+r.ok('it never writes a literal status, so a disabled account stays disabled',
+  !/status\s*=\s*'active'/.test(cp), (cp.match(/[^\n]*status\s*=[^\n]*/) || [''])[0]);
 r.ok('it tells the client the flag is cleared',
   /mustChangePassword:\s*false/.test(cp), (cp.match(/mustChangePassword:[^,]*/) || [''])[0]);
 
@@ -333,9 +426,16 @@ r.ok('it uses TEMP_PW_TTL_DAYS', /TEMP_PW_TTL_DAYS/.test(ttl),
   (ttl.match(/TEMP_PW_TTL_DAYS[^\n]*/) || [''])[0]);
 r.ok('an unstamped temp password is treated as non-expiring, not as expired',
   /if \(!issued\) return null/.test(ttl), (ttl.match(/if \(!issued\)[^\n]*/) || [''])[0]);
+r.ok('an unreadable stamp is treated as non-expiring too',
+  /if \(!at\) return null/.test(ttl), (ttl.match(/if \(!at\)[^\n]*/) || [''])[0]);
+// The epoch-milliseconds decision, asserted where it bites: a stored DISPLAY
+// string would make `ageDays` NaN and never expire anything — and the same shape
+// in lookupSession would accept an expired session.
+r.ok('the age is computed through asDate, not by trusting the stored type',
+  /asDate\(issued\)/.test(ttl), (ttl.match(/[^\n]*asDate\(issued\)[^\n]*/) || [''])[0]);
 const tmpFlag = fnBody('isTempPasswordAccount');
 r.ok('the must-change flag is read in one place too',
-  /Must Change Password/.test(tmpFlag), tmpFlag.slice(0, 160));
+  /userField\(u, 'mustChange'\)/.test(tmpFlag), tmpFlag.slice(0, 160));
 r.ok('doLoginPassword enforces it', /tempPasswordExpired\(/.test(dlp));
 r.ok('changePassword enforces it', /tempPasswordExpired\(/.test(cp));
 r.ok('...before it mints anything, so no session escapes the check',
@@ -410,40 +510,90 @@ r.ok('it has a GLOBAL hourly ceiling too, not only a per-email one',
 r.ok('...counted across every email, so many addresses cannot fan out the mail budget',
   /recentAnyEmail/.test(fp));
 r.ok('it has a resend gap', /CODE_RESEND_GAP_MS/.test(fp));
-r.ok('it retires earlier live codes', /'yes'/.test(fp));
+r.ok('it retires earlier live codes', /&&\s*!e\.used\)\s*e\.used = true/.test(fp),
+  (fp.match(/[^\n]*e\.used[^\n]*/) || [''])[0]);
 r.ok('it never reveals a failure', /catch/.test(fp));
 r.ok('it sends through sendAuthMail', /sendAuthMail/.test(fp));
+// The throttle is a read-then-write JUDGEMENT: two requests arriving together must
+// not both see "under the limit" and both issue. The MAIL, which is slow, stays
+// outside the lock.
+r.ok('the throttle decision is inside the lock', fp.indexOf('withRowLockOrThrow') < fp.indexOf('CODE_MAX_PER_HOUR'),
+  { lock: fp.indexOf('withRowLockOrThrow'), throttle: fp.indexOf('CODE_MAX_PER_HOUR') });
+r.ok('and the send is outside it, so mail never holds the store',
+  fp.indexOf('withRowLockOrThrow') < fp.indexOf('sendAuthMail'));
 
 const rp = fnBody('resetPassword');
 r.ok('resetPassword exists', rp.length > 200, rp.length);
 r.ok('resetPassword caps guessing', /CODE_MAX_ATTEMPTS/.test(rp), (rp.match(/CODE_MAX_ATTEMPTS[^\n]*/) || [''])[0]);
-r.ok('resetPassword marks the code used', /'yes'/.test(rp));
+r.ok('resetPassword burns the code on the last wrong guess',
+  /found\.used = true[\s\S]{0,400}Too many wrong codes/.test(rp),
+  (rp.match(/[^\n]*Too many wrong codes[^\n]*/) || [''])[0]);
+r.ok('resetPassword marks the code used', /found\.used = true/.test(rp));
 r.ok('resetPassword returns NO token', !/sessionToken/.test(rp));
-r.ok('resetPassword revokes every session', /revokeAllSessions/.test(rp));
+r.ok('resetPassword revokes every session', /revokeSessionsForIn\(sess, email\)/.test(rp));
+r.ok('the whole redeem is ONE lock — code, password and sessions together',
+  /withRowLockOrThrow\(function[\s\S]{0,200}readJsonLocked\('codes\.json'\)/.test(rp) &&
+  /revokeSessionsForIn\(sess, email\)/.test(rp),
+  (rp.match(/[^\n]*withRowLockOrThrow[^\n]*/) || [''])[0]);
 // A reset may not change whether an account is enabled. It originally wrote the
 // literal 'active' into the Status column, so resetting the password of a
 // deliberately disabled account silently re-enabled it — an admin action leaking
 // authority into a user-facing flow.
 r.ok('resetPassword PRESERVES Status instead of forcing it active',
-  /userCol\(urow, 'Status'\) \|\| 'active'/.test(rp),
-  (rp.match(/userCol\(urow, 'Status'\)[^\n]*/) || [''])[0] || 'literal active restored');
+  /userField\(rec, 'status'\)/.test(rp) && !/status\s*=\s*'active'/.test(rp),
+  (rp.match(/[^\n]*status[^\n]*/) || [''])[0] || 'literal active restored');
 r.ok('and refuses a disabled account outright', /disabled/i.test(rp),
   (rp.match(/[^\n]*disabled[^\n]*/i) || [''])[0]);
 
 r.head('sessions');
 const ls = fnBody('lookupSession');
 r.ok('lookupSession exists', ls.length > 200, ls.length);
-// Column numbers, not header names: lookupSession reads by index for speed.
-r.ok('it slides the expiry on use', /getRange\(i \+ 1, 4\)\.setValue/.test(ls),
-  (ls.match(/getRange\([^)]*\)[^\n]*/) || [''])[0]);
-r.ok('and records when it last saw the session', /getRange\(i \+ 1, 6\)\.setValue/.test(ls));
+// Key reads, not column indices: the token IS the key of the session store, so
+// there is no row index to search for and nothing positional left to misread.
+r.ok('it reads the session by TOKEN, one key of tokens',
+  /tokens\[token\]/.test(ls), (ls.match(/[^\n]*tokens\[token\][^\n]*/) || [''])[0]);
+r.ok('it slides the expiry on use', /expiresAt\s*=\s*now \+ CONFIG\.SESSION_DAYS/.test(ls),
+  (ls.match(/[^\n]*expiresAt[^\n]*/) || [''])[0]);
+r.ok('and records when it last saw the session', /lastSeenAt\s*=\s*now/.test(ls));
 r.ok('the slide is throttled, or the 90s poll becomes a write storm',
-  /SESSION_SLIDE_HOURS/.test(ls), (ls.match(/SESSION_SLIDE_HOURS[^\n]*/) || [''])[0]);
+  /SESSION_SLIDE_HOURS/.test(ls), (ls.match(/[^\n]*SESSION_SLIDE_HOURS[^\n]*/) || [''])[0]);
 r.ok('a stale-slide failure cannot fail the lookup',
-  /catch \(e2\)/.test(ls), (ls.match(/catch \(e2\)[^\n]*/) || [''])[0]);
-r.ok('it honours revocation', /'revoked'/.test(ls));
-r.ok('it rejects an expired session', /exp < now/.test(ls));
-r.ok('it never prunes inside itself (pruneSessions is bottom-up)', !/deleteRow/.test(ls));
+  /catch \(e\) \{ \/\* the slide is best-effort/.test(src),
+  (src.match(/[^\n]*best-effort[^\n]*/) || [''])[0]);
+// The slide is itself a read-merge-write on a file two requests can both be
+// editing, and the write that LOST would be the other request's newly minted
+// token — so the read must be inside the lock, via readJsonLocked.
+r.ok('the slide re-reads INSIDE the lock, never from the memo',
+  /withRowLock\(function[\s\S]{0,300}readJsonLocked\('sessions\.json'\)/.test(ls),
+  (ls.match(/[^\n]*readJsonLocked[^\n]*/) || [''])[0]);
+r.ok('a store that cannot be read THROWS — it is never reported as a dead token',
+  /sessionsTokens\(\)/.test(ls) && !/catch[\s\S]{0,200}return null/.test(ls.split('var tokens')[0]),
+  (ls.match(/[^\n]*sessionsTokens[^\n]*/) || [''])[0]);
+r.ok('it honours revocation', /s\.revokedAt/.test(ls));
+r.ok('it rejects an expired session', /exp\.getTime\(\) <= now/.test(ls));
+r.ok('the expiry goes through asDate, so a string cannot coerce to NaN and pass',
+  /asDate\(s\.expiresAt\)/.test(ls), (ls.match(/[^\n]*asDate\(s\.expiresAt\)[^\n]*/) || [''])[0]);
+r.ok('it never prunes inside itself (pruneSessions is bottom-up)', !/delete /.test(ls));
+
+r.head('a session store that cannot be read must not eject everyone');
+// lookupSession now throws on an unreadable store, because null means "this token
+// is not valid" and the frontend TRUSTS that answer by signing the user out. A
+// bad file would eject all twenty users in the same poll window. sessionCheck
+// therefore has to fail OPEN, with a message that does not start with
+// `unauthorized` — that prefix is what the fetch interceptor auto-logs-out on.
+const sc = fnBody('sessionCheck');
+r.ok('sessionCheck catches the store failure', /catch/.test(sc));
+r.ok('and answers status ok / alive true rather than throwing',
+  /status:\s*'ok'/.test(sc) && /alive:\s*true/.test(sc), sc.slice(0, 400));
+r.ok('the failure message names the store, so an operator can act on it',
+  /unreadable|unavailable|could not be read/i.test(sc),
+  (sc.match(/[^\n]*message[^\n]*/) || [''])[0]);
+r.ok('AND IT NEVER STARTS WITH "unauthorized"',
+  !/unauthorized/i.test(sc.replace(/unauthorizedResponse/g, '')),
+  (sc.match(/[^\n]*unauthorized[^\n]*/i) || [''])[0] || 'no unauthorized literal in sessionCheck');
+r.ok('requireAuth documents the throw rather than swallowing it',
+  /this THROWS when the session store cannot be read/i.test(src),
+  (src.match(/[^\n]*THROWS[^\n]*/) || [''])[0]);
 
 r.head('user provisioning is admin-only');
 ['createUser', 'bulkCreateUsers', 'resetUserPassword', 'setUserStatus',
@@ -462,121 +612,488 @@ r.ok('it demands the literal confirmation', /'PURGE'/.test(pu));
 r.ok('it supports a dry run that returns a plan and deletes nothing',
   /if \(dryRun\) \{[\s\S]{0,900}?dryRun: true/.test(pu),
   (pu.match(/if \(dryRun\)/) || [''])[0]);
-// The dry-run return must come BEFORE the first deleteRow, or "review before you
-// delete" is a promise the code does not keep.
-r.ok('...and the dry-run branch precedes every delete',
-  pu.indexOf('if (dryRun)') < pu.indexOf('deleteRow'),
-  { dryRunAt: pu.indexOf('if (dryRun)'), firstDelete: pu.indexOf('deleteRow') });
-r.ok('it returns what it deleted, as a backup', /asRows/.test(pu) && /removed: asRows/.test(pu));
-r.ok('it plans first, then deletes the plan in reverse',
-  /plan\.push\(/.test(pu) && /for \(var k = plan\.length - 1; k >= 0; k--\)/.test(pu));
-r.ok('deletion is refused if the list changed since the review',
+// The dry-run return must come BEFORE the first destructive write, or "review
+// before you delete" is a promise the code does not keep.
+r.ok('...and the dry-run branch precedes every write',
+  pu.indexOf('if (dryRun)') < pu.indexOf('snapshotStore'),
+  { dryRunAt: pu.indexOf('if (dryRun)'), firstWrite: pu.indexOf('snapshotStore') });
+r.ok('the plan is SORTED, because a JSON object keeps insertion order, not alphabetical',
+  /plan\.sort\(/.test(pu), (pu.match(/[^\n]*plan\.sort[^\n]*/) || [''])[0]);
+r.ok('deletion is refused if the account list changed since the review',
   /params\.expect/.test(pu) && /Nothing was deleted/.test(pu),
   (pu.match(/var expect[^\n]*/) || [''])[0]);
 r.ok('it leaves admins alone', /isAdminEmail/.test(pu));
-// Revocation is inline (one pass over SESSIONS) rather than N calls to
+// The rollback path. `restoreAppDataFromBackup` is deleted, so this snapshot is
+// what replaces it — written as a NEW file, before the first destructive write.
+r.ok('A BACKUP FILE IS TAKEN BEFORE THE FIRST DESTRUCTIVE WRITE',
+  /snapshotStore\('purge-users'[\s\S]{0,600}delete users\[p\.email\]/.test(pu),
+  (pu.match(/[^\n]*snapshotStore[^\n]*/) || [''])[0]);
+r.ok('the snapshot covers every file it is about to destroy',
+  /snapshotStore\('purge-users',\s*\['users\.json',\s*'access\.json',\s*'sessions\.json'\]\)/.test(pu),
+  (pu.match(/[^\n]*snapshotStore\([^\n]*/) || [''])[0]);
+r.ok('and the response names the backup file, not just that one exists',
+  /backup: backup/.test(pu) && /Backup: ' \+ backup/.test(pu),
+  (pu.match(/[^\n]*backup[^\n]*/) || [''])[0]);
+// One key assignment per store, on the same locked read the plan was built from.
+r.ok('it deletes the planned keys and rewrites users.json once',
+  (pu.match(/delete users\[p\.email\]/g) || []).length === 1 &&
+  (pu.match(/writeJsonLocked\('users\.json'/g) || []).length === 1,
+  { deletes: (pu.match(/delete users\[/g) || []).length,
+    writes: (pu.match(/writeJsonLocked\('users\.json'/g) || []).length });
+r.ok('it removes the membership keys too',
+  /delete memberships\[e\]/.test(pu) && /writeJsonLocked\('access\.json'/.test(pu),
+  (pu.match(/[^\n]*memberships\[e\][^\n]*/) || [''])[0]);
+// Revocation is inline (one pass over sessions.json) rather than N calls to
 // revokeAllSessions — deliberate for a bulk purge, so the assertion is on the
-// effect, not on the helper.
-r.ok('it revokes every session it can still see',
-  /setValue\('revoked'\)/.test(pu), (pu.match(/setValue\('revoked'\)/) || ['absent'])[0]);
-r.ok('and stamps the revocation time', /getRange\(n \+ 1, 7\)/.test(pu));
-r.ok('it removes the department edges too',
-  /getOrCreateUserDeptTab/.test(pu) && /edges\.deleteRow/.test(pu));
+// effect, not on the helper. It skips admins for the same reason their accounts
+// are spared: revoking the admin running this would sign them out mid-purge.
+r.ok('it revokes every session it can still see', /s\.revokedAt = now/.test(pu),
+  (pu.match(/[^\n]*revokedAt[^\n]*/) || ['absent'])[0]);
+r.ok('and skips already-revoked, blank and ADMIN tokens',
+  /if \(!s \|\| s\.revokedAt\) return;/.test(pu) &&
+  /if \(!usersKey\(s\.email\) \|\| isAdminEmail\(s\.email\)\) return;/.test(pu),
+  (pu.match(/[^\n]*isAdminEmail\(s\.email\)[^\n]*/) || [''])[0]);
+r.ok('the plan is read through the lock, so it describes the snapshot it deletes',
+  pu.indexOf('withRowLock') > -1 && pu.indexOf('readJsonLocked(\'users.json\')') > pu.indexOf('withRowLock'),
+  { lock: pu.indexOf('withRowLock'), read: pu.indexOf("readJsonLocked('users.json')") });
 
-r.head('row-index deletes are serialised against concurrent writers');
-// Every deleteRow() here is index-based against an earlier getValues() snapshot.
-// Deleting bottom-up only protects against OUR OWN deletes; a row appended by
-// another admin in between shifts every index below it and we delete the WRONG
-// row — silently, and in purgeUsers irrecoverably. Apps Script has no
-// transactions, so a script lock is the only mutual exclusion available.
+// ── The lock ──────────────────────────────────────────────────────────────────
+r.head('read-merge-write is serialised, because a Drive file has no transactions');
+// Drive has no atomic append and no compare-and-set: every store write is a
+// whole-file replace, so two writers that each read before the other wrote lose
+// one of the two changes. The sheet version did not have this problem for
+// ordinary saves — two saves upserted two separate ROWS — so the lock is a
+// genuine new cost of moving to files, and it is why it is not optional.
 const wl = fnBody('withRowLock');
 r.ok('withRowLock exists', wl.length > 200, wl.length);
 r.ok('it takes a script lock', /LockService\.getScriptLock\(\)/.test(wl));
 r.ok('it waits rather than racing', /waitLock\(/.test(wl), (wl.match(/waitLock\([^)]*\)/) || [''])[0]);
 r.ok('it releases in a finally, so a throw cannot strand the lock',
   /finally/.test(wl) && /releaseLock\(\)/.test(wl));
+r.ok('a release that itself throws cannot mask the real error',
+  /try \{ lock\.releaseLock\(\); \} catch/.test(wl),
+  (wl.match(/[^\n]*releaseLock[^\n]*/) || [''])[0]);
 r.ok('it REFUSES rather than proceeding unprotected when the lock is unavailable',
-  /status: 'error'/.test(wl) && /busy with another admin change/.test(wl),
+  /status: 'error'/.test(wl) && /LOCK_BUSY_MESSAGE/.test(wl),
   (wl.match(/catch \(e\) \{[\s\S]{0,160}/) || [''])[0]);
-// The index-based destructive paths must actually use it, and the read snapshot
-// must be INSIDE the lock or the lock buys nothing.
-['purgeUsers', 'deleteDepartment', 'setUserDepartments',
- // Added with the section merge: mergeSectionsApply rewrites AND deletes by
- // remembered row index (a new combination — no earlier migration locks), and the
- // two maintenance prunes are index-based deletes like purgeUsers.
- 'mergeSectionsApply', 'restoreAppDataFromBackup', 'maintenancePruneAuditLog'].forEach(fn => {
+// The wording matters: the old message blamed "another admin change", which was
+// alarming and wrong for an ordinary save that happened to overlap another one.
+// The frontend already keeps the user's entry as a draft and shows "⚠ Retry Save".
+r.ok('the busy message says the change was NOT saved, so the draft is not thrown away',
+  /was NOT saved/.test(fnBody('withRowLock')) || /was NOT saved/.test(code),
+  (code.match(/var LOCK_BUSY_MESSAGE[^\n]*/) || [''])[0]);
+r.ok('and it no longer blames an admin change',
+  !/busy with another admin change/.test(code),
+  (code.match(/[^\n]*admin change[^\n]*/) || [''])[0]);
+
+r.head('the not-a-response-envelope paths throw instead of returning an error object');
+// A session token or a count handed an error OBJECT would be read as a value —
+// the caller sees a truthy token that authenticates nothing.
+const wlt = fnBody('withRowLockOrThrow');
+r.ok('withRowLockOrThrow exists', wlt.length > 100, wlt.length);
+r.ok('it checks the envelope rather than the truthiness of the result',
+  /out\.ok !== true/.test(wlt), (wlt.match(/[^\n]*ok !== true[^\n]*/) || [''])[0]);
+r.ok('and throws the busy message when the lock was not taken',
+  /throw new Error\(/.test(wlt) && /LOCK_BUSY_MESSAGE/.test(wlt), wlt.slice(0, 300));
+r.ok('mintSession uses it, so a lock failure can never be mistaken for a token',
+  /return withRowLockOrThrow\(/.test(fnBody('mintSession')));
+
+r.head('every store mutation is inside a lock, and reads into it');
+// The read snapshot must be INSIDE the lock or the lock buys nothing: a read taken
+// before it would be merged over whatever landed in between.
+const LOCKED = ['saveSection', 'mintSession', 'doLogout', 'revokeAllSessions', 'pruneSessions',
+  'recordFailedLogin', 'clearFailedLogin', 'changePassword', 'resetPassword', 'forgotPassword',
+  'createUserRow', 'resetUserPassword', 'setUserStatus',
+  'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers',
+  'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog'];
+LOCKED.forEach(fn => {
   const body = fnBody(fn);
-  r.ok(fn + ' is wrapped in withRowLock', /withRowLock\(/.test(body));
-  r.ok(fn + ' takes its snapshot inside the lock',
-    body.indexOf('withRowLock') < body.indexOf('getDataRange'),
-    { lock: body.indexOf('withRowLock'), read: body.indexOf('getDataRange') });
-  r.ok(fn + ' deletes bottom-up, so its own deletes cannot shift its targets', (() => {
-    if (!/deleteRow/.test(body)) return true;                 // nothing to order
-    const descendingLoop = /for \([^)]*;\s*\w+\s*>=\s*[\w.]+\s*;\s*\w+--\)/.test(body);
-    const descendingSort = /sort\(function \(a, b\) \{ return b\.\w+ - a\.\w+; \}\)/.test(body);
-    return descendingLoop || descendingSort;
-  })(), (body.match(/[^\n]*(sort|for \()[^\n]*deleteRow|deleteRow[^\n]*/) || ['']).slice(0, 2));
+  r.ok(fn + ' takes the lock', /withRowLock(OrThrow)?\(/.test(body));
+  // Every store READ inside it must be the locked form — readJsonLocked, never the
+  // memoised readJson, which may hold a copy taken before the lock.
+  const unlockReads = (body.match(/readJson\(/g) || []).length;
+  r.ok(fn + ' never reads the store through the memo inside the lock',
+    unlockReads === 0, (body.match(/[^\n]*readJson\([^\n]*/g) || ['none']));
+  const lockAt = body.indexOf('withRowLock');
+  const firstWrite = Math.min(
+    ...['writeJsonLocked(', 'writeIR(', 'appendAuditLinesLocked(']
+      .map(s => body.indexOf(s)).filter(i => i >= 0));
+  r.ok(fn + ' writes only after the lock is taken',
+    !isFinite(firstWrite) || lockAt < firstWrite,
+    { lock: lockAt, firstWrite: isFinite(firstWrite) ? firstWrite : 'none' });
 });
+// The two bulk-provisioning actions do no store work of their own: each account is
+// created through the ONE locked entry point, so a pasted list of nineteen cannot
+// race a concurrent edit to a twentieth account.
+r.ok('createUser creates through the locked entry point',
+  /createUserRow\(/.test(fnBody('createUser')), fnBody('createUser').slice(-200));
+r.ok('bulkCreateUsers creates through the same one, per address',
+  /createUserRow\(/.test(fnBody('bulkCreateUsers')));
+r.ok('and neither writes users.json itself',
+  !/writeJson/.test(fnBody('createUser')) && !/writeJson/.test(fnBody('bulkCreateUsers')));
 
-// ── Column widths ─────────────────────────────────────────────────────────────
-r.head('the users row is written at the right width');
-// A range of the wrong width is the classic silent Apps Script failure: the
-// values are dropped or the range throws at runtime, and nothing catches it
-// until someone's password does not stick.
-const blockCols = Number((code.match(/USER_ID_BLOCK_COLS\s*=\s*(\d+)/) || [])[1]);
-r.ok('USER_ID_BLOCK_COLS is 7 (columns B..H)', blockCols === 7, blockCols);
-r.ok('no getRange(…, 2, 1, 6) remains', !/getRange\([^)]*,\s*2\s*,\s*1\s*,\s*6\s*\)/.test(code));
-r.ok('no getRange(…, 2, 1, USER_HEADS.length - 1) either (that is 10, not 7)',
-  !/USER_HEADS\.length\s*-\s*1/.test(code), (code.match(/USER_HEADS\.length[^\n]*/) || [''])[0]);
-const userHeads = ((code.match(/USER_HEADS\s*=\s*\[([\s\S]*?)\]/) || [])[1] || '')
-  .split(',').filter(s => s.trim());
-r.ok('the users header has 11 columns', userHeads.length === 11, userHeads.length);
-r.ok('the first five are the ones doLoginPassword reads by index',
-  /'Email'/.test(userHeads[0]) && /'Password Hash'|Hash/.test(userHeads[1]) && /Salt/.test(userHeads[2]),
-  userHeads.slice(0, 5));
+// seedAccounts() — the editor-run bulk onboarding. It is the one place that creates
+// many accounts in a loop, so the nested-lock trap is live here: createUserRow takes
+// its OWN lock, and the fake platform in smoke-store.mjs proves a second waitLock
+// while one is out is REFUSED, not queued. So holding the lock around the loop would
+// make the FIRST account succeed and every later one throw.
+r.head('seedAccounts provisions the seeded roster through the one locked entry point');
+const sa = fnBody('seedAccounts');
+r.ok('every account goes through createUserRow', /createUserRow\(/.test(sa));
+r.ok('and it does NOT take the lock itself — a nested lock is refused, not queued',
+  !/withRowLock(OrThrow)?\(/.test(sa), (sa.match(/[^\n]*withRowLock[^\n]*/) || ['none — correct'])[0]);
+r.ok('it writes users.json nowhere itself',
+  !/writeJson|setContent/.test(sa), (sa.match(/[^\n]*(writeJson|setContent)[^\n]*/) || ['none — correct'])[0]);
+// ADD ONLY. Rewriting an existing account is worse than doing nothing: it issues a
+// fresh temp password to somebody already using theirs, and invalidates what they have.
+r.ok('an existing account is SKIPPED, never rewritten — the guard comes first',
+  sa.indexOf('findUser(email)') > -1 && sa.indexOf('findUser(email)') < sa.indexOf('createUserRow('),
+  { guard: sa.indexOf('findUser(email)'), create: sa.indexOf('createUserRow(') });
+r.ok('and an admin address is skipped, so bootstrapAdmin() stays the only creator of it',
+  /isAdminEmail\(/.test(sa) && sa.indexOf('isAdminEmail(') < sa.indexOf('createUserRow('));
+r.ok('a bad address is reported, not attempted',
+  /validEmail\(/.test(sa) && sa.indexOf('validEmail(') < sa.indexOf('createUserRow('));
+// No second roster. A duplicated list drifts the moment somebody joins; the union of
+// SEED_MEMBERSHIPS is what guarantees every seeded edge has an account behind it.
+r.ok('the roster is the union of SEED_MEMBERSHIPS, not a second copy of it',
+  /SEED_MEMBERSHIPS\[key\]/.test(sa) && !/@indrones\.com['"]/.test(sa),
+  (sa.match(/[^\n]*@indrones[^\n]*/) || ['no hardcoded address — correct'])[0]);
+r.ok('and it iterates SEED_GRANTS for a deterministic order, so two runs report alike',
+  /Object\.keys\(SEED_GRANTS\)/.test(sa) && /\.sort\(\)/.test(sa));
+// The plaintext password must not reach the store or any file — only the log.
+r.ok('the temp passwords are printed, and the report says they are shown once',
+  /report\(/.test(sa) && /Shown ONCE/.test(src) && /stored nowhere/.test(src));
+r.ok('and the report tells the operator to copy it to the local credentials txt',
+  /local credentials txt/.test(sa));
+// A derived display name must not become a guess. "ravi@"/"purchase@" have no full
+// name in them, so they stay blank rather than being invented.
+r.ok('displayNameFor invents nothing for an address with no dot in it',
+  /indexOf\('\.'\) < 0\) return ''/.test(fnBody('displayNameFor')),
+  fnBody('displayNameFor').replace(/\s+/g, ' ').slice(0, 120));
+// The lock is only worth anything if the record written is the one the lock read.
+// Taking a record from OUTSIDE the lock and writing it back inside undoes whatever
+// landed in between — the exact lost update the plan's risk table names.
+r.ok('bootstrapAdmin re-reads the admin record INSIDE the lock',
+  fnBody('bootstrapAdmin').indexOf("readJsonLocked('users.json')") >
+  fnBody('bootstrapAdmin').indexOf('withRowLockOrThrow'),
+  (fnBody('bootstrapAdmin').match(/[^\n]*readJsonLocked[^\n]*/) || [''])[0]);
+r.ok('and writes it with the locked write, not a helper that takes its own lock',
+  /writeJsonLocked\('users\.json'/.test(fnBody('bootstrapAdmin')) &&
+  !/saveUser\(/.test(code),
+  (code.match(/[^\n]*saveUser[^\n]*/) || ['no saveUser helper — correct'])[0]);
+// A write helper that takes its OWN lock is a trap: every caller of it either
+// already holds the lock (nested) or holds a record read before it. Its absence is
+// asserted because re-adding it would silently restore both failure modes.
+r.ok('there is deliberately no saveUser helper to be called from inside a lock',
+  /no `saveUser\(email, rec\)` helper any more/.test(src),
+  (src.match(/[^\n]*saveUser[^\n]*/) || [''])[0]);
 
-r.head('every tab is widened on first use, never rebuilt');
-// getDataRange() returns rows only as wide as the last column, so an un-widened
-// tab yields undefined on the new indices — silently.
-const eh = fnBody('ensureHeaders');
-r.ok('ensureHeaders writes row 1 only', /getRange\(1, 1, 1,/.test(eh) || /setValues\(\[heads\]\)/.test(eh), eh.slice(0, 300));
-r.ok('ensureHeaders does not touch data rows', !/deleteRow|clearContent|clear\(/.test(eh));
-// Idempotent: it compares the existing row against the wanted headers and writes
-// only on a difference, so re-running it can never reformat a live tab.
-r.ok('ensureHeaders is idempotent — it compares before writing',
-  /same/.test(eh) && /if \(!same\)|if \(same\)/.test(eh), eh.slice(0, 400));
-r.ok('ensureHeaders writes the header row only',
-  /setValues\(\[heads\]\)/.test(eh), (eh.match(/setValues[^\n]*/) || [''])[0]);
-['getOrCreateUsersTab', 'getOrCreateSessionsTab', 'getOrCreateDeptTab',
- 'getOrCreateUserDeptTab', 'getOrCreateCodesTab']
-  .forEach(fn => r.ok(fn + ' uses ensureHeaders', /ensureHeaders\(/.test(fnBody(fn))));
+// The locked helpers are called only from inside a lock, by construction. Whether
+// LockService is re-entrant within one execution is not documented, so the design
+// avoids depending on the answer.
+r.ok('the *Locked helpers document that the caller holds the lock',
+  /The caller HOLDS THE LOCK/.test(src) || /assumes the lock is held/i.test(src),
+  (src.match(/[^\n]*HOLDS THE LOCK[^\n]*/) || [''])[0]);
+r.ok('a nested withRowLock is documented as forbidden, not tested for',
+  /avoided by[\s\S]{0,20}construction/i.test(src),
+  (src.match(/[^\n]*avoided by[^\n]*/) || [''])[0]);
 
-// ── AUDIT_LOG: the widened read, the noise it no longer writes ────────────────
-r.head('the audit log records the workflow half too');
-// Sentinel writes were always recorded, but with `IR Number = '__IRS__'` and the
-// real IR in the SECTION ID column, and getAuditLog matched column B only — so
-// every status/assignee/priority change was written and then unreachable. Widening
-// that match is the whole reason the timeline needs no new storage.
+// ── No positional layout, anywhere ────────────────────────────────────────────
+r.head('the positional column layout is really gone, not adapted');
+// The whole point of the move. A surviving `getRange(i + 1, 4)` — under any name,
+// as any "compatibility shim" — would keep the sheet's most fragile property
+// alive: a record whose fields are addressed by POSITION, so that inserting a
+// field silently reinterprets every value after it. The store functions must
+// address fields by NAME only.
+['readJson', 'writeJson', 'saveUser', 'findUser', 'purgeUsers', 'saveSection',
+ 'readIR', 'writeIR', 'departmentCapabilities', 'getUserDepartments', 'accessStore',
+ 'changePassword', 'resetPassword', 'forgotPassword', 'mintSession', 'lookupSession',
+ 'seedDepartments', 'seedMemberships', 'buildAuditLines', 'getAuditLog'].forEach(fn => {
+  const body = fnBody(fn);
+  r.ok(fn + ' has no sheet primitive in it',
+    !/getRange\(|getDataRange|setValues|deleteRow|appendRow|insertSheet/.test(body),
+    (body.match(/[^\n]*(getRange|getDataRange|setValues|deleteRow|appendRow)[^\n]*/g) || ['none']));
+});
+// SpreadsheetApp is still needed — but ONLY for the two read-only inputs, which
+// are not stores. Anything else reaching for it is the app writing to a sheet again.
+const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
+r.ok('SpreadsheetApp is used exactly twice', ssSites.length === 2, ssSites.length);
+ssSites.forEach((m, i) => {
+  const owner = enclosingFn(m.index);
+  r.ok('SpreadsheetApp site ' + (i + 1) + ' is a read-only input (' + (owner ? owner.name : 'top level') + ')',
+    !!owner && ['listIRs', 'listLegacyIRs', 'getAllIRStatuses'].indexOf(owner.name) > -1,
+    { site: i + 1, fn: owner && owner.name });
+});
+r.ok('and neither of them writes: the client sheet is an INPUT, never a store',
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('listIRs')) &&
+  !/setValue|appendRow/.test(fnBody('listLegacyIRs')),
+  (code.match(/[^\n]*(appendRow|\.setValue)[^\n]*/g) || ['']));
+
+r.head('a store write replaces ONE KEY, never the file');
+// The single most dangerous mis-reading of this design:
+//   writeJson('config.json', fields)   destroys the team directory and dropdowns
+//   writeJson('irs.json', fields)      destroys all 450 tickets' workflow state
+//   writeJson('comments.json', fields) destroys every comment on every ticket
+//   writeJson('users.json', rec)       destroys every other account
+// All four are keyed maps, and all four resolve through ONE mapping table, so the
+// assertion that matters is that the table covers every sentinel the app accepts.
+const ssf = fnBody('sentinelStoreFile');
+[['__IRS__', 'irs.json'], ['__CONFIG__', 'config.json'],
+ ['__NUDGES__', 'comments.json'], ['__KB__', 'kb.json']].forEach(([s, f]) => {
+  r.ok(s + ' resolves to ' + f + ', and only through the one table',
+    new RegExp("case '" + s + "':\\s*return '" + f.replace('.', '\\.') + "'").test(ssf),
+    (ssf.match(new RegExp("case '" + s + "'[^\\n]*")) || [''])[0]);
+});
+// A fifth subject with no case falls through to null, and saveSection throws on it
+// rather than defaulting to a file — a default here would write app data into
+// whatever file the default named.
+r.ok('an unknown sentinel resolves to null, not to a default file',
+  !/default:/.test(ssf), (ssf.match(/[^\n]*default:[^\n]*/) || ['no default — correct'])[0]);
+// Every sentinel store is read AND written through that table, so a new keyed store
+// cannot be added on one side only and silently miss the lock or the audit.
+r.ok('getPassbook resolves its store through the same table',
+  /sentinelStoreFile\(irNumber\)/.test(fnBody('getPassbook')));
+r.ok('and every sentinel write does too',
+  (sv.match(/sentinelStoreFile\(irNumber\)/g) || []).length === 1 &&
+  /readJsonLocked\(storeFile\)/.test(sv),
+  (sv.match(/[^\n]*sentinelStoreFile[^\n]*/) || [''])[0]);
+r.ok('saveSection assigns store[sectionId], not the whole store',
+  /store\[sectionId\] = fields;/.test(sv), (sv.match(/[^\n]*store\[sectionId\][^\n]*/) || [''])[0]);
+r.ok('and it never writes the sibling keys away',
+  !/writeJsonLocked\(storeFile,\s*fields\)/.test(sv),
+  (sv.match(/[^\n]*writeJsonLocked\(storeFile[^\n]*/) || [''])[0]);
+// irs.json is the one non-sentinel keyed store: one key per IR, never "the value".
+r.ok('irs.json is read as a keyed map, never as "the value"',
+  /var irs = readJson\('irs\.json'\)/.test(fnBody('getAllIRStatuses')),
+  (fnBody('getAllIRStatuses').match(/[^\n]*readJson\([^\n]*/) || [''])[0]);
+r.ok('and the reader indexes it by IR number, so one ticket cannot stand for all',
+  /irs\[irNum\]/.test(fnBody('getAllIRStatuses')),
+  (fnBody('getAllIRStatuses').match(/[^\n]*irs\[[^\n]*/) || [''])[0]);
+
+r.head('readJson: null only for an absent file, and it throws otherwise');
+// The tempting version of this helper answers {} for an unreadable file, and that
+// version DESTROYS data: one corrupt users.json reads as "no accounts", and the
+// very next createUser persists that emptiness plus one account.
+const rj = fnBody('readJson');
+r.ok('it answers null for a file that is not there', /\? parseStoreJson\(path, file\) : null/.test(rj),
+  (rj.match(/[^\n]*: null[^\n]*/) || [''])[0]);
+r.ok('it has NO fallback argument — the dangerous convenience is absent',
+  /function readJson\(path\)/.test(code), (code.match(/function readJson\([^)]*\)/) || [''])[0]);
+r.ok('an EMPTY file throws rather than reading as "no data"',
+  /is empty — refusing to read it as "no data"/.test(code) ||
+  /is empty/.test(fnBody('parseStoreJson')),
+  (fnBody('parseStoreJson').match(/[^\n]*is empty[^\n]*/) || [''])[0]);
+r.ok('a parse failure throws, with the file named',
+  /is not valid JSON/.test(fnBody('parseStoreJson')) &&
+  /Nothing was changed/.test(fnBody('parseStoreJson')),
+  (fnBody('parseStoreJson').match(/[^\n]*not valid JSON[^\n]*/) || [''])[0]);
+r.ok('it memoises per execution, like _ssMemo did',
+  /hasOwnProperty\.call\(_storeMemo, path\)/.test(rj), (rj.match(/[^\n]*_storeMemo[^\n]*/) || [''])[0]);
+r.ok('the locked read deliberately BYPASSES the memo',
+  !/_storeMemo\[path\]\) return/.test(fnBody('readJsonLocked').split('_storeMemo[path] = val')[0]) ||
+  /var file = findStoreFile\(path, false\);/.test(fnBody('readJsonLocked')),
+  (fnBody('readJsonLocked').match(/[^\n]*_storeMemo[^\n]*/g) || ['']));
+r.ok('and it says why: a pre-lock read would clobber what landed in between',
+  /before the lock was taken/i.test(src), (src.match(/[^\n]*BEFORE the lock[^\n]*/) || [''])[0]);
+
+r.head('the store folder is never created by a read path');
+// A read path that quietly made `_store/` would turn a misconfigured deploy into
+// an EMPTY store — and an empty users.json is every account missing at once.
+const gsf = fnBody('getStoreFolder');
+r.ok('getStoreFolder only ever looks it up',
+  /getFoldersByName/.test(gsf) && !/createFolder/.test(gsf),
+  (gsf.match(/[^\n]*createFolder[^\n]*/) || ['no createFolder — correct'])[0]);
+r.ok('a missing store folder is an error naming the run of initializeStore()',
+  /initializeStore\(\) once/.test(gsf), (gsf.match(/[^\n]*initializeStore[^\n]*/) || [''])[0]);
+r.ok('a subfolder IS creatable, but only when the caller asks',
+  /return create \? getStoreFolder\(\)\.createFolder\(name\) : null/.test(fnBody('getStoreSubfolder')),
+  (fnBody('getStoreSubfolder').match(/[^\n]*createFolder[^\n]*/) || [''])[0]);
+
+r.head('initializeStore creates the store and leaves it Restricted');
+const isf = fnBody('initializeStore');
+r.ok('it exists and reports', isf.length > 400 && /report\(/.test(isf), isf.length);
+r.ok('THE STORE IS SET PRIVATE — it holds password hashes and session tokens',
+  /setSharing\(DriveApp\.Access\.PRIVATE, DriveApp\.Permission\.NONE\)/.test(isf),
+  (isf.match(/[^\n]*setSharing[^\n]*/) || [''])[0]);
+r.ok('it creates the three subfolders',
+  /STORE_SECTIONS_DIR/.test(isf) && /STORE_AUDIT_DIR/.test(isf) && /STORE_BACKUP_DIR/.test(isf));
+r.ok('it seeds users.json as an EMPTY object, which is a real state',
+  /\['users\.json', \{\}\]/.test(isf), (isf.match(/[^\n]*users\.json[^\n]*/) || [''])[0]);
+r.ok('and sessions.json as { tokens: {} }, the shape lookupSession reads',
+  /\['sessions\.json', \{ tokens: \{\} \}\]/.test(isf));
+r.ok('it seeds sections/index.json, or the first IR would fork its own file',
+  /\[STORE_INDEX, \{ irs: \{\} \}\]/.test(isf), (isf.match(/[^\n]*STORE_INDEX[^\n]*/) || [''])[0]);
+r.ok('it is idempotent — an existing file is left alone, never re-seeded',
+  /if \(findStoreFile\(pair\[0\], false\)\) return;/.test(isf),
+  (isf.match(/[^\n]*findStoreFile\(pair[^\n]*/) || [''])[0]);
+r.ok('the guard comes BEFORE the write, or "idempotent" is a claim the code does not keep',
+  isf.indexOf('findStoreFile(pair[0], false)') < isf.indexOf('writeJson(pair[0]'),
+  { guard: isf.indexOf('findStoreFile(pair[0], false)'), write: isf.indexOf('writeJson(pair[0]') });
+r.ok('it writes through writeJson, so the memo and the file agree',
+  /writeJson\(pair\[0\], pair\[1\]\)/.test(isf),
+  (isf.match(/[^\n]*writeJson\(pair[^\n]*/) || [''])[0]);
+r.ok('nothing is written with a raw setContent, so no file is left blank or half-written',
+  !/setContent/.test(isf), (isf.match(/[^\n]*setContent[^\n]*/) || ['none — correct'])[0]);
+r.ok('...and the report is handed to report(), not only returned',
+  isf.indexOf('report(out)') > -1 && isf.indexOf('report(out)') < isf.indexOf('return out'),
+  { report: isf.indexOf('report(out)'), ret: isf.indexOf('return out') });
+
+r.head('the index is what stops a Drive search from forking a ticket');
+// getFilesByName is a Drive SEARCH and is eventually consistent: a miss right
+// after a create means createFile() and a SECOND IR409.json — the ticket silently
+// forks in two, and every later save lands on one half of it.
+const ri = fnBody('readIR');
+const wi = fnBody('writeIR');
+r.ok('readIR resolves through sections/index.json first',
+  /idx\.irs\[irNumber\]/.test(ri), (ri.match(/[^\n]*idx\.irs\[[^\n]*/) || [''])[0]);
+r.ok('and fetches by ID, a direct read, not by name',
+  /DriveApp\.getFileById\(id\)/.test(ri), (ri.match(/[^\n]*getFileById[^\n]*/) || [''])[0]);
+// An indexed file that has been moved or trashed must REFUSE. Quietly starting a
+// new file would take the ticket's whole history with it.
+r.ok('an indexed file that is gone is an error, not a fresh start',
+  /is listed in the index but is not in Drive/.test(ri) && /Nothing was changed/.test(ri),
+  (ri.match(/[^\n]*not in Drive[^\n]*/) || [''])[0]);
+// The write path. This is the one that actually forks the ticket, and it took a
+// behavioural suite to catch: it resolved its file by NAME through writeJson, so a
+// save moments after the create missed the search and created a second file.
+r.ok('writeIR REFUSES to resolve its file by name',
+  /refusing to write/.test(wi) && /without the file id/.test(wi),
+  (wi.match(/[^\n]*refusing to write[^\n]*/) || [''])[0]);
+r.ok('it writes by id', /DriveApp\.getFileById\(fileId\)/.test(wi),
+  (wi.match(/[^\n]*getFileById[^\n]*/) || [''])[0]);
+r.ok('it never searches and never creates',
+  !/getFilesByName|createFile|findStoreFile/.test(wi),
+  (wi.match(/[^\n]*(getFilesByName|createFile)[^\n]*/) || ['none — correct']));
+r.ok('and it says why, in the source, so nobody "simplifies" it back',
+  /a name lookup here is how a ticket gets forked/i.test(src),
+  (src.match(/[^\n]*forked in two[^\n]*/) || [''])[0]);
+r.ok('saveSection threads the id from readIR into writeIR',
+  /readIR\(irNumber, true, true\)/.test(sv) && /writeIR\(irNumber, data, ir\.fileId\)/.test(sv),
+  (sv.match(/[^\n]*writeIR\([^\n]*/) || [''])[0]);
+// The fallback, for an index that has LOST an entry. A multi-match is resolved by
+// newest, never arbitrarily — picking arbitrarily is how a fork becomes permanent.
+r.ok('the name search survives only as a self-healing fallback',
+  /findAllByName/.test(ri) && /function findAllByName/.test(code));
+r.ok('a multi-match is resolved by NEWEST, never arbitrarily',
+  /getLastUpdated\(\)\) > String\(pick\.getLastUpdated\(\)\)/.test(ri),
+  (ri.match(/[^\n]*getLastUpdated[^\n]*/) || [''])[0]);
+r.ok('and the recovered entry is written back to the index',
+  /idx\.irs\[irNumber\] = pick\.getId\(\)/.test(ri) && /writeSectionsIndex\(idx\)/.test(ri),
+  (ri.match(/[^\n]*writeSectionsIndex[^\n]*/) || [''])[0]);
+
+r.head('the audit is per ticket, and it is written AFTER the data');
+const bal = fnBody('buildAuditLines');
+r.ok('buildAuditLines is PURE — it reads nothing and writes nothing',
+  bal.length > 400 && !/writeJson|setContent|createFile|getBlob|readJson/.test(bal),
+  (bal.match(/[^\n]*(writeJson|setContent|getBlob|readJson)[^\n]*/g) || ['none — correct']));
+r.ok('so the caller can hold one lock across read → build → write → append',
+  /the caller can hold the lock/i.test(src));
+r.ok('it takes the uploads as a 6th parameter',
+  /function buildAuditLines\(([^)]*)\)/.test(code) &&
+  ((code.match(/function buildAuditLines\(([^)]*)\)/) || [])[1] || '').split(',').length === 6,
+  (code.match(/function buildAuditLines\([^)]*\)/) || [''])[0]);
+r.ok('an upload writes an "uploaded" event', /'uploaded'/.test(bal));
+r.ok('the uploaded line names the SOURCE field, never the derived _links key',
+  /u\.fieldId/.test(bal) && /snapValue\(u\.name/.test(bal),
+  (bal.match(/[^\n]*'uploaded'[^\n]*/) || [''])[0]);
+r.ok('the derived link keys are still skipped in both diff loops',
+  (bal.match(/_links\$\/\.test\(k\)/g) || []).length === 2,
+  (bal.match(/_links/g) || []).length);
+r.ok('done is suppressed — completion is implied by the save line',
+  (bal.match(/k === 'done'\) return/g) || []).length === 2,
+  (bal.match(/[^\n]*'done'[^\n]*/g) || []));
+r.ok('the bare "saved" marker is written only for non-sentinel writes',
+  /if \(!isSentinel\) lines\.push\(line\('saved'/.test(bal),
+  (bal.match(/[^\n]*'saved'[^\n]*/) || [''])[0]);
+r.ok('the audit timestamp stays the DISPLAY string the timeline prints verbatim',
+  /'dd-MMM-yyyy HH:mm:ss'/.test(bal), (bal.match(/[^\n]*formatDate[^\n]*/) || [''])[0]);
+
+// The ordering fix. appendAuditEntries was called BEFORE the data write, so a save
+// that then failed left an audit entry for a save that never happened.
+//
+// There are TWO write paths inside this one lock — the sentinel store and the real
+// IR — and each has its own pair. So the assertion is that in BOTH branches the
+// LAST thing done is the audit: comparing a single pair of indices across the whole
+// function would be satisfied by the first branch alone.
+const auditSites = [...sv.matchAll(/appendAuditLinesLocked\(/g)].map(m => m.index);
+const dataWrites = ['writeJsonLocked(storeFile, store)', 'writeIR(irNumber, data, ir.fileId)']
+  .map(s => sv.indexOf(s)).filter(i => i >= 0);
+r.ok('both write paths audit AFTER they write their data',
+  auditSites.length === 2 && dataWrites.length === 2 &&
+  auditSites[0] > dataWrites[0] && auditSites[1] > dataWrites[1],
+  { audits: auditSites, dataWrites });
+r.ok('and no early return can skip an audit that already happened',
+  // Every `return` in the function comes after that branch's audit, so a branch
+  // cannot write data, return, and leave the audit behind it unwritten.
+  [...sv.matchAll(/return\s/g)].map(m => m.index)
+    .every(i => i > Math.min(...auditSites) || i < Math.min(...dataWrites)),
+  { returns: [...sv.matchAll(/return\s/g)].map(m => m.index), audits: auditSites });
+r.ok('and both audits are inside the locked block, not after it',
+  Math.max(...auditSites) < sv.lastIndexOf('});'),
+  { lastAudit: Math.max(...auditSites), close: sv.lastIndexOf('});') });
+// __NUDGES__ is excluded at the SOURCE, so the excluded store never reaches the
+// function: comments already carry their own author and createdAt, and a comment
+// save fires on post, resolve, edit AND markRead.
+const audCall = sv.indexOf('buildAuditLines(');
+const nudgeGuard = sv.indexOf("irNumber === '__NUDGES__'");
+r.ok('__NUDGES__ saves are excluded from the audit at the source',
+  nudgeGuard > -1 && nudgeGuard < audCall, { guard: nudgeGuard, call: audCall });
+r.ok('the guard reads as a guard, not an inverted condition',
+  !/irNumber !== '__NUDGES__'[\s\S]{0,40}buildAuditLines/.test(sv));
+r.ok('the uploads are collected during the upload loop, before the audit build',
+  sv.indexOf('uploads.push(') < audCall, { collect: sv.indexOf('uploads.push('), call: audCall });
+r.ok('and passed into the same build, so they share the save timestamp',
+  /buildAuditLines\([^)]*uploads\)/.test(sv),
+  (sv.match(/[^\n]*buildAuditLines\([^\n]*/) || [''])[0]);
+
+r.head('the audit subject is the TICKET, not the store name');
+// A `__IRS__` patch is ABOUT IR409, so it belongs in IR409's audit file. In the
+// sheet version it was written all along, merely unreachable, because the reader
+// matched rows by one column and a workflow row carried `__IRS__` in it.
+const asf = fnBody('auditSubjectFor');
+r.ok('a __IRS__ subject resolves to the real IR', /'__IRS__'\) return String\(sectionId\)/.test(asf),
+  (asf.match(/[^\n]*__IRS__[^\n]*/) || [''])[0]);
+r.ok('another sentinel goes to a file named for the store, with __ stripped',
+  /replace\(\/__\/g, ''\)/.test(asf), (asf.match(/[^\n]*replace[^\n]*/) || [''])[0]);
+r.ok('a real IR keeps its own number', /\n\s*return String\(irNumber\);/.test(asf));
+r.ok('audit files are one per subject, .jsonl',
+  /function auditFileName\(irNumber\) \{ return irNumber \+ '\.jsonl'; \}/.test(code),
+  (code.match(/function auditFileName[^\n]*/) || [''])[0]);
+r.ok('appendAuditLinesLocked documents that the caller holds the lock',
+  /The caller HOLDS THE LOCK/.test(src),
+  (src.match(/[^\n]*HOLDS THE LOCK[^\n]*/) || [''])[0]);
+r.ok('it creates the audit/ subfolder only when it must write',
+  /getStoreSubfolder\(STORE_AUDIT_DIR, true\)/.test(fnBody('appendAuditLinesLocked')) &&
+  /getStoreSubfolder\(STORE_AUDIT_DIR, false\)/.test(fnBody('readAuditLines')),
+  { write: fnBody('appendAuditLinesLocked').match(/STORE_AUDIT_DIR, \w+/),
+    read: fnBody('readAuditLines').match(/STORE_AUDIT_DIR, \w+/) });
+r.ok('one unreadable line is turned into a VISIBLE placeholder, never skipped silently',
+  /'unreadable'/.test(fnBody('parseAuditLines')) && /line skipped/.test(fnBody('parseAuditLines')),
+  (fnBody('parseAuditLines').match(/[^\n]*unreadable[^\n]*/) || [''])[0]);
+
+r.head('getAuditLog reads one ticket, and the workflow half is reachable');
 const gal = fnBody('getAuditLog');
-r.ok('getAuditLog matches the workflow rows by the real IR in column C',
-  /colC\s*===\s*irNumber/.test(gal) && /data\[i\]\[2\]/.test(gal),
-  (gal.match(/[^\n]*colC[^\n]*/) || [''])[0]);
-r.ok('and only when column B is a sentinel, so a future sentinel cannot leak in',
-  /colB\.indexOf\('__'\)\s*===\s*0/.test(gal),
+r.ok('it reads ONE subject file, not a whole-log scan',
+  /readAuditLines\(auditSubjectFor/.test(gal), (gal.match(/[^\n]*readAuditLines[^\n]*/) || [''])[0]);
+r.ok('it matches the workflow lines by the real IR in `sec`',
+  /sec === irNumber/.test(gal), (gal.match(/[^\n]*isWorkflowRow[^\n]*/) || [''])[0]);
+r.ok('and only when `ir` is a sentinel, so a future sentinel cannot leak in',
+  /ir\.indexOf\('__'\)\s*===\s*0/.test(gal),
   (gal.match(/[^\n]*isWorkflowRow[^\n]*/) || [''])[0]);
 r.ok('each entry is labelled with which half it came from',
   /source:\s*isWorkflowRow\s*\?\s*'workflow'\s*:\s*'section'/.test(gal),
   (gal.match(/[^\n]*source:[^\n]*/) || [''])[0]);
-r.ok('a workflow row reports no section id, so it cannot be mistaken for a save',
-  /sectionId:\s*isWorkflowRow\s*\?\s*''\s*:\s*data\[i\]\[2\]/.test(gal));
-// An entry has to be attributable to the IR it is ABOUT. Reporting a workflow row's
-// own column B verbatim would hand back `__IRS__` — the STORE, not the ticket — and
-// quietly make any future `e.irNumber === irNumber` filter drop every status change.
-// (The frontend happens not to filter on it today, which is exactly why this would rot.)
-r.ok('a workflow row reports the real IR, not the store name in its own column B',
-  /irNumber:\s*isWorkflowRow\s*\?\s*data\[i\]\[2\]\s*:\s*data\[i\]\[1\]/.test(gal),
+r.ok('a workflow line reports no section id, so it cannot be mistaken for a save',
+  /sectionId:\s*isWorkflowRow\s*\?\s*''\s*:\s*sec/.test(gal));
+// An entry has to be attributable to the IR it is ABOUT. Reporting a workflow
+// line's own `ir` verbatim would hand back `__IRS__` — the STORE, not the ticket —
+// and quietly make any future `e.irNumber === irNumber` filter drop every status
+// change. (The frontend happens not to filter on it today, which is exactly why
+// this would rot.)
+r.ok('a workflow line reports the real IR, not the store name in its own field',
+  /irNumber:\s*isWorkflowRow\s*\?\s*sec\s*:\s*ir/.test(gal),
   (gal.match(/[^\n]*irNumber:[^\n]*/) || [''])[0]);
-r.ok('row order is the sheet order — append-only, so it is already chronological',
+r.ok('line order is file order — append-only, so it is already chronological',
   !/\.sort\(/.test(gal));
 r.ok('the response is capped', /AUDIT_RESPONSE_CAP/.test(gal),
   (gal.match(/var AUDIT_RESPONSE_CAP[^\n]*/) || [''])[0]);
@@ -586,45 +1103,9 @@ r.ok('the cap keeps the NEWEST entries, not the oldest',
 r.ok('and it says when it truncated, rather than silently dropping',
   /truncated:/.test(gal));
 
-r.head('the three volume measures');
-const sae = fnBody('appendAuditEntries');
-r.ok('appendAuditEntries takes the uploads as a 7th parameter',
-  /function appendAuditEntries\(([^)]*)\)/.test(code) &&
-  ((code.match(/function appendAuditEntries\(([^)]*)\)/) || [])[1] || '').split(',').length === 7,
-  (code.match(/function appendAuditEntries\([^)]*\)/) || [''])[0]);
-r.ok('an upload writes an "uploaded" event', /'uploaded'/.test(sae));
-r.ok('the uploaded row names the SOURCE field, never the derived _links key',
-  /u\.fieldId/.test(sae) && /snapValue\(u\.name/.test(sae),
-  (sae.match(/[^\n]*'uploaded'[^\n]*/) || [''])[0]);
-r.ok('the derived link keys are still skipped in both diff loops',
-  (sae.match(/_\|links\$\/|_links\$\//g) || []).length === 2 ||
-  (sae.match(/_links\$\/\.test\(k\)/g) || []).length === 2,
-  (sae.match(/_links/g) || []).length);
-r.ok('done is suppressed — completion is implied by the save row',
-  (sae.match(/k === 'done'\) return/g) || []).length === 2,
-  (sae.match(/[^\n]*'done'[^\n]*/g) || []));
-r.ok('the bare "saved" marker is written only for non-sentinel writes',
-  /if \(!isSentinel\) rows\.push\(\[ts[^\n]*'saved'/.test(sae),
-  (sae.match(/[^\n]*'saved'[^\n]*/) || [''])[0]);
-// (a) — comments already carry their author and createdAt in the items array, at
-// far better fidelity than a 500-char copy of the whole array, once per post,
-// resolve, edit AND markRead. Guarded at the CALL site so the excluded store never
-// reaches the function.
-const audCall = sv.indexOf('appendAuditEntries(');
-const nudgeGuard = sv.indexOf("irNumber !== '__NUDGES__'");
-r.ok('__NUDGES__ saves are excluded from the audit at the source',
-  nudgeGuard > -1 && nudgeGuard < audCall, { guard: nudgeGuard, call: audCall });
-r.ok('the guard reads as a guard, not an inverted condition',
-  !/irNumber === '__NUDGES__'[\s\S]{0,40}appendAuditEntries/.test(sv));
-r.ok('the uploads are collected during the upload loop, before the audit call',
-  sv.indexOf('uploads.push(') < audCall, { collect: sv.indexOf('uploads.push('), call: audCall });
-r.ok('and passed into the same batch, so they share the save timestamp',
-  /appendAuditEntries\([^)]*uploads\)/.test(sv),
-  (sv.match(/[^\n]*appendAuditEntries\([^\n]*/) || [''])[0]);
-
 r.head('pruning is a manual lever, like the session prune');
-// Destructive and index-based, so it locks; manual because the audit trail is
-// evidence and must not shrink behind anyone's back.
+// Destructive, so it locks; manual because the audit trail is evidence and must
+// not shrink behind anyone's back.
 const mpal = fnBody('maintenancePruneAuditLog');
 r.ok('maintenancePruneAuditLog exists', mpal.length > 300, mpal.length);
 r.ok('the retention window is a named constant', /AUDIT_RETENTION_DAYS\s*=\s*\d+/.test(code),
@@ -632,8 +1113,15 @@ r.ok('the retention window is a named constant', /AUDIT_RETENTION_DAYS\s*=\s*\d+
 r.ok('it says so plainly when there is nothing to do, and writes nothing',
   /return 'Nothing older than/.test(mpal), (mpal.match(/[^\n]*Nothing older[^\n]*/) || [''])[0]);
 r.ok('an unparseable stamp is KEPT, never pruned by accident',
-  /parseAuditTimestamp/.test(mpal) && /continue/.test(mpal),
+  /parseAuditTimestamp/.test(mpal) && /ms === null/.test(mpal),
   (mpal.match(/[^\n]*parseAuditTimestamp[^\n]*/) || [''])[0]);
+r.ok('it walks the audit/ folder rather than one tab',
+  /folder\.getFiles\(\)/.test(mpal), (mpal.match(/[^\n]*getFiles\(\)[^\n]*/) || [''])[0]);
+r.ok('per-subject files mean only the affected tickets are rewritten',
+  /file\.setContent\(keep\.map/.test(mpal),
+  (mpal.match(/[^\n]*setContent[^\n]*/) || [''])[0]);
+r.ok('and it counts the unreadable lines it deliberately kept',
+  /unreadable/.test(mpal), (mpal.match(/[^\n]*unreadable[^\n]*/) || [''])[0]);
 // dateParseTrap: Date.parse('21-Aug-2026 14:03:11') is NaN in V8, so a naive
 // `new Date(v).getTime()` would make every row look unparseable — or worse, prune
 // the wrong ones. The explicit parser exists for this and is used by both prunes.
@@ -641,75 +1129,48 @@ r.ok('parseAuditTimestamp parses dd-MMM-yyyy explicitly, not via Date.parse',
   (() => {
     const p = fnBody('parseAuditTimestamp');
     return p.length > 100 && !/Date\.parse/.test(p) &&
-      /substring|substr|split|match/.test(p) && /'jan'/.test(p);
+      /match\(/.test(p) && /'jan'/.test(p);
   })(), fnBody('parseAuditTimestamp').slice(0, 400));
 
-// ── The three pre-existing bugs the mapping surfaced ──────────────────────────
-r.head('the migration reports still describe the OLD nine-section world');
-// migrateAclReport's entire purpose is the owner's last chance to see the old
-// per-user grants. Iterating SECTION_KEYS after the shrink would label old column 1
-// (sec-a's grant) as sec-b AND never read the last three columns — a report that is
-// wrong in both directions, on exactly the one screen where being wrong matters.
-const mar = fnBody('migrateAclReport');
-r.ok('migrateAclReport reads a historical nine-key literal',
-  /LEGACY_ACL_SECTIONS\s*=\s*\[[\s\S]*?\]/.test(code) &&
-  (((code.match(/LEGACY_ACL_SECTIONS\s*=\s*\[([^\]]*)\]/) || [])[1] || '').split(',').filter(s => s.trim()).length === 9),
-  (code.match(/LEGACY_ACL_SECTIONS\s*=\s*\[[^\n]*/) || [''])[0]);
-r.ok('and iterates THAT, not the live SECTION_KEYS',
-  /LEGACY_ACL_SECTIONS\.length/.test(mar) && !/SECTION_KEYS/.test(mar),
-  (mar.match(/[^\n]*SECTION_KEYS[^\n]*/g) || ['none']));
-r.ok('the report says out loud which list it is reading against',
-  /HISTORICAL nine-section list/.test(mar));
-const ist = fnBody('importSingleTab');
-r.ok('importSingleTab no longer writes a retired section id',
-  !/'sec-i'/.test(ist) && !/'sec-h'/.test(ist),
-  (ist.match(/[^\n]*sec-[hi][^\n]*/g) || ['none']));
-r.ok('the legacy dispatch mapping points at the merged sec-g',
-  /'sec-g'/.test(ist), (ist.match(/sec-g[^\n]*/) || [''])[0]);
-// The TODO lives in a COMMENT, and `code` has comments stripped — so this one
-// assertion reads the raw source. (The rest of this suite asserts on `code` on
-// purpose: a comment naming a deleted function must not satisfy its own check.)
-const istSrc = fnBody('importSingleTab', src);
-r.ok('the unconditional appendRow is flagged rather than quietly left',
-  /TODO/i.test(istSrc), (istSrc.match(/[^\n]*TODO[^\n]*/i) || [''])[0]);
-// A hardcoded width in a report is a lie with a delay fuse: 'DEPARTMENTS → 15 cols'
-// survived two widenings because no test asserted it.
-r.ok('migrateAddColumns derives every width, with no hardcoded column count',
-  !/→\s*\d+\s*cols/.test(code), (code.match(/[^\n]*→[^\n]*cols[^\n]*/g) || ['none']));
-r.ok('and it prints the derived count', /DEPT_HEADS\.length \+ ' cols'/.test(code));
+r.head('every stored date goes through asDate');
+// A stored date that round-trips as a STRING makes `exp < now` compare string to
+// Date, coerce to NaN, and accept an expired session. Internal dates are epoch
+// milliseconds; only the audit timestamp stays a display string.
+const ad = fnBody('asDate');
+r.ok('asDate is the one place a stored value becomes a Date',
+  /instanceof Date/.test(ad) && /new Date\(n\)/.test(ad), ad.slice(0, 300));
+r.ok('and an unreadable value answers null rather than an Invalid Date',
+  /isNaN\(d\.getTime\(\)\) \? null : d/.test(ad), (ad.match(/[^\n]*isNaN[^\n]*/) || [''])[0]);
+r.ok('session expiry is stored as epoch ms at mint',
+  /expiresAt:\s*now \+ CONFIG\.SESSION_DAYS/.test(fnBody('mintSession')),
+  (fnBody('mintSession').match(/[^\n]*expiresAt[^\n]*/) || [''])[0]);
+r.ok('and read back through asDate, never compared as a string',
+  /asDate\(s\.expiresAt\)/.test(ls) && /asDate\(found\.expiresAt\)/.test(rp),
+  (rp.match(/[^\n]*asDate\(found\.expiresAt\)[^\n]*/) || [''])[0]);
 
-r.head('a legacy DEPARTMENTS tab is rebuilt, not silently reinterpreted');
-// SECTION_KEYS shrinking re-letters EVERY column: an existing 14-column tab read
-// positionally would map old col 4 (sec-a's grant) onto new col 4 (sec-b's grant),
-// and old col 10 (old sec-g) onto 'Updated At'. Silent misgrant, letter by letter.
-const dts = fnBody('deptTabShape');
-r.ok('deptTabShape exists', dts.length > 150, dts.length);
-r.ok('it distinguishes absent / current / legacy-9 / unknown',
-  ['absent', 'current', 'legacy-9', 'unknown'].every(s => dts.includes("'" + s + "'")),
-  (dts.match(/'[a-z0-9-]+'/g) || []));
-r.ok('legacy-9 is recognised by comparing against the historical nine-key list',
-  /LEGACY_DEPT_SECTIONS/.test(dts) && /LEGACY_DEPT_SECTIONS\s*=\s*\[/.test(code));
-r.ok('migrateAddColumns refuses to widen a tab it does not recognise',
-  /deptTabShape\(/.test(fnBody('migrateAddColumns')) && /LEFT ALONE/.test(fnBody('migrateAddColumns')),
-  (fnBody('migrateAddColumns').match(/[^\n]*LEFT ALONE[^\n]*/g) || []));
-r.ok('seedDepartments consults it too', /deptTabShape\(/.test(fnBody('seedDepartments')));
-r.ok('a legacy tab is snapshotted before it is rebuilt',
-  /DEPARTMENTS_BACKUP_/.test(fnBody('seedDepartments')) || /DEPARTMENTS_BACKUP_/.test(code),
-  (code.match(/DEPARTMENTS_BACKUP_[^\n]*/g) || []).slice(0, 2));
-
-r.head('seedDepartments upserts and names what it drops');
+// ── Seeding the owner's mapping ───────────────────────────────────────────────
+r.head('seedDepartments upserts ONE KEY per department and names what it drops');
 // `have[key]` used to mean merely "present", so a half-granted row was never
 // corrected. And the one thing a rewrite can silently lose is an existing grant
 // the new mapping does not reproduce — so it is printed, loudly. This is the
 // direct application of "a response is not a backup".
 const sd = fnBody('seedDepartments');
-r.ok('it compares the desired row against the existing one',
+r.ok('it compares the desired grants against the existing ones',
   /deltas/.test(sd), (sd.match(/[^\n]*deltas[^\n]*/) || []).slice(0, 2));
 r.ok('it reports created / updated / unchanged', /created/.test(sd) && /updated/.test(sd) && /unchanged/.test(sd));
 r.ok('it prints a DROPPED GRANTS section', /DROPPED GRANTS/.test(sd),
   (sd.match(/[^\n]*DROPPED GRANTS[^\n]*/) || [''])[0]);
 r.ok('and it lists what was dropped, not merely that something was',
   /dropped\.push\(/.test(sd) && /dropped\.join/.test(sd));
+r.ok('it writes ONE key per department, as one file',
+  /store\.departments\[key\] = /.test(sd) && /writeJsonLocked\('access\.json', store\)/.test(sd),
+  (sd.match(/[^\n]*store\.departments\[key\][^\n]*/) || [''])[0]);
+r.ok('a department the seed does not name is left UNTOUCHED, not deleted',
+  !/delete store\.departments/.test(sd),
+  (sd.match(/[^\n]*delete store\.departments[^\n]*/) || ['none — correct']));
+r.ok('it takes the lock, so a concurrent admin edit cannot be clobbered',
+  /withRowLockOrThrow/.test(sd));
+const sg = (code.match(/SEED_GRANTS\s*=\s*\{[\s\S]*?\n\};/) || [''])[0];
 r.ok('the mapping itself is a module-level literal recording whose call it was',
   /SEED_GRANTS\s*=\s*\{/.test(code) && /TRIAGE_DEPARTMENTS/.test(code),
   (code.match(/var SEED_GRANTS[^\n]*/) || [''])[0]);
@@ -718,19 +1179,22 @@ r.ok('the mapping itself is a module-level literal recording whose call it was',
 // codebase's own comment forbids — and the two departments do NOT have equal grants
 // (B/D/G vs D), so they cannot be merged either.
 r.ok('Purchase and Inventory are not merged into one department',
-  /'purchase'/.test(code) && /'inventory'/.test(code),
-  (code.match(/SEED_GRANTS\s*=\s*\{[\s\S]{0,700}?\}/) || [''])[0].slice(0, 400));
+  /'purchase'/.test(sg) && /'inventory'/.test(sg), sg.slice(0, 400));
+r.ok('Triage is granted to CR and Management alone',
+  /TRIAGE_DEPARTMENTS\s*=\s*\['cr',\s*'management'\]/.test(code),
+  (code.match(/var TRIAGE_DEPARTMENTS[^\n]*/) || [''])[0]);
 
 r.head('seedMemberships only ever ADDS');
-// setUserDepartments deletes then re-appends — correct for an admin editing one
-// person, wrong for a seed that must not disturb edges added later.
+// setUserDepartments REPLACES one person's whole list — correct for an admin
+// editing that person, wrong for a seed that must not disturb edges added later.
 const sm = fnBody('seedMemberships');
-r.ok('it does not delete anything', !/deleteRow|clear\(/.test(sm),
-  (sm.match(/[^\n]*(deleteRow|clear\()/) || ['none'])[0]);
-r.ok('it skips what is already present', /present\[email \+ '\|' \+ key\]/.test(sm),
-  (sm.match(/[^\n]*present\[[^\n]*/) || [''])[0]);
-r.ok('it appends in one block rather than row by row',
-  /setValues\(rows\)/.test(sm), (sm.match(/[^\n]*setValues[^\n]*/) || [''])[0]);
+r.ok('it does not delete anything', !/delete |clear\(/.test(sm),
+  (sm.match(/[^\n]*(delete |clear\()/) || ['none'])[0]);
+r.ok('it skips what is already present', /if \(list\.indexOf\(key\) > -1\)/.test(sm),
+  (sm.match(/[^\n]*indexOf\(key\)[^\n]*/) || [''])[0]);
+r.ok('it appends to the person\'s own list, one key assignment',
+  /store\.memberships\[email\] = list/.test(sm),
+  (sm.match(/[^\n]*store\.memberships\[email\][^\n]*/) || [''])[0]);
 r.ok('and it says "nothing removed" in its report',
   /Nothing removed/.test(sm), (sm.match(/[^\n]*Nothing removed[^\n]*/) || [''])[0]);
 r.ok('it names the people added who cannot sign in yet',
@@ -739,109 +1203,91 @@ r.ok('it says the IQC/Compliance omission is intentional',
   /IQC and Compliance have no members/.test(sm));
 r.ok('it names the Purchase/Inventory doubling as intentional too',
   /Purchase AND Inventory each list all three/.test(sm));
+r.ok('it takes the lock', /withRowLockOrThrow/.test(sm));
 
-r.head('the run order is stated, and the merge is not pre-flight');
-// The merge REWRITES rows the live app is currently reading. A migration that
-// rewrites live rows cannot run pre-flight, full stop — the mirror image of the
-// column-widening rationale. This asserts the banner still says so, in order.
-const bannerAt = src.indexOf('Pre-flight (undeployed');
-const banner = bannerAt < 0 ? '' : src.slice(bannerAt, bannerAt + 1400);
-r.ok('the banner exists', banner.length > 200, banner.length);
-r.ok('pre-flight is migrateAddColumns → migrateAclReport → bootstrapAdmin',
-  /migrateAddColumns\(\)\s*→\s*migrateAclReport\(\)\s*→\s*bootstrapAdmin\(\)/.test(banner),
-  (banner.match(/[^\n]*Pre-flight[^\n]*/) || [''])[0]);
-r.ok('the cutover group is seedDepartments → seedMemberships → report → apply',
-  /seedDepartments\(\)\s*→\s*seedMemberships\(\)/.test(banner) &&
-  /mergeSectionsReport\(\)\s*→\s*mergeSectionsApply\(\)/.test(banner),
-  (banner.match(/[^\n]*seedDepartments[^\n]*/) || [''])[0]);
-r.ok('report comes BEFORE apply in the printed order',
-  banner.indexOf('mergeSectionsReport') < banner.indexOf('mergeSectionsApply'),
-  { report: banner.indexOf('mergeSectionsReport'), apply: banner.indexOf('mergeSectionsApply') });
-r.ok('the two prunes are listed as post-go-live, not pre-flight',
-  banner.indexOf('maintenancePruneSessions') > banner.indexOf('go-live'),
-  (banner.match(/[^\n]*maintenancePruneSessions[^\n]*/) || [''])[0]);
-r.ok('the banner says WHY the split exists, not just what to run',
-  /rewrites live rows cannot be pre-flight|REWRITES rows the live app/.test(banner),
-  (banner.match(/[^\n]*REWRITES[^\n]*/) || [''])[0]);
-// The merge is index-based and destroys rows, so it locks — and unlike every earlier
-// migration, it rewrites AND deletes. That combination is what the lock is for.
-r.ok('mergeSectionsApply is the only migration that locks',
-  /withRowLock/.test(fnBody('mergeSectionsApply')) && !/withRowLock/.test(fnBody('seedDepartments')) &&
-  !/withRowLock/.test(fnBody('seedMemberships')));
-r.ok('it guards idempotency before it touches anything',
-  (() => {
-    const b = fnBody('mergeSectionsApply');
-    return b.indexOf('Already merged') > -1 && b.indexOf('Already merged') < b.indexOf('insertSheet');
-  })(), (fnBody('mergeSectionsApply').match(/[^\n]*Already merged[^\n]*/) || [''])[0]);
-r.ok('it refuses to overwrite an existing backup, so double-apply is impossible',
-  /already exists/.test(fnBody('mergeSectionsApply')),
-  (fnBody('mergeSectionsApply').match(/[^\n]*already exists[^\n]*/) || [''])[0]);
-r.ok('the backup is the WHOLE snapshot, written in one call',
-  /setValues\(data\)|setValues\(all\)/.test(fnBody('mergeSectionsApply')),
-  (fnBody('mergeSectionsApply').match(/[^\n]*setValues[^\n]*/) || [''])[0]);
-r.ok('there is an undo, and the undo is itself undoable',
-  /function restoreAppDataFromBackup/.test(code) && /APP_DATA_PRE_RESTORE_/.test(code),
-  (code.match(/APP_DATA_[A-Z_]*BACKUP_[^\n]*|APP_DATA_PRE_RESTORE_[^\n]*/g) || []).slice(0, 2));
+r.head('deleting a department takes its memberships with it');
+// Otherwise a dangling membership resurrects the grants the moment the key is
+// recreated — silently, and with the same name.
+const dd = fnBody('deleteDepartment');
+r.ok('it removes the department key', /delete store\.departments\[key\]/.test(dd));
+r.ok('and filters the key out of every membership list',
+  /list\.filter\(function \(k\) \{ return String\(k\)\.trim\(\) !== key; \}\)/.test(dd),
+  (dd.match(/[^\n]*filter\([^\n]*/) || [''])[0]);
+r.ok('a list emptied by that is removed entirely, not left as []',
+  /delete store\.memberships\[email\]/.test(dd),
+  (dd.match(/[^\n]*delete store\.memberships[^\n]*/) || [''])[0]);
+r.ok('it writes once, inside the lock',
+  /withRowLockOrThrow/.test(dd) && (dd.match(/writeJsonLocked\('access\.json'/g) || []).length === 1);
+
+r.head('setUserDepartments replaces ONE person, and only that person');
+const sud = fnBody('setUserDepartments');
+r.ok('it assigns the person\'s own key', /store\.memberships\[email\] = keys/.test(sud));
+r.ok('an emptied list is DELETED rather than stored as []',
+  /else delete store\.memberships\[email\]/.test(sud),
+  (sud.match(/[^\n]*delete store\.memberships[^\n]*/) || [''])[0]);
+r.ok('it never touches another person\'s memberships',
+  !/Object\.keys\(store\.memberships\)/.test(sud),
+  (sud.match(/[^\n]*Object\.keys[^\n]*/) || ['none — correct']));
+r.ok('it takes the lock', /withRowLockOrThrow/.test(sud));
+
+// ── The run order ─────────────────────────────────────────────────────────────
+r.head('the setup run order is stated, and there is no cutover window left');
+// The old order existed because (a) widening a DEPARTMENTS tab would be read
+// positionally by the still-live old backend and misgrant every section, and (b)
+// the APP_DATA merge rewrote rows the live app was reading. Neither exists now:
+// there are no columns and no rows, `_store/` is a folder the old backend never
+// looks at, and the store starts empty.
+//
+// The banner is asserted in TWO places on purpose, because it is stated twice and
+// an editor only reads one of them: the run-order comment block above the setup
+// functions, and the `Next:` line initializeStore() prints into the execution log.
+const bannerAt = src.lastIndexOf('ONE-TIME SETUP');
+const banner = bannerAt < 0 ? '' : src.slice(bannerAt, bannerAt + 1800);
+r.ok('the banner exists', banner.length > 400, banner.length);
+r.ok('the order is initializeStore → seedDepartments → seedMemberships → bootstrapAdmin',
+  /initializeStore\(\)[\s\S]{0,400}seedDepartments\(\)[\s\S]{0,400}seedMemberships\(\)[\s\S]{0,400}bootstrapAdmin\(\)/.test(banner),
+  (banner.match(/[^\n]*initializeStore[^\n]*/) || [''])[0]);
+r.ok('AND THE SAME ORDER IS PRINTED where the editor will actually see it',
+  /Next: seedDepartments\(\) → seedMemberships\(\) → bootstrapAdmin\(\) → seedAccounts\(\)/.test(fnBody('initializeStore')),
+  (fnBody('initializeStore').match(/[^\n]*Next:[^\n]*/) || [''])[0]);
+r.ok('the banner says the cutover ordering problem is GONE, not just that it changed',
+  /no cutover ordering problem any more/i.test(banner),
+  (banner.match(/[^\n]*cutover[^\n]*/i) || [''])[0]);
+r.ok('and it says WHY, so nobody re-invents the split',
+  /no columns and no rows/i.test(banner),
+  (banner.match(/[^\n]*no columns[^\n]*/) || [''])[0]);
+r.ok('the prunes are listed as post-go-live, not pre-flight',
+  /Anytime after go-live[\s\S]{0,200}maintenancePruneSessions\(\)/.test(banner),
+  (banner.match(/[^\n]*go-live[^\n]*/) || [''])[0]);
+r.ok('the old pre-flight functions are named nowhere', !/migrateAddColumns/.test(code));
 
 r.head('the field-id wart is documented where it bites');
 // Field ids are never renamed: they are also the anchors inside every __NUDGES__
-// item and the Field ID of every historical AUDIT_LOG row. Renaming g_missionReport
-// → f_missionReport would orphan every comment on it and split its audit history.
-// So sec-f holds g_* and sec-g holds h_*/i_* — which only works because the
-// frontend resolves a field id through an index built from SECTIONS.
-r.ok('the merge deliberately keeps the ids as they are',
-  /ids are never renamed|never renamed|No field-id renames/i.test(src),
-  (src.match(/[^\n]*renamed[^\n]*/i) || [''])[0]);
-r.ok('a collision would be reported, never silently resolved',
-  /collisions/.test(code), (code.match(/[^\n]*collisions[^\n]*/) || ['']).slice(0, 2));
-r.ok('DONE_MAP drops sec-a and never chains',
-  /DONE_MAP\s*=\s*\{\s*'sec-a':\s*null/.test(code) &&
-  /'sec-h':\s*'sec-g'/.test(code) && !/'sec-h':\s*'sec-f'/.test(code),
-  (code.match(/var DONE_MAP[^\n]*/) || [''])[0]);
+// item and the Field ID of every historical audit line, and there is no migration
+// that could rewrite them. Renaming g_missionReport → f_missionReport would orphan
+// every comment on it and split its audit history. The one place that could break
+// this in a single line is the intake strip in saveSection, so what is asserted is
+// that the ONLY mutation it makes to a payload is a DELETE — never a copy under a
+// new key, which is what a "rename for consistency" would look like.
+const fieldMutations = (sv.match(/fields\[[^\]]*\]\s*=\s*fields\[/g) || []);
+r.ok('saveSection never renames a field key — no key is ever assigned from another',
+  fieldMutations.length === 0 && /delete fields\[k\];/.test(sv),
+  fieldMutations.length ? fieldMutations : 'delete only — correct');
+r.ok('and the ONLY key it adds is the derived upload-links key',
+  (sv.match(/fields\[[^\]]*\]\s*=/g) || []).length === 1 &&
+  /fields\[fid \+ '_links'\]/.test(sv),
+  (sv.match(/fields\[[^\]]*\] =[^\n]*/g) || ['']));
+r.ok('no other function rewrites a field key either',
+  !/fields\[[^\]]*\]\s*=\s*fields\[/.test(code),
+  (code.match(/fields\[[^\]]*\] = fields\[[^\n]*/g) || ['none — correct']));
 
-r.head('sec-g is two eras at once, and the planner knows it');
-// THE regression this block exists for. After the merge, `sec-g` is the LIVE
-// PDI/Dispatch section — and it is also a SOURCE for sec-f. A plain SEC_TARGET_MAP
-// lookup therefore reads a freshly-merged PDI row as Flight Test data, so a SECOND run
-// of the merge sweeps it into sec-f: silently, and the result still looks like a
-// perfectly plausible sheet. A row's own field ids date it, because ids are never
-// renamed (old Flight Test wrote g_*, the new Section G writes h_*/i_*).
-r.ok('a row-aware classifier exists, and the group key uses it',
-  /function mergeTargetFor/.test(code) && /mergeTargetFor\(data\[i\], sec\)/.test(code),
-  (code.match(/[^\n]*mergeTargetFor[^\n]*/) || ['']).slice(0, 2));
-r.ok('the naive per-section lookup is gone from the planner',
-  !/function targetFor/.test(fnBody('planSectionMerge')) &&
-  !/targetFor\(sec\)/.test(fnBody('planSectionMerge')),
-  (fnBody('planSectionMerge').match(/[^\n]*targetFor\([^\n]*/) || [''])[0]);
-r.ok('the classifier keys on g_* for sec-g, and defers every other id to the map',
-  /indexOf\('g_'\) === 0/.test(fnBody('mergeTargetFor')) &&
-  /secId !== 'sec-g'/.test(fnBody('mergeTargetFor')),
-  fnBody('mergeTargetFor').slice(0, 160));
-r.ok('a sec-g row with no field to date it is REPORTED, never guessed at',
-  /ambiguous/.test(fnBody('planSectionMerge')) && /ambiguous:\s*\[\]/.test(fnBody('planSectionMerge')) &&
-  /ERA-AMBIGUOUS/.test(fnBody('describeMergePlan')),
-  (fnBody('describeMergePlan').match(/[^\n]*AMBIGUOUS[^\n]*/) || [''])[0]);
-// The skip is what makes a re-run an EMPTY plan rather than one that rewrites every
-// already-merged row — so the guard below it can actually fire. It must run before
-// anything is pushed onto the plan.
-r.ok('a group with nothing to merge is skipped, before any survivor is planned',
-  (() => {
-    const b = fnBody('planSectionMerge');
-    const skip = b.indexOf('sourceRows.length === 0 && targetRows.length <= 1');
-    const push = b.indexOf('plan.survivors.push');
-    return skip > -1 && push > -1 && skip < push;
-  })(), (fnBody('planSectionMerge').match(/[^\n]*targetRows\.length <= 1[^\n]*/) || [''])[0]);
-r.ok('the idempotency guard tests BOTH counts, not deletes alone',
-  /plan\.survivors\.length === 0 && plan\.deletes\.length === 0/.test(fnBody('mergeSectionsApply')),
-  (fnBody('mergeSectionsApply').match(/[^\n]*survivors\.length === 0[^\n]*/) || [''])[0]);
-
+// ── Editor-facing reports ─────────────────────────────────────────────────────
 r.head('every editor-facing report is LOGGED, not merely returned');
 // The Apps Script editor's execution log shows only what the code logs — a returned
 // value is never displayed. So a function that only returns its report is, to the
 // human running it from the function dropdown, indistinguishable from one that did
-// nothing: "Execution completed" and no `dropped` grant list, no merge plan, no
-// ERA-AMBIGUOUS block, no backup tab name, no one-time admin password. Every one of
-// those is a thing the operator must READ to run the cutover safely.
+// nothing: "Execution completed" and no `dropped` grant list, no one-time admin
+// password, no store folder name. Every one of those must be READ to run setup safely.
 //
 // This is the same failure mode as the `→ 15 cols` strings that rotted: a report
 // nobody can read is worse than no report, and nothing asserted it.
@@ -851,36 +1297,46 @@ r.ok('report() exists and both logs and returns',
 
 // Every editor-facing function that produces a report must route every one of its
 // report returns through report(). Checked per-function on the real source, so a
-// new early-return cannot slip in unlogged. `describeMergePlan` is exempt: it is a
-// helper whose caller logs, and `migrateAclReport` logs directly (it predates
-// report() and its output is the one the owner must paste somewhere private).
-const REPORTING_FNS = ['migrateAddColumns', 'seedDepartments', 'seedMemberships',
-  'mergeSectionsReport', 'mergeSectionsApply', 'restoreAppDataFromBackup',
+// new early-return cannot slip in unlogged.
+const REPORTING_FNS = ['initializeStore', 'seedDepartments', 'seedMemberships',
   'bootstrapAdmin', 'maintenancePruneSessions', 'maintenancePruneAuditLog'];
 const unlogged = REPORTING_FNS.filter(fn => {
   const body = fnBody(fn);
   if (!body || !/report\(/.test(body)) return true;
   if (!/return\s+(['"])/.test(body)) return false;   // no bare report return at all
   // A LOCKED function's inner early-returns are values handed up to the single
-  // outer `return report(withRowLock(fn))`, so a bare return inside one IS logged.
-  // Outside that shape, a bare `return '…'` never reaches the log.
-  return !/return report\(withRowLock\(function/.test(body);
+  // outer `return report(withRowLockOrThrow(fn))`, so a bare return inside one IS
+  // logged. Outside that shape, a bare `return '…'` never reaches the log.
+  return !/return report\(withRowLockOrThrow\(function/.test(body);
 });
 r.ok('no editor-facing function returns a report string unlogged',
   unlogged.length === 0, unlogged);
 
-r.ok('the locked functions wrap the WHOLE call, not each inner return',
-  ['mergeSectionsApply', 'restoreAppDataFromBackup', 'maintenancePruneAuditLog']
-    .every(fn => /^function \w+\(\) \{\r?\n  return report\(withRowLock\(function/.test(
+r.ok('the locked setup functions wrap the WHOLE call, not each inner return',
+  ['seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog']
+    .every(fn => /^function \w+\(\) \{\r?\n  return report\(withRowLockOrThrow\(function/.test(
       (code.slice(code.indexOf('function ' + fn + '()'))))),
   // Wrapping the outer call is what makes every early refusal inside the lock
-  // visible too — wrapping the inner returns instead would leave the "Already
-  // merged" and "Refusing: … already exists" paths silent.
+  // visible too — wrapping the inner returns instead would leave them silent.
   'the refusals inside the lock are the messages that matter most');
 
 r.ok('report() is called for the refusal paths too, not just the happy path',
   /if \(!email\) return report\(/.test(fnBody('bootstrapAdmin')) &&
-  /if \(shape === 'unknown'\)[\s\S]{0,400}return report\(/.test(fnBody('seedDepartments')),
-  'a swallowed "refusing to touch DEPARTMENTS" is the message that matters most');
+  /No audit\/ folder — nothing to prune/.test(fnBody('maintenancePruneAuditLog')),
+  'a swallowed "no admin email configured" is the message that matters most');
+
+r.head('the admin bootstrap does not silently reuse an unknown password');
+// If the record is missing it CREATES one and prints a one-time temporary password
+// — the only place that password exists, so the log line is the delivery mechanism.
+const ba = fnBody('bootstrapAdmin');
+r.ok('it prints the temporary password to the log',
+  /TEMPORARY PASSWORD:/.test(ba), (ba.match(/[^\n]*TEMPORARY PASSWORD[^\n]*/) || [''])[0]);
+r.ok('and says to delete that log line afterwards',
+  /delete this log line/.test(ba), (ba.match(/[^\n]*log line[^\n]*/) || [''])[0]);
+r.ok('an existing admin keeps its password — only the flags are normalised',
+  /existing password untouched/.test(ba) && /rec\.mustChange\s*=\s*''/.test(ba),
+  (ba.match(/[^\n]*untouched[^\n]*/) || [''])[0]);
+r.ok('the normalising write is inside the lock',
+  /withRowLockOrThrow/.test(ba));
 
 r.finish();

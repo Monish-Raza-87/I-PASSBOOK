@@ -6,8 +6,11 @@
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
 const CONFIG = {
-  // Google Apps Script Web App URL (v2 — correct column mappings)
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbz-borqx_TeCTh1Ibc70vv9SIHaFxRvVGs4XolbJG0EG2qEg4kVQ0hyclDOeLM8kCDP/exec',
+  // Google Apps Script Web App URL (v3 — Drive-JSON store, new project under
+  // monish.raza@indrones.com). The v2 URL it replaced stays alive and untouched as
+  // the rollback: reverting this one line and pushing gh-pages returns the app to
+  // the old backend, with no data lost.
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzCW9xVpfl2VSELFt51n7NuYxe5vJ29R1vGuafqFVcwXt3I-V7xIlmhOyyw-tQUAvRcXQ/exec',
 
   // Allowed domain — only @indrones.com (plus explicitly-allowlisted) accounts
   ALLOWED_DOMAIN: 'indrones.com',
@@ -135,6 +138,13 @@ function loginBackend(email, password) {
         persistSession(data.sessionToken);
         return data;
       }
+      // A temporary password is CORRECT but is not yet a session: the backend
+      // answers {status:'ok', mustChangePassword:true} with NO token, and the
+      // caller routes to the password-change screen. This has to pass through
+      // BEFORE the error branch below — swallowing it there is what made every
+      // first sign-in on a temp password report "Login failed." with the right
+      // password in the box.
+      if (data && data.status === 'ok' && data.mustChangePassword) return data;
       // Pass the backend's own error message through (e.g. "Wrong password.").
       currentUser.sessionError = (data && data.message) ? data.message : 'Login failed.';
       return data && data.message
@@ -381,7 +391,7 @@ function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 // Triage is a SEPARATE axis from section edit rights, not a seventh "section".
-// It governs the ticket header — status, assignee, priority, type — and the two
+// It governs the IR header — status, assignee, priority, type — and the two
 // Overview fields. A department can hold it without editing any section, which
 // is exactly what CR and Management do. Admin always has it.
 function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
@@ -405,7 +415,7 @@ function canTriage()              { const a = myAccess(); if (a.role === 'admin'
 // getPassbook returns EVERY row matching one irNumber, keyed by sectionId, so a
 // single request reads a whole store. That is why per-IR workflow state is one
 // row per IR rather than one map record: each record gets its own ~50,000-char
-// cell (no ceiling), and two people editing two different tickets never clobber
+// cell (no ceiling), and two people editing two different IRs never clobber
 // each other.
 //
 // Caveat worth knowing before adding more: a sentinel-irNumber row is readable
@@ -451,10 +461,10 @@ function saveSentinel(irNumber, sectionId, fields) {
 // owns everything mutable — status, assignee, priority, type, which sections are
 // done, CSAT. One row per IR, keyed by irNumber.
 //
-// Ownership of a ticket's status begins the moment a human changes the STATUS in
+// Ownership of an IR's status begins the moment a human changes the STATUS in
 // the app (statusOwned). Until then the Sheet's Col D is still what the list
-// shows, so an edit made in the Sheet on an untriaged ticket still works — it
-// only stops mattering once somebody has taken the ticket in hand here. Note
+// shows, so an edit made in the Sheet on an untriaged IR still works — it
+// only stops mattering once somebody has taken the IR in hand here. Note
 // that assigning or categorising does NOT take over the status.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
@@ -470,8 +480,8 @@ function appState(irNumber) {
 }
 
 // The status this app has actually taken ownership of, or '' while the Sheet is
-// still the authority for the ticket. Deliberately separate from appState():
-// saving Section B is not triage, so a ticket whose Section B was saved must go
+// still the authority for the IR. Deliberately separate from appState():
+// saving Section B is not triage, so an IR whose Section B was saved must go
 // on following the Sheet's Col D until somebody changes the status here.
 function ownedStatus(irNumber) {
   const s = irState[irNumber];
@@ -479,7 +489,7 @@ function ownedStatus(irNumber) {
 }
 
 // Record that the app has seen this IR, without claiming ownership of its
-// status yet. Written once per ticket, on first open. Records `seededAt` rather
+// status yet. Written once per IR, on first open. Records `seededAt` rather
 // than a `statusAt`, because we genuinely do not know when the Sheet's status
 // was set and Stage 4's ageing must not be built on an invented timestamp.
 function seedIRState(irNumber) {
@@ -561,7 +571,7 @@ async function patchIRState(irNumber, patch) {
   irState[irNumber] = next;
   applyIRStateToAllIRs();
   if (currentView === 'detail' && currentIR?.irNumber === irNumber) renderBannerMeta();
-  // Same guard as loadIRState: a ticket can be opened by deep link before the
+  // Same guard as loadIRState: an IR can be opened by deep link before the
   // list has loaded, and there is nothing to re-render until it does.
   if (allIRs.length) applyListFilters();
   const res = await saveSentinel(IR_STATE_IR, irNumber, next);
@@ -712,13 +722,15 @@ const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCountEl   = document.getElementById('list-count');
 const bannerPills   = document.getElementById('ir-banner-pills');
+const railToggle    = document.getElementById('sidebar-toggle');
+const listToggle    = document.getElementById('list-toggle');
 
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
 // renderLayout() translates it into the inline display values that the rest of
 // the app reads back (applySectionAccessGating tests detailView.style.display).
 let currentView = 'index';     // 'index' | 'detail'
-let activeSegment = 'all';     // ticket-list filter segment
+let activeSegment = 'all';     // IR-list filter segment
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -1095,7 +1107,7 @@ function applyTheme(animate) {
   if (dark) root.setAttribute('data-theme', 'dark');
   else root.removeAttribute('data-theme');
 
-  if (navThemeIcon)  navThemeIcon.textContent  = dark ? '☀️' : '🌙';
+  if (navThemeIcon)  navThemeIcon.innerHTML  = iconSvg(dark ? 'sun' : 'moon');
   if (navThemeLabel) navThemeLabel.textContent = dark ? 'Light mode' : 'Dark mode';
   if (navTheme)      navTheme.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
 }
@@ -1113,16 +1125,64 @@ function toggleTheme() {
   else if (mq.addListener) mq.addListener(onChange);
 })();
 
+// ─── REMEMBERED LAYOUT PREFERENCES ───────────────────────────────────────────
+// Small on/off preferences that, like the theme, belong to the device rather than
+// to one IR. Bare keys, matching THEME_KEY, and every access is wrapped, because a
+// browser with storage blocked must still render a usable page.
+const RAIL_KEY     = 'rail';       // sidebar folded to an icon rail
+const LIST_KEY     = 'list';       // IR list folded away
+const ACTIVITY_KEY = 'activity';   // activity log expanded
+
+function storedFlag(key) {
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+function setFlag(key, on) {
+  try { on ? localStorage.setItem(key, '1') : localStorage.removeItem(key); } catch { /* non-fatal */ }
+}
+
+// ─── COLLAPSIBLE CHROME ──────────────────────────────────────────────────────
+// The sidebar fold is a class on <html> and the elements it targets are static, so
+// there is nothing per-IR to re-apply — it is set once from showApp(). A reload
+// cannot flash the expanded rail either, because #app-container is display:none
+// until showApp() runs, long after this lands.
+function applyChromeState() {
+  const root = document.documentElement;
+  const rail = storedFlag(RAIL_KEY);
+  const list = storedFlag(LIST_KEY);
+  root.classList.toggle('rail-collapsed', rail);
+  if (railToggle) {
+    railToggle.setAttribute('aria-expanded', String(!rail));
+    railToggle.title = rail ? 'Show the sidebar' : 'Hide the sidebar';
+  }
+  if (listToggle) {
+    listToggle.setAttribute('aria-expanded', String(!list));
+    listToggle.title = list ? 'Show the IR list' : 'Hide the IR list';
+  }
+  renderLayout();   // the list fold IS a pane — renderLayout owns its display
+}
+function toggleRail() { setFlag(RAIL_KEY, !storedFlag(RAIL_KEY)); applyChromeState(); }
+function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeState(); }
+
 // ─── LAYOUT ──────────────────────────────────────────────────────────────────
 // One function owns the panes' visibility. It must keep writing *inline*
 // styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
-//   desktop (≥1024px) : list always visible, detail beside it when open
+//   desktop (≥1024px) : list visible, detail beside it when open
 //   mobile            : list and detail are separate full screens
+//
+// The list fold is decided HERE rather than by a stylesheet rule, because an
+// inline `display` beats any rule and this function is the one place allowed to
+// write it. Folding the list must never strand the user on an empty index screen,
+// which is why the fold only ever applies while a detail pane is open.
 function renderLayout() {
   const desktop = mqDesktop.matches;
   const detail  = currentView === 'detail';
-  indexView.style.display  = (desktop || !detail) ? 'flex' : 'none';
+  // On mobile the list and the detail are separate full screens, so an open
+  // detail always hides the list. On desktop they sit side by side, so the list
+  // hides only when the user asked for the room — and only while a detail is
+  // actually open.
+  const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
+  indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
   backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
@@ -1177,7 +1237,7 @@ async function handleRoute() {
   }
 
   if (r.name === 'ticket') {
-    // Already showing this ticket — don't rebuild every section form.
+    // Already showing this IR — don't rebuild every section form.
     if (currentView === 'detail' && currentIR?.irNumber === r.irNumber) return;
     // A deep link resolves before the IR list has loaded; wait so the banner
     // gets the drone serial and customer name.
@@ -1251,6 +1311,9 @@ function showApp() {
 
   showIndex();
   applyTheme();          // sync the nav toggle with the stored preference
+  initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
+  applyChromeState();    // ...and the sidebar / IR-list folds
+  applyActivityState(storedFlag(ACTIVITY_KEY));
   syncNavAccess();
 
   // Set up user avatar
@@ -1265,6 +1328,8 @@ function showApp() {
   userAvatar.addEventListener('click', toggleUserMenu);
   if (navTheme) navTheme.addEventListener('click', toggleTheme);
   if (navAccess) navAccess.addEventListener('click', openAccessModal);
+  if (railToggle) railToggle.addEventListener('click', toggleRail);
+  if (listToggle) listToggle.addEventListener('click', toggleList);
 
   startAppData();
 
@@ -1273,7 +1338,7 @@ function showApp() {
   if (bell) bell.addEventListener('click', toggleNudgePanel);
 
   // Enter the route. A hash already in the URL (deep link / restored tab) wins;
-  // otherwise start on the ticket list without adding a history entry.
+  // otherwise start on the IR list without adding a history entry.
   if (!location.hash) history.replaceState(null, '', '#/tickets');
   handleRoute();
 }
@@ -1378,7 +1443,7 @@ function credentialsTxt(email, tempPassword, name) {
     '',
     'What you can do',
     '---------------',
-    '• You can VIEW every ticket and COMMENT on any section right away.',
+    '• You can VIEW every IR and COMMENT on any section right away.',
     '• You can EDIT the sections your department owns. If you need edit',
     '  access somewhere else, ask the admin — it is a department setting.',
     '',
@@ -1627,7 +1692,7 @@ function renderDepartmentsTab() {
     <div class="access-section">
       <h3>What each department may edit</h3>
       <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
-      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change a ticket's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
       <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
       <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
       <div class="access-add-row" style="margin-top:0.75rem;">
@@ -1928,7 +1993,7 @@ function toDisplayDate(val) {
 }
 
 // 'DD MONTH YYYY, HH:MM'. The Sheet's Timestamp carries the time the client
-// raised the IR and the ticket has never shown it — only the date. Falls back to
+// raised the IR and the IR has never shown it — only the date. Falls back to
 // the raw cell when unparseable, so nothing is ever rendered as NaN.
 function toDisplayDateTime(val) {
   if (!val) return '';
@@ -1981,7 +2046,7 @@ const INTAKE_FIELDS = [
 ];
 
 // Columns the app reads but does not list in the intake view: the IR number and
-// the status are the ticket's identity and its workflow, and priority is
+// the status are the IR's identity and its workflow, and priority is
 // app-owned (Stage 1 triage) — the Form has no Priority question yet. Named here
 // so the audit below does not report them as dropped.
 const INTAKE_HIDDEN_NEEDLES = ['IR Number', 'Issue Status', 'Priority'];
@@ -2050,7 +2115,7 @@ function mapSheetRows(rows) {
     intake.contactPhone = phone;    // …onto its own row
 
     // Anything the Form writes that the table above does not model. Non-empty
-    // values only: a column that exists but is blank for this ticket would just
+    // values only: a column that exists but is blank for this IR would just
     // be noise on every card.
     const extra = [];
     headers.forEach((h, i) => {
@@ -2105,7 +2170,7 @@ async function fetchIRs() {
     if (records && records.length) {
       setAllIRs(records);
       _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} tickets loaded from the Sheet`);
+      setSyncStatus(`✓ ${allIRs.length} IRs loaded from the Sheet`);
       renderIRList(allIRs);
       return;
     }
@@ -2122,7 +2187,7 @@ async function fetchIRs() {
     if (data.status === 'ok') {
       setAllIRs(data.records || []);
       _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} tickets loaded`);
+      setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
       renderIRList(allIRs);
       return;
     }
@@ -2135,7 +2200,7 @@ async function fetchIRs() {
   }
 }
 
-// Manual re-read of the ticket list + app-owned state. Staff should never have
+// Manual re-read of the IR list + app-owned state. Staff should never have
 // to wonder whether what they are looking at is stale — this is the answer.
 let _refreshing = false;
 async function refreshIRList() {
@@ -2144,9 +2209,9 @@ async function refreshIRList() {
   try {
     await fetchIRs();
     await loadIRState();
-    // A ticket can be open while the list refreshes. Adopt the freshly-read
+    // A IR can be open while the list refreshes. Adopt the freshly-read
     // record so the banner and the client report stop showing stale Sheet data —
-    // app-owned fields are already merged onto it by setAllIRs(). If the ticket
+    // app-owned fields are already merged onto it by setAllIRs(). If the IR
     // is gone from the Sheet, the open record is kept rather than blanked.
     if (currentView === 'detail' && currentIR?.irNumber) {
       const fresh = allIRs.find(x => x.irNumber === currentIR.irNumber);
@@ -2178,7 +2243,7 @@ function renderSyncBar() {
   syncStatus.innerHTML =
     `<span class="sync-msg">${escHtml(_syncMsg)}</span>` +
     `<span class="sync-meta">Synced ${escHtml(t)}</span>` +
-    `<button type="button" class="sync-refresh" onclick="refreshIRList()" title="Re-read the ticket list from the Sheet">↻ Refresh</button>`;
+    `<button type="button" class="sync-refresh" onclick="refreshIRList()" title="Re-read the IR list from the Sheet">↻ Refresh</button>`;
 }
 
 // ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
@@ -2409,7 +2474,7 @@ async function openPassbook(irNumber) {
       currentIR.done = Array.isArray(st.done) ? st.done : [];
     }
     renderBannerMeta();
-    // First sight of this ticket: record that the app has seen it. Deliberately
+    // First sight of this IR: record that the app has seen it. Deliberately
     // does NOT claim ownership of the status — see seedIRState.
     seedIRState(irNumber);
   }
@@ -2422,7 +2487,7 @@ async function openPassbook(irNumber) {
   buildSectionForms(irNumber);
 
   // The client's original report. Read-only and Sheet-only, so it needs no
-  // reload after a section save — only after the ticket itself changes.
+  // reload after a section save — only after the IR itself changes.
   renderIntake();
 
   // Load saved data for this IR, then restore any unsaved drafts on top
@@ -2495,11 +2560,11 @@ function renderIntake() {
   if (!body) return;
   const ir = currentIR;
   if (!ir || !ir.irNumber) {
-    body.innerHTML = '<p class="intake-audit">No ticket selected.</p>';
+    body.innerHTML = '<p class="intake-audit">No IR selected.</p>';
     return;
   }
 
-  // `intake` holds the raw cells for a Sheet-sourced ticket. Legacy and demo
+  // `intake` holds the raw cells for a Sheet-sourced IR. Legacy and demo
   // records have no Sheet row, so fall back to the parsed fields the record does
   // carry — the tab must be honest about what it has, not show blanks.
   const intake = ir.intake || {};
@@ -2541,15 +2606,15 @@ function renderIntake() {
     : '';
 
   // Columns the Form writes that the app does not model AND that are blank on
-  // this ticket — named so the gap is visible rather than assumed away.
+  // this IR — named so the gap is visible rather than assumed away.
   const unmapped = (lastSheetAudit.unmapped || [])
     .filter(h => !extras.some(x => x.label === h));
   const auditNote = unmapped.length
-    ? `<p class="intake-audit">The client's form also writes ${unmapped.map(escHtml).join(', ')} — empty on this ticket.</p>`
+    ? `<p class="intake-audit">The client's form also writes ${unmapped.map(escHtml).join(', ')} — empty on this IR.</p>`
     : '';
   const noSheetNote = ir.intake
     ? ''
-    : `<p class="intake-audit">No Sheet row for this ticket — showing only the fields the app holds. ` +
+    : `<p class="intake-audit">No Sheet row for this IR — showing only the fields the app holds. ` +
       `Records from before the app (🏛 Legacy) live in the old workbook.</p>`;
 
   body.innerHTML =
@@ -2683,39 +2748,75 @@ function applyOverviewGating() {
 // Cached audit rows for the open IR. Comments live in a different store that the
 // bell already polls, so when they change the timeline can be re-rendered from
 // this cache with no second fetch.
-let overviewTimelineCache = { irNumber: '', entries: [] };
+let activityLogCache = { irNumber: '', entries: [] };
 
-async function loadOverviewTimeline(irNumber) {
+// The in-page log shows the newest 40; the History modal shows 400. One builder,
+// one renderer, two windows.
+const ACTIVITY_LIMIT = 40;
+
+async function loadActivityLog(irNumber) {
   const el = document.getElementById('ir-timeline');
   if (!el) return;
   const entries = await fetchAuditEntries(irNumber, 400, true);
-  // A newer ticket may have been opened while this was in flight.
+  // A newer IR may have been opened while this was in flight.
   if (!currentIR || currentIR.irNumber !== irNumber) return;
-  overviewTimelineCache = { irNumber: irNumber, entries: entries };
-  refreshOverviewTimelineView();
+  activityLogCache = { irNumber: irNumber, entries: entries };
+  refreshActivityLog();
 }
 
-function refreshOverviewTimelineView() {
+function refreshActivityLog() {
   const el = document.getElementById('ir-timeline');
   if (!el || !currentIR) return;
-  // Nothing cached for THIS ticket yet — the first fetch is still in flight, and
-  // rendering another ticket's activity would be worse than a moment of blank.
-  if (overviewTimelineCache.irNumber !== currentIR.irNumber) return;
-  renderTimelineInto(el, buildTimeline(currentIR.irNumber, overviewTimelineCache.entries, nudges, 40), {
-    emptyText: 'No activity recorded yet for this ticket.',
+  // Nothing cached for THIS IR yet — the first fetch is still in flight, and
+  // rendering another IR's activity would be worse than a moment of blank.
+  if (activityLogCache.irNumber !== currentIR.irNumber) return;
+  // Build the whole list and slice it here rather than passing the limit to
+  // buildTimeline, so the header count can report the TRUE total: "40 of 128" is
+  // honest, a bare "40" would not be.
+  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0);
+  renderTimelineInto(el, all.slice(-ACTIVITY_LIMIT), {
+    emptyText: 'No activity recorded yet for this IR.',
   });
+  renderActivityCount(all.length, Math.min(all.length, ACTIVITY_LIMIT));
+}
+
+// Refreshed on every activity refresh — including while the panel is COLLAPSED,
+// which is why the render above is never gated on is-open. Gating it would leave
+// a stale number sitting over a stale list.
+function renderActivityCount(total, shown) {
+  const el = document.getElementById('ir-activity-count');
+  if (!el) return;
+  el.textContent = !total ? '' : (shown < total ? shown + ' of ' + total : String(total));
+}
+
+function applyActivityState(open) {
+  const panel = document.getElementById('ir-activity');
+  if (panel) panel.classList.toggle('is-open', !!open);
+  const btn = document.getElementById('ir-activity-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(!!open));
+}
+function toggleActivity() {
+  const open = !storedFlag(ACTIVITY_KEY);
+  setFlag(ACTIVITY_KEY, open);
+  applyActivityState(open);
 }
 
 function renderOverview() {
   const panel = document.getElementById('ir-overview');
   if (!panel) return;
-  if (!currentIR || !currentIR.irNumber) { panel.style.display = 'none'; return; }
+  const activity = document.getElementById('ir-activity');
+  if (!currentIR || !currentIR.irNumber) {
+    panel.style.display = 'none';
+    if (activity) activity.classList.add('is-hidden');
+    return;
+  }
   panel.style.display = '';
+  if (activity) activity.classList.remove('is-hidden');
   renderOverviewFacts();
   renderOverviewEditable();
   renderLegacyLog();
   applyOverviewGating();
-  loadOverviewTimeline(currentIR.irNumber);
+  loadActivityLog(currentIR.irNumber);
 }
 
 // Mirrors the section save path, minus files and drafts, and posts to the SAME
@@ -2753,7 +2854,7 @@ async function saveOverview() {
     // Keep the in-memory record in step, or a re-render would revert to the old
     // values and look like the save was lost.
     currentSectionData[OVERVIEW_KEY] = Object.assign({}, currentSectionData[OVERVIEW_KEY] || {}, fields);
-    loadOverviewTimeline(irNumber);
+    loadActivityLog(irNumber);
   } catch (err) {
     if (btn) { btn.textContent = '⚠ Retry Save'; btn.className = 'btn error'; }
     showToast('❌ Save failed: ' + err.message);
@@ -2765,7 +2866,7 @@ async function saveOverview() {
 }
 
 // The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
-// only supplies the status a ticket starts life with.
+// only supplies the status an IR starts life with.
 function renderBannerMeta() {
   if (!bannerPills || !currentIR) return;
   const ir    = currentIR;
@@ -2850,7 +2951,7 @@ async function applyTriage() {
 
   const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '', priority, type };
   // Only a real status CHANGE moves the clock. Re-saving the same status must
-  // not reset time-in-status, or every triage edit would fake a fresh ticket.
+  // not reset time-in-status, or every triage edit would fake a fresh IR.
   if (status && status !== currentIR.status) {
     patch.statusAt = Date.now();
     patch.statusBy = myEmail() || 'unknown';
@@ -2858,7 +2959,7 @@ async function applyTriage() {
   closeTriageModal();
   await patchIRState(irNumber, patch);
   showToast('Triage saved');
-  loadOverviewTimeline(irNumber);
+  loadActivityLog(irNumber);
 
   // Assignment notifies through the comment machinery already in place — the
   // bell, the unread badge, the 90s poll and the email all work unchanged.
@@ -2927,6 +3028,11 @@ function openLegacyWorkbook() {
 
 // Back button (mobile only — the desktop split pane keeps the list on screen)
 backBtn.addEventListener('click', goIndex);
+
+// Activity log toggle. Bound once: the panel is static markup that
+// renderTimelineInto only ever fills, never replaces.
+const activityToggle = document.getElementById('ir-activity-toggle');
+if (activityToggle) activityToggle.addEventListener('click', toggleActivity);
 
 // IR banner nudge / comments button
 const irNudgeBtn = document.getElementById('ir-nudge-btn');
@@ -3134,7 +3240,7 @@ function buildSectionForms(irNumber) {
   const btnOverview = document.getElementById('save-overview');
   if (btnOverview) btnOverview.onclick = () => saveOverview();
 
-  // Inject a 💬 nudge button after each section title (per-section tagging)
+  // Inject a comment button after each section title (per-section tagging)
   Object.keys(SECTIONS).forEach(secId => {
     const sec = document.getElementById(secId);
     if (!sec || sec.querySelector('.sec-nudge-btn')) return;
@@ -3142,7 +3248,7 @@ function buildSectionForms(irNumber) {
     btn.type = 'button';
     btn.className = 'sec-nudge-btn';
     btn.dataset.sectionId = secId;
-    btn.innerHTML = '💬<span class="comment-count" style="display:none;">0</span>';
+    btn.innerHTML = iconSvg('comment') + '<span class="comment-count" style="display:none;">0</span>';
     btn.title = 'Comments on this section';
     btn.onclick = () => openNudgeModalForSection(secId);
     const h2 = sec.querySelector('.section-title');
@@ -3206,7 +3312,7 @@ function applySectionAccessGating() {
         if (el.type === 'file') { el.disabled = true; return; }
         // Don't disable the section's comment button if the user can comment.
         if (el.classList.contains('field-nudge-btn') && comment) return;
-        if (el.classList.contains('btn-add-row') || el.classList.contains('btn-esign') ||
+        if (el.classList.contains('btn-add-row') ||
             el.classList.contains('btn-add-evidence') || el.classList.contains('field-nudge-btn')) {
           if (!comment) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; }
           return;
@@ -3433,7 +3539,7 @@ function buildField(field, irNumber, sectionId) {
   // commentable for this user (skipped for read-only analysis notes too).
   const canFieldComment = sectionId ? canCommentSection(sectionId) : true;
   const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
-    ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
+    ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">${iconSvg('comment')}<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   const labelHtml = field.label
     ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
@@ -3606,20 +3712,24 @@ function safeUrl(u) {
   return /^https?:\/\//i.test(s) ? s : '';
 }
 
+// An e-signature block is READ-ONLY. There is no "Sign as …" button any more, and
+// no "Override & Re-sign" — the block records who saved the section, and the
+// activity log records it independently. The buttons existed because the old
+// Google Sheet had no login, so a typed name column was the only way to say who
+// did the work; the app has a login now, so a second, role-specific step before
+// Save recorded nothing the audit trail does not already carry.
+//
+// The fill itself lives in saveSection() — see signSectionOnSave(). This function
+// only paints whatever state that produced.
 function renderESignatureHTML(fieldId, role) {
   const sig = esignatureState[fieldId];
-  const email = currentUser?.email || '';
   const history = (sig && sig.history) ? sig.history : [];
   const historyLines = history.map(h => `• ${escHtml(h.signedBy)} — ${escHtml(formatTimestamp(h.signedAt))}`).join('<br>');
   const historyTitle = historyLines
-    ? `Edit history (hover):&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
+    ? `Earlier:&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
     : '';
 
   if (sig && sig.signedBy) {
-    const canOverride = isAdmin() || sig.signedBy === email;
-    const overrideBtn = canOverride
-      ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${escJsAttr(fieldId)}')">Override &amp; Re-sign</button>`
-      : '';
     return `
       <div class="esignature-signed" title="${escHtml(historyTitle)}">
         <div class="esignature-row">
@@ -3629,15 +3739,10 @@ function renderESignatureHTML(fieldId, role) {
             <div class="esignature-stamp">${escHtml(formatTimestamp(sig.signedAt))}</div>
           </div>
         </div>
-        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Edit history:</span><br>${historyLines}</div>` : ''}
-        ${overrideBtn}
+        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Earlier:</span><br>${historyLines}</div>` : ''}
       </div>`;
   }
-  // Unsigned
-  const signBtn = email
-    ? `<button type="button" class="btn-esign btn-esign-sign" onclick="signESignature('${escJsAttr(fieldId)}')">Sign as ${escJsAttr(email)}</button>`
-    : `<span class="esignature-muted">Sign in to sign.</span>`;
-  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span>${signBtn}</div>`;
+  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span><span class="esignature-muted">Recorded automatically when this section is saved.</span></div>`;
 }
 
 function refreshESignature(fieldId) {
@@ -3645,20 +3750,44 @@ function refreshESignature(fieldId) {
   if (block) block.innerHTML = renderESignatureHTML(fieldId, block.dataset.role || '');
 }
 
-// Sign (or override-and-resign) the given e-signature field.
-function signESignature(fieldId) {
+// Stamps the role line for whoever is saving, from ONE section. Called from
+// saveSection() just before the values are collected, so the payload it posts
+// already carries the signature and the normal save path does the rest — no second
+// write, and no draft (this is a real save, not a draft).
+//
+// TWO rules, and both are load-bearing:
+//
+//   1. Never overwrite. A block that already carries a name is left exactly as it
+//      is, so nobody can be relabelled by someone else's later save.
+//   2. Only ONE block per save — the first that is still empty — and only if this
+//      person has not already signed something in this section.
+//
+// Rule 2 is what keeps a two-role section separable. Section B is signed by two
+// different people: Inward, then Inventory. Filling every empty block on each save
+// would stamp "Inventory (ST No. Assigner)" with the Inward person's name, which is
+// a wrong attribution on a line that reaches a customer. Filling the first empty
+// one gives the Inward person their line and the Inventory person theirs, while the
+// "already signed here" guard stops a second save by the same person from creeping
+// onto the next role.
+function signSectionOnSave(sectionId) {
+  const section = SECTIONS[sectionId];
   const email = currentUser?.email;
-  if (!email) { showToast('Sign in first'); return; }
-  const prev = esignatureState[fieldId];
-  const history = (prev && prev.signedBy)
-    ? [...(prev.history || []), { signedBy: prev.signedBy, signedAt: prev.signedAt }]
-    : (prev?.history || []);
-  esignatureState[fieldId] = { signedBy: email, signedAt: new Date().toISOString(), history };
-  refreshESignature(fieldId);
-  // Persist the signature as a draft so it survives even if the section isn't saved
-  const secId = sectionIdFromFieldId(fieldId);
-  if (secId) saveDraft(secId);
-  showToast('Signed: ' + email);
+  if (!section || !email) return;
+
+  const blocks = section.fields.filter(f => f.type === 'esignature');
+  // I have already claimed my role in this section — a re-save is not a new claim.
+  if (blocks.some(f => esignatureState[f.id]?.signedBy === email)) return;
+
+  const empty = blocks.find(f => !esignatureState[f.id]?.signedBy);
+  if (!empty) return;
+
+  const prev = esignatureState[empty.id];
+  esignatureState[empty.id] = {
+    signedBy: email,
+    signedAt: new Date().toISOString(),
+    history: (prev && prev.history) ? prev.history : [],
+  };
+  refreshESignature(empty.id);
 }
 
 // ─── INWARD DROPDOWN OPTIONS (admin-customizable) ──────────────────────────────
@@ -4388,8 +4517,12 @@ async function saveSection(sectionId, irNumber) {
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
 
-  const { fieldValues, fileFields } = collectSectionValues(sectionId);
+  // Stamp any e-signature in THIS section that nobody has filled yet, BEFORE the
+  // values are collected, so the payload below already carries it. Saving is the
+  // signature: whoever pressed Save is the person recorded.
+  signSectionOnSave(sectionId);
 
+  const { fieldValues, fileFields } = collectSectionValues(sectionId);
   formData.append('fields', JSON.stringify(fieldValues));
 
   // Convert files to base64
@@ -4428,7 +4561,7 @@ async function saveSection(sectionId, irNumber) {
       // Record this save in the app-owned workflow state — every section save
       // marks that section done for this IR, and the save is now on the timeline.
       syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues);
-      loadOverviewTimeline(irNumber);
+      loadActivityLog(irNumber);
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -4447,7 +4580,7 @@ async function saveSection(sectionId, irNumber) {
 }
 
 // A section save is the one place that knows an IR was actually touched, so it
-// is where the app takes ownership of that ticket's workflow state.
+// is where the app takes ownership of that IR's workflow state.
 function syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues) {
   // Status is no longer mirrored from a section form. The IR Status dropdown lived
   // in Section A, which is gone; status is now written only by the Triage modal
@@ -5022,7 +5155,7 @@ function loadNudges() {
         refreshCommentCounts();
         if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
         rerenderOpenNudgeModal();
-        refreshOverviewTimelineView();
+        refreshActivityLog();
       }
     })
     .catch(() => { /* keep current list */ });
@@ -5274,7 +5407,7 @@ function renderNudgePanel() {
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
         <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
       </div>
-      <div class="nudge-ctx">🔔 ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
+      <div class="nudge-ctx">${iconSvg('bell')} ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
       <div class="nudge-msg">${escHtml(n.message || '')}</div>
       <div class="nudge-actions">
         ${statusChip}
@@ -5323,7 +5456,7 @@ function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
         <label class="form-label" style="margin-top:0.6rem;">Message</label>
         <textarea id="nudge-message" class="form-input" rows="3" placeholder="What do you want to remind or assign?"></textarea>
         <div class="nudge-composer-actions">
-          <button type="button" class="btn" onclick="sendComment()">💬 Comment</button>
+          <button type="button" class="btn" onclick="sendComment()">${iconSvg('comment')} Comment</button>
         </div>
       </div>
     </div>`;
@@ -5553,7 +5686,7 @@ function openNudgeModalForField(fieldId) {
 // ─── ACTIVITY TIMELINE ───────────────────────────────────────────────────────
 // ONE builder and ONE renderer, used twice: the Overview panel embeds the newest
 // 40 entries, the 🕓 History modal shows the newest 400. Because both go through
-// buildTimeline, a ticket can never tell two different stories depending on where
+// buildTimeline, an IR can never tell two different stories depending on where
 // you look at it.
 //
 // Everything here is derived from something the app already records — nothing is
@@ -5625,17 +5758,118 @@ function sectionDisplayName(sectionId) {
   return SECTION_SHORT[sectionId] || HISTORICAL_SECTION_NAMES[sectionId] || sectionId;
 }
 
+// ─── ICON SET ────────────────────────────────────────────────────────────────
+// The app's first and only SVG. Before this the whole UI was emoji, which render
+// as a different picture on every OS and read as decoration rather than chrome.
+//
+// One family: a 24-unit grid, a single 1.75 stroke, round caps and joins, no fill
+// — except the two deliberate dots, which fill with `currentColor`. Because the
+// stroke is `currentColor` too, a glyph inherits the themed text colour it sits
+// beside: no per-theme rule, no second asset, no sprite.
+//
+// INLINE, not file-based, and that is load-bearing. The app is an offline PWA and
+// sw.js caches a fixed SHELL list, so a new .svg would need a SHELL entry AND a
+// CACHE_NAME bump before an installed client could ever see it — and would still
+// be blank on a first load with no network. Inline markup ships inside app.js and
+// costs the cache nothing.
+//
+// DATA ONLY. `iconSvg` looks its argument up and never interpolates it, so a name
+// that is not a key here can only ever render as '' — never as markup. That is
+// what makes the unescaped ${iconSvg(...)} in renderTimelineInto safe.
+const ICON_PATHS = {
+  // timeline kinds
+  'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.6l2.5 2.4 4.5-5"/>',
+  plus:           '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  pencil:         '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14.5 5.5l4 4"/>',
+  minus:          '<path d="M5 12h14"/>',
+  target:         '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
+  user:           '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  flag:           '<path d="M6 21V4"/><path d="M6 5h12l-2.5 4L18 13H6"/>',
+  tag:            '<path d="M20 12.5L12.5 20a1.5 1.5 0 0 1-2.1 0L4 13.6V4h9.6l6.4 6.4a1.5 1.5 0 0 1 0 2.1z"/><circle cx="8.5" cy="8.5" r="1.4"/>',
+  upload:         '<path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16"/>',
+  // Names are the FEATURE, not the picture: `comment` is what every call site asks
+  // for, and smoke-ui.mjs cross-checks every referenced name against this map —
+  // because a name that is not here renders '' and leaves a silent blank button.
+  comment:        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  dot:            '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
+  // chrome
+  chevron:        '<path d="M9 5l7 7-7 7"/>',
+  bell:           '<path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/>',
+  'panel-left':   '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  list:           '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3.5 6h.01"/><path d="M3.5 12h.01"/><path d="M3.5 18h.01"/>',
+  ir:             '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1.5a2.5 2.5 0 0 0 0 5V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1.5a2.5 2.5 0 0 0 0-5z"/><path d="M12 7v10" stroke-dasharray="2 2.5"/>',
+  legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
+  users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
+  moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
+  sun:            '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2"/><path d="M12 19.5v2"/><path d="M2.5 12h2"/><path d="M19.5 12h2"/><path d="M5.2 5.2l1.4 1.4"/><path d="M17.4 17.4l1.4 1.4"/><path d="M18.8 5.2l-1.4 1.4"/><path d="M6.6 17.4l-1.4 1.4"/>',
+  clock:          '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  report:         '<path d="M8 3.5h8a1.5 1.5 0 0 1 1.5 1.5v14A1.5 1.5 0 0 1 16 20.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5z"/><path d="M9.5 3.5V2.5h5v1"/><path d="M9.5 9h5"/><path d="M9.5 13h5"/><path d="M9.5 17h3"/>',
+};
+
+// iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
+// the table. Never throws, never renders the literal string "undefined".
+function iconSvg(name, extraClass) {
+  const body = ICON_PATHS[name];
+  if (!body) return '';
+  return '<svg class="icon' + (extraClass ? ' ' + extraClass : '') + '"' +
+    ' viewBox="0 0 24 24" aria-hidden="true" focusable="false"' +
+    ' fill="none" stroke="currentColor" stroke-width="1.75"' +
+    ' stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+}
+
+// Fills the STATIC chrome's glyphs from the one icon set. Called once from
+// showApp(), never per IR: these elements live in index.html and are never
+// re-created, so a second call would only rewrite identical markup.
+//
+// The elements keep their empty spans in index.html rather than literal <svg>
+// there, so every glyph in the app has exactly one source — ICON_PATHS. The
+// `!el.querySelector('svg')` guard makes a re-login (which re-runs showApp) a
+// no-op instead of stacking a second icon into the same span.
+function initIcons() {
+  [
+    ['#ir-activity-toggle .activity-caret',  'chevron'],
+    ['#nudge-bell .nudge-bell-icon',         'bell'],
+    ['#nav-tickets .nav-icon',               'ir'],
+    ['#legacy-workbook-btn .nav-icon',       'legacy'],
+    ['#nav-access .nav-icon',                'users'],
+    ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
+    ['#list-toggle .list-toggle-icon',       'list'],
+    ['#detail-placeholder .ph-icon',         'ir'],
+    ['#ir-triage-btn .btn-icon',             'target'],
+    ['#ir-nudge-btn .btn-icon',              'comment'],
+    ['#ir-history-btn .btn-icon',            'clock'],
+    ['#ir-legacy-btn .btn-icon',             'legacy'],
+    ['.tab-intake .tab-icon',                'report'],
+  ].forEach(([sel, name]) => {
+    const el = document.querySelector(sel);
+    if (el && !el.querySelector('svg')) el.innerHTML = iconSvg(name);
+  });
+
+  // The nav theme glyph is a state, not a constant, so applyTheme() owns it —
+  // but it has to be seeded here too, since initIcons() is what a signed-in
+  // session calls and the toggle must not be blank until the next theme change.
+  if (navThemeIcon) navThemeIcon.innerHTML = iconSvg(isDarkTheme() ? 'sun' : 'moon');
+}
+
+// One row per event the timeline can show. `icon` is a KEY into ICON_PATHS, not
+// markup — this table stays data, so a suite can read, count and assert on it
+// without parsing SVG.
+//
+// The labels deliberately reuse the Triage modal's own nouns ("Status", "Assigned
+// to", "Priority", "Type") so the log and the modal that wrote the event speak one
+// language, and `edit` uses the backend's own verb (`changed`) rather than
+// inventing a second word for one event.
 const TIMELINE_KINDS = {
-  save:     { icon: '💾', label: 'Section saved' },
-  add:      { icon: '➕', label: 'Added' },
-  edit:     { icon: '✏️', label: 'Edited' },
-  remove:   { icon: '➖', label: 'Removed' },
-  status:   { icon: '🎯', label: 'Status' },
-  assign:   { icon: '👤', label: 'Assignment' },
-  priority: { icon: '⚑',  label: 'Priority' },
-  type:     { icon: '🏷',  label: 'Type' },
-  upload:   { icon: '📎', label: 'File uploaded' },
-  comment:  { icon: '💬', label: 'Comment' },
+  save:     { icon: 'check-circle', label: 'Section saved' },
+  add:      { icon: 'plus',         label: 'Added' },
+  edit:     { icon: 'pencil',       label: 'Changed' },
+  remove:   { icon: 'minus',        label: 'Removed' },
+  status:   { icon: 'target',       label: 'Status changed' },
+  assign:   { icon: 'user',         label: 'Assigned to' },
+  priority: { icon: 'flag',         label: 'Priority changed' },
+  type:     { icon: 'tag',          label: 'Type changed' },
+  upload:   { icon: 'upload',       label: 'File uploaded' },
+  comment:  { icon: 'comment',      label: 'Comment' },
 };
 
 // PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
@@ -5736,39 +5970,55 @@ function renderTimelineInto(el, timeline, opts) {
   const list = Array.isArray(timeline) ? timeline : [];
   if (!list.length) {
     el.innerHTML = `<div class="hist-list"><div class="nudge-empty">` +
-      escHtml(o.emptyText || 'No activity yet — save a section, triage the ticket, upload a file or leave a comment, and it appears here.') +
+      escHtml(o.emptyText || 'No activity yet — save a section, triage the IR, upload a file or leave a comment, and it appears here.') +
       `</div></div>`;
     return;
   }
   const clip = s => String(s == null ? '' : s).slice(0, 200);
   const rows = list.slice().reverse().map(it => {
-    const meta = TIMELINE_KINDS[it.kind] || { icon: '•', label: it.kind || 'Activity' };
-    const field = it.kind === 'save'
-      ? '<span class="hist-field hist-muted">(whole section)</span>'
-      : (it.fieldId ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '');
-    const srcChip = it.source === 'workflow' ? '<span class="hist-src">workflow</span>' : '';
+    const meta = TIMELINE_KINDS[it.kind] || { icon: 'dot', label: it.kind || 'Activity' };
+    // A save row is a whole-section event and its label already says so, so the
+    // `(whole section)` chip that used to sit here only repeated it. A field row
+    // keeps its human label, resolved through the section index.
+    const field = (it.kind !== 'save' && it.fieldId)
+      ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '';
+    // "workflow" is the backend's own name for the __IRS__ sentinel store. The
+    // reader knows the action as Triage — the button, the modal and the toast all
+    // say so — so the chip says it too.
+    const srcChip = it.source === 'workflow' ? '<span class="hist-src">Triage</span>' : '';
 
     let body = '';
     if (it.kind === 'comment') {
+      // The mention chip belongs in the chip row with the field and source chips,
+      // not in a diff block of its own.
       const mention = (it.mentions && it.mentions.length)
         ? `<span class="hist-src">@mention</span>` : '';
       body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
       if (mention) body += `<div class="hist-diff">${mention}</div>`;
     } else if (it.kind === 'edit' || it.kind === 'remove') {
-      body = `<div class="hist-diff"><span class="hist-old">old:</span> ${escHtml(clip(it.oldValue))}</div>` +
-             `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(it.newValue))}</div>`;
+      body = `<div class="hist-diff"><span class="hist-old">Was</span> ${escHtml(clip(it.oldValue))}</div>` +
+             `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
     } else if (it.kind === 'add') {
-      body = `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(it.newValue))}</div>`;
+      body = `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
     } else if (it.newValue) {
       body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
     }
 
-    const when = it.timestamp || (it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : '');
+    // ONE timestamp format for both halves of the list. Audit rows used to render
+    // the backend's raw `dd-MMM-yyyy HH:mm:ss` while comment rows rendered
+    // toDisplayDateTime's `DD Month YYYY, HH:MM` — two formats interleaved in one
+    // newest-first list, which reads as two different feeds. `at` is already the
+    // parsed instant for both halves, so format from it, and keep the raw string
+    // only as the fallback for a row the parser could not read.
+    const when = it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : (it.timestamp || '');
+    // A comment row's own label already says "Comment" and its field chip already
+    // names the field, so a third "· comment" suffix said nothing. A section row
+    // still names its section, and a triage row names itself.
     const where = it.source === 'comment'
-      ? 'comment'
-      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'workflow' : ''));
+      ? ''
+      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : ''));
     return `<div class="hist-item">
-      <div class="hist-top"><span class="hist-ev">${meta.icon} ${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
+      <div class="hist-top"><span class="hist-ev">${iconSvg(meta.icon)}${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
       <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
       ${body}
     </div>`;
@@ -5780,8 +6030,8 @@ function renderTimelineInto(el, timeline, opts) {
 // Shows the whole story for the open IR: every section save, field correction,
 // upload, triage change and comment — newest first. Needs the redeployed backend
 // (the `getAuditLog` action, whose match was widened to reach sentinel writes).
-// `quiet` suppresses the toasts. The Overview calls it on every ticket open, and
-// a ticket with no history on a backend that predates the widened getAuditLog
+// `quiet` suppresses the toasts. The Overview calls it on every IR open, and
+// an IR with no history on a backend that predates the widened getAuditLog
 // match should render an empty state — not an error toast per open.
 async function fetchAuditEntries(irNumber, limit, quiet) {
   try {
@@ -5809,7 +6059,7 @@ async function openHistoryModal() {
         <h3>History · ${escHtml(irNumber)}</h3>
         <button type="button" class="inward-options-close" onclick="closeHistoryModal()">&times;</button>
       </div>
-      <div class="nudge-ctx-line">Everything that has happened to this ticket — saves, field edits, uploads, triage changes and comments (newest first).</div>
+      <div class="nudge-ctx-line">Everything that has happened to this IR — saves, field edits, uploads, triage changes and comments (newest first).</div>
       <div id="history-list"></div>
     </div>`;
   document.body.appendChild(modal);

@@ -457,6 +457,18 @@ header {
 }
 #back-btn:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
 
+/* One sizing rule for every glyph in ICON_PATHS. `1em` means the icon scales with
+   whatever text it sits beside — the 13px banner button, the 18px section title,
+   the 12px field label — with no per-context override. `currentColor` on the
+   stroke (see iconSvg) means it also inherits that text's themed colour. */
+.icon {
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+  vertical-align: -0.125em;
+  pointer-events: none;
+}
+
 .icon-btn {
   width: 30px;
   height: 30px;
@@ -692,9 +704,38 @@ header {
     background: var(--surface-gray-1);
   }
   body.view-detail #detail-placeholder { display: none; }
-  .ph-icon { font-size: var(--text-5xl); opacity: 0.45; line-height: 1; }
+  .ph-icon { color: var(--ink-gray-6); opacity: 0.45; line-height: 1; }
+  .ph-icon .icon { width: 2.75rem; height: 2.75rem; }
   .ph-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
   .ph-sub { font-size: var(--text-sm); color: var(--ink-gray-5); }
+
+  /* ── Collapsible sidebar (Gmail-style rail) ───────────────
+     State is an adjective class on <html>, matching [data-theme="dark"] — NOT an
+     inline `display`. renderLayout() owns the panes' inline display and
+     applyAccessGating reads it back, so a second writer of that property is the
+     one thing this must never be. The list fold is the exception and lives in
+     renderLayout(), because there it IS a pane.
+
+     Scoped to ≥1024px on purpose: below lg the sidebar IS the bottom nav and
+     `width: 100%`, so a rail width here would fight the block above. */
+  #sidebar { transition: width 0.18s var(--ease), flex-basis 0.18s var(--ease); }
+
+  html.rail-collapsed #sidebar {
+    width: var(--rail-w);
+    flex: 0 0 var(--rail-w);
+  }
+  html.rail-collapsed .sidebar-brand { justify-content: center; padding: 0; }
+  html.rail-collapsed .brand-text,
+  html.rail-collapsed .sidebar-section-label,
+  html.rail-collapsed .nav-label,
+  html.rail-collapsed .nav-count { display: none; }
+  html.rail-collapsed .nav-item { justify-content: center; padding-inline: 0; }
+}
+
+/* Neither fold exists below lg: the sidebar is already the bottom bar and the
+   list is a full screen rather than a column. */
+@media (max-width: 1023px) {
+  #sidebar-toggle, #list-toggle { display: none; }
 }
 
 /* ══════════════════════════════════════════════════════════

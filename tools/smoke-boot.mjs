@@ -144,7 +144,7 @@ ok('at least one ticket card rendered', cards > 0, cards);
 ok('the sync bar reported something', /id="sync-status"[^>]*>\s*<span class="sync-msg"/.test(dom),
   (dom.match(/id="sync-status"[\s\S]{0,160}/) || [''])[0]);
 
-head('the 📋 Report tab is wired end to end');
+head('the Report tab is wired end to end');
 ok('the intake tab is in the strip', /data-section="sec-intake"/.test(dom));
 ok('the intake pane exists', /id="sec-intake"/.test(dom));
 // The pane's own markup is nested divs, so a `</div></div>` match truncates it.
@@ -161,7 +161,10 @@ head('the six sections, and the Overview above them');
 const tabStrip = (dom.match(/id="section-tabs">([\s\S]*?)<div id="sections-wrapper"/) || [])[1] || '';
 const SIX = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
 ok('seven tabs in the strip (six sections + Report)',
-  (tabStrip.match(/class="tab/g) || []).length === 7, (tabStrip.match(/class="tab/g) || []).length);
+  // `class="tab( |")` and not `class="tab` — the loose form also counts a tab's
+  // own inner glyph span (`class="tab-icon"`), which is not a tab.
+  (tabStrip.match(/class="tab(?=[ "])/g) || []).length === 7,
+  (tabStrip.match(/class="tab(?=[ "])/g) || []).length);
 ok('every section tab is present',
   SIX.every(s => tabStrip.includes(`data-section="${s}"`)));
 ok('Section B is the default tab', /class="tab active" data-section="sec-b"/.test(tabStrip));
@@ -194,6 +197,48 @@ ok('the facts strip rendered', (dom.match(/class="overview-fact"/g) || []).lengt
   (dom.match(/class="overview-fact"/g) || []).length);
 ok('the timeline block rendered', /id="ir-timeline"/.test(dom));
 ok('the Overview save button is in the DOM', /id="save-overview"/.test(dom));
+
+head('the activity log moved below the sections, and ships collapsed');
+// The unit suite checks the MARKUP; this checks the RENDERED page, which is the
+// only place the moved block's ordering and its collapsed default can be seen.
+ok('it renders AFTER every section',
+  domNoComments.indexOf('id="ir-activity"') > domNoComments.indexOf('id="sections-wrapper"'),
+  [domNoComments.indexOf('id="ir-activity"'), domNoComments.indexOf('id="sections-wrapper"')]);
+ok('it renders INSIDE the detail pane, so #detail-view still means "an IR is open"',
+  domNoComments.indexOf('id="ir-activity"') < domNoComments.lastIndexOf('</div>'));
+ok('it is not a section pane', (() => {
+  const tag = (domNoComments.match(/<div id="ir-activity"[^>]*>/) || [''])[0];
+  return tag.length > 0 && !/section-content|sec-/.test(tag);
+})(), (domNoComments.match(/<div id="ir-activity"[^>]*>/) || [''])[0]);
+ok('the panel is CLOSED on a fresh load',
+  (() => {
+    const tag = (domNoComments.match(/<div id="ir-activity"[^>]*>/) || [''])[0];
+    return !/is-open/.test(tag);
+  })());
+ok('and its toggle announces that it is closed',
+  /id="ir-activity-toggle"[^>]*aria-expanded="false"/.test(domNoComments));
+ok('the toggle is a real button, so the fold is keyboard-reachable',
+  /<button[^>]*id="ir-activity-toggle"/.test(domNoComments));
+
+head('every icon slot in the rendered page is actually filled');
+// This is the check that catches a MISSING icon: `iconSvg` answers an unknown name
+// with '' — correct for safety, and completely silent. A slot that is still empty
+// after showApp() ran means a call site asked for a name the map does not have, and
+// in a browser that is a blank button, not a failing test.
+const iconSlots = [...domNoComments.matchAll(
+  /<(span|div)[^>]*class="([^"]*\b(?:nav-icon|ph-icon|btn-icon|activity-caret|tab-icon|sidebar-toggle-icon|list-toggle-icon|nudge-bell-icon)\b[^"]*)"[^>]*>([\s\S]{0,400}?)<\/\1>/g)];
+const emptySlots = iconSlots.filter(m => !/<svg/.test(m[3]));
+ok('there are icon slots on the page at all', iconSlots.length >= 8, iconSlots.length);
+ok('none of them is left empty', emptySlots.length === 0,
+  emptySlots.map(m => m[2]).slice(0, 8));
+ok('the IR nav glyph is an inline SVG, not an emoji or a blank',
+  /id="nav-tickets"[\s\S]{0,300}?class="nav-icon"[^>]*>\s*<svg/.test(domNoComments));
+ok('the comments button carries the speech-bubble icon',
+  /id="ir-nudge-btn"[\s\S]{0,300}?<svg/.test(domNoComments));
+ok('no SVG in the page reaches for a network asset the offline shell lacks',
+  !/<svg[^>]*(xlink:href|<image|<use)/.test(dom));
+ok('and no emoji is left in the chrome', !/💬|🔔|🎫|📋/.test(domNoComments),
+  (domNoComments.match(/.*(?:💬|🔔|🎫|📋).*/g) || []).slice(0, 3));
 
 head('no javascript errors');
 // Chrome logs uncaught page errors to stderr with --enable-logging.

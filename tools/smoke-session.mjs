@@ -118,6 +118,59 @@ r.ok('and the retry button reloads rather than signing out',
   /access-reconnect-btn[\s\S]{0,200}loadAccessData\(\)/.test(appJs) ||
   /rb\.addEventListener\('click', \(\) => \{ panels\.innerHTML[\s\S]{0,80}loadAccessData\(\)/.test(appJs));
 
+// ── A temporary password is a CORRECT credential, not a failed login ──────────
+r.head('a temporary password reaches the change screen, not "Login failed."');
+// The backend answers a first sign-in on an admin-issued temporary password with
+// {status:'ok', mustChangePassword:true} and NO session token — by design, since
+// changing it is the only way forward. loginBackend decided "success" on
+// sessionToken alone, so that answer fell through to the error branch, found no
+// `message` on it, and reported "Login failed." with the correct password sitting
+// in the box. That is every account's first sign-in, the admin's included, and the
+// caller's perfectly good `d.mustChangePassword` check was unreachable.
+//
+// Driven for real against a stubbed transport rather than grepped: this is a
+// data-flow bug, and a regex would only have proved the strings were present —
+// which they were, on both sides of the break.
+let reply = {
+  status: 'ok', mustChangePassword: true,
+  email: 'monish.raza@indrones.com', name: 'Monish Raza',
+};
+const L = loadApp(`
+  loginBackend, SESSION_KEY, localStorage,
+  getUser: () => currentUser,
+  setUser: u => { currentUser = u; },
+`, {
+  splitStorage: true,
+  fetch: () => Promise.resolve({ text: () => Promise.resolve(JSON.stringify(reply)) }),
+});
+// The real caller seeds this before the call (submitLogin does the same), because
+// the error branch stamps currentUser.sessionError.
+L.setUser({ email: 'monish.raza@indrones.com' });
+
+const temp = await L.loginBackend('monish.raza@indrones.com', 'gHNGU-6975');
+r.ok('the backend answer is passed through instead of becoming an error',
+  !!temp && temp.status === 'ok' && temp.mustChangePassword === true, temp);
+r.ok('no session token is invented', !!temp && !temp.sessionToken, temp);
+r.ok('...and nothing is written to the session store',
+  L.localStorage.getItem(L.SESSION_KEY) === null, L.localStorage.getItem(L.SESSION_KEY));
+r.ok('...and no failure reason is left on the user',
+  !(L.getUser() || {}).sessionError, (L.getUser() || {}).sessionError);
+r.ok('...and that is the field submitLogin routes on',
+  /d\.mustChangePassword[\s\S]{0,60}showPasswordChange/.test(appJs));
+
+reply = { status: 'error', message: 'Wrong password.' };
+const wrong = await L.loginBackend('monish.raza@indrones.com', 'nope');
+r.ok('a genuinely wrong password still reports the backend message',
+  !!wrong && wrong.status === 'error' && wrong.message === 'Wrong password.', wrong);
+
+// The ordering is the whole fix: the pass-through must stand ABOVE the fallback,
+// not beside it. 'data.mustChangePassword' is the code check, not the comment.
+const lb = (appJs.match(/function loginBackend\s*\([\s\S]*?\n\}/) || [''])[0];
+const passAt = lb.indexOf('data.mustChangePassword');
+const errAt  = lb.indexOf("'Login failed.'");
+r.ok('the pass-through sits BEFORE the generic error fallback',
+  passAt > -1 && errAt > -1 && passAt < errAt, { passAt, errAt });
+
 r.head('the poll restarts after an in-page re-login');
 // clearLocalAuth() stops the poll — correct for a dead session, wrong for a LIVE
 // one. Signing in again without a page reload hits showApp()'s `_appBooted` early

@@ -4,7 +4,7 @@
 > lives in JSON files under `_store/` in the owner's Drive
 > (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. Committed on `main` and green — **1216 cases across 11 suites** —
+> workbook. Committed on `main` and green — **1337 cases across 12 suites** —
 > but **not deployed.** `app.js` still names the old `/exec`, so the live app keeps
 > talking to the old backend on the old spreadsheet; that is also the rollback. See
 > [08](08 - Development Guide.md) for the cutover, which is now just a deploy plus
@@ -122,7 +122,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1216 cases across 11 suites**, all passing.
+`node tools/smoke-all.mjs` — **1337 cases across 12 suites**, all passing.
 
 Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
 no registration step.
@@ -208,7 +208,11 @@ and a live end-to-end sign-in. See the verification list in
 
 ## Planned / Nice-to-Have Features
 
-- [ ] Dashboard with IR stats (open/closed/pending counts) — *Stage 5*
+- [x] Dashboard with IR stats — *built as the **Insights** page (`#/insights`): counts
+      by category, FY/month/status/customer/drone filters, a REPAIR sub-category
+      breakout and a status mix. Deliberately counts and filters only — no charts, no
+      ageing buckets (`statusAt` only exists for in-app-triaged IRs, since the app
+      refuses to invent a timestamp for a Sheet-set status).*
 - [ ] Section completion progress indicator on Master Index cards — *Stage 3; the data already exists*
 - [ ] Ticket ageing / time-in-status / overdue flags — *Stage 4*
 - [ ] Canned responses — *Stage 6*
@@ -238,7 +242,7 @@ and a live end-to-end sign-in. See the verification list in
   merged into **Section G — PDI Report/Dispatch Record**.
 - ✅ **The automated activity log.** The hand-typed table is retired to a read-only
   `Legacy` block; activity is now generated from four sources the app already records —
-  section saves and field edits, status/assignee/priority/type changes, comments and
+  section saves and field edits, status/assignee/priority/category changes, comments and
   @mentions, and **file uploads** (which previously left no trace at all). One pure
   `buildTimeline(...)` feeds both the Overview panel and the 🕓 History modal, so the
   two can never tell different stories.
@@ -272,5 +276,5 @@ and a live end-to-end sign-in. See the verification list in
 - ✅ **Audit trail / history for section edits** — `_store/audit/IR409.jsonl` + the 🕓 History modal
 - ✅ **Auto-calculation for the Section D repair table** — Cost = Qty × Rate, live Total Repair Cost
 - ✅ **Viewing uploaded files** — the `imageEvidence` control previews saved Drive images and links PDFs, with captions
-- ✅ **App-owned status, assignee, priority and type** — no longer read back from the Sheet (Stage 1)
+- ✅ **App-owned status, assignee, priority and category** — no longer read back from the Sheet (Stage 1)
 - ✅ **The Sheet gap** — every ingested column is now visible on the ticket, including the raise time and the three unmodelled columns (Stage 2)

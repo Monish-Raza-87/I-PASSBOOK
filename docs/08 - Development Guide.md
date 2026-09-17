@@ -215,7 +215,7 @@ one folder:
 └── _store/                                 ← Restricted. Staff never open this.
     ├── users.json      sessions.json       codes.json      attempts.json
     ├── access.json     { departments: {…}, memberships: {…} }
-    ├── irs.json        { "IR409": {status, assignee, priority, …}, … }
+    ├── irs.json        { "IR409": {status, assignee, priority, category, …}, … }
     ├── config.json     { "team-directory": …, "inward-options": …, "iqc-config": … }
     ├── kb.json         { "<key>": {…} }
     ├── comments.json   { "all": { "items": [ … ] } }

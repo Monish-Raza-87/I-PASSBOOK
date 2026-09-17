@@ -54,8 +54,12 @@ store layout.
 - **Passbook detail** — the 📋 Report tab plus the six lettered sections (B–G) and
   the Overview. On desktop it opens beside the list (split pane); below 1024px it is
   a full screen with a Back button.
-- Routing is hash-based (`#/tickets`, `#/tickets/IR409`) so deep links and the
-  browser back button work on a static host
+- **Insights** — counts over the same IRs (FY, month, status, category, customer,
+  drone), a read-only third pane rather than a panel inside the detail one, so
+  `#detail-view`'s display keeps meaning "an IR is open". No new endpoint: the whole
+  list is already in memory.
+- Routing is hash-based (`#/tickets`, `#/tickets/IR409`, `#/insights`, `#/legacy`) so
+  deep links and the browser back button work on a static host
 
 ## Who owns what (the load-bearing split)
 
@@ -66,7 +70,7 @@ app. The app owns all **mutable workflow state**.
 | Data | Owner | Where it lives |
 |---|---|---|
 | Serial no., description, incident date, who reported, evidence | Sheet | Form Responses tab, read-only |
-| Status, assignee, priority, type, section completion, SLA, CSAT | **App** | `irs.json` under `__IRS__` |
+| Status, assignee, priority, category, section completion, SLA, CSAT | **App** | `irs.json` under `__IRS__` |
 
 Precedence is always **app > Sheet**, merged in the single writer `setAllIRs()`
 (`app.js`), which every `fetchIRs()` path funnels through so the three paths

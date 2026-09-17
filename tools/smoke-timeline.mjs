@@ -119,7 +119,15 @@ r.ok('an assignment', kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'as
 r.ok('an assigneeName change is the same kind, not a second event',
   kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'assigneeName' })], [])) === 'assign');
 r.ok('a priority change', kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'priority' })], [])) === 'priority');
-r.ok('a type change', kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'type' })], [])) === 'type');
+r.ok('a category change', kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'category' })], [])) === 'category');
+// Sub-category and its note are SEPARATE kinds, not folded into `category`. A REPAIR
+// moved from GPS to BATTERY leaves `category` at REPAIR, so the audit emits only the
+// sub-category row — and rendering that as "Category changed: REPAIR → REPAIR" is a
+// row that tells the reader nothing.
+r.ok('a sub-category change is its own kind',
+  kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'subCategory' })], [])) === 'subcategory');
+r.ok('...as is the OTHERS note',
+  kinds(T.buildTimeline('IR409', [workflowRow({ fieldId: 'subCategoryNote' })], [])) === 'subcatnote');
 r.ok('a comment', kinds(T.buildTimeline('IR409', [], [comment({})])) === 'comment');
 
 r.head('workflow noise is not mistaken for a change');
@@ -133,6 +141,12 @@ r.ok('a blank workflow field is dropped',
   T.buildTimeline('IR409', [workflowRow({ fieldId: '' })], []).length === 0);
 r.ok('a seed marker is dropped',
   T.buildTimeline('IR409', [workflowRow({ fieldId: 'seededFrom', event: 'added' })], []).length === 0);
+// The retired `type` field. Every audit row already written about it is still on the
+// sheet, and the first re-triage of each such IR adds a `removed: type` row. Nothing
+// displays `type` any more, so a row about it describes a change with no visible
+// effect — dropped, like the other noise.
+r.ok('the retired `type` field is dropped too',
+  T.buildTimeline('IR409', [workflowRow({ fieldId: 'type', event: 'removed', oldValue: 'Repair' })], []).length === 0);
 r.ok('a non-marker `saved` row that names a field is not double-counted',
   T.buildTimeline('IR409', [sectionRow({ event: 'saved', fieldId: 'b_remarks' })], []).length === 0,
   T.buildTimeline('IR409', [sectionRow({ event: 'saved', fieldId: 'b_remarks' })], []));
@@ -347,7 +361,7 @@ r.ok('a non-array timeline renders the empty state, not a crash',
 
 r.head('every kind has an icon and a label');
 const missing = Object.keys(T.TIMELINE_KINDS).filter(k => !T.TIMELINE_KINDS[k].icon || !T.TIMELINE_KINDS[k].label);
-r.ok('all ten kinds are complete', missing.length === 0 && Object.keys(T.TIMELINE_KINDS).length === 10,
+r.ok('all twelve kinds are complete', missing.length === 0 && Object.keys(T.TIMELINE_KINDS).length === 12,
   { missing, count: Object.keys(T.TIMELINE_KINDS).length });
 r.ok('and the builder only ever emits one of them', (() => {
   const everything = T.buildTimeline('IR409', [
@@ -356,9 +370,10 @@ r.ok('and the builder only ever emits one of them', (() => {
     sectionRow({ event: 'removed', fieldId: 'b_remarks', oldValue: 'a' }),
     sectionRow({ event: 'uploaded', fieldId: 'f_qcDocs', newValue: 'x.pdf' }),
     workflowRow({ fieldId: 'status' }), workflowRow({ fieldId: 'assignee' }),
-    workflowRow({ fieldId: 'priority' }), workflowRow({ fieldId: 'type' }),
+    workflowRow({ fieldId: 'priority' }), workflowRow({ fieldId: 'category' }),
+    workflowRow({ fieldId: 'subCategory' }), workflowRow({ fieldId: 'subCategoryNote' }),
   ], [comment({})]);
-  return everything.length === 10 &&
+  return everything.length === 12 &&
     everything.every(x => !!T.TIMELINE_KINDS[x.kind]);
 })(), T.buildTimeline('IR409', [
   sectionRow({}), sectionRow({ event: 'added', fieldId: 'b_remarks', newValue: 'x' }),
@@ -366,7 +381,8 @@ r.ok('and the builder only ever emits one of them', (() => {
   sectionRow({ event: 'removed', fieldId: 'b_remarks', oldValue: 'a' }),
   sectionRow({ event: 'uploaded', fieldId: 'f_qcDocs', newValue: 'x.pdf' }),
   workflowRow({ fieldId: 'status' }), workflowRow({ fieldId: 'assignee' }),
-  workflowRow({ fieldId: 'priority' }), workflowRow({ fieldId: 'type' }),
+  workflowRow({ fieldId: 'priority' }), workflowRow({ fieldId: 'category' }),
+  workflowRow({ fieldId: 'subCategory' }), workflowRow({ fieldId: 'subCategoryNote' }),
 ], [comment({})]).map(x => x.kind));
 
 r.head('pre-merge history is labelled by what it was, not relabelled');
@@ -406,12 +422,13 @@ r.head('the wording names the event the backend actually wrote');
 // "workflow". Each label below is the Triage modal's own noun for the same field.
 r.ok('the backend verb `changed` is not relabelled "Edited"',
   T.TIMELINE_KINDS.edit.label === 'Changed', T.TIMELINE_KINDS.edit.label);
-r.ok("the four triage events reuse the Triage modal's own nouns",
+r.ok("the triage events reuse the Triage modal's own nouns",
   T.TIMELINE_KINDS.status.label === 'Status changed' &&
   T.TIMELINE_KINDS.assign.label === 'Assigned to' &&
   T.TIMELINE_KINDS.priority.label === 'Priority changed' &&
-  T.TIMELINE_KINDS.type.label === 'Type changed',
-  ['status', 'assign', 'priority', 'type'].map(k => T.TIMELINE_KINDS[k].label));
+  T.TIMELINE_KINDS.category.label === 'Category changed' &&
+  T.TIMELINE_KINDS.subcategory.label === 'Sub-category changed',
+  ['status', 'assign', 'priority', 'category', 'subcategory'].map(k => T.TIMELINE_KINDS[k].label));
 r.ok('no label still says "whole section" or "workflow"',
   !Object.values(T.TIMELINE_KINDS).some(k => /whole section|workflow/i.test(k.label)),
   Object.values(T.TIMELINE_KINDS).map(k => k.label));

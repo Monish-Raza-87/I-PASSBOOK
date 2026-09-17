@@ -29,5 +29,5 @@ Script backend.
 
 The client's **Google Form is the intake**; its Sheet is the immutable record of
 what the customer reported. The app owns everything mutable about a ticket
-(status, assignee, priority, type), and it shows the client's report in full on a
+(status, assignee, priority, category), and it shows the client's report in full on a
 read-only **📋 Report** tab, so support staff work in one place instead of two.

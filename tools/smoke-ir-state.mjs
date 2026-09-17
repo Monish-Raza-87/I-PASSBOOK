@@ -13,7 +13,7 @@ import { loadApp, makeReporter } from './harness.mjs';
 
 const T = loadApp(`
   setAllIRs, applyIRStateToAllIRs, appState, ownedStatus, markSectionDone, initialsOf,
-  statusCategory, IR_STATUS_VALUES, TICKET_TYPES,
+  statusCategory, IR_STATUS_VALUES, IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS,
   get allIRs() { return allIRs; },
   get irState() { return irState; }, set irState(v) { irState = v; },
   get currentIR() { return currentIR; }, set currentIR(v) { currentIR = v; },
@@ -27,7 +27,14 @@ ok('14 status values, unchanged', T.IR_STATUS_VALUES.length === 14, T.IR_STATUS_
 ok("statuses are the Form's exact strings",
   T.IR_STATUS_VALUES.includes('QC Investigation') && T.IR_STATUS_VALUES.includes('Remote Support'),
   T.IR_STATUS_VALUES);
-ok('ticket types present', T.TICKET_TYPES.length === 7, T.TICKET_TYPES);
+ok('the four categories, in the order the desk reads them',
+  T.IR_CATEGORIES.join('|') === 'CRASH|GENERAL MAINTENANCE|REMOTE SUPPORT|REPAIR', T.IR_CATEGORIES);
+ok('nine REPAIR sub-categories, OTHERS last',
+  T.REPAIR_SUBCATEGORIES.length === 9 && T.REPAIR_SUBCATEGORIES[8] === 'OTHERS', T.REPAIR_SUBCATEGORIES);
+// The escape hatch has to be one of the sub-categories, or `subCategory === OTHERS`
+// silently never matches and the note field can never be filled.
+ok('...and the escape hatch is spelled the same in both places',
+  T.REPAIR_OTHERS === 'OTHERS' && T.REPAIR_SUBCATEGORIES.includes(T.REPAIR_OTHERS), T.REPAIR_OTHERS);
 
 head('merge precedence (app > Sheet)');
 // Three tickets as fetchIRsFromSheet hands them over: status from Col D.
@@ -40,7 +47,8 @@ T.irState = {
   // Triaged: the app owns the status.
   IR409: { status: 'Production', statusOwned: true, statusAt: 1, statusBy: 'a@indrones.com',
            assignee: 'ravi@indrones.com', assigneeName: 'Ravi Singh', priority: 'Urgent',
-           type: 'Repair', done: ['sec-a', 'sec-b'], updatedBy: 'a@indrones.com' },
+           category: 'REPAIR', subCategory: 'GPS', subCategoryNote: '',
+           done: ['sec-a', 'sec-b'], updatedBy: 'a@indrones.com' },
   // First-sight seed: the app has seen this ticket but nobody has edited it.
   IR410: { status: '', seededAt: 1, seededFrom: 'sheet', seededBy: 'a@indrones.com' },
   // Section B saved (a real edit) but the status was never set by the app.
@@ -52,9 +60,16 @@ const by = n => T.allIRs.find(i => i.irNumber === n);
 ok('app status beats Sheet Col D', by('IR409').status === 'Production', by('IR409').status);
 ok('assignee lands on the record', by('IR409').assigneeName === 'Ravi Singh', by('IR409').assignee);
 ok('priority lands on the record', by('IR409').priority === 'Urgent', by('IR409').priority);
+ok('category lands on the record', by('IR409').category === 'REPAIR', by('IR409').category);
+ok('sub-category lands beside it', by('IR409').subCategory === 'GPS', by('IR409').subCategory);
+// The retired `type` key must not survive on the merged row: the store still holds
+// it for every IR triaged before this field existed, and applyIRStateToAllIRs is
+// the only place that could carry it back onto a record the UI then renders.
+ok('...and the retired `type` is NOT read off the store', by('IR409').type === undefined, by('IR409').type);
 ok('done[] lands on the record', by('IR409').done.length === 1, by('IR409').done);
 ok('a bare seed does NOT claim the status', by('IR410').status === 'Visual Inspection', by('IR410').status);
 ok('a bare seed exposes no assignee', !by('IR410').assignee, by('IR410').assignee);
+ok('a bare seed exposes no category', !by('IR410').category, by('IR410').category);
 ok('saving a section does NOT claim the status', by('IR411').status === 'Open', by('IR411').status);
 ok('but it does record the section as done', by('IR411').done.join(',') === 'sec-b', by('IR411').done);
 ok('appState() rejects a bare seed', T.appState('IR410') === null, T.appState('IR410'));
@@ -114,5 +129,24 @@ head('records with no Sheet date (legacy / demo paths)');
 T.setAllIRs([{ irNumber: 'IR900', status: 'Open' }]);
 ok('missing dateRaised survives the merge', by('IR900').dateRaised === undefined);
 ok('missing droneId survives the merge', by('IR900').droneId === undefined);
+
+head('an IR triaged before Category existed');
+// The store still holds `type: 'Repair'` on every IR triaged under the old field.
+// Nothing may resurrect it: the plan's decision was to CLEAR the old values, and
+// a read site that still consulted `type` would show one on exactly the IRs CR has
+// not re-triaged yet — which is the whole population the change is about.
+T.setAllIRs([{ irNumber: 'IR413', status: 'Open' }]);
+T.irState = { IR413: { status: 'Production', statusOwned: true, type: 'Repair', updatedBy: 'a@indrones.com' } };
+T.applyIRStateToAllIRs();
+ok('the old value is not carried onto the record', by('IR413').type === undefined, by('IR413').type);
+ok('and the category is empty, not invented', by('IR413').category === '', JSON.stringify(by('IR413').category));
+// A cleared category is a REAL state the store can hold (CR re-triages a REPAIR to
+// REMOTE SUPPORT, and the sub-category is dropped with it). `if (s.category)` would
+// leave the previous value on the in-memory row, so the list would keep showing a
+// sub-category the store no longer has.
+T.irState = { IR413: { category: 'REMOTE SUPPORT', subCategory: '', subCategoryNote: '', updatedBy: 'a@indrones.com' } };
+T.applyIRStateToAllIRs();
+ok('a cleared sub-category really clears', by('IR413').subCategory === '', JSON.stringify(by('IR413').subCategory));
+ok('...and the note with it', by('IR413').subCategoryNote === '', JSON.stringify(by('IR413').subCategoryNote));
 
 finish();

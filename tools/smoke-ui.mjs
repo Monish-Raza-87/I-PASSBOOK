@@ -85,13 +85,17 @@ const { T, byId } = loadApp(`
   SECTIONS, renderESignatureHTML, signSectionOnSave, refreshESignature,
   renderActivityCount, applyActivityState, toggleActivity,
   applyChromeState, toggleRail, toggleList, renderLayout, iconSvg, ICON_PATHS,
-  TIMELINE_KINDS, TICKET_TYPES,
+  TIMELINE_KINDS, IR_CATEGORIES,
   storedFlag, setFlag, RAIL_KEY, LIST_KEY, ACTIVITY_KEY, ACTIVITY_LIMIT,
   get sig() { return esignatureState; },
   get view() { return currentView; },
   set view(v) { currentView = v; },
   set ir(v) { currentIR = v; },
   set user(v) { currentUser = v; },
+  // The pane-visibility adjective classes live on <body>, and the harness's body is
+  // one stable stub, so this is the real thing renderLayout toggles rather than a
+  // copy of it.
+  bodyClasses: document.body.classList,
   set logCache(v) { activityLogCache = v; },
   setEntries: (irNumber, entries) => { activityLogCache = { irNumber: irNumber, entries: entries }; },
   refreshActivityLog,
@@ -415,8 +419,9 @@ r.head('the IR list folds away, but never into an empty screen');
 r.ok('the control is a real button in the header',
   /<button[^>]*id="list-toggle"/.test(indexCode) &&
   /id="list-toggle"[\s\S]{0,200}?aria-controls="index-view"/.test(indexCode));
-r.ok('renderLayout still writes INLINE display — the access gating reads it back',
-  /indexView\.style\.display\s*=/.test(appCode) && /detailView\.style\.display\s*=/.test(appCode));
+r.ok('renderLayout still writes INLINE display, for all three panes',
+  /indexView\.style\.display\s*=/.test(appCode) && /detailView\.style\.display\s*=/.test(appCode) &&
+  /insightsView\.style\.display\s*=/.test(appCode));
 r.ok('the list can never be hidden while the user is on the index', (() => {
   T.view = 'index';
   T.setFlag(T.LIST_KEY, true);      // asked for the room, but no IR is open
@@ -462,6 +467,69 @@ r.ok('and folding it is genuinely possible while an IR is open', (() => {
 })());
 r.ok('the detail pane is what governs the back button, not the fold',
   /backBtn\.style\.display\s*=/.test(appCode));
+
+r.head('the Insights pane is a third sibling, not a panel inside the detail');
+// Three claims. The dashboard must NOT be reached by opening the detail pane (the
+// pane's display is the app's only "an IR is open" flag, and #ir-activity is pinned
+// inside it), it must keep the IR list beside it on desktop — the mobile back
+// button is display:none there, so hiding the list would strand the user — and
+// "No IR selected" must not show over it, which it otherwise would because that
+// placeholder is keyed on body.view-detail being ABSENT.
+r.ok('the insights pane is visible at view = \'insights\', and the detail is not', (() => {
+  T.view = 'insights';
+  T.renderLayout();
+  const on  = byId.get('insights-view').style.display === 'flex';
+  const off = byId.get('detail-view').style.display === 'none';
+  T.view = 'index';
+  T.renderLayout();
+  return on && off && byId.get('insights-view').style.display === 'none';
+})(), byId.get('insights-view').style.display);
+r.ok('the IR list stays beside it on desktop', (() => {
+  const { T: D, byId: dById } = loadApp(`
+    renderLayout, setFlag, LIST_KEY,
+    get view() { return currentView; },
+    set view(v) { currentView = v; },
+  `, { capture: true, desktop: true });
+  D.setFlag(D.LIST_KEY, false);
+  D.view = 'insights';
+  D.renderLayout();
+  return dById.get('index-view').style.display !== 'none';
+})());
+r.ok('the empty state is suppressed over it, in both directions', (() => {
+  T.view = 'insights';
+  T.renderLayout();
+  const suppressed = !T.bodyClasses.contains('view-detail') &&
+                     T.bodyClasses.contains('view-insights');
+  // ...and coming back off the dashboard must clear it again, or the IR list would
+  // keep the placeholder hidden for good.
+  T.view = 'index';
+  T.renderLayout();
+  return suppressed && !T.bodyClasses.contains('view-insights');
+})());
+r.ok('the back button is still the detail pane\'s alone',
+  /backBtn\.style\.display\s*=\s*\(!desktop && detail\)/.test(appCode),
+  (appCode.match(/backBtn\.style\.display[^\n]*/) || [''])[0]);
+r.ok('the pane is marked in the static shell with a non-sec id and no section class',
+  /<div id="insights-view">/.test(indexCode) && !/insights-view[\s\S]{0,200}section-content/.test(indexCode));
+r.ok('the nav item is a plain hash link with no JS binding',
+  /<a class="nav-item" id="nav-insights" href="#\/insights"/.test(indexCode));
+r.ok('its icon span ships EMPTY, like every other static glyph',
+  /id="nav-insights"[\s\S]{0,140}<span class="nav-icon" aria-hidden="true"><\/span>/.test(indexCode));
+
+r.head('the dashboard paints a skeleton, never a page of zeroes');
+// A dashboard of zeroes is not "loading" — it is the answer "nothing was raised",
+// and it is the wrong one. renderInsights() is called from four places with no
+// sequence token, so it has to be safe with an empty list at any of them.
+r.ok('an empty list leaves the skeleton and no cards', (() => {
+  const { T: I, byId: iById } = loadApp(`
+    renderInsights, INSIGHTS_SKELETON,
+    set allIRs(v) { allIRs = v; },
+  `, { capture: true });
+  I.allIRs = [];
+  I.renderInsights();
+  const h = iById.get('insights-body').innerHTML;
+  return h.includes('insights-skeleton') && !/insights-card/.test(h) && h.trim() === I.INSIGHTS_SKELETON.trim();
+})());
 r.ok('both toggles go away below 1024px, where the sidebar is a bottom bar',
   /@media \(max-width: 1023px\)[\s\S]{0,200}#sidebar-toggle,\s*#list-toggle\s*\{\s*display:\s*none/.test(
     fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8')));
@@ -556,7 +624,7 @@ r.ok('every lowercase survivor is a deliberate identifier', (() => {
   return bad.length === 0;
 })(), appCode.split('\n').filter(l => /ticket/i.test(l)).slice(0, 8));
 r.ok('the deep link still works — the route name was NOT renamed',
-  /parts\[0\] === 'tickets'/.test(appCode) && T.TICKET_TYPES.length === 7);
+  /parts\[0\] === 'tickets'/.test(appCode) && T.IR_CATEGORIES.length === 4);
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');
 r.ok('classList.toggle remembers, in both the one- and two-argument form',

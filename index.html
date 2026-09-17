@@ -165,6 +165,14 @@
           <span class="nav-count" id="nav-count">—</span>
         </a>
 
+        <!-- Counts over the same IRs, sliced by FY / month / status / category /
+             customer / drone. A plain hash link with NO JS binding, exactly like
+             #nav-tickets above: the hashchange listener is the whole mechanism. -->
+        <a class="nav-item" id="nav-insights" href="#/insights" title="Insights">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label">Insights</span>
+        </a>
+
         <!-- Opens the read-only legacy workbook. The id is load-bearing:
              app.js binds openLegacyWorkbook() to it. -->
         <button type="button" class="nav-item" id="legacy-workbook-btn"
@@ -226,6 +234,10 @@
 
             <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" />
             <div class="segments" id="list-segments" role="tablist"></div>
+            <!-- The Category strip. A SECOND .segments row rather than a new widget,
+                 so it inherits the strip's own CSS and its counts read exactly like
+                 the status counts directly above it. -->
+            <div class="segments segments-cat" id="list-categories" role="tablist"></div>
           </div>
           <div id="sync-status"></div>
           <div id="ir-list" class="ir-list">
@@ -386,12 +398,32 @@
 
         <!-- Desktop-only empty state, shown until an IR is selected.
              A sibling of #detail-view rather than a child, so that
-             #detail-view's display stays a truthful "is an IR open" flag
-             (applyAccessGating reads it). -->
+             #detail-view's display stays a truthful "is an IR open" flag. -->
         <div id="detail-placeholder">
           <div class="ph-icon" aria-hidden="true"></div>
           <p class="ph-title">No IR selected</p>
           <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
+        </div>
+
+        <!-- ====== INSIGHTS VIEW ====== -->
+        <!-- A THIRD sibling pane. Not a panel inside #detail-view: on desktop the IR
+             list stays beside this one, and folding it into the detail pane would
+             make that pane's display stop meaning "an IR is open". Deliberately
+             carries no class="section-content" — the suites count panes by that
+             literal, and the nine sections are what they are counting. -->
+        <div id="insights-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title">Insights</span>
+            </div>
+          </div>
+          <div id="insights-body" class="insights-body">
+            <!-- The skeleton, so a cold #/insights deep link shows "loading" and not
+                 a dashboard of zeroes. renderInsights() re-emits the same markup. -->
+            <div class="insights-skeleton"></div>
+            <div class="insights-skeleton"></div>
+            <div class="insights-skeleton"></div>
+          </div>
         </div>
 
       </div><!-- end panes -->

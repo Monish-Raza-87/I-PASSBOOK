@@ -407,6 +407,41 @@ ok('and its toggle announces that it is closed',
 ok('the toggle is a real button, so the fold is keyboard-reachable',
   /<button[^>]*id="ir-activity-toggle"/.test(domNoComments));
 
+head('the Insights dashboard renders as a sibling pane and stays out of the way');
+// The unit suite pins renderLayout()'s branches; this pins the RENDERED page. The
+// two claims that only a real run can make are that the pane is a sibling of
+// #detail-view (not a child — #ir-activity's containment is what makes that pane's
+// display mean "an IR is open"), and that it is hidden on a cold #/tickets load
+// rather than sitting under the IR list.
+ok('the pane exists', /<div id="insights-view"[^>]*>/.test(domNoComments),
+  (domNoComments.match(/<div id="insights-view"[^>]*>/) || [''])[0]);
+ok('it is not a section pane', (() => {
+  const tag = (domNoComments.match(/<div id="insights-view"[^>]*>/) || [''])[0];
+  return tag.length > 0 && !/section-content|sec-/.test(tag);
+})(), (domNoComments.match(/<div id="insights-view"[^>]*>/) || [''])[0]);
+ok('it is a SIBLING of #detail-view, so that pane keeps meaning "an IR is open"',
+  (() => {
+    const d = domNoComments.indexOf('id="detail-view"');
+    const i = domNoComments.indexOf('id="insights-view"');
+    // It must come AFTER the detail pane closes, not inside it.
+    return d > -1 && i > d && domNoComments.indexOf('id="ir-activity"') < i;
+  })());
+ok('it is hidden — this run is on #/tickets, so the router never asked for it',
+  /id="insights-view"[^>]*style="display:\s*none/.test(domNoComments),
+  (domNoComments.match(/<div id="insights-view"[^>]*>/) || [''])[0]);
+// The dashboard is painted even while hidden (renderInsights() runs from
+// setAllIRs() on every fetch path), so the thing worth pinning is not "is it
+// painted" but "is anything of it on SCREEN" — and that the demo fallback, which
+// would otherwise show five fabricated rows as statistics, says so.
+ok('so none of its numbers reach the screen',
+  /id="insights-view"[^>]*style="display:\s*none/.test(domNoComments));
+ok('nothing claims a demo sample is real data unless it is',
+  !/insights-demo/.test(domNoComments) || /Could not sync — showing demo data/.test(domNoComments),
+  (domNoComments.match(/insights-demo[\s\S]{0,120}/) || [''])[0]);
+ok('the nav item is a hash link, and its slot got its glyph',
+  /<a class="nav-item" id="nav-insights" href="#\/insights"/.test(domNoComments) &&
+  /id="nav-insights"[\s\S]{0,300}?class="nav-icon"[^>]*>\s*<svg/.test(domNoComments));
+
 head('every icon slot in the rendered page is actually filled');
 // This is the check that catches a MISSING icon: `iconSvg` answers an unknown name
 // with '' — correct for safety, and completely silent. A slot that is still empty

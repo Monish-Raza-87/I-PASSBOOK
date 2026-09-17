@@ -117,8 +117,31 @@ last read the data and always offers a re-read.
 ### Triage modal (`#triage-modal`)
 Opened from the ticket banner. Reuses the `.inward-options-modal` shell (fixed
 positioning, appended to `document.body`, `--z-overlay`) with a `.triage-body`
-grid of `.triage-row` label/control pairs: Status, Assigned to, Priority, Type.
-`TICKET_PRIORITIES` and `TICKET_TYPES` are app-owned — the customer Form has
+grid of `.triage-row` label/control pairs: Status, Assigned to, Priority,
+**Category**.
+
+**Category** replaced the old `Type` field, whose seven values (Repair,
+Replacement, Warranty, AMC, Demo, Training, Other) described a commercial
+arrangement rather than the work, which is not what the desk sorts by. It is
+`IR_CATEGORIES` — CRASH, GENERAL MAINTENANCE, REMOTE SUPPORT, REPAIR — and it is
+**mandatory**: `applyTriage()` refuses the save with a toast when it is empty,
+because it is the one triage field the list filter and the Insights page count by,
+so an uncategorised IR is invisible to both. Under **REPAIR** a Sub-category row
+appears (`REPAIR_SUBCATEGORIES`: GPS, TRIPOD/BIPOD, TOPSHELL, CAMERA/LENS, BATTERY,
+CHARGER, RC, AIRFRAME, OTHERS), and under **OTHERS** a free-text "Mention it" note
+appears, which is also required — OTHERS exists so CR can name a fault the list
+does not cover, and an empty one re-creates the unexplained bucket the categories
+were introduced to remove. Both conditional rows stay in the DOM and are
+shown/hidden (`wireTriageCategoryRows()`), never added and removed, so the selects
+never lose their listener by being replaced. Changing Category away from REPAIR
+clears the sub-category and the note.
+
+The old `type` key is **not** bulk-rewritten out of `_store/irs.json` — that would
+be a destructive pass over every record. It is dropped per-IR by `applyTriage()`
+(`patch.type = undefined`; `JSON.stringify` omits it) the next time CR saves that
+IR's Triage, and no read site consults it any more.
+
+`TICKET_PRIORITIES` and `IR_CATEGORIES` are app-owned — the customer Form has
 neither column. Status options come from the single `IR_STATUS_VALUES` list, so
 the modal and the banner pill can never drift apart. Gated on **`canTriage()`**,
 which is a **separate axis from the section grants**: CR and Management hold it
@@ -129,6 +152,37 @@ being a section — the audience is unchanged, plus Management.
 ### Filter segments (`.segments` / `.segment`)
 Frappe's All / Open / Paused / Resolved / Closed strip with live counts. Each
 segment maps to a **status category**, not a status value — see below.
+
+A **second** `.segments` row, `#list-categories`, carries the same thing for
+Category (`renderCategorySegments()` / `categoryCounts()`). It is a second
+INDEPENDENT axis, not a third row of the same control: a CRASH that is Resolved is
+a real question, so the two combine in `applyListFilters()` rather than replacing
+one another. Its "No category" segment is offered only while something is in it —
+on a fully triaged list a permanent `0` reads as a bug rather than as good news.
+`setCategoryFilter()` is the single setter, so the Insights cards can deep-link
+into a filtered list without duplicating the repaint order.
+
+### Insights dashboard (`#insights-view`)
+A **third sibling pane**, routed at `#/insights`. Not a panel inside
+`#detail-view`: that pane's display is the app's only truthful "an IR is open" flag
+(`#ir-activity` is pinned inside it), and on desktop the dashboard keeps the IR list
+beside it — the mobile back button is `display:none` there, so hiding the list
+would strand the user. Visible to every signed-in user: it only counts rows the IR
+list already shows them.
+
+Filters (FY April–March, Month, Status, Category, Customer, Drone SN) over a card
+per category with its count, the REPAIR sub-category breakout with the OTHERS notes
+verbatim, and the four-bucket status mix. Clicking a card sets the list filter and
+opens the IR list.
+
+**Month filters independently of FY** — `month` narrows across every year and `fy`
+across every month; both set is their intersection. All client-side over `allIRs` +
+`irState`; no new endpoint. `insightsSummary()` is pure, and `renderInsights()` is
+synchronous, idempotent and safe with an empty list, which is what lets four callers
+(`setAllIRs`, `loadIRState`, `refreshIRList`, `showInsights`) use it with no
+sequence token. With `allIRs` empty it re-emits `INSIGHTS_SKELETON` — the pane's own
+static markup, because the first frame happens before `fetchIRs()` is even called —
+rather than a dashboard of zeroes, which is not "loading" but the wrong answer.
 
 ### Status pills (`.badge`) and priority (`.prio`)
 | Class | Category | Statuses mapped to it |

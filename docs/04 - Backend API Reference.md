@@ -109,7 +109,7 @@ works against the already-deployed backend with no redeploy — exactly as
 | `__CONFIG__` / `team-directory` | `{ entries: [{name, email}] }` |
 | `__CONFIG__` / `inward-options` | `{ options: {…} }` |
 | `__CONFIG__` / `iqc-config` | `{ zones, resultOptions }` |
-| `__IRS__` / `<irNumber>` | App-owned workflow state — status, assignee, priority, type, `done[]` |
+| `__IRS__` / `<irNumber>` | App-owned workflow state — status, assignee, priority, category, subCategory, `done[]` |
 | `__NUDGES__` / `all` | `{ items: [comment, …] }` |
 
 **The exemption is an allowlist, not a prefix.** `SENTINEL_SECTIONS` names every

@@ -1654,7 +1654,7 @@ function doLogout(sessionToken) {
 //
 // TRIAGE is a SECOND, INDEPENDENT AXIS beside the section grants. A department
 // may hold it without granting edit on any section — which is exactly what CR and
-// Management do. It governs the ticket header (status, assignee, priority, type)
+// Management do. It governs the ticket header (status, assignee, priority, category)
 // and the Overview panel's two fields. It is kept OUT of `grants` so no code that
 // walks the section grants can mistake Triage for a section.
 //
@@ -2577,8 +2577,8 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
   // traceable. Sentinel writes are skipped: every section save also fires
   // patchIRState(), so without this guard each save produced two marker rows, one
   // of them contentless. Workflow changes are still recorded — as the field lines
-  // below, which name `status`/`assignee`/`priority`/`type` explicitly and are
-  // what the timeline actually reads.
+  // below, which the timeline reads by field id (`status`/`assignee`/`priority`/
+  // `category`/`subCategory`), not by anything hardcoded here.
   function line(ev, fid, oldV, newV) {
     return { t: ts, ir: irNumber, sec: sectionId, by: savedBy, ev: ev, fid: fid, old: oldV, nw: newV };
   }

@@ -597,6 +597,18 @@ header {
   flex-direction: column;
 }
 
+/* The Insights dashboard. A third SIBLING pane, not a panel inside #detail-view:
+   that pane's display is a truthful "an IR is open" flag, and on desktop this one
+   keeps the IR list beside it. display:none here and set inline by renderLayout(),
+   exactly like #detail-view — CSS is the pre-JS default, not a second writer. */
+#insights-view {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
 /* Desktop-only; the media block below turns it back on. */
 #detail-placeholder { display: none; }
 
@@ -694,6 +706,7 @@ header {
      display on both; these rules only handle the scroll container. */
   #index-view { display: flex; }
   #detail-view { display: none; }
+  #insights-view { display: none; }
 
   #toast { bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
 }
@@ -722,8 +735,8 @@ header {
   #back-btn { display: none !important; }
 
   /* Empty state for the detail pane. A sibling of #detail-view, not a child,
-     so #detail-view's own display stays a truthful "a ticket is open" flag
-     (applyAccessGating reads it). */
+     so #detail-view's own display stays a truthful "a ticket is open" flag —
+     tools/smoke-ui.mjs and tools/smoke-boot.mjs pin #ir-activity inside it. */
   #detail-placeholder {
     display: flex;
     flex: 1;
@@ -737,6 +750,10 @@ header {
     background: var(--surface-gray-1);
   }
   body.view-detail #detail-placeholder { display: none; }
+  /* The dashboard keeps the list on screen, so "No IR selected" would be a lie
+     there — it is shown whenever body.view-detail is absent, which includes
+     #/insights. */
+  body.view-insights #detail-placeholder { display: none; }
   .ph-icon { color: var(--ink-gray-6); opacity: 0.45; line-height: 1; }
   .ph-icon .icon { width: 2.75rem; height: 2.75rem; }
   .ph-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
@@ -744,10 +761,9 @@ header {
 
   /* ── Collapsible sidebar (Gmail-style rail) ───────────────
      State is an adjective class on <html>, matching [data-theme="dark"] — NOT an
-     inline `display`. renderLayout() owns the panes' inline display and
-     applyAccessGating reads it back, so a second writer of that property is the
-     one thing this must never be. The list fold is the exception and lives in
-     renderLayout(), because there it IS a pane.
+     inline `display`. renderLayout() owns all three panes' inline display, so a
+     second writer of that property is the one thing this must never be. The list
+     fold is the exception and lives in renderLayout(), because there it IS a pane.
 
      Scoped to ≥1024px on purpose: below lg the sidebar IS the bottom nav and
      `width: 100%`, so a rail width here would fight the block above. */

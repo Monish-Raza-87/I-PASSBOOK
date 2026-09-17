@@ -408,7 +408,7 @@ function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
 // Triage is a SEPARATE axis from section edit rights, not a seventh "section".
-// It governs the IR header — status, assignee, priority, type — and the two
+// It governs the IR header — status, assignee, priority, category — and the two
 // Overview fields. A department can hold it without editing any section, which
 // is exactly what CR and Management do. Admin always has it.
 function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
@@ -475,8 +475,8 @@ function saveSentinel(irNumber, sectionId, fields) {
 
 // ─── __IRS__ — APP-OWNED WORKFLOW STATE ──────────────────────────────────────
 // The Sheet is the immutable client intake (what the customer wrote); the app
-// owns everything mutable — status, assignee, priority, type, which sections are
-// done, CSAT. One row per IR, keyed by irNumber.
+// owns everything mutable — status, assignee, priority, category, which sections
+// are done, CSAT. One row per IR, keyed by irNumber.
 //
 // Ownership of an IR's status begins the moment a human changes the STATUS in
 // the app (statusOwned). Until then the Sheet's Col D is still what the list
@@ -485,8 +485,13 @@ function saveSentinel(irNumber, sectionId, fields) {
 // that assigning or categorising does NOT take over the status.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
-                              //              assignee, priority, type, done[], … }
+                              //              assignee, priority, category, subCategory, done[], … }
 let irStateSyncedAt = null;   // Date of the last successful __IRS__ read
+// True while `allIRs` holds the demo sample because BOTH the Sheet and the backend
+// refused to sync. Only the Insights page reads it: a fabricated card in the IR list
+// is self-evidently a placeholder, but "CRASH: 2" on a dashboard is a number
+// somebody could quote.
+let _dataIsDemo = false;
 
 // The row for one IR, but only if a human has actually edited it. A row that
 // holds nothing but the first-sight seed is a marker, not an edit.
@@ -539,6 +544,10 @@ async function loadIRState() {
   // first fetchIRs(), and rendering an empty list here would replace the boot
   // skeletons with "0 total" for a frame.
   if (allIRs.length) applyListFilters();
+  // The overlay carries `category`, which is a dashboard dimension, and it lands
+  // AFTER the list — so the dashboard has to be repainted here too or it would
+  // count a list whose categories have not arrived yet.
+  renderInsights();
 }
 
 // The single writer of `allIRs`. Every fetchIRs() path goes through it so
@@ -547,6 +556,11 @@ async function loadIRState() {
 function setAllIRs(records) {
   allIRs = Array.isArray(records) ? records : [];
   applyIRStateToAllIRs();
+  // The dashboard counts these same rows, so every fetch path repaints it here —
+  // the Sheet read, the GAS fallback, the demo fallback and an in-page re-login.
+  // It is a no-op while the pane is not showing, and it re-emits the skeleton when
+  // the list is empty, so a failed fetch cannot leave yesterday's numbers standing.
+  renderInsights();
   return allIRs;
 }
 
@@ -563,7 +577,12 @@ function applyIRStateToAllIRs() {
     ir.assignee     = s.assignee     || '';
     ir.assigneeName = s.assigneeName || '';
     if (s.priority) ir.priority = s.priority;
-    ir.type = s.type || '';
+    // Unconditional assignment, not `if (s.category)`: a cleared category must
+    // land as '' here, or the previous value would stay on the in-memory row and
+    // the list would keep showing a category the store no longer holds.
+    ir.category      = s.category      || '';
+    ir.subCategory   = s.subCategory   || '';
+    ir.subCategoryNote = s.subCategoryNote || '';
     // Filter against the LIVE ids. The store still holds historical `sec-a`,
     // `sec-h` and `sec-i` entries until the migration remaps them, and a
     // completion marker for a section that no longer exists would render as a
@@ -648,10 +667,21 @@ const INWARD_OPTIONS_DEFAULTS = {
 // one list.
 const IR_STATUS_VALUES = ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'];
 
-// Ticket categories, app-owned (the Form has no such column). These are a guess
-// at Indrones' own groupings and are meant to be edited in this one line —
-// nothing else in the app depends on the specific values.
-const TICKET_TYPES = ['Repair', 'Replacement', 'Warranty', 'AMC', 'Demo', 'Training', 'Other'];
+// Triage Category, app-owned (the Form has no such column). This REPLACED an
+// earlier `type` field whose values (Repair/Replacement/Warranty/AMC/Demo/
+// Training/Other) described a commercial arrangement rather than the work, which
+// is not what the desk sorts by. The old key is no longer read anywhere; it is
+// dropped from an IR's row the next time CR saves that IR's Triage.
+//
+// CR (Customer Relations — the department holding the TR access axis) owns this
+// field, exactly as it owns status, assignee and priority.
+const IR_CATEGORIES = ['CRASH', 'GENERAL MAINTENANCE', 'REMOTE SUPPORT', 'REPAIR'];
+
+// Sub-categories, only meaningful under REPAIR. OTHERS is the escape hatch: it
+// carries a free-text note instead of pretending to be a tenth component.
+const REPAIR_SUBCATEGORIES =
+  ['GPS', 'TRIPOD/BIPOD', 'TOPSHELL', 'CAMERA/LENS', 'BATTERY', 'CHARGER', 'RC', 'AIRFRAME', 'OTHERS'];
+const REPAIR_OTHERS = 'OTHERS';
 
 // Triage priorities. `priority` is read from the Sheet's "Priority" column when
 // one exists (fetchIRsFromSheet) and from here when the app sets it.
@@ -718,6 +748,7 @@ const authCont    = document.getElementById('auth-container');
 const appCont     = document.getElementById('app-container');
 const indexView   = document.getElementById('index-view');
 const detailView  = document.getElementById('detail-view');
+const insightsView = document.getElementById('insights-view');
 const irList      = document.getElementById('ir-list');
 const searchInput = document.getElementById('search-input');
 const backBtn     = document.getElementById('back-btn');
@@ -737,6 +768,7 @@ const navThemeIcon  = document.getElementById('nav-theme-icon');
 const navThemeLabel = document.getElementById('nav-theme-label');
 const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
+const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
@@ -744,10 +776,10 @@ const listToggle    = document.getElementById('list-toggle');
 
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
-// renderLayout() translates it into the inline display values that the rest of
-// the app reads back (applySectionAccessGating tests detailView.style.display).
-let currentView = 'index';     // 'index' | 'detail'
+// renderLayout() translates it into the inline display of the three panes.
+let currentView = 'index';     // 'index' | 'detail' | 'insights'
 let activeSegment = 'all';     // IR-list filter segment
+let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -1314,16 +1346,23 @@ function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeSta
 // One function owns the panes' visibility. It must keep writing *inline*
 // styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
-//   desktop (≥1024px) : list visible, detail beside it when open
+//   desktop (≥1024px) : list visible, detail/insights beside it when open
 //   mobile            : list and detail are separate full screens
 //
 // The list fold is decided HERE rather than by a stylesheet rule, because an
 // inline `display` beats any rule and this function is the one place allowed to
 // write it. Folding the list must never strand the user on an empty index screen,
 // which is why the fold only ever applies while a detail pane is open.
+//
+// `detailView.style.display` is only ever WRITTEN here, never read back. The
+// sibling-pane arrangement is still required, for a different reason: tools/
+// smoke-ui.mjs and tools/smoke-boot.mjs pin #ir-activity inside #detail-view, so
+// that pane's display is a truthful "an IR is open" flag and nothing else may
+// live in it.
 function renderLayout() {
-  const desktop = mqDesktop.matches;
-  const detail  = currentView === 'detail';
+  const desktop  = mqDesktop.matches;
+  const detail   = currentView === 'detail';
+  const insights = currentView === 'insights';
   // On mobile the list and the detail are separate full screens, so an open
   // detail always hides the list. On desktop they sit side by side, so the list
   // hides only when the user asked for the room — and only while a detail is
@@ -1331,8 +1370,17 @@ function renderLayout() {
   const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
+  // The Insights dashboard is a SIBLING pane, not a panel inside the detail one:
+  // it keeps the IR list beside it on desktop (the mobile back button is
+  // display:none there, so hiding the list would strand the user on a screen with
+  // no way back to an IR).
+  if (insightsView) insightsView.style.display = insights ? 'flex' : 'none';
   backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
+  // Suppresses #detail-placeholder's "No IR selected" empty state, which shows
+  // whenever body.view-detail is absent — including on the dashboard, where an
+  // "no IR selected" message is simply wrong.
+  document.body.classList.toggle('view-insights', insights);
 
   // On desktop the list stays on screen, so mark which row is open.
   if (irList) {
@@ -1352,13 +1400,17 @@ function renderLayout() {
 // Hash routes, because GitHub Pages is static with no server rewrite:
 //   #/tickets            → the list (desktop keeps whatever IR was open)
 //   #/tickets/IR409      → that IR's passbook
+//   #/insights           → the counts dashboard
 //   #/legacy             → opens the read-only legacy workbook modal
-// showIndex()/openPassbook() stay the view functions; the router only decides
-// when to call them, so nothing here re-implements rendering.
+// showIndex()/openPassbook()/showInsights() stay the view functions; the router
+// only decides when to call them, so nothing here re-implements rendering.
 function currentRoute() {
   const parts = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'insights') return { name: 'insights' };
   if (parts[0] === 'legacy') return { name: 'legacy' };
+  // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
+  // rather than on a blank pane, which is why `insights` had to be matched above.
   return { name: 'tickets' };
 }
 
@@ -1371,6 +1423,11 @@ function goTicket(irNumber) {
   const hash = '#/tickets/' + encodeURIComponent(irNumber);
   if (location.hash === hash) { handleRoute(); return; }
   location.hash = hash;
+}
+
+function goInsights() {
+  if (location.hash === '#/insights') { showInsights(); return; }
+  location.hash = '#/insights';
 }
 
 async function handleRoute() {
@@ -1392,6 +1449,20 @@ async function handleRoute() {
     if (!currentUser) return;                   // signed out while waiting
     if (currentRoute().irNumber !== r.irNumber) return;   // superseded meanwhile
     openPassbook(r.irNumber);
+    return;
+  }
+
+  if (r.name === 'insights') {
+    if (currentView === 'insights') return;
+    // The dashboard is counts over allIRs, so a cold #/insights deep link has
+    // nothing to count until the fetch lands. Waiting here is what stops it
+    // painting an empty dashboard for the length of an 8s abort.
+    if (!allIRs.length && _irsReady) { try { await _irsReady; } catch { /* paint anyway */ } }
+    if (!currentUser) return;                   // signed out while waiting
+    // Re-read the route AFTER the await: the user may have navigated away while
+    // the list was loading, and painting now would land on top of where they went.
+    if (currentRoute().name !== 'insights') return;
+    showInsights();
     return;
   }
 
@@ -1419,7 +1490,7 @@ function startAppData() {
   loadIqcConfig();
   // Load team directory (@-mention suggestions) + nudges, and start nudge polling
   loadTeamDirectory();
-  // Load app-owned workflow state (status / assignee / priority / type per IR).
+  // Load app-owned workflow state (status / assignee / priority / category per IR).
   // Runs alongside the first fetchIRs(); setAllIRs merges whatever has arrived,
   // and loadIRState re-merges + re-renders when it lands, so either order is
   // correct.
@@ -1456,7 +1527,17 @@ function showApp() {
   if (_appBooted) { renderLayout(); syncNavAccess(); startAppData(); return; }
   _appBooted = true;
 
-  showIndex();
+  // Enter the FIRST screen synchronously, before startAppData() assigns _irsReady
+  // and before handleRoute() runs. Calling showIndex() unconditionally here would
+  // paint the IR list on a cold #/insights and hold it there for the whole of the
+  // first fetch — up to the 8s abort — because handleRoute() cannot do better than
+  // "wait for the list" when it has nothing to count yet.
+  //
+  // A deep link to an IR deliberately keeps the old behaviour: a passbook cannot be
+  // painted before its record arrives, so showIndex() paints the placeholder the
+  // detail pane will replace. handleRoute() still owns the async path and no-ops
+  // when we are already on the right screen.
+  if (currentRoute().name === 'insights') showInsights(); else showIndex();
   applyTheme();          // sync the nav toggle with the stored preference
   initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
   applyChromeState();    // ...and the sidebar / IR-list folds
@@ -1839,7 +1920,7 @@ function renderDepartmentsTab() {
     <div class="access-section">
       <h3>What each department may edit</h3>
       <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
-      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and category</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
       <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
       <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
       <div class="access-add-row" style="margin-top:0.75rem;">
@@ -2100,6 +2181,285 @@ function showIndex() {
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
+// ─── INSIGHTS ────────────────────────────────────────────────────────────────
+// Counts over the IR list, sliced by the variables the desk actually asks about.
+// Everything here is client-side over `allIRs` + `irState`, both of which are
+// already fully in memory (one gviz CSV read, plus one `__IRS__` read), so this
+// page adds NO endpoint, no cache and no second source of truth. If the two ever
+// disagree it is because the list is stale, not because the dashboard is.
+//
+// Read-only and visible to every signed-in user: it reads the same rows the IR
+// list already shows them, so there is nothing here to gate.
+
+const MONTH_LABELS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                      'August', 'September', 'October', 'November', 'December'];
+
+// "2025-09-28" → { y, m, d }, or null for anything else. `ir.dateRaisedISO` is the
+// only clean sortable date on a record — `ir.dateRaised` is display-only and holds
+// whatever the Sheet had, and there is no createdAt/timestamp anywhere. Returning
+// null rather than NaN is load-bearing: an unparseable date must land in its own
+// bucket, never in year 0 or in every year at once.
+function parseISODate(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso).trim());
+  if (!m) return null;
+  const y = +m[1], mo = +m[2], d = +m[3];
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return { y, m: mo, d };
+}
+
+// A fiscal year is named by the calendar year it STARTS in (1 April – 31 March),
+// so FY 2025-26 covers Apr–Dec 2025 and Jan–Mar 2026. Every helper here returns or
+// takes that integer, never a formatted string, so a label change can never become
+// a filtering bug.
+function irFiscalYear(iso) {
+  const d = parseISODate(iso);
+  if (!d) return null;
+  return d.m >= 4 ? d.y : d.y - 1;
+}
+
+function irMonthNumber(iso) {
+  const d = parseISODate(iso);
+  return d ? d.m : null;
+}
+
+function fyLabel(startYear) { return startYear + '-' + String((startYear + 1) % 100).padStart(2, '0'); }
+
+// The dashboard's own filter state, separate from the IR list's strips.
+// `month` is deliberately NOT derived from `fy`: Month was asked to filter
+// independently, so `month` narrows across every year and `fy` narrows across every
+// month. Both set is their intersection, not a contradiction.
+const INSIGHTS_ALL = 'all';
+let insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
+                        category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+
+// The dropdowns' option lists, computed over the WHOLE list and never over the
+// filtered rows: a select built from filtered rows would drop every other option the
+// moment one was chosen, leaving no way to change your mind. Same reasoning as
+// segmentCounts() reading allIRs.
+function insightsFacets(irs) {
+  const rows = Array.isArray(irs) ? irs : [];
+  const years = new Set(), months = new Set(), customers = new Set(), drones = new Set();
+  let undated = 0;
+  rows.forEach(ir => {
+    const fy = irFiscalYear(ir.dateRaisedISO);
+    if (fy === null) undated++;
+    else { years.add(fy); months.add(irMonthNumber(ir.dateRaisedISO)); }
+    if (ir.customerName) customers.add(String(ir.customerName));
+    if (ir.droneId) drones.add(String(ir.droneId));
+  });
+  return {
+    years: [...years].sort((a, b) => b - a),
+    months: [...months].sort((a, b) => a - b),
+    customers: [...customers].sort((a, b) => a.localeCompare(b)),
+    drones: [...drones].sort((a, b) => a.localeCompare(b)),
+    undated,
+  };
+}
+
+// PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures, exactly
+// like buildTimeline(). Returns counts only; the caller decides how to draw them.
+function insightsSummary(irs, filters) {
+  const all = Array.isArray(irs) ? irs : [];
+  const f = filters || {};
+  const rows = all.filter(ir => {
+    // String() on both sides: a select hands back a string, and a Set-derived
+    // option list holds numbers. Comparing them raw would match nothing at all,
+    // silently, for FY and Month only.
+    if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
+    if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
+    if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
+    if (f.category !== INSIGHTS_ALL) {
+      if (f.category === UNCATEGORISED) { if (ir.category) return false; }
+      else if (ir.category !== f.category) return false;
+    }
+    if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
+    if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
+    return true;
+  });
+
+  const categories = {};
+  IR_CATEGORIES.forEach(k => { categories[k] = 0; });
+  const subcategories = {};
+  REPAIR_SUBCATEGORIES.forEach(k => { subcategories[k] = 0; });
+  const statuses = {};
+  Object.keys(STATUS_CATEGORIES).forEach(k => { statuses[k] = 0; });
+
+  let uncategorised = 0, repairUnset = 0, undated = 0;
+  rows.forEach(ir => {
+    // hasOwnProperty, not a truthiness test: an IR carrying a category that is no
+    // longer on the list is uncategorised for every purpose the dashboard has.
+    if (Object.prototype.hasOwnProperty.call(categories, ir.category)) categories[ir.category]++;
+    else uncategorised++;
+    if (ir.category === 'REPAIR') {
+      if (Object.prototype.hasOwnProperty.call(subcategories, ir.subCategory)) subcategories[ir.subCategory]++;
+      else repairUnset++;
+    }
+    statuses[statusCategory(ir.status)]++;
+    if (irFiscalYear(ir.dateRaisedISO) === null) undated++;
+  });
+
+  return { total: all.length, matched: rows.length, undated,
+           categories, uncategorised, subcategories, repairUnset, statuses };
+}
+
+// What the pane shows before the first fetch lands. A page of zeroes is not
+// "loading" — it is an answer ("nothing was raised"), and it is the wrong one.
+// Exported as a constant because it is ALSO the pane's static markup in
+// index.html: the very first frame happens before fetchIRs() is even called, so the
+// skeleton has to exist in the DOM before any script runs.
+const INSIGHTS_SKELETON = `
+  <div class="insights-skeleton"></div>
+  <div class="insights-skeleton"></div>
+  <div class="insights-skeleton"></div>`;
+
+function insightsOpt(v, sel, label) {
+  const value = String(v);
+  return `<option value="${escHtml(value)}"${value === String(sel) ? ' selected' : ''}>${escHtml(label == null ? value : label)}</option>`;
+}
+
+// SYNCHRONOUS, IDEMPOTENT and safe with an empty list. Those three properties are
+// what let four different callers use it with no sequence token: setAllIRs() (every
+// fetch path, including the demo fallback and an in-page re-login), loadIRState()
+// (the app-owned overlay, which lands after the list), refreshIRList() (the header
+// Refresh) and showInsights() itself.
+function renderInsights() {
+  const body = document.getElementById('insights-body');
+  if (!body) return;
+  if (!allIRs.length) { body.innerHTML = INSIGHTS_SKELETON; return; }
+
+  const fx = insightsFacets(allIRs);
+  const f  = insightsFilters;
+
+  // A filter whose value has left the data — a refetch without that customer, a
+  // category CR has since cleared off every IR it applied to — is RESET rather than
+  // kept. The select cannot show an option that no longer exists, so keeping the
+  // value would leave the page reporting 0 matches with every dropdown reading
+  // "All", which is the one failure a reader cannot diagnose from the screen.
+  if (f.fy !== INSIGHTS_ALL && !fx.years.some(y => String(y) === String(f.fy))) f.fy = INSIGHTS_ALL;
+  if (f.month !== INSIGHTS_ALL && !fx.months.some(m => String(m) === String(f.month))) f.month = INSIGHTS_ALL;
+  if (f.customer !== INSIGHTS_ALL && !fx.customers.includes(f.customer)) f.customer = INSIGHTS_ALL;
+  if (f.drone !== INSIGHTS_ALL && !fx.drones.includes(f.drone)) f.drone = INSIGHTS_ALL;
+
+  const sum = insightsSummary(allIRs, f);
+  const filtered = sum.matched !== sum.total;
+
+  const filterRow = (id, label, options) => `
+    <label class="insights-filter"><span>${escHtml(label)}</span>
+      <select class="form-input" id="${id}">${options}</select>
+    </label>`;
+
+  const statusOpts = SEGMENT_LABELS
+    .map(([key, label]) => insightsOpt(key, f.status, key === 'all' ? 'All statuses' : label)).join('');
+
+  body.innerHTML = `
+    <div class="insights-filters">
+      ${filterRow('ins-fy', 'Fiscal year',
+        insightsOpt(INSIGHTS_ALL, f.fy, 'All years') +
+        fx.years.map(y => insightsOpt(y, f.fy, 'FY ' + fyLabel(y))).join(''))}
+      ${filterRow('ins-month', 'Month',
+        insightsOpt(INSIGHTS_ALL, f.month, 'All months') +
+        fx.months.map(m => insightsOpt(m, f.month, MONTH_LABELS[m - 1])).join(''))}
+      ${filterRow('ins-status', 'Status', statusOpts)}
+      ${filterRow('ins-category', 'Category',
+        insightsOpt(INSIGHTS_ALL, f.category, 'All categories') +
+        IR_CATEGORIES.map(k => insightsOpt(k, f.category)).join('') +
+        (sum.uncategorised || f.category === UNCATEGORISED
+          ? insightsOpt(UNCATEGORISED, f.category, 'No category') : ''))}
+      ${filterRow('ins-customer', 'Customer',
+        insightsOpt(INSIGHTS_ALL, f.customer, 'All customers') +
+        fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
+      ${filterRow('ins-drone', 'Drone SN',
+        insightsOpt(INSIGHTS_ALL, f.drone, 'All drones') +
+        fx.drones.map(d => insightsOpt(d, f.drone)).join(''))}
+      <button type="button" class="btn btn-sm btn-secondary" id="ins-clear"
+              ${filtered ? '' : 'disabled'}>Clear filters</button>
+    </div>
+
+    <p class="insights-total">
+      <strong>${sum.matched}</strong> of ${sum.total} IR${sum.total === 1 ? '' : 's'}
+      ${filtered ? 'match these filters' : 'in the list'}.
+      ${sum.undated ? `<span class="insights-note">${sum.undated} carry no readable date, so a year or month filter excludes them.</span>` : ''}
+      ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
+    </p>
+
+    <div class="insights-cards">
+      ${IR_CATEGORIES.map(k => `
+        <button type="button" class="insights-card${f.category === k ? ' active' : ''}" data-cat="${escHtml(k)}">
+          <span class="insights-card-n">${sum.categories[k]}</span>
+          <span class="insights-card-label">${escHtml(k)}</span>
+        </button>`).join('')}
+      ${sum.uncategorised ? `
+        <button type="button" class="insights-card is-muted${f.category === UNCATEGORISED ? ' active' : ''}" data-cat="${escHtml(UNCATEGORISED)}">
+          <span class="insights-card-n">${sum.uncategorised}</span>
+          <span class="insights-card-label">No category</span>
+        </button>` : ''}
+    </div>
+
+    ${sum.categories.REPAIR ? `
+      <div class="insights-block">
+        <h3 class="insights-h">REPAIR — by sub-category</h3>
+        <div class="insights-subcats">
+          ${REPAIR_SUBCATEGORIES.map(k => `
+            <span class="insights-subcat${k === REPAIR_OTHERS ? ' is-others' : ''}">
+              ${escHtml(k)}<span class="insights-subcat-n">${sum.subcategories[k]}</span>
+            </span>`).join('')}
+          ${sum.repairUnset ? `<span class="insights-subcat is-muted">Not set<span class="insights-subcat-n">${sum.repairUnset}</span></span>` : ''}
+        </div>
+        ${sum.subcategories[REPAIR_OTHERS] ? `
+          <ul class="insights-others">
+            ${allIRs.filter(ir => ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS)
+              .slice(0, 12)
+              .map(ir => `<li><strong>${escHtml(ir.irNumber)}</strong> — ${escHtml(ir.subCategoryNote || 'no note')}</li>`).join('')}
+          </ul>` : ''}
+      </div>` : ''}
+
+    <div class="insights-block">
+      <h3 class="insights-h">Status mix</h3>
+      <div class="insights-mix">
+        ${SEGMENT_LABELS.filter(([k]) => k !== 'all').map(([k, label]) => `
+          <span class="insights-mix-row">
+            <span class="${CATEGORY_BADGE[k]}">${escHtml(label)}</span>
+            <span class="insights-mix-n">${sum.statuses[k] || 0}</span>
+          </span>`).join('')}
+      </div>
+    </div>`;
+}
+
+function showInsights() {
+  currentView = 'insights';
+  renderLayout();
+  headerTitle.textContent = 'Insights';
+  // The pane renders from whatever is in memory; handleRoute() is what waits for
+  // the list. Re-rendering here keeps a re-entry from showing a stale dashboard.
+  renderInsights();
+}
+
+if (insightsView) {
+  insightsView.addEventListener('change', e => {
+    const id = e.target && e.target.id;
+    const map = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
+                  'ins-category': 'category', 'ins-customer': 'customer', 'ins-drone': 'drone' };
+    if (!map[id]) return;
+    insightsFilters[map[id]] = e.target.value;
+    renderInsights();
+  });
+  insightsView.addEventListener('click', e => {
+    const el = e.target && e.target.closest ? e.target.closest('.insights-card') : null;
+    if (el) {
+      // A card deep-links into the IR LIST, filtered to that category — the counts
+      // are only useful if you can get from a number to the IRs behind it.
+      setCategoryFilter(el.dataset.cat);
+      goIndex();
+      return;
+    }
+    if (e.target && e.target.id === 'ins-clear') {
+      insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
+                          category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+      renderInsights();
+    }
+  });
+}
+
 // ─── IR REPOSITORY — DIRECT SHEET READ ───────────────────────────────────────
 // Reads the "Form Responses" tab straight from Google Sheets as CSV. No Apps Script
 // deploy required. Falls back to GAS / demo if the sheet is unreachable.
@@ -2310,6 +2670,10 @@ async function fetchIRsFromSheet() {
 
 async function fetchIRs() {
   setSyncStatus('⟳ Syncing with the IR Repository…');
+  // Assumed live until a path proves otherwise. Set HERE, before any setAllIRs()
+  // call, because setAllIRs() is what repaints the dashboard — a flag set after it
+  // would arrive one render too late and leave the previous answer's warning up.
+  _dataIsDemo = false;
 
   // 1. Primary: read the sheet directly (no backend deploy needed)
   try {
@@ -2341,7 +2705,11 @@ async function fetchIRs() {
     throw new Error(data.message || 'Unknown error');
   } catch (err) {
     setSyncStatus('⚠ Could not sync — showing demo data');
-    // Demo mode: render sample cards so UI is visible
+    // Demo mode: render sample cards so UI is visible. The flag exists for the
+    // Insights page, which is the one screen where fabricated rows read as
+    // statistics rather than as obviously-placeholder cards — a "CRASH: 2" built
+    // from a sample is a number somebody could quote in a meeting.
+    _dataIsDemo = true;
     setAllIRs(getDemoIRs());
     renderIRList(allIRs);
   }
@@ -2441,6 +2809,7 @@ function mergeLegacyOnlyIRs() {
 
 function renderIRList(records) {
   renderSegments();
+  renderCategorySegments();
   if (!records || records.length === 0) {
     irList.innerHTML = allIRs.length
       ? '<div class="empty-state"><span>🔍</span>No IRs match this filter.</div>'
@@ -2465,7 +2834,8 @@ function renderIRList(records) {
         <div class="ir-title">${escHtml(ir.irNumber)}</div>
         <div class="ir-meta">
           <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
-          ${ir.type ? `<span class="ir-dot">·</span><span class="ir-type">${escHtml(ir.type)}</span>` : ''}
+          ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
+          ${ir.subCategory ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.subCategory)}</span>` : ''}
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
         </div>
       </div>
@@ -2564,11 +2934,58 @@ function renderSegments() {
   `).join('');
 }
 
+// ─── LIST FILTER: CATEGORY ───────────────────────────────────────────────────
+// A second, INDEPENDENT filter axis beside the status strip. Deliberately not a
+// third row of SEGMENT_LABELS: the status strip and this one combine (a CRASH that
+// is Resolved is a real question), so they are two scalars read by the same
+// applyListFilters(), not two states of one control.
+const CATEGORY_ALL = 'all';
+const UNCATEGORISED = '__none__';   // an IR CR has not triaged yet
+
+function categoryCounts() {
+  const c = { all: allIRs.length };
+  IR_CATEGORIES.forEach(k => { c[k] = 0; });
+  c[UNCATEGORISED] = 0;
+  allIRs.forEach(ir => {
+    const k = ir.category || UNCATEGORISED;
+    // An unknown value (a category retired from the list, a hand-edited store row)
+    // must not be silently added to `all` twice over — it falls into the
+    // uncategorised bucket rather than inventing a twelfth segment.
+    c[k] = (c[k] || 0) + 1;
+  });
+  return c;
+}
+
+// Uncategorised is shown only when there is something in it. On a store where every
+// IR has been triaged the segment would read "0" forever, and CR would reasonably
+// read that as a bug rather than as good news.
+function renderCategorySegments() {
+  if (!listCategories) return;
+  const c = categoryCounts();
+  const keys = [CATEGORY_ALL, ...IR_CATEGORIES];
+  if (c[UNCATEGORISED]) keys.push(UNCATEGORISED);
+  listCategories.innerHTML = keys.map(key => {
+    const label = key === CATEGORY_ALL ? 'All categories'
+                : key === UNCATEGORISED ? 'No category'
+                : key;
+    return `
+    <button type="button" class="segment${activeCategory === key ? ' active' : ''}"
+            data-cat="${escHtml(key)}" role="tab" aria-selected="${activeCategory === key}">
+      ${escHtml(label)}<span class="segment-count">${c[key] || 0}</span>
+    </button>`;
+  }).join('');
+}
+
 // The one place the search box and the segment strip combine into a filter.
 function applyListFilters() {
   const q = (searchInput.value || '').toLowerCase().trim();
   let rows = allIRs;
   if (activeSegment !== 'all') rows = rows.filter(ir => statusCategory(ir.status) === activeSegment);
+  if (activeCategory !== CATEGORY_ALL) {
+    rows = rows.filter(ir => activeCategory === UNCATEGORISED
+      ? !ir.category
+      : ir.category === activeCategory);
+  }
   if (q) {
     rows = rows.filter(ir =>
       ir.irNumber?.toLowerCase().includes(q) ||
@@ -2589,6 +3006,22 @@ if (listSegments) {
     renderSegments();
     applyListFilters();
   });
+}
+
+if (listCategories) {
+  listCategories.addEventListener('click', e => {
+    const btn = e.target.closest('.segment');
+    if (!btn) return;
+    setCategoryFilter(btn.dataset.cat);
+  });
+}
+
+// The single setter, so the Insights cards can deep-link into a filtered list
+// without duplicating the repaint order.
+function setCategoryFilter(key) {
+  activeCategory = key || CATEGORY_ALL;
+  renderCategorySegments();
+  applyListFilters();
 }
 
 // ─── PASSBOOK DETAIL ─────────────────────────────────────────────────────────
@@ -2617,7 +3050,9 @@ async function openPassbook(irNumber) {
       currentIR.assignee     = st.assignee     || '';
       currentIR.assigneeName = st.assigneeName || '';
       if (st.priority) currentIR.priority = st.priority;
-      currentIR.type = st.type || '';
+      currentIR.category        = st.category        || '';
+      currentIR.subCategory     = st.subCategory     || '';
+      currentIR.subCategoryNote = st.subCategoryNote || '';
       currentIR.done = Array.isArray(st.done) ? st.done : [];
     }
     renderBannerMeta();
@@ -3012,7 +3447,7 @@ async function saveOverview() {
   }, 3000);
 }
 
-// The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
+// The banner's triage line. Every value here is app-owned (`__IRS__`); the Sheet
 // only supplies the status an IR starts life with.
 function renderBannerMeta() {
   if (!bannerPills || !currentIR) return;
@@ -3025,7 +3460,8 @@ function renderBannerMeta() {
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
-    (ir.type ? `<span class="meta-pill">${escHtml(ir.type)}</span>` : '') +
+    (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
+    (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
@@ -3033,7 +3469,7 @@ function renderBannerMeta() {
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
 }
 
-// ─── TRIAGE MODAL (status / assignee / priority / type) ──────────────────────
+// ─── TRIAGE MODAL (status / assignee / priority / category) ──────────────────
 // Writes to `__IRS__` — the app's own record — and never touches the client's
 // Sheet, which keeps the customer's original report intact. Reuses the
 // full-screen modal pattern of the team-directory editor so it works at phone
@@ -3071,10 +3507,24 @@ function openTriageModal() {
             <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '')).join('')}
           </select>
         </label>
-        <label class="triage-row"><span>Type</span>
-          <select class="form-input" id="triage-type">
-            <option value="">— None —</option>${TICKET_TYPES.map(v => opt(v, ir.type || '')).join('')}
+        <label class="triage-row"><span>Category</span>
+          <select class="form-input" id="triage-category">
+            <option value="">— Choose —</option>${IR_CATEGORIES.map(v => opt(v, ir.category || '')).join('')}
           </select>
+        </label>
+        <!-- Sub-category exists ONLY under REPAIR. Both rows stay in the DOM and are
+             shown/hidden, rather than being added and removed, so the two selects
+             never lose the listener wired below by being replaced. -->
+        <label class="triage-row" id="triage-subcat-row"${ir.category === 'REPAIR' ? '' : ' style="display:none"'}>
+          <span>Sub-category</span>
+          <select class="form-input" id="triage-subcategory">
+            <option value="">— Choose —</option>${REPAIR_SUBCATEGORIES.map(v => opt(v, ir.subCategory || '')).join('')}
+          </select>
+        </label>
+        <label class="triage-row" id="triage-subcat-note-row"${ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS ? '' : ' style="display:none"'}>
+          <span>Mention it</span>
+          <input type="text" class="form-input" id="triage-subcat-note" maxlength="120"
+                 placeholder="What was repaired?" value="${escHtml(ir.subCategoryNote || '')}" />
         </label>
       </div>
       <div class="inward-options-foot">
@@ -3083,6 +3533,36 @@ function openTriageModal() {
       </div>
     </div>`;
   document.body.appendChild(modal);
+  wireTriageCategoryRows();
+}
+
+// Keeps the two conditional rows honest as the CR changes their mind. The rule is
+// one-directional on purpose: leaving REPAIR CLEARS the sub-category and its note,
+// so a stale "BATTERY" can never ride along under CRASH — which is exactly the kind
+// of value that would silently corrupt the Insights counts later.
+function wireTriageCategoryRows() {
+  const catRow  = document.getElementById('triage-category');
+  const subRow  = document.getElementById('triage-subcat-row');
+  const subSel  = document.getElementById('triage-subcategory');
+  const noteRow = document.getElementById('triage-subcat-note-row');
+  const noteIn  = document.getElementById('triage-subcat-note');
+  if (!catRow || !subRow || !subSel) return;
+
+  const sync = () => {
+    const isRepair = catRow.value === 'REPAIR';
+    subRow.style.display = isRepair ? '' : 'none';
+    if (!isRepair) {
+      subSel.value = '';
+      if (noteIn) noteIn.value = '';
+    }
+    if (noteRow) {
+      noteRow.style.display = (isRepair && subSel.value === REPAIR_OTHERS) ? '' : 'none';
+      if (!isRepair || subSel.value !== REPAIR_OTHERS) { if (noteIn) noteIn.value = ''; }
+    }
+  };
+  catRow.addEventListener('change', sync);
+  subSel.addEventListener('change', sync);
+  sync();
 }
 function closeTriageModal() { document.getElementById('triage-modal')?.remove(); }
 
@@ -3092,11 +3572,42 @@ async function applyTriage() {
   const status   = document.getElementById('triage-status')?.value     || '';
   const email    = document.getElementById('triage-assignee')?.value   || '';
   const priority = document.getElementById('triage-priority')?.value   || '';
-  const type     = document.getElementById('triage-type')?.value       || '';
+  const category = document.getElementById('triage-category')?.value   || '';
   const prev     = String(currentIR.assignee || '').toLowerCase();
   const member   = teamDirectory.find(d => String(d.email).toLowerCase() === email.toLowerCase());
 
-  const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '', priority, type };
+  // Category is MANDATORY. It is the one triage field the list filter and the
+  // Insights page count by, so a triaged IR without one would be invisible to both
+  // — an "uncategorised" hole no report could explain. The sub-category is required
+  // too, but only where it exists (REPAIR); the note only under OTHERS.
+  if (!category) {
+    showToast('Choose a Category before saving Triage');
+    return;
+  }
+  const isRepair = category === 'REPAIR';
+  const subCategory = isRepair ? (document.getElementById('triage-subcategory')?.value || '') : '';
+  if (isRepair && !subCategory) {
+    showToast('Choose a Sub-category for a REPAIR');
+    return;
+  }
+  const subCategoryNote = (isRepair && subCategory === REPAIR_OTHERS)
+    ? (document.getElementById('triage-subcat-note')?.value || '').trim()
+    : '';
+  // OTHERS is the escape hatch from the nine components: it exists so CR can name a
+  // fault the list does not cover. Saving it empty turns the hatch into a blank, and
+  // nine-of-nine becomes the same unexplained bucket the categories were introduced
+  // to remove.
+  if (isRepair && subCategory === REPAIR_OTHERS && !subCategoryNote) {
+    showToast('Say what was repaired for an OTHERS sub-category');
+    return;
+  }
+
+  const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '',
+                  priority, category, subCategory, subCategoryNote };
+  // `type` is the retired field. patchIRState spread-merges into the STORED row, so
+  // simply not sending it would leave the stale key there forever. An explicit
+  // undefined is what retires it, per-IR, as CR re-triages.
+  patch.type = undefined;
   // Only a real status CHANGE moves the clock. Re-saving the same status must
   // not reset time-in-status, or every triage edit would fake a fresh IR.
   if (status && status !== currentIR.status) {
@@ -5956,6 +6467,10 @@ const ICON_PATHS = {
   sun:            '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2"/><path d="M12 19.5v2"/><path d="M2.5 12h2"/><path d="M19.5 12h2"/><path d="M5.2 5.2l1.4 1.4"/><path d="M17.4 17.4l1.4 1.4"/><path d="M18.8 5.2l-1.4 1.4"/><path d="M6.6 17.4l-1.4 1.4"/>',
   clock:          '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   report:         '<path d="M8 3.5h8a1.5 1.5 0 0 1 1.5 1.5v14A1.5 1.5 0 0 1 16 20.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5z"/><path d="M9.5 3.5V2.5h5v1"/><path d="M9.5 9h5"/><path d="M9.5 13h5"/><path d="M9.5 17h3"/>',
+  // The Insights dashboard's nav glyph. `report` was the obvious reuse and is
+  // WRONG — it already means the client's Report tab — so the counts get their own
+  // three columns, which is what the page is.
+  chart:          '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="13" y="8" width="3" height="9"/><rect x="18" y="14" width="3" height="3"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
@@ -5982,6 +6497,7 @@ function initIcons() {
     ['#ir-activity-toggle .activity-caret',  'chevron'],
     ['#nudge-bell .nudge-bell-icon',         'bell'],
     ['#nav-tickets .nav-icon',               'ir'],
+    ['#nav-insights .nav-icon',              'chart'],
     ['#legacy-workbook-btn .nav-icon',       'legacy'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
@@ -6019,7 +6535,9 @@ const TIMELINE_KINDS = {
   status:   { icon: 'target',       label: 'Status changed' },
   assign:   { icon: 'user',         label: 'Assigned to' },
   priority: { icon: 'flag',         label: 'Priority changed' },
-  type:     { icon: 'tag',          label: 'Type changed' },
+  category:    { icon: 'tag',       label: 'Category changed' },
+  subcategory: { icon: 'tag',       label: 'Sub-category changed' },
+  subcatnote:  { icon: 'tag',       label: 'Repair note' },
   upload:   { icon: 'upload',       label: 'File uploaded' },
   comment:  { icon: 'comment',      label: 'Comment' },
 };
@@ -6059,12 +6577,20 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
     if (e.event === 'uploaded') { out.push(Object.assign({}, base, { kind: 'upload' })); return; }
 
     if (source === 'workflow') {
+      // Sub-category and its note get their OWN kinds rather than folding into
+      // `category`: a REPAIR whose component changes from GPS to BATTERY leaves
+      // `category` untouched, so the audit emits only the sub-category row — and
+      // labelling that row "Category changed: REPAIR → REPAIR" would be noise.
       const kind = fid === 'status' ? 'status'
                  : (fid === 'assignee' || fid === 'assigneeName') ? 'assign'
                  : fid === 'priority' ? 'priority'
-                 : fid === 'type' ? 'type' : '';
+                 : fid === 'category' ? 'category'
+                 : fid === 'subCategory' ? 'subcategory'
+                 : fid === 'subCategoryNote' ? 'subcatnote' : '';
       // Everything else a sentinel write carries — a whole-store `items` array, a
       // seed marker — is not a workflow change and must not clutter the timeline.
+      // The retired `type` field lands here too: nothing displays it any more, so
+      // an audit row about it would be a change the reader cannot see the effect of.
       if (!kind) return;
       out.push(Object.assign({}, base, { kind }));
       return;

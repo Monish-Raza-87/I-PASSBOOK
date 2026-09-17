@@ -60,18 +60,15 @@ var CONFIG = {
   // match the frontend ADMIN_EMAILS.
   ADMIN_EMAILS: ['monish.raza@indrones.com'],
 
-  // Session lifetime (DAYS). Minted at sign-in and SLID forward on use, so an
-  // active user is never signed out — matching how a Google Workspace web session
-  // behaves (default 14 days, admin-settable to 30). The frontend keeps the token
-  // in localStorage, so reopening the app resumes the session with no sign-in.
-  // Bounds how long a (possibly stolen) token stays valid.
-  SESSION_DAYS: 30,
-
-  // How stale a session's Last Seen At may get before lookupSession rewrites its
-  // Expires At (the "slide"). The frontend polls comments every 90s, so an
-  // unthrottled slide would be ~40 store writes per hour per user; 6h caps it at
-  // <=1 write per 6h while still sliding long before the 30-day expiry.
-  SESSION_SLIDE_HOURS: 6,
+  // Session lifetime, in HOURS — one working day (8h30m). Minted at sign-in and
+  // ABSOLUTE: it does not slide on use, so an active user is still signed out at
+  // the end of the shift and signs in again the next morning.
+  //
+  // This replaced a 30-day sliding session, which is a deliberate reversal: the
+  // daily sign-in is what gives the sign-in code below something to protect, and
+  // a session that slides forward on every request never expires for exactly the
+  // people who use the app most.
+  SESSION_HOURS: 8.5,
 
   // A temporary password handed over by the admin stops being a credential after
   // this many days, whether or not it was ever used. The forced first-login change
@@ -557,8 +554,7 @@ function userField(u, name) {
 // helper taking a record from its caller cannot promise that, and one taking its
 // own lock would be a nested lock on every path that already holds one.
 
-// SESSIONS — { tokens: { "<uuid>": { email, createdAt, expiresAt, revokedAt,
-//                                     lastSeenAt } } }
+// SESSIONS — { tokens: { "<uuid>": { email, createdAt, expiresAt, revokedAt } } }
 //
 // Keyed by the token itself, so a lookup is one key read and a revoke is one key
 // assignment: no row scan, and nothing that can shift under a concurrent write.
@@ -630,10 +626,13 @@ function mintSession(email) {
     store.tokens[token] = {
       email:      usersKey(email),
       createdAt:  now,
-      expiresAt:  now + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000,
-      revokedAt:  null,
-      lastSeenAt: now
+      expiresAt:  now + CONFIG.SESSION_HOURS * 60 * 60 * 1000,
+      revokedAt:  null
     };
+    // There is deliberately NO lastSeenAt. It existed for the sliding expiry, and
+    // with an ABSOLUTE expiry nothing would ever update or read it — a field named
+    // "last seen" that only ever held the mint time would be worse than absent,
+    // because the next person to reason about session lifetime would believe it.
     // Opportunistic prune of long-expired tokens, in the same write. Never from
     // inside lookupSession, where a write would race the read it is serving.
     pruneSessionsIn(store);
@@ -786,11 +785,29 @@ function createUserRow(email, name, createdBy) {
 // 6-digit code is a million guesses against an endpoint anyone can reach, so a
 // code dies after CODE_MAX_ATTEMPTS wrong tries regardless of its TTL.
 var CODE_TTL_MIN        = 15;
+// Sign-in codes last a working day, and are REUSABLE inside it: one email at the
+// first sign-in covers every sign-in that day. Deliberately the same window as
+// CONFIG.SESSION_HOURS — when the session dies, so does the code.
+var LOGIN_OTP_TTL_MIN   = 510;         // 8h30m
 var CODE_RESEND_GAP_MS  = 60 * 1000;   // min gap between code (re)issues per email
 var CODE_MAX_PER_HOUR   = 3;           // throttle: codes issued per email per hour
-var CODE_MAX_PER_HOUR_GLOBAL = 12;     // throttle: codes issued across ALL emails per hour
+var CODE_MAX_PER_HOUR_GLOBAL = 12;     // throttle: RESET codes across ALL emails per hour
+var CODE_MAX_PER_HOUR_GLOBAL_LOGIN = 120;  // throttle: LOGIN codes across ALL emails per hour
 var CODE_MAX_ATTEMPTS   = 5;           // wrong guesses before the code is burned
 var MAIL_DAILY_CAP      = 400;         // ceiling on ALL app-sent mail per day (see mailQuotaOk)
+
+// The global ceiling is PER PURPOSE, and the two differ by 10x on purpose.
+//
+// `reset` is unauthenticated — anyone can ask for a code for any address — so it
+// keeps the tight 12/hour that stops a caller walking the staff list and spending
+// the day's mail budget. `login` is issued only AFTER a correct password, so it
+// cannot be walked that way, and it has to absorb the morning: with twenty people
+// signing in between 9 and 10am, a shared ceiling of 12 would refuse a code to
+// everyone after the twelfth and the app would look broken at exactly the moment
+// the whole company is trying to start work.
+function globalCodeCap(purpose) {
+  return purpose === 'login' ? CODE_MAX_PER_HOUR_GLOBAL_LOGIN : CODE_MAX_PER_HOUR_GLOBAL;
+}
 
 // CODES — { entries: [ { email, code, purpose, createdAt, expiresAt, attempts,
 //                        used } ] }, newest last.
@@ -833,6 +850,111 @@ function pruneCodesIn(entries) {
 // 6-digit numeric code (100000–999999). GAS server runtime: Math.random is fine.
 function makeResetCode() {
   return String(Math.floor(Math.random() * 900000) + 100000);
+}
+
+// ── ONE ISSUE PATH FOR EVERY EMAILED CODE ────────────────────────────────────
+// Shared by forgotPassword (purpose 'reset') and the sign-in OTP (purpose
+// 'login'). Both want the same shape — a per-email budget, a resend gap, a global
+// ceiling, and only the newest live code redeemable — and two copies of a
+// security throttle is how one of them quietly stops working.
+//
+// Returns the code, or null when throttled. The CALLER sends the mail, OUTSIDE
+// this lock: MailApp.sendEmail is slow and must not hold it.
+function issueAuthCode(email, purpose, ttlMin) {
+  return withRowLockOrThrow(function () {
+    var raw = readJsonLocked('codes.json');
+    var entries = pruneCodesIn((raw && raw.entries instanceof Array) ? raw.entries : []);
+    var now = Date.now();
+    var hourAgo = now - 60 * 60 * 1000;
+    var recent = 0, newestMs = 0, recentSamePurpose = 0;
+    entries.forEach(function (e) {
+      var at = asDate(e.createdAt);
+      var createdMs = at ? at.getTime() : 0;
+      if (createdMs > hourAgo && String(e.purpose) === purpose) recentSamePurpose++;
+      if (usersKey(e.email) !== email) return;
+      // The per-email budget counts codes of ANY purpose: one person, one budget,
+      // so asking for a reset cannot buy extra sign-in codes in the same hour.
+      if (createdMs > hourAgo) recent++;
+      if (createdMs > newestMs) newestMs = createdMs;
+    });
+    if (recent >= CODE_MAX_PER_HOUR) return null;
+    if (newestMs && (now - newestMs) < CODE_RESEND_GAP_MS) return null;
+    if (recentSamePurpose >= globalCodeCap(purpose)) return null;
+
+    // Retire any earlier live code of this purpose, so only the newest redeems.
+    entries.forEach(function (e) {
+      if (usersKey(e.email) === email && String(e.purpose) === purpose && !e.used) e.used = true;
+    });
+    var code = makeResetCode();
+    entries.push({ email: email, code: code, purpose: purpose, createdAt: now,
+                   expiresAt: now + ttlMin * 60 * 1000, attempts: 0, used: false });
+    writeJsonLocked('codes.json', { entries: entries });
+    return code;
+  });
+}
+
+// The REDEEM itself, lock-free: the caller holds the lock and owns the write.
+//
+// It is split out because resetPassword redeems inside a bigger lock that covers
+// codes.json, users.json AND sessions.json together — a reset is one event, and
+// splitting it across locks would let a second redeem of the same code slip
+// between them. Sign-in has no such coupling, so it uses verifyAuthCode below,
+// which takes its own lock. Nested locks are forbidden, hence the split.
+//
+// Returns null when the code is good, or an error envelope to return verbatim.
+// Mutates `entries` (attempts / used); the caller persists.
+//
+// `consume` is the whole difference between the two callers. A RESET code is
+// burned on use — one reset, one code. A SIGN-IN code is deliberately NOT: it
+// stays valid for its full working day so the same code covers every sign-in that
+// day, which is the entire point of the 8h30m window. What still bounds abuse is
+// the attempt counter, which is shared across the day for the same reason.
+function redeemCodeIn(entries, email, purpose, code, consume) {
+  var isLogin = (purpose === 'login');
+  var again   = isLogin ? ' sign in again to get a new one.' : ' request a new one.';
+
+  var found = findCodeEntry(entries, email, purpose);
+  if (!found) {
+    // Reached when no code was ever issued AND when the live one was used up —
+    // burned by five wrong guesses, or expired. The wording has to fit both, so it
+    // says there is no ACTIVE code rather than that none was sent.
+    return { status: 'error', message: isLogin
+      ? 'No sign-in code is active for this address —' + again
+      : 'No reset code is outstanding for this email —' + again };
+  }
+
+  var expires = asDate(found.expiresAt);
+  if (expires && expires.getTime() < Date.now()) {
+    found.used = true;
+    return { status: 'error', message: 'That code expired —' + again };
+  }
+  if (String(found.code).trim() !== String(code)) {
+    var tries = (Number(found.attempts) || 0) + 1;
+    if (tries >= CODE_MAX_ATTEMPTS) {
+      found.used = true;                     // burn it — a 6-digit code gets 5 guesses
+      found.attempts = tries;
+      return { status: 'error', message: 'Too many wrong codes —' + again };
+    }
+    found.attempts = tries;
+    // The count is deliberately per CODE, not per IP: GAS web apps expose no
+    // reliable client address, and the entry is the only thing that can be
+    // counted honestly.
+    return { status: 'error', message: 'Wrong code. ' + (CODE_MAX_ATTEMPTS - tries) + ' attempt(s) left.' };
+  }
+
+  if (consume) found.used = true;
+  return null;
+}
+
+// Redeem an emailed code under its own lock. See redeemCodeIn for the split.
+function verifyAuthCode(email, purpose, code, consume) {
+  return withRowLockOrThrow(function () {
+    var raw = readJsonLocked('codes.json');
+    var entries = (raw && raw.entries instanceof Array) ? raw.entries : [];
+    var err = redeemCodeIn(entries, email, purpose, code, consume);
+    writeJsonLocked('codes.json', { entries: entries });
+    return err;
+  });
 }
 
 // Daily mail ceiling, covering EVERY mail this script sends. MailApp quota is
@@ -986,44 +1108,12 @@ function forgotPassword(params) {
     if (!u) return generic;                         // no enumeration
     if (userField(u, 'status').toLowerCase() === 'disabled') return generic;
 
-    // Locked: the throttle is a read-then-write judgement, so two requests
-    // arriving together must not both see "under the limit" and both issue. The
-    // MAIL is sent outside the lock — it is slow and must not hold it.
-    var issued = withRowLockOrThrow(function () {
-      var raw = readJsonLocked('codes.json');
-      var entries = pruneCodesIn((raw && raw.entries instanceof Array) ? raw.entries : []);
-      var now = Date.now();
-      var hourAgo = now - 60 * 60 * 1000;
-      var recent = 0, newestMs = 0, recentAnyEmail = 0;
-      entries.forEach(function (e) {
-        var at = asDate(e.createdAt);
-        var createdMs = at ? at.getTime() : 0;
-        if (createdMs > hourAgo) recentAnyEmail++;
-        if (usersKey(e.email) !== email) return;
-        if (createdMs > hourAgo) recent++;
-        if (createdMs > newestMs) newestMs = createdMs;
-      });
-      if (recent >= CODE_MAX_PER_HOUR) return null;                 // throttled — same answer
-      if (newestMs && (now - newestMs) < CODE_RESEND_GAP_MS) return null;
-      // A SECOND, GLOBAL ceiling. The per-email throttle above is the one a person
-      // can hit by accident; this is the one that stops an unauthenticated caller
-      // walking the whole staff list and pulling 3 codes per address — ~20 addresses
-      // × 3 would spend the day's entire mail budget inside an hour, and because the
-      // response is generic nobody would notice the reset mail had stopped.
-      // (GAS web apps expose no reliable client IP, so this is global rather than
-      // per-source. Normal traffic is a handful of resets an hour.)
-      if (recentAnyEmail >= CODE_MAX_PER_HOUR_GLOBAL) return null;
-
-      // Retire any earlier live code so only the newest one can be redeemed.
-      entries.forEach(function (e) {
-        if (usersKey(e.email) === email && String(e.purpose) === 'reset' && !e.used) e.used = true;
-      });
-      var code = makeResetCode();
-      entries.push({ email: email, code: code, purpose: 'reset', createdAt: now,
-                     expiresAt: now + CODE_TTL_MIN * 60 * 1000, attempts: 0, used: false });
-      writeJsonLocked('codes.json', { entries: entries });
-      return code;
-    });
+    // The throttle and the lock both live in issueAuthCode now — this endpoint
+    // and the sign-in OTP were carrying two copies of the same judgement, and the
+    // second copy is where a security throttle rots. A null here means throttled,
+    // which is answered with the SAME generic message (see above) rather than an
+    // error, so the throttle is not itself an oracle.
+    var issued = issueAuthCode(email, 'reset', CODE_TTL_MIN);
 
     if (issued) {
       sendAuthMail(email, 'Your I-PASSBOOK password reset code',
@@ -1055,27 +1145,12 @@ function resetPassword(params) {
     var entries = (raw && raw.entries instanceof Array) ? raw.entries : [];
     var saveCodes = function () { writeJsonLocked('codes.json', { entries: entries }); };
 
-    var found = findCodeEntry(entries, email, 'reset');
-    if (!found) return { status: 'error', message: 'No reset code is outstanding for this email — request a new one.' };
-
-    var expires = asDate(found.expiresAt);
-    if (expires && expires.getTime() < now) {
-      found.used = true;
-      saveCodes();
-      return { status: 'error', message: 'That code expired — request a new one.' };
-    }
-    if (String(found.code).trim() !== code) {
-      var tries = (Number(found.attempts) || 0) + 1;
-      if (tries >= CODE_MAX_ATTEMPTS) {
-        found.used = true;                     // burn it — a 6-digit code gets 5 guesses
-        found.attempts = tries;
-        saveCodes();
-        return { status: 'error', message: 'Too many wrong codes — request a new one.' };
-      }
-      found.attempts = tries;
-      saveCodes();
-      return { status: 'error', message: 'Wrong code. ' + (CODE_MAX_ATTEMPTS - tries) + ' attempt(s) left.' };
-    }
+    // Lock-free redeem (see redeemCodeIn) — it is called HERE rather than through
+    // verifyAuthCode precisely because this lock is the wide one: taking the
+    // one-file lock inside this one would nest, and nesting is what deadlocks.
+    // consume=true: a reset code is spent by the reset it performs.
+    var badCode = redeemCodeIn(entries, email, 'reset', code, true);
+    if (badCode) { saveCodes(); return badCode; }
 
     var users = readJsonLocked('users.json') || {};
     var rec = users[email];
@@ -1101,9 +1176,7 @@ function resetPassword(params) {
     // has already refused the only case where that would matter, and this
     // endpoint has no business changing whether an account is enabled.
     writeJsonLocked('users.json', users);
-
-    found.used = true;                         // consume the code
-    saveCodes();
+    saveCodes();   // persist the consume=true above — the code is spent by this reset
 
     var sess = readJsonLocked('sessions.json');
     if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
@@ -1241,6 +1314,20 @@ function doLoginPassword(params) {
   }
 
   clearFailedLogin(email);
+
+  // ── SECOND FACTOR: the emailed sign-in code ────────────────────────────────
+  // Sign-in is two steps. The password is verified above; the caller then has to
+  // redeem a 6-digit code that was emailed. A caller who reaches here has already
+  // proved the password, so everything below runs on a VERIFIED identity — which
+  // is exactly why the code's throttle can be far looser than the reset code's
+  // (see globalCodeCap).
+  //
+  // Placed AFTER the temp-password branch on purpose: a temp-password holder is
+  // being sent to the forced-change screen and has no session anyway, so asking
+  // them for an emailed code first would be a step that buys nothing.
+  var otpStep = loginOtpStep(email, params.code, userField(u, 'Name'));
+  if (otpStep) return otpStep;
+
   // Last-login stamp. Best-effort: a failure to record it must never fail a
   // sign-in that has already been verified.
   try {
@@ -1253,6 +1340,75 @@ function doLoginPassword(params) {
   } catch (e) { /* non-fatal */ }
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+}
+
+// The sign-in OTP gate, called from doLoginPassword on an already-verified
+// password. Returns null to MEAN "carry on and mint the session", or the response
+// to send back instead.
+//
+// Shape: the SAME code is reused for the whole working day (LOGIN_OTP_TTL_MIN,
+// 8h30m). A user signing in on their phone at 9am and their desktop at 2pm types
+// it once and never sees a second mail. So this deliberately does NOT mint a fresh
+// code per attempt: it reuses the live one, and only ISSUES when there is no live
+// code to reuse — otherwise the "reusable code" would be silently replaced by a
+// newer one on the second sign-in of the day, and the mail already in their inbox
+// would stop working.
+//
+// Note this is NOT marked used on success (consume=false): that is the whole
+// feature. The attempt counter still applies and is shared across the day, since
+// the entry is — five wrong guesses burn it and force a fresh one.
+function loginOtpStep(email, supplied, name) {
+  var code = (supplied || '').toString().trim();
+
+  if (code) {
+    var bad = verifyAuthCode(email, 'login', code, false);
+    return bad || null;                       // null → verified, mint the session
+  }
+
+  // No code supplied: this is the first step of the flow. Reuse a live code if
+  // there is one; issue only when there is not.
+  var live = null;
+  try {
+    var found = findCodeEntry(codesEntries(), email, 'login');
+    var exp = found ? asDate(found.expiresAt) : null;
+    if (exp && exp.getTime() > Date.now()) live = found;
+  } catch (e) { /* unreadable store → treat as no live code and issue below */ }
+
+  if (!live) {
+    var issued = issueAuthCode(email, 'login', LOGIN_OTP_TTL_MIN);
+    if (!issued) {
+      // No live code AND we could not issue one. It is a throttle: the per-email
+      // hourly budget, the 60s resend gap, or the global hourly ceiling. Note the
+      // gap counts codes of ANY purpose, so a password reset requested a moment
+      // ago is enough to land here.
+      //
+      // This is the one place the sign-in path answers with an ERROR rather than a
+      // prompt, and it has to: telling the user to "enter the code we emailed you"
+      // would be a plain lie — there is no code, and no way forward from that
+      // screen. The message deliberately does not say which limit was hit; that is
+      // admin-facing detail, not something a person signing in can act on.
+      return { status: 'error', message: 'Could not send a sign-in code just now — wait a minute and try again.' };
+    }
+    sendAuthMail(email, 'Your I-PASSBOOK sign-in code',
+      'Your I-PASSBOOK sign-in code is ' + issued + '.\n\n' +
+      'It works until the end of the working day (' + (LOGIN_OTP_TTL_MIN / 60) + ' hours), ' +
+      'and you can use the same code for every sign-in today — so if you are already ' +
+      'signed in on another device, you do not need a new one.\n\n' +
+      'If you did not try to sign in, someone may have your password — tell an admin.');
+    return {
+      status: 'ok', otpRequired: true, email: email, name: name, codeSent: true,
+      message: 'We emailed you a 6-digit sign-in code.'
+    };
+  }
+
+  // A live code already exists, so NONE is issued and NO mail is sent — that is the
+  // whole "one code per working day" behaviour. Re-issuing here would retire the
+  // live code by design (see issueAuthCode) and break the mail already sitting in
+  // the user's inbox.
+  return {
+    status: 'ok', otpRequired: true, email: email, name: name, codeSent: false,
+    message: 'Enter the sign-in code already emailed to you today.'
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1419,11 +1575,12 @@ var RETIRED_SECTION_IDS = ['sec-h', 'sec-i'];
 // Verify a session token and return its email, or null when the session is
 // missing, expired or revoked.
 //
-// The expiry SLIDES on every use, so an active user is never signed out — the
-// behaviour the owner asked for, and what a Google Workspace web session does.
-// The rewrite is throttled to CONFIG.SESSION_SLIDE_HOURS because the frontend
-// polls comments every 90s; unthrottled it would be ~40 store writes per hour per
-// user for no benefit, since the window is 30 days.
+// NO SLIDE. The expiry is absolute and set at mint time, so a session ends one
+// working day after sign-in however busy that day was. It used to slide forward on
+// every use — which meant the people who used the app most were the ones whose
+// sessions never expired, and the daily sign-in the OTP protects never happened.
+// Removing the slide also removed the throttled write this path used to do, so a
+// lookup is now a pure read.
 //
 // THROWS when the store cannot be read. That distinction is load-bearing: `null`
 // means "this token is not valid", which the caller answers as `unauthorized` and
@@ -1438,27 +1595,10 @@ function lookupSession(token) {
   var s = tokens[token];
   if (!s) return null;
 
-  var now = Date.now();
   var exp = asDate(s.expiresAt);
   if (s.revokedAt || !exp) return null;
-  if (exp.getTime() <= now) return null;
+  if (exp.getTime() <= Date.now()) return null;
 
-  var seen = asDate(s.lastSeenAt);
-  if (!seen || (now - seen.getTime()) > CONFIG.SESSION_SLIDE_HOURS * 60 * 60 * 1000) {
-    // Best-effort: the slide must never fail a lookup. The lock is taken and the
-    // read happens INSIDE it, because a slide is a read-merge-write on a file two
-    // concurrent requests can both be editing — and the write that lost would be
-    // the OTHER request's newly minted token.
-    try {
-      withRowLock(function () {
-        var fresh = readJsonLocked('sessions.json');
-        if (!fresh || !fresh.tokens || !fresh.tokens[token]) return;
-        fresh.tokens[token].expiresAt  = now + CONFIG.SESSION_DAYS * 24 * 60 * 60 * 1000;
-        fresh.tokens[token].lastSeenAt = now;
-        writeJsonLocked('sessions.json', fresh);
-      });
-    } catch (e) { /* the slide is best-effort — never fail a lookup for it */ }
-  }
   return usersKey(s.email);
 }
 

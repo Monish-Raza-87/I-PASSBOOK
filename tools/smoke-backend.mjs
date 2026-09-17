@@ -62,8 +62,9 @@ function enclosingFn(at) {
 r.head('the owner\'s security decisions');
 r.ok('API_VERSION is 3 — the Drive-JSON store, a different deployment from v2',
   /API_VERSION:\s*3\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
-r.ok('the session is 30 days', /SESSION_DAYS:\s*30\b/.test(code), (code.match(/SESSION_DAYS:[^\n]*/) || [''])[0]);
-r.ok('the session slides on use', /SESSION_SLIDE_HOURS:/.test(code));
+r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
+r.ok('the session does NOT slide on use — an absolute expiry',
+  !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
 r.ok('temporary passwords expire', /TEMP_PW_TTL_DAYS:\s*\d+/.test(code), (code.match(/TEMP_PW_TTL_DAYS:[^\n]*/) || [''])[0]);
 
 r.head('exactly one admin');
@@ -504,33 +505,78 @@ const fp = fnBody('forgotPassword');
 r.ok('the response is generic and identical either way',
   /generic/.test(fp) && (fp.match(/generic/g) || []).length >= 2,
   (fp.match(/generic/g) || []).length);
-r.ok('it is throttled per email', /CODE_MAX_PER_HOUR/.test(fp));
-r.ok('it has a GLOBAL hourly ceiling too, not only a per-email one',
-  /CODE_MAX_PER_HOUR_GLOBAL/.test(fp), (fp.match(/CODE_MAX_PER_HOUR_GLOBAL[^\n]*/) || [''])[0]);
-r.ok('...counted across every email, so many addresses cannot fan out the mail budget',
-  /recentAnyEmail/.test(fp));
-r.ok('it has a resend gap', /CODE_RESEND_GAP_MS/.test(fp));
-r.ok('it retires earlier live codes', /&&\s*!e\.used\)\s*e\.used = true/.test(fp),
-  (fp.match(/[^\n]*e\.used[^\n]*/) || [''])[0]);
+r.ok('it delegates the throttle to the shared issuer', /issueAuthCode\(email, 'reset'/.test(fp),
+  (fp.match(/[^\n]*issueAuthCode[^\n]*/) || [''])[0]);
 r.ok('it never reveals a failure', /catch/.test(fp));
 r.ok('it sends through sendAuthMail', /sendAuthMail/.test(fp));
+r.ok('and the send is outside the lock, so mail never holds the store',
+  !/withRowLockOrThrow/.test(fp));
+
+// ── the shared emailed-code machinery ────────────────────────────────────────
+// forgotPassword and the sign-in OTP were carrying two copies of the same
+// throttle. These assert there is now ONE, and that it is still correct.
+r.head('codes: one issuer, one redeemer, one throttle');
+const iac = fnBody('issueAuthCode');
+r.ok('issueAuthCode exists and is lock-protected', /withRowLockOrThrow/.test(iac));
+r.ok('it is throttled per email', /CODE_MAX_PER_HOUR\b/.test(iac),
+  (iac.match(/[^\n]*CODE_MAX_PER_HOUR[^\n]*/) || [''])[0]);
+r.ok('the per-email budget counts ANY purpose, so a reset buys no extra sign-ins',
+  /recent\+\+/.test(iac) && !/purpose === 'reset'[\s\S]{0,40}recent\+\+/.test(iac),
+  (iac.match(/[^\n]*recent\+\+[^\n]*/) || [''])[0]);
+r.ok('it has a GLOBAL hourly ceiling too, not only a per-email one',
+  /globalCodeCap\(purpose\)/.test(iac), (iac.match(/[^\n]*globalCodeCap[^\n]*/) || [''])[0]);
+r.ok('...and the ceiling is per PURPOSE, so sign-in codes cannot spend the reset budget',
+  /purpose === 'login' \? CODE_MAX_PER_HOUR_GLOBAL_LOGIN : CODE_MAX_PER_HOUR_GLOBAL/.test(src),
+  (src.match(/[^\n]*CODE_MAX_PER_HOUR_GLOBAL_LOGIN = [^\n]*/) || [''])[0]);
+r.ok('the sign-in ceiling is looser than the reset one — a code needs a correct password first',
+  /CODE_MAX_PER_HOUR_GLOBAL_LOGIN = (\d+)/.test(src) &&
+  Number(src.match(/CODE_MAX_PER_HOUR_GLOBAL_LOGIN = (\d+)/)[1]) >
+  Number(src.match(/CODE_MAX_PER_HOUR_GLOBAL = (\d+)/)[1]),
+  src.match(/CODE_MAX_PER_HOUR_GLOBAL_LOGIN = \d+/)[0]);
+r.ok('it has a resend gap', /CODE_RESEND_GAP_MS/.test(iac));
+r.ok('it retires earlier live codes', /&&\s*!e\.used\)\s*e\.used = true/.test(iac),
+  (iac.match(/[^\n]*e\.used[^\n]*/) || [''])[0]);
+r.ok('it prunes on the way in, so the file cannot grow without bound',
+  /pruneCodesIn/.test(iac));
+r.ok('it returns null when throttled, rather than throwing',
+  /return null/.test(iac) && !/throw/.test(iac));
 // The throttle is a read-then-write JUDGEMENT: two requests arriving together must
 // not both see "under the limit" and both issue. The MAIL, which is slow, stays
 // outside the lock.
-r.ok('the throttle decision is inside the lock', fp.indexOf('withRowLockOrThrow') < fp.indexOf('CODE_MAX_PER_HOUR'),
-  { lock: fp.indexOf('withRowLockOrThrow'), throttle: fp.indexOf('CODE_MAX_PER_HOUR') });
-r.ok('and the send is outside it, so mail never holds the store',
-  fp.indexOf('withRowLockOrThrow') < fp.indexOf('sendAuthMail'));
+r.ok('the throttle decision is inside the lock', iac.indexOf('withRowLockOrThrow') < iac.indexOf('CODE_MAX_PER_HOUR'),
+  { lock: iac.indexOf('withRowLockOrThrow'), throttle: iac.indexOf('CODE_MAX_PER_HOUR') });
 
+const rci = fnBody('redeemCodeIn');
+r.ok('redeemCodeIn is the ONE redeem, and is lock-FREE by design',
+  rci.length > 200 && !/withRowLock/.test(rci),
+  (rci.match(/[^\n]*withRowLock[^\n]*/) || [''])[0] || 'lock-free');
+r.ok('...because resetPassword calls it inside a wider lock — nesting deadlocks',
+  /redeemCodeIn\(entries, email, 'reset'/.test(fnBody('resetPassword')));
+r.ok('it caps guessing', /CODE_MAX_ATTEMPTS/.test(rci), (rci.match(/[^\n]*CODE_MAX_ATTEMPTS[^\n]*/) || [''])[0]);
+r.ok('it burns the code on the last wrong guess',
+  /found\.used = true[\s\S]{0,400}Too many wrong codes/.test(rci),
+  (rci.match(/[^\n]*Too many wrong codes[^\n]*/) || [''])[0]);
+r.ok('it rejects an expired code', /found\.used = true[\s\S]{0,200}That code expired/.test(rci));
+r.ok('it says how many attempts are left', /attempt\(s\) left/.test(rci));
+// THE feature: a sign-in code survives its own use so one code covers the day.
+r.ok('consume is the caller\'s choice — a sign-in code is NOT spent by signing in',
+  /if \(consume\) found\.used = true/.test(rci) &&
+  /verifyAuthCode\(email, 'login', code, false\)/.test(src),
+  (src.match(/[^\n]*'login', code, false[^\n]*/) || [''])[0]);
+r.ok('...while a RESET code IS spent by the reset it performs',
+  /redeemCodeIn\(entries, email, 'reset', code, true\)/.test(fnBody('resetPassword')));
+
+const vac = fnBody('verifyAuthCode');
+r.ok('verifyAuthCode wraps it in its own lock for callers that have none',
+  /withRowLockOrThrow/.test(vac) && /redeemCodeIn/.test(vac));
+
+r.head('resetPassword');
 const rp = fnBody('resetPassword');
 r.ok('resetPassword exists', rp.length > 200, rp.length);
-r.ok('resetPassword caps guessing', /CODE_MAX_ATTEMPTS/.test(rp), (rp.match(/CODE_MAX_ATTEMPTS[^\n]*/) || [''])[0]);
-r.ok('resetPassword burns the code on the last wrong guess',
-  /found\.used = true[\s\S]{0,400}Too many wrong codes/.test(rp),
-  (rp.match(/[^\n]*Too many wrong codes[^\n]*/) || [''])[0]);
-r.ok('resetPassword marks the code used', /found\.used = true/.test(rp));
 r.ok('resetPassword returns NO token', !/sessionToken/.test(rp));
 r.ok('resetPassword revokes every session', /revokeSessionsForIn\(sess, email\)/.test(rp));
+r.ok('it persists the consume, so the code is spent by the reset',
+  /saveCodes\(\)/.test(rp), (rp.match(/[^\n]*saveCodes\(\)[^\n]*/) || [''])[0]);
 r.ok('the whole redeem is ONE lock — code, password and sessions together',
   /withRowLockOrThrow\(function[\s\S]{0,200}readJsonLocked\('codes\.json'\)/.test(rp) &&
   /revokeSessionsForIn\(sess, email\)/.test(rp),
@@ -552,25 +598,16 @@ r.ok('lookupSession exists', ls.length > 200, ls.length);
 // there is no row index to search for and nothing positional left to misread.
 r.ok('it reads the session by TOKEN, one key of tokens',
   /tokens\[token\]/.test(ls), (ls.match(/[^\n]*tokens\[token\][^\n]*/) || [''])[0]);
-r.ok('it slides the expiry on use', /expiresAt\s*=\s*now \+ CONFIG\.SESSION_DAYS/.test(ls),
-  (ls.match(/[^\n]*expiresAt[^\n]*/) || [''])[0]);
-r.ok('and records when it last saw the session', /lastSeenAt\s*=\s*now/.test(ls));
-r.ok('the slide is throttled, or the 90s poll becomes a write storm',
-  /SESSION_SLIDE_HOURS/.test(ls), (ls.match(/[^\n]*SESSION_SLIDE_HOURS[^\n]*/) || [''])[0]);
-r.ok('a stale-slide failure cannot fail the lookup',
-  /catch \(e\) \{ \/\* the slide is best-effort/.test(src),
-  (src.match(/[^\n]*best-effort[^\n]*/) || [''])[0]);
-// The slide is itself a read-merge-write on a file two requests can both be
-// editing, and the write that LOST would be the other request's newly minted
-// token — so the read must be inside the lock, via readJsonLocked.
-r.ok('the slide re-reads INSIDE the lock, never from the memo',
-  /withRowLock\(function[\s\S]{0,300}readJsonLocked\('sessions\.json'\)/.test(ls),
-  (ls.match(/[^\n]*readJsonLocked[^\n]*/) || [''])[0]);
+r.ok('it does NOT slide the expiry on use — one working day, then out',
+  !/expiresAt\s*=/.test(ls) && !/lastSeenAt/.test(ls),
+  (ls.match(/[^\n]*expiresAt[^\n]*/) || [''])[0] || 'no write');
+r.ok('it does not write at all — a lookup is a pure read',
+  !/writeJson/.test(ls) && !/withRowLock/.test(ls));
 r.ok('a store that cannot be read THROWS — it is never reported as a dead token',
-  /sessionsTokens\(\)/.test(ls) && !/catch[\s\S]{0,200}return null/.test(ls.split('var tokens')[0]),
+  /sessionsTokens\(\)/.test(ls) && !/catch/.test(ls),
   (ls.match(/[^\n]*sessionsTokens[^\n]*/) || [''])[0]);
 r.ok('it honours revocation', /s\.revokedAt/.test(ls));
-r.ok('it rejects an expired session', /exp\.getTime\(\) <= now/.test(ls));
+r.ok('it rejects an expired session', /exp\.getTime\(\) <= Date.now\(\)/.test(ls));
 r.ok('the expiry goes through asDate, so a string cannot coerce to NaN and pass',
   /asDate\(s\.expiresAt\)/.test(ls), (ls.match(/[^\n]*asDate\(s\.expiresAt\)[^\n]*/) || [''])[0]);
 r.ok('it never prunes inside itself (pruneSessions is bottom-up)', !/delete /.test(ls));
@@ -701,8 +738,11 @@ r.ok('mintSession uses it, so a lock failure can never be mistaken for a token',
 r.head('every store mutation is inside a lock, and reads into it');
 // The read snapshot must be INSIDE the lock or the lock buys nothing: a read taken
 // before it would be merged over whatever landed in between.
+// forgotPassword is deliberately absent: it no longer touches the store itself,
+// it delegates both the throttle and the write to issueAuthCode (asserted above).
 const LOCKED = ['saveSection', 'mintSession', 'doLogout', 'revokeAllSessions', 'pruneSessions',
-  'recordFailedLogin', 'clearFailedLogin', 'changePassword', 'resetPassword', 'forgotPassword',
+  'recordFailedLogin', 'clearFailedLogin', 'changePassword', 'resetPassword',
+  'issueAuthCode', 'verifyAuthCode',
   'createUserRow', 'resetUserPassword', 'setUserStatus',
   'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers',
   'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog'];
@@ -1142,11 +1182,12 @@ r.ok('asDate is the one place a stored value becomes a Date',
 r.ok('and an unreadable value answers null rather than an Invalid Date',
   /isNaN\(d\.getTime\(\)\) \? null : d/.test(ad), (ad.match(/[^\n]*isNaN[^\n]*/) || [''])[0]);
 r.ok('session expiry is stored as epoch ms at mint',
-  /expiresAt:\s*now \+ CONFIG\.SESSION_DAYS/.test(fnBody('mintSession')),
+  /expiresAt:\s*now \+ CONFIG\.SESSION_HOURS \* 60 \* 60 \* 1000/.test(fnBody('mintSession')),
   (fnBody('mintSession').match(/[^\n]*expiresAt[^\n]*/) || [''])[0]);
 r.ok('and read back through asDate, never compared as a string',
-  /asDate\(s\.expiresAt\)/.test(ls) && /asDate\(found\.expiresAt\)/.test(rp),
-  (rp.match(/[^\n]*asDate\(found\.expiresAt\)[^\n]*/) || [''])[0]);
+  /asDate\(s\.expiresAt\)/.test(ls) && /asDate\(found\.expiresAt\)/.test(src) &&
+  /asDate\(e\.createdAt\)/.test(fnBody('issueAuthCode')),
+  (fnBody('redeemCodeIn').match(/[^\n]*asDate\(found\.expiresAt\)[^\n]*/) || [''])[0] || 'asDate');
 
 // ── Seeding the owner's mapping ───────────────────────────────────────────────
 r.head('seedDepartments upserts ONE KEY per department and names what it drops');

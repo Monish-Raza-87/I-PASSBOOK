@@ -32,6 +32,7 @@ const r = makeReporter();
 // file read inside the lock? did the audit write land after the data write?) rather
 // than inferring it from the source text.
 const events = [];
+const mails = [];   // every MailApp.sendEmail the backend makes, in order
 
 class FakeFile {
   constructor(id, name, folder) {
@@ -198,7 +199,20 @@ const ctx = {
   },
   // Present so a stray reference elsewhere in the file cannot throw at load time.
   SpreadsheetApp: { openById: () => { throw new Error('no sheet in this suite'); } },
-  MailApp: { sendEmail: () => { throw new Error('no mail in this suite'); } },
+  // Mail is RECORDED, not thrown. sendAuthMail swallows a throw and answers false,
+  // so a throwing MailApp cannot distinguish "we sent a code" from "we did not" —
+  // and the OTP flow's whole contract is which of those happened. PropertiesService
+  // backs mailQuotaOk's daily counter and must exist or every send throws before
+  // it ever reaches MailApp.
+  MailApp: { sendEmail: (to, subject, body) => { mails.push({ to, subject, body }); } },
+  PropertiesService: {
+    getScriptProperties: () => ({
+      _p: Object.create(null),
+      getProperty(k) { return k in this._p ? this._p[k] : null; },
+      setProperty(k, v) { this._p[k] = String(v); },
+      deleteProperty(k) { delete this._p[k]; },
+    }),
+  },
   Session: { getActiveUser: () => ({ getEmail: () => '' }) },
   Logger: { log() {} },
   ContentService: { createTextOutput: () => ({ setMimeType: () => ({}) }), MimeType: { JSON: 'json' } },
@@ -606,5 +620,238 @@ try {
 } catch (e) { sentinelUpload = e.message; }
 r.ok('an app store carrying a file upload is refused', !!sentinelUpload && /cannot carry file uploads/.test(sentinelUpload),
   sentinelUpload);
+
+// ── The emailed sign-in code ──────────────────────────────────────────────────
+// Sign-in is TWO steps now: the password, then a 6-digit code mailed to the
+// address. The code is deliberately REUSABLE for a whole working day (8h30m), so
+// someone signing in on a phone and then a desktop types it once. These run the
+// real doLoginPassword against the real Drive-fake, because "one code covers the
+// day" is a claim about stored state, not about source text.
+r.head('sign-in is two steps: the password, then a code that lasts the working day');
+
+const OTPPW = 'correct-horse-battery';
+const OTPUSER = 'otp.one@indrones.com', OTP2 = 'otp.two@indrones.com',
+      OTP3 = 'otp.three@indrones.com';
+
+// An ordinary, already-onboarded account: real hash, no forced change, enabled.
+function mkUser(email) {
+  ctx.createUserRow(email, email.split('@')[0], ADMIN);
+  ctx.withRowLockOrThrow(function () {
+    var users = ctx.readJsonLocked('users.json');
+    users[email].hash   = ctx.hashPassword(OTPPW, 'salty');
+    users[email].salt   = 'salty';
+    users[email].mustChange = '';
+    users[email].status = 'active';
+    users[email].tempPwIssuedAt = null;
+    ctx.writeJsonLocked('users.json', users);
+  });
+}
+[OTPUSER, OTP2, OTP3].forEach(mkUser);
+
+const codeEntries = () => (fresh('codes.json') || { entries: [] }).entries;
+const liveLoginCode = email => codeEntries()
+  .filter(e => e.email === email && e.purpose === 'login' && !e.used).pop() || null;
+const setCodes = entries => ctx.withRowLockOrThrow(() => ctx.writeJsonLocked('codes.json', { entries }));
+
+reexec(); mails.length = 0;
+const step1 = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW });
+r.ok('step 1 accepts the password, asks for a code, and mints NO session',
+  step1.status === 'ok' && step1.otpRequired === true && !step1.sessionToken, step1);
+r.ok('it reports that a code WAS sent, since there was none to reuse',
+  step1.codeSent === true, step1.message);
+
+const first = liveLoginCode(OTPUSER);
+r.ok('a login-purpose code is now in the store', !!first, codeEntries().length + ' entries');
+r.ok('it is six digits', /^\d{6}$/.test(first.code), first.code);
+r.ok('and it lives 8h30m — one working day, not the reset window',
+  first.expiresAt - first.createdAt === 510 * 60 * 1000,
+  (first.expiresAt - first.createdAt) / 60000 + ' min vs reset ' + 15);
+r.ok('the code was EMAILED, and the mail carries it',
+  mails.length === 1 && mails[0].to === OTPUSER && mails[0].body.indexOf(first.code) > -1,
+  mails.map(m => m.to + ' / ' + m.subject));
+r.ok('the mail tells them the same code works all day',
+  /every sign-in today/.test(mails[0].body));
+
+// A wrong code is refused, and says how much rope is left.
+reexec();
+const wrong = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: '000000' });
+r.ok('a wrong code is refused and mints no session',
+  wrong.status === 'error' && !wrong.sessionToken, wrong);
+r.ok('and it counts the tries down', /attempt\(s\) left/.test(wrong.message), wrong.message);
+
+// The right code mints a session — and survives its own use.
+reexec();
+const ok1 = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: first.code });
+r.ok('the emailed code mints a session', ok1.status === 'ok' && !!ok1.sessionToken, ok1);
+r.ok('the session runs 8h30m and does not slide',
+  (function () { const t = fresh('sessions.json').tokens[ok1.sessionToken];
+    return t.expiresAt - t.createdAt === 8.5 * 3600 * 1000 && !('lastSeenAt' in t); })(),
+  fresh('sessions.json').tokens[ok1.sessionToken]);
+r.ok('the code is NOT consumed by that sign-in — the whole point of the feature',
+  (function () { const e = liveLoginCode(OTPUSER); return !!e && e.code === first.code && e.attempts === 1; })() ||
+  (function () { const e = liveLoginCode(OTPUSER); return !!e && e.code === first.code; })(),
+  liveLoginCode(OTPUSER));
+
+// Second sign-in of the day: same code, no second email.
+reexec(); mails.length = 0;
+const step2 = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW });
+r.ok('signing in again asks for the code already in the inbox',
+  step2.otpRequired === true && step2.codeSent === false, step2.message);
+r.ok('and sends NO second mail', mails.length === 0, mails.length);
+r.ok('it did not replace the live code with a newer one',
+  liveLoginCode(OTPUSER).code === first.code, liveLoginCode(OTPUSER).code);
+reexec();
+const ok2 = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: first.code });
+r.ok('the SAME code signs in a second device the same day',
+  ok2.status === 'ok' && !!ok2.sessionToken && ok2.sessionToken !== ok1.sessionToken,
+  ok2.status + ' ' + (ok2.sessionToken || ''));
+
+// Expiry: a code past its window is not reused, a fresh one is issued.
+// createdAt is backdated as well as expiresAt — the 60s resend gap is real
+// wall-clock time and a test does not advance it, so without this the reissue
+// would be refused by the throttle and this would be measuring the wrong thing.
+ctx.withRowLockOrThrow(function () {
+  const raw = ctx.readJsonLocked('codes.json');
+  raw.entries.forEach(e => {
+    if (e.email === OTPUSER && e.purpose === 'login') {
+      e.createdAt = Date.now() - 2 * 3600 * 1000;
+      e.expiresAt = Date.now() - 1000;
+    }
+  });
+  ctx.writeJsonLocked('codes.json', raw);
+});
+reexec(); mails.length = 0;
+const step3 = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW });
+r.ok('an expired code is not reused — a fresh one is issued and mailed',
+  step3.otpRequired === true && step3.codeSent === true && mails.length === 1, step3.message);
+
+// Five wrong guesses burn it, shared across the day because the entry is.
+reexec();
+let burn = null;
+for (let i = 0; i < 5; i++) burn = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: '000000' });
+r.ok('five wrong guesses burn the code', /Too many wrong codes/.test(burn.message), burn.message);
+reexec();
+const afterBurn = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: '000000' });
+r.ok('and afterwards there is no active code to guess at',
+  afterBurn.status === 'error' && /No sign-in code is active/.test(afterBurn.message), afterBurn.message);
+
+// A wrong PASSWORD must still not send anything — the code gate is behind it.
+reexec(); mails.length = 0;
+const badPw = ctx.doLoginPassword({ email: OTPUSER, password: 'not-the-password' });
+r.ok('a wrong password sends no code and asks for none',
+  badPw.status === 'error' && badPw.otpRequired === undefined && mails.length === 0, badPw.message);
+
+// ── purpose isolation: a sign-in code is not a reset code, or vice versa ──────
+r.head('a sign-in code cannot reset a password, and a reset code cannot sign in');
+reexec(); mails.length = 0;
+ctx.forgotPassword({ email: OTP2 });
+const resetCode = codeEntries().filter(e => e.email === OTP2 && e.purpose === 'reset' && !e.used).pop();
+r.ok('forgotPassword issued a reset code through the shared issuer', !!resetCode,
+  codeEntries().filter(e => e.email === OTP2).map(e => e.purpose).join(','));
+r.ok('and it lives 15 minutes, not the sign-in window',
+  resetCode.expiresAt - resetCode.createdAt === 15 * 60 * 1000,
+  (resetCode.expiresAt - resetCode.createdAt) / 60000 + ' min');
+
+reexec();
+const crossReset = ctx.resetPassword({ email: OTP2, code: resetCode.code, newPassword: 'a-brand-new-one' });
+r.ok('the reset code DOES reset, and returns no session',
+  crossReset.status === 'ok' && !crossReset.sessionToken, crossReset);
+
+// With the reset spent, ask for a sign-in code and try to use IT as a reset.
+// The reset entry's createdAt is nudged back past the 60s resend gap first —
+// otherwise the gap sees a code issued moments ago (of ANY purpose) and refuses
+// the sign-in code, which is correct behaviour but not what this is measuring.
+ctx.withRowLockOrThrow(function () {
+  const raw = ctx.readJsonLocked('codes.json');
+  raw.entries.forEach(e => { if (e.email === OTP2) e.createdAt = Date.now() - 120000; });
+  ctx.writeJsonLocked('codes.json', raw);
+});
+// Sign in with the password the reset CHOSE, since that is now the real one.
+const OTP2PW = 'a-brand-new-one';
+reexec(); mails.length = 0;
+const stepB = ctx.doLoginPassword({ email: OTP2, password: OTP2PW });
+r.ok('the password the reset chose works, and now wants a code',
+  stepB.status === 'ok' && stepB.otpRequired === true, stepB.message);
+const login2 = liveLoginCode(OTP2);
+r.ok('a sign-in code was mailed separately from the reset one',
+  !!login2 && mails.length === 1, mails.length);
+
+reexec();
+const crossLogin = ctx.resetPassword({ email: OTP2, code: login2.code, newPassword: 'a-brand-new-two' });
+r.ok('a SIGN-IN code cannot be redeemed as a password reset',
+  crossLogin.status === 'error' && /No reset code is outstanding/.test(crossLogin.message),
+  crossLogin.message);
+r.ok('...and the failed attempt did not spend the sign-in code',
+  (function () { const e = liveLoginCode(OTP2); return !!e && e.code === login2.code; })(),
+  liveLoginCode(OTP2));
+reexec();
+const okB = ctx.doLoginPassword({ email: OTP2, password: OTP2PW, code: login2.code });
+r.ok('which still signs in afterwards', okB.status === 'ok' && !!okB.sessionToken, okB.status);
+
+// A reset code cannot be used to sign in either.
+reexec();
+const loginAsReset = ctx.doLoginPassword({ email: OTPUSER, password: OTPPW, code: resetCode.code });
+r.ok('an old RESET code is not accepted as a sign-in code',
+  loginAsReset.status === 'error', loginAsReset.message);
+
+// ── the two hourly ceilings, which are deliberately different sizes ───────────
+r.head('login codes get a looser hourly ceiling than reset codes — a password came first');
+const now = Date.now();
+const filler = (n, purpose) => Array.from({ length: n }, (_, i) => ({
+  email: 'filler' + i + '@indrones.com', code: '111111', purpose,
+  createdAt: now, expiresAt: now + 3600000, attempts: 0, used: false,
+}));
+
+setCodes(filler(12, 'reset'));
+reexec();
+ctx.forgotPassword({ email: OTP3 });
+r.ok('12 reset codes across all addresses already spent the hour — a 13th is refused',
+  codeEntries().length === 12, codeEntries().length);
+
+// The sign-in ceiling is 120, precisely because a login code needs a correct
+// password first. 12 sign-ins an hour would lock out a 15-person team on one
+// morning, which is what the reset-sized ceiling would have done.
+setCodes(filler(120, 'login'));
+reexec(); mails.length = 0;
+const capped = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
+r.ok('120 sign-in codes already spent the hour — the next one is refused',
+  capped.status === 'error' && mails.length === 0, capped.message);
+r.ok('and the refusal says so instead of pointing at an empty inbox',
+  /wait a minute/.test(capped.message), capped.message);
+r.ok('the reset ceiling was NOT raised with it',
+  ctx.globalCodeCap('reset') === 12 && ctx.globalCodeCap('login') === 120,
+  ctx.globalCodeCap('reset') + ' / ' + ctx.globalCodeCap('login'));
+
+// Under the ceiling the very same call succeeds — so the test above measured the
+// ceiling and not something else about OTP3.
+setCodes(filler(119, 'login'));
+reexec(); mails.length = 0;
+const underCap = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
+r.ok('one under the ceiling, the same sign-in gets its code',
+  underCap.status === 'ok' && underCap.codeSent === true && mails.length === 1,
+  underCap.message + ' / mails=' + mails.length);
+
+// ── the account-state gates still win over the code step ─────────────────────
+r.head('the code step sits BEHIND every account-state gate');
+ctx.withRowLockOrThrow(function () {
+  var users = ctx.readJsonLocked('users.json');
+  users[OTP3].status = 'disabled';
+  ctx.writeJsonLocked('users.json', users);
+});
+reexec(); mails.length = 0;
+const off = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
+r.ok('a disabled account is refused at the password, before any code is sent',
+  off.status === 'error' && mails.length === 0 && off.otpRequired === undefined, off.message);
+
+ctx.withRowLockOrThrow(function () {
+  var users = ctx.readJsonLocked('users.json');
+  users[OTP3].status = 'active';
+  users[OTP3].mustChange = 'yes';
+  ctx.writeJsonLocked('users.json', users);
+});
+reexec(); mails.length = 0;
+const temp = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
+r.ok('a temp-password holder is sent to the forced change, NOT asked for a code',
+  temp.status === 'ok' && temp.mustChangePassword === true && mails.length === 0, temp);
 
 r.finish();

@@ -169,10 +169,20 @@ function loginBackend(email, password, code) {
         : { status: 'error', message: 'Login failed.' };
     })
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
-  // 15s hard backstop — a hung fetch can never leave the caller waiting forever.
+  // Hard backstop, so a hung fetch can never leave the caller waiting forever.
+  //
+  // 45s, and NOT the 15s it used to be. Apps Script is the slowest thing in this
+  // stack and sign-in is its slowest call: the container cold-starts on the first
+  // request after every backend deploy (measured 2026-09-17 — a 40s+ round trip
+  // for the trivially cheap `ping`, 3-5s warm, ~7s for a login POST that does no
+  // work at all), and the code step then sends mail synchronously on top. At 15s a
+  // cold sign-in was reported as "Login timed out — check your connection" while
+  // the backend was working fine — which reads as a broken app and sends the user
+  // off to check a connection that was never the problem. Waiting longer is the
+  // cheaper failure: the button is disabled and says "Signing in…" meanwhile.
   return Promise.race([
     doFetch,
-    new Promise(r => setTimeout(() => r({ status: 'error', message: 'Login timed out — check your connection' }), 15000)),
+    new Promise(r => setTimeout(() => r({ status: 'error', message: 'Login timed out — check your connection' }), 45000)),
   ]);
 }
 

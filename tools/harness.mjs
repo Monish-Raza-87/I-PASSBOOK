@@ -56,10 +56,14 @@ function el() {
  *   `'mapSheetRows, INTAKE_FIELDS, get lastSheetAudit() { return lastSheetAudit; }'`.
  *   `let`/`const` at a script's top level are not properties of the global
  *   object, so they can only be reached from inside this lexical scope.
- * @param {{capture?: boolean, splitStorage?: boolean}} [opts] `capture: true`
- *   memoizes elements by id so a test can read back what a render wrote, and
- *   returns `{ T, byId }` instead of just `T`. `splitStorage: true` gives
- *   localStorage and sessionStorage SEPARATE stores (see below).
+ * @param {{capture?: boolean, splitStorage?: boolean, globals?: object, preload?: string}} [opts]
+ *   `capture: true` memoizes elements by id so a test can read back what a render
+ *   wrote, and returns `{ T, byId }` instead of just `T`. `splitStorage: true` gives
+ *   localStorage and sessionStorage SEPARATE stores (see below). `globals` are
+ *   assigned onto the sandbox before app.js runs, for a suite that needs the app to
+ *   see something the stub DOM does not provide. `preload` is source evaluated inside
+ *   the sandbox for the same reason but in the sandbox's own realm — see the note in
+ *   the body.
  * @returns the populated `__T` object, or `{ T, byId }` when capturing.
  */
 export function loadApp(bindings = '', opts = {}) {
@@ -91,8 +95,16 @@ export function loadApp(bindings = '', opts = {}) {
 
   const ctx = {
     console, setTimeout, clearTimeout, setInterval, clearInterval,
-    URLSearchParams, AbortController, Date, Math, JSON, Promise, Set, Map,
-    Array, Object, String, Number, RegExp, Error, Intl,
+    URLSearchParams, AbortController,
+    // NOTE the absence of Array / Object / String / Number / Date / Math / JSON /
+    // Promise / Set / Map / RegExp / Error / Intl.
+    //
+    // A context has its own intrinsics, and handing it the host's would shadow them:
+    // every `[a, b]` literal in app.js is then an array of the SANDBOX's realm while
+    // the name `Array` resolves to the HOST's, so `x instanceof Array` — which the
+    // vendored pdf-lib uses to recognise a page size — is false for the app's own
+    // array. smoke-store.mjs already loads backend.gs this way and for this reason.
+    // Only genuinely non-V8 globals (the ones a bare context lacks) are supplied.
     alert() {},
     // No network: every loader takes its failure branch, which is also the branch
     // the "backend unreachable" behaviour depends on.
@@ -114,6 +126,8 @@ export function loadApp(bindings = '', opts = {}) {
   };
   ctx.window = ctx;
   ctx.globalThis = ctx;
+  // Extra globals a suite needs the app to see.
+  if (opts.globals) Object.assign(ctx, opts.globals);
   // Only when a suite supplies its own transport. app.js posts with FormData, so
   // a suite that drives the real login path needs the constructor to exist; it is
   // left undefined otherwise so no existing suite changes behaviour.
@@ -134,6 +148,15 @@ export function loadApp(bindings = '', opts = {}) {
 
   const src = fs.readFileSync(APP_JS, 'utf8') + `\n;globalThis.__T = {\n${bindings}\n};`;
   createContext(ctx);
+  // Source evaluated INSIDE the sandbox, before app.js.
+  //
+  // This is not the same thing as `globals`. A library handed in through `globals`
+  // was built in this file's realm, and pdf-lib in particular rejects the app's own
+  // array literals — its page-size check is realm-sensitive, so `doc.addPage([w, h])`
+  // from inside the sandbox throws "must be of type ... or Array". Evaluating the
+  // library here gives the app one built from the sandbox's own intrinsics, which is
+  // what a browser has. Used by smoke-export.mjs for the vendored pdf-lib.
+  if (opts.preload) runInContext(opts.preload, ctx, { filename: 'preload.js' });
   runInContext(src, ctx, { filename: 'app.js' });
   return opts.capture ? { T: ctx.__T, byId } : ctx.__T;
 }

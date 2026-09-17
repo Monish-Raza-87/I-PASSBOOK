@@ -123,8 +123,8 @@ r.ok('SECTIONS has no sec-a entry, so nothing builds a form for it',
 // ── THE sweep: every field id resolves to the section that declares it ────────
 r.head('every declared field resolves back to its own section');
 // This is the whole reason the ids were not renamed. `sec-f` holds `f_*` and `g_*`;
-// `sec-g` holds `h_*` and `i_*`. A prefix-based resolution sends `g_missionReport`
-// to the deleted `sec-g`-as-Flight-Test and loses the value.
+// `sec-g` holds `h_*` and `i_*`. A prefix-based resolution sends `g_basicReport` to
+// `sec-g` and loses the value.
 let declared = 0;
 const misresolved = [];
 T.SECTION_IDS.forEach(s => {
@@ -150,8 +150,8 @@ r.ok('the index agrees with SECTIONS on every key',
 // guess. Named individually as well as swept, because these are the examples the
 // comment in app.js points at and a future reader will grep for them.
 r.head('the merged-id cases, named');
-r.ok('g_missionReport (old Flight Test) resolves to sec-f',
-  T.sectionIdFromFieldId('g_missionReport') === 'sec-f', T.sectionIdFromFieldId('g_missionReport'));
+r.ok('g_basicReport (Flight Test, once its own section) resolves to sec-f',
+  T.sectionIdFromFieldId('g_basicReport') === 'sec-f', T.sectionIdFromFieldId('g_basicReport'));
 r.ok('h_dispatchChecklist (old PDI) resolves to sec-g',
   T.sectionIdFromFieldId('h_dispatchChecklist') === 'sec-g', T.sectionIdFromFieldId('h_dispatchChecklist'));
 r.ok('i_courier (old Dispatch) resolves to sec-g',
@@ -178,7 +178,7 @@ r.ok('an empty id is null, not a crash', T.sectionIdFromFieldId('') === null && 
 r.ok('fieldLabel falls back to the raw id for an unknown field',
   T.fieldLabelFor('zzz_nope') === 'zzz_nope', T.fieldLabelFor('zzz_nope'));
 r.ok('and returns the label for a known one',
-  T.fieldLabelFor('g_missionReport') !== 'g_missionReport', T.fieldLabelFor('g_missionReport'));
+  T.fieldLabelFor('g_basicReport') !== 'g_basicReport', T.fieldLabelFor('g_basicReport'));
 
 // ── The Overview's structural isolation ───────────────────────────────────────
 r.head('the Overview is not a section in the shell either');

@@ -42,6 +42,7 @@ const SERVED = [
   'sw.js',
   'tokens.css',
   'views.css',
+  'vendor/pdf-lib.min.js',
   'assets/Indrones Intro v2.mp4',
   'assets/logo.png'
 ]

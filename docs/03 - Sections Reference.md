@@ -289,9 +289,8 @@ parsed by an explicit month-table parser rather than by `Date.parse`.
 | `b_inwardBy` | Inward By (Name) | text | Person who performed the inward |
 | `b_stNo` | Stock Transfer (ST) No. | text | Assigned by Inventory |
 | `b_inwardTable` | Particulars Received | inwardTable | 11-row table: Particular, Model/Value (dropdown or free text), Qty |
+| `b_inwardPhotos` | Inward Photos (Image or PDF) | imageEvidence | 📷 Capture photo / + Add image / PDF |
 | `b_remarks` | Remarks | textarea | |
-| `b_signInward` | Digital Signature — Inward Performed By | esignature | Email + timestamp; locked after signing |
-| `b_signInventory` | Digital Signature — Inventory (ST No. Assigner) | esignature | Email + timestamp; locked after signing |
 
 ### Particulars table (`b_inwardTable`)
 Saved as an object keyed by particular name: `{ "Air Vehicle": { model, qty, remark }, ... }`.
@@ -328,12 +327,18 @@ to GAS under irNumber `__CONFIG__` / sectionId `inward-options` (shared) and to
 | `payload` | Payload | ADTI 24 mp, View Pro A609, Siyi A8 Mini, Share 5 Angle, Sony A6000, DID NOT COME |
 | `base` | Base | Emlid RS2, Spectra SP85, Spectra SP60, DID NOT COME |
 
-### E-signatures (`esignature` type)
-Saved as `{ signedBy, signedAt, history: [{ signedBy, signedAt }, ...] }`.
-- Signing captures the signed-in user's **email + full ISO timestamp** (displayed as `DD Month YYYY, HH:MM:SS`).
-- Once signed, the field is **locked** — not editable, not deletable.
-- An authorized user (the original signer, an admin, or anyone whose department grants edit on this section) may **Override & Re-sign**; the previous value is pushed into `history`, which is shown on the block (and as a hover tooltip on the signed cell).
-- `esignatureState` is reset each time a passbook is opened (`openPassbook`) and populated from saved data by `populateFieldValue`.
+### A note on digital signatures
+Every section used to carry `esignature` fields (`b_signInward`, `b_signInventory`,
+`c_signIqc`, `d_signQcManager`, `d_signPurchaseManager`, `e_signProduction`,
+`f_signQc`, `g_signPilot`, `h_signPdi`), auto-stamped with the signed-in user on every
+save. **The provision for digital signatures was withdrawn, so the whole feature was
+removed** — the fields, the renderer, `esignatureState`, `signSectionOnSave`, and the
+`.esignature-*` CSS. Values already stored in `_store/` are left alone; they simply
+stop being rendered, and `store[sectionId] = fields` drops each key the next time that
+section is saved.
+
+**Exporting a section** replaces what D's old PDF download did, and is available on
+every section — see [Per-section export](#per-section-export-download--download-and-share).
 
 ---
 
@@ -344,10 +349,13 @@ Saved as `{ signedBy, signedAt, history: [{ signedBy, signedAt }, ...] }`.
 |---|---|---|---|
 | `c_iqcDate` | Inspection Date | date | |
 | `c_iqcBy` | Inspected By | text | IQC inspector name |
-| `c_evidenceLink` | Link to Evidence (Photo / Video) Folder | url | Folder link with "Open ↗" |
 | `c_iqcTable` | Visual Inspection Checklist | iqcTable | Zone rows: Result (PASS/FAIL/NA) + per-row Remark |
+| `c_iqcPhotos` | Inspection Photos (Image or PDF) | imageEvidence | 📷 Capture photo / + Add image / PDF |
 | `c_remarks` | Remarks | textarea | Overall remarks at the bottom |
-| `c_signIqc` | Digital Signature — IQC Inspector | esignature | Email + timestamp; locked after signing |
+
+> The `c_evidenceLink` field ("Link to Evidence (Photo / Video) Folder") was **removed**.
+> Evidence is attached with `c_iqcPhotos` instead, so it travels inside the section's
+> exported PDF rather than pointing at a folder someone has to open separately.
 
 ### Visual inspection checklist (`c_iqcTable`)
 Saved as an object keyed by zone id: `{ "A1": { result, remark }, "D5I": { result, remark, name, checks }, ... }`.
@@ -379,9 +387,8 @@ Inspection zones (`IQC_ZONES` in `app.js`), grouped A–E:
 |  | E4 / E5 | E.4 / E.5. | _(editable)_ | Inspector fills item name + checks |
 
 Each check row has a **Result** dropdown (`PASS` / `FAIL` / `NA`) and a **Remark** field.
-The bottom `c_remarks` textarea holds overall remarks. The `c_signIqc` e-signature
-follows the same locked + override-with-history behaviour as Section B (see
-[`esignature` type](#e-signatures-esignature-type)).
+The bottom `c_remarks` textarea holds overall remarks. Photos and PDFs of the inspection
+are attached with `c_iqcPhotos`.
 
 ### Admin customization (Section C)
 Admins (`ADMIN_EMAILS` — `monish.raza@indrones.com`,
@@ -427,18 +434,36 @@ from the sheet is deferred (later development).
 | `d_rootCause` | Root Cause | textarea | |
 | `d_correctiveAction` | Corrective Action | textarea | |
 | `d_preventiveAction` | Preventive Action | textarea | |
-| `d_signQcManager` | Digital Signature — Technical Support (QC Manager) | esignature | Closes Part A |
 
-### Download Investigation (PDF)
-A **⬇ Download Investigation (PDF)** button under the section builds a clean,
-client-facing printable document (IR, system ID, date, analyst, the dynamic
-intro, investigation, evidence images with captions, root cause / corrective /
-preventive) and opens the browser print dialog so it can be saved/shared as PDF.
-Newly-attached (not-yet-saved) images are embedded as data URLs; uploaded
-images use their Drive URLs. **Part B (Cost Analysis) is excluded** from this
-download. The document ends with an **Investigation Authorised** sign-off line
-showing the Technical Support (QC Manager) name + date if Part A is already
-signed, otherwise "Pending signature".
+### Per-section export (Download / Download and share)
+Every section B–G ends with a `.sec-export-row` holding two buttons:
+
+| Button | id | What it does |
+|---|---|---|
+| ⬇ Download | `download-sec-<x>` | Builds the section as a real PDF **file** and downloads it |
+| ⬇ Download and share | `share-sec-<x>` | Same file, handed to the device share sheet (`navigator.share`) |
+
+The export replaces the old D-only **⬇ Download Investigation (PDF)**, which wrote HTML
+into a popup and called the print dialog and so could never produce a file to attach.
+Built with the vendored **pdf-lib** (`vendor/pdf-lib.min.js`), in three layers:
+
+| Function | Job |
+|---|---|
+| `sectionPdfModel(sectionId, fieldValues, ir)` | **Pure.** Values → `{title, irNumber, droneId, blocks}`. Driven by `SECTIONS`, so a field added later exports with no new code |
+| `collectExportMedia(sectionId, lib)` | Resolves each attachment to bytes: a photo becomes a JPEG at **1600px long edge, quality 0.82** (`fitLongEdge`); a PDF is merged into the report when its bytes can be read |
+| `drawSectionPdf(model, media, lib)` | The only pdf-lib code. A4, 40pt margins, Helvetica |
+
+- **Exporting reads the current form values, not the saved ones**, so unsaved edits are
+  included. It never writes anything back.
+- **Attached PDFs are merged into the report** whenever their bytes can be obtained —
+  always for a file attached in this sitting. A PDF attached earlier is only a Drive URL,
+  and reading it back depends on Drive's CORS headers; when that fails the user is told
+  **before** the work starts, and the report names the document at the end rather than
+  dropping it silently.
+- **Any user may export.** A view-only user's pane disables every control, so the two
+  buttons carry `.sec-export-btn` and are exempted from that gating — exporting is a read.
+- Filenames are `IR409 - Section B.pdf`, sanitised against path separators and reserved
+  characters.
 
 ### Image evidence (`imageEvidence` type)
 Each entry is an image **or PDF** plus a free-text **Name / context** caption. This
@@ -492,7 +517,6 @@ question, the lead time, and the Purchase Manager sign-off.
 | `d_repairTable` | Particulars For Repair / Replace | costTable | See the `costTable` type below |
 | `d_leadTime` | Estimated Lead Time | text | e.g. "7–10 working days" |
 | `d_goAhead` | Received Go Ahead By The Customer? | select | Options: _(blank)_, Yes, No. Customer approval of the estimate (Format tab row 55) |
-| `d_signPurchaseManager` | Digital Signature — Purchase Manager | esignature | Closes Part B |
 
 > **Note on Part B field types:** the Format worksheet's Section D region uses
 > heavy cell-merging, so Google's public CSV endpoint blanks out most of the
@@ -535,11 +559,9 @@ saved value re-seeds 3 blank rows so the operator always has inputs ready.
 |---|---|---|
 | `e_prodDocs` | Route Card / Job Card (Image or PDF) | imageEvidence |
 | `e_prodRemarks` | Rework Details / Remarks | textarea |
-| `e_signProduction` | Digital Signature — Production Technician | esignature |
 
 Stripped to just the route/job card upload (shared `imageEvidence` — image **or** PDF,
-preview + 📷 capture, see Section D "Image evidence"), a rework remark, and a Production
-Technician e-signature.
+preview + 📷 capture, see Section D "Image evidence") and a rework remark.
 
 ---
 
@@ -554,32 +576,35 @@ convention, not a boundary.
 |---|---|---|---|
 | `f_qcDocs` | QC Report (Image or PDF) | imageEvidence | old Section F |
 | `f_qcRemarks` | QC Remarks | textarea | old Section F |
-| `f_signQc` | Digital Signature — QC Inspector | esignature | old Section F |
-| `g_basicReport` | Basic Flight Test Report (Image or PDF) | imageEvidence | old Section G |
-| `g_missionReport` | Mission Flight Test Report (Image or PDF) | imageEvidence | old Section G |
+| `g_basicReport` | Flight Test Report (Image or PDF) | imageEvidence | old Section G — Basic **and** Mission, merged |
 | `g_flightLogs` | Data Check — Flight Logs | checkpointEvidence | old Section G |
 | `g_postProcessing` | Data Check — Post-Processing | checkpointEvidence | old Section G |
 | `g_dataCheckRemarks` | Data Check Remarks | textarea | old Section G |
-| `g_signPilot` | Digital Signature — Test Pilot | esignature | old Section G |
 
-QC report upload (shared `imageEvidence`), remarks, and a QC Inspector e-signature;
-then two flight test report uploads, two **data-check checkpoints**
-(`checkpointEvidence`, see below) — one for flight logs, one for post-processing —
-each a tick the QC person marks "done" **plus** an image/PDF attachment with
-preview, a data-check remark, and a Test Pilot e-signature.
+QC report upload (shared `imageEvidence`) and remarks; then **one** flight test report
+upload — the Basic and Mission uploads were merged into `g_basicReport` — and two
+**data-check checkpoints** (`checkpointEvidence`, see below), one for flight logs and one
+for post-processing, each a tick the QC person marks "done" **plus** an image/PDF
+attachment with preview, and a data-check remark.
 
+> **The flight-test merge.** `g_basicReport` ("Basic Flight Test Report") and
+> `g_missionReport` ("Mission Flight Test Report") are now **one** field, labelled
+> **"Flight Test Report (Image or PDF)"**. The survivor keeps the id `g_basicReport` so
+> its audit history and every anchored comment stay attached, and the retired field's
+> saved uploads are folded into it when the section loads (`mergeFlightReportEntries`,
+> deduped by link, else name, else caption). Nothing is written back, so no existing
+> record is modified — the next ordinary save of the section simply drops the retired key.
+>
 > **The field ids were deliberately NOT renamed.** `sec-f` holds `f_*` **and** `g_*`
 > ids, and `sec-g` (below) holds `h_*` **and** `i_*`. Field ids are also the anchors
 > inside every `__NUDGES__` comment item (`n.fieldId`) and the `Field ID` of every
-> historical audit line, so renaming `g_missionReport` → `f_missionReport`
-> would orphan every comment anchored to it and split its audit history across two
-> names. Keeping them is also what makes the merge a re-keying of existing records
-> rather than a rewrite of every field name inside them.
+> historical audit line, so renaming them would orphan every comment anchored to one and
+> split its audit history across two names.
 >
 > That wart is only survivable because a field id is resolved through
 > `FIELD_SECTION_INDEX`, an index built from `SECTIONS` itself. Resolving it by
-> prefix — the way this used to work — sends `g_missionReport` to a section that no
-> longer exists.
+> prefix — the way this used to work — sends `g_basicReport` to `sec-g`, a section that
+> does not declare it.
 
 ### Data-check checkpoint (`checkpointEvidence` type)
 A composite field grouping a **done tick** + an **image/PDF attachment**:
@@ -607,7 +632,6 @@ what was checked, then where it went.
 | `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) | old Section H |
 | `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section B) | dispatchChecklist | dynamic, from Section B | old Section H |
 | `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC | old Section H |
-| `h_signPdi` | Digital Signature — PDI Inspector | esignature | | old Section H |
 | `i_dispatchDate` | Dispatch Date | date | | old Section I |
 | `i_dispatchBy` | Dispatched By | text | | old Section I |
 | `i_courier` | Courier / Transporter | text | | old Section I |

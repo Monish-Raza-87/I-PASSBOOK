@@ -133,10 +133,10 @@
 
 .btn-inward-options { border-radius: 0; font-size: var(--text-xs); }
 
-/* The e-signature Sign / Override buttons used to live here. They are gone: an
-   e-signature block is a read-only record of who saved the section, filled by
-   saveSection() and reported independently by the activity log. The block's own
-   styling is in views.css, under "e-signature". */
+/* The e-signature Sign / Override buttons used to live here, and then the
+   e-signature block itself. Both are gone: signatures were never asked for and the
+   auto-stamped block was noise, so nothing records a signature now. Who saved a
+   section is in the activity log, which is where that question belongs. */
 
 /* Small square destructive controls in the repeating tables. */
 .cost-del,

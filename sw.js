@@ -6,7 +6,7 @@
 //  - Same-origin static shell (HTML/CSS/JS/assets): cache-first, populate cache
 //    from the network on first use.
 //  - Other cross-origin (fonts, etc.): default network handling.
-const CACHE_NAME = 'ipassbook-v23';
+const CACHE_NAME = 'ipassbook-v24';
 const SHELL = [
   './',
   './index.html',
@@ -15,6 +15,7 @@ const SHELL = [
   './base.css',
   './components.css',
   './views.css',
+  './vendor/pdf-lib.min.js',
   './app.js',
   './manifest.json',
   './assets/logo.png',

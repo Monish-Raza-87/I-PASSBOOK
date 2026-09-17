@@ -4,7 +4,7 @@
 > lives in JSON files under `_store/` in the owner's Drive
 > (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. Committed on `main` and green — **1337 cases across 12 suites** —
+> workbook. Committed on `main` and green — **1446 cases across 13 suites** —
 > but **not deployed.** `app.js` still names the old `/exec`, so the live app keeps
 > talking to the old backend on the old spreadsheet; that is also the rollback. See
 > [08](08 - Development Guide.md) for the cutover, which is now just a deploy plus
@@ -96,7 +96,7 @@ completely, and the honest mitigation is named rather than implied.
 - ⚠️ **The live Sheet header row has never been verified directly** — reads from this dev environment return HTTP 401, so the header row is taken from `backend.gs`'s constants plus a test fixture. The mapper is self-auditing and matches by substring, which is why it was built that way; still, confirm against the real Sheet when convenient. This matters **more** now, not less: the Form Responses tab is one of only two Sheets the backend reads.
 
 ### UX
-- ⚠️ **Emoji still live in the older in-panel chrome** — the app's *icons* are now one inline-SVG set (`ICON_PATHS` / `iconSvg`), and the chrome the owner walks daily is fully converted. What is left is emoji inside **prose and status text**, plus a handful of older in-panel buttons: the `⚠️` hints, the `✓`/`✘`/`⚠` option labels (`Received` / `Missing` / `Damaged`), the `📎`/`📷`/`📄` evidence affordances, and the User Access modal's `👥`/`💾`/`📋`. Converting those is a **separate pass** — the option labels are customer-facing strings and the evidence affordances are inside the upload flow. `smoke-ui.mjs` pins the count at **29 non-comment lines**, so it can only go down: a new emoji cannot be added without a test failing and somebody deciding about it.
+- ⚠️ **Emoji still live in the older in-panel chrome** — the app's *icons* are now one inline-SVG set (`ICON_PATHS` / `iconSvg`), and the chrome the owner walks daily is fully converted. What is left is emoji inside **prose and status text**, plus a handful of older in-panel buttons: the `⚠️` hints, the `✓`/`✘`/`⚠` option labels (`Received` / `Missing` / `Damaged`), the `📎`/`📷`/`📄` evidence affordances, and the User Access modal's `👥`/`💾`/`📋`. Converting those is a **separate pass** — the option labels are customer-facing strings and the evidence affordances are inside the upload flow. `smoke-ui.mjs` caps the count at **45 non-comment lines**, so it can only go down: a new emoji cannot be added without a test failing and somebody deciding about it. (45 is a correction, not growth — the older ledger of 29 scanned only the part of the file the suite happened to concatenate, and every emoji below that point was invisible to it.)
 - ⚠️ **No loading state per section** — loading saved data is silent; user sees empty forms briefly
 - ⚠️ **No error recovery** — if save fails, the retry button appears but doesn't auto-retry
 - ⚠️ **File previews are image-only** — PDF uploads show no preview, only images get thumbnails
@@ -117,12 +117,12 @@ completely, and the honest mitigation is named rather than implied.
   - `getAuditLog`'s `truncated` flag is **off by one**: it reports `truncated` when there are exactly `cap` entries, so there is nothing hidden. Nothing in `app.js` reads it.
 - 🔧 **`maintenancePruneAuditLog` reads and rewrites every audit file** it finds, under one lock. Each file is small (~40 KB for a busy ticket), so the whole sweep is bounded, but it is the one editor-run function whose cost grows with the number of tickets. Run it deliberately, not on a schedule nobody watches.
 - 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so `sec-f` writes to `'Section F - Quality Control'` (which therefore also holds Flight Test uploads) and `sec-g` to `'Section H - PDI'` (also Dispatch). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
-- 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_missionReport` → `f_missionReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_missionReport` to a section that no longer exists.
+- 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_basicReport` → `f_basicReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_basicReport` to a section that no longer exists.
 - 🔧 **The deployed backend is older than `backend.gs`, and so is the deployed frontend.** They cut over together at the cutover deploy; nothing in Stages 1–2 depends on the parts that are missing.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1337 cases across 12 suites**, all passing.
+`node tools/smoke-all.mjs` — **1446 cases across 13 suites**, all passing.
 
 Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
 no registration step.
@@ -134,16 +134,36 @@ no registration step.
 | `smoke-shell.mjs` | Every id `app.js` reads at parse time exists in `index.html`; the **7 tabs and 7 panes** (📋 Report + six lettered); that the retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane, and that the Overview carries neither `class="section-content"` nor a `sec-` id; the plain end-of-body `<script>` contract; cascade order; token-only intake CSS; and that the **irreversible purge is two-step in the UI too** (review → copy → delete), not just in the endpoint behind it |
 | `smoke-ir-state.mjs` | `__IRS__` ownership, precedence and merge — including that a **retired** section id is filtered out of `ir.done` |
 | `smoke-intake.mjs` | The Sheet column map, the audit, degenerate/reordered input, and escaping — including **the ticket-list card rendered from two untrusted sources** (the public customer Form's serial field, and `__IRS__` status/priority, which any signed-in user can write). Asserts on real rendered output: no injected attribute, no attribute beyond the fixed set the renderer writes, and a `javascript:` link produces no anchor at all |
-| `smoke-sections.mjs` | The six-section contract; every field id in every **merged** section resolves to its section id — `g_missionReport → sec-f`, `h_dispatchChecklist → sec-g`, `i_courier → sec-g`, the cases that fail without `FIELD_SECTION_INDEX`; the prefix fallback still works for an id in no form; the Overview's structural isolation; and that `saveDraft('sec-a')` writes nothing |
+| `smoke-sections.mjs` | The six-section contract; every field id in every **merged** section resolves to its section id — `g_basicReport → sec-f`, `h_dispatchChecklist → sec-g`, `i_courier → sec-g`, the cases that fail without `FIELD_SECTION_INDEX`; the prefix fallback still works for an id in no form; the Overview's structural isolation; and that `saveDraft('sec-a')` writes nothing |
 | `smoke-timeline.mjs` | Drives the **pure** `buildTimeline` in the `vm` harness — behaviour, not shape. Each event kind maps correctly; `done` deltas are suppressed; an `uploaded` row carries the file name with the **source** field id; comments merge in and other IRs are excluded; a `'dd-MMM-yyyy HH:mm:ss'` fixture parses (the `Date.parse` → `NaN` trap); mixed timestamps sort with the tiebreak; `limit` trims from the newest end; and no entry ever interpolates the literal `undefined` |
 | `smoke-access.mjs` | View + comment for everyone, edit only from departments, admin bypass, the fallback **failing closed on writes**, and that the de-admined `customer.relations@` address is gone from `app.js` entirely. Also that `canTriage()` is a **separate axis**: a `sec-c` edit grant does not confer it, a CR user has `triage: true` with `canEditSection` false for all six, and `myAccess().triage === false` on the fallback |
 | `smoke-session.mjs` | The token is in `localStorage` and survives a `sessionStorage` wipe; `clearLocalAuth` is the one teardown path and stops the poll; **the poll restarts after an in-page re-login**; the dead `forceReauth()` stays deleted; and **`confirmSessionAlive()` resolves true when fetch rejects** |
 | `smoke-boot.mjs` | **Real headless Chrome**: the app boots via `?dev=1`, the Overview renders its facts/legacy log, the activity panel renders **below** the sections and **collapsed**, **every icon slot in the rendered page is filled**, and the full CSV → map → render chain reaches the DOM; a phase loads the **signed-out** login screen with the sign-up machinery absent from the DOM; and a final phase drives the sign-in **form** against a scripted backend — the reveal toggle masks, unmasks and re-masks the field with a real glyph and a switching label, step 1 shows the code step and stores **no** token, the code-step note names the address, a wrong code is refused with the attempt count and the right one signs in. It is also the only suite that would catch a `TypeError` from a shadowed function name — `renderBannerMeta`'s local `canTriage` had to be renamed `showTriage` for exactly that reason. Skips cleanly if no Chrome is installed |
-| `smoke-ui.mjs` | The five UI changes, as behaviour: saving IS signing (no `<button>` in an e-signature block, `signESignature` gone, the stamp lands **before** `collectSectionValues`); the fill **never overwrites** a person and claims **one role line per save**, so Section B's two roles stay separable; the nine role lines the Section D PDF needs all survive; the activity panel's placement, collapsed default, class-not-inline `display` fold and honest `N of M` count; **`indexView` can never be hidden while the user is on the index** (asserted on a **desktop** viewport, since the phone layout hides it legitimately); and that **every icon name the source references exists in `ICON_PATHS`** — in both directions, so a dead entry fails too |
+| `smoke-ui.mjs` | **The digital-signature feature is gone, everywhere** — no `esignature` field survives in any section, no `signESignature`/`renderESignatureHTML`/`refreshESignature`/`signSectionOnSave`/`esignatureState` exists in the source, nothing renders `signedBy`/`signedAt`, the `.esignature-*` CSS is gone with it, and `saveSection` no longer stamps. Then, as behaviour: the activity panel's placement, collapsed default, class-not-inline `display` fold and honest `N of M` count; the sidebar folding to an icon rail and the IR list never folding into an empty screen; the Insights pane being a third sibling rather than a panel inside the detail; the dashboard painting a skeleton rather than a page of zeroes; **`indexView` can never be hidden while the user is on the index** (asserted on a **desktop** viewport, since the phone layout hides it legitimately); the comments icon being a real icon; the emoji ledger holding at 45; and that **every icon name the source references exists in `ICON_PATHS`** — in both directions, so a dead entry fails too |
+| `smoke-export.mjs` | **The per-section PDF export, and the image fields it carries.** `pdfSafe`, `fitLongEdge` (the 1600px / 82% rule, as arithmetic), `wrapText` and `exportFileName`/`sanitizeFileName` are driven directly, since none of them needs a browser. `sectionPdfModel` is checked against the real `SECTIONS` metadata for B and C — including the new `b_inwardPhotos` / `c_iqcPhotos` fields, the deleted `c_evidenceLink`, every table shape (`inwardTable`, `iqcTable`, `costTable`, `dispatchChecklist`), an all-empty section, an unknown section id, and that `g_basicReport` is modelled while the retired `g_missionReport` appears nowhere. `mergeFlightReportEntries` / `savedEvidenceEntries` prove the flight-test merge is **idempotent** and that two unmatchable entries are both kept. The buttons are asserted as six `download-sec-*` and six `share-sec-*` inside `.sec-export-row`, that `#download-sec-d` is gone, and that the gating exempts exactly `sec-export-btn` so a view-only user can still export. Finally `drawSectionPdf` runs against **the real vendored pdf-lib, evaluated inside the sandbox** (see the harness note below): a filled Section B is one A4 page, a two-page attached PDF makes three, an unreadable attachment degrades to the report alone, a long section spills to a second page, and a Remarks box full of emoji exports instead of throwing. It also pins the packaging side — the vendor file is the UMD build, `index.html` loads it before `app.js`, `sw.js` caches it, and `deploy-ghpages.mjs`'s explicit `SERVED` list carries it |
 
 There is no build step and no test framework — suites are plain node scripts.
 `smoke-boot.mjs` stubs `window.fetch` rather than reaching the network, so the
 `CONFIG.GAS_URL` change cannot break it.
+
+`tools/harness.mjs` evaluates `app.js` in a `node:vm` context, and that context now
+**owns its own intrinsics** — the host's `Array`/`Object`/`String`/`Number`/`Date`/
+`Math`/`JSON`/`Promise`/`Set`/`Map`/`RegExp`/`Error`/`Intl` are deliberately *not*
+handed in, only the genuinely non-V8 globals a bare context lacks (`console`,
+timers, `URLSearchParams`, `AbortController`, `alert`). Handing the host's in would
+shadow the realm's: every `[a, b]` literal in `app.js` would be an array of the
+sandbox's realm while the name `Array` resolved to the host's, so `x instanceof
+Array` would be false for the app's own array. `smoke-store.mjs` already loaded
+`backend.gs` this way for this exact reason, and `smoke-export.mjs` made it matter:
+the vendored `pdf-lib` recognises a page size through just such a check and rejects
+the app's own `[w, h]` with *"page must be of type ... or Array, but was actually of
+type NaN"*.
+
+The same suite is why `loadApp` gained `opts.preload` — source evaluated **inside**
+the sandbox before `app.js`. That is not the same thing as `opts.globals`, which
+builds a library in the harness's own realm; preloading gives the app a `pdf-lib`
+built from the sandbox's intrinsics, which is what a browser has. It is used for
+nothing else.
 
 ### What a regex suite cannot see, and what closed the gap
 
@@ -222,7 +242,6 @@ and a live end-to-end sign-in. See the verification list in
 - [ ] Photo gallery view for saved file links
 - [ ] Form validation with required fields
 - [ ] Offline-first with local storage sync queue
-- [ ] Export to PDF
 - [ ] Multi-language support (Hindi + English)
 - [ ] Move the IR list read behind the authenticated `listIRs` action (closes the last
       unauthenticated data path)
@@ -236,6 +255,13 @@ and a live end-to-end sign-in. See the verification list in
   and the four sheet primitives that made positional rows safe (`findUserRowIndex`,
   `userCol`, `USER_HEADS`, `deptTabShape`) are deleted rather than shimmed: a JSON
   record has names, so every read-modify-write is a key assignment.
+- ✅ **Per-section PDF export, images in B and C, and the end of digital signatures.**
+  Every section B–G now has **⬇ Download** and **⬇ Download and share**, which build a
+  real PDF file (vendored `pdf-lib`) with that section's photos embedded and any
+  readable attached PDF merged in. Sections B and C gained the shared
+  `imageEvidence` control, and C's "Link to Evidence Folder" field was removed. The
+  nine `esignature` fields and their machinery were deleted, and the two Flight Test
+  Report uploads became one field.
 - ✅ **The section restructure** — nine sections became six (**B–G**); old Section A's
   content became the pinned **Overview panel** (data key `sec-a`, no letter, no tab);
   QC + Flight Test merged into **Section F — Quality Test Report**; PDI + Dispatch

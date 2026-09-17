@@ -608,42 +608,17 @@
   margin-bottom: 8px;
 }
 
-/* ── Section B/H — e-signature ─────────────────────────────
-   Read-only: the block records who saved the section, and no button changes it.
-   The unsigned state is a dashed placeholder; the signed state is the green
-   record with the timestamp. */
-.esignature-block { font-size: var(--text-sm); }
-.esignature-unsigned {
+/* ── Section export row ────────────────────────────────────
+   Download / Download and share, under the Save button of every section. Exporting
+   reads the section, so these stay live for view-only users (see the gating
+   exemption in app.js) — only Save is gated. */
+.sec-export-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.6rem;
-  padding: 0.7rem 0.9rem;
-  border: 1px dashed var(--outline-gray-3);
-  border-radius: var(--radius-4);
-  background: var(--surface-gray-1);
+  gap: 0.5rem;
+  margin-top: 0.6rem;
 }
-.esignature-role { color: var(--ink-gray-7); font-weight: var(--weight-medium); font-size: var(--text-xs); }
-.esignature-muted { color: var(--ink-gray-5); font-size: var(--text-xs); }
-.esignature-signed {
-  padding: 0.7rem 0.9rem;
-  border: 1px solid var(--outline-green-2);
-  border-radius: var(--radius-4);
-  background: var(--surface-green-1);
-}
-.esignature-row { display: flex; align-items: flex-start; gap: 0.55rem; }
-.esignature-check { color: var(--ink-green-7); font-weight: var(--weight-bold); font-size: var(--text-md); line-height: 1.2; }
-.esignature-line { font-size: var(--text-sm); color: var(--ink-gray-8); }
-.esignature-stamp { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 1px; }
-.esignature-info { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.esignature-history {
-  margin-top: 0.55rem;
-  padding-top: 0.55rem;
-  border-top: 1px dashed var(--outline-gray-3);
-  font-size: var(--text-xs);
-  color: var(--ink-gray-5);
-}
-.esignature-history-label { font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
+.sec-export-row .btn { flex: 0 1 auto; }
 
 /* ── Section D — image evidence ────────────────────────────── */
 .image-evidence { display: flex; flex-direction: column; gap: 0.55rem; }

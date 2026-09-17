@@ -328,6 +328,10 @@
               <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <button class="btn" id="save-sec-b">Save Section B</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-b">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-b">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section C: IQC Inspection -->
@@ -335,6 +339,10 @@
               <h2 class="section-title">Section C — IQC Visual Inspection</h2>
               <div id="sec-c-form"></div>
               <button class="btn" id="save-sec-c">Save Section C</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-c">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-c">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section D: Investigation -->
@@ -342,7 +350,10 @@
               <h2 class="section-title">Section D — Investigation</h2>
               <div id="sec-d-form"></div>
               <button class="btn" id="save-sec-d">Save Section D</button>
-              <button class="btn btn-secondary" id="download-sec-d">⬇ Download Investigation (PDF)</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-d">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-d">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section E: Production -->
@@ -350,6 +361,10 @@
               <h2 class="section-title">Section E — Production (Rework)</h2>
               <div id="sec-e-form"></div>
               <button class="btn" id="save-sec-e">Save Section E</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-e">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-e">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section F: Quality Test Report (QC + Flight Test) -->
@@ -357,6 +372,10 @@
               <h2 class="section-title">Section F — Quality Test Report</h2>
               <div id="sec-f-form"></div>
               <button class="btn" id="save-sec-f">Save Section F</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-f">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-f">⬇ Download and share</button>
+              </div>
             </div>
 
             <!-- Section G: PDI Report/Dispatch Record (PDI + Dispatch) -->
@@ -364,6 +383,10 @@
               <h2 class="section-title">Section G — PDI Report/Dispatch Record</h2>
               <div id="sec-g-form"></div>
               <button class="btn" id="save-sec-g">Save Section G</button>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-g">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-g">⬇ Download and share</button>
+              </div>
             </div>
 
           </div>
@@ -433,6 +456,11 @@
   <!-- Toast notification -->
   <div id="toast" role="status" aria-live="polite"></div>
 
+  <!-- PDF export library. A plain script, deliberately: app.js stays a plain
+       end-of-body script with no module system, and this only has to expose
+       window.PDFLib before app.js runs. Vendored, not CDN — the app has to work
+       offline (it is a PWA) and must not depend on a third party at runtime. -->
+  <script src="vendor/pdf-lib.min.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on

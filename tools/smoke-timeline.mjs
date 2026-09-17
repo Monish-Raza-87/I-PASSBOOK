@@ -304,9 +304,9 @@ r.ok('a field row is labelled with its human name, not its id',
   })(), render(built([sectionRow({ event: 'changed', fieldId: 'b_remarks', oldValue: 'a', newValue: 'b' })]), {}).slice(0, 400));
 r.ok('a merged-section field id is labelled too — g_* resolves inside sec-f',
   (() => {
-    const h = render(built([sectionRow({ sectionId: 'sec-f', event: 'changed', fieldId: 'g_missionReport', oldValue: 'a', newValue: 'b' })]), {});
-    return h.indexOf('g_missionReport') < 0 && /Quality Test/.test(h);
-  })(), render(built([sectionRow({ sectionId: 'sec-f', event: 'changed', fieldId: 'g_missionReport', oldValue: 'a', newValue: 'b' })]), {}).slice(0, 500));
+    const h = render(built([sectionRow({ sectionId: 'sec-f', event: 'changed', fieldId: 'g_basicReport', oldValue: 'a', newValue: 'b' })]), {});
+    return h.indexOf('g_basicReport') < 0 && /Quality Test/.test(h);
+  })(), render(built([sectionRow({ sectionId: 'sec-f', event: 'changed', fieldId: 'g_basicReport', oldValue: 'a', newValue: 'b' })]), {}).slice(0, 500));
 r.ok('an upload row shows the file name and the source field name',
   (() => {
     const h = render(built([sectionRow({ event: 'uploaded', fieldId: 'f_qcDocs', newValue: 'qc-report.pdf' })]), {});

@@ -689,8 +689,6 @@ const TICKET_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
 
 // Runtime option lists (defaults merged with any saved overrides).
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
-// E-signature state for the open IR: { [fieldId]: { signedBy, signedAt, history: [] } }
-let esignatureState = {};
 // Image-evidence control state (used by Section D + E/F/G/H/I uploads):
 // evidenceState[fieldId] = [{ caption, link, file, url, type, name }].
 // `link` = Drive URL of an already-uploaded file ('' while pending upload); `file`/`url`
@@ -3031,7 +3029,6 @@ async function openPassbook(irNumber) {
   const seq = ++_openSeq;
 
   currentIR = allIRs.find(ir => ir.irNumber === irNumber) || { irNumber };
-  esignatureState = {};   // clear signatures from any previously-open IR
   evidenceState = {};     // clear image-evidence state from any previously-open IR
   dispatchChecklistState = {}; // clear Section H dispatch checklist from previous IR
 
@@ -3763,9 +3760,8 @@ const SECTIONS = {
       { id: 'b_inwardBy',   label: 'Inward By (Name)', type: 'text', placeholder: 'Person who performed the inward' },
       { id: 'b_stNo',       label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number assigned by Inventory' },
       { id: 'b_inwardTable', label: 'Particulars Received', type: 'inwardTable' },
+      { id: 'b_inwardPhotos', label: 'Inward Photos (Image or PDF)', type: 'imageEvidence' },
       { id: 'b_remarks',    label: 'Remarks', type: 'textarea', placeholder: 'Condition at receiving, missing items, observations, etc.' },
-      { id: 'b_signInward',    label: 'Digital Signature — Inward Performed By',  type: 'esignature', role: 'Inward Performed By' },
-      { id: 'b_signInventory', label: 'Digital Signature — Inventory (ST No. Assigner)', type: 'esignature', role: 'Inventory (ST No. Assigner)' },
     ]
   },
   'sec-c': {
@@ -3773,10 +3769,9 @@ const SECTIONS = {
     fields: [
       { id: 'c_iqcDate',      label: 'Inspection Date', type: 'date' },
       { id: 'c_iqcBy',        label: 'Inspected By',    type: 'text', placeholder: 'IQC inspector name' },
-      { id: 'c_evidenceLink', label: 'Link to Evidence (Photo / Video) Folder', type: 'url', placeholder: 'Paste folder link...' },
       { id: 'c_iqcTable',     label: 'Visual Inspection Checklist', type: 'iqcTable' },
+      { id: 'c_iqcPhotos',    label: 'Inspection Photos (Image or PDF)', type: 'imageEvidence' },
       { id: 'c_remarks',      label: 'Remarks', type: 'textarea', placeholder: 'Overall inspection remarks, observations, summary...' },
-      { id: 'c_signIqc',      label: 'Digital Signature — IQC Inspector', type: 'esignature', role: 'IQC Inspector' },
     ]
   },
   // Section D — Investigation, in two parts:
@@ -3796,7 +3791,6 @@ const SECTIONS = {
       { id: 'd_rootCause',      label: 'Root Cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
       { id: 'd_correctiveAction',  label: 'Corrective Action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
       { id: 'd_preventiveAction',  label: 'Preventive Action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
-      { id: 'd_signQcManager',  label: 'Digital Signature — Technical Support (QC Manager)', type: 'esignature', role: 'Technical Support (QC Manager)' },
 
       // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
       { id: 'd_partB',              label: 'Part B — Cost Analysis (Repair Estimate &amp; Lead Time)', type: 'divider' },
@@ -3804,7 +3798,6 @@ const SECTIONS = {
       { id: 'd_repairTable',        label: 'Particulars For Repair / Replace', type: 'costTable' },
       { id: 'd_leadTime',           label: 'Estimated Lead Time', type: 'text', placeholder: 'e.g. 7–10 working days' },
       { id: 'd_goAhead',            label: 'Received Go Ahead By The Customer?', type: 'select', options: ['', 'Yes', 'No'] },
-      { id: 'd_signPurchaseManager', label: 'Digital Signature — Purchase Manager', type: 'esignature', role: 'Purchase Manager' },
     ]
   },
   'sec-e': {
@@ -3812,7 +3805,6 @@ const SECTIONS = {
     fields: [
       { id: 'e_prodDocs',     label: 'Route Card / Job Card (Image or PDF)', type: 'imageEvidence' },
       { id: 'e_prodRemarks',  label: 'Rework Details / Remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
-      { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
     ]
   },
   // Quality Test Report — a merge of the old QC section and the old Flight Test
@@ -3823,21 +3815,22 @@ const SECTIONS = {
     fields: [
       { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
-      { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
 
       // ── Part B — Flight Test ──
       { id: 'f_partFlight',    label: 'Flight Test', type: 'divider' },
-      { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
-      { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
+      // Basic + Mission are ONE field now. The id stays `g_basicReport` so the audit
+      // history and every anchored comment on it survive; the saved contents of the
+      // retired `g_missionReport` are folded in when this section is loaded, by the
+      // imageEvidence branch of populateFieldValue().
+      { id: 'g_basicReport',   label: 'Flight Test Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
       { id: 'g_postProcessing', label: 'Data Check — Post-Processing', type: 'checkpointEvidence', tickLabel: 'Post-processing data check performed & verified' },
       { id: 'g_dataCheckRemarks', label: 'Data Check Remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
-      { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
   },
   // PDI Report/Dispatch Record — a merge of the old PDI section and the old
   // Logistics & Dispatch section. Inspecting the packed goods and dispatching
-  // them is one handover, signed once.
+  // them is one handover, recorded once.
   'sec-g': {
     title: 'Section G — PDI Report/Dispatch Record',
     fields: [
@@ -3845,7 +3838,6 @@ const SECTIONS = {
       { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
       { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
-      { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
 
       // ── Part B — Dispatch ──
       { id: 'g_partDispatch', label: 'Dispatch', type: 'divider' },
@@ -3889,9 +3881,14 @@ function buildSectionForms(irNumber) {
     if (btn) btn.onclick = () => saveSection(secId, irNumber);
   });
 
-  // Wire Section D Part A PDF download
-  const dlD = document.getElementById('download-sec-d');
-  if (dlD) dlD.onclick = () => downloadSectionDPartA();
+  // Wire the per-section export buttons. Exporting is a READ, so these are wired
+  // for every user and exempted from the view-only disable below.
+  Object.keys(SECTIONS).forEach(secId => {
+    const dl = document.getElementById('download-' + secId);
+    if (dl) { dl.classList.add('sec-export-btn'); dl.onclick = () => exportSectionPdf(secId, { share: false }); }
+    const sh = document.getElementById('share-' + secId);
+    if (sh) { sh.classList.add('sec-export-btn'); sh.onclick = () => exportSectionPdf(secId, { share: true }); }
+  });
 
   // Wire the pinned Overview's save button. Not part of the SECTIONS loop above:
   // the Overview is not a section, so it has no `save-sec-*` id to pick up.
@@ -3967,6 +3964,9 @@ function applySectionAccessGating() {
     if (view && !edit) {
       pane.querySelectorAll('input, textarea, select, button').forEach(el => {
         if (el.id === 'nudge-bell' || el.classList.contains('sec-nudge-btn')) return;
+        // Exporting a section is a read: a view-only user may still download it or
+        // share it. Only writing is gated.
+        if (el.classList.contains('sec-export-btn')) return;
         if (el.type === 'file') { el.disabled = true; return; }
         // Don't disable the section's comment button if the user can comment.
         if (el.classList.contains('field-nudge-btn') && comment) return;
@@ -4115,8 +4115,6 @@ function buildField(field, irNumber, sectionId) {
         <div class="iqc-table-body">${buildIqcRowsHTML()}</div>
         ${adminBtn}
       </div>`;
-  } else if (field.type === 'esignature') {
-    control = `<div class="esignature-block" id="${id}-block" data-field="${id}" data-role="${esc(field.role || '')}">${renderESignatureHTML(id, field.role || '')}</div>`;
   } else if (field.type === 'analysisNote') {
     // Dynamic read-only intro line: "Dear customer, analysis of IRXXX for your
     // system with ID XXXXX has been completed. Its findings are as below."
@@ -4324,19 +4322,7 @@ function updateUrlLink(fieldId) {
   }
 }
 
-// ─── E-SIGNATURE (Section B) ───────────────────────────────────────────────────
-// Captures the signed-in user's email + full timestamp. Once signed, the cell
-// is locked (not editable, not deletable). An authorized user may override
-// (re-sign); each prior value is retained in `history` and shown on hover.
-
-function formatTimestamp(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return String(iso);
-  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-  const pad = n => String(n).padStart(2, '0');
-  return `${pad(d.getDate())} ${months[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
+// ─── HTML ESCAPING ─────────────────────────────────────────────────────────────
 
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -4368,84 +4354,6 @@ function escJsAttr(s) {
 function safeUrl(u) {
   const s = String(u == null ? '' : u).trim();
   return /^https?:\/\//i.test(s) ? s : '';
-}
-
-// An e-signature block is READ-ONLY. There is no "Sign as …" button any more, and
-// no "Override & Re-sign" — the block records who saved the section, and the
-// activity log records it independently. The buttons existed because the old
-// Google Sheet had no login, so a typed name column was the only way to say who
-// did the work; the app has a login now, so a second, role-specific step before
-// Save recorded nothing the audit trail does not already carry.
-//
-// The fill itself lives in saveSection() — see signSectionOnSave(). This function
-// only paints whatever state that produced.
-function renderESignatureHTML(fieldId, role) {
-  const sig = esignatureState[fieldId];
-  const history = (sig && sig.history) ? sig.history : [];
-  const historyLines = history.map(h => `• ${escHtml(h.signedBy)} — ${escHtml(formatTimestamp(h.signedAt))}`).join('<br>');
-  const historyTitle = historyLines
-    ? `Earlier:&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
-    : '';
-
-  if (sig && sig.signedBy) {
-    return `
-      <div class="esignature-signed" title="${escHtml(historyTitle)}">
-        <div class="esignature-row">
-          <span class="esignature-check">&#10003;</span>
-          <div class="esignature-info">
-            <div class="esignature-line">${escHtml(role)} — signed by <strong>${escHtml(sig.signedBy)}</strong></div>
-            <div class="esignature-stamp">${escHtml(formatTimestamp(sig.signedAt))}</div>
-          </div>
-        </div>
-        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Earlier:</span><br>${historyLines}</div>` : ''}
-      </div>`;
-  }
-  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span><span class="esignature-muted">Recorded automatically when this section is saved.</span></div>`;
-}
-
-function refreshESignature(fieldId) {
-  const block = document.getElementById(fieldId + '-block');
-  if (block) block.innerHTML = renderESignatureHTML(fieldId, block.dataset.role || '');
-}
-
-// Stamps the role line for whoever is saving, from ONE section. Called from
-// saveSection() just before the values are collected, so the payload it posts
-// already carries the signature and the normal save path does the rest — no second
-// write, and no draft (this is a real save, not a draft).
-//
-// TWO rules, and both are load-bearing:
-//
-//   1. Never overwrite. A block that already carries a name is left exactly as it
-//      is, so nobody can be relabelled by someone else's later save.
-//   2. Only ONE block per save — the first that is still empty — and only if this
-//      person has not already signed something in this section.
-//
-// Rule 2 is what keeps a two-role section separable. Section B is signed by two
-// different people: Inward, then Inventory. Filling every empty block on each save
-// would stamp "Inventory (ST No. Assigner)" with the Inward person's name, which is
-// a wrong attribution on a line that reaches a customer. Filling the first empty
-// one gives the Inward person their line and the Inventory person theirs, while the
-// "already signed here" guard stops a second save by the same person from creeping
-// onto the next role.
-function signSectionOnSave(sectionId) {
-  const section = SECTIONS[sectionId];
-  const email = currentUser?.email;
-  if (!section || !email) return;
-
-  const blocks = section.fields.filter(f => f.type === 'esignature');
-  // I have already claimed my role in this section — a re-save is not a new claim.
-  if (blocks.some(f => esignatureState[f.id]?.signedBy === email)) return;
-
-  const empty = blocks.find(f => !esignatureState[f.id]?.signedBy);
-  if (!empty) return;
-
-  const prev = esignatureState[empty.id];
-  esignatureState[empty.id] = {
-    signedBy: email,
-    signedAt: new Date().toISOString(),
-    history: (prev && prev.history) ? prev.history : [],
-  };
-  refreshESignature(empty.id);
 }
 
 // ─── INWARD DROPDOWN OPTIONS (admin-customizable) ──────────────────────────────
@@ -4773,6 +4681,52 @@ async function loadSectionData(irNumber) {
   }
 }
 
+// Resolve a saved imageEvidence field's entries: captions saved with an empty link
+// (the upload was still pending at the last save) get their Drive URLs merged in
+// from '<fieldId>_links'. That merge is SKIPPED for drafts — a draft's empty link
+// means a not-yet-uploaded image, which must not pick up a Drive URL belonging to a
+// different (saved) entry. Also seeds one entry per link for fields migrated from
+// the old `file` type, which stored nothing but links.
+function savedEvidenceEntries(sectionId, fieldId, value, isDraft) {
+  let arr = (Array.isArray(value) ? value : []).map(e => ({
+    caption: (e && e.caption) || '', link: (e && e.link) || '', type: (e && e.type) || '', name: (e && e.name) || '',
+  }));
+  if (isDraft) return arr;
+  const linksRaw = currentSectionData?.[sectionId]?.[fieldId + '_links'];
+  if (linksRaw) {
+    const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
+    let li = 0;
+    arr = arr.map(e => (e.link || li >= links.length) ? e : { caption: e.caption, link: links[li++], type: e.type, name: e.name });
+  }
+  if (!arr.length) {
+    arr = String(linksRaw || '').split(',').map(s => s.trim()).filter(Boolean).map(l => ({ caption: '', link: l, type: '', name: '' }));
+  }
+  return arr;
+}
+
+// Fold the two Flight Test upload fields into one without losing the uploads that
+// are already in the store. Deduped by link, else name, else caption — and an entry
+// with none of those is always kept, because two blanks are not the same thing.
+// Idempotent: the survivor absorbs the retired field's entries, and re-running it
+// against the same saved data collapses to the same set. Nothing is written back,
+// so no record is touched.
+function mergeFlightReportEntries(base, extra) {
+  const seen = new Set();
+  const keyOf = e => {
+    if (e.link) return 'l:' + e.link;
+    if (e.name) return 'n:' + e.name;
+    if (e.caption) return 'c:' + e.caption + '|' + (e.type || '');
+    return '';
+  };
+  const out = [];
+  [base, extra].forEach(list => (list || []).forEach(e => {
+    const key = keyOf(e);
+    if (key) { if (seen.has(key)) return; seen.add(key); }
+    out.push(e);
+  }));
+  return out;
+}
+
 function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   const section = SECTIONS[sectionId];
   const field = section?.fields.find(f => f.id === fieldId);
@@ -4784,28 +4738,15 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
 
   // Handle imageEvidence type — value is [{caption, link, type, name}]
   if (field?.type === 'imageEvidence') {
-    let arr = Array.isArray(value) ? value : [];
-    // When loading SAVED data, captions saved with empty links (pending upload at
-    // last save) get their Drive URLs merged in from '<fieldId>_links'. Skip this
-    // for drafts: a draft's empty link means a not-yet-uploaded image, which must
-    // NOT pick up a Drive URL belonging to a different (saved) entry.
-    if (!isDraft) {
-      const linksRaw = currentSectionData?.[sectionId]?.[fieldId + '_links'];
-      if (linksRaw) {
-        const links = String(linksRaw).split(',').map(s => s.trim()).filter(Boolean);
-        let li = 0;
-        arr = arr.map(e => {
-          if (!e.link && li < links.length) return { caption: e.caption || '', link: links[li++], type: e.type || '', name: e.name || '' };
-          return { caption: e.caption || '', link: e.link || '', type: e.type || '', name: e.name || '' };
-        });
-      }
-      // Back-compat: fields migrated from the old `file` type stored only Drive
-      // links in <fieldId>_links with no entry array. Seed one entry per link so
-      // those uploads still preview after migration to imageEvidence.
-      if (!arr.length) {
-        const links = String(currentSectionData?.[sectionId]?.[fieldId + '_links'] || '').split(',').map(s => s.trim()).filter(Boolean);
-        arr = links.map(l => ({ caption: '', link: l, type: '', name: '' }));
-      }
+    let arr = savedEvidenceEntries(sectionId, fieldId, value, isDraft);
+    // The retired "Mission Flight Test Report" was merged into this field. Fold its
+    // saved uploads in here, on load only, so they stay visible instead of sitting
+    // in the store unseen. Deduped, so this cannot duplicate on a second load.
+    if (!isDraft && fieldId === 'g_basicReport') {
+      arr = mergeFlightReportEntries(
+        arr,
+        savedEvidenceEntries(sectionId, 'g_missionReport', currentSectionData?.[sectionId]?.g_missionReport, false)
+      );
     }
     evidenceState[fieldId] = arr.map(e => ({ caption: e.caption || '', link: e.link || '', file: null, url: null, type: e.type || '', name: e.name || '' }));
     renderImageEvidence(fieldId);
@@ -4888,13 +4829,6 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
-  // Handle esignature type — value is { signedBy, signedAt, history: [] }
-  if (field?.type === 'esignature') {
-    esignatureState[fieldId] = (value && typeof value === 'object') ? value : {};
-    refreshESignature(fieldId);
-    return;
-  }
-
   // Handle iqcTable type — value is { [zoneId]: { result, remark, name?, checks? } }
   if (field?.type === 'iqcTable' && value && typeof value === 'object') {
     const wrapper = document.getElementById(fieldId);
@@ -4960,7 +4894,7 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   }
 }
 
-// Collect all field values for a section from the DOM + esignatureState.
+// Collect all field values for a section from the DOM + evidenceState.
 // Shared by saveSection and the draft auto-persist. Returns { fieldValues, fileFields }.
 function collectSectionValues(sectionId) {
   const section = SECTIONS[sectionId];
@@ -5057,8 +4991,6 @@ function collectSectionValues(sectionId) {
         });
       }
       fieldValues[field.id] = tableData;
-    } else if (field.type === 'esignature') {
-      fieldValues[field.id] = esignatureState[field.id] || {};
     } else {
       const el = document.getElementById(field.id);
       if (el) fieldValues[field.id] = el.value;
@@ -5146,7 +5078,6 @@ function discardAllDrafts() {
   // Drop drafts, rebuild forms fresh (re-applies Section A auto-fill), then
   // re-apply the saved backend data so the UI reflects the last saved state.
   Object.keys(SECTIONS).forEach(clearDraft);
-  esignatureState = {};
   buildSectionForms(currentIR.irNumber);
   if (currentSectionData) {
     Object.entries(currentSectionData).forEach(([secId, fields]) => {
@@ -5174,11 +5105,6 @@ async function saveSection(sectionId, irNumber) {
   formData.append('irNumber', irNumber);
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
-
-  // Stamp any e-signature in THIS section that nobody has filled yet, BEFORE the
-  // values are collected, so the payload below already carries it. Saving is the
-  // signature: whoever pressed Save is the person recorded.
-  signSectionOnSave(sectionId);
 
   const { fieldValues, fileFields } = collectSectionValues(sectionId);
   formData.append('fields', JSON.stringify(fieldValues));
@@ -5265,146 +5191,522 @@ function fileToDataUrl(file) {
   });
 }
 
-// ─── SECTION D — PART A PDF DOWNLOAD ──────────────────────────────────────────
-// Builds a clean, client-facing printable document of the Investigation (Part A
-// only) and opens the browser print dialog so it can be saved/shared as a PDF.
-// Part B (Cost Analysis) is deliberately excluded.
-async function downloadSectionDPartA() {
-  const irNum  = currentIR?.irNumber || 'IR';
-  const drone  = currentIR?.droneId  || '';
-  const getVal = id => { const el = document.getElementById(id); return el ? (el.value || '') : ''; };
-  const analysisBy   = getVal('d_analysisBy');
-  const analysisDate = toDisplayDate(getVal('d_analysisDate'));
-  const investigation = getVal('d_investigation');
-  const rootCause     = getVal('d_rootCause');
-  const corrective    = getVal('d_correctiveAction');
-  const preventive    = getVal('d_preventiveAction');
+// ─── PER-SECTION PDF EXPORT ───────────────────────────────────────────────────
+// Every section exports as a real PDF *file* — not a print dialog — so it can be
+// attached to an email or handed to a phone's share sheet.
+//
+// Three layers, deliberately, so the parts that can be got wrong are testable
+// without a browser and without the library:
+//
+//   sectionPdfModel()    pure. values → blocks. No DOM, no pdf-lib.
+//   collectExportMedia() resolves bytes: normalises photos, reads attached PDFs.
+//   drawSectionPdf()     the only pdf-lib code, and it takes the library by
+//                        injection so the suites can drive it with a fake.
+//
+// `PDFLib` is referenced ONLY inside a function body (through pdfLib()). The
+// suites evaluate this file under a stub DOM with no `PDFLib` in scope, so a
+// module-level mention would take all of them down.
 
-  // Evidence images: uploaded images use their Drive URL; not-yet-saved images
-  // are read as data URLs so they embed reliably in the printed document.
-  const entries = evidenceState['d_evidence'] || [];
-  const images = [];
-  for (const e of entries) {
-    if ((e.type || '') === 'pdf') continue;   // PDFs can't embed in the printed doc
-    let src = e.link || '';
-    if (!src && e.file) { try { src = await fileToDataUrl(e.file); } catch {} }
-    if (src) images.push({ caption: e.caption || '', src });
-  }
+const EXPORT_IMAGE_LONG_EDGE = 1600;
+const EXPORT_IMAGE_QUALITY = 0.82;
 
-  const esc   = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const nlbr  = s => esc(s).replace(/\n/g, '<br>');
-  const para  = (label, val) => val && val.trim()
-    ? `<h2>${esc(label)}</h2><div class="val">${nlbr(val)}</div>`
-    : `<h2>${esc(label)}</h2><div class="val muted">—</div>`;
-  const imgBlock = images.map(im => `
-    <figure>
-      <img src="${esc(im.src)}" />
-      ${im.caption ? `<figcaption>${esc(im.caption)}</figcaption>` : ''}
-    </figure>`).join('');
+// A photo goes INTO the report and a PDF is appended to it — but only if its bytes
+// can be had. A file attached in this sitting is in memory and always can be; one
+// attached earlier is only a Drive URL, and whether that can be read back is up to
+// Drive's CORS headers. Everything below treats "cannot read it back" as a thing to
+// REPORT, never as a thing to silently drop.
 
-  // QC Manager sign-off — the Investigation (Part A) authoriser. Shows the
-  // signed name + date if already signed, otherwise "Pending".
-  const qcSig = esignatureState['d_signQcManager'];
-  const qcSignBlock = (() => {
-    if (qcSig && qcSig.signedBy) {
-      const when = qcSig.signedAt ? toDisplayDate(qcSig.signedAt.split('T')[0]) : '';
-      return `<div class="signoff">
-        <h2>Investigation Authorised</h2>
-        <div class="signoff-row">
-          <div class="signoff-label">Technical Support (QC Manager)</div>
-          <div class="signoff-name">${esc(qcSig.signedBy)}</div>
-          <div class="signoff-date">${esc(when)}</div>
-        </div>
-      </div>`;
-    }
-    return `<div class="signoff">
-      <h2>Investigation Authorised</h2>
-      <div class="signoff-row">
-        <div class="signoff-label">Technical Support (QC Manager)</div>
-        <div class="signoff-name muted">Pending signature</div>
-        <div class="signoff-date"></div>
-      </div>
-    </div>`;
-  })();
+// WinAnsi — the encoding of the standard PDF fonts — cannot represent most
+// non-Latin-1 characters, and pdf-lib THROWS on one rather than dropping it, so a
+// single emoji in a Remarks box would fail the whole export. Fold the common
+// typographic characters down to ASCII and replace whatever is left.
+//
+// The table is written as code points, not as literals: the tick and the cross sit
+// in the U+2600–27BF block, which tools/smoke-ui.mjs counts as emoji in app.js, and
+// that count is a fixed ledger that may only go down.
+const PDF_CHAR_MAP = (() => {
+  const map = {};
+  [
+    [0x2013, '-'], [0x2014, '-'],           // en dash, em dash
+    [0x2018, "'"], [0x2019, "'"],           // curly single quotes
+    [0x201C, '"'], [0x201D, '"'],           // curly double quotes
+    [0x2026, '...'], [0x2022, '-'],         // ellipsis, bullet
+    [0x2713, 'v'], [0x2717, 'x'],           // tick, cross
+    [0x2192, '->'], [0x20B9, 'Rs.'],        // arrow, rupee
+  ].forEach(pair => { map[String.fromCharCode(pair[0])] = pair[1]; });
+  return map;
+})();
 
-  const html = `<!doctype html><html><head><meta charset="utf-8" />
-<title>${esc(irNum)} — Investigation</title>
-<style>
-  @page { margin: 16mm; }
-  * { box-sizing: border-box; }
-  body { font-family: 'Inter', Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; }
-  .head { border-bottom: 2px solid #0E62FF; padding-bottom: 10px; margin-bottom: 14px; }
-  h1 { font-size: 20px; margin: 0 0 4px; color: #0E62FF; }
-  .brand { font-size: 12px; color: #64748b; letter-spacing: .04em; text-transform: uppercase; }
-  .meta { font-size: 13px; color: #334155; margin: 12px 0; }
-  .meta span { display: inline-block; margin-right: 18px; }
-  .intro { background: #eef4ff; border-left: 4px solid #0E62FF; padding: 12px 14px; font-size: 14px; line-height: 1.5; margin: 6px 0 18px; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: #0E62FF; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin: 22px 0 8px; }
-  .val { font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
-  .val.muted { color: #94a3b8; }
-  figure { margin: 12px 0; text-align: center; page-break-inside: avoid; }
-  figure img { max-width: 100%; max-height: 600px; border: 1px solid #e2e8f0; border-radius: 8px; }
-  figcaption { font-size: 12px; color: #475569; margin-top: 6px; }
-  .signoff { margin-top: 28px; page-break-inside: avoid; }
-  .signoff h2 { margin-bottom: 12px; }
-  .signoff-row { display: flex; align-items: flex-end; gap: 28px; }
-  .signoff-label { font-size: 12px; color: #475569; border-top: 1px solid #0f172a; padding-top: 6px; min-width: 240px; }
-  .signoff-name { font-size: 14px; font-weight: 600; color: #0f172a; }
-  .signoff-name.muted { color: #94a3b8; font-weight: 400; }
-  .signoff-date { font-size: 12px; color: #475569; }
-  .foot { margin-top: 28px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; }
-</style></head><body>
-  <div class="head">
-    <div class="brand">Indrones After-Sales · I-PASSBOOK</div>
-    <h1>Investigation Report</h1>
-  </div>
-  <div class="meta">
-    <span><strong>IR:</strong> ${esc(irNum)}</span>
-    <span><strong>System ID:</strong> ${esc(drone)}</span>
-    <span><strong>Date:</strong> ${esc(analysisDate)}</span>
-    <span><strong>Analyst:</strong> ${esc(analysisBy)}</span>
-  </div>
-  <div class="intro">Dear customer, analysis of <strong>${esc(irNum)}</strong> for your system with ID <strong>${esc(drone)}</strong> has been completed. Its findings are as below.</div>
-  ${para('Description of Investigation', investigation)}
-  ${images.length ? `<h2>Investigation Evidence</h2>${imgBlock}` : ''}
-  ${para('Root Cause', rootCause)}
-  ${para('Corrective Action', corrective)}
-  ${para('Preventive Action', preventive)}
-  ${qcSignBlock}
-  <div class="foot">This report was generated from I-PASSBOOK · Section D (Part A — Investigation).</div>
-  <script>
-    (function(){
-      var printed = false;
-      function go(){ if (printed) return; printed = true; setTimeout(function(){ window.focus(); window.print(); }, 250); }
-      var imgs = Array.prototype.slice.call(document.images);
-      var pending = imgs.length;
-      if (!pending) { window.onload = go; return; }
-      function done(){ if (--pending <= 0) go(); }
-      imgs.forEach(function(im){
-        if (im.complete && im.naturalWidth) { done(); return; }
-        im.onload  = done;
-        im.onerror = done;
-      });
-      window.onload = function(){ setTimeout(go, 4000); };
-    })();
-  <\/script>
-</body></html>`;
-
-  const w = window.open('', '_blank');
-  if (!w) { showToast('Allow pop-ups to download the PDF'); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+// Exactly what WinAnsi can carry: printable ASCII, plus Latin-1 from 0xA0 up. A
+// replacement callback rather than a character class, so a character outside it is
+// never handed to pdf-lib raw. Two details that are easy to get wrong:
+//
+//   - A control character is not drawable at all, and a newline that reaches here —
+//     it should not, since the drawer wraps first — becomes a SPACE rather than the
+//     "?" a reader would read as a typo.
+//   - The `u` flag, so an emoji is one code point and becomes ONE "?", not the two
+//     that its surrogate halves would each produce.
+function pdfSafe(s) {
+  return String(s == null ? '' : s)
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
+    .replace(/[^\x20-\x7e\xa0-\xff]/gu, c => (c in PDF_CHAR_MAP ? PDF_CHAR_MAP[c] : '?'));
 }
 
-// ─── IMAGE EVIDENCE (Section D) ───────────────────────────────────────────────
-// Per-image evidence with a name/context caption. New images are uploaded to
-// Drive via the existing file mechanism (fieldId '_links'); captions + the
-// already-uploaded Drive URLs live in the field value `d_evidence` as
-// [{caption, link}]. The backend overwrites '_links' with only the newly-uploaded
-// URLs on each save, so already-uploaded links are carried in `d_evidence` and
-// re-sent on every save; newly-uploaded links are merged back from '_links'
-// after a save (and on load) so captions stay paired with their images.
+// Scale a w×h box so its LONG edge is at most `max`. Never upscales: a small photo
+// stays sharp rather than being blown up into a blurry one.
+function fitLongEdge(w, h, max) {
+  const width = Number(w) || 0, height = Number(h) || 0;
+  if (!(width > 0) || !(height > 0)) return { width: 0, height: 0, scale: 1 };
+  const longest = Math.max(width, height);
+  const scale = longest > max ? max / longest : 1;
+  return { width: Math.round(width * scale), height: Math.round(height * scale), scale };
+}
+
+// Greedy word wrap. Two things a naive split(' ') gets wrong and this does not: an
+// explicit newline typed into a textarea is a break the author meant, and a single
+// word wider than the column (a long URL) has to be hard-broken or it runs off the
+// page. Pure — takes a pdf-lib font because that is what knows the widths.
+//
+// The fold to WinAnsi happens HERE, not at the draw call: `widthOfTextAtSize` encodes
+// the string too, so measuring an emoji throws before anything is drawn. Folding per
+// paragraph — after the split — is what keeps a typed blank line a blank line instead
+// of letting pdfSafe turn its newline into a space.
+function wrapText(text, font, size, maxWidth) {
+  const raw = String(text == null ? '' : text);
+  if (!raw) return [];
+  const lines = [];
+  raw.split('\n').forEach(paragraphRaw => {
+    const paragraph = pdfSafe(paragraphRaw);
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    if (!words.length) { lines.push(''); return; }
+    let line = '';
+    for (let word of words) {
+      while (font.widthOfTextAtSize(word, size) > maxWidth && word.length > 1) {
+        let cut = 1;
+        while (cut < word.length && font.widthOfTextAtSize(word.slice(0, cut + 1), size) <= maxWidth) cut++;
+        if (line) { lines.push(line); line = ''; }
+        lines.push(word.slice(0, cut));
+        word = word.slice(cut);
+      }
+      if (!word) continue;
+      const candidate = line ? line + ' ' + word : word;
+      if (!line || font.widthOfTextAtSize(candidate, size) <= maxWidth) line = candidate;
+      else { lines.push(line); line = word; }
+    }
+    if (line) lines.push(line);
+  });
+  return lines;
+}
+
+function analysisNoteText(ir) {
+  const irNum = (ir && ir.irNumber) || 'IRXXX';
+  const drone = (ir && ir.droneId) || 'XXXXX';
+  return `Dear customer, analysis of ${irNum} for your system with ID ${drone} has been completed. Its findings are as below.`;
+}
+
+// The four table shapes the app stores, each with the columns it is shown under.
+// Row builders are defensive: a half-filled row is a row, not a crash.
+const EXPORT_TABLES = {
+  inwardTable: {
+    columns: ['Particulars', 'Model', 'Qty', 'Remark'],
+    rows: v => Object.keys(v || {}).map(k => [k, (v[k] || {}).model || '', (v[k] || {}).qty || '', (v[k] || {}).remark || '']),
+  },
+  iqcTable: {
+    columns: ['Zone / Item', 'Result', 'Remark'],
+    rows: v => Object.keys(v || {}).map(k => [(v[k] || {}).name || k, (v[k] || {}).result || '', (v[k] || {}).remark || '']),
+  },
+  costTable: {
+    columns: ['Particular', 'Qty', 'Rate', 'Cost', 'Remark'],
+    rows: v => (Array.isArray(v) ? v : []).map(r => [(r || {}).particular || '', (r || {}).qty || '', (r || {}).rate || '', (r || {}).cost || '', (r || {}).remark || '']),
+  },
+  dispatchChecklist: {
+    columns: ['Particular', 'Status'],
+    rows: v => Object.keys(v || {}).map(k => [k, v[k] || '']),
+  },
+};
+
+// values → blocks. Driven entirely by SECTIONS, so a field added to a section later
+// appears in its export without anyone touching this function.
+function sectionPdfModel(sectionId, fieldValues, ir) {
+  const section = SECTIONS[sectionId];
+  if (!section) return { title: '', irNumber: '', droneId: '', blocks: [] };
+  const values = fieldValues || {};
+  const blocks = [];
+
+  section.fields.forEach(field => {
+    const value = values[field.id];
+
+    if (field.type === 'divider') {
+      if (field.label) blocks.push({ kind: 'divider', text: field.label });
+      return;
+    }
+    if (field.type === 'analysisNote') {
+      blocks.push({ kind: 'note', text: analysisNoteText(ir) });
+      return;
+    }
+    if (field.type === 'checkpointEvidence') {
+      blocks.push({
+        kind: 'field',
+        label: field.tickLabel || field.label || '',
+        value: (value && value.done) ? 'Done' : 'Not done',
+      });
+      const items = (Array.isArray(value && value.attach) ? value.attach : []).map((e, i) => ({
+        key: `${field.id}_attach#${i}`,
+        caption: (e && e.caption) || '', name: (e && e.name) || '', type: (e && e.type) || '',
+      }));
+      if (items.length) blocks.push({ kind: 'images', label: field.label || '', items: items });
+      return;
+    }
+    if (field.type === 'imageEvidence') {
+      const items = (Array.isArray(value) ? value : []).map((e, i) => ({
+        key: `${field.id}#${i}`,
+        caption: (e && e.caption) || '', name: (e && e.name) || '', type: (e && e.type) || '',
+      }));
+      if (items.length) blocks.push({ kind: 'images', label: field.label || '', items: items });
+      return;
+    }
+    const table = EXPORT_TABLES[field.type];
+    if (table) {
+      const rows = table.rows(value);
+      if (rows.length) blocks.push({ kind: 'table', label: field.label || '', columns: table.columns, rows: rows });
+      return;
+    }
+    // text, textarea, date, select, courierName, and anything added later.
+    let out = value == null ? '' : String(value);
+    if (field.type === 'date' && out) out = toDisplayDate(out);
+    blocks.push({ kind: 'field', label: field.label || '', value: out });
+  });
+
+  return {
+    title: section.title,
+    irNumber: (ir && ir.irNumber) || '',
+    droneId: (ir && ir.droneId) || '',
+    blocks: blocks,
+  };
+}
+
+function pdfLib() {
+  return (typeof PDFLib !== 'undefined' && PDFLib) ? PDFLib : null;
+}
+
+// A saved attachment is only a Drive URL. Try the preview host first (the one the
+// app already uses for thumbnails), then the stored link itself. Either can fail on
+// CORS — that is a null, not an exception.
+async function fetchEvidenceBlob(entry) {
+  const id = driveFileId(entry && entry.link);
+  const urls = [];
+  if (id) urls.push(`https://lh3.googleusercontent.com/d/${id}`);
+  if (safeUrl(entry && entry.link)) urls.push(entry.link);
+  for (const url of urls) {
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      if (res.ok) return await res.blob();
+    } catch { /* try the next one */ }
+  }
+  return null;
+}
+
+// Browser-only: canvas → JPEG at the long-edge cap. Split from fitLongEdge so the
+// arithmetic is testable without a canvas.
+async function normalizeImage(blob) {
+  const bitmap = await createImageBitmap(blob);
+  const size = fitLongEdge(bitmap.width, bitmap.height, EXPORT_IMAGE_LONG_EDGE);
+  if (!size.width || !size.height) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = size.width;
+  canvas.height = size.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, size.width, size.height);
+  if (bitmap.close) bitmap.close();
+  const out = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', EXPORT_IMAGE_QUALITY));
+  if (!out) return null;
+  return new Uint8Array(await out.arrayBuffer());
+}
+
+// Resolve every attachment in a section into either embeddable bytes or a named
+// record of what could not be read. `lib` is only used to ask "would pdf-lib accept
+// this?", so a PDF that would fail mid-draw is known to be a leftover BEFORE the
+// report is written and the user can be told.
+async function collectExportMedia(sectionId, lib) {
+  const section = SECTIONS[sectionId];
+  const images = new Map();
+  const attachments = [];
+  if (!section) return { images: images, attachments: attachments };
+
+  const keys = [];
+  section.fields.forEach(field => {
+    if (field.type === 'imageEvidence') keys.push(field.id);
+    else if (field.type === 'checkpointEvidence') keys.push(field.id + '_attach');
+  });
+
+  for (const fieldId of keys) {
+    const entries = evidenceState[fieldId] || [];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      const key = `${fieldId}#${i}`;
+      const isPdf = guessEvidenceType(e) === 'pdf';
+
+      if (isPdf) {
+        let bytes = null;
+        try {
+          const blob = e.file || await fetchEvidenceBlob(e);
+          if (blob) bytes = new Uint8Array(await blob.arrayBuffer());
+        } catch { bytes = null; }
+        const record = {
+          key: key,
+          name: e.name || e.caption || `Attachment ${attachments.length + 1}.pdf`,
+          bytes: bytes,
+          mergeable: false,
+        };
+        if (bytes && lib && lib.PDFDocument) {
+          try {
+            await lib.PDFDocument.load(bytes, { ignoreEncryption: true });
+            record.mergeable = true;
+          } catch { record.mergeable = false; }
+        }
+        attachments.push(record);
+      } else {
+        let jpeg = null;
+        try {
+          const blob = e.file || await fetchEvidenceBlob(e);
+          if (blob) jpeg = await normalizeImage(blob);
+        } catch { jpeg = null; }
+        if (jpeg) images.set(key, jpeg);
+      }
+    }
+  }
+  return { images: images, attachments: attachments };
+}
+
+// The only function that touches pdf-lib. A4, 40pt margins, Helvetica.
+async function drawSectionPdf(model, media, lib) {
+  if (!lib || !lib.PDFDocument) throw new Error('PDF library not loaded');
+  const { PDFDocument, StandardFonts, rgb } = lib;
+
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  const PAGE_W = 595.28, PAGE_H = 841.89, M = 40;   // A4 in points
+  const CONTENT_W = PAGE_W - M * 2;
+  const INK = rgb(0.06, 0.09, 0.16);
+  const MUTED = rgb(0.45, 0.50, 0.58);
+  const RULE = rgb(0.85, 0.88, 0.92);
+  const HEAD = rgb(0.10, 0.15, 0.25);
+
+  let page = doc.addPage([PAGE_W, PAGE_H]);
+  let y = PAGE_H - M;
+  const newPage = () => { page = doc.addPage([PAGE_W, PAGE_H]); y = PAGE_H - M; };
+  const room = h => { if (y - h < M) newPage(); };
+  const gap = h => { y -= h; };
+
+  // Draw one wrapped paragraph. `y` is the TOP of the line; the baseline sits one
+  // font-size below it.
+  const line = (text, opts) => {
+    const o = opts || {};
+    const f = o.bold ? bold : font;
+    const size = o.size || 10;
+    const x = o.x != null ? o.x : M;
+    const lh = size * 1.35;
+    wrapText(text, f, size, o.width || CONTENT_W).forEach(text => {
+      room(lh);
+      page.drawText(pdfSafe(text), { x: x, y: y - size, font: f, size: size, color: o.color || INK });
+      y -= lh;
+    });
+  };
+  const rule = () => {
+    room(10);
+    page.drawLine({ start: { x: M, y: y }, end: { x: PAGE_W - M, y: y }, thickness: 0.7, color: RULE });
+    gap(10);
+  };
+
+  // ── Masthead ──
+  line('INDRONES AFTER-SALES  ·  I-PASSBOOK', { size: 8, color: MUTED });
+  gap(2);
+  line(model.title, { size: 17, bold: true, color: HEAD });
+  gap(2);
+  const meta = [model.irNumber && `IR: ${model.irNumber}`, model.droneId && `System ID: ${model.droneId}`].filter(Boolean);
+  if (meta.length) line(meta.join('     '), { size: 9.5, color: MUTED });
+  gap(4);
+  rule();
+
+  // ── Body ──
+  for (const block of model.blocks) {
+    if (block.kind === 'divider') {
+      gap(10);
+      line(block.text, { size: 12, bold: true, color: HEAD });
+      rule();
+    } else if (block.kind === 'note') {
+      gap(6);
+      line(block.text, { size: 10, color: INK, x: M + 14, width: CONTENT_W - 14 });
+      gap(6);
+    } else if (block.kind === 'field') {
+      gap(8);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      const filled = block.value != null && String(block.value).trim() !== '';
+      line(filled ? block.value : '—', { size: 10.5, color: filled ? INK : MUTED });
+    } else if (block.kind === 'images') {
+      gap(10);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      for (const item of block.items) {
+        if (item.type === 'pdf') continue;   // listed under Attached documents instead
+        const jpeg = media.images.get(item.key);
+        let embedded = null;
+        if (jpeg) { try { embedded = await doc.embedJpg(jpeg); } catch { embedded = null; } }
+        if (!embedded) {
+          line(`${item.caption || item.name || 'Image'} — not included`, { size: 9, color: MUTED });
+          continue;
+        }
+        // Fit the column, and never taller than a whole page.
+        const scale = Math.min(CONTENT_W / embedded.width, (PAGE_H - M * 2) / embedded.height, 1);
+        const w = embedded.width * scale, h = embedded.height * scale;
+        room(h + 10);
+        page.drawImage(embedded, { x: M + (CONTENT_W - w) / 2, y: y - h, width: w, height: h });
+        gap(h + 5);
+        if (item.caption) line(item.caption, { size: 8.5, color: MUTED });
+        gap(10);
+      }
+    } else if (block.kind === 'table') {
+      gap(10);
+      if (block.label) line(block.label, { size: 8.5, bold: true, color: MUTED });
+      // First column takes 30%; the rest share what is left.
+      const widths = block.columns.length === 1
+        ? [CONTENT_W]
+        : [CONTENT_W * 0.30].concat(new Array(block.columns.length - 1).fill((CONTENT_W * 0.70) / (block.columns.length - 1)));
+      const drawRow = (cells, size, f, color) => {
+        const lh = size * 1.3;
+        const wrapped = block.columns.map((_, i) => wrapText(cells[i] == null ? '' : String(cells[i]), f, size, widths[i] - 8));
+        const rowH = Math.max(1, ...wrapped.map(w => w.length)) * lh + 6;
+        room(rowH);
+        let x = M;
+        wrapped.forEach((columnLines, i) => {
+          columnLines.forEach((text, k) => {
+            page.drawText(pdfSafe(text), { x: x + 4, y: y - size - k * lh - 3, font: f, size: size, color: color });
+          });
+          x += widths[i];
+        });
+        y -= rowH;
+        page.drawLine({ start: { x: M, y: y }, end: { x: PAGE_W - M, y: y }, thickness: 0.4, color: RULE });
+      };
+      drawRow(block.columns, 8.5, bold, MUTED);
+      block.rows.forEach(row => drawRow(row, 9.5, font, INK));
+    }
+  }
+
+  // ── Attached documents ──
+  // Every attached PDF is named, whether or not it made it inside. A document that
+  // silently loses an attachment is worse than one that admits it.
+  if (media.attachments.length) {
+    gap(16);
+    line('Attached documents', { size: 12, bold: true, color: HEAD });
+    rule();
+    media.attachments.forEach(a => {
+      line(a.mergeable ? `${a.name} — included below` : `${a.name} — not included (could not be read back)`,
+           { size: 9.5, color: a.mergeable ? INK : MUTED });
+      gap(2);
+    });
+  }
+
+  // ── Append the attachments we could read ──
+  for (const a of media.attachments) {
+    if (!a.mergeable || !a.bytes) continue;
+    const source = await PDFDocument.load(a.bytes, { ignoreEncryption: true });
+    const pages = await doc.copyPages(source, source.getPageIndices());
+    pages.forEach(p => doc.addPage(p));
+  }
+
+  return await doc.save();
+}
+
+// `IR409 - Section B.pdf`, with everything a filesystem would object to removed.
+// The reserved characters are a list rather than a character class on purpose: this
+// file's comment stripper reads a double quote inside a regex literal as the start
+// of a string and then loses its place for the rest of the file.
+function sanitizeFileName(s) {
+  let out = String(s == null ? '' : s);
+  ['\\', '/', ':', '*', '?', '"', '<', '>', '|'].forEach(ch => { out = out.split(ch).join('-'); });
+  return out.replace(/[\x00-\x1f\x7f]/g, '-').replace(/\s+/g, ' ').trim() || 'export';
+}
+function exportFileName(irNumber, sectionId) {
+  const letter = String(sectionId || '').replace(/^sec-/, '').toUpperCase();
+  return sanitizeFileName(`${irNumber || 'IR'} - Section ${letter}`) + '.pdf';
+}
+
+// Hand the file(s) over. The share sheet takes them all at once; anything without
+// one falls back to a download, which is the desktop case.
+async function deliverExportFiles(files, share) {
+  if (share && navigator.canShare && navigator.canShare({ files: files })) {
+    try {
+      await navigator.share({ files: files });
+      return;
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;   // the user backed out
+    }
+  }
+  files.forEach(file => {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  });
+}
+
+function setExportBusy(btn, busy) {
+  if (!btn) return () => {};
+  const original = btn.textContent;
+  btn.disabled = busy;
+  btn.style.opacity = busy ? '0.6' : '';
+  if (busy) btn.textContent = 'Preparing…';
+  return () => { btn.disabled = false; btn.style.opacity = ''; btn.textContent = original; };
+}
+
+async function exportSectionPdf(sectionId, opts) {
+  const share = !!(opts && opts.share);
+  const lib = pdfLib();
+  if (!lib) { showToast('The PDF library did not load — reload the page and try again'); return; }
+
+  const btn = document.getElementById((share ? 'share-' : 'download-') + sectionId);
+  const done = setExportBusy(btn, true);
+  try {
+    const media = await collectExportMedia(sectionId, lib);
+    const { fieldValues } = collectSectionValues(sectionId);
+    const model = sectionPdfModel(sectionId, fieldValues, currentIR);
+
+    // Say what will be missing BEFORE the work, not after.
+    const missing = media.attachments.filter(a => !a.mergeable);
+    if (missing.length) {
+      const verb = share ? 'shared' : 'downloaded';
+      const msg = `${missing.length} attached PDF${missing.length > 1 ? 's' : ''} could not be read back from Drive, `
+        + `so ${missing.length > 1 ? 'they are' : 'it is'} NOT inside this report:\n\n`
+        + missing.map(a => `  • ${a.name}`).join('\n')
+        + `\n\nThe report itself will be ${verb} normally, and will name `
+        + `${missing.length > 1 ? 'them' : 'it'} at the end. Continue?`;
+      if (!window.confirm(msg)) return;
+    }
+
+    const bytes = await drawSectionPdf(model, media, lib);
+    const file = new File([bytes], exportFileName(currentIR && currentIR.irNumber, sectionId), { type: 'application/pdf' });
+    await deliverExportFiles([file], share);
+    if (missing.length) showToast(`Exported — ${missing.length} attachment${missing.length > 1 ? 's were' : ' was'} named, not included`);
+  } catch (err) {
+    showToast('Could not build the PDF — ' + ((err && err.message) || 'unknown error'));
+  } finally {
+    done();
+  }
+}
+
+// ─── IMAGE EVIDENCE ───────────────────────────────────────────────────────────
+// Per-image evidence with a name/context caption, used by every section that
+// carries photos (B, C, D, F, G). New images are uploaded to Drive via the
+// existing file mechanism (fieldId '_links'); captions + the already-uploaded
+// Drive URLs live in the field value as [{caption, link}]. The backend overwrites
+// '_links' with only the newly-uploaded URLs on each save, so already-uploaded
+// links are carried in the field value and re-sent on every save; newly-uploaded
+// links are merged back from '_links' after a save (and on load) so captions stay
+// paired with their images.
 // Extract a Google Drive file id from a Drive URL (for direct image preview).
 function driveFileId(link) {
   if (!link) return '';

@@ -376,25 +376,34 @@ keystroke, so no fold state may live inside the list.
 `applyChromeState()` sets both from storage and re-runs `renderLayout()` rather than
 duplicating the rule; `showApp()` calls it once, before the first paint.
 
-### E-signature blocks — read-only, filled by saving
-An `esignature` field renders as a role line with no button. There is no "Sign as …"
-and no "Override & Re-sign": saving the section *is* the signature, and the activity
-log records it independently. `renderESignatureHTML(fieldId, role)` only paints the
-state; `signSectionOnSave(sectionId)` produces it, called from `saveSection()` just
-before `collectSectionValues()` so the posted payload already carries the signature —
-no second write, and no draft.
+### Section export row — `.sec-export-row`
+Every section B–G ends with two buttons under Save: **⬇ Download**
+(`#download-sec-<x>`) and **⬇ Download and share** (`#share-sec-<x>`). Both build the
+section as a real PDF file; the second hands it to the device share sheet. See
+`docs/03` → *Per-section export* for what goes into the document.
 
-> ⚠️ **Two rules, both load-bearing.** (1) **Never overwrite** a block that already
-> carries a name. (2) **One role line per save** — the first still empty — and only
-> if this person has not already signed something in this section. Rule 2 is what
-> keeps Section B separable: its two lines are signed by two different people
-> (Inward, then Inventory), and filling *every* empty block on each save would stamp
-> "Inventory (ST No. Assigner)" with the Inward person's name. The "already signed
-> here" guard stops a re-save by the same person from creeping onto the next role.
+```css
+.sec-export-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
+.sec-export-row .btn { flex: 0 1 auto; }
+```
 
-The nine fields are **kept, not deleted**: Section D's PDF prints "Investigation
-Authorised" from `d_signQcManager`, so removing the field would silently empty a line
-on a document that goes to a customer.
+Both buttons also carry `.sec-export-btn`, which is **not** cosmetic: a view-only
+user's pane disables every `input, textarea, select, button` in it, and this class is
+what exempts the two export buttons from that sweep. Exporting is a read, so a viewer
+may download and share while still being unable to save. The wiring in `app.js` and
+the exemption in the gating loop name the same class, so renaming one without the
+other would leave a viewer with a dead button.
+
+### Digital signatures — removed
+`esignature` fields, `renderESignatureHTML`, `signSectionOnSave`, `esignatureState`
+and the `.esignature-*` rules are all **gone**. The provision for digital signatures
+was withdrawn, so a section is no longer stamped with whoever pressed Save. Saved
+signature values in `_store/` are left untouched — they simply stop being rendered, and
+each key is dropped the next time that section is saved (`store[sectionId] = fields`).
+
+This is also why the old "kept, not deleted" note about `d_signQcManager` no longer
+applies: D's export used to print an "Investigation Authorised" line from it, and that
+whole download was replaced by the per-section export above.
 
 ### Client's Report (`#sec-intake`, the Report tab)
 The read-only intake view: every column the customer's Google Form actually

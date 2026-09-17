@@ -54,60 +54,62 @@
   </div>
 
   <!-- ========== AUTH SCREEN ========== -->
+  <!-- No sign-up and no captcha: every account is provisioned by the admin, so
+       the only things this form does are sign in and recover a password. The
+       three modes share the one form (Enter submits whichever is showing). -->
   <div id="auth-container">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
         <div class="auth-brand">I-PASSBOOK</div>
-        <p class="auth-hint">Sign in with your @indrones.com account.</p>
+        <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
-        <!-- Honeypot: hidden from humans, filled by bots → server rejects. -->
-        <input type="text" id="auth-website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true"
-               placeholder="Leave this empty" class="auth-honeypot" />
-        <div id="auth-name-wrap" style="display:none">
-          <input class="form-input" type="text" id="auth-name" placeholder="Your name (optional)" autocomplete="name" />
-        </div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
-        <!-- Captcha (sign-up only): server-generated image challenge, answer kept on the server. -->
-        <div id="auth-captcha-wrap" style="display:none">
-          <label for="auth-captcha" class="auth-captcha-label">Solve to continue:</label>
-          <div class="auth-captcha-row">
-            <img id="auth-captcha-img" class="auth-captcha-img" alt="Captcha challenge" />
-            <button type="button" id="auth-captcha-refresh" class="icon-btn" title="New challenge">↻</button>
-          </div>
-          <div id="auth-captcha-error" class="auth-err" style="display:none"></div>
-          <input class="form-input" type="text" id="auth-captcha" inputmode="numeric" pattern="[0-9\-]*" placeholder="Answer" autocomplete="off" />
-        </div>
         <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
-        <button type="button" class="btn btn-secondary" id="auth-signup-btn" style="display:none">Sign up</button>
-        <!-- OTP step (shown after Sign up requests a code). -->
-        <div id="auth-otp-wrap" style="display:none">
-          <p id="auth-otp-note" class="auth-hint"></p>
-          <input class="form-input" type="text" id="auth-otp" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+        <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+
+        <!-- Forgot step: ask for the email, get a 6-digit code. -->
+        <div id="auth-forgot-wrap" style="display:none">
+          <button type="button" class="btn" id="auth-forgot-btn">Email me a code</button>
+        </div>
+
+        <!-- Reset step: the code from the email + the new password. -->
+        <div id="auth-reset-wrap" style="display:none">
+          <p id="auth-reset-note" class="auth-hint"></p>
+          <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
-          <button type="button" class="btn" id="auth-verify-btn">Verify &amp; create account</button>
+          <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
+          <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
           <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
         </div>
+
+        <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
       </form>
-      <button type="button" id="auth-toggle-mode" class="link-btn">Need an account? Sign up</button>
       <p id="auth-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
 
-  <!-- ========== REQUEST ACCESS ========== -->
-  <!-- Deliberately a sibling of #app-container, not a child: a signed-in user
-       with no access has the whole app shell hidden, not just the panes. -->
-  <div id="request-access">
+  <!-- ========== FIRST-LOGIN PASSWORD CHANGE ========== -->
+  <!-- Deliberately a sibling of #app-container, not a child: while this is up the
+       whole app shell is hidden. An account signing in with its temporary
+       password gets no session token from the backend, so this screen is
+       presentation only — there is nothing behind it to reach. -->
+  <div id="password-change">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
         <div class="auth-brand">I-PASSBOOK</div>
-        <p class="auth-hint">You're signed in, but your account doesn't have access yet.</p>
+        <p class="auth-hint" id="pc-sub">Set your own password to finish setting up your account — you only do this once.</p>
       </div>
-      <div id="request-access-email" class="access-email-line"></div>
-      <button class="btn" id="request-access-btn">Request access</button>
-      <p id="request-access-pending" class="req-pending" style="display:none">✓ Access requested — an admin will review and assign your permissions.</p>
-      <button class="btn btn-secondary" id="request-access-signout">Sign Out</button>
+      <div id="pc-email" class="access-email-line"></div>
+      <form id="pc-form" autocomplete="off">
+        <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
+        <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
+        <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
+      </form>
+      <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>
+      <button class="btn btn-secondary" id="pc-signout">Sign Out</button>
+      <p id="pc-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
 
@@ -115,6 +117,8 @@
   <div id="app-container">
 
     <!-- ====== SIDEBAR (≥1024px) / BOTTOM NAV (<1024px) ====== -->
+    <!-- The .nav-icon spans are filled from ICON_PATHS by initIcons(), never with
+         literal markup here, so every glyph in the app has exactly one source. -->
     <nav id="sidebar" aria-label="Main">
       <div class="sidebar-brand">
         <span class="brand-mark" aria-hidden="true">IP</span>
@@ -124,9 +128,9 @@
       <div class="sidebar-nav">
         <div class="sidebar-section-label">Service Desk</div>
 
-        <a class="nav-item" id="nav-tickets" href="#/tickets">
-          <span class="nav-icon" aria-hidden="true">🎫</span>
-          <span class="nav-label">Tickets</span>
+        <a class="nav-item" id="nav-tickets" href="#/tickets" title="IRs">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label">IRs</span>
           <span class="nav-count" id="nav-count">—</span>
         </a>
 
@@ -134,20 +138,20 @@
              app.js binds openLegacyWorkbook() to it. -->
         <button type="button" class="nav-item" id="legacy-workbook-btn"
                 title="Old I-PASSBOOK records (kept until app go-live)">
-          <span class="nav-icon" aria-hidden="true">🏛</span>
+          <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label">Legacy Records</span>
         </button>
 
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">
-          <span class="nav-icon" aria-hidden="true">👥</span>
+          <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label">User Access</span>
         </button>
       </div>
 
       <div class="sidebar-foot">
         <button type="button" class="nav-item" id="nav-theme" title="Switch between light and dark">
-          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true">🌙</span>
+          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true"></span>
           <span class="nav-label" id="nav-theme-label">Dark mode</span>
         </button>
       </div>
@@ -157,11 +161,22 @@
     <div id="workspace">
 
       <header>
+        <!-- Both folds live here rather than in the panes they collapse: the header
+             is static markup that is never re-rendered, so a toggle can never be
+             swallowed by the thing it hides. A control placed inside #index-view
+             would vanish mid-typing, because renderIRList() replaces the list's
+             innerHTML on every keystroke. -->
+        <button type="button" class="icon-btn" id="sidebar-toggle" title="Hide the sidebar" aria-controls="sidebar">
+          <span class="sidebar-toggle-icon" aria-hidden="true"></span>
+        </button>
+        <button type="button" class="icon-btn" id="list-toggle" title="Hide the IR list" aria-controls="index-view">
+          <span class="list-toggle-icon" aria-hidden="true"></span>
+        </button>
         <div id="back-btn">← Back</div>
         <div id="header-title">I-PASSBOOK</div>
         <div class="header-actions">
           <div id="nudge-bell" class="nudge-bell" title="Comments &amp; notifications">
-            <span class="nudge-bell-icon" aria-hidden="true">🔔</span>
+            <span class="nudge-bell-icon" aria-hidden="true"></span>
             <span id="nudge-badge" class="nudge-badge" style="display:none">0</span>
           </div>
           <div id="user-avatar" title="Account">?</div>
@@ -174,7 +189,7 @@
         <div id="index-view">
           <div class="list-toolbar">
             <div class="list-toolbar-top">
-              <span class="list-title">Tickets</span>
+              <span class="list-title">IRs</span>
               <span class="list-count" id="list-count"></span>
             </div>
 
@@ -200,30 +215,59 @@
               <div class="banner-pills" id="ir-banner-pills"></div>
             </div>
             <div class="banner-actions">
-              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this ticket">🎯 Triage</button>
-              <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate">💬 Comments<span class="comment-count" style="display:none">0</span></button>
-              <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR">🕓 History</button>
-              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK">🏛 Legacy Record</button>
+              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Triage</button>
+              <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
+              <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>
+              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy Record</button>
             </div>
           </div>
 
           <!-- Unsaved-draft notice -->
           <div id="draft-banner" class="draft-banner" style="display:none"></div>
 
+          <!-- ====== IR OVERVIEW (pinned, above the tabs) ======
+               Section A's content, in the form it should always have had: the
+               client's intake facts read-only, the two fields CRM owns, and the
+               legacy hand-typed log read-only. It is NOT a section and NOT a tab.
+
+               Three structural rules, each load-bearing — do not "tidy" them:
+               1. `id="ir-overview"`, never `sec-*`. The shell/boot suites count
+                  panes by `id="sec-…" class="section-content"`, so an `ir-`
+                  prefix makes miscounting it as a section impossible.
+               2. It must NOT carry `class="section-content"`. The tab handler
+                  clears `.active` from every `.section-content` and re-adds it
+                  only to the clicked pane, so this panel would be hidden
+                  permanently the first time anybody clicked a tab.
+               3. It sits OUTSIDE `#sections-wrapper`. That excludes it from the
+                  wrapper's delegated input/change listeners, which drive
+                  saveDraft — intended, not an oversight: the panel is always
+                  visible and one click from Save, so a draft adds nothing.
+
+               The automated activity timeline used to live in here. It moved
+               below #sections-wrapper: it is the longest block on the page and
+               sat above the tab strip, so the sections a user came for were
+               pushed off-screen. -->
+          <div id="ir-overview" class="overview-panel">
+            <div class="overview-head">
+              <h2 class="overview-title">Overview</h2>
+              <button type="button" class="btn" id="save-overview">Save Overview</button>
+            </div>
+            <div id="ir-overview-facts"></div>
+            <div id="ir-overview-editable"></div>
+            <div id="ir-legacy-log"></div>
+          </div>
+
           <!-- Scrollable section tabs. The 📋 Report tab is the client's own
                report, read-only; `data-intake` keeps it out of the access-gating
                fallback (it is never hidden, so it would always win). -->
           <div class="tabs-container" id="section-tabs">
-            <div class="tab tab-intake" data-section="sec-intake" data-intake="1">📋 Report</div>
-            <div class="tab active" data-section="sec-a">A: Preliminary</div>
-            <div class="tab" data-section="sec-b">B: Inward</div>
+            <div class="tab tab-intake" data-section="sec-intake" data-intake="1"><span class="tab-icon" aria-hidden="true"></span>Report</div>
+            <div class="tab active" data-section="sec-b">B: Inward</div>
             <div class="tab" data-section="sec-c">C: IQC</div>
             <div class="tab" data-section="sec-d">D: Investigation</div>
             <div class="tab" data-section="sec-e">E: Production</div>
-            <div class="tab" data-section="sec-f">F: QC</div>
-            <div class="tab" data-section="sec-g">G: Flight Test</div>
-            <div class="tab" data-section="sec-h">H: PDI</div>
-            <div class="tab" data-section="sec-i">I: Logistics</div>
+            <div class="tab" data-section="sec-f">F: Quality Test</div>
+            <div class="tab" data-section="sec-g">G: PDI/Dispatch</div>
           </div>
 
           <!-- Section contents -->
@@ -236,16 +280,8 @@
               <div id="sec-intake-body"></div>
             </div>
 
-            <!-- Section A: Preliminary Details -->
-            <div id="sec-a" class="section-content active">
-              <h2 class="section-title">Section A — Preliminary Details &amp; Activity Log</h2>
-              <button class="btn btn-top-save" id="save-sec-a-top">Save Section A</button>
-              <div id="sec-a-form"></div>
-              <button class="btn" id="save-sec-a">Save Section A</button>
-            </div>
-
             <!-- Section B: Inward Checklist -->
-            <div id="sec-b" class="section-content">
+            <div id="sec-b" class="section-content active">
               <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <button class="btn" id="save-sec-b">Save Section B</button>
@@ -253,7 +289,7 @@
 
             <!-- Section C: IQC Inspection -->
             <div id="sec-c" class="section-content">
-              <h2 class="section-title">Section C — IQC Inspection</h2>
+              <h2 class="section-title">Section C — IQC Visual Inspection</h2>
               <div id="sec-c-form"></div>
               <button class="btn" id="save-sec-c">Save Section C</button>
             </div>
@@ -273,44 +309,57 @@
               <button class="btn" id="save-sec-e">Save Section E</button>
             </div>
 
-            <!-- Section F: Quality Control -->
+            <!-- Section F: Quality Test Report (QC + Flight Test) -->
             <div id="sec-f" class="section-content">
-              <h2 class="section-title">Section F — Quality Control (QC Test)</h2>
+              <h2 class="section-title">Section F — Quality Test Report</h2>
               <div id="sec-f-form"></div>
               <button class="btn" id="save-sec-f">Save Section F</button>
             </div>
 
-            <!-- Section G: Flight Test -->
+            <!-- Section G: PDI Report/Dispatch Record (PDI + Dispatch) -->
             <div id="sec-g" class="section-content">
-              <h2 class="section-title">Section G — Flight Test</h2>
+              <h2 class="section-title">Section G — PDI Report/Dispatch Record</h2>
               <div id="sec-g-form"></div>
               <button class="btn" id="save-sec-g">Save Section G</button>
             </div>
 
-            <!-- Section H: PDI -->
-            <div id="sec-h" class="section-content">
-              <h2 class="section-title">Section H — Pre-Delivery Inspection (PDI)</h2>
-              <div id="sec-h-form"></div>
-              <button class="btn" id="save-sec-h">Save Section H</button>
-            </div>
+          </div>
 
-            <!-- Section I: Logistics -->
-            <div id="sec-i" class="section-content">
-              <h2 class="section-title">Section I — Logistics &amp; Dispatch</h2>
-              <div id="sec-i-form"></div>
-              <button class="btn" id="save-sec-i">Save Section I</button>
-            </div>
+          <!-- ====== ACTIVITY LOG (below every section) ======
+               Moved out of #ir-overview. Collapsed by default: the log matters
+               when something looks wrong, not on every open.
 
+               It is NOT a section and NOT a pane: no `sec-*` id, no
+               `class="section-content"`, and it sits OUTSIDE #sections-wrapper so
+               the wrapper's delegated input listener never sees it (nothing in
+               here is editable, so a draft would be pointless junk).
+
+               The `id="ir-timeline"` div is the shared renderer's mount point —
+               the same one the 🕓 History modal uses via renderTimelineInto().
+               Do not move the header INSIDE it: renderTimelineInto overwrites
+               innerHTML wholesale and would delete it. -->
+          <div id="ir-activity" class="activity-panel">
+            <h2 class="activity-title">
+              <button type="button" class="activity-toggle" id="ir-activity-toggle"
+                      aria-expanded="false" aria-controls="ir-activity-body">
+                <span class="activity-caret" aria-hidden="true"></span>
+                <span>Activity</span>
+                <span class="activity-count" id="ir-activity-count"></span>
+              </button>
+            </h2>
+            <div class="activity-body" id="ir-activity-body">
+              <div id="ir-timeline"></div>
+            </div>
           </div>
         </div><!-- end detail-view -->
 
-        <!-- Desktop-only empty state, shown until a ticket is selected.
+        <!-- Desktop-only empty state, shown until an IR is selected.
              A sibling of #detail-view rather than a child, so that
-             #detail-view's display stays a truthful "is a ticket open" flag
+             #detail-view's display stays a truthful "is an IR open" flag
              (applyAccessGating reads it). -->
         <div id="detail-placeholder">
-          <div class="ph-icon" aria-hidden="true">🎫</div>
-          <p class="ph-title">No ticket selected</p>
+          <div class="ph-icon" aria-hidden="true"></div>
+          <p class="ph-title">No IR selected</p>
           <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
         </div>
 

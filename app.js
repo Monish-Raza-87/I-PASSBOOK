@@ -6,8 +6,11 @@
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
 const CONFIG = {
-  // Google Apps Script Web App URL (v2 — correct column mappings)
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbz-borqx_TeCTh1Ibc70vv9SIHaFxRvVGs4XolbJG0EG2qEg4kVQ0hyclDOeLM8kCDP/exec',
+  // Google Apps Script Web App URL (v3 — Drive-JSON store, new project under
+  // monish.raza@indrones.com). The v2 URL it replaced stays alive and untouched as
+  // the rollback: reverting this one line and pushing gh-pages returns the app to
+  // the old backend, with no data lost.
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec',
 
   // Allowed domain — only @indrones.com (plus explicitly-allowlisted) accounts
   ALLOWED_DOMAIN: 'indrones.com',
@@ -36,80 +39,83 @@ const CONFIG = {
 // ─── STATE ───────────────────────────────────────────────────────────────────
 let currentUser = null;
 
-// ─── EMAIL + PASSWORD AUTH (allowlist-gated, no Google) ───────────────────────
-// No Google sign-in anywhere. A user signs UP with email + password — the
-// backend only lets emails on CONFIG.ALLOWED_EMAILS create an account. Sign-in
-// exchanges email + password for a revocable server SESSION TOKEN (12h), which
-// the frontend holds in sessionStorage and attaches to every backend call. A
-// refresh within a session stays signed in, but a FULL app close wipes
-// sessionStorage — so reopening the app ALWAYS requires signing in again,
-// regardless of who was logged in before (a handed-off device can't inherit a
-// session). The caller's email is read FROM the session token by the backend,
-// never a client param, so the allowlist gate can't be spoofed. An idle timeout
-// also forces re-sign-in after inactivity. See [[auth-token-gate]].
+// ─── EMAIL + PASSWORD AUTH (admin-provisioned, no self-signup) ────────────────
+// The admin creates every account and hands over a temporary password. On first
+// sign-in the user is forced to set their own password before a session is minted.
+// Sign-in exchanges email + password for a revocable server SESSION TOKEN, which
+// the frontend holds in localStorage and attaches to every backend call.
+//
+// localStorage, NOT sessionStorage, and no idle timeout: the owner asked for the
+// behaviour a Google Sheet has — sign in once, stay signed in for weeks, never be
+// asked again mid-task. The token slides forward on use server-side, so an active
+// person is effectively never signed out. The trade-off (a shared/handed-off
+// device keeps the session) is the owner's explicit call; the Sign Out button and
+// the server-side revoke are the answer to it. See [[auth-token-gate]].
 
-// Persist/restore the session token in sessionStorage (NOT localStorage) — this
-// is what makes "close the app → must sign in again" work.
+// Persist/restore the session token. localStorage so reopening the app resumes
+// the session instead of demanding a fresh sign-in.
 const SESSION_KEY = 'ipb_session';
 function persistSession(token) {
-  try { if (token) sessionStorage.setItem(SESSION_KEY, token); else sessionStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
+  try { if (token) localStorage.setItem(SESSION_KEY, token); else localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
 }
 function loadSession() {
-  try { return sessionStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+  try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
 }
 
-// ─── IDLE TIMEOUT / FORCED RE-AUTH ───────────────────────────────────────────
-// After IDLE_MS of no user activity, the session is revoked and the user is
-// bounced to the login screen (no page reload — the toast stays visible). This
-// is a "basic reason for re-sign-in": a device left open doesn't stay signed in
-// forever, which matters on a shared / handed-off device.
-const IDLE_MS = 15 * 60 * 1000;   // 15 minutes
-let _idleTimer = null;
-let _idleListenersAdded = false;
-function resetIdleTimer() {
-  if (_idleTimer) clearTimeout(_idleTimer);
-  if (!currentUser || !currentUser.sessionToken) return;   // only arm when signed in
-  _idleTimer = setTimeout(() => {
-    showToast('Signed out due to inactivity — please sign in again');
-    forceReauth();
-  }, IDLE_MS);
-}
-function startIdleTimer() {
-  if (!_idleListenersAdded) {
-    _idleListenersAdded = true;
-    ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'].forEach(ev =>
-      window.addEventListener(ev, resetIdleTimer, { passive: true }));
-  }
-  resetIdleTimer();
-}
-// Revoke the server session, clear in-session state, and show the login screen
-// (no reload). Used by the idle timeout and the session-expired path.
-function forceReauth() {
-  const st = currentUser && currentUser.sessionToken;
-  if (st) {
-    try {
-      const fd = new FormData();
-      fd.append('action', 'logout');
-      fd.append('sessionToken', st);
-      _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
-    } catch { /* non-fatal */ }
-  }
+// The ONE place local auth state is torn down, so it can never be half-cleared.
+// A stale profile with no token (or a token with no profile) is itself a cause of
+// spurious "please sign in again" screens at boot — every clear site used to
+// remember a different subset of keys. Also stops the comment poll, which would
+// otherwise keep firing an unauthorized request every 90s and re-trigger the
+// ejection path for as long as the login screen is up.
+function clearLocalAuth() {
   try {
-    sessionStorage.removeItem('ipb_user');
+    localStorage.removeItem('ipb_user');
+    localStorage.removeItem(SESSION_KEY);
+    sessionStorage.removeItem('ipb_user');   // legacy key from the sessionStorage build
     sessionStorage.removeItem(SESSION_KEY);
   } catch { /* non-fatal */ }
-  currentUser = null;
-  _authToastShown = false;
-  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null; }
-  if (typeof showAuth === 'function') showAuth();
+  try { if (typeof stopNudgePolling === 'function') stopNudgePolling(); } catch { /* non-fatal */ }
+}
+
+// NOTE — there is deliberately no `forceReauth()` here. An earlier build had one
+// that revoked the server session, cleared local state and showed the login
+// screen; nothing ever called it, and its comment claimed two call sites that did
+// not exist. Do not reintroduce it: the only path that would want it is rule 4 of
+// the interceptor below, and by then `confirmSessionAlive()` has already proved
+// the token is dead, so the revoke is a wasted round trip. Sign Out (`signOut()`)
+// is the one place a live token is deliberately revoked.
+
+// Ask the backend whether our token is still alive. This is the ONLY thing allowed
+// to conclude that a session has died.
+//
+// It resolves TRUE on a network failure, and that default is the whole point: the
+// bug this replaces ejected people on a flaky connection, on a CORS hiccup, and on
+// any HTML error page. "I could not reach the server" is not "you are signed out",
+// and treating it as one is what produced the repeated sign-in prompts.
+function confirmSessionAlive() {
+  const st = currentUser && currentUser.sessionToken;
+  if (!st) return Promise.resolve(false);
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
+    + 'action=sessionCheck&sessionToken=' + encodeURIComponent(st);
+  return _origFetch(url)
+    .then(r => r.text().then(t => {
+      try {
+        const d = JSON.parse(t);
+        return !!(d && d.status === 'ok' && d.alive);
+      } catch { return true; }        // unparseable → assume alive, do not eject
+    }))
+    .catch(() => true);               // unreachable → assume alive, do not eject
 }
 
 // Exchange email + password for a server session token + access payload.
-// Called from the Sign in button. Stores the session, clears any stale
-// sessionError, and returns the backend's parsed {status,...} so the caller can
-// surface the real rejection reason (e.g. "Wrong password."). Uses _origFetch
-// (not the intercepted fetch) so the login call isn't subject to the session
-// gate, and so a bad password can't trigger the "session expired" auto-logout.
+// Stores the session, clears any stale sessionError, and returns the backend's
+// parsed {status,...} so the caller can surface the real rejection reason.
+// Uses _origFetch (not the intercepted fetch) so the login call isn't subject to
+// the session gate, and so a bad password can't trigger the auto-logout path.
+//
+// A successful login on a temporary password returns mustChangePassword with NO
+// token — the caller must route to the password-change screen, not into the app.
 function loginBackend(email, password) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
   const fd = new FormData();
@@ -124,18 +130,22 @@ function loginBackend(email, password) {
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
-        // backend doLoginPassword nests the access payload under data.access
-        // (the getMyAccess return). Without this, currentUser.access would be
-        // all-undefined and lock the user out of sections.
+        // backend nests the access payload under data.access (the getMyAccess
+        // return). Without this, currentUser.access would be all-undefined.
         const a = (data && data.access) || {};
-        currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
+        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
         currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
       }
-      // Pass the backend's own error message through (e.g. "Wrong password." /
-      // "No account found for this email — sign up first."). Store it so the UI
-      // can surface the real reason instead of a generic "login failed".
+      // A temporary password is CORRECT but is not yet a session: the backend
+      // answers {status:'ok', mustChangePassword:true} with NO token, and the
+      // caller routes to the password-change screen. This has to pass through
+      // BEFORE the error branch below — swallowing it there is what made every
+      // first sign-in on a temp password report "Login failed." with the right
+      // password in the box.
+      if (data && data.status === 'ok' && data.mustChangePassword) return data;
+      // Pass the backend's own error message through (e.g. "Wrong password.").
       currentUser.sessionError = (data && data.message) ? data.message : 'Login failed.';
       return data && data.message
         ? { status: 'error', message: data.message }
@@ -149,12 +159,9 @@ function loginBackend(email, password) {
   ]);
 }
 
-// Sign-up is two steps (email verification via OTP):
-//   1) requestSignupBackend — backend emails a 6-digit code to the allowlisted
-//      address (MailApp, already scoped — no new permission). No account yet.
-//   2) verifySignupBackend  — user enters the code; backend creates the account
-//      and mints a session. `t` = ms since the form became ready (server-enforced
-//      bot time-gate). `website` is a honeypot — must stay empty.
+// POST helper for every self-authenticating auth call (the password lifecycle).
+// Goes through _origFetch so it carries no session token and can never trip the
+// session gate — a wrong reset code must not look like an expired session.
 function postAuth(action, fields) {
   const fd = new FormData();
   fd.append('action', action);
@@ -165,68 +172,53 @@ function postAuth(action, fields) {
     }))
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
 }
-function requestSignupBackend(email, password, t, website, captchaId, captchaAnswer) {
-  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and a password.' });
-  return postAuth('requestSignup', {
-    email, password, t: String(t || 0), website: website || '',
-    captchaId: captchaId || '', captchaAnswer: captchaAnswer || ''
-  });
-}
-function verifySignupBackend(email, password, code) {
-  if (!email || !password || !code) return Promise.resolve({ status: 'error', message: 'Enter your email, password, and the code.' });
-  return postAuth('verifySignup', { email, password, code });
+
+// Set a new password. Used both for the forced first-login change (currentPassword
+// is the admin's temporary password) and for a password the user chose to change.
+// Returns a session token on success — the only path that mints one for an account
+// still flagged Must Change Password.
+function changePasswordBackend(email, currentPassword, newPassword) {
+  if (!email || !currentPassword || !newPassword) {
+    return Promise.resolve({ status: 'error', message: 'Enter your current and new password.' });
+  }
+  if (newPassword.length < 8) {
+    return Promise.resolve({ status: 'error', message: 'New password must be at least 8 characters.' });
+  }
+  return postAuth('changePassword', { email, currentPassword, newPassword });
 }
 
-// Fetch a self-hosted captcha challenge (server-generated SVG image). The answer
-// stays on the server; the client only gets the image + an id to reference it.
-let _captchaId = null;
-function fetchCaptcha(imgEl) {
-  const errEl = document.getElementById('auth-captcha-error');
-  if (imgEl) imgEl.style.display = 'none';
-  if (errEl) { errEl.style.display = ''; errEl.textContent = 'Loading challenge…'; }
-  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getCaptcha';
-  return _origFetch(url).then(r => r.text().then(t => {
-    try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-  })).then(d => {
-    if (d && d.status === 'ok' && d.captchaId && d.svg && imgEl) {
-      _captchaId = d.captchaId;
-      // Base64 data-URI is the most broadly compatible way to render an SVG in <img>
-      // (handles the U+2212 minus sign and any other non-Latin1 char without encoding drama).
-      try { imgEl.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(d.svg))); }
-      catch (e) { imgEl.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(d.svg); }
-      imgEl.alt = 'Captcha challenge';
-      imgEl.style.display = '';
-      if (errEl) { errEl.style.display = 'none'; errEl.textContent = ''; }
-    } else if (imgEl) {
-      // Surface the REAL reason instead of silently showing a blank box. The most common
-      // cause is the GAS backend not yet redeployed with the getCaptcha action.
-      const reason = (d && d.message) ? d.message : 'no response from server';
-      if (errEl) {
-        errEl.style.display = '';
-        errEl.textContent = /Unknown action/i.test(reason)
-          ? 'Backend needs redeploy — captcha action missing. Tap ↻ after redeploying.'
-          : 'Captcha unavailable — tap ↻ to retry. (' + reason + ')';
-      }
-      console.warn('fetchCaptcha: challenge not loaded', d);
-    }
-    return d;
-  }).catch(err => {
-    const e2 = document.getElementById('auth-captcha-error');
-    if (e2) { e2.style.display = ''; e2.textContent = 'Captcha unavailable — check your connection, then tap ↻.'; }
-    console.warn('fetchCaptcha: network error', err);
-    return null;
-  });
+function forgotPasswordBackend(email) {
+  if (!email) return Promise.resolve({ status: 'error', message: 'Enter your email.' });
+  return postAuth('forgotPassword', { email });
 }
 
-// Refresh the caller's role/permissions from the backend (boot + after access
-// changes). Best-effort — a failure leaves the previous access in place.
+function resetPasswordBackend(email, code, newPassword) {
+  if (!email || !code || !newPassword) {
+    return Promise.resolve({ status: 'error', message: 'Enter the code and your new password.' });
+  }
+  if (newPassword.length < 8) {
+    return Promise.resolve({ status: 'error', message: 'New password must be at least 8 characters.' });
+  }
+  return postAuth('resetPassword', { email, code, newPassword });
+}
+
+// Refresh the caller's role/permissions from the backend (boot + after department
+// changes). Best-effort — a failure leaves the previous access in place, and the
+// gating fallback is view-only, so a failed refresh can never grant edit.
 function refreshMyAccess() {
   if (!currentUser || !currentUser.sessionToken) return Promise.resolve(null);
   const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getMyAccess';
   return fetch(url).then(r => r.ok ? r.json() : null)
     .then(data => {
       if (data && data.status === 'ok') {
-        currentUser.access = { role: data.role, permissions: data.permissions, pendingRequest: !!data.pendingRequest };
+        currentUser.access = {
+          role: data.role,
+          permissions: data.permissions,
+          departments: data.departments || [],
+          // Absent on an older backend means no Triage — the fail-closed default,
+          // which is the right direction for a permission.
+          triage: data.triage === true,
+        };
         return data;
       }
       return null;
@@ -235,7 +227,25 @@ function refreshMyAccess() {
 }
 
 const _origFetch = window.fetch.bind(window);
-let _authToastShown = false;       // one "session expired" hint per session, not per call
+let _authToastShown = false;       // one "session expired" hint per page session
+let _authSuspect = false;          // latched — at most one liveness probe per suspicion
+
+// Attaches the session token + email to every backend call, and decides what a
+// rejection MEANS. Four rules, and the first three exist to make the fourth rare:
+//
+//   1. Any good response clears suspicion.
+//   2. Only a PARSEABLE JSON `unauthorized`, on a call that actually carried a
+//      token, may even start an ejection. An HTTP error, an HTML error page
+//      (which is what a GAS failure returns) or a CORS failure never can.
+//   3. On suspicion, touch NOTHING locally — ask the server via
+//      confirmSessionAlive(), which answers "alive" when it cannot reach it.
+//   4. Only then eject: an inline retry inside the admin modal (where a full
+//      sign-out would lose the admin's unsaved work), a re-login elsewhere.
+//
+// What this replaces: a single unauthorized anywhere wiped storage and showed the
+// login screen, while the 90-second comment poll kept firing into a dead session
+// and re-arming it. That loop — not the token's lifetime — is why the User Access
+// page kept demanding a sign-in.
 window.fetch = function (input, init) {
   return (async () => {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -243,18 +253,17 @@ window.fetch = function (input, init) {
     if (!isGAS) return _origFetch(input, init);
 
     // Dev bypass (localhost + ?dev=1): no real account, so backend calls aren't
-    // authorized and fall back to demo data. Intentional — real testing happens
-    // signed-in on the live site.
+    // authorized and fall back to demo data. MUST stay before the token logic —
+    // there is no session to attach and nothing to eject. smoke-boot.mjs depends
+    // on this ordering.
     if (shouldUseDevAuthBypass()) return _origFetch(input, init);
 
-    // login / signup are self-authenticating (email+password in the body) — do
-    // NOT attach a session token to them (there isn't one yet, and they must not
-    // trip the session-expired auto-logout below).
-    const isAuthCall = url.indexOf('action=login') >= 0 || url.indexOf('action=requestSignup') >= 0 || url.indexOf('action=verifySignup') >= 0;
+    // The auth calls authenticate themselves (credentials in the body) and must
+    // never be subject to the session gate below.
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
-
     const isFormData = init && init.body && init.body instanceof FormData;
     const origBody = isFormData ? init.body : null;
 
@@ -265,7 +274,6 @@ window.fetch = function (input, init) {
 
     let resp;
     if (isAuthCall) {
-      // Pass the FormData auth call through untouched (uses _origFetch directly).
       resp = await _origFetch(input, init);
     } else if (isFormData) {
       // FormData() only accepts an HTMLFormElement, so copy entries by hand.
@@ -274,7 +282,6 @@ window.fetch = function (input, init) {
       appendAuth(fd);
       resp = await _origFetch(url, Object.assign({}, init, { body: fd }));
     } else {
-      // GET-style: append creds to the URL.
       const sep = url.indexOf('?') >= 0 ? '&' : '?';
       let q = '';
       if (sessionToken) q += (q ? '&' : '') + 'sessionToken=' + encodeURIComponent(sessionToken);
@@ -282,26 +289,38 @@ window.fetch = function (input, init) {
       resp = await _origFetch(url + (q ? sep + q : ''), init);
     }
 
-    // If the session is gone (expired / revoked / backend redeployed with a fresh
-    // SESSIONS tab), surface ONE hint and bounce back to the login screen so the
-    // user just signs in again — no "Reconnect" step, fully automatic. This is
-    // the "auto mode" recovery: a dead session never leaves the user stuck.
-    if (resp && resp.ok && !isAuthCall && !_authToastShown) {
-      try {
-        const data = await resp.clone().json();
-        if (data && data.status === 'error' && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0) {
-          _authToastShown = true;
-          showToast('Session expired — please sign in again');
-          try {
-            sessionStorage.removeItem('ipb_user');
-            sessionStorage.removeItem(SESSION_KEY);
-            localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
-          } catch { /* non-fatal */ }
-          currentUser = null;
-          if (typeof showAuth === 'function') showAuth();
-        }
-      } catch { /* not JSON */ }
+    // Rule 2 — nothing below may run unless a token was actually presented.
+    if (!resp || !resp.ok || isAuthCall || !sessionToken) return resp;
+
+    let data = null;
+    try { data = await resp.clone().json(); }
+    catch { _authSuspect = false; return resp; }        // HTML/opaque body → never eject
+
+    const isUnauthorized = data && data.status === 'error'
+      && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
+    if (!isUnauthorized) { _authSuspect = false; return resp; }   // rule 1
+
+    // Rule 3 — ask the server, having changed nothing locally.
+    if (_authSuspect) return resp;                       // a probe is already in flight
+    _authSuspect = true;
+    const alive = await confirmSessionAlive();
+    _authSuspect = false;
+    if (alive) return resp;                              // a false alarm — carry on
+
+    // Rule 4 — confirmed dead.
+    if (!_authToastShown) {
+      _authToastShown = true;
+      showToast('Session expired — please sign in again');
     }
+    // Inside the admin modal, a full sign-out would throw away unsaved edits and
+    // is what made this page feel like it was nagging. Offer a retry instead.
+    if (document.getElementById('access-modal')) {
+      renderAccessReconnect(String(data.message || ''));
+      return resp;
+    }
+    clearLocalAuth();
+    currentUser = null;
+    if (typeof showAuth === 'function') showAuth();
     return resp;
   })();
 };
@@ -311,41 +330,71 @@ let currentSectionData = {};   // cached data for open passbook
 let legacyMap   = {};          // irNumber -> { label, gid, embedUrl, openUrl } for legacy IRs (≤~IR441)
 
 // ─── ADMIN (config editors + access managers) ─────────────────────────────────
-// Admins manage users & per-section access, and bypass every permission check.
-// Must match backend CONFIG.ADMIN_EMAILS.
+// Admins bypass every permission check and are the only accounts that can
+// provision people or set department grants. Must match backend
+// CONFIG.ADMIN_EMAILS.
 const ADMIN_EMAILS = [
   'monish.raza@indrones.com',
-  'customer.relations@indrones.com',
 ];
 function isAdmin() {
   const email = currentUser?.email?.toLowerCase().trim();
   if (!email) return false;
   if (ADMIN_EMAILS.includes(email)) return true;
-  // Allow the local dev user (?dev=1) to test admin features.
-  if (email === `dev@${CONFIG.ALLOWED_DOMAIN}`) return true;
+  // The local dev user (?dev=1) needs admin UI to test the access modal. The guard
+  // must match the bypass's own conditions EXACTLY — it used to be just the email,
+  // so a tampered `ipb_user` in localStorage made isAdmin() true on the live site
+  // even though shouldUseDevAuthBypass() was false. That only showed admin chrome
+  // (every backend call still returned Unauthorized, since the backend knows one
+  // admin) but two definitions of "admin" that disagree is a trap for later.
+  if (email === `dev@${CONFIG.ALLOWED_DOMAIN}` && shouldUseDevAuthBypass()) return true;
   return false;
 }
 // Kept as an alias so existing Section B code reads naturally.
 const isInwardAdmin = isAdmin;
 
-// ─── ACCESS CONTROL (per-section view / comment / edit) ───────────────────────
+// ─── ACCESS CONTROL (view + comment for everyone; edit from departments) ──────
 // `currentUser.access` is populated by loginBackend / refreshMyAccess:
-//   { role: 'admin'|'user'|'none', permissions: { 'sec-a':'edit', ... }, pendingRequest }
-// During the backend redeploy window (or a transient getMyAccess failure) access
-// may be undefined — we fall back to a permissive profile so the app keeps
-// working exactly as it did before ACLs existed. The backend enforces
-// independently once redeployed, so this frontend leniency is safe in transition.
-const SECTION_IDS = ['sec-a','sec-b','sec-c','sec-d','sec-e','sec-f','sec-g','sec-h','sec-i'];
+//   { role: 'admin'|'user', permissions: { 'sec-b':'edit', … }, departments: [], triage: bool }
+//
+// `triage` is a SEPARATE axis, not a seventh permission key: a department can hold
+// it without editing any section (CR and Management do). `permissions[OVERVIEW_KEY]`
+// still exists so the Overview's inputs gate through the ordinary canEdit() seam.
+//
+// The fallback below must fail CLOSED on writes and OPEN on reads: view+comment
+// everywhere, edit nowhere. If access hasn't arrived yet (first paint, a
+// transient getMyAccess failure) the worst case is a disabled Save button the
+// user retries — never an unauthorised write, and never a locked-out screen.
+// The backend enforces independently, so a wrong guess here costs a button.
+// The six LIVE sections, letters B–G. There is no Section A: its content moved to
+// the Overview panel, whose data still lives under the `sec-a` key in APP_DATA
+// (see OVERVIEW_KEY below). `sec-h` and `sec-i` no longer exist either — they were
+// merged into `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch
+// Record), and backend.gs migrated their rows.
+const SECTION_IDS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+// The Overview panel is not a section — it has no tab, no letter and no
+// completion state — but it is still a record in APP_DATA, still gated, and
+// still resolved by field prefix. Keeping the original `sec-a` id means existing
+// rows, drafts and AUDIT_LOG history all keep working untouched.
+const OVERVIEW_KEY = 'sec-a';
 function myAccess() {
   if (currentUser && currentUser.access) return currentUser.access;
-  // Permissive fallback: treat as a user with edit on every section.
-  const all = {};
-  SECTION_IDS.forEach(s => { all[s] = 'edit'; });
-  return { role: isAdmin() ? 'admin' : 'user', permissions: all, pendingRequest: false, __fallback: true };
+  const viewOnly = {};
+  SECTION_IDS.forEach(s => { viewOnly[s] = 'view'; });
+  viewOnly[OVERVIEW_KEY] = 'view';
+  // `triage: false` is spelled out rather than left undefined so the
+  // fail-closed intent is visible at the call site: this profile is what the app
+  // uses before real access arrives, and it must never confer Triage.
+  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], triage: false, __fallback: true };
 }
 function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
-function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'comment' || v === 'edit'; }
+// Comment comes WITH view — every signed-in user can comment on every section.
+function canCommentSection(secId) { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; return !!(a.permissions && a.permissions[secId] === 'edit'); }
+// Triage is a SEPARATE axis from section edit rights, not a seventh "section".
+// It governs the IR header — status, assignee, priority, type — and the two
+// Overview fields. A department can hold it without editing any section, which
+// is exactly what CR and Management do. Admin always has it.
+function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
 
 // ─── SENTINEL STORES ─────────────────────────────────────────────────────────
 // App-owned records that live outside the 9 workflow sections. They are saved
@@ -366,7 +415,7 @@ function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 // getPassbook returns EVERY row matching one irNumber, keyed by sectionId, so a
 // single request reads a whole store. That is why per-IR workflow state is one
 // row per IR rather than one map record: each record gets its own ~50,000-char
-// cell (no ceiling), and two people editing two different tickets never clobber
+// cell (no ceiling), and two people editing two different IRs never clobber
 // each other.
 //
 // Caveat worth knowing before adding more: a sentinel-irNumber row is readable
@@ -412,10 +461,10 @@ function saveSentinel(irNumber, sectionId, fields) {
 // owns everything mutable — status, assignee, priority, type, which sections are
 // done, CSAT. One row per IR, keyed by irNumber.
 //
-// Ownership of a ticket's status begins the moment a human changes the STATUS in
+// Ownership of an IR's status begins the moment a human changes the STATUS in
 // the app (statusOwned). Until then the Sheet's Col D is still what the list
-// shows, so an edit made in the Sheet on an untriaged ticket still works — it
-// only stops mattering once somebody has taken the ticket in hand here. Note
+// shows, so an edit made in the Sheet on an untriaged IR still works — it
+// only stops mattering once somebody has taken the IR in hand here. Note
 // that assigning or categorising does NOT take over the status.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
@@ -431,8 +480,8 @@ function appState(irNumber) {
 }
 
 // The status this app has actually taken ownership of, or '' while the Sheet is
-// still the authority for the ticket. Deliberately separate from appState():
-// saving Section B is not triage, so a ticket whose Section B was saved must go
+// still the authority for the IR. Deliberately separate from appState():
+// saving Section B is not triage, so an IR whose Section B was saved must go
 // on following the Sheet's Col D until somebody changes the status here.
 function ownedStatus(irNumber) {
   const s = irState[irNumber];
@@ -440,7 +489,7 @@ function ownedStatus(irNumber) {
 }
 
 // Record that the app has seen this IR, without claiming ownership of its
-// status yet. Written once per ticket, on first open. Records `seededAt` rather
+// status yet. Written once per IR, on first open. Records `seededAt` rather
 // than a `statusAt`, because we genuinely do not know when the Sheet's status
 // was set and Stage 4's ageing must not be built on an invented timestamp.
 function seedIRState(irNumber) {
@@ -498,7 +547,11 @@ function applyIRStateToAllIRs() {
     ir.assigneeName = s.assigneeName || '';
     if (s.priority) ir.priority = s.priority;
     ir.type = s.type || '';
-    ir.done = Array.isArray(s.done) ? s.done : [];
+    // Filter against the LIVE ids. The store still holds historical `sec-a`,
+    // `sec-h` and `sec-i` entries until the migration remaps them, and a
+    // completion marker for a section that no longer exists would render as a
+    // progress row nobody can name.
+    ir.done = Array.isArray(s.done) ? s.done.filter(id => SECTION_IDS.includes(id)) : [];
   });
 }
 
@@ -518,7 +571,7 @@ async function patchIRState(irNumber, patch) {
   irState[irNumber] = next;
   applyIRStateToAllIRs();
   if (currentView === 'detail' && currentIR?.irNumber === irNumber) renderBannerMeta();
-  // Same guard as loadIRState: a ticket can be opened by deep link before the
+  // Same guard as loadIRState: an IR can be opened by deep link before the
   // list has loaded, and there is nothing to re-render until it does.
   if (allIRs.length) applyListFilters();
   const res = await saveSentinel(IR_STATE_IR, irNumber, next);
@@ -531,8 +584,15 @@ async function patchIRState(irNumber, patch) {
 // which is the only place that knows a section was actually saved.
 function markSectionDone(irNumber, sectionId) {
   const row = irState[irNumber] || {};
-  const done = Array.isArray(row.done) ? row.done.slice() : [];
-  if (!done.includes(sectionId)) done.push(sectionId);
+  // Always filter against SECTION_IDS on the way OUT, in both directions. This
+  // return value is what the caller writes back via patchIRState, so an unfiltered
+  // list would let a retired id inherited from a stale or partially-migrated store
+  // survive every subsequent save — the filter would only ever run for the one
+  // retired id that happened to be passed in.
+  const done = (Array.isArray(row.done) ? row.done : []).filter(id => SECTION_IDS.includes(id));
+  // Only live sections are completable. The Overview is deliberately not one, and a
+  // retired id must never be able to re-enter the list.
+  if (SECTION_IDS.includes(sectionId) && !done.includes(sectionId)) done.push(sectionId);
   return done;
 }
 
@@ -662,13 +722,15 @@ const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCountEl   = document.getElementById('list-count');
 const bannerPills   = document.getElementById('ir-banner-pills');
+const railToggle    = document.getElementById('sidebar-toggle');
+const listToggle    = document.getElementById('list-toggle');
 
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
 // renderLayout() translates it into the inline display values that the rest of
-// the app reads back (applyAccessGating tests detailView.style.display).
+// the app reads back (applySectionAccessGating tests detailView.style.display).
 let currentView = 'index';     // 'index' | 'detail'
-let activeSegment = 'all';     // ticket-list filter segment
+let activeSegment = 'all';     // IR-list filter segment
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -691,25 +753,27 @@ window.addEventListener('load', () => {
       const storedSession = loadSession();
       if (stored && storedSession) {
         currentUser = stored;
-        // Restore the server session token so backend calls are authorized with
-        // no sign-in pop-up. This only happens on a refresh WITHIN a session — a
-        // full app close wipes sessionStorage (loadStoredUser/loadSession return
-        // null) and the user must sign in again below.
+        // Restore the server session token so backend calls are authorized with no
+        // sign-in prompt. localStorage, so this survives a full app close.
         currentUser.sessionToken = storedSession;
         showApp();
-        // Refresh role/permissions from the backend (drives access gating +
-        // request-access screen). Best-effort; gating has a safe fallback. If
-        // the session is dead, the interceptor bounces back to the login screen.
-        refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
-        startIdleTimer();   // arm the inactivity auto sign-out
+        // Refresh role/permissions + departments (drives per-section save-button
+        // gating). Best-effort; the gating fallback is view-only.
+        // No mustChangePassword handling here: a stored session can only exist for
+        // an account whose flag is already cleared — the backend mints no token
+        // while it is set — so a stale stored session simply fails sessionCheck and
+        // takes the ordinary expiry path.
+        refreshMyAccess().then(() => {
+          if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+        });
       } else if (shouldUseDevAuthBypass()) {
         currentUser = createDevUser();
-        persistUser(currentUser, false); // dev bypass: this tab only
+        persistUser(currentUser);
         showApp();
       } else {
-        // Stale profile with no session = effectively signed out. Drop the
-        // stale profile and show the login screen so the user signs in fresh.
-        if (stored) { try { sessionStorage.removeItem('ipb_user'); localStorage.removeItem('ipb_user'); } catch { /* non-fatal */ } }
+        // Half-restored state (a profile with no token, or a token with no
+        // profile) is a stale fragment. Clear BOTH and show the login screen.
+        if (stored || storedSession) clearLocalAuth();
         showAuth();
       }
     }, 800);
@@ -723,251 +787,296 @@ function shouldUseDevAuthBypass() {
 }
 
 function createDevUser() {
+  // The dev bypass must be as capable as a real admin, because that is the only
+  // way to exercise the admin modal in a real browser (smoke-boot.mjs relies on
+  // this path entirely). It carries a sessionToken so refreshMyAccess() actually
+  // runs instead of returning early — that early return used to hide the fact
+  // that a dev user had no token at all.
+  const all = {};
+  SECTION_IDS.forEach(s => { all[s] = 'edit'; });
+  all[OVERVIEW_KEY] = 'edit';
   return {
     name: 'Dev Tester',
     email: `dev@${CONFIG.ALLOWED_DOMAIN}`,
     initial: 'D',
     token: 'local-dev',
+    sessionToken: 'local-dev',
+    access: { role: 'admin', permissions: all, departments: [], triage: true },
   };
 }
 
-// ─── IN-SESSION PROFILE (sessionStorage — NOT persistent across app close) ────
-// The profile + session token live in sessionStorage only, so a full app close
-// wipes them and the next open forces a fresh sign-in (a handed-off device can't
-// inherit the previous user's session). A refresh within a session keeps the
-// user signed in. The server session token is the real credential; this profile
-// is just the display name/email. The raw password is NEVER stored.
-function persistUser(user /* persist flag ignored — always sessionStorage */) {
+// ─── LOCAL PROFILE (localStorage — survives an app close) ────────────────────
+// The profile + session token live in localStorage so reopening the app resumes
+// the session instead of demanding a sign-in. The server session token is the
+// real credential and is revocable; this profile is just the display name/email.
+// The raw password is NEVER stored.
+function persistUser(user) {
   const safe = {
     name:    user.name,
     email:   user.email,
     picture: user.picture,
     initial: user.initial,
   };
-  try {
-    sessionStorage.setItem('ipb_user', JSON.stringify(safe));
-    // Deliberately do NOT write localStorage — that would survive app close and
-    // defeat the "reopen → must sign in again" security model.
-    localStorage.removeItem('ipb_user');
-  } catch { /* storage may be unavailable in private mode — non-fatal */ }
+  try { localStorage.setItem('ipb_user', JSON.stringify(safe)); } catch { /* private mode */ }
 }
 
 function loadStoredUser() {
   try {
-    // sessionStorage only — a full app close clears it, forcing re-sign-in.
-    const session = sessionStorage.getItem('ipb_user');
-    if (session) return JSON.parse(session);
-    // If a very old localStorage profile lingers from the prior "keep me logged
-    // in" model, ignore (and clean) it — we never restore a cross-close session.
-    localStorage.removeItem('ipb_user');
-  } catch { }
-  return null;
+    return JSON.parse(localStorage.getItem('ipb_user') || 'null');
+  } catch { return null; }
 }
 
 // ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
+// Three modes share one form: 'login' | 'forgot' | 'reset'. There is no sign-up
+// mode — accounts are provisioned by the admin — so the only two things a person
+// can do here are sign in, and recover a forgotten password via an emailed code.
+let _authFormWired = false;
+let _authMode = 'login';     // 'login' | 'forgot' | 'reset'
+let _resetEmail = '';
+
+// Establish a signed-in session from a backend payload. Shared by the login form
+// and the forced password change, so both land in exactly the same state.
+function finishAuth(email, d) {
+  const fallbackName = (email.split('@')[0] || 'User');
+  currentUser = currentUser || {};
+  currentUser.name    = currentUser.name || fallbackName;
+  currentUser.email   = email;
+  currentUser.initial = String(currentUser.name).charAt(0).toUpperCase() || '?';
+  delete currentUser.picture;
+  currentUser.sessionToken = d.sessionToken;
+  // The backend nests the access payload under data.access (getMyAccess).
+  const a = (d && d.access) || {};
+  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
+  currentUser.sessionError = null;
+  persistSession(d.sessionToken);
+  persistUser(currentUser);
+  _authToastShown = false;   // fresh session — allow one expiry hint again
+  showApp();
+  refreshMyAccess().then(() => { if (typeof applySectionAccessGating === 'function') applySectionAccessGating(); });
+}
+
 function showAuth() {
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
+  const pc = document.getElementById('password-change');
+  if (pc) pc.style.display = 'none';
+  document.body.classList.remove('view-detail');
+  _resetEmail = '';
+  setAuthMode('login');
   const err = document.getElementById('auth-error');
-  if (err) err.style.display = 'none';
-  // Reset to a clean Sign-in form (showAuth can be called mid-session by the
-  // idle timeout / session-expired path, when the form may be in signup/OTP mode).
-  const hide = (id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; };
-  const show = (id) => { const el = document.getElementById(id); if (el) el.style.display = ''; };
-  hide('auth-name-wrap'); hide('auth-otp-wrap'); hide('auth-captcha-wrap');
-  show('auth-signin-btn'); hide('auth-signup-btn');
-  const toggleBtn = document.getElementById('auth-toggle-mode');
-  if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
-  _authMode = 'login'; _pendingSignup = null;
-  ['auth-email', 'auth-password', 'auth-otp', 'auth-captcha'].forEach(id => {
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   wireAuthForm();
 }
 
-let _authFormWired = false;
-let _authFormReadyTs = 0;          // for the server-enforced bot time-gate
-let _authMode = 'login';           // 'login' | 'signup' | 'otp'
-let _pendingSignup = null;         // { email, password } held between OTP request & verify
+// Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
+// the browser's own Enter-to-submit keeps working in all three modes.
+function setAuthMode(mode) {
+  _authMode = mode;
+  const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  set('auth-password',      mode === 'login');
+  set('auth-signin-btn',    mode === 'login');
+  set('auth-forgot-link',   mode === 'login');
+  set('auth-forgot-wrap',   mode === 'forgot');
+  set('auth-reset-wrap',    mode === 'reset');
+  set('auth-back-link',     mode !== 'login');
+  set('auth-email',         true);          // every mode needs the email
+  // `required` follows visibility explicitly rather than relying on browsers
+  // agreeing that a display:none control is barred from constraint validation —
+  // a hidden required input that still validated would make the forgot and reset
+  // steps unsubmittable.
+  const passIn = document.getElementById('auth-password');
+  if (passIn) passIn.required = (mode === 'login');
+  const hint = document.getElementById('auth-hint-text');
+  if (hint) {
+    hint.textContent = mode === 'forgot'
+      ? 'Enter your email and we’ll send you a reset code.'
+      : mode === 'reset'
+        ? 'Enter the code from your email and choose a new password.'
+        : 'Sign in with the credentials your admin gave you.';
+  }
+  const err = document.getElementById('auth-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+}
+
+// ─── FORCED FIRST-LOGIN PASSWORD CHANGE ──────────────────────────────────────
+// A full-screen sibling of #app-container: while it is up, nothing in the shell
+// is reachable.
+//
+// It is presentation only. A temp-password sign-in returns NO session token (see
+// backend doLoginPassword), so there is nothing to skip TO — removing this screen
+// in devtools leaves you signed out with no way in. The temporary password is held
+// in a module-local variable and never touches storage.
+let _pcEmail = '';
+let _pcTemp = null;
+let _pcWired = false;
+
+function showPasswordChange(email, forced, tempPassword) {
+  _pcEmail = (email || '').toLowerCase().trim();
+  if (forced) _pcTemp = tempPassword || _pcTemp;
+  else _pcTemp = null;
+  authCont.style.display = 'none';
+  appCont.style.display  = 'none';
+  document.body.classList.remove('view-detail');
+  const pc = document.getElementById('password-change');
+  if (!pc) { showAuth(); return; }
+  pc.style.display = 'flex';
+  const em = document.getElementById('pc-email');
+  if (em) em.textContent = _pcEmail;
+  const sub = document.getElementById('pc-sub');
+  if (sub) {
+    sub.textContent = forced
+      ? 'Welcome. Set your own password to finish setting up your account — you only do this once.'
+      : 'Choose a new password for your account.';
+  }
+  ['pc-new', 'pc-confirm'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const err = document.getElementById('pc-error');
+  if (err) { err.textContent = ''; err.style.display = 'none'; }
+  wirePasswordChange();
+  const first = document.getElementById('pc-new');
+  if (first) setTimeout(() => first.focus(), 60);
+}
+
+function wirePasswordChange() {
+  if (_pcWired) return;
+  _pcWired = true;
+  const form   = document.getElementById('pc-form');
+  const save   = document.getElementById('pc-save');
+  const out    = document.getElementById('pc-signout');
+  const errEl  = document.getElementById('pc-error');
+  const showErr = m => { if (errEl) { errEl.textContent = m; errEl.style.display = m ? 'block' : 'none'; } };
+
+  if (out) out.addEventListener('click', () => { _pcTemp = null; signOut(); });
+
+  const submit = () => {
+    const a = (document.getElementById('pc-new') || {}).value || '';
+    const b = (document.getElementById('pc-confirm') || {}).value || '';
+    if (a.length < 8) { showErr('Password must be at least 8 characters.'); return; }
+    if (a !== b) { showErr('The two passwords do not match.'); return; }
+    if (!_pcTemp) { showErr('Your sign-in expired — please sign in again.'); showAuth(); return; }
+    if (save) { save.disabled = true; save.textContent = 'Setting…'; }
+    showErr('');
+    changePasswordBackend(_pcEmail, _pcTemp, a).then(d => {
+      if (save) { save.disabled = false; save.textContent = 'Set password & continue'; }
+      if (d && d.status === 'ok' && d.sessionToken) {
+        _pcTemp = null;
+        finishAuth(_pcEmail, d);
+      } else {
+        showErr((d && d.message) || 'Could not set the password.');
+      }
+    });
+  };
+  if (save) save.addEventListener('click', submit);
+  if (form) form.addEventListener('submit', ev => { ev.preventDefault(); submit(); });
+}
+
 function wireAuthForm() {
   if (_authFormWired) return;
   const form = document.getElementById('auth-form');
   if (!form) return;
   _authFormWired = true;
-  _authFormReadyTs = Date.now();
 
   const emailIn    = document.getElementById('auth-email');
   const passIn     = document.getElementById('auth-password');
-  const honeyIn    = document.getElementById('auth-website');   // honeypot — humans leave empty
-  const signInBtn   = document.getElementById('auth-signin-btn');
-  const signUpBtn   = document.getElementById('auth-signup-btn');
-  const toggleBtn   = document.getElementById('auth-toggle-mode');
-  const otpWrap     = document.getElementById('auth-otp-wrap');
-  const otpIn       = document.getElementById('auth-otp');
-  const otpNote     = document.getElementById('auth-otp-note');
-  const verifyBtn   = document.getElementById('auth-verify-btn');
-  const resendLink  = document.getElementById('auth-resend-link');
-  const captchaWrap = document.getElementById('auth-captcha-wrap');
-  const captchaImg  = document.getElementById('auth-captcha-img');
-  const captchaIn   = document.getElementById('auth-captcha');
-  const captchaRefresh = document.getElementById('auth-captcha-refresh');
-  const errEl       = document.getElementById('auth-error');
-
-  const showError = (msg) => { if (errEl) { errEl.textContent = msg; errEl.style.display = msg ? 'block' : 'none'; } };
-  const refreshCaptcha = () => { if (captchaImg) fetchCaptcha(captchaImg); if (captchaIn) captchaIn.value = ''; };
-  const setOtpStep = (on, note) => {
-    if (otpWrap) otpWrap.style.display = on ? 'flex' : 'none';
-    if (on && otpNote && note) otpNote.textContent = note;
-    if (on) _authMode = 'otp'; else if (_authMode === 'otp') _authMode = 'signup';
-    if (on) {
-      signUpBtn.style.display = 'none';
-      if (captchaWrap) captchaWrap.style.display = 'none';   // captcha already validated
-      if (otpIn) setTimeout(() => otpIn.focus(), 50);
-    }
-  };
-
-  const finishSuccess = (email, d) => {
-    const name = (email.split('@')[0] || 'User');
-    currentUser.name    = name;
-    currentUser.email   = email;
-    currentUser.initial = name.charAt(0).toUpperCase() || '?';
-    delete currentUser.picture;
-    currentUser.sessionToken = d.sessionToken;
-    const a = (d && d.access) || {};
-    currentUser.access = { role: a.role, permissions: a.permissions, pendingRequest: !!a.pendingRequest };
-    persistSession(d.sessionToken);
-    persistUser(currentUser, true);
-    showApp();
-    refreshMyAccess().then(() => { if (typeof applyAccessGating === 'function') applyAccessGating(); });
-    startIdleTimer();   // arm the inactivity auto sign-out
-  };
+  const codeIn     = document.getElementById('auth-code');
+  const newIn      = document.getElementById('auth-new-password');
+  const signInBtn  = document.getElementById('auth-signin-btn');
+  const forgotBtn  = document.getElementById('auth-forgot-btn');
+  const resetBtn   = document.getElementById('auth-reset-btn');
+  const resendLink = document.getElementById('auth-resend-link');
+  const errEl      = document.getElementById('auth-error');
+  const showError  = m => { if (errEl) { errEl.textContent = m; errEl.style.display = m ? 'block' : 'none'; } };
+  const emailOf    = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
 
   const submitLogin = () => {
-    const email = (emailIn.value || '').trim().toLowerCase();
-    const password = passIn.value || '';
+    const email = emailOf();
+    const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
     signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
     showError('');
-    currentUser = currentUser || { email: email };
+    currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, password).then(d => {
       signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
-      if (d && d.status === 'ok' && d.sessionToken) finishSuccess(email, d);
-      else showError((d && d.message) || 'Login failed.');
+      // A temporary password is correct but not yet a session — the change is the
+      // only way forward, and the password just typed is the credential for it.
+      if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
+      if (d && d.status === 'ok' && d.sessionToken) finishAuth(email, d);
+      else showError((d && d.message) || 'Sign in failed.');
     });
   };
 
-  // Step 1: ask the backend to email a 6-digit code to the allowlisted address.
-  // The honeypot + time-to-submit + captcha are all checked server-side.
-  const requestCode = (email, password) => {
-    const t = Date.now() - _authFormReadyTs;
-    const website = (honeyIn && honeyIn.value) || '';
-    if (website) return Promise.resolve({ status: 'error', message: 'Sign-up could not be completed.' });
-    const answer = (captchaIn && captchaIn.value) || '';
-    return requestSignupBackend(email, password, t, website, _captchaId, answer);
-  };
-
-  const submitSignup = () => {
-    const email = (emailIn.value || '').trim().toLowerCase();
-    const password = passIn.value || '';
-    if (!email || !password) { showError('Enter your email and a password.'); return; }
-    if (password.length < 6) { showError('Password must be at least 6 characters.'); return; }
-    if (captchaIn && !captchaIn.value) { showError('Please solve the captcha.'); return; }
-    signUpBtn.disabled = true; signUpBtn.textContent = 'Sending code…';
+  const submitForgot = () => {
+    const email = emailOf();
+    if (!email) { showError('Enter your email first.'); return; }
+    forgotBtn.disabled = true; forgotBtn.textContent = 'Sending…';
     showError('');
-    requestCode(email, password).then(d => {
-      signUpBtn.disabled = false; signUpBtn.textContent = 'Sign up';
-      if (d && d.status === 'ok') {
-        _pendingSignup = { email, password };
-        currentUser = { email: email };
-        setOtpStep(true, 'Enter the 6-digit code sent to ' + email);
-        if (d.message) showToast(d.message);
-      } else {
-        // A wrong/expired captcha is refreshed so the user gets a fresh image.
-        if (d && d.captchaRefresh) refreshCaptcha();
-        showError((d && d.message) || 'Sign up failed.');
-      }
+    forgotPasswordBackend(email).then(d => {
+      forgotBtn.disabled = false; forgotBtn.textContent = 'Email me a code';
+      // The backend answers identically whether or not the account exists, so the
+      // UI must not imply otherwise — always move on to the code step.
+      _resetEmail = email;
+      setAuthMode('reset');
+      const note = document.getElementById('auth-reset-note');
+      if (note) note.textContent = 'If ' + email + ' has an account, a 6-digit code is on its way.';
+      showToast((d && d.message) || 'Check your inbox for the reset code');
     });
   };
 
-  // Step 2: verify the code → backend creates the account + mints a session.
-  const submitVerify = () => {
-    if (!_pendingSignup) { showError('Please request a code first.'); return; }
-    const code = (otpIn && otpIn.value || '').trim();
+  const submitReset = () => {
+    const email = _resetEmail || emailOf();
+    const code  = ((codeIn && codeIn.value) || '').trim();
+    const pw    = (newIn && newIn.value) || '';
     if (!code) { showError('Enter the 6-digit code from your email.'); return; }
-    verifyBtn.disabled = true; verifyBtn.textContent = 'Verifying…';
+    if (pw.length < 8) { showError('New password must be at least 8 characters.'); return; }
+    resetBtn.disabled = true; resetBtn.textContent = 'Setting…';
     showError('');
-    verifySignupBackend(_pendingSignup.email, _pendingSignup.password, code).then(d => {
-      verifyBtn.disabled = false; verifyBtn.textContent = 'Verify & create account';
-      if (d && d.status === 'ok' && d.sessionToken) {
-        const email = _pendingSignup ? _pendingSignup.email : (currentUser && currentUser.email || '');
-        _pendingSignup = null;
-        setOtpStep(false);
-        finishSuccess(email, d);
+    resetPasswordBackend(email, code, pw).then(d => {
+      resetBtn.disabled = false; resetBtn.textContent = 'Set new password';
+      if (d && d.status === 'ok') {
+        // No token is returned on purpose: signing in with the new password is
+        // what proves it was typed the way the user meant.
+        if (codeIn) codeIn.value = '';
+        if (newIn) newIn.value = '';
+        if (emailIn) emailIn.value = email;
+        setAuthMode('login');
+        showError('');
+        showToast('Password set — sign in with your new password');
       } else {
-        showError((d && d.message) || 'Verification failed.');
+        showError((d && d.message) || 'Could not reset the password.');
       }
     });
   };
 
-  const resendCode = () => {
-    if (!_pendingSignup) return;
+  const resend = () => {
+    if (!resendLink) return;
     resendLink.textContent = 'Sending…';
     resendLink.style.pointerEvents = 'none';
-    showError('');
-    requestCode(_pendingSignup.email, _pendingSignup.password).then(d => {
+    forgotPasswordBackend(_resetEmail || emailOf()).then(d => {
       resendLink.textContent = 'Resend code';
       resendLink.style.pointerEvents = '';
-      if (d && d.status === 'ok') showToast(d.message || 'New code sent');
-      else showError((d && d.message) || 'Could not resend.');
+      showToast((d && d.message) || 'If that account exists, a new code is on its way');
     });
   };
 
-  signInBtn.addEventListener('click', submitLogin);
-  signUpBtn.addEventListener('click', submitSignup);
-  if (verifyBtn) verifyBtn.addEventListener('click', submitVerify);
-  if (resendLink) resendLink.addEventListener('click', resendCode);
-  if (captchaRefresh) captchaRefresh.addEventListener('click', (e) => { e.preventDefault(); refreshCaptcha(); });
-  if (toggleBtn) toggleBtn.addEventListener('click', toggleAuthMode);
-  // Enter submits the CURRENT mode (login / signup / otp), not always login.
-  form.addEventListener('submit', (ev) => {
+  if (signInBtn)  signInBtn.addEventListener('click', submitLogin);
+  if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
+  if (resetBtn)   resetBtn.addEventListener('click', submitReset);
+  if (resendLink) resendLink.addEventListener('click', resend);
+  const forgotLink = document.getElementById('auth-forgot-link');
+  if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
+  const backLink = document.getElementById('auth-back-link');
+  if (backLink) backLink.addEventListener('click', () => setAuthMode('login'));
+
+  // Enter submits the CURRENT mode, not always login.
+  form.addEventListener('submit', ev => {
     ev.preventDefault();
-    if (_authMode === 'otp') submitVerify();
-    else if (_authMode === 'signup') submitSignup();
+    if (_authMode === 'forgot') submitForgot();
+    else if (_authMode === 'reset') submitReset();
     else submitLogin();
   });
-}
-
-function toggleAuthMode() {
-  const nameWrap  = document.getElementById('auth-name-wrap');
-  const toggleBtn = document.getElementById('auth-toggle-mode');
-  const signInBtn = document.getElementById('auth-signin-btn');
-  const signUpBtn = document.getElementById('auth-signup-btn');
-  const otpWrap   = document.getElementById('auth-otp-wrap');
-  const captchaWrap = document.getElementById('auth-captcha-wrap');
-  const captchaImg  = document.getElementById('auth-captcha-img');
-  if (!nameWrap) return;
-  const isSignup = nameWrap.style.display !== 'none';
-  if (isSignup) {
-    // → Sign in mode
-    nameWrap.style.display = 'none';
-    if (otpWrap) otpWrap.style.display = 'none';
-    if (captchaWrap) captchaWrap.style.display = 'none';
-    signInBtn.style.display = '';
-    signUpBtn.style.display = 'none';
-    _authMode = 'login';
-    _pendingSignup = null;
-    if (toggleBtn) toggleBtn.textContent = 'Need an account? Sign up';
-  } else {
-    // → Sign up mode (captcha is required, so fetch a fresh challenge now)
-    nameWrap.style.display = '';
-    if (otpWrap) otpWrap.style.display = 'none';
-    if (captchaWrap) { captchaWrap.style.display = ''; if (captchaImg) fetchCaptcha(captchaImg); }
-    signInBtn.style.display = 'none';
-    signUpBtn.style.display = '';
-    _authMode = 'signup';
-    if (toggleBtn) toggleBtn.textContent = 'Already have an account? Sign in';
-  }
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
@@ -998,7 +1107,7 @@ function applyTheme(animate) {
   if (dark) root.setAttribute('data-theme', 'dark');
   else root.removeAttribute('data-theme');
 
-  if (navThemeIcon)  navThemeIcon.textContent  = dark ? '☀️' : '🌙';
+  if (navThemeIcon)  navThemeIcon.innerHTML  = iconSvg(dark ? 'sun' : 'moon');
   if (navThemeLabel) navThemeLabel.textContent = dark ? 'Light mode' : 'Dark mode';
   if (navTheme)      navTheme.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
 }
@@ -1016,17 +1125,64 @@ function toggleTheme() {
   else if (mq.addListener) mq.addListener(onChange);
 })();
 
+// ─── REMEMBERED LAYOUT PREFERENCES ───────────────────────────────────────────
+// Small on/off preferences that, like the theme, belong to the device rather than
+// to one IR. Bare keys, matching THEME_KEY, and every access is wrapped, because a
+// browser with storage blocked must still render a usable page.
+const RAIL_KEY     = 'rail';       // sidebar folded to an icon rail
+const LIST_KEY     = 'list';       // IR list folded away
+const ACTIVITY_KEY = 'activity';   // activity log expanded
+
+function storedFlag(key) {
+  try { return localStorage.getItem(key) === '1'; } catch { return false; }
+}
+function setFlag(key, on) {
+  try { on ? localStorage.setItem(key, '1') : localStorage.removeItem(key); } catch { /* non-fatal */ }
+}
+
+// ─── COLLAPSIBLE CHROME ──────────────────────────────────────────────────────
+// The sidebar fold is a class on <html> and the elements it targets are static, so
+// there is nothing per-IR to re-apply — it is set once from showApp(). A reload
+// cannot flash the expanded rail either, because #app-container is display:none
+// until showApp() runs, long after this lands.
+function applyChromeState() {
+  const root = document.documentElement;
+  const rail = storedFlag(RAIL_KEY);
+  const list = storedFlag(LIST_KEY);
+  root.classList.toggle('rail-collapsed', rail);
+  if (railToggle) {
+    railToggle.setAttribute('aria-expanded', String(!rail));
+    railToggle.title = rail ? 'Show the sidebar' : 'Hide the sidebar';
+  }
+  if (listToggle) {
+    listToggle.setAttribute('aria-expanded', String(!list));
+    listToggle.title = list ? 'Show the IR list' : 'Hide the IR list';
+  }
+  renderLayout();   // the list fold IS a pane — renderLayout owns its display
+}
+function toggleRail() { setFlag(RAIL_KEY, !storedFlag(RAIL_KEY)); applyChromeState(); }
+function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeState(); }
+
 // ─── LAYOUT ──────────────────────────────────────────────────────────────────
 // One function owns the panes' visibility. It must keep writing *inline*
-// styles: applyAccessGating reads detailView.style.display, and
-// applySectionAccessGating selects `.tab:not([style*="display: none"])`.
+// styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
-//   desktop (≥1024px) : list always visible, detail beside it when open
+//   desktop (≥1024px) : list visible, detail beside it when open
 //   mobile            : list and detail are separate full screens
+//
+// The list fold is decided HERE rather than by a stylesheet rule, because an
+// inline `display` beats any rule and this function is the one place allowed to
+// write it. Folding the list must never strand the user on an empty index screen,
+// which is why the fold only ever applies while a detail pane is open.
 function renderLayout() {
   const desktop = mqDesktop.matches;
   const detail  = currentView === 'detail';
-  indexView.style.display  = (desktop || !detail) ? 'flex' : 'none';
+  // On mobile the list and the detail are separate full screens, so an open
+  // detail always hides the list. On desktop they sit side by side, so the list
+  // hides only when the user asked for the room — and only while a detail is
+  // actually open.
+  const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
+  indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
   backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
@@ -1081,7 +1237,7 @@ async function handleRoute() {
   }
 
   if (r.name === 'ticket') {
-    // Already showing this ticket — don't rebuild every section form.
+    // Already showing this IR — don't rebuild every section form.
     if (currentView === 'detail' && currentIR?.irNumber === r.irNumber) return;
     // A deep link resolves before the IR list has loaded; wait so the banner
     // gets the drone serial and customer name.
@@ -1099,33 +1255,11 @@ async function handleRoute() {
 window.addEventListener('hashchange', () => { handleRoute(); });
 
 // ─── APP BOOT ────────────────────────────────────────────────────────────────
-function showApp() {
-  authCont.style.display = 'none';
-  appCont.style.display  = 'flex';
-
-  // Idempotent: this function binds click listeners to the avatar, the bell and
-  // the request-access buttons. A second call (re-login, router re-entry) would
-  // double-fire every one of them, so bind once and only refresh the layout.
-  if (_appBooted) { renderLayout(); syncNavAccess(); return; }
-  _appBooted = true;
-
-  showIndex();
-  applyTheme();          // sync the nav toggle with the stored preference
-  syncNavAccess();
-
-  // Set up user avatar
-  userAvatar.textContent = currentUser?.initial || '?';
-  if (currentUser?.picture) {
-    userAvatar.style.backgroundImage = `url(${currentUser.picture})`;
-    userAvatar.style.backgroundSize  = 'cover';
-    userAvatar.textContent = '';
-  }
-
-  // User menu toggle
-  userAvatar.addEventListener('click', toggleUserMenu);
-  if (navTheme) navTheme.addEventListener('click', toggleTheme);
-  if (navAccess) navAccess.addEventListener('click', openAccessModal);
-
+// Everything the signed-in app loads, and the poll it starts. Split out of
+// showApp() so the in-page re-login path can run it a second time: that path
+// stops the nudge poll during teardown, and a signed-in user who never gets it
+// back has a silently dead comment bell for the life of the page.
+function startAppData() {
   // Fetch IRs. The promise is kept so a deep link (#/tickets/IR409) can wait
   // for the list before it opens the passbook.
   _irsReady = fetchIRs();
@@ -1145,20 +1279,66 @@ function showApp() {
   loadIRState();
   loadNudges();
   startNudgePolling();
+}
+
+function showApp() {
+  // Guard: an account still holding a temporary password must never reach the
+  // shell. This is belt-and-braces — the backend mints no session in that state,
+  // so finishAuth() cannot be reached with mustChangePassword set — but a guard
+  // here means any future caller that gets it wrong diverts instead of showing a
+  // half-usable app whose every save would be rejected.
+  if (currentUser && currentUser.access && currentUser.access.mustChangePassword) {
+    showPasswordChange(currentUser.email, true);
+    return;
+  }
+  authCont.style.display = 'none';
+  appCont.style.display  = 'flex';
+  const pc = document.getElementById('password-change');
+  if (pc) pc.style.display = 'none';
+
+  // Idempotent: this function binds click listeners to the avatar, the bell and
+  // the nav. A second call (re-login, router re-entry) would double-fire every
+  // one of them, so bind once and only refresh the layout + the data.
+  //
+  // The data reload is not optional. A second call means an IN-PAGE re-login: the
+  // interceptor's confirmed-expiry path calls showAuth() and the user signs in
+  // again without the page ever reloading, so `_appBooted` is still true. The
+  // teardown that got them there (clearLocalAuth) STOPS the nudge poll — so
+  // returning here without restarting it left a freshly signed-in user with no
+  // comment polling, no IR refresh and no app state, silently and permanently.
+  if (_appBooted) { renderLayout(); syncNavAccess(); startAppData(); return; }
+  _appBooted = true;
+
+  showIndex();
+  applyTheme();          // sync the nav toggle with the stored preference
+  initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
+  applyChromeState();    // ...and the sidebar / IR-list folds
+  applyActivityState(storedFlag(ACTIVITY_KEY));
+  syncNavAccess();
+
+  // Set up user avatar
+  userAvatar.textContent = currentUser?.initial || '?';
+  if (currentUser?.picture) {
+    userAvatar.style.backgroundImage = `url(${currentUser.picture})`;
+    userAvatar.style.backgroundSize  = 'cover';
+    userAvatar.textContent = '';
+  }
+
+  // User menu toggle
+  userAvatar.addEventListener('click', toggleUserMenu);
+  if (navTheme) navTheme.addEventListener('click', toggleTheme);
+  if (navAccess) navAccess.addEventListener('click', openAccessModal);
+  if (railToggle) railToggle.addEventListener('click', toggleRail);
+  if (listToggle) listToggle.addEventListener('click', toggleList);
+
+  startAppData();
 
   // Bell toggle
   const bell = document.getElementById('nudge-bell');
   if (bell) bell.addEventListener('click', toggleNudgePanel);
 
-  // Wire the request-access screen buttons (shown later by applyAccessGating
-  // if the signed-in user has no access yet).
-  const raBtn = document.getElementById('request-access-btn');
-  if (raBtn) raBtn.addEventListener('click', requestAccessAction);
-  const raOut = document.getElementById('request-access-signout');
-  if (raOut) raOut.addEventListener('click', signOut);
-
   // Enter the route. A hash already in the URL (deep link / restored tab) wins;
-  // otherwise start on the ticket list without adding a history entry.
+  // otherwise start on the IR list without adding a history entry.
   if (!location.hash) history.replaceState(null, '', '#/tickets');
   handleRoute();
 }
@@ -1170,66 +1350,111 @@ function syncNavAccess() {
   if (navAccess)     navAccess.style.display     = admin ? '' : 'none';
 }
 
-// ─── ACCESS GATING (boot-level: app vs request-access screen) ────────────────
-// Called after login / refreshMyAccess. A signed-in user with role 'none'
-// (and not an admin) gets the request-access screen instead of the IR index.
-function applyAccessGating() {
-  const ra = document.getElementById('request-access');
-  if (!ra) return;
-  const a = myAccess();
-  const locked = a.role === 'none' && !isAdmin() && !a.__fallback;
-  if (locked) {
-    // #request-access is a sibling of #app-container, so the whole shell
-    // (sidebar + header + panes) goes away, not just the panes.
-    ra.style.display = 'flex';
-    appCont.style.display = 'none';
-    indexView.style.display = 'none';
-    detailView.style.display = 'none';
-    document.body.classList.remove('view-detail');
-    const emailEl = document.getElementById('request-access-email');
-    if (emailEl) emailEl.textContent = currentUser?.email || '';
-    const pendEl = document.getElementById('request-access-pending');
-    if (pendEl) pendEl.style.display = a.pendingRequest ? 'block' : 'none';
-    const btn = document.getElementById('request-access-btn');
-    if (btn) { btn.disabled = !!a.pendingRequest; btn.textContent = a.pendingRequest ? 'Access requested' : 'Request access'; }
-    return;
-  }
-  // Has access (or fallback during transition) → hide request-access screen.
-  ra.style.display = 'none';
-  // Only restore the shell if the user is actually signed in (this runs on the
-  // access-refresh path, which can also fire while the login screen is up).
-  if (authCont.style.display === 'none') appCont.style.display = 'flex';
-  syncNavAccess();
-  if (detailView.style.display === 'flex') {
-    applySectionAccessGating();   // a passbook is open — re-gate with fresh access
-  } else {
-    showIndex();
-  }
-}
+// ─── ACCESS GATING (retired) ─────────────────────────────────────────────────
+// There is no boot-level gate any more. Every signed-in account gets view +
+// comment on all nine sections the moment it exists, so the old
+// "you don't have access — request it and wait for an admin" screen had nothing
+// left to enforce and is gone, along with requestAccessAction().
+//
+// What remains is per-section EDIT gating inside an open passbook, which is
+// applySectionAccessGating() below. Edit rights come from departments only, and
+// the backend enforces them independently of anything rendered here.
 
-// Submit an access request. The backend records it as pending + emails admins.
-function requestAccessAction() {
+// ─── ADMIN: User Access modal ────────────────────────────────────────────────
+// Three tabs, one backend call. `listUsers` returns every account AND every
+// department in a single response, so switching tabs never re-fetches and the
+// People matrix can draw people × departments from one consistent snapshot.
+const SECTION_LABELS = { 'sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G' };
+// Human names for the tick grids. Kept as a literal rather than derived from
+// SECTIONS (defined much further down, and lazily) so the admin UI never depends
+// on the section-form builder having been evaluated.
+const SECTION_SHORT = {
+  'sec-b': 'Inward Checklist',
+  'sec-c': 'IQC Visual Inspection',
+  'sec-d': 'Investigation',
+  'sec-e': 'Production (Rework)',
+  'sec-f': 'Quality Test Report',
+  'sec-g': 'PDI Report/Dispatch Record',
+};
+// Triage is kept as its OWN label pair rather than a seventh `sec-*` key, so no
+// future `Object.keys(SECTION_SHORT)`/`SECTION_LABELS` walk can mistake it for a
+// section. It shares the grant grid's rendering, not its identity.
+const TRIAGE_LABEL = 'TR';
+const TRIAGE_SHORT = 'Triage (header, status & Overview)';
+
+let accessCache = { users: [], departments: [], apiVersion: 0 };
+let accessTab = 'people';
+
+// Every admin action is a POST carrying the session token, so it goes through the
+// intercepted fetch (which appends the token) — never _origFetch.
+function adminPost(action, fields) {
   const fd = new FormData();
-  fd.append('action', 'requestAccess');
-  fd.append('name', currentUser?.name || '');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+  fd.append('action', action);
+  Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.json())
-    .then(data => {
-      if (data && data.status === 'ok') {
-        if (currentUser.access) currentUser.access.pendingRequest = true;
-        applyAccessGating();
-        showToast('Access requested — an admin will review it');
-      } else {
-        showToast('Could not request access: ' + ((data && data.message) || 'backend error'));
-      }
-    })
-    .catch(() => showToast('Could not reach the backend — try again'));
+    .catch(() => ({ status: 'error', message: 'Could not reach the backend.' }));
 }
 
-// ─── ADMIN: User Access & Requests modal ─────────────────────────────────────
-const ACCESS_LEVELS = ['', 'view', 'comment', 'edit'];
-const ACCESS_LABEL  = { '': 'None', 'view': 'View', 'comment': 'Comment', 'edit': 'Edit' };
-const SECTION_LABELS = { 'sec-a':'A','sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G','sec-h':'H','sec-i':'I' };
+function copyText(text) {
+  const ok = () => showToast('Copied to clipboard');
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      ok();
+    } catch { showToast('Copy failed — select the text and copy manually'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(ok).catch(fallback);
+  } else fallback();
+}
+
+// The owner's handover document. One block per person, to be pasted into a txt
+// and delivered individually. It contains the ONE moment the temporary password
+// is visible — the backend stores only its hash, so if this is lost the admin
+// issues a new one with Reset password.
+function credentialsTxt(email, tempPassword, name) {
+  const link = location.origin + location.pathname;
+  return [
+    'I-PASSBOOK — your sign-in details',
+    '=================================',
+    '',
+    (name ? 'Name:  ' + name : ''),
+    'Email: ' + email,
+    'Temporary password: ' + tempPassword,
+    '',
+    'How to get in (first time only)',
+    '-------------------------------',
+    '1. Open: ' + link,
+    '2. Sign in with the email and temporary password above.',
+    '3. You will be asked to set your OWN password. Do that — the temporary',
+    '   one stops working immediately afterwards.',
+    '',
+    'On a phone: open the link, then use your browser menu →',
+    '"Add to Home screen" so it opens like an app.',
+    '',
+    'What you can do',
+    '---------------',
+    '• You can VIEW every IR and COMMENT on any section right away.',
+    '• You can EDIT the sections your department owns. If you need edit',
+    '  access somewhere else, ask the admin — it is a department setting.',
+    '',
+    'Forgot your password?',
+    '---------------------',
+    'On the sign-in screen click "Forgot password?", enter this email, and a',
+    '6-digit code will arrive by email. Enter the code and choose a new one.',
+    '',
+    'Keep this safe and do not forward it.',
+  ].filter(l => l !== '').join('\n');
+}
 
 function openAccessModal() {
   if (!isAdmin()) { showToast('Admins only'); return; }
@@ -1241,252 +1466,436 @@ function openAccessModal() {
   modal.innerHTML = `
     <div class="access-card">
       <div class="inward-options-head">
-        <div class="inward-options-title">👥 User Access &amp; Requests</div>
+        <div class="inward-options-title">👥 User Access</div>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
       <div class="access-status" id="access-status"></div>
-      <div class="access-body">
-        <div class="access-section">
-          <h3>Pending requests</h3>
-          <div id="access-requests"><div class="access-loading">Loading…</div></div>
-        </div>
-        <div class="access-section">
-          <h3>Users</h3>
-          <p class="access-hint">Add a teammate's @indrones.com email and pick one access level for all sections. Need finer control? Choose <strong>Custom…</strong> to set sections A–I separately.</p>
-          <p class="access-legend"><span class="acc-lv none">None</span> no access · <span class="acc-lv view">View</span> read-only · <span class="acc-lv comment">Comment</span> view + comment · <span class="acc-lv edit">Edit</span> view + comment + edit · <strong>Custom…</strong> per section</p>
-          <div class="access-add-row">
-            <input type="email" id="access-new-email" class="form-input" placeholder="teammate@indrones.com" />
-            <button type="button" class="btn" id="access-add-btn">+ Add</button>
-          </div>
-          <div id="access-users"><div class="access-loading">Loading…</div></div>
-          <button type="button" class="btn" id="access-save-all" style="margin-top:0.75rem;">💾 Save all changes</button>
-        </div>
+      <div class="access-tabs">
+        <button type="button" class="access-tab" data-tab="people">People &amp; departments</button>
+        <button type="button" class="access-tab" data-tab="depts">Departments</button>
+        <button type="button" class="access-tab" data-tab="create">Create people</button>
       </div>
+      <div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
-  document.getElementById('access-add-btn').addEventListener('click', addAccessUser);
-  document.getElementById('access-save-all').addEventListener('click', saveAllAccess);
-  updateAccessStatus();
+  modal.querySelectorAll('.access-tab').forEach(btn => {
+    btn.addEventListener('click', () => { accessTab = btn.dataset.tab; renderAccessTabs(); });
+  });
+  renderAccessTabs();
   loadAccessData();
 }
+function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
+
+function renderAccessTabs() {
+  const modal = document.getElementById('access-modal');
+  if (!modal) return;
+  modal.querySelectorAll('.access-tab').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.tab === accessTab);
+  });
+}
+
 function updateAccessStatus() {
   const el = document.getElementById('access-status');
   if (!el) return;
   const hasSession = !!(currentUser && currentUser.sessionToken);
-  const cred = hasSession
-    ? 'session ✓'
-    : ('no active session — ' + escHtml((currentUser && currentUser.sessionError) || 'sign in again'));
-  el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}`;
+  const cred = hasSession ? 'session ✓' : 'no active session';
+  const v = accessCache.apiVersion ? ' · API v' + accessCache.apiVersion : '';
+  el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}${v}`;
 }
-function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
 
-let accessCache = { users: [], requests: [] };
+// The reconnect panel. Rendered INSIDE the modal, because a full sign-out here
+// would throw away whatever the admin was mid-way through — and that ejector is
+// what made this page feel like it was nagging for a sign-in. The button retries
+// the load instead of signing out.
 function accessReconnectHtml(reason) {
-  // reason = the REAL backend rejection (expired/revoked session). With
-  // email+password auth there is no "Reconnect" — the user just signs in again.
-  const why = reason ? escHtml(String(reason)) : 'Your sign-in session isn’t active, so the backend rejected this request.';
-  const hint = 'Your session expired. Sign in again and this list reloads automatically.';
+  const why = reason
+    ? escHtml(String(reason))
+    : 'Your sign-in session isn’t active, so the backend rejected this request.';
   return `<div class="access-error">
-    <div id="access-reconnect-reason">${why}</div>
-    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Sign in again</button>
-    <div class="access-hint" style="margin-top:0.5rem;">${hint}</div>
+    <div>${why}</div>
+    <button type="button" class="btn" id="access-reconnect-btn" style="margin-top:0.6rem;">Retry</button>
+    <div class="access-hint" style="margin-top:0.5rem;">Nothing you have typed here has been lost. Retry to reload — sign out only if the retry keeps failing.</div>
   </div>`;
 }
+function renderAccessReconnect(reason) {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  panels.innerHTML = accessReconnectHtml(reason);
+  const rb = document.getElementById('access-reconnect-btn');
+  if (rb) rb.addEventListener('click', () => { panels.innerHTML = '<div class="access-loading">Loading…</div>'; loadAccessData(); });
+}
+
 function loadAccessData() {
-  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listACL')
+  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listUsers')
     .then(r => r.json())
     .then(data => {
       if (data && data.status === 'ok') {
-        accessCache = { users: data.users || [], requests: data.requests || [] };
-        renderAccessRequests();
-        renderAccessUsers();
+        accessCache = { users: data.users || [], departments: data.departments || [], apiVersion: data.apiVersion || 0 };
+        updateAccessStatus();
+        renderAccessPanel();
         return;
       }
       const unauthorized = data && String(data.message || '').toLowerCase().indexOf('unauthorized') === 0;
       // Surface the REAL backend rejection reason instead of a generic message.
       const reason = (currentUser && currentUser.sessionError) || (data && data.message) || '';
-      const html = unauthorized
-        ? accessReconnectHtml(reason)
-        : '<div class="access-error">Could not load — is the backend redeployed? ' + escHtml((data && data.message) || '') + '</div>';
-      document.getElementById('access-requests').innerHTML = html;
-      document.getElementById('access-users').innerHTML = '';
-      if (unauthorized) {
-        const rb = document.getElementById('access-reconnect-btn');
-        if (rb) rb.addEventListener('click', () => { signOut(); });
-      }
+      if (unauthorized) { renderAccessReconnect(reason); return; }
+      const panels = document.getElementById('access-panels');
+      if (panels) panels.innerHTML = '<div class="access-error">Could not load — is the backend redeployed? ' + escHtml((data && data.message) || '') + '</div>';
     })
     .catch(() => {
-      document.getElementById('access-requests').innerHTML = '<div class="access-error">Could not reach the backend.</div>';
-      document.getElementById('access-users').innerHTML = '';
+      const panels = document.getElementById('access-panels');
+      if (panels) panels.innerHTML = '<div class="access-error">Could not reach the backend. <button type="button" class="btn btn-sm" id="access-reconnect-btn" style="margin-left:0.5rem;">Retry</button></div>';
+      const rb = document.getElementById('access-reconnect-btn');
+      if (rb) rb.addEventListener('click', () => loadAccessData());
     });
 }
 
-function renderAccessRequests() {
-  const el = document.getElementById('access-requests');
-  const reqs = accessCache.requests || [];
-  if (!reqs.length) { el.innerHTML = '<div class="access-empty">No pending requests.</div>'; return; }
-  el.innerHTML = reqs.map(r => `
-    <div class="access-request-row">
-      <div><div class="access-req-name">${escHtml(r.name || '—')}</div><div class="access-req-email">${escHtml(r.email)}</div><div class="access-req-time">${escHtml(r.requestedAt || '')}</div></div>
-      <div class="access-req-actions">
-        <button type="button" class="btn btn-sm" onclick="approveRequest('${escHtml(r.email)}')">Approve</button>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="rejectRequest('${escHtml(r.email)}')">Reject</button>
-      </div>
-    </div>`).join('');
+function renderAccessPanel() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  if (accessTab === 'depts')       renderDepartmentsTab();
+  else if (accessTab === 'create') renderCreateTab();
+  else                             renderPeopleTab();
 }
 
-// A user's effective single access level when all 9 sections are equal. If the
-// sections differ, the user is in "Custom…" mode (mixed per-section perms).
-function userAccessLevel(u) {
-  const p = (u && u.permissions) || {};
-  const first = (p[SECTION_IDS[0]] || '');
-  return SECTION_IDS.every(s => (p[s] || '') === first) ? first : '__custom__';
-}
-
-function renderAccessUsers() {
-  const el = document.getElementById('access-users');
+// ─── TAB 1: people × departments matrix ──────────────────────────────────────
+function renderPeopleTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
   const users = accessCache.users || [];
-  if (!users.length) { el.innerHTML = '<div class="access-empty">No users yet — add one above.</div>'; return; }
-  el.innerHTML = users.map((u, idx) => {
-    const level = userAccessLevel(u);
-    const isCustom = level === '__custom__';
-    // Primary access-level selector: None / View / Comment / Edit / Custom…
-    const levelOpts = ['', 'view', 'comment', 'edit', '__custom__']
-      .map(l => `<option value="${l}"${l === level ? ' selected' : ''}>${l === '__custom__' ? 'Custom…' : ACCESS_LABEL[l]}</option>`).join('');
-    // Per-section grid (only shown in Custom mode). Selects always exist in the
-    // DOM so readRowPermsFromDom works in both modes.
-    const cells = SECTION_IDS.map(s => {
-      const v = (u.permissions && u.permissions[s]) || '';
-      const sopts = ACCESS_LEVELS.map(l => `<option value="${l}"${l === v ? ' selected' : ''}>${ACCESS_LABEL[l]}</option>`).join('');
-      return `<label class="acc-sec"><span>${SECTION_LABELS[s]}</span>
-        <select class="access-cell" data-row="${idx}" data-sec="${s}">${sopts}</select></label>`;
-    }).join('');
-    return `<div class="access-user-card" data-row="${idx}">
-      <div class="access-user-top">
+  const depts = accessCache.departments || [];
+  if (!users.length) {
+    panels.innerHTML = '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
+    return;
+  }
+  const head = depts.map(d => `<th title="${escHtml(d.name)}">${escHtml(d.name || d.key)}</th>`).join('');
+  const rows = users.map(u => {
+    const mine = u.departments || [];
+    const cells = depts.map(d => `
+      <td><input type="checkbox" class="acc-dept-tick" data-email="${escHtml(u.email)}" data-key="${escHtml(d.key)}"${mine.indexOf(d.key) >= 0 ? ' checked' : ''} /></td>`).join('');
+    const badge = u.isAdmin
+      ? '<span class="acc-badge acc-badge-admin">admin</span>'
+      : (u.status === 'disabled' ? '<span class="acc-badge acc-badge-off">disabled</span>' : '');
+    const pending = u.mustChangePassword ? '<span class="acc-badge acc-badge-temp">temp password</span>' : '';
+    return `<tr data-email="${escHtml(u.email)}">
+      <td class="acc-matrix-name">
         <div class="access-email-line">${escHtml(u.email)}</div>
+        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${pending}</div>
+        <div class="acc-matrix-actions">
+          <button type="button" class="btn btn-sm btn-secondary acc-reset" data-email="${escHtml(u.email)}">Reset password</button>
+          ${u.isAdmin ? '' : `<button type="button" class="btn btn-sm btn-secondary acc-toggle" data-email="${escHtml(u.email)}" data-status="${u.status === 'disabled' ? 'active' : 'disabled'}">${u.status === 'disabled' ? 'Enable' : 'Disable'}</button>`}
+        </div>
+      </td>
+      ${depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>'}
+    </tr>`;
+  }).join('');
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>Who is in which department</h3>
+      <p class="access-hint">Tick the departments a person belongs to. <strong>Everyone</strong> signed in can view and comment on every section — a tick here only adds <strong>edit</strong> rights, on the sections that department owns (set in the <em>Departments</em> tab).</p>
+      <div class="acc-matrix-wrap">
+        <table class="acc-matrix">
+          <thead><tr><th>Person</th>${head}</tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <button type="button" class="btn" id="access-save-all" style="margin-top:0.75rem;">💾 Save all changes</button>
+    </div>`;
+
+  panels.querySelectorAll('.acc-reset').forEach(b => b.addEventListener('click', () => resetPasswordAction(b.dataset.email)));
+  panels.querySelectorAll('.acc-toggle').forEach(b => b.addEventListener('click', () => setStatusAction(b.dataset.email, b.dataset.status)));
+  const save = document.getElementById('access-save-all');
+  if (save) save.addEventListener('click', savePeopleMatrix);
+}
+
+// One POST per CHANGED person. Unchanged rows are skipped, so a 19-person grid
+// with one edit is one write, not nineteen.
+function savePeopleMatrix() {
+  const btn = document.getElementById('access-save-all');
+  const ticks = document.querySelectorAll('.acc-dept-tick');
+  const byEmail = {};
+  ticks.forEach(t => {
+    const e = t.dataset.email;
+    if (!byEmail[e]) byEmail[e] = [];
+    if (t.checked) byEmail[e].push(t.dataset.key);
+  });
+  const jobs = [];
+  (accessCache.users || []).forEach(u => {
+    const next = (byEmail[u.email] || []).slice().sort();
+    const prev = (u.departments || []).slice().sort();
+    if (next.join('|') === prev.join('|')) return;      // unchanged — don't write
+    jobs.push(adminPost('setUserDepartments', { email: u.email, departments: JSON.stringify(next) }));
+  });
+  if (!jobs.length) { showToast('Nothing changed'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  Promise.all(jobs).then(results => {
+    const failed = results.filter(d => !d || d.status !== 'ok').length;
+    if (btn) { btn.disabled = false; btn.textContent = '💾 Save all changes'; }
+    showToast(failed ? `Saved ${results.length - failed}, ${failed} failed` : `Saved ${results.length} change${results.length === 1 ? '' : 's'}`);
+    loadAccessData();
+  });
+}
+
+function resetPasswordAction(email) {
+  if (!confirm('Issue a NEW temporary password for ' + email + '?\n\nTheir current password stops working and their devices are signed out.')) return;
+  adminPost('resetUserPassword', { email: email }).then(d => {
+    if (d && d.status === 'ok') { showCredentials([{ email: d.email, tempPassword: d.tempPassword, name: '' }]); loadAccessData(); }
+    else showToast((d && d.message) || 'Could not reset the password.');
+  });
+}
+
+function setStatusAction(email, status) {
+  if (status === 'disabled' && !confirm('Disable ' + email + '?\n\nThey are signed out immediately and cannot sign in again until re-enabled.')) return;
+  adminPost('setUserStatus', { email: email, status: status }).then(d => {
+    showToast((d && d.message) || (d && d.status === 'ok' ? 'Done' : 'Could not change the status.'));
+    loadAccessData();
+  });
+}
+
+// ─── TAB 2: department → section grants ──────────────────────────────────────
+function renderDepartmentsTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  const depts = accessCache.departments || [];
+  const cards = depts.map(d => {
+    const ticks = SECTION_IDS.map(s => `
+      <label class="acc-sec" title="${escHtml(SECTION_SHORT[s])}">
+        <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="${s}"${d.grants && d.grants[s] ? ' checked' : ''} />
+        <span>${SECTION_LABELS[s]}</span>
+        <span class="acc-sec-name">${escHtml(SECTION_SHORT[s])}</span>
+      </label>`).join('');
+    return `<div class="access-user-card" data-key="${escHtml(d.key)}">
+      <div class="access-user-top">
+        <div>
+          <div class="access-email-line">${escHtml(d.name || d.key)}</div>
+          <div class="acc-matrix-sub">${d.members || 0} ${d.members === 1 ? 'person' : 'people'}${d.active ? '' : ' · inactive'}</div>
+        </div>
         <div class="access-user-controls">
-          <select class="access-level" data-row="${idx}">${levelOpts}</select>
-          <button type="button" class="btn btn-sm btn-danger" onclick="removeAccessUser(${idx})">Remove</button>
+          <button type="button" class="btn btn-sm acc-save-dept" data-key="${escHtml(d.key)}">Save</button>
+          <button type="button" class="btn btn-sm btn-danger acc-del-dept" data-key="${escHtml(d.key)}">Delete</button>
         </div>
       </div>
-      <div class="access-perms-grid" style="${isCustom ? '' : 'display:none;'}">${cells}</div>
+      <div class="access-perms-grid">${ticks}</div>
+      <div class="access-perms-grid access-perms-triage">
+        <label class="acc-sec" title="${escHtml(TRIAGE_SHORT)}">
+          <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="triage"${d.triage ? ' checked' : ''} />
+          <span>${TRIAGE_LABEL}</span>
+          <span class="acc-sec-name">${escHtml(TRIAGE_SHORT)}</span>
+        </label>
+      </div>
     </div>`;
   }).join('');
-  // Wire each row's access-level selector.
-  el.querySelectorAll('.access-level').forEach(sel => {
-    sel.addEventListener('change', () => {
-      const idx = Number(sel.dataset.row);
-      const val = sel.value;
-      const card = el.querySelector(`.access-user-card[data-row="${idx}"]`);
-      const grid = card && card.querySelector('.access-perms-grid');
-      if (val === '__custom__') { if (grid) grid.style.display = ''; return; }
-      // One level for all sections: update cache + every per-section dropdown so a
-      // later "Custom…" expand reflects the chosen level. readRowPermsFromDom reads
-      // those dropdowns, so this is what gets saved.
-      if (grid) grid.style.display = 'none';
-      const u = accessCache.users[idx];
-      if (u) { u.permissions = u.permissions || {}; SECTION_IDS.forEach(s => { u.permissions[s] = val; }); }
-      el.querySelectorAll(`.access-cell[data-row="${idx}"]`).forEach(c => { c.value = val; });
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>What each department may edit</h3>
+      <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and type</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
+      <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
+      <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
+      <div class="access-add-row" style="margin-top:0.75rem;">
+        <input type="text" id="access-new-dept" class="form-input" placeholder="New department name" />
+        <button type="button" class="btn" id="access-add-dept">+ Add department</button>
+      </div>
+    </div>`;
+
+  panels.querySelectorAll('.acc-save-dept').forEach(b => b.addEventListener('click', () => saveDepartmentAction(b.dataset.key)));
+  panels.querySelectorAll('.acc-del-dept').forEach(b => b.addEventListener('click', () => deleteDepartmentAction(b.dataset.key)));
+  const add = document.getElementById('access-add-dept');
+  if (add) add.addEventListener('click', () => {
+    const inp = document.getElementById('access-new-dept');
+    const name = (inp && inp.value || '').trim();
+    if (!name) { showToast('Enter a department name'); return; }
+    const existing = (accessCache.departments || []).find(d => (d.name || '').toLowerCase() === name.toLowerCase());
+    if (existing) { showToast('That department already exists'); return; }
+    adminPost('saveDepartment', { name: name, grants: '{}' }).then(d => {
+      showToast((d && d.message) || 'Created');
+      loadAccessData();
     });
   });
 }
 
-// Read the current dropdown selections for a row from the DOM (captures the
-// admin's edits before saving).
-function readRowPermsFromDom(idx) {
-  const perms = {};
-  SECTION_IDS.forEach(s => {
-    const sel = document.querySelector(`.access-cell[data-row="${idx}"][data-sec="${s}"]`);
-    perms[s] = sel ? sel.value : '';
-  });
-  return perms;
+function readDeptGrants(key) {
+  const grants = {};
+  document.querySelectorAll(`.acc-grant[data-key="${key}"]`).forEach(t => { grants[t.dataset.sec] = t.checked ? 'edit' : ''; });
+  return grants;
+}
+function saveDepartmentAction(key) {
+  const d = (accessCache.departments || []).find(x => x.key === key);
+  adminPost('saveDepartment', {
+    key: key,
+    name: (d && d.name) || key,
+    active: (d && d.active === false) ? 'no' : 'yes',
+    grants: JSON.stringify(readDeptGrants(key)),
+  }).then(r => { showToast((r && r.message) || 'Saved'); loadAccessData(); });
+}
+function deleteDepartmentAction(key) {
+  if (!confirm('Delete the department "' + key + '"?\n\nEveryone in it loses the edit rights it granted. This cannot be undone.')) return;
+  adminPost('deleteDepartment', { key: key }).then(d => { showToast((d && d.message) || 'Deleted'); loadAccessData(); });
 }
 
-function saveAccessRow(email, perms) {
-  const fd = new FormData();
-  fd.append('action', 'saveACL');
-  fd.append('email', email);
-  fd.append('permissions', JSON.stringify(perms));
-  fd.append('mode', 'upsert');
-  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json());
+// ─── TAB 3: create people (single + bulk) ────────────────────────────────────
+function renderCreateTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>One person</h3>
+      <div class="access-add-row">
+        <input type="email" id="access-new-email" class="form-input" placeholder="teammate@indrones.com" />
+        <input type="text" id="access-new-name" class="form-input" placeholder="Full name (optional)" />
+        <button type="button" class="btn" id="access-create-one">+ Create account</button>
+      </div>
+    </div>
+    <div class="access-section">
+      <h3>Several people</h3>
+      <p class="access-hint">One email per line. Commas and semicolons work too. Duplicates and existing accounts are skipped and reported — one typo will not stop the rest.</p>
+      <textarea id="access-bulk-emails" class="form-input" rows="6" placeholder="a@indrones.com&#10;b@indrones.com&#10;c@indrones.com"></textarea>
+      <p class="access-hint" style="margin-top:0.5rem;">Optional: one <code>email, Full Name</code> per line, to set display names.</p>
+      <textarea id="access-bulk-names" class="form-input" rows="3" placeholder="a@indrones.com, Asha Rao"></textarea>
+      <button type="button" class="btn" id="access-bulk-create" style="margin-top:0.75rem;">Create accounts</button>
+    </div>
+    <div id="access-creds"></div>
+    <div class="access-section acc-danger">
+      <h3>Danger zone</h3>
+      <p class="access-hint">Delete <strong>every</strong> account except the admins. Used once when the app was re-provisioned. It cannot be undone, so it happens in two steps: review the list, copy it, then confirm.</p>
+      <div class="access-add-row">
+        <input type="text" id="access-purge-confirm" class="form-input" placeholder="Type PURGE to confirm" />
+        <button type="button" class="btn btn-danger" id="access-purge">Review what will be deleted</button>
+      </div>
+      <div id="access-purge-out"></div>
+    </div>`;
+
+  const one = document.getElementById('access-create-one');
+  if (one) one.addEventListener('click', () => {
+    const inp = document.getElementById('access-new-email');
+    const nm  = document.getElementById('access-new-name');
+    const email = (inp && inp.value || '').trim().toLowerCase();
+    if (!email) { showToast('Enter an email address'); return; }
+    one.disabled = true; one.textContent = 'Creating…';
+    adminPost('createUser', { email: email, name: (nm && nm.value || '').trim() }).then(d => {
+      one.disabled = false; one.textContent = '+ Create account';
+      if (d && d.status === 'ok') {
+        if (inp) inp.value = '';
+        if (nm) nm.value = '';
+        showCredentials([{ email: d.email, tempPassword: d.tempPassword, name: d.name }]);
+        loadAccessData();
+      } else showToast((d && d.message) || 'Could not create the account.');
+    });
+  });
+
+  const bulk = document.getElementById('access-bulk-create');
+  if (bulk) bulk.addEventListener('click', () => {
+    const eInp = document.getElementById('access-bulk-emails');
+    const nInp = document.getElementById('access-bulk-names');
+    const emails = (eInp && eInp.value || '').trim();
+    if (!emails) { showToast('Paste at least one email address'); return; }
+    bulk.disabled = true; bulk.textContent = 'Creating…';
+    adminPost('bulkCreateUsers', { emails: emails, names: (nInp && nInp.value) || '' }).then(d => {
+      bulk.disabled = false; bulk.textContent = 'Create accounts';
+      if (d && d.status === 'ok') {
+        if (eInp) eInp.value = '';
+        if (nInp) nInp.value = '';
+        showCredentials(d.created || [], d.skipped || []);
+        loadAccessData();
+      } else showToast((d && d.message) || 'Could not create the accounts.');
+    });
+  });
+
+  const purge = document.getElementById('access-purge');
+  if (purge) purge.addEventListener('click', () => {
+    const c = document.getElementById('access-purge-confirm');
+    const out = document.getElementById('access-purge-out');
+    const typed = (c && c.value || '').trim();
+    if (typed !== 'PURGE') { showToast('Type PURGE exactly to confirm'); return; }
+    purge.disabled = true; purge.textContent = 'Checking…';
+    // Step 1 — PLAN ONLY. The backend writes nothing here, so this is safe to press
+    // by accident and safe to close the page on. It used to delete first and hand
+    // back a "backup" in the same response, which is not a backup: a dropped
+    // connection took the only record of those accounts with them.
+    adminPost('purgeUsers', { confirm: 'PURGE', dryRun: '1' }).then(d => {
+      purge.disabled = false; purge.textContent = 'Review what will be deleted';
+      if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Purge refused.'); return; }
+      const rows = d.removed || [];
+      if (!out) return;
+      if (!rows.length) {
+        out.innerHTML = '<p class="access-hint" style="margin-top:0.6rem;">Nothing to delete — there are no non-admin accounts.</p>';
+        return;
+      }
+      // Tab-separated so it pastes straight into a Sheet as columns.
+      const backup = rows.map(r => [r.email, r.name, r.createdBy, r.createdAt].join('\t')).join('\n');
+      out.innerHTML = `<p class="access-hint" style="margin-top:0.6rem;">Nothing has been deleted yet — copy this list first.</p>
+        <textarea class="form-input" rows="6" readonly>${escHtml(backup)}</textarea>
+        <div class="access-add-row" style="margin-top:0.5rem;">
+          <button type="button" class="btn btn-sm btn-secondary" id="access-purge-copy">Copy backup</button>
+          <button type="button" class="btn btn-sm btn-danger" id="access-purge-go">Delete these ${rows.length} account(s)</button>
+        </div>`;
+      const cp = document.getElementById('access-purge-copy');
+      if (cp) cp.addEventListener('click', () => copyText(backup));
+      const go = document.getElementById('access-purge-go');
+      if (go) go.addEventListener('click', () => {
+        if (!confirm(`Delete ${rows.length} account(s) permanently?`)) return;
+        go.disabled = true; go.textContent = 'Deleting…';
+        // `expect` pins the reviewed count. If an account was created or removed
+        // between the two steps the backend refuses and nothing is deleted.
+        adminPost('purgeUsers', { confirm: 'PURGE', expect: String(rows.length) }).then(res => {
+          if (res && res.status === 'ok') {
+            out.innerHTML = `<p class="access-hint" style="margin-top:0.6rem;">Deleted ${(res.removed || []).length} account(s).</p>`;
+            if (c) c.value = '';
+            showToast(res.message || 'Accounts removed.');
+            loadAccessData();
+          } else {
+            go.disabled = false; go.textContent = `Delete these ${rows.length} account(s)`;
+            showToast((res && res.message) || 'Purge refused.');
+          }
+        });
+      });
+    });
+  });
 }
 
-function addAccessUser() {
-  const inp = document.getElementById('access-new-email');
-  const email = (inp?.value || '').trim().toLowerCase();
-  if (!email.endsWith('@' + CONFIG.ALLOWED_DOMAIN)) { showToast('Enter a valid @' + CONFIG.ALLOWED_DOMAIN + ' email'); return; }
-  if (accessCache.users.some(u => u.email === email)) { showToast('That user is already listed'); return; }
-  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = ''; });
-  accessCache.users.push({ email, permissions: perms });
-  inp.value = '';
-  // Render the new row locally WITHOUT reloading from the server — a reload
-  // would wipe any unsaved dropdown edits the admin made in other rows. The
-  // new user is persisted on "Save all changes" (or immediately below).
-  renderAccessUsers();
-  saveAccessRow(email, perms).then(d => {
-    showToast(d && d.status === 'ok' ? 'Added ' + email + ' — set permissions, then Save all changes' : 'Add pending: ' + ((d && d.message) || 'will save with Save all'));
-  });
+// The credentials panel. This is the ONLY time a temporary password is visible —
+// the sheet holds its hash — so it warns, and offers both a human block and a CSV.
+function showCredentials(created, skipped) {
+  const wrap = document.getElementById('access-creds');
+  if (!wrap) return;
+  if (!created || !created.length) {
+    wrap.innerHTML = skipped && skipped.length
+      ? `<div class="access-section"><h3>Nothing created</h3>${skippedHtml(skipped)}</div>`
+      : '';
+    return;
+  }
+  const blocks = created.map(c => credentialsTxt(c.email, c.tempPassword, c.name)).join('\n\n' + '-'.repeat(60) + '\n\n');
+  const csv = created.map(c => c.email + ',' + c.tempPassword).join('\n');
+  const cards = created.map(c => `
+    <div class="cred-card">
+      <div class="cred-email">${escHtml(c.email)}${c.name ? ' · ' + escHtml(c.name) : ''}</div>
+      <div class="cred-pw"><code>${escHtml(c.tempPassword)}</code>
+        <button type="button" class="btn btn-sm btn-secondary cred-copy-pw" data-pw="${escHtml(c.tempPassword)}">Copy password</button>
+      </div>
+    </div>`).join('');
+  wrap.innerHTML = `
+    <div class="access-section">
+      <h3>${created.length} temporary password${created.length === 1 ? '' : 's'}</h3>
+      <p class="access-hint">⚠️ <strong>Shown once.</strong> Only the hash is stored — if you lose these, use <em>Reset password</em> to issue new ones. Nothing here has been written to the sheet or to any file.</p>
+      ${cards}
+      <div class="access-add-row" style="margin-top:0.75rem;">
+        <button type="button" class="btn" id="cred-copy-all">📋 Copy all handover texts</button>
+        <button type="button" class="btn btn-secondary" id="cred-copy-csv">Copy as CSV (email,password)</button>
+      </div>
+      ${skipped && skipped.length ? skippedHtml(skipped) : ''}
+    </div>`;
+  const all = document.getElementById('cred-copy-all');
+  if (all) all.addEventListener('click', () => copyText(blocks));
+  const csvBtn = document.getElementById('cred-copy-csv');
+  if (csvBtn) csvBtn.addEventListener('click', () => copyText(csv));
+  wrap.querySelectorAll('.cred-copy-pw').forEach(b => b.addEventListener('click', () => copyText(b.dataset.pw)));
 }
-
-function removeAccessUser(idx) {
-  const u = accessCache.users[idx];
-  if (!u) return;
-  if (!confirm('Remove access for ' + u.email + '?')) return;
-  // Remove locally + re-render (no server reload, which would wipe unsaved
-  // edits in other rows). The delete is persisted immediately below.
-  accessCache.users.splice(idx, 1);
-  renderAccessUsers();
-  const fd = new FormData();
-  fd.append('action', 'saveACL');
-  fd.append('email', u.email);
-  fd.append('mode', 'remove');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? 'Removed ' + u.email : 'Remove pending: ' + ((d && d.message) || 'will clear on next reload'));
-  });
-}
-
-function saveAllAccess() {
-  const users = accessCache.users || [];
-  let done = 0, failed = 0;
-  const total = users.length;
-  if (!total) { showToast('Nothing to save'); return; }
-  const btn = document.getElementById('access-save-all');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  Promise.all(users.map((u, idx) => saveAccessRow(u.email, readRowPermsFromDom(idx))
-    .then(d => { if (d && d.status === 'ok') done++; else failed++; })
-    .catch(() => failed++)
-  )).then(() => {
-    btn.disabled = false; btn.textContent = '💾 Save all changes';
-    showToast(failed ? `Saved ${done}, ${failed} failed` : `Saved access for ${done} user${done === 1 ? '' : 's'}`);
-    loadAccessData();
-  });
-}
-
-function approveRequest(email) {
-  // Approve with default View on every section — the admin can fine-tune in the
-  // users table below. Keeps the request flow one click.
-  const perms = {}; SECTION_IDS.forEach(s => { perms[s] = 'view'; });
-  const fd = new FormData();
-  fd.append('action', 'decideRequest');
-  fd.append('email', email);
-  fd.append('decision', 'approve');
-  fd.append('permissions', JSON.stringify(perms));
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? `Approved ${email} — default View access. Adjust below.` : 'Approve failed: ' + ((d && d.message) || 'error'));
-    loadAccessData();
-  });
-}
-function rejectRequest(email) {
-  if (!confirm('Reject access request from ' + email + '?')) return;
-  const fd = new FormData();
-  fd.append('action', 'decideRequest');
-  fd.append('email', email);
-  fd.append('decision', 'reject');
-  fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).then(r => r.json()).then(d => {
-    showToast(d && d.status === 'ok' ? `Rejected ${email}` : 'Reject failed: ' + ((d && d.message) || 'error'));
-    loadAccessData();
-  });
+function skippedHtml(skipped) {
+  return `<div class="access-hint" style="margin-top:0.6rem;"><strong>Skipped:</strong><ul>` +
+    skipped.map(s => `<li>${escHtml(s.email)} — ${escHtml(s.reason || '')}</li>`).join('') + `</ul></div>`;
 }
 
 // ─── USER MENU ───────────────────────────────────────────────────────────────
@@ -1498,7 +1907,7 @@ function createUserMenu() {
     menu.innerHTML = `
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
-      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access &amp; Requests</button>' : ''}
+      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access</button>' : ''}
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
@@ -1525,14 +1934,12 @@ function signOut() {
       const fd = new FormData();
       fd.append('action', 'logout');
       fd.append('sessionToken', st);
-      fetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
+      // _origFetch, not the intercepted one: the interceptor's rules are built
+      // around keeping a live session, and this call is deliberately ending one.
+      _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd }).catch(() => {});
     } catch { /* non-fatal */ }
   }
-  try {
-    sessionStorage.removeItem('ipb_user');
-    sessionStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem('ipb_user');   // clear any legacy persistent profile
-  } catch { }
+  clearLocalAuth();
   currentUser = null;
   location.reload();
 }
@@ -1586,7 +1993,7 @@ function toDisplayDate(val) {
 }
 
 // 'DD MONTH YYYY, HH:MM'. The Sheet's Timestamp carries the time the client
-// raised the IR and the ticket has never shown it — only the date. Falls back to
+// raised the IR and the IR has never shown it — only the date. Falls back to
 // the raw cell when unparseable, so nothing is ever rendered as NaN.
 function toDisplayDateTime(val) {
   if (!val) return '';
@@ -1639,7 +2046,7 @@ const INTAKE_FIELDS = [
 ];
 
 // Columns the app reads but does not list in the intake view: the IR number and
-// the status are the ticket's identity and its workflow, and priority is
+// the status are the IR's identity and its workflow, and priority is
 // app-owned (Stage 1 triage) — the Form has no Priority question yet. Named here
 // so the audit below does not report them as dropped.
 const INTAKE_HIDDEN_NEEDLES = ['IR Number', 'Issue Status', 'Priority'];
@@ -1708,7 +2115,7 @@ function mapSheetRows(rows) {
     intake.contactPhone = phone;    // …onto its own row
 
     // Anything the Form writes that the table above does not model. Non-empty
-    // values only: a column that exists but is blank for this ticket would just
+    // values only: a column that exists but is blank for this IR would just
     // be noise on every card.
     const extra = [];
     headers.forEach((h, i) => {
@@ -1763,7 +2170,7 @@ async function fetchIRs() {
     if (records && records.length) {
       setAllIRs(records);
       _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} tickets loaded from the Sheet`);
+      setSyncStatus(`✓ ${allIRs.length} IRs loaded from the Sheet`);
       renderIRList(allIRs);
       return;
     }
@@ -1780,7 +2187,7 @@ async function fetchIRs() {
     if (data.status === 'ok') {
       setAllIRs(data.records || []);
       _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} tickets loaded`);
+      setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
       renderIRList(allIRs);
       return;
     }
@@ -1793,7 +2200,7 @@ async function fetchIRs() {
   }
 }
 
-// Manual re-read of the ticket list + app-owned state. Staff should never have
+// Manual re-read of the IR list + app-owned state. Staff should never have
 // to wonder whether what they are looking at is stale — this is the answer.
 let _refreshing = false;
 async function refreshIRList() {
@@ -1802,9 +2209,9 @@ async function refreshIRList() {
   try {
     await fetchIRs();
     await loadIRState();
-    // A ticket can be open while the list refreshes. Adopt the freshly-read
+    // A IR can be open while the list refreshes. Adopt the freshly-read
     // record so the banner and the client report stop showing stale Sheet data —
-    // app-owned fields are already merged onto it by setAllIRs(). If the ticket
+    // app-owned fields are already merged onto it by setAllIRs(). If the IR
     // is gone from the Sheet, the open record is kept rather than blanked.
     if (currentView === 'detail' && currentIR?.irNumber) {
       const fresh = allIRs.find(x => x.irNumber === currentIR.irNumber);
@@ -1836,7 +2243,7 @@ function renderSyncBar() {
   syncStatus.innerHTML =
     `<span class="sync-msg">${escHtml(_syncMsg)}</span>` +
     `<span class="sync-meta">Synced ${escHtml(t)}</span>` +
-    `<button type="button" class="sync-refresh" onclick="refreshIRList()" title="Re-read the ticket list from the Sheet">↻ Refresh</button>`;
+    `<button type="button" class="sync-refresh" onclick="refreshIRList()" title="Re-read the IR list from the Sheet">↻ Refresh</button>`;
 }
 
 // ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
@@ -1897,22 +2304,29 @@ function renderIRList(records) {
 
   irList.innerHTML = records.map(ir => {
     const owner = ir.assigneeName || ir.assignee || '';
+    // Everything below is escaped, and that is load-bearing rather than tidy:
+    // `droneId` is Form Responses column K, written by whoever submits the public
+    // customer form, and `status`/`priority` can be rewritten by any signed-in user
+    // through the `__IRS__` sentinel store. Before this, an unauthenticated
+    // attacker could put an `onerror` payload in the serial field and steal the
+    // admin's session token the moment the list rendered.
+    const sumUrl = safeUrl(ir.summaryLink);
     return `
-    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${ir.irNumber}" onclick="goTicket('${ir.irNumber}')">
+    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
       ${owner ? `<span class="assignee-avatar" title="Assigned to ${escHtml(owner)}">${escHtml(initialsOf(owner))}</span>` : ''}
       <div class="ir-card-main">
-        <div class="ir-title">${ir.irNumber}</div>
+        <div class="ir-title">${escHtml(ir.irNumber)}</div>
         <div class="ir-meta">
-          <span class="ir-sn">${ir.droneId || ''}</span>
+          <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
           ${ir.type ? `<span class="ir-dot">·</span><span class="ir-type">${escHtml(ir.type)}</span>` : ''}
-          ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${ir.dateRaised}</span>` : ''}
+          ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
         </div>
       </div>
       <div class="ir-card-side">
         ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
-        ${ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${ir.priority}</span>` : ''}
-        <span class="${getBadgeClass(ir.status)}">${ir.status || 'Open'}</span>
-        ${ir.summaryLink ? `<a href="${ir.summaryLink}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
+        ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(ir.priority)}</span>` : ''}
+        <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
+        ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
   `;
@@ -2060,7 +2474,7 @@ async function openPassbook(irNumber) {
       currentIR.done = Array.isArray(st.done) ? st.done : [];
     }
     renderBannerMeta();
-    // First sight of this ticket: record that the app has seen it. Deliberately
+    // First sight of this IR: record that the app has seen it. Deliberately
     // does NOT claim ownership of the status — see seedIRState.
     seedIRState(irNumber);
   }
@@ -2073,7 +2487,7 @@ async function openPassbook(irNumber) {
   buildSectionForms(irNumber);
 
   // The client's original report. Read-only and Sheet-only, so it needs no
-  // reload after a section save — only after the ticket itself changes.
+  // reload after a section save — only after the IR itself changes.
   renderIntake();
 
   // Load saved data for this IR, then restore any unsaved drafts on top
@@ -2094,6 +2508,9 @@ async function openPassbook(irNumber) {
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
   renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section B draft values
+  // The pinned Overview needs the saved data (a_crmOwner/a_contactPhone, and the
+  // legacy activity log), so it renders only after loadSectionData has landed.
+  renderOverview();
 
   // Legacy record: show the "Legacy Record" button if this IR exists in the
   // legacy workbook, and auto-open that read-only view when there's no new-app
@@ -2143,11 +2560,11 @@ function renderIntake() {
   if (!body) return;
   const ir = currentIR;
   if (!ir || !ir.irNumber) {
-    body.innerHTML = '<p class="intake-audit">No ticket selected.</p>';
+    body.innerHTML = '<p class="intake-audit">No IR selected.</p>';
     return;
   }
 
-  // `intake` holds the raw cells for a Sheet-sourced ticket. Legacy and demo
+  // `intake` holds the raw cells for a Sheet-sourced IR. Legacy and demo
   // records have no Sheet row, so fall back to the parsed fields the record does
   // carry — the tab must be honest about what it has, not show blanks.
   const intake = ir.intake || {};
@@ -2189,15 +2606,15 @@ function renderIntake() {
     : '';
 
   // Columns the Form writes that the app does not model AND that are blank on
-  // this ticket — named so the gap is visible rather than assumed away.
+  // this IR — named so the gap is visible rather than assumed away.
   const unmapped = (lastSheetAudit.unmapped || [])
     .filter(h => !extras.some(x => x.label === h));
   const auditNote = unmapped.length
-    ? `<p class="intake-audit">The client's form also writes ${unmapped.map(escHtml).join(', ')} — empty on this ticket.</p>`
+    ? `<p class="intake-audit">The client's form also writes ${unmapped.map(escHtml).join(', ')} — empty on this IR.</p>`
     : '';
   const noSheetNote = ir.intake
     ? ''
-    : `<p class="intake-audit">No Sheet row for this ticket — showing only the fields the app holds. ` +
+    : `<p class="intake-audit">No Sheet row for this IR — showing only the fields the app holds. ` +
       `Records from before the app (🏛 Legacy) live in the old workbook.</p>`;
 
   body.innerHTML =
@@ -2210,13 +2627,254 @@ function renderIntake() {
     extrasHtml;
 }
 
+// ─── OVERVIEW PANEL ──────────────────────────────────────────────────────────
+// What used to be Section A, in the form it should always have had. It is pinned
+// above the section tabs and is not a section: no letter, no tab, no completion
+// state, and it is never drafted (it sits outside #sections-wrapper).
+//
+// Its record still lives in APP_DATA under the id `sec-a` — OVERVIEW_KEY — so the
+// existing row, the existing AUDIT_LOG history and the backend's locked-intake
+// strip all keep working unchanged. Nothing user-visible says "A" any more.
+//
+// Layout, top to bottom:
+//   facts     the intake values the customer's Google Form supplies, read-only
+//   editable  the two fields CRM actually owns (a_crmOwner, a_contactPhone)
+//   timeline  generated from what the app records — see buildTimeline
+//   legacy    the hand-typed activity log, read-only and labelled Legacy
+
+const OVERVIEW_FACTS = [
+  { field: 'irNumber',    label: 'IR Number',        kind: 'text' },
+  { field: 'droneId',     label: 'Drone Serial No.', kind: 'text' },
+  { field: 'dateRaised',  label: 'Date Raised',      kind: 'date' },
+  { field: 'companyName', label: 'Company',          kind: 'text' },
+  { field: 'customerName',label: 'Respondent',       kind: 'text' },
+  { field: 'issueType',   label: 'Support Required', kind: 'text' },
+];
+
+// Read one intake value, preferring the raw Sheet cell over the parsed record.
+// Same precedence rule as renderIntake(): the Sheet is the client's own words.
+function overviewFactValue(field) {
+  const ir = currentIR || {};
+  const raw = ir.intake && ir.intake[field];
+  if (raw !== undefined && raw !== null && raw !== '') return raw;
+  return ir[field] !== undefined && ir[field] !== null ? ir[field] : '';
+}
+
+function renderOverviewFacts() {
+  const el = document.getElementById('ir-overview-facts');
+  if (!el) return;
+  const facts = OVERVIEW_FACTS.map(f => {
+    const v = overviewFactValue(f.field);
+    return `<div class="overview-fact"><span class="overview-fact-label">${escHtml(f.label)}</span>` +
+           `<span class="overview-fact-value">${intakeValueHtml(f.kind, v)}</span></div>`;
+  }).join('');
+  el.innerHTML = `<div class="overview-facts">${facts}</div>` +
+    `<button type="button" class="overview-report-link" id="overview-report-link">` +
+    `Full report, issue description &amp; weather →</button>`;
+  // The description and the incident/weather text are long and stay on the 📋
+  // Report tab. Pinning all ten intake fields here would push the timeline a
+  // screen down on a phone, and they are already one tap away.
+  const link = document.getElementById('overview-report-link');
+  if (link) link.onclick = () => {
+    const tab = document.querySelector('.tab[data-section="sec-intake"]');
+    if (tab) tab.click();
+  };
+}
+
+function renderOverviewEditable() {
+  const el = document.getElementById('ir-overview-editable');
+  if (!el) return;
+  const saved = (currentSectionData && currentSectionData[OVERVIEW_KEY]) || {};
+  const canWrite = canTriage();
+  const val = (key, fallback) => {
+    const v = saved[key];
+    return (v === undefined || v === null) ? (fallback || '') : v;
+  };
+  const ro = canWrite ? '' : ' disabled';
+  el.innerHTML =
+    `<div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager</label>
+       <input class="form-input" type="text" id="a_crmOwner" placeholder="Name of CRM person" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
+     </div>
+     <div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_contactPhone">Customer Phone</label>
+       <input class="form-input" type="tel" id="a_contactPhone" placeholder="+91 XXXXX XXXXX" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+     </div>` +
+    (canWrite ? '' : `<p class="overview-note">Only Customer Relations and Management can edit these. Everyone can read them.</p>`);
+}
+
+// The hand-typed activity log, read-only. It is shown exactly as it was typed,
+// with the four-column grid it was typed into — spans where the inputs were, so
+// the layout needs no new CSS. Not merged into the timeline: the rows carry no
+// per-row timestamp, so any date on them would be invented.
+function renderLegacyLog() {
+  const el = document.getElementById('ir-legacy-log');
+  if (!el) return;
+  const raw = (currentSectionData && currentSectionData[OVERVIEW_KEY] || {}).a_activityLog;
+  let rows = [];
+  if (Array.isArray(raw)) {
+    rows = raw.filter(r => r && (r.activity || r.remark || r.date));
+  } else if (typeof raw === 'string' && raw.trim()) {
+    // Older records stored this field as one blob of text before it became a table.
+    rows = [{ activity: raw }];
+  }
+  if (!rows.length) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    `<div class="overview-sub-head">
+       <span class="legacy-tag">Legacy</span>
+       <span class="overview-sub-note">Hand-typed activity log from before this app recorded activity automatically. Kept for the record — the app no longer writes to it.</span>
+     </div>
+     <div class="activity-table-wrapper">
+       <div class="activity-table-header">
+         <span class="act-col-day">#</span>
+         <span class="act-col-date">Date</span>
+         <span class="act-col-activity">Activity Description</span>
+         <span class="act-col-remark">Remark</span>
+       </div>
+       <div class="activity-table-body">${rows.map(buildLegacyActivityRow).join('')}</div>
+     </div>`;
+}
+
+function applyOverviewGating() {
+  const btn = document.getElementById('save-overview');
+  if (!btn) return;
+  const canWrite = canTriage();
+  btn.disabled = !canWrite;
+  btn.style.opacity = canWrite ? '' : '0.5';
+  btn.style.cursor = canWrite ? '' : 'not-allowed';
+  btn.title = canWrite ? '' : 'You need Triage access to edit the Overview';
+}
+
+// Cached audit rows for the open IR. Comments live in a different store that the
+// bell already polls, so when they change the timeline can be re-rendered from
+// this cache with no second fetch.
+let activityLogCache = { irNumber: '', entries: [] };
+
+// The in-page log shows the newest 40; the History modal shows 400. One builder,
+// one renderer, two windows.
+const ACTIVITY_LIMIT = 40;
+
+async function loadActivityLog(irNumber) {
+  const el = document.getElementById('ir-timeline');
+  if (!el) return;
+  const entries = await fetchAuditEntries(irNumber, 400, true);
+  // A newer IR may have been opened while this was in flight.
+  if (!currentIR || currentIR.irNumber !== irNumber) return;
+  activityLogCache = { irNumber: irNumber, entries: entries };
+  refreshActivityLog();
+}
+
+function refreshActivityLog() {
+  const el = document.getElementById('ir-timeline');
+  if (!el || !currentIR) return;
+  // Nothing cached for THIS IR yet — the first fetch is still in flight, and
+  // rendering another IR's activity would be worse than a moment of blank.
+  if (activityLogCache.irNumber !== currentIR.irNumber) return;
+  // Build the whole list and slice it here rather than passing the limit to
+  // buildTimeline, so the header count can report the TRUE total: "40 of 128" is
+  // honest, a bare "40" would not be.
+  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0);
+  renderTimelineInto(el, all.slice(-ACTIVITY_LIMIT), {
+    emptyText: 'No activity recorded yet for this IR.',
+  });
+  renderActivityCount(all.length, Math.min(all.length, ACTIVITY_LIMIT));
+}
+
+// Refreshed on every activity refresh — including while the panel is COLLAPSED,
+// which is why the render above is never gated on is-open. Gating it would leave
+// a stale number sitting over a stale list.
+function renderActivityCount(total, shown) {
+  const el = document.getElementById('ir-activity-count');
+  if (!el) return;
+  el.textContent = !total ? '' : (shown < total ? shown + ' of ' + total : String(total));
+}
+
+function applyActivityState(open) {
+  const panel = document.getElementById('ir-activity');
+  if (panel) panel.classList.toggle('is-open', !!open);
+  const btn = document.getElementById('ir-activity-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(!!open));
+}
+function toggleActivity() {
+  const open = !storedFlag(ACTIVITY_KEY);
+  setFlag(ACTIVITY_KEY, open);
+  applyActivityState(open);
+}
+
+function renderOverview() {
+  const panel = document.getElementById('ir-overview');
+  if (!panel) return;
+  const activity = document.getElementById('ir-activity');
+  if (!currentIR || !currentIR.irNumber) {
+    panel.style.display = 'none';
+    if (activity) activity.classList.add('is-hidden');
+    return;
+  }
+  panel.style.display = '';
+  if (activity) activity.classList.remove('is-hidden');
+  renderOverviewFacts();
+  renderOverviewEditable();
+  renderLegacyLog();
+  applyOverviewGating();
+  loadActivityLog(currentIR.irNumber);
+}
+
+// Mirrors the section save path, minus files and drafts, and posts to the SAME
+// `sec-a` record the Overview has always used. Deliberately reuses the existing
+// saveSection action rather than adding one: the backend's locked-intake guard
+// keeps stripping the ten customer-form keys from any `sec-a` payload, so the
+// Overview can never write a second, divergent copy of the intake facts.
+async function saveOverview() {
+  const irNumber = currentIR?.irNumber;
+  if (!irNumber) return;
+  if (!canTriage()) { showToast('You need Triage access to edit the Overview'); return; }
+  const btn = document.getElementById('save-overview');
+  const label = btn ? btn.textContent : '';
+  if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; }
+
+  const fields = {
+    a_crmOwner:     document.getElementById('a_crmOwner')?.value || '',
+    a_contactPhone: document.getElementById('a_contactPhone')?.value || '',
+  };
+
+  const formData = new FormData();
+  formData.append('action', 'saveSection');
+  formData.append('irNumber', irNumber);
+  formData.append('sectionId', OVERVIEW_KEY);
+  formData.append('savedBy', currentUser?.email || 'unknown');
+  formData.append('fields', JSON.stringify(fields));
+  formData.append('files', JSON.stringify([]));
+
+  try {
+    const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.status !== 'ok') throw new Error(data.message || 'Backend error');
+    if (btn) { btn.textContent = '✓ Saved!'; btn.className = 'btn saved'; }
+    showToast('Overview saved');
+    // Keep the in-memory record in step, or a re-render would revert to the old
+    // values and look like the save was lost.
+    currentSectionData[OVERVIEW_KEY] = Object.assign({}, currentSectionData[OVERVIEW_KEY] || {}, fields);
+    loadActivityLog(irNumber);
+  } catch (err) {
+    if (btn) { btn.textContent = '⚠ Retry Save'; btn.className = 'btn error'; }
+    showToast('❌ Save failed: ' + err.message);
+  }
+
+  setTimeout(() => {
+    if (btn) { btn.textContent = label || 'Save Overview'; btn.className = 'btn'; }
+  }, 3000);
+}
+
 // The banner's triage line. All four values are app-owned (`__IRS__`); the Sheet
-// only supplies the status a ticket starts life with.
+// only supplies the status an IR starts life with.
 function renderBannerMeta() {
   if (!bannerPills || !currentIR) return;
   const ir    = currentIR;
   const owner = ir.assigneeName || ir.assignee || '';
-  const canTriage = canEditSection('sec-a');
+  // Named `showTriage`, NOT `canTriage` — a local of that name would shadow the
+  // canTriage() function for the whole of this scope and throw a TypeError.
+  // Only a real browser run catches that; the vm suites cannot see it.
+  const showTriage = canTriage();
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
@@ -2225,7 +2883,7 @@ function renderBannerMeta() {
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
-  if (triageBtn) triageBtn.style.display = canTriage ? '' : 'none';
+  if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
 }
 
 // ─── TRIAGE MODAL (status / assignee / priority / type) ──────────────────────
@@ -2235,7 +2893,7 @@ function renderBannerMeta() {
 // width without a new layout.
 function openTriageModal() {
   if (!currentIR) return;
-  if (!canEditSection('sec-a')) { showToast('You do not have edit access to triage tickets'); return; }
+  if (!canTriage()) { showToast('You do not have Triage access — ask an admin to grant it'); return; }
   if (document.getElementById('triage-modal')) return;
   const ir     = currentIR;
   const owners = teamDirectory.slice().sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
@@ -2293,7 +2951,7 @@ async function applyTriage() {
 
   const patch = { status, statusOwned: true, assignee: email, assigneeName: member ? (member.name || email) : '', priority, type };
   // Only a real status CHANGE moves the clock. Re-saving the same status must
-  // not reset time-in-status, or every triage edit would fake a fresh ticket.
+  // not reset time-in-status, or every triage edit would fake a fresh IR.
   if (status && status !== currentIR.status) {
     patch.statusAt = Date.now();
     patch.statusBy = myEmail() || 'unknown';
@@ -2301,6 +2959,7 @@ async function applyTriage() {
   closeTriageModal();
   await patchIRState(irNumber, patch);
   showToast('Triage saved');
+  loadActivityLog(irNumber);
 
   // Assignment notifies through the comment machinery already in place — the
   // bell, the unread badge, the 90s poll and the email all work unchanged.
@@ -2308,8 +2967,7 @@ async function applyTriage() {
   // backend.gs, so an assignment notification reads as a comment.
   if (email && email.toLowerCase() !== prev) {
     const n = {
-      id: nudgeId(), irNumber, scope: 'section', sectionId: 'sec-a', fieldId: 'a_overallStatus',
-      sectionLabel: 'A: Preliminary', fieldLabel: 'IR Status',
+      id: nudgeId(), irNumber, scope: 'ir',
       to: email,
       from: currentUser?.email || 'unknown',
       fromName: currentUser?.name || currentUser?.email || 'Someone',
@@ -2371,6 +3029,11 @@ function openLegacyWorkbook() {
 // Back button (mobile only — the desktop split pane keeps the list on screen)
 backBtn.addEventListener('click', goIndex);
 
+// Activity log toggle. Bound once: the panel is static markup that
+// renderTimelineInto only ever fills, never replaces.
+const activityToggle = document.getElementById('ir-activity-toggle');
+if (activityToggle) activityToggle.addEventListener('click', toggleActivity);
+
 // IR banner nudge / comments button
 const irNudgeBtn = document.getElementById('ir-nudge-btn');
 if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
@@ -2420,29 +3083,21 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 // ─── SECTION FORM BUILDER ────────────────────────────────────────────────────
+// Six sections, letters B–G. Two of them are MERGES of what used to be separate
+// sections, and the merged field ids were deliberately NOT renamed:
+//
+//   sec-f  holds  f_*  (ex-QC)        +  g_*  (ex-Flight Test)
+//   sec-g  holds  h_*  (ex-PDI)       +  i_*  (ex-Dispatch)
+//
+// Renaming them would orphan every comment anchored to a field (a `__NUDGES__`
+// item carries `fieldId`) and split each field's AUDIT_LOG history across two
+// names. Keeping them is also what makes the row migration a one-column rewrite
+// rather than a JSON-key rewrite. Field id → section id is resolved by
+// FIELD_SECTION_INDEX below, never by guessing the prefix.
+//
+// There is no `sec-a` entry: Section A became the Overview panel, which is not a
+// section and has no form.
 const SECTIONS = {
-  'sec-a': {
-    title: 'Section A — Preliminary Details & Activity Log',
-    fields: [
-      // ── Locked intake fields: auto-populated from the customer IR form,
-      //    read-only for EVERYONE (no one edits these — they're the form's record).
-      { id: 'a_irNumber',      label: 'IR Number',                    type: 'text',     readonly: true, locked: true },
-      { id: 'a_droneId',       label: 'Drone Serial No.',             type: 'text',     readonly: true, locked: true },
-      { id: 'a_dateRaised',    label: 'Date of Incident',             type: 'date',     readonly: true, locked: true },
-      { id: 'a_companyName',   label: 'Company Name',                type: 'text',     readonly: true, locked: true },
-      { id: 'a_customerName',  label: 'Respondant Name',             type: 'text',     readonly: true, locked: true },
-      { id: 'a_contactEmail',  label: 'Respondant Email',            type: 'email',    readonly: true, locked: true },
-      { id: 'a_issueType',     label: 'What Support Is Required?',    type: 'text',     readonly: true, locked: true },
-      { id: 'a_issueDesc',     label: 'Issue Description',            type: 'textarea', readonly: true, locked: true },
-      { id: 'a_incidentLocationWeather', label: 'Incident Location and Weather', type: 'textarea', readonly: true, locked: true },
-      { id: 'a_evidence',      label: 'Evidence (from customer form)', type: 'readonlyLinks', locked: true },
-      // ── Editable (governed by Section A edit permission): CRM fills these.
-      { id: 'a_crmOwner',      label: 'Customer Relations Manager',  type: 'text',     placeholder: 'Name of CRM person' },
-      { id: 'a_contactPhone',  label: 'Customer Phone',              type: 'tel',      placeholder: '+91 XXXXX XXXXX' },
-      { id: 'a_activityLog',   label: 'Activity Log (Timeline)',     type: 'activityTable' },
-      { id: 'a_overallStatus', label: 'IR Status',                    type: 'select',   options: IR_STATUS_VALUES },
-    ]
-  },
   'sec-b': {
     title: 'Section B — Inward Checklist (Inventory)',
     fields: [
@@ -2502,17 +3157,18 @@ const SECTIONS = {
       { id: 'e_signProduction', label: 'Digital Signature — Production Technician', type: 'esignature', role: 'Production Technician' },
     ]
   },
+  // Quality Test Report — a merge of the old QC section and the old Flight Test
+  // section. Both are QC tests, so they belong on one report. The field ids keep
+  // their original `f_`/`g_` prefixes (see the note above SECTIONS).
   'sec-f': {
-    title: 'Section F — Quality Control (QC)',
+    title: 'Section F — Quality Test Report',
     fields: [
       { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
       { id: 'f_signQc',       label: 'Digital Signature — QC Inspector', type: 'esignature', role: 'QC Inspector' },
-    ]
-  },
-  'sec-g': {
-    title: 'Section G — Flight Test',
-    fields: [
+
+      // ── Part B — Flight Test ──
+      { id: 'f_partFlight',    label: 'Flight Test', type: 'divider' },
       { id: 'g_basicReport',   label: 'Basic Flight Test Report (Image or PDF)',    type: 'imageEvidence' },
       { id: 'g_missionReport', label: 'Mission Flight Test Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
@@ -2521,19 +3177,20 @@ const SECTIONS = {
       { id: 'g_signPilot',    label: 'Digital Signature — Test Pilot', type: 'esignature', role: 'Test Pilot' },
     ]
   },
-  'sec-h': {
-    title: 'Section H — Pre-Delivery Inspection (PDI)',
+  // PDI Report/Dispatch Record — a merge of the old PDI section and the old
+  // Logistics & Dispatch section. Inspecting the packed goods and dispatching
+  // them is one handover, signed once.
+  'sec-g': {
+    title: 'Section G — PDI Report/Dispatch Record',
     fields: [
       { id: 'h_pdiDocs',     label: 'PDI Report (Image or PDF)', type: 'imageEvidence' },
       { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
       { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
       { id: 'h_signPdi',     label: 'Digital Signature — PDI Inspector', type: 'esignature', role: 'PDI Inspector' },
-    ]
-  },
-  'sec-i': {
-    title: 'Section I — Logistics & Dispatch',
-    fields: [
+
+      // ── Part B — Dispatch ──
+      { id: 'g_partDispatch', label: 'Dispatch', type: 'divider' },
       { id: 'i_dispatchDate', label: 'Dispatch Date',      type: 'date' },
       { id: 'i_courier',      label: 'Courier / Transporter', type: 'courierName', default: 'Bluedart' },
       { id: 'i_courierTrackId', label: 'Courier Tracking ID', type: 'text', placeholder: 'AWB / docket / tracking number' },
@@ -2543,6 +3200,19 @@ const SECTIONS = {
     ]
   },
 };
+
+// Field id → section id, built once from SECTIONS so a merged section resolves
+// its inherited ids correctly. `g_missionReport` belongs to `sec-f` and
+// `i_courier` to `sec-g`; the prefix says otherwise, which is exactly why this
+// index exists. Used by sectionIdFromFieldId() and by the nudge/comment anchor
+// resolution, which needs to know which section a field is rendered in.
+const FIELD_SECTION_INDEX = (() => {
+  const idx = {};
+  Object.entries(SECTIONS).forEach(([sectionId, section]) => {
+    section.fields.forEach(f => { idx[f.id] = sectionId; });
+  });
+  return idx;
+})();
 
 function buildSectionForms(irNumber) {
   Object.entries(SECTIONS).forEach(([sectionId, section]) => {
@@ -2561,15 +3231,16 @@ function buildSectionForms(irNumber) {
     if (btn) btn.onclick = () => saveSection(secId, irNumber);
   });
 
-  // Wire Section A top save button (duplicate of bottom)
-  const btnTopA = document.getElementById('save-sec-a-top');
-  if (btnTopA) btnTopA.onclick = () => saveSection('sec-a', irNumber);
-
   // Wire Section D Part A PDF download
   const dlD = document.getElementById('download-sec-d');
   if (dlD) dlD.onclick = () => downloadSectionDPartA();
 
-  // Inject a 💬 nudge button after each section title (per-section tagging)
+  // Wire the pinned Overview's save button. Not part of the SECTIONS loop above:
+  // the Overview is not a section, so it has no `save-sec-*` id to pick up.
+  const btnOverview = document.getElementById('save-overview');
+  if (btnOverview) btnOverview.onclick = () => saveOverview();
+
+  // Inject a comment button after each section title (per-section tagging)
   Object.keys(SECTIONS).forEach(secId => {
     const sec = document.getElementById(secId);
     if (!sec || sec.querySelector('.sec-nudge-btn')) return;
@@ -2577,7 +3248,7 @@ function buildSectionForms(irNumber) {
     btn.type = 'button';
     btn.className = 'sec-nudge-btn';
     btn.dataset.sectionId = secId;
-    btn.innerHTML = '💬<span class="comment-count" style="display:none;">0</span>';
+    btn.innerHTML = iconSvg('comment') + '<span class="comment-count" style="display:none;">0</span>';
     btn.title = 'Comments on this section';
     btn.onclick = () => openNudgeModalForSection(secId);
     const h2 = sec.querySelector('.section-title');
@@ -2641,7 +3312,7 @@ function applySectionAccessGating() {
         if (el.type === 'file') { el.disabled = true; return; }
         // Don't disable the section's comment button if the user can comment.
         if (el.classList.contains('field-nudge-btn') && comment) return;
-        if (el.classList.contains('btn-add-row') || el.classList.contains('btn-esign') ||
+        if (el.classList.contains('btn-add-row') ||
             el.classList.contains('btn-add-evidence') || el.classList.contains('field-nudge-btn')) {
           if (!comment) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; }
           return;
@@ -2656,31 +3327,20 @@ function applySectionAccessGating() {
     // Field 💬 buttons
     pane.querySelectorAll('.field-nudge-btn').forEach(b => { b.style.display = comment ? '' : 'none'; });
   });
+  // The Overview is not in SECTION_IDS — it has no tab to hide and no per-section
+  // grant — so it is gated separately, on the Triage flag alone.
+  applyOverviewGating();
 }
 
 function buildField(field, irNumber, sectionId) {
   const id = field.id;
   let control = '';
 
-  // Auto-fill values from the current IR (Form Responses data).
-  // Shared across textarea / url / text / date / email / tel controls.
-  const autoFill = {
-    'a_irNumber':      currentIR?.irNumber || '',
-    'a_droneId':       currentIR?.droneId || '',
-    'a_dateRaised':    toISODate(currentIR?.incidentDate || currentIR?.dateRaised),
-    'a_crmOwner':      currentIR?.spoc || '',
-    'a_customerName':  currentIR?.customerName || '',
-    'a_contactEmail':  currentIR?.contactEmail || '',
-    'a_contactPhone':  currentIR?.contactPhone || '',
-    'a_issueType':     currentIR?.issueType || '',
-    'a_issueDesc':     currentIR?.issueDesc || '',
-    'a_overallStatus': currentIR?.status || currentIR?.initialStatus || '',
-    // Locked intake fields sourced from the customer form (cols M/N+Q/R):
-    'a_companyName':              currentIR?.companyName || '',
-    'a_incidentLocationWeather':  currentIR?.incidentLocationWeather || '',
-    'a_evidence':                 [currentIR?.evidenceFormN, currentIR?.evidenceFormQ].filter(Boolean).join('\n'),
-  };
-  const val = autoFill[field.id] !== undefined ? autoFill[field.id] : '';
+  // The auto-fill map that used to live here populated the ten locked intake
+  // fields of Section A. Those fields are not built any more — the Overview panel
+  // renders them from currentIR directly, read-only — so there is nothing left to
+  // pre-fill and no field here is intake-sourced.
+  const val = '';
   // Escape for safe insertion into an HTML attribute or textarea content
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -2708,7 +3368,7 @@ function buildField(field, irNumber, sectionId) {
       </div>`;
   } else if (field.type === 'file') {
     control = `
-      <div class="file-upload-wrapper" onclick="document.getElementById('${id}').click()">
+      <div class="file-upload-wrapper" onclick="document.getElementById('${escJsAttr(id)}').click()">
         <span style="font-size:1.5rem;">📎</span>
         <span style="font-size:0.85rem; margin-top:4px;">Tap to attach photo or file</span>
         <input type="file" id="${id}" class="file-upload-input" accept="image/*,application/pdf" ${field.multiple ? 'multiple' : ''} />
@@ -2729,29 +3389,6 @@ function buildField(field, irNumber, sectionId) {
       </div>
     `).join('');
     control = `<div>${rows}</div>`;
-  } else if (field.type === 'activityTable') {
-    const initialRows = 5;
-    const defaultDate = toISODate(currentIR?.dateRaised);
-    let rowsHtml = '';
-    // First row: pre-filled with "IR Reported" and the date
-    rowsHtml += buildActivityRow(1, defaultDate, 'IR Reported');
-    for (let i = 2; i <= initialRows; i++) {
-      rowsHtml += buildActivityRow(i, '');
-    }
-    control = `
-      <div class="activity-table-wrapper" id="${id}">
-        <div class="activity-table-header">
-          <span class="act-col-day">#</span>
-          <span class="act-col-date">Date</span>
-          <span class="act-col-activity">Activity Description</span>
-          <span class="act-col-remark">Remark</span>
-        </div>
-        <div class="activity-table-body" id="${id}-body">
-          ${rowsHtml}
-        </div>
-        <button type="button" class="btn-add-row" onclick="addActivityRow('${id}')">+ Add Row</button>
-      </div>
-    `;
   } else if (field.type === 'costTable') {
     // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B:
     // columns Particulars | Qty | Rate | Cost (auto = Qty*Rate) | Remark, plus a total.
@@ -2770,7 +3407,7 @@ function buildField(field, irNumber, sectionId) {
           <span class="cost-del-h"></span>
         </div>
         <div class="cost-table-body" id="${id}-body">${rowsHtml}</div>
-        <button type="button" class="btn-add-row" onclick="addCostRow('${id}')">+ Add Row</button>
+        <button type="button" class="btn-add-row" onclick="addCostRow('${escJsAttr(id)}')">+ Add Row</button>
         <div class="cost-total">Total Repair Cost: ₹<span id="${id}-total">0.00</span></div>
       </div>
     `;
@@ -2836,8 +3473,8 @@ function buildField(field, irNumber, sectionId) {
       <div class="image-evidence" id="${id}-wrap" data-field="${id}">
         <div class="image-evidence-list" id="${id}-list"></div>
         <div class="evidence-actions">
-          <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${id}')">+ Add image / PDF</button>
-          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${id}')">📷 Capture photo</button>
+          <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(id)}')">+ Add image / PDF</button>
+          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(id)}')">📷 Capture photo</button>
         </div>
         <input type="file" id="${id}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
         <input type="file" id="${id}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${id}', this)" />
@@ -2856,8 +3493,8 @@ function buildField(field, irNumber, sectionId) {
         <div class="image-evidence" id="${attachId}-wrap" data-field="${attachId}">
           <div class="image-evidence-list" id="${attachId}-list"></div>
           <div class="evidence-actions">
-            <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escHtml(attachId)}')">+ Add image / PDF</button>
-            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escHtml(attachId)}')">📷 Capture photo</button>
+            <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(attachId)}')">+ Add image / PDF</button>
+            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(attachId)}')">📷 Capture photo</button>
           </div>
           <input type="file" id="${attachId}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
           <input type="file" id="${attachId}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
@@ -2902,7 +3539,7 @@ function buildField(field, irNumber, sectionId) {
   // commentable for this user (skipped for read-only analysis notes too).
   const canFieldComment = sectionId ? canCommentSection(sectionId) : true;
   const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
-    ? `<button type="button" class="field-nudge-btn" data-field-id="${escHtml(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escHtml(id)}')">💬<span class="comment-count" style="display:none;">0</span></button>`
+    ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">${iconSvg('comment')}<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   const labelHtml = field.label
     ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
@@ -2937,27 +3574,20 @@ function toISODate(val) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function buildActivityRow(dayCount, dateValue, activityValue) {
+// The hand-typed activity table is retired — the Overview panel's timeline is
+// generated from what the app already records, so nobody fills this in any more.
+// What was already typed is kept and shown READ-ONLY by the Overview: same
+// four-column grid, spans instead of inputs, so the layout needs no new CSS.
+function buildLegacyActivityRow(row) {
+  const r = row || {};
   return `
-    <div class="activity-table-row">
-      <input type="number" class="form-input act-day" value="${dayCount}" readonly />
-      <input type="date" class="form-input act-date" value="${dateValue}" />
-      <input type="text" class="form-input act-activity" placeholder="Activity..." value="${activityValue || ''}" />
-      <input type="text" class="form-input act-remark" placeholder="Remark..." />
+    <div class="activity-table-row is-readonly">
+      <span class="act-day">${escHtml(r.dayCount || r.day || '')}</span>
+      <span class="act-date">${escHtml(r.date || '')}</span>
+      <span class="act-activity">${escHtml(r.activity || '')}</span>
+      <span class="act-remark">${escHtml(r.remark || '')}</span>
     </div>
   `;
-}
-
-function addActivityRow(fieldId) {
-  const body = document.getElementById(fieldId + '-body');
-  if (!body) return;
-  const existingRows = body.querySelectorAll('.activity-table-row');
-  const nextDay = existingRows.length > 0
-    ? parseInt(existingRows[existingRows.length - 1].querySelector('.act-day').value || '0') + 1
-    : 1;
-  body.insertAdjacentHTML('beforeend', buildActivityRow(nextDay, ''));
-  const lastRow = body.lastElementChild;
-  if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ─── COST TABLE (Section D Part B) ────────────────────────────────────────────
@@ -3054,20 +3684,52 @@ function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// Escaper for a value interpolated into an INLINE HANDLER, e.g.
+//   onclick="goTicket('${escJsAttr(ir.irNumber)}')"
+// escHtml is NOT enough there: it does not touch `'`, and every handler in this
+// file is a single-quoted JS string inside a double-quoted attribute — so a value
+// containing a quote closes the JS string and the rest runs as code. That is a
+// live hole, because these values come from the Sheet (a member of the public
+// writes the customer Form) and from sentinel stores any signed-in user can write.
+// Escaping order matters: entities first, then the backslash, then the quote that
+// the backslash protects.
+function escJsAttr(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r?\n/g, '\\n');
+}
+
+// An href built from stored data must be a real http(s) URL — otherwise
+// `javascript:` is a link the user clicks. Anything else becomes '' and the
+// caller omits the anchor.
+function safeUrl(u) {
+  const s = String(u == null ? '' : u).trim();
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
+// An e-signature block is READ-ONLY. There is no "Sign as …" button any more, and
+// no "Override & Re-sign" — the block records who saved the section, and the
+// activity log records it independently. The buttons existed because the old
+// Google Sheet had no login, so a typed name column was the only way to say who
+// did the work; the app has a login now, so a second, role-specific step before
+// Save recorded nothing the audit trail does not already carry.
+//
+// The fill itself lives in saveSection() — see signSectionOnSave(). This function
+// only paints whatever state that produced.
 function renderESignatureHTML(fieldId, role) {
   const sig = esignatureState[fieldId];
-  const email = currentUser?.email || '';
   const history = (sig && sig.history) ? sig.history : [];
   const historyLines = history.map(h => `• ${escHtml(h.signedBy)} — ${escHtml(formatTimestamp(h.signedAt))}`).join('<br>');
   const historyTitle = historyLines
-    ? `Edit history (hover):&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
+    ? `Earlier:&#10;${history.map(h => `${h.signedBy} — ${formatTimestamp(h.signedAt)}`).join('\n')}`
     : '';
 
   if (sig && sig.signedBy) {
-    const canOverride = isAdmin() || sig.signedBy === email;
-    const overrideBtn = canOverride
-      ? `<button type="button" class="btn-esign btn-esign-override" onclick="signESignature('${fieldId}')">Override &amp; Re-sign</button>`
-      : '';
     return `
       <div class="esignature-signed" title="${escHtml(historyTitle)}">
         <div class="esignature-row">
@@ -3077,15 +3739,10 @@ function renderESignatureHTML(fieldId, role) {
             <div class="esignature-stamp">${escHtml(formatTimestamp(sig.signedAt))}</div>
           </div>
         </div>
-        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Edit history:</span><br>${historyLines}</div>` : ''}
-        ${overrideBtn}
+        ${historyLines ? `<div class="esignature-history"><span class="esignature-history-label">Earlier:</span><br>${historyLines}</div>` : ''}
       </div>`;
   }
-  // Unsigned
-  const signBtn = email
-    ? `<button type="button" class="btn-esign btn-esign-sign" onclick="signESignature('${fieldId}')">Sign as ${escHtml(email)}</button>`
-    : `<span class="esignature-muted">Sign in to sign.</span>`;
-  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span>${signBtn}</div>`;
+  return `<div class="esignature-unsigned"><span class="esignature-role">${escHtml(role)}</span><span class="esignature-muted">Recorded automatically when this section is saved.</span></div>`;
 }
 
 function refreshESignature(fieldId) {
@@ -3093,20 +3750,44 @@ function refreshESignature(fieldId) {
   if (block) block.innerHTML = renderESignatureHTML(fieldId, block.dataset.role || '');
 }
 
-// Sign (or override-and-resign) the given e-signature field.
-function signESignature(fieldId) {
+// Stamps the role line for whoever is saving, from ONE section. Called from
+// saveSection() just before the values are collected, so the payload it posts
+// already carries the signature and the normal save path does the rest — no second
+// write, and no draft (this is a real save, not a draft).
+//
+// TWO rules, and both are load-bearing:
+//
+//   1. Never overwrite. A block that already carries a name is left exactly as it
+//      is, so nobody can be relabelled by someone else's later save.
+//   2. Only ONE block per save — the first that is still empty — and only if this
+//      person has not already signed something in this section.
+//
+// Rule 2 is what keeps a two-role section separable. Section B is signed by two
+// different people: Inward, then Inventory. Filling every empty block on each save
+// would stamp "Inventory (ST No. Assigner)" with the Inward person's name, which is
+// a wrong attribution on a line that reaches a customer. Filling the first empty
+// one gives the Inward person their line and the Inventory person theirs, while the
+// "already signed here" guard stops a second save by the same person from creeping
+// onto the next role.
+function signSectionOnSave(sectionId) {
+  const section = SECTIONS[sectionId];
   const email = currentUser?.email;
-  if (!email) { showToast('Sign in first'); return; }
-  const prev = esignatureState[fieldId];
-  const history = (prev && prev.signedBy)
-    ? [...(prev.history || []), { signedBy: prev.signedBy, signedAt: prev.signedAt }]
-    : (prev?.history || []);
-  esignatureState[fieldId] = { signedBy: email, signedAt: new Date().toISOString(), history };
-  refreshESignature(fieldId);
-  // Persist the signature as a draft so it survives even if the section isn't saved
-  const secId = sectionIdFromFieldId(fieldId);
-  if (secId) saveDraft(secId);
-  showToast('Signed: ' + email);
+  if (!section || !email) return;
+
+  const blocks = section.fields.filter(f => f.type === 'esignature');
+  // I have already claimed my role in this section — a re-save is not a new claim.
+  if (blocks.some(f => esignatureState[f.id]?.signedBy === email)) return;
+
+  const empty = blocks.find(f => !esignatureState[f.id]?.signedBy);
+  if (!empty) return;
+
+  const prev = esignatureState[empty.id];
+  esignatureState[empty.id] = {
+    signedBy: email,
+    signedAt: new Date().toISOString(),
+    history: (prev && prev.history) ? prev.history : [],
+  };
+  refreshESignature(empty.id);
 }
 
 // ─── INWARD DROPDOWN OPTIONS (admin-customizable) ──────────────────────────────
@@ -3574,33 +4255,9 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
     return;
   }
 
-  // Handle activityTable type
-  if (field?.type === 'activityTable') {
-    const body = document.getElementById(fieldId + '-body');
-    if (!body) return;
-
-    if (Array.isArray(value)) {
-      // New format: array of row objects
-      body.innerHTML = '';
-      value.forEach((row, i) => {
-        body.insertAdjacentHTML('beforeend', buildActivityRow(
-          row.dayCount || (i + 1),
-          row.date || ''
-        ));
-        const rows = body.querySelectorAll('.activity-table-row');
-        const lastRow = rows[rows.length - 1];
-        if (lastRow) {
-          lastRow.querySelector('.act-activity').value = row.activity || '';
-          lastRow.querySelector('.act-remark').value = row.remark || '';
-        }
-      });
-    } else if (typeof value === 'string' && value.trim()) {
-      // Backward compatibility: old textarea data
-      const firstActivity = body.querySelector('.activity-table-row:first-child .act-activity');
-      if (firstActivity) firstActivity.value = value;
-    }
-    return;
-  }
+  // No activityTable branch: the type is retired. The legacy log it used to hold is
+  // rendered read-only by the Overview, straight from currentSectionData, and no
+  // SECTIONS entry declares the type any more.
 
   // Handle costTable type — value is [{particular, qty, rate, cost, remark}, ...]
   if (field?.type === 'costTable') {
@@ -3690,20 +4347,6 @@ function collectSectionValues(sectionId) {
         if (el) checkValues[field.items[i]] = el.value;
       });
       fieldValues[field.id] = checkValues;
-    } else if (field.type === 'activityTable') {
-      const body = document.getElementById(field.id + '-body');
-      const tableData = [];
-      if (body) {
-        body.querySelectorAll('.activity-table-row').forEach(row => {
-          tableData.push({
-            dayCount: row.querySelector('.act-day')?.value || '',
-            date:     row.querySelector('.act-date')?.value || '',
-            activity: row.querySelector('.act-activity')?.value || '',
-            remark:   row.querySelector('.act-remark')?.value || '',
-          });
-        });
-      }
-      fieldValues[field.id] = tableData;
     } else if (field.type === 'costTable') {
       const body = document.getElementById(field.id + '-body');
       const rows = [];
@@ -3776,7 +4419,17 @@ function draftKey(sectionId) {
   return `ipb_draft_${currentIR?.irNumber || '_'}_${sectionId}`;
 }
 function sectionIdFromFieldId(fieldId) {
-  const letter = (fieldId || '').split('_')[0];     // 'a','b',...
+  if (!fieldId) return null;
+  // The index is authoritative. The prefix guess below is WRONG for the merged
+  // sections — `g_missionReport` lives in `sec-f`, `i_courier` in `sec-g` — so it
+  // is only a fallback for ids that no form declares (an old field, a future one).
+  const known = FIELD_SECTION_INDEX[fieldId];
+  if (known) return known;
+  const letter = String(fieldId).split('_')[0];     // 'a','b',...
+  // `a_*` fields are the Overview's; they have no section tab but they do have a
+  // home, so they resolve to OVERVIEW_KEY rather than to a non-existent `sec-a`
+  // section entry.
+  if (letter === 'a') return OVERVIEW_KEY;
   return letter ? `sec-${letter}` : null;
 }
 function saveDraft(sectionId) {
@@ -3864,8 +4517,12 @@ async function saveSection(sectionId, irNumber) {
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
 
-  const { fieldValues, fileFields } = collectSectionValues(sectionId);
+  // Stamp any e-signature in THIS section that nobody has filled yet, BEFORE the
+  // values are collected, so the payload below already carries it. Saving is the
+  // signature: whoever pressed Save is the person recorded.
+  signSectionOnSave(sectionId);
 
+  const { fieldValues, fileFields } = collectSectionValues(sectionId);
   formData.append('fields', JSON.stringify(fieldValues));
 
   // Convert files to base64
@@ -3901,9 +4558,10 @@ async function saveSection(sectionId, irNumber) {
       // Saving Section B changes the goods Section H verifies against — refresh
       // the dispatch checklist so it lists exactly what was received.
       if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
-      // Record this save in the app-owned workflow state: Section A owns the
-      // status, and every section save marks that section done for this IR.
+      // Record this save in the app-owned workflow state — every section save
+      // marks that section done for this IR, and the save is now on the timeline.
       syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues);
+      loadActivityLog(irNumber);
     } else {
       throw new Error(data.message || 'Backend error');
     }
@@ -3922,23 +4580,14 @@ async function saveSection(sectionId, irNumber) {
 }
 
 // A section save is the one place that knows an IR was actually touched, so it
-// is where the app takes ownership of that ticket's workflow state.
+// is where the app takes ownership of that IR's workflow state.
 function syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues) {
-  const patch = { done: markSectionDone(irNumber, sectionId) };
-  // Section A carries the IR Status dropdown. Mirroring it into __IRS__ is what
-  // makes an in-app status change reach the list badge: the badge reads app
-  // state, and the Section A row in APP_DATA is not where the badge looks.
-  if (sectionId === 'sec-a' && fieldValues && fieldValues.a_overallStatus) {
-    const next = String(fieldValues.a_overallStatus).trim();
-    const cur  = ownedStatus(irNumber) || currentIR?.status || '';
-    if (next && next !== cur) {
-      patch.status      = next;
-      patch.statusOwned = true;
-      patch.statusAt    = Date.now();
-      patch.statusBy    = myEmail() || 'unknown';
-    }
-  }
-  patchIRState(irNumber, patch);
+  // Status is no longer mirrored from a section form. The IR Status dropdown lived
+  // in Section A, which is gone; status is now written only by the Triage modal
+  // (see applyTriage), which owns `status`/`statusOwned`/`statusAt` itself. A
+  // section save that happens to post a status key must not be able to move the
+  // workflow clock.
+  patchIRState(irNumber, { done: markSectionDone(irNumber, sectionId) });
 }
 
 function fileToBase64(file) {
@@ -4156,7 +4805,7 @@ function renderImageEvidence(fieldId) {
                value="${escHtml(e.caption || '')}"
                oninput="updateEvidenceCaption('${escHtml(fieldId)}', ${i}, this.value)" />
         <button type="button" class="evidence-remove"
-                onclick="removeEvidenceImage('${escHtml(fieldId)}', ${i})" title="Remove">&#10005;</button>
+                onclick="removeEvidenceImage('${escJsAttr(fieldId)}', ${i})" title="Remove">&#10005;</button>
       </div>`;
   }).join('');
 }
@@ -4394,11 +5043,14 @@ function drainToastQueue() {
 // irNumber '__NUDGES__' / sectionId 'all' (same mechanism as the admin config).
 
 // ── Team directory (admin-editable; used for @-mention autocomplete) ──
+// A seed only — the admin owns this list from the editor. `customer.relations@`
+// was removed from the seed with the Sept 2026 rewrite: it is no longer an
+// account (see ADMIN_EMAILS), and a directory entry that resolves to no mailbox
+// turns an @-mention into a silent bounce.
 const TEAM_DIRECTORY_DEFAULTS = [
   { name: 'Monish Raza',        email: 'monish.raza@indrones.com' },
   { name: 'Ravi Singh',         email: 'ravi@indrones.com' },
   { name: 'Adhik Nair',          email: 'adhik.nair@indrones.com' },
-  { name: 'Customer Relations', email: 'customer.relations@indrones.com' },
 ];
 let teamDirectory = TEAM_DIRECTORY_DEFAULTS.map(d => ({ ...d }));
 
@@ -4503,6 +5155,7 @@ function loadNudges() {
         refreshCommentCounts();
         if (document.getElementById('nudge-panel')?.style.display === 'block') renderNudgePanel();
         rerenderOpenNudgeModal();
+        refreshActivityLog();
       }
     })
     .catch(() => { /* keep current list */ });
@@ -4747,19 +5400,19 @@ function renderNudgePanel() {
       ? `<span class="nudge-status resolved">✓ Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
-      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
     return `<div class="nudge-item ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
         <span class="nudge-time">${escHtml(relativeTime(n.createdAt))}</span>
       </div>
-      <div class="nudge-ctx">🔔 ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
+      <div class="nudge-ctx">${iconSvg('bell')} ${escHtml(n.irNumber || '')} · ${escHtml(scopeContextText(n))}</div>
       <div class="nudge-msg">${escHtml(n.message || '')}</div>
       <div class="nudge-actions">
         ${statusChip}
         ${actionBtn}
-        ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escHtml(n.irNumber)}')">Open IR</button>` : ''}
+        ${canOpen ? `<button type="button" class="nudge-mini" onclick="openIRFromNudge('${escJsAttr(n.irNumber)}')">Open IR</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -4803,7 +5456,7 @@ function openNudgeModal(scope, irNumber, sectionId, fieldId, label) {
         <label class="form-label" style="margin-top:0.6rem;">Message</label>
         <textarea id="nudge-message" class="form-input" rows="3" placeholder="What do you want to remind or assign?"></textarea>
         <div class="nudge-composer-actions">
-          <button type="button" class="btn" onclick="sendComment()">💬 Comment</button>
+          <button type="button" class="btn" onclick="sendComment()">${iconSvg('comment')} Comment</button>
         </div>
       </div>
     </div>`;
@@ -4850,10 +5503,10 @@ function renderNudgeThread() {
       ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">✓ Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
-      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escHtml(n.id)}')">✓ Resolve</button>`;
+      ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
     const editBtn = editable && !editing
-      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escHtml(n.id)}')" title="Edit comment">✏ Edit</button>`
+      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escJsAttr(n.id)}')" title="Edit comment">✏ Edit</button>`
       : '';
     const editedTag = n.editedAt
       ? `<span class="nudge-edited" title="Edited${n.editedBy ? ' by ' + n.editedBy : ''} · ${relativeTime(n.editedAt)}">(edited)</span>`
@@ -4861,7 +5514,7 @@ function renderNudgeThread() {
     const msgOrEditor = editing
       ? `<div class="nudge-edit-wrap">
            <textarea class="nudge-edit-input" id="nudge-edit-${escHtml(n.id)}">${escHtml(n.message || '')}</textarea>
-           <button type="button" class="nudge-mini primary" onclick="editNudge('${escHtml(n.id)}', document.getElementById('nudge-edit-${escHtml(n.id)}').value)">Save</button>
+           <button type="button" class="nudge-mini primary" onclick="editNudge('${escJsAttr(n.id)}', document.getElementById('nudge-edit-${escJsAttr(n.id)}').value)">Save</button>
            <button type="button" class="nudge-mini" onclick="cancelEditNudge()">Cancel</button>
          </div>`
       : `<div class="nudge-msg">${escHtml(n.message || '')}${editedTag}</div>`;
@@ -4892,7 +5545,7 @@ function onNudgeRecipientInput(value) {
     .slice(0, 6);
   if (!matches.length) { suggest.innerHTML = '<div class="nudge-suggest-empty">No match — type a full email to tag anyway.</div>'; suggest.style.display = 'block'; return; }
   suggest.innerHTML = matches.map((d, i) =>
-    `<button type="button" class="nudge-suggest-item" data-idx="${i}" data-email="${escHtml(d.email)}" data-name="${escHtml((d.name||'').replace(/"/g, '&quot;'))}" onclick="selectNudgeRecipient('${escHtml(d.email)}','${escHtml((d.name||'').replace(/'/g, ''))}')">
+    `<button type="button" class="nudge-suggest-item" data-idx="${i}" data-email="${escJsAttr(d.email)}" data-name="${escJsAttr((d.name||'').replace(/"/g, '&quot;'))}" onclick="selectNudgeRecipient('${escJsAttr(d.email)}','${escJsAttr(d.name || '')}')">
       <span class="nudge-suggest-name">${escHtml(d.name || '')}</span>
       <span class="nudge-suggest-email">${escHtml(d.email || '')}</span>
     </button>`).join('');
@@ -5030,45 +5683,373 @@ function openNudgeModalForField(fieldId) {
   openNudgeModal('field', currentIR.irNumber, sectionId, fieldId, field?.label || fieldId);
 }
 
+// ─── ACTIVITY TIMELINE ───────────────────────────────────────────────────────
+// ONE builder and ONE renderer, used twice: the Overview panel embeds the newest
+// 40 entries, the 🕓 History modal shows the newest 400. Because both go through
+// buildTimeline, an IR can never tell two different stories depending on where
+// you look at it.
+//
+// Everything here is derived from something the app already records — nothing is
+// synthesised:
+//   section saves & field edits → AUDIT_LOG rows carrying a real section id
+//   triage changes (status / assignee / priority / type) → AUDIT_LOG rows whose
+//     column B is a `__` sentinel write; the real IR sits in the Section ID
+//     column, which is why backend.gs getAuditLog matches both shapes
+//   file uploads → the `uploaded` audit event added alongside this work
+//   comments & @mentions → the __NUDGES__ store (which already carries its own
+//     author and timestamp, better than an audit row would)
+//
+// The legacy hand-typed activity log is deliberately NOT folded in. It has no
+// per-row timestamp, so merging it would mean inventing when things happened.
+// The Overview shows it as its own labelled block instead.
+
+// Deltas the timeline never shows. `done` is the section-completion array: every
+// save rewrites it, and a 500-character JSON diff of it would drown the real
+// edits. The completion itself is not lost — the save's own marker names the
+// section. The backend skips it too; this is the belt to that pair of braces,
+// because rows written before the backend changed are still in the log.
+const SUPPRESSED_AUDIT_FIELDS = ['done'];
+
+const AUDIT_MONTHS = { jan:0, feb:1, mar:2, apr:3, may:4, jun:5, jul:6, aug:7, sep:8, oct:9, nov:10, dec:11 };
+
+// 'dd-MMM-yyyy HH:mm:ss' → epoch ms.
+// Date.parse() returns NaN for this shape in V8, and a NaN would not throw — it
+// would silently sort the whole timeline by nothing. So the shape is parsed
+// explicitly. Only ORDERING matters, and the backend stamps every row from one
+// timezone, so the local-time construction below is sufficient.
+function parseAuditTimestamp(v) {
+  if (v == null || v === '') return 0;
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === 'number') return v;
+  const s = String(v).trim();
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(s);
+  if (m) {
+    const mon = AUDIT_MONTHS[m[2].toLowerCase()];
+    if (mon !== undefined) {
+      return new Date(+m[3], mon, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0)).getTime();
+    }
+  }
+  const n = Date.parse(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// Human name for a field id, from the forms. Falls back to the raw id for a field
+// no current form declares — a retired one, or one that exists only in history.
+function fieldLabelFor(fieldId) {
+  if (!fieldId) return '';
+  const secId = FIELD_SECTION_INDEX[fieldId];
+  if (secId && SECTIONS[secId]) {
+    const f = SECTIONS[secId].fields.find(x => x.id === fieldId);
+    if (f && f.label) return f.label;
+  }
+  return fieldId;
+}
+
+// Sections that no longer exist. History predating the merge still names them, and
+// relabelling that history with the surviving section would misattribute the work
+// that was actually done under the old letter.
+const HISTORICAL_SECTION_NAMES = {
+  'sec-a': 'Overview (formerly Section A)',
+  'sec-h': 'PDI (now part of G)',
+  'sec-i': 'Dispatch (now part of G)',
+};
+function sectionDisplayName(sectionId) {
+  if (!sectionId) return '';
+  return SECTION_SHORT[sectionId] || HISTORICAL_SECTION_NAMES[sectionId] || sectionId;
+}
+
+// ─── ICON SET ────────────────────────────────────────────────────────────────
+// The app's first and only SVG. Before this the whole UI was emoji, which render
+// as a different picture on every OS and read as decoration rather than chrome.
+//
+// One family: a 24-unit grid, a single 1.75 stroke, round caps and joins, no fill
+// — except the two deliberate dots, which fill with `currentColor`. Because the
+// stroke is `currentColor` too, a glyph inherits the themed text colour it sits
+// beside: no per-theme rule, no second asset, no sprite.
+//
+// INLINE, not file-based, and that is load-bearing. The app is an offline PWA and
+// sw.js caches a fixed SHELL list, so a new .svg would need a SHELL entry AND a
+// CACHE_NAME bump before an installed client could ever see it — and would still
+// be blank on a first load with no network. Inline markup ships inside app.js and
+// costs the cache nothing.
+//
+// DATA ONLY. `iconSvg` looks its argument up and never interpolates it, so a name
+// that is not a key here can only ever render as '' — never as markup. That is
+// what makes the unescaped ${iconSvg(...)} in renderTimelineInto safe.
+const ICON_PATHS = {
+  // timeline kinds
+  'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.6l2.5 2.4 4.5-5"/>',
+  plus:           '<path d="M12 5v14"/><path d="M5 12h14"/>',
+  pencil:         '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14.5 5.5l4 4"/>',
+  minus:          '<path d="M5 12h14"/>',
+  target:         '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
+  user:           '<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>',
+  flag:           '<path d="M6 21V4"/><path d="M6 5h12l-2.5 4L18 13H6"/>',
+  tag:            '<path d="M20 12.5L12.5 20a1.5 1.5 0 0 1-2.1 0L4 13.6V4h9.6l6.4 6.4a1.5 1.5 0 0 1 0 2.1z"/><circle cx="8.5" cy="8.5" r="1.4"/>',
+  upload:         '<path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16"/>',
+  // Names are the FEATURE, not the picture: `comment` is what every call site asks
+  // for, and smoke-ui.mjs cross-checks every referenced name against this map —
+  // because a name that is not here renders '' and leaves a silent blank button.
+  comment:        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  dot:            '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
+  // chrome
+  chevron:        '<path d="M9 5l7 7-7 7"/>',
+  bell:           '<path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/>',
+  'panel-left':   '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+  list:           '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3.5 6h.01"/><path d="M3.5 12h.01"/><path d="M3.5 18h.01"/>',
+  ir:             '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1.5a2.5 2.5 0 0 0 0 5V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1.5a2.5 2.5 0 0 0 0-5z"/><path d="M12 7v10" stroke-dasharray="2 2.5"/>',
+  legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
+  users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
+  moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
+  sun:            '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2"/><path d="M12 19.5v2"/><path d="M2.5 12h2"/><path d="M19.5 12h2"/><path d="M5.2 5.2l1.4 1.4"/><path d="M17.4 17.4l1.4 1.4"/><path d="M18.8 5.2l-1.4 1.4"/><path d="M6.6 17.4l-1.4 1.4"/>',
+  clock:          '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  report:         '<path d="M8 3.5h8a1.5 1.5 0 0 1 1.5 1.5v14A1.5 1.5 0 0 1 16 20.5H8A1.5 1.5 0 0 1 6.5 19V5A1.5 1.5 0 0 1 8 3.5z"/><path d="M9.5 3.5V2.5h5v1"/><path d="M9.5 9h5"/><path d="M9.5 13h5"/><path d="M9.5 17h3"/>',
+};
+
+// iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
+// the table. Never throws, never renders the literal string "undefined".
+function iconSvg(name, extraClass) {
+  const body = ICON_PATHS[name];
+  if (!body) return '';
+  return '<svg class="icon' + (extraClass ? ' ' + extraClass : '') + '"' +
+    ' viewBox="0 0 24 24" aria-hidden="true" focusable="false"' +
+    ' fill="none" stroke="currentColor" stroke-width="1.75"' +
+    ' stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+}
+
+// Fills the STATIC chrome's glyphs from the one icon set. Called once from
+// showApp(), never per IR: these elements live in index.html and are never
+// re-created, so a second call would only rewrite identical markup.
+//
+// The elements keep their empty spans in index.html rather than literal <svg>
+// there, so every glyph in the app has exactly one source — ICON_PATHS. The
+// `!el.querySelector('svg')` guard makes a re-login (which re-runs showApp) a
+// no-op instead of stacking a second icon into the same span.
+function initIcons() {
+  [
+    ['#ir-activity-toggle .activity-caret',  'chevron'],
+    ['#nudge-bell .nudge-bell-icon',         'bell'],
+    ['#nav-tickets .nav-icon',               'ir'],
+    ['#legacy-workbook-btn .nav-icon',       'legacy'],
+    ['#nav-access .nav-icon',                'users'],
+    ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
+    ['#list-toggle .list-toggle-icon',       'list'],
+    ['#detail-placeholder .ph-icon',         'ir'],
+    ['#ir-triage-btn .btn-icon',             'target'],
+    ['#ir-nudge-btn .btn-icon',              'comment'],
+    ['#ir-history-btn .btn-icon',            'clock'],
+    ['#ir-legacy-btn .btn-icon',             'legacy'],
+    ['.tab-intake .tab-icon',                'report'],
+  ].forEach(([sel, name]) => {
+    const el = document.querySelector(sel);
+    if (el && !el.querySelector('svg')) el.innerHTML = iconSvg(name);
+  });
+
+  // The nav theme glyph is a state, not a constant, so applyTheme() owns it —
+  // but it has to be seeded here too, since initIcons() is what a signed-in
+  // session calls and the toggle must not be blank until the next theme change.
+  if (navThemeIcon) navThemeIcon.innerHTML = iconSvg(isDarkTheme() ? 'sun' : 'moon');
+}
+
+// One row per event the timeline can show. `icon` is a KEY into ICON_PATHS, not
+// markup — this table stays data, so a suite can read, count and assert on it
+// without parsing SVG.
+//
+// The labels deliberately reuse the Triage modal's own nouns ("Status", "Assigned
+// to", "Priority", "Type") so the log and the modal that wrote the event speak one
+// language, and `edit` uses the backend's own verb (`changed`) rather than
+// inventing a second word for one event.
+const TIMELINE_KINDS = {
+  save:     { icon: 'check-circle', label: 'Section saved' },
+  add:      { icon: 'plus',         label: 'Added' },
+  edit:     { icon: 'pencil',       label: 'Changed' },
+  remove:   { icon: 'minus',        label: 'Removed' },
+  status:   { icon: 'target',       label: 'Status changed' },
+  assign:   { icon: 'user',         label: 'Assigned to' },
+  priority: { icon: 'flag',         label: 'Priority changed' },
+  type:     { icon: 'tag',          label: 'Type changed' },
+  upload:   { icon: 'upload',       label: 'File uploaded' },
+  comment:  { icon: 'comment',      label: 'Comment' },
+};
+
+// PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
+// Returns entries OLDEST FIRST, trimmed to the newest `limit` (0/absent = all).
+// The renderer reverses for display; the builder needs ascending order to trim
+// from the correct end.
+function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
+  const out = [];
+
+  (Array.isArray(auditEntries) ? auditEntries : []).forEach(e => {
+    if (!e) return;
+    const fid = String(e.fieldId || '');
+    if (SUPPRESSED_AUDIT_FIELDS.indexOf(fid) >= 0) return;
+    const source = e.source === 'workflow' ? 'workflow' : 'section';
+    const base = {
+      at: parseAuditTimestamp(e.timestamp),
+      timestamp: e.timestamp || '',
+      by: e.savedBy || '',
+      source,
+      // A workflow row's Section ID column holds the IR, not a section, so it
+      // must not be reported as one.
+      sectionId: source === 'workflow' ? '' : (e.sectionId || ''),
+      fieldId: source === 'workflow' ? '' : fid,
+      oldValue: e.oldValue == null ? '' : String(e.oldValue),
+      newValue: e.newValue == null ? '' : String(e.newValue),
+      // Every entry carries the SAME shape whichever half it came from. A comment
+      // row has no old/new value and an audit row has no mentions, and leaving
+      // either out means the renderer — and any future consumer — reads `undefined`
+      // off some rows and '' off others. That asymmetry is invisible until someone
+      // renders it, and it renders as the literal string "undefined".
+      message: '',
+      mentions: [],
+    };
+
+    if (e.event === 'uploaded') { out.push(Object.assign({}, base, { kind: 'upload' })); return; }
+
+    if (source === 'workflow') {
+      const kind = fid === 'status' ? 'status'
+                 : (fid === 'assignee' || fid === 'assigneeName') ? 'assign'
+                 : fid === 'priority' ? 'priority'
+                 : fid === 'type' ? 'type' : '';
+      // Everything else a sentinel write carries — a whole-store `items` array, a
+      // seed marker — is not a workflow change and must not clutter the timeline.
+      if (!kind) return;
+      out.push(Object.assign({}, base, { kind }));
+      return;
+    }
+
+    if (e.event === 'saved') {
+      // The batch marker for a save. A `saved` row that names a field carries no
+      // more than the per-field rows below it, so only the bare one is shown.
+      if (!fid) out.push(Object.assign({}, base, { kind: 'save' }));
+      return;
+    }
+
+    out.push(Object.assign({}, base, {
+      kind: e.event === 'added' ? 'add' : e.event === 'removed' ? 'remove' : 'edit',
+    }));
+  });
+
+  (Array.isArray(nudgeItems) ? nudgeItems : []).forEach(n => {
+    if (!n) return;
+    if (String(n.irNumber || '') !== String(irNumber || '')) return;
+    out.push({
+      at: Number(n.createdAt) || 0,
+      timestamp: '',
+      by: n.fromName || n.from || '',
+      source: 'comment',
+      sectionId: '',
+      fieldId: n.fieldId || '',
+      // Same shape as an audit entry — see the note on `base` above.
+      oldValue: '',
+      newValue: '',
+      kind: 'comment',
+      message: n.message || '',
+      mentions: Array.isArray(n.mentions) ? n.mentions : [],
+    });
+  });
+
+  out.sort((a, b) => {
+    if (a.at !== b.at) return a.at - b.at;
+    // One save writes a whole batch at a single timestamp. Sections before
+    // workflow, so the edit that caused a state change reads before the change.
+    const rank = s => (s === 'section' ? 0 : s === 'workflow' ? 1 : 2);
+    return rank(a.source) - rank(b.source);
+  });
+
+  const cap = Number(limit) > 0 ? Number(limit) : 0;
+  return (cap && out.length > cap) ? out.slice(out.length - cap) : out;
+}
+
+// One renderer for both consumers. Markup is the existing `.hist-*` block, reused
+// unchanged so the timeline inherits the modal's styling and the design system's
+// tokens with no new colours.
+function renderTimelineInto(el, timeline, opts) {
+  if (!el) return;
+  const o = opts || {};
+  const list = Array.isArray(timeline) ? timeline : [];
+  if (!list.length) {
+    el.innerHTML = `<div class="hist-list"><div class="nudge-empty">` +
+      escHtml(o.emptyText || 'No activity yet — save a section, triage the IR, upload a file or leave a comment, and it appears here.') +
+      `</div></div>`;
+    return;
+  }
+  const clip = s => String(s == null ? '' : s).slice(0, 200);
+  const rows = list.slice().reverse().map(it => {
+    const meta = TIMELINE_KINDS[it.kind] || { icon: 'dot', label: it.kind || 'Activity' };
+    // A save row is a whole-section event and its label already says so, so the
+    // `(whole section)` chip that used to sit here only repeated it. A field row
+    // keeps its human label, resolved through the section index.
+    const field = (it.kind !== 'save' && it.fieldId)
+      ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '';
+    // "workflow" is the backend's own name for the __IRS__ sentinel store. The
+    // reader knows the action as Triage — the button, the modal and the toast all
+    // say so — so the chip says it too.
+    const srcChip = it.source === 'workflow' ? '<span class="hist-src">Triage</span>' : '';
+
+    let body = '';
+    if (it.kind === 'comment') {
+      // The mention chip belongs in the chip row with the field and source chips,
+      // not in a diff block of its own.
+      const mention = (it.mentions && it.mentions.length)
+        ? `<span class="hist-src">@mention</span>` : '';
+      body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
+      if (mention) body += `<div class="hist-diff">${mention}</div>`;
+    } else if (it.kind === 'edit' || it.kind === 'remove') {
+      body = `<div class="hist-diff"><span class="hist-old">Was</span> ${escHtml(clip(it.oldValue))}</div>` +
+             `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
+    } else if (it.kind === 'add') {
+      body = `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
+    } else if (it.newValue) {
+      body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
+    }
+
+    // ONE timestamp format for both halves of the list. Audit rows used to render
+    // the backend's raw `dd-MMM-yyyy HH:mm:ss` while comment rows rendered
+    // toDisplayDateTime's `DD Month YYYY, HH:MM` — two formats interleaved in one
+    // newest-first list, which reads as two different feeds. `at` is already the
+    // parsed instant for both halves, so format from it, and keep the raw string
+    // only as the fallback for a row the parser could not read.
+    const when = it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : (it.timestamp || '');
+    // A comment row's own label already says "Comment" and its field chip already
+    // names the field, so a third "· comment" suffix said nothing. A section row
+    // still names its section, and a triage row names itself.
+    const where = it.source === 'comment'
+      ? ''
+      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : ''));
+    return `<div class="hist-item">
+      <div class="hist-top"><span class="hist-ev">${iconSvg(meta.icon)}${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
+      <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
+      ${body}
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="hist-list">${rows}</div>`;
+}
+
 // ─── AUDIT TRAIL / EDIT HISTORY ───────────────────────────────────────────────
-// Shows the backend AUDIT_LOG for the open IR: every save + every field overwrite
-// (old→new), newest first — so any later correction is traceable. Requires the
-// redeployed backend (getAuditLog action).
+// Shows the whole story for the open IR: every section save, field correction,
+// upload, triage change and comment — newest first. Needs the redeployed backend
+// (the `getAuditLog` action, whose match was widened to reach sentinel writes).
+// `quiet` suppresses the toasts. The Overview calls it on every IR open, and
+// an IR with no history on a backend that predates the widened getAuditLog
+// match should render an empty state — not an error toast per open.
+async function fetchAuditEntries(irNumber, limit, quiet) {
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}&limit=${limit}`);
+    const data = await res.json();
+    if (data.status === 'ok') return Array.isArray(data.entries) ? data.entries : [];
+    if (data.status === 'error' && !quiet) showToast('History: ' + (data.message || 'backend error'));
+  } catch {
+    if (!quiet) showToast('History unavailable — backend not connected yet');
+  }
+  return [];
+}
+
 async function openHistoryModal() {
   if (!currentIR?.irNumber) { showToast('Open an IR first'); return; }
   const irNumber = currentIR.irNumber;
-  let entries = [];
-  try {
-    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}`);
-    const data = await res.json();
-    if (data.status === 'ok') entries = Array.isArray(data.entries) ? data.entries : [];
-    else if (data.status === 'error') { showToast('History: ' + (data.message || 'backend error')); }
-  } catch {
-    showToast('History unavailable — backend not connected yet');
-  }
-  const evLabel = e => e.event === 'changed' ? '✏️ changed'
-    : e.event === 'added' ? '➕ added'
-    : e.event === 'removed' ? '➖ removed'
-    : '💾 saved';
-  const clip = s => String(s == null ? '' : s).slice(0, 200);
-  const body = entries.length
-    ? entries.slice().reverse().map(e => {
-        const field = e.fieldId
-          ? `<span class="hist-field">${escHtml(e.fieldId)}</span>`
-          : '<span class="hist-field hist-muted">(section save)</span>';
-        let diff = '';
-        if (e.event === 'changed' || e.event === 'removed')
-          diff = `<div class="hist-diff"><span class="hist-old">old:</span> ${escHtml(clip(e.oldValue))}</div>`
-               + `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
-        else if (e.event === 'added')
-          diff = `<div class="hist-diff"><span class="hist-new">new:</span> ${escHtml(clip(e.newValue))}</div>`;
-        return `<div class="hist-item">
-          <div class="hist-top"><span class="hist-ev">${evLabel(e)}</span>${field}<span class="hist-time">${escHtml(e.timestamp || '')}</span></div>
-          <div class="hist-by">by ${escHtml(e.savedBy || '')} · ${escHtml(e.sectionId || '')}</div>
-          ${diff}
-        </div>`;
-      }).join('')
-    : '<div class="nudge-empty">No history yet — saves and edits for this IR will appear here.</div>';
+  const entries = await fetchAuditEntries(irNumber, 400);
+  const timeline = buildTimeline(irNumber, entries, nudges, 400);
   const modal = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'history-modal';
@@ -5078,10 +6059,11 @@ async function openHistoryModal() {
         <h3>History · ${escHtml(irNumber)}</h3>
         <button type="button" class="inward-options-close" onclick="closeHistoryModal()">&times;</button>
       </div>
-      <div class="nudge-ctx-line">Audit trail — every save &amp; field correction (newest first).</div>
-      <div class="hist-list">${body}</div>
+      <div class="nudge-ctx-line">Everything that has happened to this IR — saves, field edits, uploads, triage changes and comments (newest first).</div>
+      <div id="history-list"></div>
     </div>`;
   document.body.appendChild(modal);
+  renderTimelineInto(document.getElementById('history-list'), timeline);
   modal.addEventListener('click', e => { if (e.target === modal) closeHistoryModal(); });
 }
 function closeHistoryModal() { document.getElementById('history-modal')?.remove(); }

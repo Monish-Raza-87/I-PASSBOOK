@@ -434,8 +434,20 @@
   padding: 5px 0;
   border-bottom: 1px solid var(--outline-gray-1);
 }
-.activity-table-row .form-input,
+/* The row inputs are gone: .activity-table-row now renders the LEGACY hand-typed
+   log read-only, as <span>s (see buildLegacyActivityRow in app.js). Only the cost
+   table still puts inputs in a repeating row. */
 .cost-table-row .form-input { padding: 0 0.5rem; height: 30px; font-size: var(--text-sm); }
+
+/* Read-only twin of the row grid. Same columns, same restack — only the controls
+   differed, so the grid and the mobile rules below are deliberately shared. */
+.activity-table-row.is-readonly {
+  color: var(--ink-gray-8);
+  font-size: var(--text-sm);
+  align-items: start;
+}
+.activity-table-row.is-readonly > span { min-width: 0; word-break: break-word; padding: 2px 0; }
+.activity-table-row.is-readonly .act-day { padding-top: 2px; }
 
 /* Both the header cell and the read-only row input carry .cost-sn / .cost-cost,
    so the two rules below are scoped to the row where they differ. */
@@ -587,20 +599,23 @@
   margin-bottom: 8px;
 }
 
-/* ── Section B/H — e-signature ─────────────────────────────── */
+/* ── Section B/H — e-signature ─────────────────────────────
+   Read-only: the block records who saved the section, and no button changes it.
+   The unsigned state is a dashed placeholder; the signed state is the green
+   record with the timestamp. */
 .esignature-block { font-size: var(--text-sm); }
 .esignature-unsigned {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 0.6rem;
   padding: 0.7rem 0.9rem;
   border: 1px dashed var(--outline-gray-3);
   border-radius: var(--radius-4);
   background: var(--surface-gray-1);
 }
-.esignature-role { color: var(--ink-gray-5); font-size: var(--text-xs); }
-.esignature-muted { color: var(--ink-gray-5); }
+.esignature-role { color: var(--ink-gray-7); font-weight: var(--weight-medium); font-size: var(--text-xs); }
+.esignature-muted { color: var(--ink-gray-5); font-size: var(--text-xs); }
 .esignature-signed {
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--outline-green-2);
@@ -620,7 +635,6 @@
   color: var(--ink-gray-5);
 }
 .esignature-history-label { font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
-.btn-esign { margin-top: 0.55rem; }
 
 /* ── Section D — image evidence ────────────────────────────── */
 .image-evidence { display: flex; flex-direction: column; gap: 0.55rem; }
@@ -765,16 +779,17 @@
   font-size: var(--text-sm);
 }
 .hist-top { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin-bottom: 2px; }
-.hist-ev { font-weight: var(--weight-semibold); color: var(--ink-gray-9); white-space: nowrap; }
+.hist-ev { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: var(--weight-semibold); color: var(--ink-gray-9); white-space: nowrap; }
+/* The glyph sits slightly quieter than the label, so ten rows read as text first
+   and as icons second. Inherits the themed colour from .icon's currentColor. */
+.hist-ev .icon { color: var(--ink-gray-6); }
 .hist-field {
-  font-family: var(--font-mono);
   font-size: var(--text-xs);
   background: var(--surface-gray-3);
   color: var(--ink-gray-7);
   padding: 1px 5px;
   border-radius: var(--radius-2);
 }
-.hist-field.hist-muted { color: var(--ink-gray-5); background: transparent; font-family: inherit; }
 .hist-time { margin-left: auto; color: var(--ink-gray-5); font-size: var(--text-xs); white-space: nowrap; }
 .hist-by { color: var(--ink-gray-5); font-size: var(--text-xs); margin-bottom: 3px; }
 .hist-diff { font-size: var(--text-xs); word-break: break-word; margin-top: 2px; }
@@ -782,9 +797,197 @@
 .hist-old { color: var(--ink-red-7); }
 .hist-new { color: var(--ink-green-7); }
 
+/* Which half of the timeline an entry came from — a section save or a workflow
+   change. Reuses the .hist-field chip shape so the two read as one family. */
+.hist-src {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-gray-5);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-2);
+  padding: 0 5px;
+}
+
+/* The in-page activity log. The modal's 64vh is wrong inside a page that already
+   scrolls — it would make the log taller than the viewport on its own. */
+#ir-timeline .hist-list { max-height: 48vh; }
+
 /* ══════════════════════════════════════════════════════════
-   ADMIN — User Access & Requests
-   The --bg bug: these three rules used var(--bg), which was never
+   ACTIVITY LOG — one collapsible panel below every section
+   Moved out of #ir-overview: it is the longest block on the page
+   and sat above the tabs, pushing the sections off-screen.
+   ══════════════════════════════════════════════════════════ */
+.activity-panel {
+  margin: 0.85rem 0 0;
+  padding: 0.6rem 0.9rem 0.7rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-5);
+  background: var(--surface-base);
+}
+.activity-title { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+
+/* The whole header row is the toggle, so the hit area is the full width and the
+   caret is decoration rather than a control of its own. */
+.activity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.15rem 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-gray-9);
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+.activity-toggle:hover { color: var(--ink-gray-7); }
+.activity-caret { display: inline-flex; color: var(--ink-gray-5); transition: transform 0.15s var(--ease); }
+#ir-activity.is-open .activity-caret { transform: rotate(90deg); }
+
+/* How many rows are behind the fold. Blank when there are none, so a fresh IR
+   does not advertise an empty log. */
+.activity-count {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--ink-gray-5);
+  font-variant-numeric: tabular-nums;
+}
+
+/* display, not a height transition: there is no accordion animation anywhere in
+   this app, and a max-height transition needs a magic number that the 48vh cap
+   inside would fight. The caret rotation is the whole affordance. */
+.activity-body { display: none; }
+#ir-activity.is-open .activity-body { display: block; }
+/* The panel supplies its own padding; the list's would double it. */
+.activity-body .hist-list { padding-inline: 0; }
+
+/* Belt-and-braces hide for "no IR open". #ir-activity lives inside #detail-view,
+   which renderLayout() already hides — so this only matters if #detail-view is
+   ever shown with currentIR cleared. A class, never an inline `display`: that
+   convention is reserved for the panes. */
+#ir-activity.is-hidden { display: none; }
+
+/* ══════════════════════════════════════════════════════════
+   IR OVERVIEW — pinned panel above the tabs
+   Section A's content in the form it should always have had.
+   Not a section, not a tab, never hidden by the tab handler.
+   ══════════════════════════════════════════════════════════ */
+.overview-panel {
+  margin: 0 0 0.85rem;
+  padding: 0.85rem 0.9rem 0.6rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-5);
+  background: var(--surface-base);
+}
+.overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.overview-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+}
+.overview-head .btn { width: auto; padding: 0.35rem 0.8rem; font-size: var(--text-sm); }
+
+/* Fact strip — the client's intake facts, read-only. Deliberately compact: the ten
+   full fields live on the 📋 Report tab one click away, and pinning all of them
+   here would push the tabs a screen down on a phone. */
+.overview-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.4rem 0.9rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-4);
+  background: var(--surface-gray-1);
+}
+.overview-fact { min-width: 0; }
+.overview-fact-label {
+  display: block;
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-5);
+}
+.overview-fact-value {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-9);
+  word-break: break-word;
+}
+/* An empty fact renders as intakeValueHtml's em-dash placeholder, not a blank —
+   so the .intake-empty colour rule above is what mutes it. */
+
+/* Points at the 📋 Report tab rather than duplicating its long textareas here. */
+.overview-report-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-blue-7);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  text-align: left;
+}
+.overview-report-link:hover { text-decoration: underline; }
+
+/* The two fields CRM owns. Disabled for everyone else — gating is on the Triage
+   axis (see canTriage in app.js), not on any section. */
+.overview-edit-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 190px) 1fr;
+  gap: 0.4rem 0.7rem;
+  align-items: center;
+  margin-top: 0.5rem;
+}
+.overview-edit-label { font-size: var(--text-sm); color: var(--ink-gray-7); }
+.overview-edit-row .form-input:disabled { background: var(--surface-gray-2); cursor: not-allowed; }
+.overview-note,
+.overview-sub-note { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0.35rem 0 0; }
+
+/* Sub-blocks (the timeline, the legacy log) inside the panel. */
+.overview-sub-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.75rem 0 0.35rem;
+}
+.overview-sub-head .overview-sub-note { margin: 0; }
+
+/* The legacy tag marks hand-typed history the app no longer writes. Styled like
+   .hist-field so it reads as a label rather than a heading. */
+.legacy-tag {
+  font-size: var(--text-2xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-amber-8);
+  border: 1px solid var(--outline-amber-2);
+  border-radius: var(--radius-2);
+  padding: 0 5px;
+}
+
+@media (max-width: 639px) {
+  .overview-panel { padding: 0.7rem 0.6rem 0.5rem; }
+  .overview-head { flex-wrap: wrap; }
+  .overview-edit-row { grid-template-columns: 1fr; }
+  .overview-edit-label { margin-bottom: -0.15rem; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   ADMIN — User Access
+   The --bg bug: these rules used var(--bg), which was never
    defined, so the card had NO background and sat on the raw scrim.
    ══════════════════════════════════════════════════════════ */
 .access-card {
@@ -806,107 +1009,127 @@
   border-bottom: 1px solid var(--outline-gray-1);
   background: var(--surface-gray-1);
 }
+/* Tab strip. Three panes, one listUsers snapshot — see openAccessModal(). */
+.access-tabs { display: flex; gap: 2px; padding: 0.5rem 1.2rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.access-tab {
+  padding: 0.45rem 0.85rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius-4) var(--radius-4) 0 0;
+  background: none;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.access-tab:hover { color: var(--ink-gray-8); background: var(--surface-gray-2); }
+.access-tab.is-active {
+  color: var(--ink-gray-9);
+  font-weight: var(--weight-medium);
+  background: var(--surface-base);
+  border-color: var(--outline-gray-1);
+}
 .access-body { padding: 1rem 1.2rem 1.2rem; overflow-y: auto; }
 .access-section { margin-bottom: 1.4rem; }
 .access-section h3 { font-size: var(--text-md); font-weight: var(--weight-semibold); margin: 0 0 0.45rem; color: var(--ink-gray-9); }
 .access-hint { font-size: var(--text-sm); color: var(--ink-gray-5); margin: 0 0 0.7rem; }
-.access-legend { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0 0 0.7rem; line-height: 1.7; }
-.access-legend .acc-lv {
+.access-hint ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.access-hint code { font-size: var(--text-xs); }
+.access-danger { border-top: 1px solid var(--outline-gray-1); padding-top: 1rem; }
+
+.access-email-line { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); white-space: nowrap; }
+.access-loading, .access-empty { font-size: var(--text-sm); color: var(--ink-gray-5); padding: 0.4rem 0; }
+.access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
+.access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+.access-add-row .form-input { flex: 1; min-width: 160px; }
+.access-add-row .btn { width: auto; flex: 0 0 auto; }
+.access-body textarea.form-input { width: 100%; font-family: var(--font-mono, monospace); font-size: var(--text-xs); }
+
+/* ── People × departments matrix ──────────────────────────── */
+/* Its own scroll container: six-plus departments will not fit a phone, and a
+   squashed grid is worse than a sideways scroll. */
+.acc-matrix-wrap { overflow-x: auto; border: 1px solid var(--outline-gray-1); border-radius: var(--radius-4); }
+.acc-matrix { border-collapse: collapse; width: 100%; font-size: var(--text-sm); }
+.acc-matrix th {
+  padding: 0.4rem 0.6rem;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-5);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  background: var(--surface-gray-1);
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.acc-matrix th:first-child { text-align: left; }
+.acc-matrix td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--outline-gray-1); text-align: center; vertical-align: middle; }
+.acc-matrix tr:last-child td { border-bottom: none; }
+.acc-matrix td.acc-matrix-name { text-align: left; min-width: 240px; }
+.acc-matrix-sub { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 2px; }
+.acc-matrix-actions { display: flex; gap: 0.35rem; margin-top: 0.35rem; flex-wrap: wrap; }
+.acc-dept-tick, .acc-grant { width: 16px; height: 16px; cursor: pointer; accent-color: var(--ink-gray-8); }
+
+/* Status chips on a person row: admin / disabled / temp password. */
+.acc-badge {
   display: inline-block;
   padding: 1px 6px;
   border-radius: var(--radius-2);
   font-size: var(--text-2xs);
   font-weight: var(--weight-medium);
-  margin: 0 2px;
+  margin-left: 3px;
 }
-.access-legend .acc-lv.none    { background: var(--surface-gray-2); color: var(--ink-gray-6); }
-.access-legend .acc-lv.view    { background: var(--surface-blue-2); color: var(--ink-blue-6); }
-.access-legend .acc-lv.comment { background: var(--surface-amber-2); color: var(--ink-amber-8); }
-.access-legend .acc-lv.edit    { background: var(--surface-green-2); color: var(--ink-green-7); }
+.acc-badge-admin { background: var(--surface-blue-2); color: var(--ink-blue-6); }
+.acc-badge-off   { background: var(--surface-red-2); color: var(--ink-red-7); }
+.acc-badge-temp  { background: var(--surface-amber-2); color: var(--ink-amber-8); }
 
-.access-quickset { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; align-items: center; font-size: var(--text-2xs); color: var(--ink-gray-5); }
-.acc-quick {
-  padding: 1px 6px;
-  border-radius: var(--radius-2);
-  border: 1px solid var(--outline-gray-2);
-  background: var(--surface-base);
-  color: var(--ink-gray-7);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-}
-.acc-quick:hover { border-color: var(--outline-gray-4); background: var(--surface-gray-2); }
-.acc-quick.lv-none    { color: var(--ink-gray-6); }
-.acc-quick.lv-view    { color: var(--ink-blue-6); }
-.acc-quick.lv-comment { color: var(--ink-amber-8); }
-.acc-quick.lv-edit    { color: var(--ink-green-7); }
-
-.access-email-line { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); white-space: nowrap; }
-.access-loading, .access-empty { font-size: var(--text-sm); color: var(--ink-gray-5); padding: 0.4rem 0; }
-.access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
-.access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; }
-.access-add-row .form-input { flex: 1; min-width: 160px; }
-.access-add-row .btn { width: auto; flex: 0 0 auto; }
-
-.access-request-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.7rem;
-  padding: 0.55rem 0.7rem;
-  background: var(--surface-gray-1);
-  border: 1px solid var(--outline-gray-1);
-  border-radius: var(--radius-4);
-  margin-bottom: 0.45rem;
-}
-.access-req-name  { font-size: var(--text-base); font-weight: var(--weight-medium); color: var(--ink-gray-8); }
-.access-req-email { font-size: var(--text-sm); color: var(--ink-gray-6); }
-.access-req-time  { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.access-req-actions { display: flex; gap: 0.35rem; flex-shrink: 0; }
-
+/* ── Department → section grant grid ─────────────────────── */
 .access-user-card {
-  background: var(--surface-gray-1);
   border: 1px solid var(--outline-gray-1);
   border-radius: var(--radius-4);
-  padding: 0.65rem 0.8rem;
-  margin-bottom: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  margin-bottom: 0.6rem;
+  background: var(--surface-base);
 }
 .access-user-top { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .access-user-controls { display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0; }
-.access-level {
-  padding: 0 0.5rem;
-  height: 30px;
-  border-radius: var(--radius-3);
-  border: 1px solid var(--outline-gray-2);
-  background: var(--surface-base);
-  color: var(--ink-gray-8);
-  font-family: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-}
-.access-level:focus { outline: none; border-color: var(--outline-gray-4); box-shadow: var(--focus-default); }
 .access-perms-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
-  gap: 0.4rem 0.5rem;
-  margin-top: 0.55rem;
-  padding-top: 0.55rem;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
   border-top: 1px solid var(--outline-gray-1);
 }
-.acc-sec { display: flex; flex-direction: column; gap: 2px; }
-.acc-sec > span { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-5); }
-.access-cell {
-  padding: 0 0.35rem;
-  height: 28px;
-  border-radius: var(--radius-3);
+.acc-sec { display: flex; align-items: center; gap: 0.4rem; cursor: pointer; }
+.acc-sec > span { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-6); }
+.acc-sec .acc-sec-name { font-size: var(--text-xs); color: var(--ink-gray-5); }
+
+/* ── One-time credentials card ───────────────────────────── */
+.cred-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.4rem;
   border: 1px solid var(--outline-gray-1);
+  border-left: 3px solid var(--ink-amber-8);
+  border-radius: var(--radius-4);
   background: var(--surface-base);
-  color: var(--ink-gray-8);
-  font-family: inherit;
-  font-size: var(--text-xs);
 }
-.acc-sec .access-cell { font-size: var(--text-xs); }
+.cred-email { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); }
+.cred-pw { display: flex; align-items: center; gap: 0.5rem; }
+.cred-pw code {
+  font-size: var(--text-md);
+  letter-spacing: 0.04em;
+  color: var(--ink-gray-9);
+  background: var(--surface-gray-2);
+  padding: 2px 8px;
+  border-radius: var(--radius-3);
+}
 
 /* ══════════════════════════════════════════════════════════
    BELOW lg — the sidebar is a fixed bottom bar, so scroll
@@ -936,6 +1159,8 @@
   .iqc-cfg-row .iqc-cfg-name,
   .iqc-cfg-row .iqc-cfg-checks { grid-column: 1 / -1; }
 
-  .access-perms-grid { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
-  .access-req-actions { width: 100%; justify-content: flex-end; }
+  .access-perms-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  /* The people × departments matrix scrolls sideways rather than squashing
+     six departments into a phone width. */
+  .acc-matrix td.acc-matrix-name { min-width: 200px; }
 }

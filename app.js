@@ -10,7 +10,7 @@ const CONFIG = {
   // monish.raza@indrones.com). The v2 URL it replaced stays alive and untouched as
   // the rollback: reverting this one line and pushing gh-pages returns the app to
   // the old backend, with no data lost.
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbzCW9xVpfl2VSELFt51n7NuYxe5vJ29R1vGuafqFVcwXt3I-V7xIlmhOyyw-tQUAvRcXQ/exec',
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec',
 
   // Allowed domain — only @indrones.com (plus explicitly-allowlisted) accounts
   ALLOWED_DOMAIN: 'indrones.com',

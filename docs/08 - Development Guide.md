@@ -135,7 +135,7 @@ folder the old backend never looks at, and the store starts empty.
    `?action=ping` in a browser tab, then `?action=getPassbook&irNumber=IR409` with a
    real token. Only once it answers correctly do `app.js` and `gh-pages` change —
    which keeps the frontend pointing at a working backend for the whole window.
-5. Update `CONFIG.GAS_URL` in `app.js:10` to the new `/exec` URL, **bump
+5. Update `CONFIG.GAS_URL` in `app.js:13` to the new `/exec` URL, **bump
    `CACHE_NAME` in `sw.js`** (the URL constant lives in a cached asset), and
    **push `gh-pages`**.
 
@@ -271,7 +271,7 @@ mean the app is writing to a sheet again.
   are written by the customer Google Form and are never renamed; `STATUS_CATEGORIES`
   maps them to Frappe's Open/Paused/Resolved/Closed **categories** for pill colouring
 - **Shell DOM is static** — `app.js` captures twelve element references at parse
-  time (`app.js:639-650`), so `index.html` must keep those ids and `app.js` must
+  time (`app.js:699-726` — 28 of them), so `index.html` must keep those ids and `app.js` must
   stay a plain end-of-body `<script src>` (never `type="module"`/`defer`)
 - **View state is inline** — `renderLayout()` is the only place that writes
   `indexView`/`detailView`/`backBtn` display, and it must keep writing *inline*

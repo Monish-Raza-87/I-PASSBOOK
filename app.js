@@ -3049,6 +3049,12 @@ function mergeLegacyOnlyIRs() {
       allIRs.push({ irNumber: l.irNumber, droneId: drone, dateRaised: '', status: 'Open', isLegacyOnly: true });
     }
   });
+  // The stubs are pushed AFTER setAllIRs() has already merged app-owned state
+  // into the records it was given, so without this a legacy IR that HAS been
+  // triaged in the app renders as untouched: no assignee, no category, and —
+  // with Stage 3's count on the card — "0/6" over a ticket with saved sections.
+  // This is the same single merge, applied to the records it missed.
+  applyIRStateToAllIRs();
   // keep latest-first ordering by IR number
   allIRs.sort((a, b) => parseInt((b.irNumber || '').replace(/\D/g, ''), 10) - parseInt((a.irNumber || '').replace(/\D/g, ''), 10));
 }
@@ -3066,6 +3072,13 @@ function renderIRList(records) {
 
   irList.innerHTML = records.map(ir => {
     const owner = ir.assigneeName || ir.assignee || '';
+    // Stage 3 and Stage 4, read off the merged record. Both are no-ops when the
+    // data cannot support them — an IR with no saved sections and no clock
+    // renders exactly the card it rendered before they existed.
+    const prog = sectionProgress(ir.done);
+    const age  = irAge(ir);
+    const late = irOverdue(ir);
+    const showProg = wantProgress(ir, prog);
     // Everything below is escaped, and that is load-bearing rather than tidy:
     // `droneId` is Form Responses column K, written by whoever submits the public
     // customer form, and `status`/`priority` can be rewritten by any signed-in user
@@ -3083,18 +3096,46 @@ function renderIRList(records) {
           ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
           ${ir.subCategory ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.subCategory)}</span>` : ''}
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
+          ${age ? `<span class="ir-dot">·</span><span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
         </div>
       </div>
       <div class="ir-card-side">
         ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
         ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(ir.priority)}</span>` : ''}
         <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
+        ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
+        ${showProg ? progressChip(prog) : ''}
         ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
   `;
   }).join('');
   updateListCounts(records.length);
+}
+
+// The completion chip, shared by the list card and the ticket header so the two
+// cannot render it differently. The fill width is a CLASS, never an inline
+// style: the list card is asserted to carry no attribute the renderer did not
+// write (smoke-intake.mjs), and a `style=` on it would break that contract for
+// a value that only ever has seven states.
+function progressChip(prog) {
+  const complete = prog.done >= prog.total;
+  const title = complete
+    ? `All ${prog.total} sections saved`
+    : `${prog.done} of ${prog.total} sections saved`;
+  return `<span class="ir-progress p${prog.done}${complete ? ' is-complete' : ''}" title="${escHtml(title)}">` +
+         `<span class="ir-progress-bar"></span>` +
+         `<span class="ir-progress-text">${prog.done}/${prog.total}</span>` +
+         `</span>`;
+}
+
+// Whether this ticket gets a completion chip at all. A legacy-only record is a
+// historic entry with no passbook of its own, so "0/6" over one would read as
+// work outstanding on a ticket nobody is working — but if a legacy IR HAS saved
+// sections (someone opened it and filled a form in), the count is real and is
+// shown.
+function wantProgress(ir, prog) {
+  return !(ir && ir.isLegacyOnly && prog.done === 0);
 }
 
 // Initials for the assignee chip on a list card. Accepts a display name or an
@@ -3156,6 +3197,108 @@ function statusCategory(status) {
 // delete their rules.
 function getBadgeClass(status) {
   return CATEGORY_BADGE[statusCategory(status)];
+}
+
+// ─── COMPLETION AND AGEING (Stage 3 / Stage 4) ───────────────────────────────
+// Both facts are read off the list card AND the ticket header, so they are
+// computed here once and never inside a renderer — the card and the header
+// cannot then tell different stories about the same ticket.
+//
+// The rule they both obey is the one the whole `__IRS__` store is built on:
+// NEVER INVENT A TIMESTAMP. The app knows exactly when IT changed a status
+// (`statusAt`, written only on a real change — see applyTriage), so that is a
+// real clock. A status the customer's Sheet set has no timestamp anywhere, so
+// ageing falls back to the raise date and SAYS SO (`basis`); a ticket with
+// neither — every legacy-only record — has no clock at all, rather than being
+// reported as zero days old.
+
+const DAY_MS = 86400000;
+
+// How much of the passbook is filled in. Counted by walking the six LIVE ids and
+// asking whether each was saved, rather than by counting the entries in `done[]`
+// — so a store row holding a duplicate (or twenty junk ids) cannot render "7/6"
+// or a progress bar with no fill class to reach for.
+function sectionProgress(done) {
+  const ids = Array.isArray(done) ? SECTION_IDS.filter(id => done.includes(id)) : [];
+  return { done: ids.length, total: SECTION_IDS.length };
+}
+
+// Whole days since a millisecond timestamp, floored, never negative: a clock
+// that disagrees with this machine's (a status set a minute "in the future" on
+// another laptop) reads as today, not as -1 days.
+function daysSince(ms, now = Date.now()) {
+  if (!Number.isFinite(ms)) return null;
+  const d = Math.floor((now - ms) / DAY_MS);
+  return d < 0 ? 0 : d;
+}
+
+// The clock a ticket is on, and what that clock actually measures:
+//   { days, basis: 'status' } — N days in this status, app-recorded
+//   { days, basis: 'raised' } — N days since the client raised it, from the
+//                               Sheet's own date. The STATUS may have moved
+//                               since, and this app cannot know when.
+//   null                      — no clock. Nothing is guessed.
+function irAge(ir, now = Date.now()) {
+  if (!ir) return null;
+  if (Number.isFinite(ir.statusAt)) return { days: daysSince(ir.statusAt, now), basis: 'status' };
+  const iso = parseISODate(ir.dateRaisedISO);
+  if (!iso) return null;
+  return { days: daysSince(Date.UTC(iso.y, iso.m - 1, iso.d), now), basis: 'raised' };
+}
+
+// Overdue limits in days, by priority. The owner's decision, 2026-09-18, and
+// the ONE place to change them. An unprioritised ticket gets the loosest limit
+// on purpose: treating "nobody has prioritised this yet" as urgent would flag
+// every freshly-raised ticket as overdue.
+const IR_OVERDUE_DAYS = { Urgent: 1, High: 3, Medium: 7, Low: 14 };
+const IR_OVERDUE_DEFAULT_DAYS = 14;
+
+function irOverdueLimit(priority) {
+  // Matched case-insensitively rather than by direct key lookup: a stored
+  // 'high' would otherwise miss the map and silently take the loosest limit,
+  // which is the one wrong answer that looks like it worked.
+  const p = String(priority || '').trim().toLowerCase();
+  for (const key of Object.keys(IR_OVERDUE_DAYS)) {
+    if (key.toLowerCase() === p) return IR_OVERDUE_DAYS[key];
+  }
+  return IR_OVERDUE_DEFAULT_DAYS;
+}
+
+// Only a ticket still IN THE PIPELINE can be overdue: a paused or finished one
+// is not running a clock, whatever its age. Returns null rather than false when
+// it is simply not overdue, so no caller can confuse "no" with "no clock".
+function irOverdue(ir, now = Date.now()) {
+  if (!ir || statusCategory(ir.status) !== 'open') return null;
+  const age = irAge(ir, now);
+  if (!age) return null;
+  const limit = irOverdueLimit(ir.priority);
+  return age.days >= limit ? { days: age.days, limit, basis: age.basis } : null;
+}
+
+// The age as it is spoken. One function, so the card and the header cannot word
+// the same fact differently. "In status" is only said when the app recorded the
+// change itself; otherwise the label names what the number really measures.
+function ageLabel(age) {
+  if (!age) return '';
+  return age.basis === 'status' ? `In status ${age.days}d` : `Raised ${age.days}d ago`;
+}
+
+function ageTitle(ir, age) {
+  if (!age) return '';
+  if (age.basis === 'status') {
+    return `Status last changed ${toDisplayDate(ir.statusAt)} — recorded in the passbook`;
+  }
+  return `Raised ${toDisplayDate(ir.dateRaisedISO)}. This is the age of the IR, not of its status: the status was set in the client's Sheet, which carries no timestamp, and this app will not invent one`;
+}
+
+function overdueTitle(ir, late) {
+  const clock = late.basis === 'status'
+    ? `${late.days} days in this status`
+    : `${late.days} days since it was raised`;
+  const limit = ir.priority
+    ? `the ${late.limit}-day limit for ${ir.priority} priority`
+    : `the ${late.limit}-day limit for an unprioritised IR`;
+  return `Overdue — ${clock}, past ${limit}`;
 }
 
 // ─── LIST FILTER SEGMENTS ────────────────────────────────────────────────────
@@ -3702,11 +3845,19 @@ function renderBannerMeta() {
   // canTriage() function for the whole of this scope and throw a TypeError.
   // Only a real browser run catches that; the vm suites cannot see it.
   const showTriage = canTriage();
+  // Stage 3 and Stage 4 say the same thing here as on the list card, from the
+  // same helpers — the header is where there is room to word it in full.
+  const prog = sectionProgress(ir.done);
+  const age  = irAge(ir);
+  const late = irOverdue(ir);
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
     (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
     (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
+    (age ? `<span class="meta-pill${late ? ' meta-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '') +
+    (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : '') +
+    (wantProgress(ir, prog) ? progressChip(prog) : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);

@@ -5517,7 +5517,7 @@ async function saveSection(sectionId, irNumber) {
       filePayload.push({
         fieldId: ff.id,
         name: files[idx].name,
-        mimeType: files[idx].type,
+        mimeType: resolveFileMime(files[idx]),
         base64: b64,
       });
     });
@@ -5580,6 +5580,28 @@ function fileToBase64(file) {
     reader.onload  = () => resolve(reader.result.split(',')[1]);
     reader.onerror = reject;
   });
+}
+// The MIME type of a picked file, taken from its NAME when the browser could not
+// say. Android's picker and some camera apps hand over a file with an empty
+// `File.type`, and passing that straight through is what made uploads vanish on
+// those phones. Mirrors `mimeFromName`/`resolveMime` in backend.gs — the backend
+// is the authority (it must be, since a client gate is not a gate), and this copy
+// is only so the payload is honest about what it is sending.
+function mimeFromFileName(name) {
+  const ext = (String(name || '').toLowerCase().match(/\.([a-z0-9]+)$/) || [])[1] || '';
+  const map = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', jpe: 'image/jpeg', jfif: 'image/jpeg',
+    png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+    heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff',
+    pdf: 'application/pdf',
+  };
+  return map[ext] || '';
+}
+function resolveFileMime(file) {
+  const declared = String(file?.type || '');
+  const generic = !declared || declared === 'application/octet-stream' || declared === 'binary/octet-stream';
+  const byName = mimeFromFileName(file?.name);
+  return (generic && byName) ? byName : (declared || byName || 'application/octet-stream');
 }
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
@@ -6181,7 +6203,8 @@ function onEvidencePicked(fieldId, input) {
   const files = Array.from(input.files || []);
   if (!evidenceState[fieldId]) evidenceState[fieldId] = [];
   files.forEach(f => {
-    const type = f.type === 'application/pdf' ? 'pdf' : (f.type.startsWith('image/') ? 'image' : '');
+    const mime = resolveFileMime(f);
+    const type = mime === 'application/pdf' ? 'pdf' : (mime.startsWith('image/') ? 'image' : '');
     evidenceState[fieldId].push({ caption: '', link: '', file: f, url: URL.createObjectURL(f), type, name: f.name });
   });
   input.value = '';

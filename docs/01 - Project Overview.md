@@ -43,6 +43,7 @@ i-passbook-app/
 ├── views.css           # Ticket list, sync bar, ticket detail, intake report, section tables
 ├── tools/
 │   ├── gen-tokens.mjs     # Regenerates tokens.css from frappe/frappe-ui
+│   ├── make-icons.ps1     # Regenerates the icon set from assets/icon-master.jpeg
 │   ├── deploy-ghpages.mjs # Publishes to the gh-pages branch (dry run by default)
 │   ├── serve-local.mjs    # Zero-dependency local server (no npm download)
 │   ├── harness.mjs        # Shared smoke-test harness
@@ -52,7 +53,8 @@ i-passbook-app/
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
-│   ├── icon-192.png    # App icon, from the 2K master (manifest + favicon)
+│   ├── icon-master.jpeg # The brand master — the ONLY source for the icons below
+│   ├── icon-192.png    # App icon (manifest + favicon + the sign-in card)
 │   ├── icon-512.png    # App icon, large
 │   ├── apple-touch-icon.png  # 180×180, the size iOS asks for
 │   ├── logo.png        # Legacy letterhead — NOT an icon, pruned from the deploy
@@ -63,6 +65,18 @@ i-passbook-app/
 
 `style.css` no longer exists — it was replaced by the five layered stylesheets above
 (see [09 — Design System](09 - Design System.md)).
+
+**The icon pipeline, in one place, because it is not obvious from the files.**
+`assets/icon-master.jpeg` is the brand master and the only source; the three PNGs
+beside it are generated from it by `tools/make-icons.ps1` (PowerShell +
+System.Drawing — this repo has no npm access, so there is no sharp/jimp).
+The tool downscales the master **as a whole square**, never cropping to the
+mark's bounding box: the artwork sits on a soft wash that reaches all four edges
+of the master, and a tight crop slices that gradient into a visible rectangular
+seam on a white icon. So the size of the mark inside the icon is decided by how
+the master is cropped, not by the tool — the master's current crop puts the mark
+at 75% of the icon's width. Replacing the master means re-running the tool **and
+bumping `CACHE_NAME` in `sw.js`**, because `icon-192.png` is precached.
 
 ## Key Design Decisions
 

@@ -315,19 +315,23 @@ html[data-intro="seen"] #splash-screen {
   flex: 0 0 var(--header-h);
   border-bottom: 1px solid var(--outline-gray-1);
 }
+/* The mark is the app icon itself, not a lettered stand-in: same 26px box in the
+   sidebar and in the folded icon rail, so the one image is the whole brand. */
 .brand-mark {
   width: 26px;
   height: 26px;
   border-radius: var(--radius-3);
-  background: var(--surface-gray-10);
-  color: var(--ink-base);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-bold);
-  letter-spacing: 0.02em;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
+}
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 .brand-text {
   font-size: var(--text-base);

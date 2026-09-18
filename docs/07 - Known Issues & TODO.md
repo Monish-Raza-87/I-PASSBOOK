@@ -4,7 +4,7 @@
 > lives in JSON files under `_store/` in the owner's Drive
 > (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. Committed and green — **1605 cases across 15 suites** —
+> workbook. Committed and green at that release — **1605 cases across 15 suites** —
 > and **deployed** to `gh-pages` (`4d6a283`, from `category-insights` `4592c83`,
 > `CACHE_NAME` `ipassbook-v28`). The **`backend.gs` on that branch is NOT deployed**:
 > the live Apps Script project still runs `main`'s backend, so sign-in is still
@@ -26,9 +26,12 @@
 >
 > **Status of the Frappe Helpdesk pivot.** Phase 1 (shell + design system) and Phase 2
 > **Stages 1 and 2** are committed on `main` and live on `gh-pages` (`74c0298`) —
-> app-owned workflow state (`__IRS__`) and the read-only 📋 Report tab. Stages 3–8
-> (list intelligence, SLA, dashboard, canned responses, knowledge base, CSAT) are
-> designed but unstarted; the plan is the source of truth for those.
+> app-owned workflow state (`__IRS__`) and the read-only 📋 Report tab. The dashboard
+> went in early as the **Insights** page. **Stages 3 and 4 — the section completion
+> count and the ageing clock with overdue flags — are built and green in the working
+> tree on 2026-09-18** (the suite count below is their evidence), and are not deployed
+> yet. Stages 6–8 (canned responses, knowledge base, CSAT) are designed but unstarted;
+> the plan is the source of truth for those.
 
 ## Known Issues
 
@@ -92,7 +95,24 @@ completely, and the honest mitigation is named rather than implied.
 - ❌ **No delete capability** — sections can be updated but never cleared/deleted
 - ❌ **No IR creation from app** — new IRs must come from the Google Form → "Form Responses" tab (deliberate; the Form is the client's front door)
 - ❌ **No validation** — forms have no required-field checks before save
-- ⚠️ **Section completion is tracked but not shown** — `irs.json` records which sections have been saved (`done[]`, written on save, recomputed on every `openPassbook()`), but no progress indicator renders yet. That is Stage 3. The frontend filters it against `SECTION_IDS`, so a retired id in the store cannot reappear as a phantom tab.
+- ⚠️ **Ageing runs on whichever clock is real, and says which one it used.** Two
+  clocks exist and they are not interchangeable: `statusAt`, written by
+  `applyTriage` **only on a real status change**, and `dateRaisedISO`, the client's
+  own raise date. A card therefore reads **"In status 6d"** when the app recorded the
+  change itself and **"Raised 21d ago"** when it did not — because a status the Sheet
+  set carries no timestamp anywhere, and this app will not invent one. `ir.dateRaised`
+  — the string the card *displays* — is deliberately **not** parseable here for the
+  same reason. With neither date (every legacy-only record) there is **no clock at
+  all**: no age chip, and no overdue flag, rather than "0d". **The overdue limits are
+  `IR_OVERDUE_DAYS` in app.js — Urgent 1 day, High 3, Medium 7, Low 14, and the
+  loosest of those for an unprioritised IR**; only a ticket whose status category is
+  **open** can be flagged, so a paused or finished one is old, not late. A limit is
+  reached on the day itself (`>=`), and it is the one place to change the policy.
+- ⚠️ **The completion count is read from `done[]` and can only ever say 0–6.** It walks
+  the six live `SECTION_IDS` and asks whether each was saved, so a store row holding a
+  duplicate or a retired `sec-a`/`sec-h`/`sec-i` marker cannot render "7/6" or promise
+  a tab nobody can open. A legacy-only record shows no chip *until* something is saved
+  against it — "0/6" over a historic record would read as work outstanding.
 - ⚠️ **The hand-typed activity log is read-only and will stay that way** — it is kept in the Overview as a labelled `Legacy` block so history is not lost, but nothing writes it any more. It is deliberately **not** folded into the generated timeline: it has no per-row timestamp, so merging it would mean inventing when things happened. The app's own record of activity is the timeline.
 - ⚠️ **A stale service worker sees the new backend with the old shell for one load.** The deployed build carries the old nine-section shell, so a browser still holding it will request `sec-h`/`sec-i` (refused with a clear "reload the app" error, because `RETIRED_SECTION_IDS` names them) and can post `a_overallStatus` into the `sec-a` row, which nothing reads. Harmless, and the `CACHE_NAME` bump ends it on the next reload — but it is the residual cost of the frontend and backend cutting over together.
 - ⚠️ **Three Sheet columns are unmodelled** — the Form writes columns E, J and O, for which no `IR_REPO_*_COL` constant exists. The 📋 Report tab surfaces them under "Other columns from the Sheet" rather than dropping them, and the app records which headers it did not recognise (`lastSheetAudit`). A new Form question is therefore visible, but appears in a catch-all block instead of a modelled field.
@@ -125,7 +145,19 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1605 cases across 15 suites**, all passing.
+`node tools/smoke-all.mjs` — **1676 cases across 16 suites**, all passing.
+(1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
+its 69 cases arrived with Stages 3–4.)
+
+**A suite that fails inside `smoke-all` but passes on its own is Chrome contention,
+not a regression** — re-run just that suite before believing it. `smoke-boot.mjs`
+launches real browsers, and twice a full run has produced an empty first paint
+(no icon slots, 33 failures) or a lost `localStorage` flag. The second one is
+understood and fixed: Chrome writes the profile asynchronously, so the intro phase
+now waits ~1.5s after the probe before killing the process, because killing it
+instantly could lose the "seen" flag and make the return-visit assertions fail over
+a working feature. The first one is not diagnosed, only observed — re-run and it is
+gone.
 
 Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
 no registration step.
@@ -136,6 +168,7 @@ no registration step.
 | `smoke-backend.mjs` | Regex over `backend.gs`, retargeted from Sheets to the store: deleted sheet machinery really gone (`getRange`, `appendRow`, every `getOrCreate*Tab`, the merge planner, the importer, the column constants); **every remaining `SpreadsheetApp.` call site walks to its enclosing function and must be one of the read-only inputs**, and the store functions contain no positional layout at all; the one-key write rule; `readJson`'s throw-don't-fallback contract; `getStoreFolder` never creating; the index and the anti-fork rule; per-IR audit, audit-last, and no early return that can skip one; the forced password change (no token before any mint, TTL on **both** doors); the mail cap on every send site; the sentinel allowlist; the lock's release-in-`finally` and refuse-rather-than-proceed wording; every locked write path named in the LOCKED list; and the editor run order printed where the editor will actually see it |
 | `smoke-shell.mjs` | Every id `app.js` reads at parse time exists in `index.html`; the **7 tabs and 7 panes** (📋 Report + six lettered); that the retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane, and that the Overview carries neither `class="section-content"` nor a `sec-` id; the plain end-of-body `<script>` contract; cascade order; token-only intake CSS; and that the **irreversible purge is two-step in the UI too** (review → copy → delete), not just in the endpoint behind it |
 | `smoke-ir-state.mjs` | `__IRS__` ownership, precedence and merge — including that a **retired** section id is filtered out of `ir.done` |
+| `smoke-list-intel.mjs` | **The two list stages that turn an absence into a number, which is exactly how they fail.** Stage 3: the completion count reads `done[]` against the six live ids, so a duplicate, an unknown id or a retired `sec-a` marker cannot push it past 6 or promise a tab nobody can open, a junk `done[]` counts 0 rather than `NaN`, and the fill arrives as a `p0`–`p6` **class**, never an inline style (the card's attribute set is pinned by `smoke-intake.mjs`). Stage 4: the clock is `statusAt` when the app recorded the change and the client's `dateRaisedISO` otherwise, **and the label says which** ("In status 6d" vs "Raised 21d ago"); the display-only `dateRaised` string and a JS `Date` string are both refused; a future timestamp reads 0 days, not negative; and with neither date there is **no clock at all** — no age chip and no overdue flag. Overdue is by priority (Urgent 1 / High 3 / Medium 7 / Low 14, the loosest for an unprioritised IR, matched case-insensitively, reached on the day itself), and **only an `open` ticket can be flagged** — a paused or delivered one is old, not late. Then the rendered card and header are asserted from real output: both carry the same count and age, exactly one `badge-danger` between a late and a fresh ticket, the tooltip names that ticket's own limit, a hostile priority cannot add an attribute through the tooltip path — and a legacy-only IR keeps its app-owned category, status, saved sections and clock instead of rendering as untouched |
 | `smoke-intake.mjs` | The Sheet column map, the audit, degenerate/reordered input, and escaping — including **the ticket-list card rendered from two untrusted sources** (the public customer Form's serial field, and `__IRS__` status/priority, which any signed-in user can write). Asserts on real rendered output: no injected attribute, no attribute beyond the fixed set the renderer writes, and a `javascript:` link produces no anchor at all |
 | `smoke-sections.mjs` | The six-section contract; every field id in every **merged** section resolves to its section id — `g_basicReport → sec-f`, `h_dispatchChecklist → sec-g`, `i_courier → sec-g`, the cases that fail without `FIELD_SECTION_INDEX`; the prefix fallback still works for an id in no form; the Overview's structural isolation; and that `saveDraft('sec-a')` writes nothing |
 | `smoke-timeline.mjs` | Drives the **pure** `buildTimeline` in the `vm` harness — behaviour, not shape. Each event kind maps correctly; `done` deltas are suppressed; an `uploaded` row carries the file name with the **source** field id; comments merge in and other IRs are excluded; a `'dd-MMM-yyyy HH:mm:ss'` fixture parses (the `Date.parse` → `NaN` trap); mixed timestamps sort with the tiebreak; `limit` trims from the newest end; and no entry ever interpolates the literal `undefined` |
@@ -236,8 +269,15 @@ and a live end-to-end sign-in. See the verification list in
       breakout and a status mix. Deliberately counts and filters only — no charts, no
       ageing buckets (`statusAt` only exists for in-app-triaged IRs, since the app
       refuses to invent a timestamp for a Sheet-set status).*
-- [ ] Section completion progress indicator on Master Index cards — *Stage 3; the data already exists*
-- [ ] Ticket ageing / time-in-status / overdue flags — *Stage 4*
+- [x] Section completion progress indicator on Master Index cards — *Stage 3; built
+      2026-09-18. A `3/6` chip with a small bar, reading `done[]` against the six live
+      section ids, on the card and in the IR header. Filled sections turn green at
+      `6/6`.*
+- [x] Ticket ageing / time-in-status / overdue flags — *Stage 4; built 2026-09-18. The
+      clock is `statusAt` when the app recorded the status change and the raise date
+      otherwise, and the label says which ("In status 6d" / "Raised 21d ago"); nothing
+      is shown when there is no real timestamp. Overdue is by priority — see the
+      limits note under Functionality.*
 - [ ] Canned responses — *Stage 6*
 - [ ] Knowledge base — *Stage 7*
 - [ ] CSAT score — *Stage 8*
@@ -254,6 +294,27 @@ and a live end-to-end sign-in. See the verification list in
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **The app has a real icon, generated from one brand master.** The owner-supplied
+  crop is now `assets/icon-master.jpeg` (1653×1653), and `icon-192.png`,
+  `icon-512.png` and `apple-touch-icon.png` are all produced from it by
+  `tools/make-icons.ps1` — the whole square is downscaled, never a bounding-box crop,
+  because the background wash runs corner to corner and a tight crop leaves a visible
+  seam. The mark sits at 75% of the width, consistently inset across all three, and the
+  master is the **only** source: the superseded 2048×2048 upload is deleted rather than
+  left beside it to be picked up by mistake. `smoke-shell.mjs` now fails if any icon is
+  blank or the master goes missing.
+- ✅ **The list says how far along each IR is, and how long it has been sitting.**
+  Every card carries a `3/6` completion chip (a small bar plus the count, green at
+  `6/6`) and an age — `In status 6d` when the app recorded the status change, `Raised
+  21d ago` when only the client's raise date is real — with an **Overdue** badge on any
+  open IR past its priority's limit. The IR header says the same thing, from the same
+  helpers, so the two can never disagree. **Nothing is ever invented**: an IR with no
+  real timestamp shows no age and is never overdue, and a legacy-only record with
+  nothing saved shows no chip. Building this also fixed a real bug on the way —
+  legacy-only stubs are appended to `allIRs` *after* `setAllIRs()` merges app-owned
+  state, so a legacy IR that had been triaged rendered in the list as untouched
+  (no assignee, no category, and now "0/6" over a ticket with saved sections); the
+  merge is now re-applied to the records it missed.
 - ✅ **Closed IRs have their Drive folders archived, and reopened ones come back.**
   A daily trigger (installed once with `installArchiveTrigger()`) moves the folder of
   any IR that has been `Close` for more than 30 days into `Archive IRs/`, capped at 10

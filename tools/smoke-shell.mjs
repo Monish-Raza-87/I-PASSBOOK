@@ -285,6 +285,14 @@ ok('index.html points at the icon set, not the old letterhead',
   !/assets\/logo\.png/.test(html));
 ok('the sign-in card shows the mark',
   /class="auth-logo"/.test(html) && /assets\/icon-192\.png/.test(authHead));
+// The sidebar mark was a lettered "IP" square standing in for the logo, which is
+// exactly the sort of placeholder that survives a redesign because nothing breaks
+// when it does. It is the icon now — and the same file the sign-in card uses, so
+// the app cannot end up wearing two different marks.
+ok('the sidebar brand mark is the icon, not a lettered stand-in',
+  /class="brand-mark"[^>]*>\s*<img[^>]*assets\/icon-192\.png/.test(html) &&
+  !/class="brand-mark"[^>]*>\s*[A-Za-z]/.test(html),
+  (html.match(/class="brand-mark"[\s\S]{0,120}/) || [''])[0]);
 
 const manifest = JSON.parse(read('../manifest.json'));
 ok('the manifest declares both icon sizes',
@@ -309,6 +317,21 @@ ok('the apple-touch-icon is a real 180x180 PNG', (() => {
   const b = fs.readFileSync(p);
   return b.readUInt32BE(16) === 180 && b.readUInt32BE(20) === 180;
 })());
+// A dimension check passes on a BLANK icon, which is exactly what a botched
+// regeneration produces — tools/make-icons.ps1 writes a fresh file of the right
+// size even if it read a master that was wrong or empty. A flat single-colour
+// PNG of this size deflates to a few hundred bytes, so the byte count is the
+// canary the IHDR cannot be. The master is asserted too: it is the only source
+// for all three, and a missing one is what the NEXT icon change would trip on.
+ok('no icon is a blank file, and the master they come from is present', (() => {
+  const names = ['assets/icon-192.png', 'assets/icon-512.png', 'assets/apple-touch-icon.png'];
+  const thin = names.filter(n => {
+    const p = new URL(`../${n}`, import.meta.url);
+    return !fs.existsSync(p) || fs.statSync(p).size < 4096;
+  });
+  const master = new URL('../assets/icon-master.jpeg', import.meta.url);
+  return thin.length === 0 && fs.existsSync(master) && fs.statSync(master).size > 4096;
+})(), 'a blank PNG deflates to well under 4 KB');
 // sw.js precaches what it lists, and the deploy only serves what SERVED names.
 // An entry in one and not the other is a 404 the browser swallows.
 const served = (read('../tools/deploy-ghpages.mjs').match(/const SERVED = \[[\s\S]*?\]/) || [''])[0];

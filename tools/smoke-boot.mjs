@@ -715,6 +715,15 @@ async function runIntroLoad(ms) {
     `${base}${INTRO_PATH}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const got = await waitForProbe(before, ms);
+  // Give Chrome a moment to write the profile down before killing it. The
+  // "seen" flag goes to the profile's LevelDB asynchronously, and the probe
+  // lands at about the same instant the intro is dismissed — so killing the
+  // process the moment the probe arrives can lose the flag, and the RETURN-VISIT
+  // assertions below then fail for a reason that has nothing to do with the
+  // feature. Seen once for real (2 failures in a full `smoke-all` run, clean on
+  // three re-runs of this suite alone), which is exactly how a flaky test gets
+  // believed over a working feature.
+  if (got) await new Promise(r => setTimeout(r, 1500));
   try { proc.kill(); } catch { /* already gone */ }
   return got;
 }

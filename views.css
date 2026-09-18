@@ -1376,6 +1376,57 @@
   .activity-toggle { min-height: 40px; }
 }
 
+/* ─── Completion and ageing (Stage 3 / Stage 4) ──────────────────────────────
+   Two facts that sit on the same row: how much of the passbook is filled in,
+   and how long the ticket has been sitting. Both are quiet when there is
+   nothing to say — a ticket with no saved sections and no usable date renders
+   exactly the card it rendered before these existed.
+
+   The bar's fill is a CLASS (p0–p6), not an inline style. The list card is
+   asserted to carry no attribute the renderer did not write
+   (smoke-intake.mjs), and `style=` would break that contract for a value that
+   has only seven states.
+
+   The Overdue flag reuses .badge-danger: a real semantic colour, dark-mode
+   aware, and the same red the rest of the app uses for "this is wrong". It is
+   deliberately NOT the accent — an accent-coloured warning would change its
+   meaning with the user's chosen palette. */
+.ir-progress { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.ir-progress-bar {
+  display: block;
+  width: 30px;
+  height: 4px;
+  border-radius: var(--radius-9);
+  background: var(--surface-gray-3);
+  overflow: hidden;
+}
+.ir-progress-bar::after {
+  content: '';
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--ink-gray-6);
+}
+.ir-progress-text {
+  font-size: var(--text-2xs);
+  line-height: 1;
+  color: var(--ink-gray-5);
+  font-variant-numeric: tabular-nums;
+}
+.ir-progress.p1 .ir-progress-bar::after { width: 16.666%; }
+.ir-progress.p2 .ir-progress-bar::after { width: 33.333%; }
+.ir-progress.p3 .ir-progress-bar::after { width: 50%; }
+.ir-progress.p4 .ir-progress-bar::after { width: 66.666%; }
+.ir-progress.p5 .ir-progress-bar::after { width: 83.333%; }
+.ir-progress.p6 .ir-progress-bar::after { width: 100%; }
+.ir-progress.is-complete .ir-progress-bar::after { background: var(--ink-green-7); }
+.ir-progress.is-complete .ir-progress-text { color: var(--ink-green-7); font-weight: var(--weight-semibold); }
+
+.ir-age { color: var(--ink-gray-5); }
+.ir-age.is-late { color: var(--st-danger-fg); font-weight: var(--weight-medium); }
+.meta-pill.meta-late { color: var(--st-danger-fg); background: var(--st-danger-bg); border-color: var(--st-danger-bd); }
+
 /* ══════════════════════════════════════════════════════════
    POLISH — level: NOTICEABLE
 

@@ -52,8 +52,12 @@ i-passbook-app/
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
-│   ├── logo.png        # App icon (237 KB)
-│   └── intro_ipassbookv2.mp4  # Splash screen video (9.7 MB, 9s)
+│   ├── icon-192.png    # App icon, from the 2K master (manifest + favicon)
+│   ├── icon-512.png    # App icon, large
+│   ├── apple-touch-icon.png  # 180×180, the size iOS asks for
+│   ├── logo.png        # Legacy letterhead — NOT an icon, pruned from the deploy
+│   ├── intro_ipassbookv2.mp4         # Splash video, 16:9 master (9.7 MB, 9.0s)
+│   └── intro_ipassbookv2_mobile.mp4  # Splash video, portrait cut (3.8 MB, 9.1s)
 └── docs/               # ← This knowledge base
 ```
 

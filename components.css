@@ -869,3 +869,40 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   line-height: var(--leading-body);
 }
 .empty-state span { font-size: 2.5rem; display: block; margin-bottom: 0.9rem; }
+
+/* ── Phone: stop iOS zooming the whole page on every field ────────────────
+   16px is not a style preference. iOS Safari zooms the viewport whenever a
+   focused field is under 16px, and --text-base is 14px — so every login,
+   remark and remark field sprang the layout open on a phone. 16px is the
+   threshold; nothing here is tuned by eye.
+
+   `select`/`textarea` are named separately so this wins at their higher
+   specificity. The dense in-table fields (.inward-row, .iqc-row,
+   .cost-table-row, .iqc-cfg-row) deliberately stay smaller — they are 0,2,0
+   rules in views.css and this cannot reach them. That is on purpose: a 16px
+   font in a 100px-wide grid column would clip, and those rows are not where
+   anyone types on a phone. */
+@media (max-width: 639px) {
+  .form-input,
+  select.form-input,
+  textarea.form-input { font-size: 16px; }
+
+  /* Triage / Comments / History sit in the ticket header at 28px — the three
+     buttons someone reaches for most, and the smallest things to hit. The
+     height is raised rather than the padding so the glyphs, the icon gap and
+     the .comment-count badge offsets all stay exactly where they are. */
+  .btn-ghost { height: 40px; }
+
+  /* The per-section and per-field comment chips are 25x20 — the smallest
+     controls in the app. Growing the box would push a section heading and a
+     field label apart, so the HIT AREA grows instead, via a transparent
+     pseudo-element that adds nothing to the layout. Horizontal only: a field
+     chip floats right inside a label row, and claiming vertical space would
+     swallow taps meant for the input underneath it. */
+  .sec-nudge-btn::after,
+  .field-nudge-btn::after {
+    content: '';
+    position: absolute;
+    inset: 0 -9px;
+  }
+}

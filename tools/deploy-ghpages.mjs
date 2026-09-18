@@ -44,8 +44,11 @@ const SERVED = [
   'tokens.css',
   'views.css',
   'vendor/pdf-lib.min.js',
+  'assets/apple-touch-icon.png',
+  'assets/icon-192.png',
+  'assets/icon-512.png',
   'assets/intro_ipassbookv2.mp4',
-  'assets/logo.png'
+  'assets/intro_ipassbookv2_mobile.mp4'
 ]
 
 // Present on gh-pages but not in the repo's main tree — carried over untouched.
@@ -57,9 +60,15 @@ const CARRY = ['.nojekyll']
 // clone. Anything that is genuinely dead belongs here instead.
 //
 // The intro this replaced: nothing references it any more (index.html points at
-// intro_ipassbookv2.mp4), so it is ~3.9 MB of pure dead weight.
+// intro_ipassbookv2*.mp4), so it is ~3.9 MB of pure dead weight.
+//
+// logo.png goes too. It was standing in as the app icon, but it is a letterhead
+// — not square, and carrying the company address and phone number — so at the
+// 192px a home screen asks for it was a grey smear. The real icon set above
+// replaces it and sw.js no longer precaches it.
 const PRUNE = [
-  'assets/Indrones Intro v2.mp4'
+  'assets/Indrones Intro v2.mp4',
+  'assets/logo.png'
 ]
 
 const argv = process.argv.slice(2)

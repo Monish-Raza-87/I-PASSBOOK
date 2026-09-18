@@ -28,16 +28,24 @@ store layout.
 ## App Screens
 
 ### 1. Splash Screen
-- Plays `assets/intro_ipassbookv2.mp4` (9.03 s) — **once per device**, on the first
-  open. `localStorage.introSeen` is set when it plays, and the pre-paint script in
+- Plays the intro — **once per device**, on the first open. Two cuts of it ship:
+  `assets/intro_ipassbookv2_mobile.mp4` (portrait, 9.07 s) is listed **first** in the
+  `<video>` and gated with `media="(max-width: 639px)"`; the 16:9 master
+  `assets/intro_ipassbookv2.mp4` (9.03 s) carries no media attribute, so it is both
+  the desktop cut and the fallback for a browser that ignores `media` on `<source>`.
+  `<source>` selection takes the **first** entry that matches, so the order matters —
+  swapping them sends every phone the landscape master.
+- `localStorage.introSeen` is set when it plays, and the pre-paint script in
   `index.html` hides the splash off that flag on every open after, so a returning
   user sees nothing and downloads nothing (the video is `preload="none"`).
 - Dismissal is driven by the video's own `ended` event, not a fixed wait, with an
   `INTRO_FALLBACK_MS` (9.5 s) backstop so a missing or unplayable file still
-  reaches sign-in. **The fallback must stay ≥ the video's duration** — a shorter
-  timer is what silently cut the previous intro off mid-play; `smoke-shell.mjs`
-  now reads the duration out of the MP4 header and fails if it doesn't.
-- Neutral dark chrome with the "I-PASSBOOK" wordmark
+  reaches sign-in. **The fallback must stay ≥ the longest cut** — a shorter timer is
+  what silently cut the previous intro off mid-play; `smoke-shell.mjs` now reads the
+  duration out of each MP4 header and fails if it doesn't.
+- Nothing is drawn over the video. It plays full-bleed; the loader bar is timed from
+  the video's own duration via `--intro-ms`. The wordmark and the full product name
+  that used to sit on top of it live on the sign-in card instead.
 - Fades out, then checks auth state
 
 ### 2. Auth Screen

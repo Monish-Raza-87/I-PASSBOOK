@@ -180,44 +180,82 @@ const swJs = read('../sw.js');
 
 const videoTag = (html.match(/<video id="splash-video"[\s\S]*?<\/video>/) || [''])[0];
 ok('the splash video tag exists', videoTag.length > 0);
-ok('it points at the current intro file',
-  /src="assets\/intro_ipassbookv2\.mp4"/.test(videoTag),
-  videoTag.replace(/\s+/g, ' '));
+
+// Two cuts of the same intro. The phone one must come FIRST and carry the media
+// gate: <source> selection takes the first entry that matches, so a desktop file
+// listed first would win on a phone as well and the portrait cut would never play.
+const sources = [...videoTag.matchAll(/<source\s+src="[^"]+"[^>]*>/g)].map(m => m[0]);
+ok('the splash offers two cuts of the intro', sources.length === 2, sources);
+ok('the phone cut is listed first and is the media-gated one',
+  /intro_ipassbookv2_mobile\.mp4/.test(sources[0] || '') &&
+  /media="\(max-width: 639px\)"/.test(sources[0] || '') &&
+  !/media=/.test(sources[1] || ''),
+  sources);
+ok('both cuts exist on disk',
+  ['intro_ipassbookv2.mp4', 'intro_ipassbookv2_mobile.mp4']
+    .every(f => fs.existsSync(new URL(`../assets/${f}`, import.meta.url))));
 ok('and no longer references the file it replaced',
   !/Indrones Intro v2\.mp4/.test(html) && !/Indrones Intro v2\.mp4/.test(appJs));
-ok('the file it points at exists on disk',
-  fs.existsSync(new URL('../assets/intro_ipassbookv2.mp4', import.meta.url)));
-// preload="none" + no autoplay is what stops a RETURNING user downloading ~9.7 MB
-// for a splash they will never be shown. Either attribute alone would fetch it.
+// preload="none" + no autoplay is what stops a RETURNING user downloading the
+// intro for a splash they will never be shown. Either alone would fetch it.
 ok('it is preloaded lazily and not autoplayed',
   /preload="none"/.test(videoTag) && !/\bautoplay\b/.test(videoTag),
   videoTag.replace(/\s+/g, ' '));
-// Precaching it in SHELL would make EVERY first-time install pay the whole
-// download before sign-in, which is the opposite of what lazy loading bought.
-ok('it is not precached in the service worker shell',
+// Precaching either cut in SHELL would make EVERY first-time install pay the
+// whole download before sign-in, which is the opposite of what lazy loading bought.
+ok('neither cut is precached in the service worker shell',
   !/intro_ipassbookv2/.test(swJs));
 
-// Read the real duration out of the MP4 header, so the timer below is checked
-// against the file rather than against a number someone typed. This is the bug
+// Nothing is drawn over the intro. A darkening layer with backdrop-filter: blur()
+// used to sit on top of it — the owner saw the result as a blurry video — and the
+// wordmark that sat on that layer moved to the sign-in card. Scoped to the splash
+// block and the splash styles, because `backdrop-filter` is used legitimately
+// elsewhere (the frosted headers).
+const splashBlock = (html.match(/<div id="splash-screen">[\s\S]*?<!-- ========== AUTH SCREEN/) || [''])[0];
+ok('nothing is layered over the video',
+  splashBlock.length > 0 &&
+  !/splash-overlay|splash-logo|splash-sub|class="[^"]*overlay/.test(splashBlock),
+  splashBlock.replace(/\s+/g, ' ').slice(0, 200));
+const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?AUTH SCREEN/) || [''])[0];
+ok('and no blur or darkening rule is left in the splash styles',
+  splashCss.length > 0 &&
+  !/backdrop-filter|splash-overlay|splash-logo|splash-sub/.test(splashCss));
+// The card, not the splash, is where the full product name now lives. Bounded by
+// the hint paragraph rather than by the next </div>, which closes .auth-brand.
+const authHead = (html.match(/<div class="auth-head">[\s\S]*?id="auth-hint-text"/) || [''])[0];
+ok('the product name moved to the sign-in card',
+  /Indrones Product After-Sales Summary Book/.test(authHead),
+  authHead.replace(/\s+/g, ' '));
+
+// Read the real duration out of an MP4 header, so the timer below is checked
+// against the files rather than against a number someone typed. This is the bug
 // that shipped before: a 2000ms timer against a 3940ms video, so the intro was
-// always cut off mid-play.
-const mp4DurationMs = (() => {
-  const b = fs.readFileSync(new URL('../assets/intro_ipassbookv2.mp4', import.meta.url));
+// always cut off mid-play. The mvhd box in these files is version 0.
+const mp4DurationMs = (file) => {
+  const b = fs.readFileSync(new URL(`../assets/${file}`, import.meta.url));
   const i = b.indexOf('mvhd');
-  if (i < 0) return null;
-  const v = b[i + 4];
-  if (v === 1) return null;
+  if (i < 0 || b[i + 4] === 1) return null;
   const timescale = b.readUInt32BE(i + 16);
   const duration = b.readUInt32BE(i + 20);
   return timescale ? (duration / timescale) * 1000 : null;
-})();
-ok('the intro is a readable MP4', mp4DurationMs !== null, mp4DurationMs);
+};
+const durations = {
+  desktop: mp4DurationMs('intro_ipassbookv2.mp4'),
+  mobile: mp4DurationMs('intro_ipassbookv2_mobile.mp4')
+};
+ok('both cuts are readable MP4s', Object.values(durations).every(v => v !== null), durations);
 
 const fallbackMs = Number((appJs.match(/INTRO_FALLBACK_MS\s*=\s*(\d+)/) || [])[1]);
 ok('app.js declares an intro fallback timer', Number.isFinite(fallbackMs), fallbackMs);
-ok('the fallback is at least as long as the video, so it never cuts it',
-  mp4DurationMs !== null && fallbackMs >= mp4DurationMs,
-  { fallbackMs, mp4DurationMs });
+ok('the fallback outlasts the longer cut, so it truncates neither',
+  Object.values(durations).every(v => v !== null && fallbackMs >= v),
+  { fallbackMs, ...durations });
+
+// The loader bar is timed from the video, not from a number in the stylesheet —
+// it used to reach 100% at 1.85s while nine seconds of intro were still playing,
+// which read as a stuck progress bar.
+ok('the loader bar is timed from the video itself',
+  /--intro-ms/.test(appJs) && /var\(--intro-ms/.test(read('../base.css')));
 
 head('the intro plays once, then is skipped');
 ok('app.js keys the "already seen" flag on localStorage',
@@ -234,6 +272,51 @@ ok('the pre-paint script sets data-intro before the body parses',
   /data-intro/.test(prePaint) && /introSeen/.test(prePaint));
 ok('base.css hides the splash off that attribute',
   /html\[data-intro="seen"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
+
+// ── The app icon ─────────────────────────────────────────────────────────────
+// The icon set replaced a letterhead PNG that was standing in as one. A manifest
+// is easy to get wrong and fails silently: Chrome drops an icon whose bytes do
+// not match the size it claims, and offers no install prompt — with no error in
+// the console, so nobody notices until someone tries to add it to a home screen.
+head('the app icon');
+ok('index.html points at the icon set, not the old letterhead',
+  /rel="icon"[^>]*assets\/icon-192\.png/.test(html) &&
+  /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(html) &&
+  !/assets\/logo\.png/.test(html));
+ok('the sign-in card shows the mark',
+  /class="auth-logo"/.test(html) && /assets\/icon-192\.png/.test(authHead));
+
+const manifest = JSON.parse(read('../manifest.json'));
+ok('the manifest declares both icon sizes',
+  manifest.icons.some(i => i.sizes === '192x192' && i.src === 'assets/icon-192.png') &&
+  manifest.icons.some(i => i.sizes === '512x512' && i.src === 'assets/icon-512.png'),
+  manifest.icons);
+// A PNG's IHDR carries its dimensions at bytes 16 and 20 — read them rather than
+// trusting the label.
+ok('every declared icon is a real PNG of the size it claims',
+  manifest.icons.every(ic => {
+    const p = new URL(`../${ic.src}`, import.meta.url);
+    if (!fs.existsSync(p)) return false;
+    const b = fs.readFileSync(p);
+    return `${b.readUInt32BE(16)}x${b.readUInt32BE(20)}` === ic.sizes;
+  }), manifest.icons);
+// iOS ignores <link rel="icon"> and asks for this exact file name at the root of
+// the assets folder it is given; a missing one falls back to a screenshot of the
+// page, which is what the home screen would show instead of the mark.
+ok('the apple-touch-icon is a real 180x180 PNG', (() => {
+  const p = new URL('../assets/apple-touch-icon.png', import.meta.url);
+  if (!fs.existsSync(p)) return false;
+  const b = fs.readFileSync(p);
+  return b.readUInt32BE(16) === 180 && b.readUInt32BE(20) === 180;
+})());
+// sw.js precaches what it lists, and the deploy only serves what SERVED names.
+// An entry in one and not the other is a 404 the browser swallows.
+const served = (read('../tools/deploy-ghpages.mjs').match(/const SERVED = \[[\s\S]*?\]/) || [''])[0];
+const shellList = (swJs.match(/const SHELL = \[[\s\S]*?\]/) || [''])[0];
+ok('every precached shell file is in the deploy\'s served list',
+  [...shellList.matchAll(/'\.\/([^']+)'/g)].map(m => m[1])
+    .every(p => p === '' || served.includes(`'${p}'`)),
+  [...shellList.matchAll(/'\.\/([^']+)'/g)].map(m => m[1]));
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

@@ -107,20 +107,33 @@ must keep writing **inline** `display` values — `applyAccessGating` reads
 `.tab:not([style*="display: none"])`.
 
 ### Splash (`#splash-screen`)
-Fixed overlay at `--z-splash`, intro video, neutral dark chrome, loader bar.
+Fixed overlay at `--z-splash` holding nothing but the intro video and a loader bar.
+**Nothing is layered over the video** — a darkening div with a backdrop blur used to
+sit here and the owner read the result as a blurry video. The wordmark and the
+"Indrones Product After-Sales Summary Book" line it carried moved to the sign-in
+card, where the full product name belongs.
+
+Two cuts ship — a portrait phone cut listed first and gated by `media`, then the
+16:9 master as both the desktop cut and the fallback. `<source>` takes the first
+match, so the order is load-bearing.
 
 The intro plays **once per device**. `app.js` records `localStorage.introSeen` when
 it plays, and the pre-paint script sets `data-intro="seen"` on `<html>` before the
 body parses — `base.css` hides the splash off that attribute, so a returning user
 never sees a flash of it. The video is `preload="none"` with no `autoplay`, and
-`app.js` calls `play()` only on that first open, so the ~9.7 MB is never fetched
-again. It is deliberately **not** in `sw.js`'s `SHELL` — precaching it would charge
-every first-time install the whole download before sign-in.
+`app.js` calls `play()` only on that first open, so the download is never paid
+again. Neither cut is in `sw.js`'s `SHELL` — precaching them would charge every
+first-time install ~13 MB before sign-in.
 
 Dismissal listens for the video's `ended` event rather than waiting a fixed time, so
 a re-exported intro needs no code change; `INTRO_FALLBACK_MS` is the backstop when
-`ended` never arrives. Adding an asset here means adding it to `SERVED` in
-`tools/deploy-ghpages.mjs` (and to `PRUNE` if it replaces one).
+`ended` never arrives, and must stay ≥ the longest cut. The loader bar's
+`animation-duration` is `var(--intro-ms)`, which `app.js` sets from the video's own
+duration on `loadedmetadata` — it previously ran a fixed 1.85 s and reached 100%
+with seven seconds of intro still to play.
+
+Adding an asset here means adding it to `SERVED` in `tools/deploy-ghpages.mjs` (and
+to `PRUNE` if it replaces one).
 
 ### Auth card (`.glass-card`)
 Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and

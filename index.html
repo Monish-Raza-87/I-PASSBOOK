@@ -21,7 +21,8 @@
   <link rel="stylesheet" href="components.css" />
   <link rel="stylesheet" href="views.css" />
 
-  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#171717" media="(prefers-color-scheme: dark)" />
@@ -66,16 +67,18 @@
   <div id="splash-screen">
     <!-- preload="none" and no autoplay ON PURPOSE: a returning user must not
          download this video at all. app.js calls play() only on the first open.
-         It is deliberately NOT in sw.js's SHELL — precaching ~9.7 MB on install
-         would cost every user that download before they ever sign in. -->
+         Neither cut is in sw.js's SHELL — precaching ~13 MB on install would
+         cost every user that download before they ever sign in.
+
+         Two cuts of the same intro. The phone one is listed FIRST and gated by
+         media, so a phone gets the portrait framing it was cut for instead of
+         the 16:9 master scaled up and cropped to a strip. The desktop file
+         carries no media attribute, which makes it the fallback at every other
+         width — including a browser that ignores media on <source>. -->
     <video id="splash-video" class="splash-video" muted playsinline preload="none">
+      <source src="assets/intro_ipassbookv2_mobile.mp4" type="video/mp4" media="(max-width: 639px)">
       <source src="assets/intro_ipassbookv2.mp4" type="video/mp4">
     </video>
-    <div class="splash-overlay"></div>
-    <div class="splash-logo-wrap">
-      <div class="splash-logo">I-PASSBOOK</div>
-      <div class="splash-sub">Indrones Product After-Sales Summary Book</div>
-    </div>
     <div class="splash-loader">
       <div class="splash-bar"></div>
     </div>
@@ -88,7 +91,11 @@
   <div id="auth-container">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
+        <!-- alt="" on purpose: the brand name is the next line down, so this is
+             the same information twice and the text is the accessible copy. -->
+        <img class="auth-logo" src="assets/icon-192.png" alt="" width="76" height="76" />
         <div class="auth-brand">I-PASSBOOK</div>
+        <p class="auth-full">Indrones Product After-Sales Summary Book</p>
         <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
@@ -318,7 +325,17 @@
                pushed off-screen. -->
           <div id="ir-overview" class="overview-panel">
             <div class="overview-head">
-              <h2 class="overview-title">Overview</h2>
+              <div class="overview-head-left">
+                <h2 class="overview-title">Overview</h2>
+                <!-- Text-labelled on purpose: the house rule is that only icons
+                     which earn their place get one. The chevron is a disclosure
+                     affordance, drawn in CSS — no icon font, no SVG asset. -->
+                <button type="button" class="overview-toggle" id="overview-toggle"
+                        aria-expanded="true" aria-controls="ir-overview-facts">
+                  <span class="overview-chevron" aria-hidden="true"></span>
+                  <span class="overview-toggle-text">Hide</span>
+                </button>
+              </div>
               <button type="button" class="btn" id="save-overview">Save Overview</button>
             </div>
             <div id="ir-overview-facts"></div>

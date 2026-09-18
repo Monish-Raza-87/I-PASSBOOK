@@ -108,7 +108,17 @@ ok('the intake pane is rendered by renderIntake(), never saved',
   /function renderIntake\(/.test(appJs) && /renderIntake\(\);/.test(appJs));
 ok('saveDraft ignores non-SECTIONS panes',
   /if \(!SECTIONS\[sectionId\]\) return;/.test(appJs));
-const cascade = ['tokens.css', 'base.css', 'components.css', 'views.css'].map(f => html.indexOf(f));
+// palette.css sits between tokens.css and base.css and that position is
+// load-bearing: it re-points the accent role (:root in tokens.css) onto a colour
+// family, and every var(--accent) in base/components/views resolves against it.
+// Before tokens.css it would be overridden; after base.css it would still win on
+// specificity but leave the first paint accent-less. Hence an explicit order.
+//
+// Matched as `href="…"`, not as a bare filename: index.html's comment above the
+// links names palette.css too, and a bare indexOf would find the prose first and
+// happily report the wrong order.
+const cascade = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css']
+  .map(f => html.indexOf(`href="${f}"`));
 ok('the stylesheet cascade order is unchanged',
   cascade.every((v, i) => v >= 0 && (i === 0 || v > cascade[i - 1])), cascade);
 

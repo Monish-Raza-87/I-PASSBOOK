@@ -4,11 +4,14 @@
 > lives in JSON files under `_store/` in the owner's Drive
 > (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. Committed on `main` and green — **1446 cases across 13 suites** —
-> but **not deployed.** `app.js` still names the old `/exec`, so the live app keeps
-> talking to the old backend on the old spreadsheet; that is also the rollback. See
-> [08](08 - Development Guide.md) for the cutover, which is now just a deploy plus
-> one line in `app.js` and a `CACHE_NAME` bump.
+> workbook. Committed and green — **1605 cases across 15 suites** —
+> and **deployed** to `gh-pages` (`4d6a283`, from `category-insights` `4592c83`,
+> `CACHE_NAME` `ipassbook-v28`). The **`backend.gs` on that branch is NOT deployed**:
+> the live Apps Script project still runs `main`'s backend, so sign-in is still
+> password-only and the emailed code never appears. That order is deliberate and must
+> not be inverted — new backend + old frontend is what locks everybody out. See
+> [08](08 - Development Guide.md) for the deploy, which is now just a New version on
+> the existing deployment plus a `CACHE_NAME` bump.
 >
 > The new store starts **empty** — there was no app data to migrate, by the owner's
 > word. The old "I-Passbook App Repository" spreadsheet is **not read, written or
@@ -122,7 +125,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1446 cases across 13 suites**, all passing.
+`node tools/smoke-all.mjs` — **1605 cases across 15 suites**, all passing.
 
 Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
 no registration step.
@@ -243,11 +246,31 @@ and a live end-to-end sign-in. See the verification list in
 - [ ] Form validation with required fields
 - [ ] Offline-first with local storage sync queue
 - [ ] Multi-language support (Hindi + English)
+- [ ] **Erase archived IR folders.** Not built, deliberately: closing an IR moves its
+      folder to `Archive IRs/` and nothing is ever deleted. The owner will watch Drive
+      usage for a while and ask for this separately if space becomes an issue.
 - [ ] Move the IR list read behind the authenticated `listIRs` action (closes the last
       unauthenticated data path)
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **Closed IRs have their Drive folders archived, and reopened ones come back.**
+  A daily trigger (installed once with `installArchiveTrigger()`) moves the folder of
+  any IR that has been `Close` for more than 30 days into `Archive IRs/`, capped at 10
+  per run so the first sweep can be watched, and brings a folder back when its ticket
+  is reopened. **Nothing is ever erased.** One resolver, `findIRFolder()`, is what makes
+  this safe: the folder is looked for in the root *then* the archive, so an upload to an
+  archived IR lands beside its existing files instead of silently forking a second
+  `root/IR409`. Recorded as `archived` / `restored` in the ticket's own audit file. See
+  [04](04 - Backend API Reference.md).
+- ✅ **Users choose their own appearance, and the app is no longer plain.** Four preset
+  palettes — Blue, Violet, Teal, Graphite — plus light/dark/system, both in an
+  *Appearance* group in the **user menu** rather than the sidebar foot that had to be
+  scrolled to. The accent became a real role (`palette.css`) instead of hard-coded blue,
+  which also fixed a genuine accessibility bug: links and `.btn-primary` were at
+  **3.37:1**, below WCAG AA, and are now 4.68:1 and 6.70:1. The look itself is the
+  **Noticeable** polish level, a block at the end of `views.css`. See
+  [09](09 - Design System.md).
 - ✅ **App storage moved out of Google Sheets entirely.** Every byte the app owns —
   accounts, sessions, the access matrix, saved sections, the audit trail, comments,
   the knowledge base, backups — is a JSON file under `_store/` in the owner's Drive.

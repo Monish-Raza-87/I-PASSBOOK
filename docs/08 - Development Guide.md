@@ -5,20 +5,30 @@
 Since this is a vanilla HTML/CSS/JS app with no build tools:
 
 ```bash
-# Option 1: Python (if installed)
-cd D:\Projects\i-passbook-app
+# Recommended — no dependencies, cannot fail on a machine with no registry access
+node tools/serve-local.mjs          # → http://localhost:3000/
+node tools/serve-local.mjs 8080     # a different port
+
+# Alternatives
 python -m http.server 3000
-
-# Option 2: Node.js (if installed)
-npx serve -l 3000 -s
-
-# Option 3: VS Code Live Server extension
-# Right-click index.html → "Open with Live Server"
+npx serve -l 3000 -s                # downloads a package on first run
+# ...or the VS Code Live Server extension: right-click index.html
 ```
+
+> **Prefer `tools/serve-local.mjs`.** `npx serve` has to fetch the package on first
+> run, and when that fails it fails **silently** — no error, no server, just a
+> browser that cannot reach localhost. The script also sends
+> `Cache-Control: no-store`, so an edited stylesheet is not served out of the
+> browser's own cache.
 
 Then open: `http://localhost:3000/?dev=1`
 
 The `?dev=1` query parameter activates **dev auth bypass** — you'll be logged in as "Dev Tester" (with admin access) without needing a real account. This only works on `localhost`/`127.0.0.1`/`::1`.
+
+Backend calls are left **unauthorized** in this mode (there is no session to attach),
+so the app falls back to demo data. That is what makes it safe: **nothing done in a
+`?dev=1` session can read or write the live Drive store.** It is for inspecting the
+UI — layout, the palettes, the polish level — not for testing data.
 
 > **Do not remove the dev bypass casually.** It is reachable only on localhost plus
 > `?dev=1`, and it is the *only* way `smoke-boot.mjs` can boot the authenticated
@@ -88,6 +98,32 @@ the store, then deploy.
 **This is a NEW Apps Script project, under `monish.raza@indrones.com`.** The data
 and the backend sit in one account, and `customer.relations@` is out of the
 picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) for why.
+
+> ### ⚠️ Where things stand now — read before following the steps below
+>
+> The project **exists and is live**: its `/exec` ends **`jQXatfT/exec`**, and
+> `app.js` already points at it. So most of the original cutover below has already
+> happened, and two of its steps are now **wrong for this project**:
+>
+> - **Do not create a new project, and do not use "New deployment".** For every
+>   later deploy of *this* project, use **Deploy → Manage deployments → pencil →
+>   New version**. A "New deployment" mints a different `/exec` and breaks every
+>   installed client, because the URL lives in a cached `app.js`.
+> - **The deployed backend is still behind the branch.** It runs `main`'s code, so
+>   live sign-in is password-only: a password login returns a plain token with no
+>   `otpRequired`, and the code box simply never appears. Pasting the branch's
+>   `backend.gs` and deploying a **New version** is what turns the emailed code on.
+>   **Deploy the backend last, never first** — new backend + old frontend is the
+>   combination that locks everybody out, because the old frontend has nowhere to
+>   type the code.
+>
+> **After the deploy, run `installArchiveTrigger()` once** from the editor, signed in
+> as `monish.raza@indrones.com` — that is the account that owns the Drive folder, and
+> the trigger executes as whoever installed it. Until you do, closed IR folders are
+> archived only when `archiveClosedIRs()` is run by hand. Confirm exactly one trigger
+> appears in the project's Triggers page; the function is idempotent, so a second run
+> is safe but should add nothing.
+
 
 **Step 1 — one-time setup (run from the editor, before the deploy).**
 1. Sign in to [script.google.com](https://script.google.com) **as

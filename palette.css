@@ -1,0 +1,100 @@
+/* ============================================================
+   palette.css — the accent role, and the four selectable palettes
+
+   tokens.css names colours (--surface-blue-7, --ink-violet-3 …).
+   This file names a *job* — "the accent" — and then points that job at one
+   of those families. Every rule in the app that wants brand colour says
+   `var(--accent)`; which family that lands on is the user's choice.
+
+   Nothing here is a new colour. Every value is a var() onto a token that
+   tokens.css already defines, which is why switching palettes can never
+   produce an unreadable screen: all four families are Frappe's own
+   contrast-validated ramps, and the ramps invert between light and dark
+   by themselves (--surface-<hue>-9 is hue/800 in light mode and hue/200
+   in dark), so one declaration themes both modes correctly.
+
+   ⚠ Load order — tokens.css, THEN this file, THEN base.css.
+   This file is NOT generated. tools/gen-tokens.mjs rewrites tokens.css
+   wholesale, so accent roles must live here or a re-run would erase them.
+
+   Adding a palette: add its name to PALETTES in app.js AND to the
+   [data-palette="…"] block below. A name in only one of the two is a bug —
+   app.js would offer a choice that resolves to the blue fallback.
+   ============================================================ */
+
+/* ── The accent role ─────────────────────────────────────────────────────────
+   Blue is the default, declared on :root so it also applies before the
+   pre-paint script in index.html has run (and if localStorage is unreadable).
+   The explicit [data-palette="blue"] repeats it: the attribute and :root have
+   different specificity, so relying on :root alone would break the moment
+   anything set a palette on a nested element.
+
+   Every preset follows ONE pattern — accent is ink-<family>-7, the wash is
+   surface-<family>-1, the bar is surface-<family>-7, the solid button is
+   surface-<family>-9/-8/-7. Keeping the four structurally identical is what
+   makes "measure contrast once" a valid argument for all of them.
+
+   Note blue deliberately does NOT use --ink-blue-link, the old link token.
+   That token is a lighter blue (3.37:1 on white in light mode, 3.48:1 on the
+   dark surface) and fails WCAG AA at body size, which is the size links are.
+   ink-blue-7 is 4.68:1 light / 8.97:1 dark. Links are very slightly darker
+   than before as a result, and legible for the first time.
+   ------------------------------------------------------------------------- */
+:root,
+[data-palette="blue"] {
+  --accent: var(--ink-blue-7); /* text and icons — links, small labels */
+  --accent-soft: var(--surface-blue-1); /* pale wash behind a note or zone */
+  --accent-soft-line: var(--outline-blue-1); /* that wash's border */
+  --accent-bar: var(--surface-blue-7); /* the 3px rule down a note's edge */
+
+  --btn-solid-bg: var(--surface-blue-9); /* the accent's solid button … */
+  --btn-solid-bg-hover: var(--surface-blue-8);
+  --btn-solid-bg-active: var(--surface-blue-7);
+  --btn-solid-fg: var(--ink-base); /* … and the text on it */
+}
+
+[data-palette="violet"] {
+  --accent: var(--ink-violet-7);
+  --accent-soft: var(--surface-violet-1);
+  --accent-soft-line: var(--outline-violet-1);
+  --accent-bar: var(--surface-violet-7);
+
+  --btn-solid-bg: var(--surface-violet-9);
+  --btn-solid-bg-hover: var(--surface-violet-8);
+  --btn-solid-bg-active: var(--surface-violet-7);
+  --btn-solid-fg: var(--ink-base);
+}
+
+[data-palette="teal"] {
+  --accent: var(--ink-teal-7);
+  --accent-soft: var(--surface-teal-1);
+  --accent-soft-line: var(--outline-teal-1);
+  --accent-bar: var(--surface-teal-7);
+
+  --btn-solid-bg: var(--surface-teal-9);
+  --btn-solid-bg-hover: var(--surface-teal-8);
+  --btn-solid-bg-active: var(--surface-teal-7);
+  --btn-solid-fg: var(--ink-base);
+}
+
+/* Graphite is the neutral: the accent is the existing gray family, so this is the
+   palette closest to the app before palettes existed. It is the one preset allowed
+   to deviate from the shared pattern, and it has to. The other three carry emphasis
+   with a HUE, and a hue at -7 is already loud; gray has no hue to do that work, so
+   its bar sits one step stronger (gray-8, not gray-7) and its solid button has to go
+   all the way to the end of the ramp (gray-10/-9/-8, not -9/-8/-7). */
+[data-palette="graphite"] {
+  --accent: var(--ink-gray-7);
+  --accent-soft: var(--surface-gray-1);
+  --accent-soft-line: var(--outline-gray-1);
+  --accent-bar: var(--surface-gray-8);
+
+  --btn-solid-bg: var(--surface-gray-10);
+  --btn-solid-bg-hover: var(--surface-gray-9);
+  --btn-solid-bg-active: var(--surface-gray-8);
+  --btn-solid-fg: var(--ink-base);
+}
+
+/* Red, green and amber are deliberately absent. They already mean danger,
+   success and warning in the status badges, so offering them as an accent
+   would make a "Closed" badge change colour with a cosmetic preference. */

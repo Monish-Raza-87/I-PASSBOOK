@@ -36,7 +36,12 @@ const SOURCES = {
 
 // ── Which families to emit ───────────────────────────────────────────────────
 // Only the hues this app actually uses. Add a name here and re-run to extend.
-const HUES = ['red', 'blue', 'green', 'amber', 'violet'];
+//
+// `teal` is here for the palette presets rather than for any current use: it is one
+// of the four accents a user can choose, and it was the one family Frappe ships that
+// the app had not emitted yet. The ramps already exist in the cache, so this costs
+// bytes and no colour decisions.
+const HUES = ['red', 'blue', 'green', 'amber', 'violet', 'teal'];
 // Raw key names as they appear in colors.json's themedVariables.
 const GRAY = ['base', ...Array.from({ length: 10 }, (_, i) => `gray-${i + 1}`)];
 const GRAY_INK = ['base', ...Array.from({ length: 9 }, (_, i) => `gray-${i + 1}`)];
@@ -129,7 +134,6 @@ function buildMode(mode, colors) {
   for (const key of GRAY_INK) {
     if (tv.ink[key]) push(`--ink-${key}`, tv.ink[key]);
   }
-  push('--ink-blue-link', tv.ink['blue-link']);
 
   for (const key of GRAY_INK) {
     if (tv.outline[key]) push(`--outline-${key}`, tv.outline[key]);
@@ -326,13 +330,10 @@ ${FONT_SIZES.map(s => {
    so nothing here is a new colour — only a shorter way to say it.
    ══════════════════════════════════════════════════════════ */
 :root {
-  /* Accent / "primary" action. Frappe's primary button is neutral, not
-     brand-coloured: surface-gray-10 is near-black in light mode and
-     near-white in dark, so the same token inverts correctly. */
-  --accent:        var(--ink-blue-link);
-  --btn-solid-bg:       var(--surface-gray-10);
-  --btn-solid-bg-hover: var(--surface-gray-9);
-  --btn-solid-fg:       var(--ink-base);
+  /* The accent role (--accent, --btn-solid-*) lives in palette.css, NOT here,
+     because this script rewrites tokens.css wholesale — anything added to this
+     block would be erased on the next run. This file names colours; palette.css
+     names the job. Status categories, below, are semantic and do not move. */
 
   /* Status categories (see STATUS_CATEGORIES in app.js) */
   --st-open-bg:     var(--surface-blue-2);

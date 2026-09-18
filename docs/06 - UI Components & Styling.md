@@ -1,13 +1,14 @@
 # 06 — UI Components & Styling
 
-The stylesheet is four layered files, loaded in this order from `index.html`:
+The stylesheet is five layered files, loaded in this order from `index.html`:
 
 | File | Contents |
 |---|---|
 | `tokens.css` | **Generated.** Colour ramps (light + dark), radius, typography, elevation, focus rings, layout metrics, z-index scale, semantic aliases |
+| `palette.css` | **Hand-written.** The accent *role* — `--accent`, `--accent-soft`, `--accent-bar`, `--btn-solid-*` — re-pointed per palette. Loaded right after `tokens.css`, and must not move: `tokens.css` is regenerated whole, so the role cannot live there |
 | `base.css` | Reset, typography helpers, keyframes, splash, auth, app shell (sidebar / header / panes), responsive breakpoints |
 | `components.css` | Buttons, form controls, pills, search, dropdowns, modals, loading states |
-| `views.css` | Ticket list, sync bar, ticket detail, the read-only intake report, the 9 section tables, comments / history / admin UI |
+| `views.css` | Ticket list, sync bar, ticket detail, the read-only intake report, the section tables, comments / history / admin UI — and, **last**, the polish level (see [09](09 - Design System.md)) |
 
 For provenance, the generation script and the browser-support decisions, see
 [09 — Design System](09 - Design System.md). In short: **the palette is Frappe
@@ -23,18 +24,17 @@ Three families, exactly as Frappe defines them:
 --surface-gray-1..10
 --surface-sidebar
 --surface-elevation-1|2|3
---surface-blue-1..10  --surface-green-*  --surface-red-*  --surface-amber-*  --surface-violet-*
+--surface-blue-1..10  --surface-green-*  --surface-red-*  --surface-amber-*  --surface-violet-*  --surface-teal-*
 
 /* text and icons — ramps stop at 9 */
 --ink-base
 --ink-gray-1..9
---ink-blue-link
---ink-blue-*  --ink-green-*  --ink-red-*  --ink-amber-*  --ink-violet-*
+--ink-blue-*  --ink-green-*  --ink-red-*  --ink-amber-*  --ink-violet-*  --ink-teal-*
 
 /* borders and dividers */
 --outline-gray-1..9
 --outline-elevation-1|2
---outline-blue-*  --outline-green-*  --outline-red-*  --outline-amber-*  --outline-violet-*
+--outline-blue-*  --outline-green-*  --outline-red-*  --outline-amber-*  --outline-violet-*  --outline-teal-*
 
 /* and alpha variants of the above for layering over images */
 --surface-alpha-*  --outline-alpha-*
@@ -55,31 +55,47 @@ Everything else is derived:
 Semantic shortcuts on `:root` — these are what the component CSS actually uses:
 
 ```css
---accent: var(--ink-blue-link);
 --btn-solid-bg: var(--surface-gray-10);   /* neutral, inverts in dark mode */
 --st-open-bg/fg/bd  --st-paused-*  --st-resolved-*  --st-closed-*  --st-legacy-*  --st-danger-*
 ```
+
+`--accent` and the `--btn-solid-*` button colours are **not** here — they are the
+*role* the palette layer re-points, and they live in `palette.css`. A component must
+use `var(--accent)`, never `--surface-blue-*` or `--ink-blue-*` directly: naming a
+colour family hard-codes the palette and the user's choice silently stops working.
+See [09](09 - Design System.md).
 
 **Rule for new CSS: never a raw hex, never a px font size.** Use a token. The only
 deliberate exception is the splash screen's fixed black (`#0b0b0b`, so the intro
 video sits on neutral chrome). There is no second one: the captcha image backdrop
 (`#f4f4f4`) went with the captcha, when sign-up was removed.
 
-## Theming
+## Theming and appearance
 
-- Preference is `'light' | 'dark' | 'system'`, stored in `localStorage` under `theme`.
-- `'system'` (the default) follows `prefers-color-scheme` live.
+- Theme preference is `'light' | 'dark' | 'system'`, stored in `localStorage` under
+  `theme`. `'system'` (the default) follows `prefers-color-scheme` live.
 - Dark is applied as `[data-theme="dark"]` on `<html>`; light removes the attribute.
-- A tiny inline script in `<head>` applies the stored value **before first paint**,
-  so a dark-mode device never flashes white.
+- **Palette** preference is `'blue' | 'violet' | 'teal' | 'graphite'`, stored in
+  `localStorage` under `palette`, applied as `[data-palette="…"]` on `<html>`. Blue
+  is also the value on bare `:root`, so it applies even if storage is unreadable.
+- A tiny inline script in `<head>` applies **both** values **before first paint**, so
+  there is no flash of the wrong theme or the wrong accent.
 - `applyTheme(true)` in `app.js` stamps `.no-transition` on `<html>` for two
   `requestAnimationFrame`s around a swap — without it every transitioning surface
   cross-fades at once and the swap reads as a flash.
+- Both controls live in the **user menu (top right)**, in an `Appearance` group: theme
+  rows and palette rows, each a labelled row with a swatch, marked `aria-checked`.
+  They are **not** in the sidebar foot — that was where the theme toggle used to be,
+  and it required scrolling to the bottom of the sidebar to reach. General rule:
+  **no primary control lives at the bottom of a scrolling column.**
+- The site-wide allowlist for palettes is `__CONFIG__/theme`
+  (`{ palettes: [...], default }`), read by every signed-in user and writable only by
+  an admin. A stored choice that is no longer allowed falls back to the default.
 
 ## Key Components
 
 ### App shell
-- **≥1024px** — `#sidebar` (232px: brand, nav, theme toggle) · `#workspace`
+- **≥1024px** — `#sidebar` (232px: brand, nav) · `#workspace`
   (56px header, then `#panes`: list 400px + detail). `body.view-detail` reveals the
   detail pane; the list stays on screen, so ticket switching never leaves the page.
 - **<1024px** — `#sidebar` becomes a fixed bottom bar (icons over labels, counts
@@ -346,8 +362,10 @@ token for either theme. The `.icon` rule in `base.css` owns the sizing (`1em`).
 
 Slots in `index.html` are **empty spans** (`<span class="nav-icon">`), filled by
 `initIcons()`; each is guarded by `!el.querySelector('svg')` so a re-login (which
-re-runs `showApp`) is a no-op instead of stacking a second icon. `applyTheme()` owns
-the theme glyph, since it is a state rather than a constant.
+re-runs `showApp`) is a no-op instead of stacking a second icon. There is no theme
+glyph any more: the old sidebar-foot toggle that needed one is gone, and the theme
+and palette rows in the user menu show their state with `aria-checked` and a check
+mark rather than an icon.
 
 ### Collapsible chrome (`#sidebar-toggle`, `#list-toggle`)
 Both mirror Gmail: the sidebar folds to an icon rail, and the IR list folds away.
@@ -432,8 +450,9 @@ and location are free text typed by the customer.
 
 ### Buttons (`.btn`)
 Neutral solid by default (`--surface-gray-10`, which is near-black in light and
-near-white in dark). Variants: `.btn-secondary` (outline), `.btn-primary` (blue),
-`.btn-danger`, `.btn-lg`, `.btn-sm`, `.btn-inline`. Async states: `.saving`
+near-white in dark). Variants: `.btn-secondary` (outline), `.btn-primary` (**the
+accent** — `--btn-solid-bg`, so it follows the chosen palette), `.btn-danger`,
+`.btn-lg`, `.btn-sm`, `.btn-inline`. Async states: `.saving`
 (amber), `.saved` (green), `.error` (red) — all three are applied by
 `className` assignment in `app.js`, so their rules must not be removed by a
 grep-based dead-CSS sweep.

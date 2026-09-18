@@ -635,9 +635,16 @@ r.ok('app.js stays a plain end-of-body script — no module system was introduce
 // Without each of these the export button is live but the library 404s.
 r.ok('the service worker caches it in the shell',
   /SHELL = \[[\s\S]*?vendor\/pdf-lib\.min\.js[\s\S]*?\]/.test(swSrc));
-r.ok('and the cache name was bumped, or returning users keep a shell without it',
-  /ipassbook-v24/.test(swSrc) && !/ipassbook-v23/.test(swSrc),
-  (swSrc.match(/CACHE_NAME\s*=\s*'[^']*'/) || [''])[0]);
+// The intent is "a returning client is not left holding a shell from BEFORE the
+// library existed" — v24 is the last version without it. Asserting the exact current
+// number made every later, unrelated bump fail this suite for no reason, which is
+// how a real regression gets lost in the noise.
+r.ok('and the cache name is past the version that had no pdf-lib, or returning users ' +
+     'keep a shell without it',
+  (function () {
+    const m = swSrc.match(/CACHE_NAME\s*=\s*'ipassbook-v(\d+)'/);
+    return !!m && parseInt(m[1], 10) > 24;
+  })(), (swSrc.match(/CACHE_NAME\s*=\s*'[^']*'/) || [''])[0]);
 r.ok('the deploy tool copies it to the live site',
   /SERVED = \[[\s\S]*?'vendor\/pdf-lib\.min\.js'[\s\S]*?\]/.test(deploySrc));
 

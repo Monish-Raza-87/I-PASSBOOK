@@ -19,5 +19,10 @@ desktop.ini
 # Node (if added later)
 node_modules/
 
+# Generated design-review page — rebuild with tools/build-polish-preview.mjs.
+# The *.json sources beside it ARE tracked: they are the offline colour cache
+# tools/gen-tokens.mjs reads, so only this build output is ignored.
+tools/.cache/polish-preview.html
+
 # Build artifacts
 dist/

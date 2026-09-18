@@ -6,12 +6,13 @@
 //  - Same-origin static shell (HTML/CSS/JS/assets): cache-first, populate cache
 //    from the network on first use.
 //  - Other cross-origin (fonts, etc.): default network handling.
-const CACHE_NAME = 'ipassbook-v26';
+const CACHE_NAME = 'ipassbook-v28';
 const SHELL = [
   './',
   './index.html',
   // Design system, in cascade order (see index.html).
   './tokens.css',
+  './palette.css',   // re-points the accent role; must load right after tokens.css
   './base.css',
   './components.css',
   './views.css',

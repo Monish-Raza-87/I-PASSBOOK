@@ -79,11 +79,92 @@ Frappe's primary button is `bg-surface-gray-10 text-ink-base`, not a brand hue.
 same token inverts correctly with no per-theme override.
 
 The old Indrones brand blue (`#0E62FF`) is **gone** — no bespoke primary. That is
-why `--btn-solid-bg` exists as a semantic alias: it names the role, so a future
-brand colour would be a one-line change here rather than a sweep through the CSS.
+why `--btn-solid-bg` exists as a semantic alias: it names the role, so the accent
+is a one-line change rather than a sweep through the CSS.
 
-Blue still appears, but only where it carries meaning Frappe gives it:
-`--ink-blue-link` for links, and `--st-open-*` for the Open status category.
+That alias is not decoration. It is what the **palette layer** re-points — see
+below.
+
+Blue still appears where it carries *meaning* rather than taste: the `--st-open-*`
+triple, which is the "Open" status category. Those are deliberately not part of
+the accent role, so choosing the Teal palette does not turn every Open badge teal.
+
+The old `--ink-blue-link` token is **also gone**, and for a reason worth keeping:
+it was `#0c8ef8`, which is **3.37:1 on white** — below WCAG AA at body size, which
+is exactly the size the app's links are. Links and `.btn-primary` now come off
+`ink-blue-7` / `surface-blue-9` (4.68:1 and 6.70:1). `tools/smoke-palette.mjs`
+measures this on every palette in both themes, so a future palette cannot quietly
+go unreadable.
+
+## Palettes — the accent role
+
+Users pick an appearance from four ready-made palettes — **Blue** (default),
+**Violet**, **Teal**, **Graphite** — in the **user menu (top right)**. The
+controls live there rather than at the bottom of the sidebar, which is where the
+theme toggle used to be and which the owner had to scroll to reach. General rule
+for this project: **no primary control lives at the bottom of a scrolling column.**
+
+The mechanism is one indirection, in `palette.css`:
+
+```
+colour family  →  role name  →  component
+`--ink-blue-7` →  `--accent`  →  a link's color
+```
+
+`palette.css` is loaded between `tokens.css` and `base.css` and sets eight roles
+per palette: `--accent`, `--accent-soft`, `--accent-soft-line`, `--accent-bar`,
+`--btn-solid-bg`, `--btn-solid-bg-hover`, `--btn-solid-bg-active`, `--btn-solid-fg`.
+
+Three things to know:
+
+- **`tokens.css` is generated and gets overwritten whole**, so the roles cannot
+  live there. Add accent values to `palette.css` or they will disappear on the
+  next `node tools/gen-tokens.mjs`.
+- **Every palette follows one pattern** — accent `ink-<family>-7`, wash
+  `surface-<family>-1`, bar `surface-<family>-7`, button `surface-<family>-9/-8/-7`
+  — which is why contrast only had to be measured once. Graphite is the neutral,
+  spelled `gray` in the tokens, and is the one licensed deviation (button on
+  `gray-10/-9/-8`).
+- **Red, green and amber are excluded on purpose.** They already mean danger,
+  success and warning in the status badges; offering them as an accent would
+  repaint a "Closed" badge with a cosmetic preference.
+
+**Adding a palette** means editing two files, or the menu offers a choice that
+does nothing: the `PALETTES` list in `app.js`, and a `[data-palette="…"]` block in
+`palette.css`. `index.html`'s pre-paint script carries its own copy of the names
+as a fallback, so it is a third place to update if the list changes.
+
+The site-wide allowlist is `__CONFIG__/theme` (`{ palettes: [...], default }`).
+A stored choice that is no longer allowed falls back to the default rather than
+breaking.
+
+## The polish level
+
+The owner reviewed three levels as a preview page and chose **Noticeable**
+(2026-09-18). The level is not a build flag, a config value or a class on
+`<html>` — **it is a block at the end of `views.css`**, headed
+`POLISH — level: NOTICEABLE`. Read that block's own header before editing it.
+
+Two properties make it work, and both are easy to break:
+
+1. **It wins because it is last, not because it is stronger.** Almost every rule
+   in it restates a selector that already exists earlier, at the *same*
+   specificity. Move the block, or reorder the stylesheet links, and the polish
+   silently stops applying — no error, just a plainer app.
+2. **It introduces no colour.** Every value is an existing token, so the level
+   follows all four palettes and both themes with no extra work.
+
+The levels are cumulative: Subtle (rhythm, separation) → Moderate (tinted
+surfaces, a page header, accent-coloured active states) → Noticeable (depth,
+motion, a gradient ground). Going back down means deleting the parts marked
+"Noticeable", or the block.
+
+`tools/build-polish-preview.mjs` regenerates the review page the decision was
+made from (`tools/.cache/polish-preview.html`, a local file, git-ignored).
+`tools/smoke-polish.mjs` ties the two together: it fails if the preview's rules
+and the shipped block disagree, and if a selector in the block has no earlier
+rule to beat.
+
 
 ## Token families and ramps
 
@@ -135,5 +216,9 @@ so that they compose with a card's own shadow instead of replacing it.
 2. Use only `var(--…)` tokens — no raw hex, no px font sizes.
 3. If a role has no token, add a semantic alias at the bottom of `tokens.css`
    (mapping onto an existing Frappe token) rather than inventing a value.
-4. Check both themes. A token that works in light and not in dark means the wrong
+4. If the colour should follow the user's palette, use `var(--accent)` /
+   `var(--accent-soft)` / `var(--btn-solid-bg)` — **never** a `--surface-blue-*`
+   or `--ink-blue-*` directly. Naming a colour family in a component hard-codes
+   the palette and the choice silently stops working.
+5. Check both themes. A token that works in light and not in dark means the wrong
    family was picked — `surface` where `ink` was needed, most often.

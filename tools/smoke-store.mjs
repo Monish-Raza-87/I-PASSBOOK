@@ -60,7 +60,14 @@ class FakeFile {
 }
 
 class FakeFolder {
-  constructor(id, name) { this.id = id; this.name = name; this.folders = []; this.files = []; }
+  constructor(id, name) {
+    this.id = id; this.name = name; this.folders = []; this.files = [];
+    // Parentage is tracked because the archive feature moves folders between the
+    // root and `Archive IRs/`, and "where is this folder NOW" is the only honest
+    // way to answer whether it is archived — a stored flag would be a second
+    // source of truth. Set on create AND on move, below.
+    this.parent = null;
+  }
 
   getName() { return this.name; }
   getId() { return this.id; }
@@ -72,8 +79,26 @@ class FakeFolder {
   }
   createFolder(name) {
     const f = new FakeFolder(this.id + '/' + name, name);
+    f.parent = this;
     this.folders.push(f);
     return f;
+  }
+  getParents() { return iter(this.parent ? [this.parent] : []); }
+  // Child LISTING, consistent unlike a search. The archive sweep uses this to read
+  // `Archive IRs/` in one call rather than searching for ~450 tickets one by one.
+  getFolders() { return iter(this.folders.slice()); }
+  // A move, not a copy. The id survives, which is exactly why archiving a ticket
+  // does not break the file links already stored in its passbook.
+  //
+  // The lock state is captured INTO the event string, so one assertion can prove
+  // Drive work did not happen inside the script lock — the same trick `search:` and
+  // `write:` use for the store files.
+  moveTo(target) {
+    events.push('move:' + this.name + '->' + target.getName() + ':lock=' + lockState.held);
+    if (this.parent) this.parent.folders = this.parent.folders.filter(f => f !== this);
+    this.parent = target;
+    target.folders.push(this);
+    return this;
   }
   getFilesByName(name) {
     events.push('search:' + name);
@@ -84,8 +109,16 @@ class FakeFolder {
     return iter(hits);
   }
   createFile(name, content, mime) {
+    // The real API takes EITHER (name, content, mime) or a single Blob, and the
+    // upload path uses the Blob form — `sectionFolder.createFile(blob)`. Without this
+    // the fake names every uploaded file "[object Object]", which reads as a passing
+    // test until someone asserts on a file's name.
+    if (name && typeof name === 'object' && name.name) {
+      mime = name.mime; content = name.data; name = name.name;
+    }
     const f = new FakeFile('file-' + (++FakeFolder.seq), name, this);
     f.content = String(content == null ? '' : content);
+    f.mime = mime;
     this.files.push(f);
     events.push('create:' + name);
     return f;
@@ -213,7 +246,14 @@ const ctx = {
       deleteProperty(k) { delete this._p[k]; },
     }),
   },
-  Session: { getActiveUser: () => ({ getEmail: () => '' }) },
+  // `getEffectiveUser` is what the archive sweep records as the actor on an audit
+  // line. It is the account a trigger runs as, which is why the sweep reads it
+  // rather than taking a caller-supplied name.
+  Session: {
+    getActiveUser: () => ({ getEmail: () => '' }),
+    getEffectiveUser: () => ({ getEmail: () => 'monish.raza@indrones.com' }),
+    getScriptTimeZone: () => 'Asia/Kolkata',
+  },
   Logger: { log() {} },
   ContentService: { createTextOutput: () => ({ setMimeType: () => ({}) }), MimeType: { JSON: 'json' } },
 };
@@ -854,5 +894,143 @@ reexec(); mails.length = 0;
 const temp = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
 r.ok('a temp-password holder is sent to the forced change, NOT asked for a code',
   temp.status === 'ok' && temp.mustChangePassword === true && mails.length === 0, temp);
+
+// ── ARCHIVING A CLOSED IR'S DRIVE FOLDER ──────────────────────────────────────
+// The feature's whole risk lives in one place: `getOrCreateSectionFolder` finds the
+// IR folder BY NAME, so a folder sitting in `Archive IRs/` must still be found — or
+// the next upload silently creates a SECOND, empty `root/IR801` and one ticket's
+// files end up split across two folders with no error anywhere. The first three
+// assertions below are that hazard, stated as a regression test.
+r.head('a closed IR folder moves to Archive IRs/, and uploads still land in it');
+
+const ARCHIVE_NAME = ctx.CONFIG.ARCHIVE_FOLDER_NAME;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const NOW = Date.now();
+
+const seedIRs = rows => ctx.withRowLockOrThrow(() => ctx.writeJsonLocked('irs.json', rows));
+const uploadTo = (ir, name) => ctx.saveSection(ir, 'sec-b', {},
+  [{ base64: 'x', name: name, mimeType: 'image/png', fieldId: 'f_inwardDocs' }], ADMIN);
+const archiveFolder = () => ROOT.getFoldersByName(ARCHIVE_NAME).hasNext()
+  ? ROOT.getFoldersByName(ARCHIVE_NAME).next() : null;
+const hasRoot = ir => ROOT.getFoldersByName(ir).hasNext();
+const hasArchived = ir => { const a = archiveFolder(); return !!a && a.getFoldersByName(ir).hasNext(); };
+const archivedFileNames = ir => {
+  const sec = archiveFolder().getFoldersByName(ir).next()
+    .getFoldersByName('Section B - Inward Checklist').next();
+  return sec.files.map(f => f.getName());
+};
+// A status write through the SAME path the app uses — saveSection on the __IRS__
+// sentinel — so the reopen hook is exercised rather than called directly.
+const setStatus = (ir, status) => ctx.saveSection('__IRS__', ir,
+  { status: status, statusOwned: true, statusAt: NOW, assignee: ADMIN }, [], ADMIN);
+
+// IR801: a plain closed-and-aged ticket with one uploaded file.
+uploadTo('IR801', 'first.png');
+// Captured BEFORE the move, so the assertion below can prove the move kept the same
+// folder object rather than copying it.
+const ir801Before = ROOT.getFoldersByName('IR801').next();
+r.ok('an upload creates root/IR801 and puts the file in its section folder',
+  hasRoot('IR801') && ROOT.getFoldersByName('IR801').next()
+    .getFoldersByName('Section B - Inward Checklist').next().files[0].getName() === 'first.png');
+
+seedIRs({
+  IR801: { status: 'Close',    statusOwned: true,  statusAt: NOW - 31 * DAY_MS },
+  IR802: { status: 'Close',    statusOwned: true,  statusAt: NOW - 29 * DAY_MS },  // too recent
+  IR803: { status: 'Close',    statusOwned: true                        },          // no statusAt
+  IR804: { status: 'Close',    statusOwned: false, statusAt: NOW - 40 * DAY_MS },  // Col D only
+  IR805: { status: 'Production', statusOwned: true, statusAt: NOW - 40 * DAY_MS }, // not closed
+});
+
+events.length = 0;
+const sweep1 = ctx.archiveClosedIRs();
+r.ok('the sweep is idempotent, reports in words, and goes through report()',
+  /^Archive sweep — archived 1, restored 0/.test(sweep1), sweep1);
+r.ok('a ticket closed 31 days ago moved to Archive IRs/',
+  hasArchived('IR801') && !hasRoot('IR801'));
+r.ok('31 days on, the ticket keeps its own folder name and its section subfolders',
+  archivedFileNames('IR801').join(',') === 'first.png', archivedFileNames('IR801'));
+r.ok('closed only 29 days ago — NOT moved, and the report says how many are waiting',
+  !hasArchived('IR802') && /not yet 30 days old/.test(sweep1), sweep1);
+r.ok('a Close with no usable statusAt is named, never archived on an invented date',
+  !hasArchived('IR803') && /no usable close date/.test(sweep1), sweep1);
+r.ok('a Close the APP does not own (Sheet Col D only) is left alone',
+  !hasArchived('IR804'), sweep1);
+r.ok('a ticket that is not closed is left alone', !hasArchived('IR805'));
+
+// THE REGRESSION TEST. Everything above is setup for this one.
+events.length = 0;
+uploadTo('IR801', 'second.png');
+r.ok('AN UPLOAD AFTER ARCHIVING LANDS BESIDE THE FIRST FILE, not in a new folder',
+  archivedFileNames('IR801').join(',') === 'first.png,second.png',
+  archivedFileNames('IR801'));
+r.ok('and NOTHING was created at the root — this is the fork the resolver prevents',
+  !hasRoot('IR801'));
+r.ok('and it is the SAME folder object, moved rather than copied — so every stored ' +
+     'file link still resolves',
+  archiveFolder().getFoldersByName('IR801').next() === ir801Before);
+
+// ── idempotency, the cap, and the report's other lines ────────────────────────
+events.length = 0;
+const sweep2 = ctx.archiveClosedIRs();
+r.ok('a second sweep moves nothing at all',
+  events.filter(e => e.indexOf('move:') === 0).length === 0, events);
+r.ok('and says so rather than reporting a silent zero', /archived 0, restored 0/.test(sweep2), sweep2);
+
+r.ok('the cap is small enough to watch land', ctx.ARCHIVE_MAX_PER_RUN === 10, ctx.ARCHIVE_MAX_PER_RUN);
+r.ok('and the ageing rule is a month, not a week',
+  ctx.ARCHIVE_AFTER_DAYS === 30, ctx.ARCHIVE_AFTER_DAYS);
+
+// ── the reopen ────────────────────────────────────────────────────────────────
+// The app's own path: a triage save that takes the ticket out of Close.
+setStatus('IR801', 'Production');
+r.ok('a status change out of Close brings the folder straight back to the root',
+  hasRoot('IR801') && !hasArchived('IR801'));
+
+// The same ticket put back, then reopened by hand in the store — no hook fires, so
+// the sweep is the only thing that can notice, which is what it is for.
+seedIRs({ IR806: { status: 'Close', statusOwned: true, statusAt: NOW - 31 * DAY_MS } });
+uploadTo('IR806', 'x.png');
+ctx.archiveClosedIRs();
+r.ok('IR806 archived', hasArchived('IR806') && !hasRoot('IR806'));
+ctx.withRowLockOrThrow(() => {
+  const s = ctx.readJsonLocked('irs.json');
+  s.IR806.status = 'Production';                 // hand-edited: no hook, no app involved
+  ctx.writeJsonLocked('irs.json', s);
+});
+const sweep3 = ctx.archiveClosedIRs();
+r.ok('the sweep restores a folder whose ticket is no longer closed, however it changed',
+  hasRoot('IR806') && !hasArchived('IR806') && /Restored: IR806/.test(sweep3), sweep3);
+
+// ── the audit trail ───────────────────────────────────────────────────────────
+r.head('the archive is recorded on the ticket, not only in Drive');
+const audit801 = ctx.getAuditLog('IR801').entries;
+const archLine = audit801.filter(e => e.event === 'archived');
+const restLine = audit801.filter(e => e.event === 'restored');
+r.ok('IR801 carries an archived line and a restored line',
+  archLine.length === 1 && restLine.length === 1,
+  audit801.map(e => e.event).join(','));
+r.ok('both are attributed to the ticket and route as workflow writes',
+  archLine[0].irNumber === 'IR801' && archLine[0].source === 'workflow' &&
+  restLine[0].irNumber === 'IR801', archLine[0]);
+r.ok('the sweep records WHO ran it, from the session rather than a literal',
+  archLine[0].savedBy === 'monish.raza@indrones.com', archLine[0].savedBy);
+r.ok('an archived line names the destination', /Archive IRs/.test(archLine[0].newValue), archLine[0].newValue);
+const audit802 = ctx.getAuditLog('IR802').entries;
+r.ok('a ticket that was NOT moved has no archived line — the log never runs ahead',
+  audit802.filter(e => e.event === 'archived').length === 0, audit802.length);
+
+// ── the lock ──────────────────────────────────────────────────────────────────
+// The fake records the lock state INTO each move event string, so this is a real
+// check rather than a reading of the source: Drive work must never happen with the
+// global script lock held.
+const moveEvents = events.filter(e => e.indexOf('move:') === 0);
+r.ok('moves were actually recorded, so the next assertion is not vacuous',
+  moveEvents.length >= 2, moveEvents);
+r.ok('EVERY folder move happened OUTSIDE the script lock',
+  !/move:.*:lock=true/.test(events.join('|')), moveEvents);
+
+// ── out of scope, enforced ────────────────────────────────────────────────────
+r.ok('nothing in the backend erases anything — archiving MOVES and stops',
+  !/setTrashed|removeFile\(|deleteFile\(/.test(src), 'grep over the real source');
 
 r.finish();

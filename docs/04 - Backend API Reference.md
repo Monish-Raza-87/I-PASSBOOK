@@ -628,6 +628,9 @@ One-time setup (before the deploy — no user impact):
 
 Anytime after go-live:
   maintenancePruneSessions(), maintenancePruneAuditLog()
+
+Once, to turn on automatic archiving:
+  installArchiveTrigger()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -646,6 +649,41 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `seedAccounts()` | additive only | Creates **one account per seeded member** — the roster is the union of `SEED_MEMBERSHIPS` itself, so there is no second list to drift — and prints each address with its temp password. An existing account is **skipped, never rewritten**: re-issuing would invalidate the password somebody is already using. Must run after `bootstrapAdmin()` (admin addresses are skipped) and must **not** hold the lock, because `createUserRow` takes its own and a nested lock is refused, not queued |
 | `maintenancePruneSessions()` | destructive, locked | Removes expired sessions |
 | `maintenancePruneAuditLog()` | destructive, locked | Retains `AUDIT_RETENTION_DAYS` of audit lines, per subject file. Manual on purpose — the audit trail is evidence and must not shrink behind anyone's back. A line whose timestamp cannot be parsed is **kept**, never pruned by accident |
+| `archiveClosedIRs()` | idempotent, locked | **Reconciles** folder location with ticket status: moves the Drive folder of every IR that has been **`Close`** for more than 30 days (`ARCHIVE_AFTER_DAYS`) into `Archive IRs/`, and brings back any folder whose ticket is no longer closed. **At most 10 folders per run** (`ARCHIVE_MAX_PER_RUN`), and it reports how many are still waiting, so the first sweep can be watched. **Moves only — it never erases.** An IR with no folder is reported, not an error. A folder already where it belongs is skipped, so a second run moves nothing |
+| `installArchiveTrigger()` | idempotent | Creates the **daily** time-driven trigger that calls `archiveClosedIRs()`. A second run does not create a second trigger. Until it is run, archiving happens only when the sweep is invoked by hand — the function says so in its own output so it cannot be forgotten. **It must be run by the account that owns the Drive folder** (`monish.raza@indrones.com`), because the trigger executes as whoever installed it |
+
+### Archiving, and the hazard that had to be closed first
+
+Each IR already had its own folder under the root, with a subfolder per section;
+uploads land there. Archiving only changes *where that folder lives*.
+
+The risk is that the folder was resolved **by name from the root on every
+upload**. Once `IR409/` moved to `Archive IRs/IR409`, that lookup would find
+nothing, `createFolder` would make a **second, empty `root/IR409`**, and one
+ticket's files would be silently split across two folders. So there is exactly one
+resolver, `findIRFolder(irNumber, create)`, which checks the root **then**
+`Archive IRs/` and only creates when neither has it. An upload to an archived IR
+lands beside its existing files. Do not add a second folder lookup.
+
+Reopening an IR moves its folder **back** to the main folder. The transition is
+detected in `saveSection`'s `__IRS__` branch (where the status is written,
+comparing against the previous status read inside the lock) rather than by the
+sweep — a sweep would leave a reopened ticket archived for up to a day. The store
+write happens **inside** the lock and the folder move **outside** it: a Drive call
+under the script lock would put every other writer behind it.
+
+Two audit events record it, in the ticket's own `_store/audit/IR409.jsonl`:
+
+| `ev` | Written when |
+|---|---|
+| `archived` | The sweep moved the folder into `Archive IRs/` |
+| `restored` | A status change moved it back to the main folder |
+
+Neither has a free-text field, so `nw` carries the folder's new location and `fid`
+is `''` — the same idiom `uploaded` uses for a file name.
+
+**Erasing is deliberately not built.** The owner will watch Drive usage first and
+ask for it separately.
 
 The full procedure, with the verification steps, is in
 [08 — Development Guide](08 - Development Guide.md).

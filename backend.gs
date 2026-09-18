@@ -43,6 +43,11 @@ var CONFIG = {
   // initializeStore().
   STORE_FOLDER_NAME: '_store',
 
+  // Where a closed IR's own folder goes, a sibling of `_store/` and of the live
+  // per-IR folders. The owner binds this one to the company server so the data
+  // syncs off Drive; nothing here erases anything yet. See archiveClosedIRs().
+  ARCHIVE_FOLDER_NAME: 'Archive IRs',
+
   ALLOWED_DOMAIN: 'indrones.com',
 
   // Bump this whenever the action set or a response shape changes. `ping` reports
@@ -2243,7 +2248,12 @@ function getAllIRStatuses() {
 // Adding a store here is a deliberate act. Prefer the narrowest key list that
 // works; '*' means "keyed by a real-world id" and still validates the shape.
 var SENTINEL_SECTIONS = {
-  '__CONFIG__': ['team-directory', 'inward-options', 'iqc-config'],
+  // 'theme' is the site-wide appearance allowlist: { palettes: [...], default }.
+  // It is read by every signed-in user (loadPaletteConfig in app.js) but written
+  // only by an admin — the write gate is isAdminEmail, checked in saveSection, not
+  // this list. Adding it here is what unlocks the write at all; until this ships
+  // and the backend is redeployed, the admin UI's save is rejected.
+  '__CONFIG__': ['team-directory', 'inward-options', 'iqc-config', 'theme'],
   '__NUDGES__': ['all'],
   '__IRS__':    '*',   // one row per IR number
   '__KB__':     '*'    // one row per article id (Stage 7 — not yet written)
@@ -2401,7 +2411,12 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   // brace is the critical section; Drive has no transactions, so the READ must be
   // inside it. A read taken before the lock would be merged over whatever landed in
   // between and drop that writer's save silently.
-  return withRowLockOrThrow(function () {
+  //
+  // `reopenIR` is the one thing the critical section DECIDES but must not DO: the
+  // folder move is Drive work, and the rule above is that Drive work stays outside
+  // the lock. It is read after the lock closes, below.
+  var reopenIR = '';
+  var result = withRowLockOrThrow(function () {
     var lines;
     if (isSentinel) {
       var storeFile = sentinelStoreFile(irNumber);
@@ -2410,6 +2425,23 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
       // was taken, and merging onto that copy would clobber the newer file.
       var store = readJsonLocked(storeFile) || {};
       var existing = (store[sectionId] && typeof store[sectionId] === 'object') ? store[sectionId] : {};
+
+      // A ticket LEAVING Close gets its Drive folder back from the archive.
+      //
+      // Decided here, and only here, because `existing` is the stored status as it
+      // was BEFORE this write — the one instant the close→open transition is
+      // visible. Left to the daily sweep, a reopened ticket would keep its files
+      // archived until the next run, and a new upload would land in the archive
+      // beside them, which is exactly what nobody expects a reopened ticket to do.
+      //
+      // The reverse is deliberately NOT handled here: entering Close does not
+      // archive anything. That happens 30 days later, in archiveClosedIRs.
+      //
+      // The frontend sends the whole merged row (patchIRState), so `fields.status`
+      // is the new status, not a missing key.
+      if (irNumber === '__IRS__' && existing.status === 'Close' && fields.status !== 'Close') {
+        reopenIR = String(sectionId);
+      }
 
       // __NUDGES__ is excluded at the source rather than filtered later: comments
       // already carry their own author and createdAt in the items array, and a nudge
@@ -2444,6 +2476,25 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 
     return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
   });
+
+  // 3. OUTSIDE the lock, and AFTER the status write has landed. The order is the
+  // point: if the move went first, a failure would leave an OPEN ticket whose folder
+  // is still archived, and nothing would ever retry it. This way the stored status
+  // is already the truth and only the folder lags — which the next save corrects.
+  //
+  // A failed move does NOT fail the save. The save is already durable, so returning
+  // an error here would send the user to re-save a section that saved perfectly. It
+  // is said in words instead: a ticket whose files are in the wrong folder is
+  // something a person should hear about while they are looking at the screen.
+  if (reopenIR) {
+    try {
+      restoreIRFolder(reopenIR, savedBy);
+    } catch (e) {
+      result.message += ' (' + reopenIR + "'s folder could not be moved back out of '" +
+                        CONFIG.ARCHIVE_FOLDER_NAME + "', so its files are still archived. " + e.message + ')';
+    }
+  }
+  return result;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2523,15 +2574,57 @@ function sendNudgeEmail(params, authEmail) {
 // ──────────────────────────────────────────────────────────────────────────────
 // DRIVE HELPERS
 // ──────────────────────────────────────────────────────────────────────────────
+// WHERE AN IR'S OWN FOLDER LIVES — and the one place that knows it.
+//
+// `root/IR409` while the ticket is live, `root/Archive IRs/IR409` once it has been
+// closed long enough (archiveClosedIRs). ONE resolver, because the folder is found
+// BY NAME from a parent: a lookup that only ever searched the root would miss an
+// archived folder entirely and CREATE A SECOND, EMPTY `root/IR409` on the next
+// upload — silently splitting one ticket's files across two folders, with nothing
+// anywhere reporting an error. Every path that names an IR's folder goes through
+// here, including the move back on reopen.
+//
+// Returns { folder, archived }, or null when it exists in neither and `create` is
+// false.
+function findIRFolder(irNumber, create) {
+  // Before any folder name is built from it — the same order saveSection uses.
+  assertRealIR(irNumber);
+
+  var rootFolder = getRootFolder();
+  var inRoot = rootFolder.getFoldersByName(irNumber);
+  if (inRoot.hasNext()) return { folder: inRoot.next(), archived: false };
+
+  // Only searched when the folder is NOT in the root. `create` is deliberately NOT
+  // passed through: an ordinary upload to a brand-new ticket must not bring the
+  // archive folder into existence. Creating it belongs to the move, in
+  // moveFolderBetween — see getArchiveFolder.
+  var archive = getArchiveFolder(false);
+  if (archive) {
+    var inArchive = archive.getFoldersByName(irNumber);
+    if (inArchive.hasNext()) return { folder: inArchive.next(), archived: true };
+  }
+
+  if (!create) return null;
+  return { folder: rootFolder.createFolder(irNumber), archived: false };
+}
+
+// `root/Archive IRs` — created LAZILY. A store where nothing has been closed yet
+// must not grow an empty folder just because the app might one day need one.
+function getArchiveFolder(create) {
+  var rootFolder = getRootFolder();
+  var it = rootFolder.getFoldersByName(CONFIG.ARCHIVE_FOLDER_NAME);
+  if (it.hasNext()) return it.next();
+  return create ? rootFolder.createFolder(CONFIG.ARCHIVE_FOLDER_NAME) : null;
+}
+
 function getOrCreateSectionFolder(irNumber, sectionId) {
-  var rootFolder = DriveApp.getFolderById(CONFIG.DRIVE_ROOT_FOLDER_ID);
+  // The IR folder wherever it now lives — NOT always the root. An upload to an
+  // archived ticket lands beside the files already there.
+  var found = findIRFolder(irNumber, true);
 
-  // IR folder: e.g., "IR409"
-  var irFolder = getOrCreateSubfolder(rootFolder, irNumber);
-
-  // Section folder: e.g., "Section B - Inward"
+  // Section folder: e.g., "Section B - Inward Checklist"
   var sectionLabel = getSectionLabel(sectionId);
-  var sectionFolder = getOrCreateSubfolder(irFolder, sectionLabel);
+  var sectionFolder = getOrCreateSubfolder(found.folder, sectionLabel);
 
   return sectionFolder;
 }
@@ -3127,6 +3220,275 @@ function maintenancePruneAuditLog() {
            ' days across ' + prunedFiles + ' ticket file(s). ' + keptLines + ' entr(y/ies) kept' +
            (unreadable ? ', including ' + unreadable + ' unreadable line(s) kept on purpose.' : '.');
   }));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ARCHIVE — move a CLOSED ticket's Drive folder out of the working set.
+//
+// The owner binds `root/Archive IRs` to the company server, so what lands there is
+// synced off Drive. NOTHING HERE ERASES ANYTHING: the sweep MOVES a folder and
+// stops. Erasing is a separate decision the owner has deliberately deferred until
+// they can see whether Drive space is actually a problem — so do not add it here
+// without being asked, and do not "tidy up" what is already in the archive.
+//
+// The folder KEEPS ITS NAME (`Archive IRs/IR409`, section subfolders intact), and
+// every passbook link keeps working: a stored link is a file-id URL, and a move
+// does not change a file's id.
+// ──────────────────────────────────────────────────────────────────────────────
+
+// How long a ticket must have been closed before its folder is swept. A month means
+// a close-then-reopen inside the reporting period never moves anything, which is the
+// common case; the reopen path in saveSection covers the rest immediately.
+var ARCHIVE_AFTER_DAYS = 30;
+
+// Per run, and deliberately small. The first sweep is something the owner WATCHES
+// land in Drive, and sixty simultaneous folder moves is not a thing anyone can
+// verify. Re-running continues where this left off — the sweep is idempotent.
+var ARCHIVE_MAX_PER_RUN = 10;
+
+// The audit line for an archive move. Same shape buildAuditLines emits for a
+// workflow write — `ir` is the STORE name, the ticket is in `sec` — so the timeline
+// reads it with no special case. The audit schema has no free-text field, so `nw`
+// carries the location and `fid` is '' exactly as `uploaded` does.
+function archiveAuditLine(irNumber, ev, newValue, by) {
+  return {
+    t: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    ir: '__IRS__', sec: String(irNumber), by: by || '',
+    ev: ev, fid: '', old: '', nw: String(newValue || '')
+  };
+}
+
+// Who to record against an archive move. The audit schema's `by` is its one free
+// field, so the actor belongs there: a hand-run sweep records the person who ran
+// it, a trigger run records the trigger's owner, and an environment with no Session
+// (the test harness) records the sweep itself rather than throwing.
+function sweepActor() {
+  try {
+    var email = Session.getEffectiveUser().getEmail();
+    if (email) return email;
+  } catch (e) { /* no Session in this environment — fall through */ }
+  return 'archive sweep';
+}
+
+// The move itself, given the folder. Split out because the sweep has already LISTED
+// the archive and holds the folder handle — re-finding it by name would be a second
+// search for something it is already holding.
+function moveFolderBetween(folder, toArchive) {
+  var destination = toArchive
+    ? getArchiveFolder(true)
+    : getRootFolder();
+  // `moveTo`, not copy-and-delete. A file's id is unchanged by a move, so the links
+  // already saved in the passbook keep resolving — which is the whole reason
+  // archiving a ticket that is still readable is safe.
+  folder.moveTo(destination);
+}
+
+// Move one IR's folder between the root and `Archive IRs`. BOTH directions, one
+// implementation: the reopen path and the sweep have to agree on what "archived"
+// means, and two copies of that would drift.
+//
+// Returns 'archived' | 'restored', or null when the folder is already where it was
+// asked to go — the common case for a sweep that runs every day.
+function moveIRFolder(irNumber, toArchive) {
+  var found = findIRFolder(irNumber, false);
+  if (!found) return null;                          // no folder yet — nothing to move
+  if (found.archived === !!toArchive) return null;  // already there
+  moveFolderBetween(found.folder, toArchive);
+  return toArchive ? 'archived' : 'restored';
+}
+
+// The reopen half, called from saveSection AFTER the new status has been stored.
+// Takes its own lock for the audit append — NOT a nested one: saveSection's lock has
+// already been released by the time this runs.
+function restoreIRFolder(irNumber, by) {
+  var did = moveIRFolder(irNumber, false);
+  if (!did) return null;
+  withRowLockOrThrow(function () {
+    appendAuditLinesLocked(irNumber,
+      [archiveAuditLine(irNumber, 'restored', 'Moved back to the main folder', by)]);
+  });
+  return did;
+}
+
+// THE SWEEP. Run it from the Apps Script editor, or let the trigger that
+// installArchiveTrigger() sets up run it daily.
+//
+// It RECONCILES rather than only archiving: a folder in the archive whose ticket is
+// no longer closed comes back, and a folder in the root whose ticket has been closed
+// for ARCHIVE_AFTER_DAYS goes out. The direction is decided from the STATUS and from
+// where the folder actually IS — never from a stored "archived" flag, which would be
+// a second source of truth and would start lying the first time anyone dragged a
+// folder in the Drive UI.
+//
+// This wrapper exists so the function can NEVER THROW. A trigger that throws sends
+// the owner a failure email every single night, and a nightly email nobody can act
+// on is how a real failure goes unread for a month.
+function archiveClosedIRs() {
+  try {
+    return report(runArchiveSweep());
+  } catch (e) {
+    // The lock being busy is the likeliest cause by far, and it is not a fault:
+    // the moves simply did not happen and the next run will do them.
+    return report('Archive sweep did not run — ' + e.message + '\n' +
+                  'Nothing was erased, and nothing that was already archived was touched. ' +
+                  'The next run picks up where this one stopped.');
+  }
+}
+
+function runArchiveSweep() {
+  var by = sweepActor();
+
+  // ── Phase 1: the statuses, under the lock. Nothing but a store read.
+  var store = withRowLockOrThrow(function () {
+    return readJsonLocked(sentinelStoreFile('__IRS__')) || {};
+  });
+
+  // ── Phase 2: where the folders ACTUALLY are, outside the lock. ONE listing of the
+  // archive rather than a name search per ticket: ~450 searches a night would be
+  // both slower and less reliable than reading one folder's children, and Drive's
+  // name search is the eventually-consistent one (see the note on readSectionsIndex).
+  var archiveFolder = getArchiveFolder(false);
+  var inArchive = {};
+  if (archiveFolder) {
+    var kids = archiveFolder.getFolders();
+    while (kids.hasNext()) {
+      var kid = kids.next();
+      var name = String(kid.getName());
+      if (/^IR\d+$/.test(name)) inArchive[name] = kid;
+    }
+  }
+
+  // ── Phase 3: decide. Both directions, from the status alone.
+  var cutoff = Date.now() - (ARCHIVE_AFTER_DAYS * 24 * 60 * 60 * 1000);
+  var candidates = [], restore = [], waiting = 0, noClock = 0, skippedKeys = [];
+  var known = {};
+
+  Object.keys(store).forEach(function (irNumber) {
+    // An irs.json key is validated on write as a real-world id, NOT as an IR
+    // number, so a junk key is possible and has to be filtered here rather than
+    // handed to findIRFolder — which asserts the shape and would throw the whole
+    // run away over one bad key.
+    if (!/^IR\d+$/.test(irNumber)) { skippedKeys.push(irNumber); return; }
+    known[irNumber] = true;
+
+    var row = store[irNumber];
+    // `statusOwned` is load-bearing. Without it, a status inherited from the Sheet's
+    // Col D would read as the app's own decision, and a ticket nobody closed in the
+    // app could have its folder archived.
+    var closed = !!(row && typeof row === 'object' && row.statusOwned && row.status === 'Close');
+
+    // Archived, but no longer closed. The reopen hook in saveSection runs on the
+    // app's own status change and normally gets there first — but it CAN fail (and
+    // says so in the save's own message), and a status corrected by hand writes no
+    // hook at all. Reconciling here is what makes either case heal within a day.
+    if (inArchive[irNumber] && !closed) { restore.push(irNumber); return; }
+    if (!closed) return;
+
+    // An unusable `statusAt` is NOT guessed at. The field arrived with statusOwned,
+    // so a stored Close can predate it; that ticket waits for the owner to sweep it
+    // by hand rather than being archived on an invented date.
+    var at = Number(row.statusAt);
+    if (!isFinite(at) || at <= 0) { noClock++; return; }
+
+    if (at > cutoff) { waiting++; return; }
+    if (inArchive[irNumber]) return;         // already out there — nothing to do
+    candidates.push({ ir: irNumber, closedAt: at });
+  });
+
+  // A folder in the archive for an IR with NO row at all. That is not a closed
+  // ticket by any reading, so it comes back: an IR missing from the store is one
+  // whose status nobody knows, and the archived folder is where its evidence lives.
+  Object.keys(inArchive).forEach(function (irNumber) {
+    if (!known[irNumber]) restore.push(irNumber);
+  });
+
+  candidates.sort(function (a, b) { return a.closedAt - b.closedAt; });   // oldest first
+  var batch = candidates.slice(0, ARCHIVE_MAX_PER_RUN);
+
+  // ── Phase 4: move, outside the lock.
+  var moved = [], returned = [], failed = [], noFolder = [];
+  batch.forEach(function (c) {
+    try {
+      if (moveIRFolder(c.ir, true)) moved.push(c.ir);
+      else noFolder.push(c.ir);      // no Drive folder — a ticket with no uploads yet
+    } catch (e) {
+      failed.push(c.ir + ': ' + e.message);
+    }
+  });
+  restore.forEach(function (irNumber) {
+    try {
+      // The handle from Phase 2, not a fresh search for something already in hand.
+      moveFolderBetween(inArchive[irNumber], false);
+      returned.push(irNumber);
+    } catch (e) {
+      failed.push(irNumber + ' (back): ' + e.message);
+    }
+  });
+
+  // ── Phase 5: the audit, ONE lock for the whole batch rather than one per ticket,
+  // and only for folders that ACTUALLY moved: the log must never claim a move that
+  // did not happen.
+  if (moved.length || returned.length) {
+    withRowLockOrThrow(function () {
+      moved.forEach(function (irNumber) {
+        appendAuditLinesLocked(irNumber,
+          [archiveAuditLine(irNumber, 'archived', 'Moved to ' + CONFIG.ARCHIVE_FOLDER_NAME, by)]);
+      });
+      returned.forEach(function (irNumber) {
+        appendAuditLinesLocked(irNumber,
+          [archiveAuditLine(irNumber, 'restored', 'Moved back to the main folder', by)]);
+      });
+    });
+  }
+
+  var tail = [];
+  if (moved.length)          tail.push('Archived: ' + moved.join(', '));
+  if (returned.length)       tail.push('Restored: ' + returned.join(', '));
+  if (candidates.length > batch.length)
+    tail.push((candidates.length - batch.length) + ' more are ready — run again to continue.');
+  if (waiting)               tail.push(waiting + ' closed ticket(s) not yet ' + ARCHIVE_AFTER_DAYS + ' days old.');
+  if (noClock)               tail.push(noClock + ' closed ticket(s) have no usable close date — sweep those by hand.');
+  if (noFolder.length)       tail.push('No Drive folder, so nothing to move: ' + noFolder.join(', '));
+  if (failed.length)         tail.push('FAILED, left where they were: ' + failed.join(' | '));
+  if (skippedKeys.length)    tail.push('Skipped, not IR numbers: ' + skippedKeys.join(', '));
+  if (!tail.length)          tail.push('Nothing to do.');
+
+  return 'Archive sweep — archived ' + moved.length + ', restored ' + returned.length +
+         ' (cap ' + ARCHIVE_MAX_PER_RUN + ' archived per run).\n' + tail.join('\n');
+}
+
+// Install the daily trigger. Run ONCE from the Apps Script editor.
+//
+// It must be run by the account that OWNS the Drive folder, because a trigger
+// executes as the user who created it. Installed from any other account it fails
+// every night with a permission error nobody is there to read.
+//
+// Idempotent: a second run reports the trigger it found rather than adding another.
+// Two triggers would just mean two sweeps a day, silently.
+function installArchiveTrigger() {
+  var existing = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === 'archiveClosedIRs';
+  });
+  if (existing.length) {
+    return report('Already installed — ' + existing.length +
+                  ' trigger(s) call archiveClosedIRs. Nothing changed.');
+  }
+  ScriptApp.newTrigger('archiveClosedIRs').timeBased().everyDays(1).atHour(2).create();
+  return report('Installed. archiveClosedIRs runs daily around 02:00, in the script\'s own time zone (' +
+                Session.getScriptTimeZone() + '), as ' + Session.getEffectiveUser().getEmail() + '.\n' +
+                'Until this existed, folders were archived ONLY when someone ran the sweep by hand.');
+}
+
+// Remove it again. Installed-but-unwanted is a state worth being able to leave, and
+// without this the only way out is the Triggers page.
+function removeArchiveTrigger() {
+  var found = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === 'archiveClosedIRs';
+  });
+  if (!found.length) return report('No archive trigger installed. Nothing changed.');
+  found.forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  return report('Removed ' + found.length + ' archive trigger(s). ' +
+                'Folders already moved to "' + CONFIG.ARCHIVE_FOLDER_NAME + '" stay where they are.');
 }
 
 // Parse the app's 'dd-MMM-yyyy HH:mm:ss' stamp into epoch ms, or null.

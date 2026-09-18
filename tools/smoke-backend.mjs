@@ -1380,4 +1380,42 @@ r.ok('an existing admin keeps its password — only the flags are normalised',
 r.ok('the normalising write is inside the lock',
   /withRowLockOrThrow/.test(ba));
 
+r.head('the Drive archive has exactly ONE trigger installer, and no hidden ones');
+// The behaviour of the sweep is in smoke-store.mjs, where it actually runs. What is
+// asserted here is the shape a behavioural suite cannot see: that nothing else in
+// the file has quietly acquired the power to create a trigger.
+const scriptAppUses = (code.match(/ScriptApp\.\w+/g) || []);
+r.ok('ScriptApp appears only in the two trigger functions',
+  (function () {
+    const outside = ['installArchiveTrigger', 'removeArchiveTrigger']
+      .map(fn => fnBody(fn)).join('\n');
+    return scriptAppUses.every(u => outside.indexOf(u) > -1);
+  })(), scriptAppUses);
+r.ok('the installer is IDEMPOTENT — it lists before it creates',
+  /getProjectTriggers\(\)[\s\S]{0,200}?existing\.length[\s\S]{0,400}?newTrigger/.test(
+    fnBody('installArchiveTrigger')));
+r.ok('and it can be undone, so installed-but-unwanted is a state you can leave',
+  /deleteTrigger/.test(fnBody('removeArchiveTrigger')));
+r.ok('both print through report(), because the editor never shows a return value',
+  /return report\(/.test(fnBody('installArchiveTrigger')) &&
+  /return report\(/.test(fnBody('removeArchiveTrigger')));
+r.ok('the sweep CANNOT throw — a nightly failure email is a failure nobody reads',
+  /^function archiveClosedIRs\(\) \{\r?\n  try \{\r?\n    return report\(/.test(
+    code.slice(code.indexOf('function archiveClosedIRs()'))));
+
+r.head('the archived-folder fork is closed at the source');
+// The regression: getOrCreateSectionFolder used to resolve the IR folder by name
+// from the ROOT only, so a folder moved to Archive IRs/ would not be found and a
+// second, empty one would be created. smoke-store.mjs proves the behaviour; this
+// pins the line that caused it.
+r.ok('getOrCreateSectionFolder no longer looks the IR folder up in the root',
+  !/getOrCreateSubfolder\(rootFolder,\s*irNumber\)/.test(code) &&
+  /findIRFolder\(irNumber, true\)/.test(fnBody('getOrCreateSectionFolder')),
+  (fnBody('getOrCreateSectionFolder').match(/var \w+ = [^\n]*/) || [''])[0]);
+r.ok('the resolver searches the archive but NEVER creates it as a side effect',
+  /var archive = getArchiveFolder\(false\)/.test(fnBody('findIRFolder')),
+  'an ordinary upload must not bring Archive IRs/ into existence');
+r.ok('nothing in the backend erases a folder or a file',
+  !/setTrashed|removeFile\(|\bdeleteFile\(/.test(code));
+
 r.finish();

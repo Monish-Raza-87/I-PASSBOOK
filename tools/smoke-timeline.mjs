@@ -361,8 +361,17 @@ r.ok('a non-array timeline renders the empty state, not a crash',
 
 r.head('every kind has an icon and a label');
 const missing = Object.keys(T.TIMELINE_KINDS).filter(k => !T.TIMELINE_KINDS[k].icon || !T.TIMELINE_KINDS[k].label);
-r.ok('all twelve kinds are complete', missing.length === 0 && Object.keys(T.TIMELINE_KINDS).length === 12,
-  { missing, count: Object.keys(T.TIMELINE_KINDS).length });
+// The count is pinned on purpose: a kind is a thing the reader sees, and one added
+// without a thought about the wording is a row nobody can interpret. But the pin is
+// a LIST, not a number, so the failure names what appeared or disappeared.
+const KINDS = ['save','add','edit','remove','status','assign','priority',
+               'category','subcategory','subcatnote','upload','comment',
+               'archived','restored'];
+const actual = Object.keys(T.TIMELINE_KINDS).slice().sort();
+r.ok('every kind the reader can see is complete, and none appeared unannounced',
+  missing.length === 0 && actual.join(',') === KINDS.slice().sort().join(','),
+  { missing, unexpected: actual.filter(k => KINDS.indexOf(k) < 0),
+    gone: KINDS.filter(k => actual.indexOf(k) < 0) });
 r.ok('and the builder only ever emits one of them', (() => {
   const everything = T.buildTimeline('IR409', [
     sectionRow({}), sectionRow({ event: 'added', fieldId: 'b_remarks', newValue: 'x' }),

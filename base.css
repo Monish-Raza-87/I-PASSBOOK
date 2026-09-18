@@ -208,12 +208,14 @@ html[data-intro="seen"] #splash-screen {
 #auth-form, #pc-form { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .auth-head { text-align: center; margin-bottom: 1.5rem; }
+/* Height, not width: the mark's aspect ratio is the artwork's (512x383), so a
+   fixed width would squash it. No border-radius either — the artwork has no
+   background now, so rounding a transparent box would only clip the mark. */
 .auth-logo {
   display: block;
   margin: 0 auto 0.75rem;
-  width: 76px;
   height: 76px;
-  border-radius: var(--radius-5);
+  width: auto;
 }
 .auth-brand {
   font-size: var(--text-3xl);
@@ -324,23 +326,21 @@ html[data-intro="seen"] #splash-screen {
   flex: 0 0 var(--header-h);
   border-bottom: 1px solid var(--outline-gray-1);
 }
-/* The mark is the app icon itself, not a lettered stand-in: same 26px box in the
-   sidebar and in the folded icon rail, so the one image is the whole brand. */
+/* The mark is the app's own artwork with its background keyed out — no tile, no
+   radius, no plate behind it, so it sits ON the page instead of in a box on it.
+   Sized by height: the lockup is wider than it is tall (512x383), and the word in
+   it is deliberately small, because the sidebar spells the name out in text
+   beside it. */
 .brand-mark {
-  width: 26px;
   height: 26px;
-  border-radius: var(--radius-3);
-  overflow: hidden;
   display: flex;
   align-items: center;
-  justify-content: center;
   flex: 0 0 auto;
 }
 .brand-mark img {
-  width: 100%;
   height: 100%;
+  width: auto;
   display: block;
-  object-fit: cover;
 }
 .brand-text {
   font-size: var(--text-base);
@@ -762,6 +762,12 @@ header {
     flex: 0 0 var(--rail-w);
   }
   html.rail-collapsed .sidebar-brand { justify-content: center; padding: 0; }
+  /* The lockup is a WIDE mark (512×383) and the rail is a 56px column, so sizing
+     it by height here would leave the word a smudge. In the rail it is sized by
+     width instead and takes the column — the one place the mark is the only
+     thing saying who the app is, since `.brand-text` is hidden beside it. */
+  html.rail-collapsed .brand-mark { width: 100%; justify-content: center; padding-inline: 0.4rem; }
+  html.rail-collapsed .brand-mark img { height: auto; width: 100%; }
   html.rail-collapsed .brand-text,
   html.rail-collapsed .sidebar-section-label,
   html.rail-collapsed .nav-label,

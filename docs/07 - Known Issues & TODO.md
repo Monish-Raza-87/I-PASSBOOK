@@ -145,7 +145,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1680 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1682 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4.)
 
@@ -313,6 +313,15 @@ and a live end-to-end sign-in. See the verification list in
   master is the **only** source: the superseded 2048×2048 upload is deleted rather than
   left beside it to be picked up by mistake. `smoke-shell.mjs` now fails if any icon is
   blank or the master goes missing.
+- ✅ **The logo sits on the page instead of in a tile on it.** The owner reported the
+  icon arriving "in a shape of square" and asked for it borderless, "to feel real
+  embedded into the page". The square was the artwork's own light background, and the
+  fix is `assets/icon-mark.png` — the same logo with that background **keyed out** —
+  used for the sidebar and the sign-in card, while the tab, home screen and manifest
+  keep the square icons, because an OS tile has to be square. It cannot be done by
+  colour: the monogram and the "Passbook" script are the same colour as the background,
+  so a flood fill inward from the border is what separates them, and one wrong
+  tolerance either leaves the square or hollows the logo out.
 - ✅ **The list says how far along each IR is, and how long it has been sitting.**
   Every card carries a `3/6` completion chip (a small bar plus the count, green at
   `6/6`) and an age — `In status 6d` when the app recorded the status change, `Raised

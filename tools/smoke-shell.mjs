@@ -313,15 +313,33 @@ ok('index.html points at the icon set, not the old letterhead',
   /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(html) &&
   !/assets\/logo\.png/.test(html));
 ok('the sign-in card shows the mark',
-  /class="auth-logo"/.test(html) && /assets\/icon-192\.png/.test(authHead));
-// The sidebar mark was a lettered "IP" square standing in for the logo, which is
-// exactly the sort of placeholder that survives a redesign because nothing breaks
-// when it does. It is the icon now — and the same file the sign-in card uses, so
-// the app cannot end up wearing two different marks.
-ok('the sidebar brand mark is the icon, not a lettered stand-in',
-  /class="brand-mark"[^>]*>\s*<img[^>]*assets\/icon-192\.png/.test(html) &&
+  /class="auth-logo"/.test(html) && /assets\/icon-mark\.png/.test(authHead));
+// The sidebar and the sign-in card show the BORDERLESS mark, while the tab, the
+// home screen and the manifest keep the square icons — an OS tile has to be
+// square, and iOS/Android mask it themselves. The two must not be swapped: the
+// square one inside the app shows the light background it was drawn on, which is
+// the "it comes in a shape of square" the owner reported.
+ok('the sidebar brand mark is the borderless mark, not the square icon',
+  /class="brand-mark"[^>]*>\s*<img[^>]*assets\/icon-mark\.png/.test(html) &&
   !/class="brand-mark"[^>]*>\s*[A-Za-z]/.test(html),
-  (html.match(/class="brand-mark"[\s\S]{0,120}/) || [''])[0]);
+  (html.match(/class="brand-mark"[\s\S]{0,140}/) || [''])[0]);
+ok('...and neither in-app mark falls back to the square icon',
+  !/class="auth-logo"[^>]*icon-192/.test(html) &&
+  !/class="brand-mark"[^>]*icon-192/.test(html));
+// The cutout has to be regenerable and CHECKED, not just present: a mark that
+// silently kept its background looks fine on the light page and wrong everywhere
+// else, and a mark whose fill ate the logo looks fine until someone opens it.
+ok('the borderless mark is a real PNG with an alpha channel, and is not blank',
+  (() => {
+    const p = new URL('../assets/icon-mark.png', import.meta.url);
+    if (!fs.existsSync(p)) return false;
+    const b = fs.readFileSync(p);
+    const w = b.readUInt32BE(16), h = b.readUInt32BE(20);
+    // IHDR colour type 6 = truecolour with alpha. Without it the "borderless"
+    // mark would be a white rectangle.
+    const colourType = b[25];
+    return w === 512 && h > 200 && colourType === 6 && b.length > 8192;
+  })(), 'expected a 512-wide RGBA PNG');
 
 const manifest = JSON.parse(read('../manifest.json'));
 ok('the manifest declares both icon sizes',

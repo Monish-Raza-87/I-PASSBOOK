@@ -47,6 +47,7 @@ const SERVED = [
   'assets/apple-touch-icon.png',
   'assets/icon-192.png',
   'assets/icon-512.png',
+  'assets/icon-mark.png',
   'assets/intro_ipassbookv2.mp4',
   'assets/intro_ipassbookv2_mobile.mp4'
 ]

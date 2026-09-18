@@ -54,9 +54,12 @@ i-passbook-app/
 ├── manifest.json       # PWA manifest
 ├── assets/
 │   ├── icon-master.jpeg # The brand master — the ONLY source for the icons below
-│   ├── icon-192.png    # App icon (manifest + favicon + the sign-in card)
+│   ├── icon-192.png    # App icon (manifest + favicon)
 │   ├── icon-512.png    # App icon, large
 │   ├── apple-touch-icon.png  # 180×180, the size iOS asks for
+│   ├── icon-mark.png   # The SAME artwork with its background keyed out — what
+│   │                   #   the app itself shows (sidebar + sign-in card), so the
+│   │                   #   mark sits on the page instead of in a tile on it
 │   ├── logo.png        # Legacy letterhead — NOT an icon, pruned from the deploy
 │   ├── intro_ipassbookv2.mp4         # Splash video, 16:9 master (9.7 MB, 9.0s)
 │   └── intro_ipassbookv2_mobile.mp4  # Splash video, portrait cut (3.8 MB, 9.1s)
@@ -77,6 +80,21 @@ seam on a white icon. So the size of the mark inside the icon is decided by how
 the master is cropped, not by the tool — the master's current crop puts the mark
 at 75% of the icon's width. Replacing the master means re-running the tool **and
 bumping `CACHE_NAME` in `sw.js`**, because `icon-192.png` is precached.
+
+The same run also writes **`assets/icon-mark.png`**, and that one is a different
+kind of file: the artwork with its light background made **transparent**, for the
+two places the app shows the brand *inside* itself (the sidebar and the sign-in
+card). The square OS icons keep their background on purpose — a home-screen tile
+is square and the platform masks it — but on a card that background reads as a
+tile sitting on the page, which is what the owner saw and asked to have removed.
+Keying it out cannot be done by colour, because the monogram and the "Passbook"
+script are the *same colour* as the background they sit on; only **connectivity**
+separates them, so the tool floods inward from the border and stops at anything
+that is not background-coloured, which leaves the white inside the circle
+untouched. That flood is ~2.7 million pixels, so it is compiled with `Add-Type`
+rather than looped in PowerShell. `smoke-shell.mjs` checks the result really is
+an RGBA PNG of the right size, because a mark that quietly kept its background
+looks correct on the light page and wrong everywhere else.
 
 ## Key Design Decisions
 

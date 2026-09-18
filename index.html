@@ -93,7 +93,10 @@
       <div class="auth-head">
         <!-- alt="" on purpose: the brand name is the next line down, so this is
              the same information twice and the text is the accessible copy. -->
-        <img class="auth-logo" src="assets/icon-192.png" alt="" width="76" height="76" />
+        <!-- The borderless mark, not the square icon: on a card this size the
+             baked-in light background of the OS icon reads as a tile sitting on
+             the page. Same artwork, background keyed out (tools/make-icons.ps1). -->
+        <img class="auth-logo" src="assets/icon-mark.png" alt="" />
         <div class="auth-brand">I-PASSBOOK</div>
         <p class="auth-full">Indrones Product After-Sales Summary Book</p>
         <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
@@ -187,7 +190,7 @@
          literal markup here, so every glyph in the app has exactly one source. -->
     <nav id="sidebar" aria-label="Main">
       <div class="sidebar-brand">
-        <span class="brand-mark" aria-hidden="true"><img src="assets/icon-192.png" alt="" width="26" height="26" decoding="async" /></span>
+        <span class="brand-mark" aria-hidden="true"><img src="assets/icon-mark.png" alt="I-PASSBOOK" decoding="async" /></span>
         <span class="brand-text">I-PASSBOOK</span>
       </div>
 

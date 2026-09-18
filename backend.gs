@@ -2324,6 +2324,40 @@ function getPassbook(irNumber, authEmail) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// The MIME type of an uploaded file, decided by its NAME first.
+//
+// This exists because trusting the browser's `File.type` alone silently lost
+// uploads. Android's document picker — and several camera apps — hand Chrome a
+// file they cannot type, so `File.type` arrives as '' (or a generic
+// application/octet-stream) even for a plain JPEG. The upload loop used to skip
+// any file without a MIME type, so on those phones the photo was dropped on the
+// floor while the save still reported success: the thumbnail was there before
+// saving and gone after a reload, with nothing to explain it. The owner hit
+// exactly this on two phones.
+//
+// So the extension is the primary source and the declared type is the fallback,
+// never the reverse. A wrong-but-plausible type (octet-stream) is what makes a
+// Drive file refuse to preview, so a name we recognise always wins.
+// ──────────────────────────────────────────────────────────────────────────────
+function mimeFromName(name) {
+  var m = String(name || '').toLowerCase().match(/\.([a-z0-9]+)$/);
+  var map = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', jpe: 'image/jpeg', jfif: 'image/jpeg',
+    png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp',
+    heic: 'image/heic', heif: 'image/heif', tif: 'image/tiff', tiff: 'image/tiff',
+    pdf: 'application/pdf'
+  };
+  return m ? (map[m[1]] || '') : '';
+}
+function resolveMime(declared, name) {
+  var d = String(declared || '');
+  var generic = !d || d === 'application/octet-stream' || d === 'binary/octet-stream';
+  var byName = mimeFromName(name);
+  if (generic && byName) return byName;
+  return d || byName || 'application/octet-stream';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ACTION: saveSection
 // Saves form fields + uploads files to Google Drive under IR/Section folder
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2391,8 +2425,17 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   if (files && files.length > 0) {
     var sectionFolder = getOrCreateSectionFolder(irNumber, sectionId);
     files.forEach(function(file) {
-      if (!file.base64 || !file.name || !file.mimeType) return;
-      var blob     = Utilities.newBlob(Utilities.base64Decode(file.base64), file.mimeType, file.name);
+      // A file with no name or no contents is a broken upload, not a reason to
+      // skip one quietly. Say so and let the whole save fail: the client keeps the
+      // entries as a draft, and the user is told which file to re-pick. The old
+      // `return` here is what made "uploads don't work" invisible.
+      //
+      // NOT asserted: file.mimeType. See resolveMime — an empty one is normal on
+      // Android and is recoverable from the filename.
+      if (!file.base64 || !file.name)
+        throw new Error('A file arrived without its name or contents, so nothing was saved. Re-select the file and save again.');
+      var mime     = resolveMime(file.mimeType, file.name);
+      var blob     = Utilities.newBlob(Utilities.base64Decode(file.base64), mime, file.name);
       var uploaded = sectionFolder.createFile(blob);
       // Per FILE, never on the folder: the upload folders stay browsable by link,
       // while `_store/` — password hashes, salts, session tokens — is Restricted.

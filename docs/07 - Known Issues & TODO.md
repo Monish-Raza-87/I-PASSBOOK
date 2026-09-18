@@ -28,10 +28,11 @@
 > **Stages 1 and 2** are committed on `main` and live on `gh-pages` (`74c0298`) —
 > app-owned workflow state (`__IRS__`) and the read-only 📋 Report tab. The dashboard
 > went in early as the **Insights** page. **Stages 3 and 4 — the section completion
-> count and the ageing clock with overdue flags — are built and green in the working
-> tree on 2026-09-18** (the suite count below is their evidence), and are not deployed
-> yet. Stages 6–8 (canned responses, knowledge base, CSAT) are designed but unstarted;
-> the plan is the source of truth for those.
+> count and the ageing clock with overdue flags — are built and green (2026-09-18) and
+> are live on the frontend**: `gh-pages` publishes from `category-insights`, so the
+> `eb522b5` deploy (cache v32) carries them. The **backend** for that branch is not
+> deployed yet — see the owner step below. Stages 6–8 (canned responses, knowledge
+> base, CSAT) are designed but unstarted; the plan is the source of truth for those.
 
 ## Known Issues
 
@@ -141,13 +142,38 @@ completely, and the honest mitigation is named rather than implied.
 - 🔧 **`maintenancePruneAuditLog` reads and rewrites every audit file** it finds, under one lock. Each file is small (~40 KB for a busy ticket), so the whole sweep is bounded, but it is the one editor-run function whose cost grows with the number of tickets. Run it deliberately, not on a schedule nobody watches.
 - 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so `sec-f` writes to `'Section F - Quality Control'` (which therefore also holds Flight Test uploads) and `sec-g` to `'Section H - PDI'` (also Dispatch). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
 - 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_basicReport` → `f_basicReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_basicReport` to a section that no longer exists.
-- 🔧 **The deployed backend is older than `backend.gs`, and so is the deployed frontend.** They cut over together at the cutover deploy; nothing in Stages 1–2 depends on the parts that are missing.
+- 🔧 **The deployed backend is older than `backend.gs`.** The frontend is NOT — it went
+  first, deliberately (the new sign-in needs a screen to type the code into, so an old
+  frontend meeting a new backend locks everyone out; the old backend meeting a new
+  frontend does not). What is outstanding is the **owner step**: paste `backend.gs` into
+  the Apps Script project, **Deploy → Manage deployments → ✏️ → New version**, then run
+  `installArchiveTrigger()` once if it is missing. Until that lands, sign-in is still
+  password-only and `__CONFIG__/theme` writes are refused. See [08](08 - Development Guide.md).
+- 🐛 **File uploads silently vanished on some Android phones — FIXED 2026-09-19, not yet
+  deployed.** The owner reported the camera and file picker "not working" for one user
+  across two phones. The cause was not the app's UI: Android's document picker (and
+  several camera apps) hand Chrome a file it cannot type, so `File.type` arrives as `''`
+  even for a plain JPEG. The client passed that straight through as `mimeType`, and the
+  upload loop began `if (!file.base64 || !file.name || !file.mimeType) return;` — so the
+  file was **dropped with no error while the save still reported success**. The thumbnail
+  appeared before saving and was gone after a reload, which is exactly what "uploads don't
+  work" looks like with nothing in the log. Fixed on both sides: the MIME type is now
+  derived from the **filename extension first** (`resolveMime`/`mimeFromName`, mirrored in
+  `app.js`), because a recognised extension must beat a useless declared type — a Drive
+  file stored as `application/octet-stream` is one that will not preview. A file with no
+  name or no contents now **throws** instead of being skipped, so the failure is loud and
+  the draft is kept. `smoke-store.mjs` reproduces the phone case behaviourally (the old
+  code fails it), and `smoke-backend.mjs` pins the shape. **This rides the same backend
+  paste as the sign-in work** — it is not fixed on anyone's phone until that deploy.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1682 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1697 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
-its 69 cases arrived with Stages 3–4.)
+its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
+`smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it
+calls `saveSection` with a file whose MIME type is empty, which is what an Android
+picker really does.)
 
 **A suite that fails inside `smoke-all` but passes on its own is Chrome contention,
 not a regression** — re-run just that suite before believing it. `smoke-boot.mjs`

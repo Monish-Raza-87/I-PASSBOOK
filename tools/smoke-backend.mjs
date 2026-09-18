@@ -1418,4 +1418,31 @@ r.ok('the resolver searches the archive but NEVER creates it as a side effect',
 r.ok('nothing in the backend erases a folder or a file',
   !/setTrashed|removeFile\(|\bdeleteFile\(/.test(code));
 
+r.head('an upload with no MIME type still lands, and a broken one is never dropped quietly');
+// The owner's report: on two Android phones the photo showed a thumbnail before
+// saving and was gone after a reload, with no error anywhere. Android's picker
+// hands Chrome `File.type === ''` for a plain JPEG, and the upload loop used to
+// `return` on a falsy mimeType — a silent drop under a "✓ Saved!".
+r.ok('the upload loop no longer skips a file for a missing MIME type',
+  !/if \(!file\.base64 \|\| !file\.name \|\| !file\.mimeType\) return;/.test(sv),
+  (sv.match(/if \(!file\.base64[^\n]*/) || ['none — correct'])[0]);
+r.ok('it still refuses a file with no name or no contents, loudly',
+  /if \(!file\.base64 \|\| !file\.name\)\s*\n\s*throw new Error\(/.test(sv),
+  (sv.match(/if \(!file\.base64[^\n]*/) || [''])[0]);
+r.ok('the MIME type comes from resolveMime, not straight off the wire',
+  /var mime\s*=\s*resolveMime\(file\.mimeType, file\.name\)/.test(sv));
+r.ok('and the blob is built with that resolved type',
+  /Utilities\.newBlob\(Utilities\.base64Decode\(file\.base64\), mime, file\.name\)/.test(sv));
+r.ok('a recognised extension beats a useless declared type',
+  /d === 'application\/octet-stream'/.test(fnBody('resolveMime')) &&
+  /if \(generic && byName\) return byName;/.test(fnBody('resolveMime')));
+r.ok('resolveMime can never return an empty string — Drive needs a real type',
+  /return d \|\| byName \|\| 'application\/octet-stream'/.test(fnBody('resolveMime')));
+r.ok('the extension map covers the phone formats, not only the desktop ones',
+  ['jpg','jpeg','png','gif','webp','heic','heif','bmp','tiff','pdf']
+    .every(e => new RegExp('\\b' + e + ':').test(fnBody('mimeFromName'))),
+  (fnBody('mimeFromName').match(/heic[^\n]*/) || [''])[0]);
+r.ok('mimeFromName reads the LAST extension and lowercases it',
+  /toLowerCase\(\)\.match\(\/\\\.\(\[a-z0-9\]\+\)\$\/\)/.test(fnBody('mimeFromName')));
+
 r.finish();

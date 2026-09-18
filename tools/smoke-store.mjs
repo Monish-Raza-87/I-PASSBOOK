@@ -652,6 +652,50 @@ r.ok('the audit records the upload as its own event',
     .some(l => l.ev === 'uploaded' && l.nw === 'checklist.pdf'),
   auditFile('IR700').content);
 
+// The owner's report, reproduced. On two Android phones the photo showed a
+// thumbnail before saving and was gone after a reload, with no error anywhere:
+// Android's picker hands Chrome `File.type === ''` for a plain JPEG, and the
+// upload loop used to `return` on a falsy mimeType. The name is the source of
+// truth now, so the file must land — and land TYPED, because a Drive file stored
+// as octet-stream is one that will not preview.
+const sectionFolderOf = ir => ROOT.getFoldersByName(ir).next()
+  .getFoldersByName('Section B - Inward Checklist').next();
+
+ctx.saveSection('IR701', 'sec-b', { b_remarks: 'from an Android camera' },
+  [{ fieldId: 'b_docs', name: 'IMG_20260919.jpg', mimeType: '', base64: 'AAA' }], ADMIN);
+const phoneFile = sectionFolderOf('IR701').files[0];
+r.ok('a phone upload with NO MIME type lands instead of vanishing',
+  !!phoneFile && phoneFile.getName() === 'IMG_20260919.jpg',
+  sectionFolderOf('IR701').files.map(f => f.getName()));
+r.ok('and it lands typed image/jpeg, not octet-stream — Drive has to preview it',
+  !!phoneFile && phoneFile.mime === 'image/jpeg', phoneFile && phoneFile.mime);
+r.ok('so its link still reaches the section',
+  /b_docs_links/.test(Object.keys(fresh('sections/IR701.json')['sec-b']).join(' ')),
+  Object.keys(fresh('sections/IR701.json')['sec-b']));
+
+// A generic type from the picker must lose to a recognised extension: that is the
+// difference between a file that previews in the app and one that downloads.
+ctx.saveSection('IR702', 'sec-b', {},
+  [{ fieldId: 'b_docs', name: 'photo.HEIC', mimeType: 'application/octet-stream', base64: 'AAA' }], ADMIN);
+const heicFile = sectionFolderOf('IR702').files[0];
+r.ok('a generic octet-stream declaration loses to the extension',
+  !!heicFile && heicFile.mime === 'image/heic', heicFile && heicFile.mime);
+
+// A file that arrives with no contents is a broken upload, not a reason to drop
+// one quietly. Loud beats silent — the client keeps the entries as a draft.
+let brokenUpload = null;
+try {
+  ctx.saveSection('IR703', 'sec-b', { b_remarks: 'should not persist' },
+    [{ fieldId: 'b_docs', name: 'empty.jpg', mimeType: '', base64: '' }], ADMIN);
+} catch (e) { brokenUpload = e.message; }
+r.ok('a file with no contents THROWS instead of being skipped in silence',
+  !!brokenUpload && /without its name or contents/.test(brokenUpload), brokenUpload);
+r.ok('and it says what to do about it, rather than just failing',
+  !!brokenUpload && /Re-select/.test(brokenUpload), brokenUpload);
+r.ok('nothing was written: the throw happens before the locked store write',
+  !fresh('sections/IR703.json'),
+  fresh('sections/IR703.json') && Object.keys(fresh('sections/IR703.json')));
+
 // App stores must not carry uploads at all — that was the last sentinel hole.
 let sentinelUpload = null;
 try {

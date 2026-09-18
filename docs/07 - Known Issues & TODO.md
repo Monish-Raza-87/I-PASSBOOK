@@ -307,6 +307,37 @@ and a live end-to-end sign-in. See the verification list in
 - [ ] Canned responses — *Stage 6*
 - [ ] Knowledge base — *Stage 7*
 - [ ] CSAT score — *Stage 8*
+
+> **On the stage numbering.** There is no Stage 5 anywhere in this repo — the
+> checklist goes 4, 6, 7, 8. The stage plan itself is **not a file in this
+> repository**, which is why the pivot section above can only say "the plan is the
+> source of truth": a session reading only these docs cannot check the plan's own
+> wording. If the plan is worth keeping, it belongs in `docs/` where the rest of
+> the reasoning lives.
+
+### Waiting on the owner, not on code
+
+Everything else on this page is a dev task. These four are the ones that need a
+human with the Google account, and three of them are the *same* five-minute job:
+
+1. **Paste `backend.gs` into the Apps Script project and deploy a New version.**
+   Editor: https://script.google.com/d/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/edit
+   — **Deploy → Manage deployments → ✏️ → New version**. Never "New deployment"
+   (it mints a different `/exec` and breaks every installed client). The `/exec`
+   URL must keep ending `jQXatfT/exec`. **Backend last, never first** — and the
+   frontend has already gone first, so this is now the safe step.
+   This one paste turns on **three** things at once: the emailed sign-in code,
+   `__CONFIG__/theme` writes, and the fix for uploads that vanished on Android.
+2. **Run `installArchiveTrigger()` once** from that editor, signed in as
+   `monish.raza@indrones.com` — the account that owns the Drive folder, because the
+   trigger executes as whoever installed it. Idempotent; confirm exactly one trigger
+   on the Triggers page. Until it exists, closed IR folders are archived only by hand.
+3. **Publish the frontend** if `app.js` has moved since `eb522b5`: `node
+   tools/deploy-ghpages.mjs` to dry-run, then `node tools/deploy-ghpages.mjs --commit
+   --push`. Needs `DEPLOY_SOURCE=category-insights` while the work is on that branch.
+4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs**, 30 days after cutover —
+   they are the only record of the old hand-assigned grants, and nothing reads them.
+   Drive usage is worth a look at the same time (see "Erase archived IR folders").
 - [ ] Push notifications for IR status changes
 - [ ] Photo gallery view for saved file links
 - [ ] Form validation with required fields

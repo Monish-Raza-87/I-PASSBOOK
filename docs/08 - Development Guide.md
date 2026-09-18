@@ -109,13 +109,19 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 >   later deploy of *this* project, use **Deploy → Manage deployments → pencil →
 >   New version**. A "New deployment" mints a different `/exec` and breaks every
 >   installed client, because the URL lives in a cached `app.js`.
-> - **The deployed backend is still behind the branch.** It runs `main`'s code, so
->   live sign-in is password-only: a password login returns a plain token with no
+> - **The deployed backend is still behind the branch, and the frontend is NOT —
+>   the frontend went first, on purpose.** `gh-pages` publishes from
+>   `category-insights`, so the deployed `app.js` already knows how to ask for the
+>   emailed code and renders Stages 3–4. The live backend runs `main`'s code, so
+>   sign-in is still password-only: a password login returns a plain token with no
 >   `otpRequired`, and the code box simply never appears. Pasting the branch's
 >   `backend.gs` and deploying a **New version** is what turns the emailed code on.
 >   **Deploy the backend last, never first** — new backend + old frontend is the
 >   combination that locks everybody out, because the old frontend has nowhere to
->   type the code.
+>   type the code. **That risk is already behind us**: the frontend has been live
+>   since `eb522b5` (cache v32), so this paste is now the safe completion step, not
+>   the risky one. The same paste also carries the fix for uploads that vanished on
+>   Android phones (see [07](07 - Known Issues & TODO.md)).
 >
 > **After the deploy, run `installArchiveTrigger()` once** from the editor, signed in
 > as `monish.raza@indrones.com` — that is the account that owns the Drive folder, and

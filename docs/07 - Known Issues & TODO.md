@@ -168,12 +168,13 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1697 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1702 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
 `smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it
 calls `saveSection` with a file whose MIME type is empty, which is what an Android
-picker really does.)
+picker really does — and the 5 that pin the mark decode the PNG and count its
+pixels, because the checks that were there before passed on the broken file.)
 
 **A suite that fails inside `smoke-all` but passes on its own is Chrome contention,
 not a regression** — re-run just that suite before believing it. `smoke-boot.mjs`
@@ -432,6 +433,23 @@ human with the Google account, and three of them are the *same* five-minute job:
   @mentions, and **file uploads** (which previously left no trace at all). One pure
   `buildTimeline(...)` feeds both the Overview panel and the 🕓 History modal, so the
   two can never tell different stories.
+- ✅ **The borderless mark works in dark mode, and the reason it did not is worth
+  keeping.** When the owner asked for the tile to be removed, the cutout's flood fill
+  turned out to be reaching INSIDE the circle — through the light knockout band behind
+  the "Passbook" script, which crosses the rim — and punching out the monogram and the
+  lettering with it. That is invisible on a light page, because a transparent hole shows
+  the page and the page is the same near-white the artwork's background was; it only
+  showed up in dark mode, where the mark became an empty box. So there were two bugs,
+  not one: the cutout ate 21,000 pixels of artwork, and the surviving tones are all dark,
+  so the mark is invisible on the dark surface as drawn. `tools/make-icons.ps1` now
+  restores the circle from the original pixels (`RestoreDisc`), found from the surviving
+  ink rather than hardcoded geometry, and **refuses to write a mark whose circle does not
+  come back filled**; `base.css` inverts the mark in dark mode, which works *because* the
+  monogram is a knockout in the disc. `smoke-shell.mjs` decodes the PNG and counts pixels
+  — ~22,000 opaque near-white ones intact, ~800 hollowed out — because a size check and a
+  "not blank" check both pass on the broken file. The generalisable part: **a mark that
+  is correct on a light background can be broken in a way only a dark background shows**,
+  and rendering it over magenta is what makes it obvious.
 - ✅ **The department matrix is populated.** The owner's mapping lives in
   `SEED_GRANTS`; `seedDepartments()` upserts it and reports `created` / `updated` /
   `unchanged` / and a **`dropped`** list, and `seedMemberships()` adds the

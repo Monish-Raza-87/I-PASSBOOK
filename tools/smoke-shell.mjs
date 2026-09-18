@@ -12,6 +12,7 @@
 // Frappe pivot's routing and access-gating depend on.
 
 import fs from 'node:fs';
+import zlib from 'node:zlib';
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
@@ -340,6 +341,97 @@ ok('the borderless mark is a real PNG with an alpha channel, and is not blank',
     const colourType = b[25];
     return w === 512 && h > 200 && colourType === 6 && b.length > 8192;
   })(), 'expected a 512-wide RGBA PNG');
+
+// ── The mark must still HAVE its artwork, and must work in dark mode ──────────
+//
+// The bug this pins, found by the owner in dark mode and by nobody on the light
+// page: the cutout's flood fill reached INSIDE the circle, through the light
+// knockout band behind the "Passbook" script, and punched out the monogram and
+// the lettering. On a light page that is invisible — a transparent hole shows the
+// page, and the page is the same near-white the artwork's background was. On the
+// dark one the whole mark became an empty box.
+//
+// A dimension check and a "not blank" check both pass on the hollowed-out mark,
+// so this decodes the pixels and counts them. The white monogram and script
+// knockouts are ~22,000 fully opaque near-white pixels when the mark is intact
+// and ~800 when the fill has eaten them — the numbers below are measured against
+// both versions of the real file, not chosen.
+function pngPixels(p) {
+  const b = fs.readFileSync(p);
+  let off = 8, w = 0, h = 0, ct = 0;
+  const idat = [];
+  while (off + 12 <= b.length) {
+    const len = b.readUInt32BE(off);
+    const type = b.toString('ascii', off + 4, off + 8);
+    const data = b.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); ct = data[9]; }
+    if (type === 'IDAT') idat.push(data);
+    off += 12 + len;
+  }
+  if (ct !== 6) return null;
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const bpp = 4, stride = w * bpp, out = Buffer.alloc(h * stride);
+  let p2 = 0;
+  for (let y = 0; y < h; y++) {
+    const ft = raw[p2++];
+    const line = raw.subarray(p2, p2 + stride); p2 += stride;
+    const cur = out.subarray(y * stride, (y + 1) * stride);
+    const prev = y ? out.subarray((y - 1) * stride, y * stride) : Buffer.alloc(stride);
+    for (let i = 0; i < stride; i++) {
+      const a = i >= bpp ? cur[i - bpp] : 0, bb = prev[i], c = i >= bpp ? prev[i - bpp] : 0;
+      let v = line[i];
+      if (ft === 1) v += a;
+      else if (ft === 2) v += bb;
+      else if (ft === 3) v += (a + bb) >> 1;
+      else if (ft === 4) {
+        const pp = a + bb - c, pa = Math.abs(pp - a), pb = Math.abs(pp - bb), pc = Math.abs(pp - c);
+        v += (pa <= pb && pa <= pc) ? a : (pb <= pc ? bb : c);
+      }
+      cur[i] = v & 255;
+    }
+  }
+  return { w, h, px: out };
+}
+
+const markStats = (() => {
+  const png = pngPixels(new URL('../assets/icon-mark.png', import.meta.url));
+  if (!png) return null;
+  const { w, h, px } = png;
+  let clear = 0, solid = 0, nearWhiteSolid = 0;
+  for (let i = 0; i < w * h; i++) {
+    const a = px[i * 4 + 3];
+    if (a === 0) { clear++; continue; }
+    if (a !== 255) continue;
+    solid++;
+    const lum = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+    if (lum > 230) nearWhiteSolid++;
+  }
+  return { clear, solid, nearWhiteSolid, total: w * h };
+})();
+
+ok('the mark still contains its white artwork — the fill did not eat the monogram',
+  !!markStats && markStats.nearWhiteSolid > 8000,
+  markStats ? `${markStats.nearWhiteSolid} opaque near-white px (hollowed-out mark: ~800)` : 'unreadable PNG');
+ok('and that white is a real share of the mark, not a few stray rim pixels',
+  !!markStats && markStats.nearWhiteSolid / markStats.solid > 0.1,
+  markStats ? `${(100 * markStats.nearWhiteSolid / markStats.solid).toFixed(1)}% of opaque px are near-white` : '');
+ok('the background is still transparent — the fix did not put the square back',
+  !!markStats && markStats.clear / markStats.total > 0.3 && markStats.clear / markStats.total < 0.6,
+  markStats ? `${(100 * markStats.clear / markStats.total).toFixed(0)}% transparent` : '');
+
+// The mark's two tones are both dark, so on the dark surface it is invisible as
+// drawn. inverted it is legible, and the inversion is what keeps the artwork's
+// internal contrast (the monogram is a knockout in the disc, so it inverts with
+// it). Both in-app marks have to be covered, or one of them stays a blank box.
+const baseCss = read('../base.css');
+ok('dark mode inverts BOTH in-app marks, so neither is a blank box on the dark page',
+  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.auth-logo\s*\{[^}]*filter:\s*invert\(1\)/.test(
+    baseCss.replace(/\s+/g, m => m.includes('\n') ? '\n' : ' ')),
+  (baseCss.match(/\[data-theme="dark"\][^{]*\{[^}]*invert[^}]*\}/) || ['none — the mark is invisible in dark mode'])[0]);
+// brightness(0) invert(1) flattens the mark to a single colour, and the monogram
+// disappears into the disc. It is the obvious-looking wrong answer here.
+ok('and it is invert(1), NOT brightness(0) invert(1) which flattens the mark',
+  !/\[data-theme="dark"\][^{]*\{[^}]*brightness\(0\)[^}]*\}/.test(baseCss));
 
 const manifest = JSON.parse(read('../manifest.json'));
 ok('the manifest declares both icon sizes',

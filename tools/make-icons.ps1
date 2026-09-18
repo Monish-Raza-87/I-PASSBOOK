@@ -38,10 +38,26 @@
 # The naive way to do that — make every light pixel transparent — punches the
 # holes in the logo too, because the "Passbook" script and the monogram inside
 # the circle are white. What is background and what is artwork cannot be told
-# apart by colour alone: they are the same colour. The only thing that separates
-# them is CONNECTIVITY, so the fill starts at the border and spreads inward,
-# stopping at anything that is not background-coloured. The white inside the
-# circle is enclosed by the dark circle and is never reached.
+# apart by colour alone: they are the same colour. So the fill starts at the
+# border and spreads inward, stopping at anything that is not background-coloured.
+#
+# ── Why that fill is not enough on its own ──────────────────────────────────
+#
+# The first version of this assumed the white inside the circle was SEALED OFF by
+# the dark circle, and never reached. It is not. The "Passbook" script crosses the
+# rim, so the light knockout band behind those letters is a bridge from the
+# outside straight into the middle of the artwork. The fill walks it and punches
+# out the monogram and the letters with it.
+#
+# That bug is INVISIBLE on a light page — a transparent hole shows the page, and
+# the page is the same near-white the artwork's background was. The owner only
+# found it in dark mode, where the whole mark turned into an empty box. Rendering
+# the mark over magenta is what made it obvious: the monogram and the letters of
+# "Passbook" were see-through the entire time.
+#
+# So the circle is restored from the original pixels after the fill. See
+# RestoreDisc — it is found from the SURVIVING ink, because the circle is the
+# tallest thing in the mark.
 #
 # That flood is why this part is C# injected with Add-Type rather than plain
 # PowerShell: it is ~2.7 million pixels and a per-pixel loop in PowerShell takes
@@ -228,6 +244,92 @@ public static class BrandMark
         return n;
     }
 
+    // Put the circle back, from the pixels the fill spoiled.
+    //
+    // The fill leaks in through the knockout band behind "Passbook" and eats the
+    // monogram and the lettering inside the circle. Restoring the circle from the
+    // original bytes undoes exactly that and nothing else: outside the circle the
+    // fill did its job and stays.
+    //
+    // The circle is located from what SURVIVED, so this needs no hardcoded
+    // geometry — the circle is the tallest thing in the mark, so the surviving
+    // ink's bbox height is its diameter and its left edge is the mark's left edge.
+    // Returns {cx, cy, r, restored}; restored is -1 if the result does not look
+    // like a filled disc, which is the cue to stop rather than ship a half-fixed
+    // mark.
+    public static double[] RestoreDisc(byte[] px, byte[] orig, int w, int h)
+    {
+        int minX = w, minY = h, maxX = -1, maxY = -1;
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                if (px[(y * w + x) * 4 + 3] == 0) continue;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+        }
+        if (maxX < 0) return new double[] { 0, 0, 0, -1 };
+
+        double r  = (maxY - minY + 1) / 2.0;
+        double cx = minX + r;
+        double cy = (minY + maxY) / 2.0;
+
+        // Restore to r+2 with a fade, NOT to exactly r. The monogram touches the
+        // rim in places, and a hard cut at r leaves those touches as a notch
+        // bitten out of the circle — small at icon size, plainly visible at the
+        // 76px the sign-in card draws it. Two pixels of fade at master scale
+        // (1653px) is a third of a pixel in the finished 512px mark, so the extra
+        // reach cannot show as a fringe.
+        double reach = r + 2.0;
+        int restored = 0;
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+                double d = Math.Sqrt(dx * dx + dy * dy);
+                if (d > reach) continue;
+                int i = (y * w + x) * 4;
+                px[i]     = orig[i];
+                px[i + 1] = orig[i + 1];
+                px[i + 2] = orig[i + 2];
+                if (d > r)
+                {
+                    int a = (int)(orig[i + 3] * (reach - d) / 2.0);
+                    px[i + 3] = (byte)(a < 0 ? 0 : (a > 255 ? 255 : a));
+                }
+                else
+                {
+                    px[i + 3] = orig[i + 3];
+                    restored++;
+                }
+            }
+        }
+
+        // A disc that was really found is almost entirely opaque now: the only
+        // see-through pixels left inside it are the anti-aliased rim. If this is
+        // not true, the "tallest ink" guess picked the wrong thing and the mark
+        // is not fixed.
+        int inside = 0, solid = 0;
+        double probe = r * 0.9;
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                double dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+                if (Math.Sqrt(dx * dx + dy * dy) > probe) continue;
+                inside++;
+                if (px[(y * w + x) * 4 + 3] > 250) solid++;
+            }
+        }
+        if (inside > 0 && solid < inside * 0.98) restored = -1;
+
+        return new double[] { cx, cy, r, restored };
+    }
+
     static void Push(Stack<int> s, bool[] clear, bool[] bgish, int p)
     {
         if (!clear[p] && bgish[p]) { clear[p] = true; s.Push(p); }
@@ -316,12 +418,24 @@ $data = $plate.LockBits($all, [System.Drawing.Imaging.ImageLockMode]::ReadWrite,
 $bytes = New-Object byte[] ($data.Stride * $plate.Height)
 [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
 
+# The fill is destructive, and RestoreDisc needs the pixels it spoiled.
+$orig = New-Object byte[] $bytes.Length
+[Array]::Copy($bytes, $orig, $bytes.Length)
+
 [BrandMark]::Cutout($bytes, $plate.Width, $plate.Height, $BackgroundTolerance)
+$disc = [BrandMark]::RestoreDisc($bytes, $orig, $plate.Width, $plate.Height)
 $box = [BrandMark]::Box($bytes, $plate.Width, $plate.Height)
 $cleared = [BrandMark]::Cleared($bytes, $plate.Width, $plate.Height)
 
 [System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $data.Scan0, $bytes.Length)
 $plate.UnlockBits($data)
+
+if ($disc[3] -lt 0) {
+  throw "The fill reached inside the circle and the restore did not put it back — the 'tallest ink' guess found something that is not a filled disc. Nothing was written."
+}
+if ($disc[3] -lt 1000) {
+  throw "The circle was restored from only $($disc[3]) pixels, which is too few to be the artwork. Nothing was written."
+}
 
 if ($box[2] -lt 0) {
   throw "The cutout left nothing opaque behind — the tolerance ($BackgroundTolerance) ate the logo. Nothing was written."
@@ -346,7 +460,10 @@ $mark.Save($markPath, [System.Drawing.Imaging.ImageFormat]::Png)
 ""
 "{0,-22} {1}x{2}  {3,8:N0} bytes   {4}" -f 'icon-mark.png', $mark.Width, $mark.Height, (Get-Item $markPath).Length, (AlphaReport $mark)
 "  background keyed out: $clearedPct% of the master; artwork box ${x0},${y0} to ${x1},${y1}"
+"  circle restored: $([int]$disc[3]) px, centre $([int]$disc[0]),$([int]$disc[1]) r=$([int]$disc[2]) — the monogram and the script inside it are opaque again"
 "  this one is the INSIDE-the-app mark: no square, no background, the page shows through."
+"  light mode uses it as drawn; dark mode inverts it in base.css, because these"
+"  tones are invisible on the dark surface."
 
 $mark.Dispose(); $trimmed.Dispose(); $plate.Dispose()
 $masterBmp.Dispose(); $master.Dispose()

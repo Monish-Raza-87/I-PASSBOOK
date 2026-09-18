@@ -342,6 +342,26 @@ html[data-intro="seen"] #splash-screen {
   width: auto;
   display: block;
 }
+/* On a light page the mark is used exactly as drawn. On a dark one its two tones
+   both disappear: the circle is a dark navy on #171717 and the "Passbook" script
+   is darker still, so the mark reads as an empty box. The owner reported exactly
+   that after the tile was removed.
+
+   invert() is the whole fix, and it works because of how the artwork is built:
+   the monogram and the script inside the circle are HOLES knocked out of the
+   disc, so inverting turns the disc light and those knockouts dark, keeping the
+   design's internal contrast. Outside the circle the script is dark ink on a now
+   transparent background, so it inverts to a light word on the dark page — which
+   is what the artwork does in reverse on white. No second asset, no plate, and
+   nothing to keep in sync when the master is replaced.
+
+   brightness(0) invert(1) would NOT work: it flattens the mark to one colour and
+   the monogram disappears into the disc. Probed on the real dark surface before
+   choosing, not guessed. */
+[data-theme="dark"] .brand-mark img,
+[data-theme="dark"] .auth-logo {
+  filter: invert(1);
+}
 .brand-text {
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);

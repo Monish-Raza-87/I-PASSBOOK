@@ -90,11 +90,33 @@ tile sitting on the page, which is what the owner saw and asked to have removed.
 Keying it out cannot be done by colour, because the monogram and the "Passbook"
 script are the *same colour* as the background they sit on; only **connectivity**
 separates them, so the tool floods inward from the border and stops at anything
-that is not background-coloured, which leaves the white inside the circle
-untouched. That flood is ~2.7 million pixels, so it is compiled with `Add-Type`
-rather than looped in PowerShell. `smoke-shell.mjs` checks the result really is
-an RGBA PNG of the right size, because a mark that quietly kept its background
-looks correct on the light page and wrong everywhere else.
+that is not background-coloured. That flood is ~2.7 million pixels, so it is
+compiled with `Add-Type` rather than looped in PowerShell.
+
+**The flood alone was not enough, and the failure was invisible for a while.**
+The white inside the circle is NOT sealed off by the circle: the "Passbook" script
+crosses the rim, so the light knockout band behind those letters is a bridge from
+the outside straight into the middle of the artwork. The flood walked it and
+punched out the monogram and the lettering — 21,000 pixels of artwork turned
+see-through. On a light page that is indistinguishable from correct, because a
+transparent hole shows the page and the page is the same near-white the artwork's
+background was; it only became visible in **dark mode**, where the mark turned
+into an empty box. The circle is now restored from the original pixels after the
+fill (`RestoreDisc`), located from the surviving ink rather than from hardcoded
+geometry, and the tool refuses to write a mark whose circle does not come back
+filled. Rendering the mark over magenta is what makes this class of bug obvious.
+
+`smoke-shell.mjs` decodes the PNG and counts its pixels — the intact mark has
+~22,000 opaque near-white ones and a hollowed-out mark has ~800 — because a
+dimension check and a "not blank" check both pass on the broken file.
+
+**Dark mode inverts the mark** (`filter: invert(1)` in `base.css`). Both of its
+tones are dark, so on the dark surface it is invisible as drawn — the owner
+reported exactly that. Inverting works *because* of how the artwork is built: the
+monogram and the script inside the circle are knockouts in the disc, so they
+invert along with it and the design keeps its internal contrast. `brightness(0)
+invert(1)`, the obvious-looking alternative, flattens the whole mark to one colour
+and loses the monogram.
 
 ## Key Design Decisions
 

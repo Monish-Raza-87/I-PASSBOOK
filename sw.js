@@ -3,10 +3,14 @@
 //  - Apps Script backend (live data): ALWAYS network, NEVER cached — otherwise
 //    the IR list / passbook would freeze at the first response and never update.
 //  - Navigations: network-first, fall back to cached index.html when offline.
-//  - Same-origin static shell (HTML/CSS/JS/assets): cache-first, populate cache
-//    from the network on first use.
+//  - Same-origin static shell (HTML/CSS/JS/assets): stale-while-revalidate — serve
+//    the cached copy instantly, refresh it in the background. That means a code
+//    change reaches a returning user on their SECOND load, not their first: the
+//    first load is served the stale `app.js` while the new one is fetched. Bumping
+//    CACHE_NAME below is what removes that one-load lag, which is why
+//    `tools/deploy-ghpages.mjs` refuses to be quiet about it.
 //  - Other cross-origin (fonts, etc.): default network handling.
-const CACHE_NAME = 'ipassbook-v32';
+const CACHE_NAME = 'ipassbook-v33';
 const SHELL = [
   './',
   './index.html',

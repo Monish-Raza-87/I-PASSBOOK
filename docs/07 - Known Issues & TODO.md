@@ -294,6 +294,16 @@ and a live end-to-end sign-in. See the verification list in
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **The mobile intro filled the screen by zooming into the middle of it.** The
+  splash video was sized `min-width/min-height: 100%` with `width/height: auto`,
+  which reads as full-bleed and is not — a replaced element with auto sizing keeps
+  its **intrinsic** size, and the minimums only ever raise it. Measured on the live
+  build: a phone rendered the portrait cut at its native 1080×1920 and cropped it to
+  the centre, showing **47% × 43%** of the frame against the desktop's 74% × 74% —
+  a ~2.3× zoom, worst on the narrowest screen. It is `inset: 0` + 100% + `object-fit:
+  cover` now, so the element is the size of the screen and the cropping is
+  deliberate. The portrait cut itself was always right and always chosen
+  (1080×1920, 3.8 MB, gated to `max-width: 639px`); the file was never the problem.
 - ✅ **The app has a real icon, generated from one brand master.** The owner-supplied
   crop is now `assets/icon-master.jpeg` (1653×1653), and `icon-192.png`,
   `icon-512.png` and `apple-touch-icon.png` are all produced from it by

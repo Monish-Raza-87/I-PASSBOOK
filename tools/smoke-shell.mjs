@@ -273,6 +273,35 @@ ok('the pre-paint script sets data-intro before the body parses',
 ok('base.css hides the splash off that attribute',
   /html\[data-intro="seen"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
 
+// The splash is sized to the VIEWPORT, not to the video's own pixels. This is
+// asserted because the wrong version is the one that looks right when you read
+// it: `min-width/min-height: 100%` with `width/height: auto` reads as full-bleed,
+// but a replaced element with auto sizing keeps its INTRINSIC size and the
+// minimums only ever raise it. That shipped, and put a 1080x1920 element on a
+// phone, so the centring crop showed 47% x 43% of the frame against the desktop's
+// 74% x 74% — the owner reported the result as the mobile intro "not appearing
+// properly". object-fit: cover is what does the cropping, deliberately, once the
+// element is the size of the screen.
+head('the splash video fills the screen instead of zooming into the middle of it');
+const splashVideo = (read('../base.css').match(/\.splash-video\s*\{[^}]*\}/) || [''])[0];
+ok('.splash-video is pinned to the viewport, not to its own pixel size',
+  /inset:\s*0/.test(splashVideo) &&
+  /width:\s*100%/.test(splashVideo) && /height:\s*100%/.test(splashVideo),
+  splashVideo);
+ok('...and it does not size itself from the video\'s intrinsic dimensions',
+  !/width:\s*auto/.test(splashVideo) && !/height:\s*auto/.test(splashVideo) &&
+  !/min-width/.test(splashVideo) && !/min-height/.test(splashVideo),
+  splashVideo);
+ok('object-fit: cover does the cropping, so the aspect ratio is preserved',
+  /object-fit:\s*cover/.test(splashVideo));
+// The phone cut is chosen by a media query on <source>, and the phone cut is the
+// portrait one — so if this pairing drifts, the phone silently gets the 16:9
+// desktop frame it has no room for.
+ok('the portrait mobile cut is offered first, gated to phone widths',
+  /intro_ipassbookv2_mobile\.mp4[\s\S]{0,120}max-width:\s*639px/.test(html) &&
+  html.indexOf('intro_ipassbookv2_mobile.mp4') < html.indexOf('intro_ipassbookv2.mp4"'),
+  (html.match(/<video id="splash-video"[\s\S]{0,400}/) || [''])[0]);
+
 // ── The app icon ─────────────────────────────────────────────────────────────
 // The icon set replaced a letterhead PNG that was standing in as one. A manifest
 // is easy to get wrong and fails silently: Chrome drops an icon whose bytes do

@@ -137,16 +137,25 @@ html[data-intro="seen"] #splash-screen {
    darkening layer here, with a backdrop blur, sitting behind the wordmark; the
    owner saw the result as a blurry video and asked for it gone. The wordmark
    and the "Indrones Product After-Sales Summary Book" line moved to the
-   sign-in card, which is where the full product name belongs anyway. */
+   sign-in card, which is where the full product name belongs anyway.
+
+   Sized to the VIEWPORT, not to the video's own pixels. The rules here were
+   `min-width/min-height: 100%` with `width/height: auto`, which reads as
+   full-bleed and is not: a replaced element with auto sizing keeps its
+   intrinsic size, and the minimums only ever raise it. So the element rendered
+   at 1080x1920 CSS px on a phone and 1920x1080 on a desktop, and the centring
+   translate cropped the middle of the frame — measured on the live build, a
+   phone was showing 47% x 43% of the picture against the desktop's 74% x 74%.
+   That is the ~2.3x zoom the owner reported as the mobile intro "not appearing
+   properly", and it was worst on the narrowest screen, where the mobile cut
+   matters most. `inset: 0` + 100% makes the element the size of the screen and
+   `object-fit: cover` does the cropping deliberately, preserving the aspect
+   ratio instead of magnifying it. */
 .splash-video {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  min-width: 100%;
-  min-height: 100%;
-  width: auto;
-  height: auto;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
   z-index: 1;
 }

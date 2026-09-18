@@ -882,6 +882,63 @@
 }
 .overview-head .btn { width: auto; padding: 0.35rem 0.8rem; font-size: var(--text-sm); }
 
+/* ── Collapsing the Overview ──────────────────────────────────────────────────
+   The panel is the first thing on a ticket and the tallest, so it pushes the
+   section tabs — the thing a person actually came for — down the screen. This
+   lets a user fold it away. The preference is per device.
+
+   ⚠ Collapse the CHILDREN, never #ir-overview itself. renderOverview() drives
+   that element's own inline `display` (none when no IR is open, '' when one is),
+   and any `display` from this file would be overridden by it — or worse, fight
+   it. Hiding the three content divs leaves that logic completely untouched. */
+.overview-head-left {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.overview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.overview-toggle:hover { color: var(--ink-gray-8); border-color: var(--outline-gray-3); }
+.overview-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A chevron drawn from two borders — no icon asset. Points down when open,
+   right when closed, which is the convention everywhere. */
+.overview-chevron {
+  width: 6px;
+  height: 6px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+#ir-overview.is-collapsed .overview-chevron { transform: rotate(-45deg); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .overview-chevron { transition: transform 0.15s var(--ease); }
+}
+
+#ir-overview.is-collapsed #ir-overview-facts,
+#ir-overview.is-collapsed #ir-overview-editable,
+#ir-overview.is-collapsed #ir-legacy-log,
+#ir-overview.is-collapsed #save-overview { display: none; }
+
+/* Collapsed, the header is the whole panel — so it should not reserve the
+   bottom margin the body used to occupy. */
+#ir-overview.is-collapsed .overview-head { margin-bottom: 0; }
+
 /* Fact strip — the client's intake facts, read-only. Deliberately compact: the ten
    full fields live on the 📋 Report tab one click away, and pinning all of them
    here would push the tabs a screen down on a phone. */
@@ -1294,6 +1351,29 @@
   /* The people × departments matrix scrolls sideways rather than squashing
      six departments into a phone width. */
   .acc-matrix td.acc-matrix-name { min-width: 200px; }
+}
+
+/* ── Phone: give the tabs a real tap target ──────────────────────────────
+   On a phone the tabs (Triage / Comments / History, and the section tabs)
+   measured 28px tall — under the 44px Apple and 48px Google both ask for,
+   and the smallest thing on the screen to hit.
+
+   The fix grows the box with min-height and centres the label, rather than
+   padding it out. That matters: the active tab is marked by a 2px
+   border-bottom, so anything that moves the text baseline would drag the
+   underline with it. Centring keeps the border pinned to the box edge and
+   the tab reads exactly as it does on desktop. No font metric changes, so
+   nothing reflows sideways either. */
+@media (max-width: 639px) {
+  .tab {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+  .overview-toggle { min-height: 40px; }
+  /* Same treatment for the Activity fold on a ticket — full width already, so
+     only its height was under-sized. */
+  .activity-toggle { min-height: 40px; }
 }
 
 /* ══════════════════════════════════════════════════════════

@@ -870,6 +870,17 @@ window.addEventListener('load', () => {
   const video = document.getElementById('splash-video');
   if (!video) { dismissSplash(false); return; }
 
+  // The loader bar under the intro is timed from the video itself rather than a
+  // number in the stylesheet — it used to finish at 1.85s while nine seconds of
+  // video were still playing, which read as a stuck progress bar. --intro-ms is
+  // read by .splash-bar's animation-duration in base.css; the CSS default stands
+  // if metadata never arrives.
+  video.addEventListener('loadedmetadata', () => {
+    if (Number.isFinite(video.duration) && video.duration > 0) {
+      document.documentElement.style.setProperty('--intro-ms', video.duration + 's');
+    }
+  }, { once: true });
+
   // The backstop, armed before play() so it covers every failure mode. `ended`
   // normally beats it; if the video is missing or unplayable, `error` does.
   const fallback = setTimeout(() => dismissSplash(false), INTRO_FALLBACK_MS);
@@ -878,6 +889,49 @@ window.addEventListener('load', () => {
   video.addEventListener('error', finish, { once: true });
   video.play().catch(finish);
 });
+
+// ─── OVERVIEW COLLAPSE ───────────────────────────────────────────────────────
+// A ticket's Overview is the first and tallest block on the page, which pushes
+// the section tabs — the thing a person opened the ticket for — off the screen.
+// It folds away, and the choice is remembered per device.
+//
+// Bound once, at parse time: index.html is static, so these elements exist by
+// the time this file evaluates (it is the last thing in <body>). The class goes
+// on the panel, but views.css hides the panel's CHILDREN — renderOverview() owns
+// the panel's own inline `display`, and this must never fight with it.
+const OVERVIEW_OPEN_KEY = 'overviewOpen';
+
+// Default CLOSED. The stored value is opt-IN to open, so a fresh device, a
+// cleared cache, or storage being blocked all land on the tidy screen rather
+// than the cluttered one.
+function overviewStoredOpen() {
+  try { return localStorage.getItem(OVERVIEW_OPEN_KEY) === '1'; } catch (e) { return false; }
+}
+
+function applyOverviewOpen(open) {
+  const panel = document.getElementById('ir-overview');
+  if (!panel) return;
+  panel.classList.toggle('is-collapsed', !open);
+  const btn = document.getElementById('overview-toggle');
+  if (!btn) return;
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  const label = btn.querySelector('.overview-toggle-text');
+  if (label) label.textContent = open ? 'Hide' : 'Show';
+}
+
+(function initOverviewToggle() {
+  const btn = document.getElementById('overview-toggle');
+  if (!btn) return;
+  applyOverviewOpen(overviewStoredOpen());
+  btn.addEventListener('click', () => {
+    // Read the CURRENT state off the DOM rather than tracking a parallel
+    // variable, so this cannot drift from what is actually rendered.
+    const panel = document.getElementById('ir-overview');
+    const nextOpen = panel ? panel.classList.contains('is-collapsed') : false;
+    applyOverviewOpen(nextOpen);
+    try { localStorage.setItem(OVERVIEW_OPEN_KEY, nextOpen ? '1' : '0'); } catch (e) { /* storage blocked */ }
+  });
+})();
 
 function shouldUseDevAuthBypass() {
   const params = new URLSearchParams(window.location.search);

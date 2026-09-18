@@ -1,0 +1,653 @@
+<title>I-PASSBOOK Demo Run-Sheet</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+  :root {
+    --ground: #f5f7fa;
+    --surface: #ffffff;
+    --stage: #eceff5;
+    --ink: #11151c;
+    --ink-2: #454e5c;
+    --ink-3: #6d7787;
+    --rule: #dfe4ec;
+    --rule-strong: #c7d0dd;
+    --accent: #1f5fd0;
+    --accent-ink: #14429a;
+    --accent-soft: #e8effd;
+    --warn-ink: #7a5000;
+    --warn-soft: #fdf7e8;
+    --warn-rule: #ecd9a8;
+    --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1116;
+      --surface: #151a21;
+      --stage: #1c222c;
+      --ink: #e9edf3;
+      --ink-2: #adb6c4;
+      --ink-3: #7d8899;
+      --rule: #242b35;
+      --rule-strong: #333c48;
+      --accent: #79acfb;
+      --accent-ink: #a9c9ff;
+      --accent-soft: #16202f;
+      --warn-ink: #e8bd6d;
+      --warn-soft: #241d0f;
+      --warn-rule: #4a3c1e;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1116;
+    --surface: #151a21;
+    --stage: #1c222c;
+    --ink: #e9edf3;
+    --ink-2: #adb6c4;
+    --ink-3: #7d8899;
+    --rule: #242b35;
+    --rule-strong: #333c48;
+    --accent: #79acfb;
+    --accent-ink: #a9c9ff;
+    --accent-soft: #16202f;
+    --warn-ink: #e8bd6d;
+    --warn-soft: #241d0f;
+    --warn-rule: #4a3c1e;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.5;
+    padding-inline: clamp(16px, 4vw, 28px);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1040px; margin-inline: auto; padding-block: 2.75rem 5rem; }
+
+  a { color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+
+  /* ── Masthead ─────────────────────────────────────────────────────────── */
+  .eyebrow {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.13em;
+    text-transform: uppercase; color: var(--ink-3); margin: 0 0 0.9rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 5vw, 2.7rem); font-weight: 600; letter-spacing: -0.022em;
+    line-height: 1.1; margin: 0 0 0.85rem; text-wrap: balance; max-width: 20ch;
+  }
+  .standfirst {
+    font-family: var(--serif); font-size: 1.1rem; line-height: 1.6;
+    color: var(--ink-2); margin: 0 0 1.6rem; max-width: 60ch;
+  }
+  .facts {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 2.25rem;
+    padding: 1rem 0 0; margin: 0; border-top: 1px solid var(--rule);
+  }
+  .facts div { display: flex; flex-direction: column; gap: 0.15rem; }
+  .facts dt {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .facts dd { margin: 0; font-size: 0.88rem; color: var(--ink); max-width: 34ch; }
+
+  /* ── Callouts ─────────────────────────────────────────────────────────── */
+  .alert, .note {
+    border: 1px solid var(--warn-rule); background: var(--warn-soft);
+    border-radius: 9px; padding: 1.05rem 1.2rem;
+  }
+  .alert { margin-top: 2rem; }
+  .alert h2, .note b {
+    font-family: var(--mono); font-size: 0.7rem; font-weight: 500;
+    letter-spacing: 0.09em; text-transform: uppercase; color: var(--warn-ink);
+    margin: 0 0 0.5rem; display: block;
+  }
+  .alert h2 { font-size: 0.78rem; }
+  .alert p, .note p { margin: 0; font-size: 0.93rem; line-height: 1.6; color: var(--ink-2); }
+  .alert p + p, .note p + p { margin-top: 0.6rem; }
+  .alert strong, .note strong { color: var(--ink); font-weight: 600; }
+
+  /* ── Beat index ───────────────────────────────────────────────────────── */
+  .index-head {
+    font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.11em;
+    text-transform: uppercase; color: var(--ink-3);
+    margin: 3rem 0 1rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--rule-strong);
+  }
+  .index { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 0 1.75rem; }
+  .index a {
+    display: flex; align-items: baseline; gap: 0.65rem; padding: 0.42rem 0;
+    text-decoration: none; color: var(--ink-2); font-size: 0.86rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .index a:hover { color: var(--accent-ink); border-bottom-color: var(--accent); }
+  .index a i { font-family: var(--mono); font-style: normal; font-size: 0.73rem; color: var(--ink-3); }
+  .index a em { margin-left: auto; font-family: var(--mono); font-style: normal; font-size: 0.7rem; color: var(--ink-3); }
+
+  /* ── Preparation ──────────────────────────────────────────────────────── */
+  .prep { margin-top: 3.5rem; }
+  .prep h2, .appx h2 {
+    font-size: 1.15rem; font-weight: 600; letter-spacing: -0.012em;
+    margin: 0 0 1rem; text-wrap: balance;
+  }
+  .prep ol { margin: 0; padding-left: 1.35rem; display: flex; flex-direction: column; gap: 0.75rem; max-width: 74ch; }
+  .prep li { font-size: 0.94rem; line-height: 1.6; color: var(--ink-2); padding-left: 0.2rem; }
+  .prep li strong { color: var(--ink); font-weight: 600; }
+  .prep li::marker { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); }
+  .prep ul { margin: 0.55rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .prep ul li { font-size: 0.9rem; }
+  .prep ul li::marker { color: var(--ink-3); }
+  code {
+    font-family: var(--mono); font-size: 0.86em;
+    background: var(--stage); border-radius: 4px; padding: 0.1em 0.36em;
+  }
+
+  /* ── Beats ────────────────────────────────────────────────────────────── */
+  .beats { margin-top: 3.5rem; border-top: 2px solid var(--ink); }
+  .beat {
+    display: grid; grid-template-columns: 5.5rem 1fr; gap: 0 2.25rem;
+    padding-block: 2.1rem; border-bottom: 1px solid var(--rule);
+    scroll-margin-top: 1.5rem;
+  }
+  .beat-num { font-family: var(--mono); }
+  .beat-num i {
+    display: block; font-style: normal; font-size: 1.45rem; font-weight: 500;
+    color: var(--accent); letter-spacing: -0.02em; line-height: 1;
+  }
+  .beat-num em {
+    display: block; font-style: normal; font-size: 0.67rem; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--ink-3); margin-top: 0.3rem;
+  }
+  .beat h2 {
+    font-size: 1.3rem; font-weight: 600; letter-spacing: -0.014em;
+    line-height: 1.2; margin: 0; text-wrap: balance;
+  }
+  .stage {
+    background: var(--stage); border-radius: 8px; padding: 0.72rem 0.95rem;
+    font-size: 0.87rem; line-height: 1.55; color: var(--ink-2); margin: 0.95rem 0 1.45rem;
+  }
+  .stage b {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--accent-ink); margin-right: 0.55rem;
+  }
+  .stage em { color: var(--ink); font-style: italic; }
+  .say {
+    font-family: var(--serif); font-size: 1.06rem; line-height: 1.64;
+    max-width: 62ch; display: flex; flex-direction: column; gap: 0.9rem;
+  }
+  .say p { margin: 0; }
+  .say strong { font-weight: 600; }
+  .say em { font-style: italic; }
+  .beat .note { margin-top: 1.6rem; max-width: 62ch; }
+
+  /* ── Appendices ───────────────────────────────────────────────────────── */
+  .appx { margin-top: 3.5rem; }
+  .appx + .appx { margin-top: 2.75rem; }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.86rem; }
+  th, td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; line-height: 1.5; }
+  th {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 500; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-3); background: var(--stage); white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td:first-child { color: var(--ink); font-weight: 500; }
+  td:nth-child(2) { color: var(--ink-2); }
+  td:last-child { color: var(--ink-2); }
+
+  .qa { padding-block: 1rem; border-bottom: 1px solid var(--rule); max-width: 74ch; }
+  .qa:last-child { border-bottom: 0; }
+  .qa p { margin: 0; }
+  .qa .q { font-weight: 600; margin-bottom: 0.35rem; }
+  .qa .a { font-family: var(--serif); font-size: 1rem; line-height: 1.6; color: var(--ink-2); }
+
+  .shortlist { margin: 0; padding-left: 1.35rem; display: flex; flex-direction: column; gap: 0.6rem; max-width: 74ch; }
+  .shortlist li { font-size: 0.94rem; line-height: 1.55; color: var(--ink-2); padding-left: 0.2rem; }
+  .shortlist li strong { color: var(--ink); font-weight: 600; }
+  .shortlist li::marker { font-family: var(--mono); font-size: 0.85rem; color: var(--accent); }
+  .closer { font-family: var(--serif); font-size: 1rem; color: var(--ink-2); margin: 1.15rem 0 0; max-width: 74ch; }
+
+  footer {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+    font-size: 0.82rem; color: var(--ink-3); max-width: 74ch;
+  }
+
+  @media (max-width: 640px) {
+    .beat { grid-template-columns: 1fr; gap: 0.7rem; padding-block: 1.8rem; }
+    .beat-num { display: flex; align-items: baseline; gap: 0.6rem; }
+    .beat-num i { font-size: 1.15rem; }
+    .beat-num em { margin-top: 0; }
+    .say { font-size: 1.03rem; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Indrones · After-sales</p>
+    <h1>I-PASSBOOK Demo Run-Sheet</h1>
+    <p class="standfirst">
+      Sixteen beats for a walkthrough of I-PASSBOOK — what to put on screen, and what to
+      say while it is there. Read it aloud, or hand it to NotebookLM as the source for a
+      video or a slide deck.
+    </p>
+    <dl class="facts">
+      <div><dt>Audience</dt><dd>Everyone who touches an IR — CR, IQC, Production, QC, Flight Test, Purchase, Inventory, Engineering, Compliance, Management</dd></div>
+      <div><dt>Length</dt><dd>About 30 minutes, plus questions</dd></div>
+      <div><dt>Format</dt><dd>One screen, one presenter, a real IR open throughout</dd></div>
+    </dl>
+  </header>
+
+  <section class="alert">
+    <h2>One feature is not live yet</h2>
+    <p>
+      Sign-in as coded is two steps: your password, then a 6-digit code emailed to you.
+      That code step is written and sitting on the <code>category-insights</code> branch,
+      but the <strong>Apps Script backend has not been updated</strong> — so the live app
+      is still <strong>password only</strong>.
+    </p>
+    <p>
+      Until you paste the new backend in and deploy a new version, do not promise staff
+      the emailed code on the day. Everything else in this run-sheet matches the app as it
+      runs today.
+    </p>
+  </section>
+
+  <p class="index-head">Running order</p>
+  <nav class="index" aria-label="Beats">
+    <a href="#b1"><i>01</i>What this is<em>2 min</em></a>
+    <a href="#b2"><i>02</i>Getting your account<em>2 min</em></a>
+    <a href="#b3"><i>03</i>The IR list<em>3 min</em></a>
+    <a href="#b4"><i>04</i>Opening a ticket<em>3 min</em></a>
+    <a href="#b5"><i>05</i>The Overview<em>2 min</em></a>
+    <a href="#b6"><i>06</i>The seven sections<em>6 min</em></a>
+    <a href="#b7"><i>07</i>Saving, drafts, photos<em>2 min</em></a>
+    <a href="#b8"><i>08</i>Triage<em>4 min</em></a>
+    <a href="#b9"><i>09</i>Comments &amp; notifications<em>3 min</em></a>
+    <a href="#b10"><i>10</i>History and Activity<em>3 min</em></a>
+    <a href="#b11"><i>11</i>Downloading a section<em>2 min</em></a>
+    <a href="#b12"><i>12</i>Insights<em>2 min</em></a>
+    <a href="#b13"><i>13</i>Making it yours<em>1 min</em></a>
+    <a href="#b14"><i>14</i>Who can do what<em>3 min</em></a>
+    <a href="#b15"><i>15</i>Admin &amp; Legacy<em>3 min</em></a>
+    <a href="#b16"><i>16</i>Ground rules<em>3 min</em></a>
+  </nav>
+
+  <section class="prep">
+    <h2>Before you record</h2>
+    <ol>
+      <li>
+        <strong>Check the backend is current.</strong> If you have pasted the new
+        <code>backend.gs</code> and deployed a new version, Beat 2&rsquo;s presenter note
+        becomes part of the session — say it out loud. If you have not, leave it out.
+      </li>
+      <li>
+        <strong>Sign in as yourself and use a real IR</strong>, not a demo one. Staff
+        recognise their own tickets, and it makes the walkthrough land.
+      </li>
+      <li>
+        <strong>Have two accounts ready if you can</strong> — one admin (yours,
+        <code>monish.raza@indrones.com</code>) and one ordinary account, so you can show
+        what a non-admin sees and does not see.
+      </li>
+      <li>
+        <strong>Say these three things out loud at least once:</strong>
+        <ul>
+          <li>The client&rsquo;s Google Form report is never edited by the app.</li>
+          <li>Everyone can read and comment on everything; editing is granted by department.</li>
+          <li>Triage — status, assignee, priority, category — is a separate permission from editing.</li>
+        </ul>
+      </li>
+    </ol>
+  </section>
+
+  <div class="beats">
+
+    <article class="beat" id="b1">
+      <div class="beat-num"><i>01</i><em>2 min</em></div>
+      <div>
+        <h2>What this is</h2>
+        <p class="stage"><b>Show</b> The sign-in screen. Let the logo and the line under it sit on screen.</p>
+        <div class="say">
+          <p>I-PASSBOOK is our product after-sales record. Every IR — from the moment a customer raises it to the moment the drone ships back — lives in one place, and everyone who needs to touch it can see it.</p>
+          <p>Today it has two jobs. It replaces the spreadsheet we have been keeping by hand. And it gives every IR a proper history, so when someone asks &ldquo;what happened to this unit?&rdquo;, the answer is already written down — with a name and a time next to it.</p>
+          <p>It is a web app. There is nothing to install. Open it in a browser on your phone or your laptop, and it works. If you add it to your home screen it behaves like any other app.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b2">
+      <div class="beat-num"><i>02</i><em>2 min</em></div>
+      <div>
+        <h2>Getting your account</h2>
+        <p class="stage"><b>Show</b> Nothing yet — this is a talking beat. If you have a spare account, show the sign-in screen only.</p>
+        <div class="say">
+          <p>There is no sign-up. Nobody creates their own account — that is deliberate, because this holds customer data. I create every account, and I hand you a temporary password. It looks like <code>Kx7Qm-4392</code> — five letters and four digits, with the letters chosen so you cannot mix up an I and a 1, or an O and a zero.</p>
+          <p>That temporary password is good for 14 days. The first time you sign in with it, the app will not let you into anything else — it stops you and asks you to set your own password. Once you have set it, the temporary one stops working immediately.</p>
+          <p>If you are ever locked out, use <strong>Forgot password?</strong> on the sign-in screen. It emails you a 6-digit code; type the code and your new password together, and you are back in. I do not need to be involved.</p>
+        </div>
+        <div class="note">
+          <b>Presenter note — only if the backend is deployed</b>
+          <p>Once the backend is updated, sign-in adds a second step: after your password, the app emails a 6-digit code and you type it in. That code is valid for 8 hours 30 minutes, it can be reused inside that window — so if you sign out and back in the same day, the same code still works — and five wrong guesses cancels it.</p>
+          <p>A working session lasts 8 hours 30 minutes from the moment you sign in, and it does not extend itself while you work. So a full day means signing in once, and possibly once more after lunch.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b3">
+      <div class="beat-num"><i>03</i><em>3 min</em></div>
+      <div>
+        <h2>The IR list</h2>
+        <p class="stage"><b>Show</b> The IR list. Type in the search box. Click a status chip. Click a category chip. Click <em>↻ Refresh</em>.</p>
+        <div class="say">
+          <p>This is every IR. Newest first.</p>
+          <p>Search matches the IR number or the drone serial — so if someone calls you about drone 4471, you can type 4471 and go straight to it.</p>
+          <p>These chips are filters, and the number on each one is how many IRs are in it. <strong>All, Open, Paused, Resolved, Closed.</strong> The second row filters by category. And they stack — pick Paused and REMOTE SUPPORT and you see only paused remote-support jobs.</p>
+          <p>Each card gives you the IR number, the drone serial, the category, when it was raised, who it is assigned to, its priority, and its status.</p>
+          <p><strong>↻ Refresh</strong> re-reads the list from the Sheet. If a colleague has just created an IR from the customer form and it is not showing, refresh before you assume something is wrong.</p>
+          <p>One warning: <strong>Closed</strong> here is not the same as finished and forgotten. A closed IR&rsquo;s files are moved into an archive folder automatically once it has been closed for a month. The record stays — the ticket still appears here exactly as it did.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b4">
+      <div class="beat-num"><i>04</i><em>3 min</em></div>
+      <div>
+        <h2>Opening a ticket, and the Report tab</h2>
+        <p class="stage"><b>Show</b> Open one IR. It lands on a section tab. Click <em>Report</em> first.</p>
+        <div class="say">
+          <p>Every IR opens with the same header: the IR number, the drone and the customer on the left, and on the right the status, priority, category, sub-category and owner. If nobody owns it, it says <strong>Unassigned</strong> in plain words.</p>
+          <p>Now — <strong>Report</strong>. This is the most important tab to understand, because of what it does <em>not</em> do.</p>
+          <p>This is exactly what the client typed into the Google Form. It is read-only. The app never edits these values, ever. So when a customer says &ldquo;I told you it was a crash, not a repair&rdquo;, you can open this tab and show them what they submitted, unchanged.</p>
+          <p>Below the report there is a link through to the full report, the issue description and the weather at the time.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b5">
+      <div class="beat-num"><i>05</i><em>2 min</em></div>
+      <div>
+        <h2>The Overview</h2>
+        <p class="stage"><b>Show</b> The Overview block. Click <em>Hide</em>, then <em>Show</em>.</p>
+        <div class="say">
+          <p>The Overview is the summary you actually work from. It pulls the facts you need without scrolling: IR number, drone serial, date raised, company, who responded, and what support was asked for.</p>
+          <p>Two of these boxes are editable — the Customer Relations Manager, and the customer&rsquo;s phone number. <strong>Only CR and Management can edit them.</strong> Everyone else reads them. That is not a mistake; it is so the phone number on a ticket is one person&rsquo;s responsibility rather than everyone&rsquo;s guess.</p>
+          <p>If the Overview is in your way, hide it. The app remembers that you prefer it hidden.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b6">
+      <div class="beat-num"><i>06</i><em>6 min</em></div>
+      <div>
+        <h2>The seven sections</h2>
+        <p class="stage"><b>Show</b> Click through the tabs in order: <em>B: Inward</em>, <em>C: IQC</em>, <em>D: Investigation</em>, <em>E: Production</em>, <em>F: Quality Test</em>, <em>G: PDI/Dispatch</em>. Do not fill anything in — just show each one and name it.</p>
+        <div class="say">
+          <p>The work itself happens in these tabs, and they follow the unit through the building in order.</p>
+          <p><strong>B: Inward</strong> — the unit arrives. Inward date, who received it, the stock transfer number, what was actually in the box, and photos of it as received. <em>Photograph the unit before you touch it.</em> That photo is the only record of how it arrived.</p>
+          <p><strong>C: IQC</strong> — visual inspection. The checklist is split into zones, and each line gets a <strong>PASS</strong>, <strong>FAIL</strong> or <strong>NA</strong>. Do not leave a line blank because it looked fine — mark it PASS. Blank looks the same as forgotten.</p>
+          <p><strong>D: Investigation</strong> — this is where the technical answer goes. Who analysed it, when, what the root cause was, and what we are doing about it: the corrective action, and the preventive action so it does not happen again. There is also a cost side — whether it is covered under warranty, the parts and labour as a table you can add rows to, and whether the customer has given the go-ahead. The total adds itself up.</p>
+          <p><strong>E: Production</strong> — the route card and what was actually reworked.</p>
+          <p><strong>F: Quality Test</strong> — the QC report, then the flight test: the report itself and two ticks to confirm the flight logs and the post-processing data were checked.</p>
+          <p><strong>G: PDI/Dispatch</strong> — the last gate. The PDI result is either <strong>Pass – Ready to Dispatch</strong> or <strong>Fail – Return to QC</strong>. Then the dispatch details: courier, tracking number, and the date the client received it.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b7">
+      <div class="beat-num"><i>07</i><em>2 min</em></div>
+      <div>
+        <h2>Saving, drafts, and photos</h2>
+        <p class="stage"><b>Show</b> Type into a field, then click <em>+ Add image / PDF</em> and <em>📷 Capture photo</em>. Do not save — point at the section&rsquo;s Save button.</p>
+        <div class="say">
+          <p>Two things about how saving works.</p>
+          <p>First, every section has its own Save button. You save the section you worked on, not the whole ticket. While you are typing, a draft is kept automatically, so a dropped connection or a closed tab does not lose your paragraph.</p>
+          <p>Second — evidence. Every section that needs it takes photos and PDFs. <strong>📷 Capture photo</strong> opens your camera directly, which is the fast way to do it from the shop floor. Attach the photo to the section it belongs to, not to a general pile.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b8">
+      <div class="beat-num"><i>08</i><em>4 min</em></div>
+      <div>
+        <h2>Triage</h2>
+        <p class="stage"><b>Show</b> Click <em>Triage</em> in the header. Change the status, assign someone, set a priority and a category.</p>
+        <div class="say">
+          <p>Triage is where the ticket is routed, and it is its own permission. You can have Triage without being able to edit any section — which is exactly how CR and Management work.</p>
+          <p>Inside, five things.</p>
+          <p><strong>Status</strong> — the stage the unit is at. Open, Inward, Visual Inspection, QC Investigation, Production, QC, Flight Test, PDI, Approval, Delivered, Remote Support, and so on. Setting it to <strong>Close</strong> closes the ticket, and moving it off Close reopens it — I will come back to why that matters.</p>
+          <p><strong>Assigned to</strong> — who owns this now. <strong>Assigning someone sends them a notification</strong>, so do not assign casually.</p>
+          <p><strong>Priority</strong> — Urgent, High, Medium or Low.</p>
+          <p><strong>Category</strong> — CRASH, GENERAL MAINTENANCE, REMOTE SUPPORT or REPAIR. This one is required; the app will not let you save without it.</p>
+          <p><strong>Sub-category</strong> — only appears if you chose REPAIR. GPS, Tripod/Bipod, Topshell, Camera/Lens, Battery, Charger, RC, Airframe, or Others. If you pick Others, it asks you to say what was repaired, so the next person is not left guessing.</p>
+          <p>One rule worth knowing: everything you set here is recorded <strong>in the passbook, not in the customer&rsquo;s Sheet</strong>. The client&rsquo;s original report stays exactly as they wrote it.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b9">
+      <div class="beat-num"><i>09</i><em>3 min</em></div>
+      <div>
+        <h2>Comments and notifications</h2>
+        <p class="stage"><b>Show</b> Click <em>Comments</em> in the header. Tag someone. Then click the bell.</p>
+        <div class="say">
+          <p>This is how we ask each other things without it living in a WhatsApp group.</p>
+          <p>You can comment on the whole IR, on a section, or on a single field. Tag the person you are asking — type <strong>@</strong> and pick them — write your message, and hit Comment. They get an email.</p>
+          <p>Every comment is either <strong>Open</strong> or <strong>Resolved</strong>, so a question does not sit there looking unanswered forever. Resolve it when it is dealt with. You can edit your own comments if you made a mistake.</p>
+          <p>The bell at the top shows a count of what is waiting for you. The number in the comment button on a section tells you how many open comments are on that section.</p>
+          <p><strong>Comments are not a substitute for filling the section in.</strong> If you resolved a question, put the answer in the section it belongs to.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b10">
+      <div class="beat-num"><i>10</i><em>3 min</em></div>
+      <div>
+        <h2>History and Activity</h2>
+        <p class="stage"><b>Show</b> Scroll to the <em>Activity</em> fold at the bottom of the ticket and open it. Then click <em>History</em> in the header.</p>
+        <div class="say">
+          <p>This is the part that replaces the argument.</p>
+          <p>The <strong>Activity</strong> fold at the bottom shows the last 40 things that happened to this IR. <strong>History</strong> shows everything — up to 400 entries.</p>
+          <p>Each line says what changed, who changed it, and when: section saved, field changed — and it shows you the old value and the new one — file uploaded, status changed, assigned to, priority changed, comment posted, and folder archived or restored.</p>
+          <p>So &ldquo;who changed the root cause?&rdquo; and &ldquo;when did this move to Production?&rdquo; have answers. You do not have to remember. It is written down.</p>
+          <p>This is also why we fill things in properly rather than leaving them blank — the history is the record we hand over.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b11">
+      <div class="beat-num"><i>11</i><em>2 min</em></div>
+      <div>
+        <h2>Downloading a section</h2>
+        <p class="stage"><b>Show</b> Click <em>⬇ Download</em> on a section. Then <em>⬇ Download and share</em>.</p>
+        <div class="say">
+          <p>Any section can be downloaded as a PDF — click Download, and you get a clean document for that IR and that section. Download and share does the same thing and opens your phone&rsquo;s share sheet, so you can send it straight on.</p>
+          <p>This is how you send a customer the investigation summary without sending them the whole system.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b12">
+      <div class="beat-num"><i>12</i><em>2 min</em></div>
+      <div>
+        <h2>Insights</h2>
+        <p class="stage"><b>Show</b> Open <em>Insights</em> from the sidebar. Click a category card.</p>
+        <div class="say">
+          <p>Insights is counting, not charting. It answers questions like: how many crash incidents came in this month? How many repair jobs were GPS?</p>
+          <p>Filter by year, month, status, category, customer or drone. The cards are clickable — click CRASH and it takes you to the IR list filtered to crash jobs, so you can go from the number to the actual tickets in one click.</p>
+          <p>There is also a REPAIR breakdown by sub-category, which is how we find out which failure keeps coming back.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b13">
+      <div class="beat-num"><i>13</i><em>1 min</em></div>
+      <div>
+        <h2>Making it yours</h2>
+        <p class="stage"><b>Show</b> Open the user menu, top right. Switch to Dark. Switch the accent colour.</p>
+        <div class="say">
+          <p>Top right, in your menu, you can switch between Light, Dark or System — System follows your phone — and pick an accent colour. It is a preference and it is yours; it changes nothing about the data.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b14">
+      <div class="beat-num"><i>14</i><em>3 min</em></div>
+      <div>
+        <h2>Who can do what</h2>
+        <p class="stage"><b>Show</b> Nothing — this is a talking beat. Stay on the ticket you have open.</p>
+        <div class="say">
+          <p>Three sentences and you have the whole permission model.</p>
+          <p><strong>One. Everyone signed in can read every section and comment on anything.</strong> There are no secret tickets.</p>
+          <p><strong>Two. Editing is granted by department.</strong> If you are in QC, you can edit sections B, C, D and F. If you are not, those sections are read-only to you — the fields are greyed out and the Save button is turned off. That is not the app being broken.</p>
+          <p><strong>Three. Triage is separate.</strong> Status, assignee, priority and category, plus the two Overview boxes, are governed by Triage, not by which sections you can edit.</p>
+          <p>If you need edit access to a section you cannot change, ask me — access comes from your department, not from your account.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b15">
+      <div class="beat-num"><i>15</i><em>3 min</em></div>
+      <div>
+        <h2>Admin-only, and the Legacy workbook</h2>
+        <p class="stage"><b>Show (admins only)</b> Open <em>User Access</em> from the sidebar. Show the three tabs briefly. Do <em>not</em> open the Danger zone on screen.</p>
+        <div class="say">
+          <p>Everything below is admin-only — most of you will never see this, which is how it should be.</p>
+          <p><strong>User Access</strong> is where accounts are created, departments are set up, and permissions are given. It has three tabs: who is in which department, the departments themselves, and creating people — one at a time, or a whole list pasted in at once.</p>
+          <p>There is a <strong>Danger zone</strong> on that screen that can delete every account in one go. It is deliberately hard to fire: you have to type the word PURGE, then review the list, then confirm, and the app takes a backup first. Nobody will trigger it by accident.</p>
+          <p>One more thing in the sidebar: <strong>Legacy Records</strong>. That opens the old I-PASSBOOK workbook, read-only, for anything that happened before this app existed. It stays available until we are fully live, so no old record is lost.</p>
+        </div>
+      </div>
+    </article>
+
+    <article class="beat" id="b16">
+      <div class="beat-num"><i>16</i><em>3 min</em></div>
+      <div>
+        <h2>Ground rules</h2>
+        <p class="stage"><b>Show</b> The ticket list, so people see the whole shape of the app while you close.</p>
+        <div class="say">
+          <p>Five things I want everyone to take away.</p>
+          <p><strong>One.</strong> Put it in the section, not in a comment. Comments are for asking. Sections are the record.</p>
+          <p><strong>Two.</strong> Photograph the unit at Inward, before anyone touches it.</p>
+          <p><strong>Three.</strong> Never leave a checklist line blank to mean &ldquo;fine&rdquo;. Mark it PASS.</p>
+          <p><strong>Four.</strong> If the status changes, change it in Triage. The archive rule runs off it — a closed ticket&rsquo;s folder moves to the archive after a month, and reopening it brings it straight back. So keep it honest and it takes care of itself.</p>
+          <p><strong>Five.</strong> Read the Report tab before you ask the customer anything. They have already told us once.</p>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <section class="appx">
+    <h2>Appendix A — Troubleshooting</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Symptom</th><th>What it means</th><th>What to do</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>&ldquo;Sign in failed.&rdquo;</td>
+            <td>Wrong email or password, or the account is disabled.</td>
+            <td>Check with the admin. Nothing you can fix from your side.</td>
+          </tr>
+          <tr>
+            <td>Cannot sign in with the temporary password</td>
+            <td>The 14-day window closed, or it was already used once.</td>
+            <td>Ask the admin to reset it.</td>
+          </tr>
+          <tr>
+            <td>Back at the sign-in screen without signing out</td>
+            <td>The session ran out. A session lasts 8h30m from sign-in and does not extend itself.</td>
+            <td>Sign in again.</td>
+          </tr>
+          <tr>
+            <td>An IR someone just created is missing</td>
+            <td>The list has not re-read the Sheet.</td>
+            <td>Click <strong>↻ Refresh</strong>.</td>
+          </tr>
+          <tr>
+            <td>A section is greyed out and Save is off</td>
+            <td>You do not have edit rights for that section.</td>
+            <td>Ask the admin — access comes from your department.</td>
+          </tr>
+          <tr>
+            <td>You cannot see the Triage button</td>
+            <td>Triage is a separate permission.</td>
+            <td>Ask the admin.</td>
+          </tr>
+          <tr>
+            <td>The list says &ldquo;🔍 No IRs match this filter.&rdquo;</td>
+            <td>A filter is still on.</td>
+            <td>Click <strong>All</strong>.</td>
+          </tr>
+          <tr>
+            <td>A PDF export says attachments were named, not included</td>
+            <td>A file attached to that section could not be read back from Drive.</td>
+            <td>The file is listed by name in the PDF. Open it in the app.</td>
+          </tr>
+          <tr>
+            <td>You cannot create your own account</td>
+            <td>By design — there is no sign-up.</td>
+            <td>Ask the admin for an account.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="appx">
+    <h2>Appendix B — Questions to expect</h2>
+    <div class="qa">
+      <p class="q">Can I edit what the customer wrote?</p>
+      <p class="a">No. The Report tab is read-only and always will be. Anything we add goes in the Overview or a section.</p>
+    </div>
+    <div class="qa">
+      <p class="q">Can I see tickets that are not mine?</p>
+      <p class="a">Yes. Everyone can read every section of every IR. Only editing is restricted.</p>
+    </div>
+    <div class="qa">
+      <p class="q">What happens when a ticket is closed?</p>
+      <p class="a">It goes on working exactly as before. Its files are moved to an archive folder after it has been closed for a month, and if it is reopened they come straight back.</p>
+    </div>
+    <div class="qa">
+      <p class="q">Is there an app to install?</p>
+      <p class="a">No. Open it in a browser. You can add it to your home screen so it opens like an app.</p>
+    </div>
+    <div class="qa">
+      <p class="q">Who do I ask for access?</p>
+      <p class="a">The admin. Access is granted by department.</p>
+    </div>
+    <div class="qa">
+      <p class="q">Can I delete something I typed by mistake?</p>
+      <p class="a">Edit the field and save. The History keeps the old value, so the change is visible, but the field itself is corrected.</p>
+    </div>
+  </section>
+
+  <section class="appx">
+    <h2>Appendix C — Five-minute version</h2>
+    <p class="closer" style="margin-top:0; margin-bottom:1rem;">If you only have five minutes, do these five things and stop.</p>
+    <ol class="shortlist">
+      <li><strong>Beat 3</strong> — the list, search, and the filter chips.</li>
+      <li><strong>Beat 4</strong> — the Report tab is read-only; the app never edits the customer&rsquo;s words.</li>
+      <li><strong>Beat 6</strong> — walk the seven section tabs without filling any in.</li>
+      <li><strong>Beat 8</strong> — open Triage and set a status. Say that assigning someone notifies them.</li>
+      <li><strong>Beat 14</strong> — everyone reads everything; editing comes from your department.</li>
+    </ol>
+    <p class="closer">Then point people at Beat 16 and let them ask questions.</p>
+  </section>
+
+  <footer>
+    The same content also lives as plain text at <code>docs/I-PASSBOOK Staff Demo Script.md</code>
+    — that is the file to upload to NotebookLM. This page is the readable copy.
+  </footer>
+
+</div>

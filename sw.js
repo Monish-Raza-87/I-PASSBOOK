@@ -6,7 +6,7 @@
 //  - Same-origin static shell (HTML/CSS/JS/assets): cache-first, populate cache
 //    from the network on first use.
 //  - Other cross-origin (fonts, etc.): default network handling.
-const CACHE_NAME = 'ipassbook-v31';
+const CACHE_NAME = 'ipassbook-v32';
 const SHELL = [
   './',
   './index.html',
@@ -20,6 +20,7 @@ const SHELL = [
   './app.js',
   './manifest.json',
   './assets/icon-192.png',
+  './assets/icon-mark.png',   // the borderless mark the app itself shows
 ];
 const isBackend = url => url.indexOf('https://script.google.com/') === 0;
 

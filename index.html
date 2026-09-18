@@ -11,8 +11,12 @@
        static Inter weights must be dropped for the variable axis. -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,100..900&display=swap" rel="stylesheet" />
 
-  <!-- Design system, in cascade order. Plain CSS, no build step. -->
+  <!-- Design system, in cascade order. Plain CSS, no build step.
+       palette.css must sit directly after tokens.css: it re-points the accent
+       role onto one of the colour families tokens.css defines, and every rule
+       in base/components/views that uses var(--accent) resolves against it. -->
   <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="palette.css" />
   <link rel="stylesheet" href="base.css" />
   <link rel="stylesheet" href="components.css" />
   <link rel="stylesheet" href="views.css" />
@@ -24,8 +28,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 
-  <!-- Apply the stored theme before first paint, so there is no light flash
-       on a dark-mode device. Kept inline and tiny on purpose. -->
+  <!-- Apply the stored theme and palette before first paint, so there is no
+       flash of the wrong colours. Kept inline and tiny on purpose.
+       The palette list here is the FALLBACK, not the allowlist: app.js
+       reconciles it against __CONFIG__/theme after sign-in. An unknown name
+       resolves to the blue default rather than to no palette at all, so a
+       stale localStorage value can never leave the accent undefined. -->
   <script>
     (function () {
       try {
@@ -33,6 +41,12 @@
         var dark = p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
         if (dark) document.documentElement.setAttribute('data-theme', 'dark');
       } catch (e) { /* storage blocked — fall back to light */ }
+      try {
+        var PALETTES = ['blue', 'violet', 'teal', 'graphite'];
+        var pal = localStorage.getItem('palette') || 'blue';
+        if (PALETTES.indexOf(pal) < 0) pal = 'blue';
+        document.documentElement.setAttribute('data-palette', pal);
+      } catch (e) { /* storage blocked — palette.css's :root default applies */ }
     })();
   </script>
 </head>
@@ -188,12 +202,10 @@
         </button>
       </div>
 
-      <div class="sidebar-foot">
-        <button type="button" class="nav-item" id="nav-theme" title="Switch between light and dark">
-          <span class="nav-icon" id="nav-theme-icon" aria-hidden="true"></span>
-          <span class="nav-label" id="nav-theme-label">Dark mode</span>
-        </button>
-      </div>
+      <!-- The theme toggle used to sit here as .sidebar-foot. It is now the
+           Appearance group in the user menu (top right), because reaching it
+           meant scrolling to the bottom of the sidebar. The .sidebar-foot rules
+           went with it. -->
     </nav>
 
     <!-- ====== WORKSPACE ====== -->

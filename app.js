@@ -771,9 +771,6 @@ const toast       = document.getElementById('toast');
 // reads them.
 const navAccess     = document.getElementById('nav-access');
 const navAdminLabel = document.getElementById('nav-admin-label');
-const navTheme      = document.getElementById('nav-theme');
-const navThemeIcon  = document.getElementById('nav-theme-icon');
-const navThemeLabel = document.getElementById('nav-theme-label');
 const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCategories = document.getElementById('list-categories');
@@ -1269,7 +1266,7 @@ function wireAuthForm() {
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
 // Preference is 'light' | 'dark' | 'system' under localStorage 'theme'.
-// 'system' is the default and honours the OS setting live; the nav toggle
+// 'system' is the default and honours the OS setting live; the Appearance menu
 // switches to an explicit light/dark. The <head> script applies the stored
 // value before first paint so there is no flash.
 const THEME_KEY = 'theme';
@@ -1283,6 +1280,18 @@ function isDarkTheme() {
   return p === 'dark' || (p !== 'light' && prefersDark());
 }
 
+const THEME_CHOICES = [
+  { value: 'light',  label: 'Light' },
+  { value: 'dark',   label: 'Dark' },
+  { value: 'system', label: 'System' },
+];
+
+function setTheme(value) {
+  try { localStorage.setItem(THEME_KEY, value); } catch { /* non-fatal */ }
+  applyTheme(true);
+  syncAppearanceMenu();
+}
+
 function applyTheme(animate) {
   const dark = isDarkTheme();
   const root = document.documentElement;
@@ -1294,15 +1303,131 @@ function applyTheme(animate) {
   }
   if (dark) root.setAttribute('data-theme', 'dark');
   else root.removeAttribute('data-theme');
-
-  if (navThemeIcon)  navThemeIcon.innerHTML  = iconSvg(dark ? 'sun' : 'moon');
-  if (navThemeLabel) navThemeLabel.textContent = dark ? 'Light mode' : 'Dark mode';
-  if (navTheme)      navTheme.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
 }
 
-function toggleTheme() {
-  try { localStorage.setItem(THEME_KEY, isDarkTheme() ? 'light' : 'dark'); } catch { /* non-fatal */ }
-  applyTheme(true);
+// ─── PALETTE ─────────────────────────────────────────────────────────────────
+// Which colour family the accent role resolves to. Same shape as the theme: a
+// bare localStorage key, applied as `data-palette` on <html>, and read by the
+// same pre-paint script so there is no flash.
+//
+// palette.css owns the colours — this table owns only the names and the order
+// they appear in the menu. `swatch` is a RAW token (not var(--accent)), which is
+// the point: the chip has to show its own palette's colour while a different
+// palette is active, and raw tokens are theme-aware so the chip is right in both
+// light and dark.
+const PALETTE_KEY = 'palette';
+const FALLBACK_PALETTE = 'blue';
+const PALETTES = [
+  { value: 'blue',     label: 'Blue',     swatch: 'var(--surface-blue-9)' },
+  { value: 'violet',   label: 'Violet',   swatch: 'var(--surface-violet-9)' },
+  { value: 'teal',     label: 'Teal',     swatch: 'var(--surface-teal-9)' },
+  { value: 'graphite', label: 'Graphite', swatch: 'var(--surface-gray-10)' },
+];
+
+// __CONFIG__/theme, written by an admin: { palettes: [...], default: 'blue' }.
+// null means "not read yet", which is NOT the same as "empty" — until it lands,
+// every preset is offered. A user who opens the menu before the read completes
+// sees the full list rather than an empty one.
+let paletteConfig = null;
+
+function storedPalette() {
+  try { return localStorage.getItem(PALETTE_KEY) || FALLBACK_PALETTE; } catch { return FALLBACK_PALETTE; }
+}
+
+// The presets an admin currently allows, in the menu's own order. Falls back to
+// every preset rather than to none: a site-wide config that is missing, empty or
+// entirely stale must not leave the user with nothing to pick.
+function paletteChoices() {
+  const allow = paletteConfig && Array.isArray(paletteConfig.palettes) ? paletteConfig.palettes : null;
+  if (!allow || !allow.length) return PALETTES;
+  const known = PALETTES.filter(p => allow.indexOf(p.value) >= 0);
+  return known.length ? known : PALETTES;
+}
+
+// The stored choice, if it is still allowed; otherwise the admin's default, if
+// that is allowed; otherwise the first allowed preset. Resolving — rather than
+// just trusting localStorage — is what lets an admin retire a palette without
+// stranding anyone who had already picked it.
+function resolvePalette() {
+  const choices = paletteChoices();
+  const has = v => choices.some(p => p.value === v);
+  const stored = storedPalette();
+  if (has(stored)) return stored;
+  const def = paletteConfig && paletteConfig.default;
+  if (has(def)) return def;
+  return choices[0].value;
+}
+
+function applyPalette() {
+  document.documentElement.setAttribute('data-palette', resolvePalette());
+}
+
+function setPalette(value) {
+  try { localStorage.setItem(PALETTE_KEY, value); } catch { /* non-fatal */ }
+  applyPalette();
+  syncAppearanceMenu();
+}
+
+// Read the site-wide allowlist. Read-only and best-effort: on a dead backend the
+// stored preference stands, which is the same degradation every other sentinel
+// read has. Called once per session, after sign-in.
+function loadPaletteConfig() {
+  return loadSentinel('__CONFIG__', 'theme').then(cfg => {
+    if (!cfg || typeof cfg !== 'object') return;
+    paletteConfig = {
+      palettes: Array.isArray(cfg.palettes) ? cfg.palettes : null,
+      default: typeof cfg.default === 'string' ? cfg.default : null,
+    };
+    // A retired choice has to take effect now, not on the next reload. The menu
+    // caches its DOM, so drop it — toggleUserMenu() rebuilds it from the new
+    // allowlist on the next open.
+    applyPalette();
+    const menu = document.getElementById('user-menu');
+    if (menu) menu.remove();
+  });
+}
+
+// ─── APPEARANCE MENU ─────────────────────────────────────────────────────────
+// The light/dark/palette controls live in the user menu (top right). They used to
+// be a single nav button at the bottom of the sidebar, which meant scrolling a
+// whole column to reach a control that belongs to the account, not to the IR list.
+//
+// Rendered as two labelled groups of rows, never icon-only: a swatch plus a word
+// for each palette, and a word for each theme. Selection is carried by
+// aria-checked and a tick, so it is legible without relying on colour alone.
+function syncAppearanceMenu() {
+  const menu = document.getElementById('user-menu');
+  if (!menu) return;
+  const theme = storedTheme();
+  menu.querySelectorAll('.appearance-row').forEach(row => {
+    const [group, value] = row.dataset.opt.split(':');
+    const on = group === 'theme' ? value === theme : value === resolvePalette();
+    row.setAttribute('aria-checked', on ? 'true' : 'false');
+    row.classList.toggle('is-on', on);
+  });
+}
+
+function buildAppearanceGroup() {
+  const themeRows = THEME_CHOICES.map(c => `
+    <button type="button" class="appearance-row" role="radio" data-opt="theme:${c.value}" aria-checked="false">
+      <span class="appearance-check" aria-hidden="true"></span>
+      <span class="appearance-label">${c.label}</span>
+    </button>`).join('');
+
+  const paletteRows = paletteChoices().map(p => `
+    <button type="button" class="appearance-row" role="radio" data-opt="palette:${p.value}" aria-checked="false">
+      <span class="appearance-swatch" style="background:${p.swatch}" aria-hidden="true"></span>
+      <span class="appearance-label">${p.label}</span>
+      <span class="appearance-check" aria-hidden="true"></span>
+    </button>`).join('');
+
+  return `
+    <div class="appearance-group">
+      <div class="appearance-head" role="radiogroup" aria-label="Theme">Theme</div>
+      ${themeRows}
+      <div class="appearance-head" role="radiogroup" aria-label="Accent colour">Accent colour</div>
+      ${paletteRows}
+    </div>`;
 }
 
 // Follow the OS while the preference is still 'system'.
@@ -1547,11 +1672,15 @@ function showApp() {
   // detail pane will replace. handleRoute() still owns the async path and no-ops
   // when we are already on the right screen.
   if (currentRoute().name === 'insights') showInsights(); else showIndex();
-  applyTheme();          // sync the nav toggle with the stored preference
+  applyTheme();          // sync <html> with the stored light/dark preference
+  applyPalette();        // ...and with the stored accent, before anything paints
   initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
   applyChromeState();    // ...and the sidebar / IR-list folds
   applyActivityState(storedFlag(ACTIVITY_KEY));
   syncNavAccess();
+  // The site-wide palette allowlist, once per session. Deliberately not awaited:
+  // the stored preference is already applied, and this only narrows it.
+  loadPaletteConfig();
 
   // Set up user avatar
   userAvatar.textContent = currentUser?.initial || '?';
@@ -1563,7 +1692,6 @@ function showApp() {
 
   // User menu toggle
   userAvatar.addEventListener('click', toggleUserMenu);
-  if (navTheme) navTheme.addEventListener('click', toggleTheme);
   if (navAccess) navAccess.addEventListener('click', openAccessModal);
   if (railToggle) railToggle.addEventListener('click', toggleRail);
   if (listToggle) listToggle.addEventListener('click', toggleList);
@@ -2144,10 +2272,20 @@ function createUserMenu() {
     menu.innerHTML = `
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
+      ${buildAppearanceGroup()}
       ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access</button>' : ''}
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
+    // Appearance rows. Delegated on the menu rather than bound per row, because
+    // the menu is rebuilt by createUserMenu() whenever the allowlist changes.
+    menu.addEventListener('click', (e) => {
+      const row = e.target.closest('.appearance-row');
+      if (!row) return;
+      const [group, value] = row.dataset.opt.split(':');
+      if (group === 'theme') setTheme(value); else setPalette(value);
+    });
+    syncAppearanceMenu();
     document.getElementById('signout-btn').addEventListener('click', signOut);
     const adminBtn = document.getElementById('access-admin-btn');
     if (adminBtn) adminBtn.addEventListener('click', () => { menu.style.display = 'none'; openAccessModal(); });
@@ -6758,6 +6896,11 @@ const ICON_PATHS = {
   flag:           '<path d="M6 21V4"/><path d="M6 5h12l-2.5 4L18 13H6"/>',
   tag:            '<path d="M20 12.5L12.5 20a1.5 1.5 0 0 1-2.1 0L4 13.6V4h9.6l6.4 6.4a1.5 1.5 0 0 1 0 2.1z"/><circle cx="8.5" cy="8.5" r="1.4"/>',
   upload:         '<path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V16"/>',
+  // The Drive-archive move. A lid, a box, a handle — the conventional glyph, and
+  // the only new one the archive feature adds. It is here because the two events it
+  // serves are otherwise invisible: a ticket whose files silently left the working
+  // folder is exactly the thing a reader needs told.
+  archive:        '<rect x="3" y="4.5" width="18" height="4" rx="1"/><path d="M5 8.5V19a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5V8.5"/><path d="M10 12.5h4"/>',
   // Names are the FEATURE, not the picture: `comment` is what every call site asks
   // for, and smoke-ui.mjs cross-checks every referenced name against this map —
   // because a name that is not here renders '' and leaves a silent blank button.
@@ -6826,10 +6969,9 @@ function initIcons() {
     if (el && !el.querySelector('svg')) el.innerHTML = iconSvg(name);
   });
 
-  // The nav theme glyph is a state, not a constant, so applyTheme() owns it —
-  // but it has to be seeded here too, since initIcons() is what a signed-in
-  // session calls and the toggle must not be blank until the next theme change.
-  if (navThemeIcon) navThemeIcon.innerHTML = iconSvg(isDarkTheme() ? 'sun' : 'moon');
+  // Nothing here owns the theme any more. The light/dark and accent controls are
+  // text rows in the user menu (see buildAppearanceGroup), rebuilt with the menu
+  // every time it opens, so there is no glyph to seed and no state to sync.
 }
 
 // One row per event the timeline can show. `icon` is a KEY into ICON_PATHS, not
@@ -6853,6 +6995,11 @@ const TIMELINE_KINDS = {
   subcatnote:  { icon: 'tag',       label: 'Repair note' },
   upload:   { icon: 'upload',       label: 'File uploaded' },
   comment:  { icon: 'comment',      label: 'Comment' },
+  // The Drive archive. Two labels on ONE glyph: both are the same event — the
+  // ticket's folder moving between the working set and the archive — and a second
+  // picture for the return trip would be two icons for one idea.
+  archived: { icon: 'archive',      label: 'Folder archived' },
+  restored: { icon: 'archive',      label: 'Folder restored' },
 };
 
 // PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
@@ -6888,6 +7035,16 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
     };
 
     if (e.event === 'uploaded') { out.push(Object.assign({}, base, { kind: 'upload' })); return; }
+
+    // The archive events, branched on the EVENT rather than on `fid` like the
+    // workflow rows below. These carry no field — what changed is where a folder
+    // lives, not a value in the form — so the `fid` chain would classify them as ''
+    // and drop them, and a ticket whose files silently left the working folder is
+    // exactly what a reader needs told.
+    if (e.event === 'archived' || e.event === 'restored') {
+      out.push(Object.assign({}, base, { kind: e.event }));
+      return;
+    }
 
     if (source === 'workflow') {
       // Sub-category and its note get their OWN kinds rather than folding into
@@ -6976,7 +7133,13 @@ function renderTimelineInto(el, timeline, opts) {
     // "workflow" is the backend's own name for the __IRS__ sentinel store. The
     // reader knows the action as Triage — the button, the modal and the toast all
     // say so — so the chip says it too.
-    const srcChip = it.source === 'workflow' ? '<span class="hist-src">Triage</span>' : '';
+    //
+    // The archive events are written through that same store, so they arrive as
+    // `source: 'workflow'` — but a folder move is not a triage edit, and chipping it
+    // "Triage" would put a word on the row that no button in the app uses for it.
+    const isArchiveEvent = it.kind === 'archived' || it.kind === 'restored';
+    const srcChip = (it.source === 'workflow' && !isArchiveEvent)
+      ? '<span class="hist-src">Triage</span>' : '';
 
     let body = '';
     if (it.kind === 'comment') {

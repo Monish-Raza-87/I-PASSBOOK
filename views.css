@@ -181,7 +181,7 @@
 }
 .ir-sn { color: var(--ink-gray-6); font-weight: var(--weight-medium); }
 .ir-dot { opacity: 0.5; }
-.ir-summary-link { font-size: var(--text-xs); color: var(--ink-blue-link); white-space: nowrap; }
+.ir-summary-link { font-size: var(--text-xs); color: var(--accent); white-space: nowrap; }
 
 /* Banner pills for the app-owned triage fields (type, assignee). Status and
    priority reuse the existing .badge-* / .prio-* classes. */
@@ -330,7 +330,7 @@
   flex: 0 0 auto;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
-  color: var(--ink-blue-link);
+  color: var(--accent);
   text-decoration: none;
   white-space: nowrap;
 }
@@ -374,7 +374,7 @@
 .intake-row-wide .intake-value { white-space: pre-wrap; }
 .intake-empty { color: var(--ink-gray-4); }
 .intake-plain { color: var(--ink-gray-6); }
-.intake-link { color: var(--ink-blue-link); text-decoration: none; }
+.intake-link { color: var(--accent); text-decoration: none; }
 .intake-link:hover { text-decoration: underline; }
 
 .intake-ev { display: flex; align-items: baseline; gap: 0.35rem; }
@@ -399,9 +399,9 @@
 .analysis-note {
   width: 100%;
   padding: 0.7rem 0.9rem;
-  background: var(--surface-blue-1);
-  border: 1px solid var(--outline-blue-1);
-  border-left: 3px solid var(--surface-blue-6);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-line);
+  border-left: 3px solid var(--accent-bar);
   border-radius: var(--radius-4);
   font-size: var(--text-base);
   line-height: var(--leading-body);
@@ -563,12 +563,12 @@
   align-items: baseline;
   gap: 0.5rem;
   padding: 6px 9px;
-  background: var(--surface-blue-1);
-  border-top: 1px solid var(--outline-blue-1);
-  border-bottom: 1px solid var(--outline-blue-1);
+  background: var(--accent-soft);
+  border-top: 1px solid var(--accent-soft-line);
+  border-bottom: 1px solid var(--accent-soft-line);
 }
 .iqc-zone-header:first-child { border-top: none; }
-.iqc-zone-code { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--ink-blue-7); }
+.iqc-zone-code { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--accent); }
 .iqc-zone-name { font-size: var(--text-sm); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-gray-8); }
 .iqc-row { border-bottom: 1px solid var(--outline-gray-1); }
 .iqc-row:last-child { border-bottom: none; }
@@ -674,7 +674,7 @@
 .evidence-pdf-link:hover { background: var(--surface-gray-2); border-color: var(--outline-gray-4); text-decoration: none; }
 .evidence-pdf-icon { font-size: var(--text-xl); line-height: 1; }
 .evidence-pdf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.evidence-pdf-open { font-size: var(--text-xs); color: var(--ink-blue-link); font-weight: var(--weight-medium); white-space: nowrap; }
+.evidence-pdf-open { font-size: var(--text-xs); color: var(--accent); font-weight: var(--weight-medium); white-space: nowrap; }
 
 /* ── Section H — dispatch checklist + cross-check ──────────── */
 .dispatch-checklist { display: flex; flex-direction: column; gap: 0.45rem; }
@@ -704,8 +704,8 @@
   color: var(--ink-gray-6);
   margin-bottom: 0.5rem;
   padding: 0.4rem 0.6rem;
-  border-left: 3px solid var(--surface-blue-6);
-  background: var(--surface-blue-1);
+  border-left: 3px solid var(--accent-bar);
+  background: var(--accent-soft);
   border-radius: var(--radius-2);
 }
 .crosscheck-table {
@@ -917,7 +917,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--ink-blue-7);
+  color: var(--accent);
   font-family: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
@@ -1294,4 +1294,79 @@
   /* The people × departments matrix scrolls sideways rather than squashing
      six departments into a phone width. */
   .acc-matrix td.acc-matrix-name { min-width: 200px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   POLISH — level: NOTICEABLE
+
+   The owner reviewed all three levels and chose this one. The levels are
+   cumulative: Subtle (rhythm and separation), then Moderate (tinted
+   surfaces, a considered page header, accent-coloured active states), then
+   this layer (depth, motion, a gradient ground).
+
+   Four things to know before editing:
+
+   1. This block is deliberately LAST in the LAST-loaded stylesheet. Almost
+      every rule here restates a selector that already exists earlier in
+      this file or in components.css, at the SAME specificity — so being
+      last is the entire reason it wins. Moving this block, or the
+      stylesheet link order, silently disables the polish. That reorder is
+      not the harmless tidy-up it looks like.
+   2. Nothing here introduces a colour. Every value is one of the app's own
+      tokens, so the level follows the four palettes and light/dark with no
+      further work.
+   3. The status badges are untouched on purpose. They carry MEANING (open,
+      closed, urgent); a cosmetic level must not repaint one.
+   4. Going back to Moderate or Subtle means deleting the parts marked
+      "Noticeable", or the block. There is no build step and no config flag:
+      the level IS these contents.
+
+   One thing this block does NOT contain, on purpose: Subtle's rhythm work.
+   In the preview every Subtle rule set the review wrapper's own gap and
+   padding (--pv-gap/--pv-pad), which is preview chrome and has no app
+   counterpart — the app's spacing is already the app's own. So a rule of
+   Subtle's that you cannot find here is not missing.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── Moderate: the accent says "you are here" ────────────────────────────────
+   Every one of these states is neutral grey today. This is the change the
+   owner notices most, and it is why the palettes exist. */
+.segment.active { background: var(--accent-soft); color: var(--accent); }
+.segment.active .segment-count { color: var(--accent); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.ir-card.is-selected { background: var(--accent-soft); }
+.ir-card.is-selected::before { background: var(--accent); width: 3px; }
+.insights-card.active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── Noticeable: the page header reads as a header ───────────────────────────
+   A gradient from the palette's wash into the page, so the top of each view
+   is distinguishable from the rows below it at a glance. */
+#ir-banner,
+.list-toolbar {
+  background: linear-gradient(120deg, var(--accent-soft), var(--surface-base) 70%);
+}
+
+/* ── Noticeable: depth on the blocks that hold content ───────────────────────
+   --elevation-sm, not md: these sit ON the page. The overlays (modal, nudge
+   panel, user menu) already carry lg/2xl, and an in-page panel must not
+   compete with them for the sense of "floating above". */
+.overview-panel,
+.insights-card { box-shadow: var(--elevation-sm); }
+
+/* ── Noticeable: the two accent-bar notes agree on their bar ─────────────────
+   They are the same device at two sizes, so they move together. */
+.analysis-note,
+.cc-note { border-left-width: 4px; }
+
+/* ── Noticeable: the primary action sits above the page ───────────────────── */
+.btn-primary { box-shadow: var(--elevation-sm); }
+
+/* ── Noticeable: a row answers the pointer ───────────────────────────────────
+   The transform is guarded on no-preference rather than left to the global
+   reduced-motion rule in base.css: a hover transform is a STATE change, not
+   a transition, so that rule cannot switch it off. A reduced-motion user
+   gets the background highlight and no slide. */
+.ir-card { transition: transform 0.14s var(--ease), background 0.14s var(--ease); }
+@media (prefers-reduced-motion: no-preference) {
+  .ir-card:hover { transform: translateX(3px); }
 }

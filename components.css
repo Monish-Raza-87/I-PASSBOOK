@@ -4,9 +4,12 @@
 
 /* ══════════════════════════════════════════════════════════
    BUTTONS
-   Modelled on frappe-ui's Button.vue. Note the "primary" action is
-   NEUTRAL, not brand-coloured: surface-gray-10 reads near-black in
-   light mode and near-white in dark, so one token inverts correctly.
+   Modelled on frappe-ui's Button.vue. `.btn` on its own is the NEUTRAL
+   action: surface-gray-10 reads near-black in light mode and near-white
+   in dark, so one token inverts correctly and no palette moves it. The
+   brand-coloured action is `.btn-primary`, which draws on the accent role
+   from palette.css. A `.btn` with NO variant is a neutral button — pick a
+   variant rather than expecting the base to carry brand colour.
    ══════════════════════════════════════════════════════════ */
 .btn {
   display: inline-flex;
@@ -51,12 +54,12 @@
 .btn-secondary:active { background: var(--surface-gray-3); border-color: var(--outline-gray-4); }
 
 .btn-primary {
-  background: var(--surface-blue-6);
-  color: var(--ink-base);
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
   border-color: transparent;
 }
-.btn-primary:hover  { background: var(--surface-blue-7); }
-.btn-primary:active { background: var(--surface-blue-8); }
+.btn-primary:hover  { background: var(--btn-solid-bg-hover); }
+.btn-primary:active { background: var(--btn-solid-bg-active); }
 
 .btn-danger {
   background: var(--surface-red-7);
@@ -578,6 +581,74 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .user-menu-name  { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
 .user-menu-email { font-size: var(--text-xs); color: var(--ink-gray-5); margin-bottom: 0.7rem; }
 
+/* ── Appearance group ────────────────────────────────────────────────────────
+   Theme and accent pickers inside the user menu. These replaced a single icon
+   button at the bottom of the sidebar, which the owner had to scroll a whole
+   column to reach.
+
+   Every row is a WORD with a swatch — no icon-only controls. Selection is shown
+   twice over, by a tick and by the row's own tint, so it survives a colour-blind
+   reading and a greyscale screenshot. The tick is the accent, which means the
+   menu demonstrates the palette you are choosing. */
+.appearance-group {
+  margin: 0 -0.75rem 0.6rem;   /* bleed to the menu's edge so the rule spans it */
+  border-top: 1px solid var(--outline-gray-1);
+  border-bottom: 1px solid var(--outline-gray-1);
+  padding: 0.55rem 0 0.55rem;
+}
+.appearance-head {
+  padding: 0.35rem 0.75rem 0.25rem;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-5);
+}
+.appearance-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.35rem 0.75rem;
+  border: 0;
+  background: none;
+  color: var(--ink-gray-8);
+  font-family: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+}
+.appearance-row:hover { background: var(--surface-gray-2); }
+.appearance-row.is-on { color: var(--accent); font-weight: var(--weight-medium); background: var(--accent-soft); }
+
+/* Fixed 14px circle so the Theme rows (which have no swatch) and the Accent
+   rows align on one left edge — the tick simply takes the swatch's place. */
+.appearance-swatch,
+.appearance-check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+.appearance-swatch { border: 1px solid var(--outline-gray-3); }
+.appearance-check {
+  background: none;
+  border: 1px solid transparent;
+  position: relative;
+}
+.appearance-row.is-on .appearance-check::after {
+  content: '';
+  position: absolute;
+  left: 3.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.appearance-label { flex: 1 1 auto; }
+
 .nudge-panel {
   position: fixed;
   top: calc(var(--header-h) + 6px);
@@ -619,7 +690,7 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .nudge-item-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .nudge-from { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); }
 .nudge-time { font-size: var(--text-2xs); color: var(--ink-gray-5); }
-.nudge-ctx  { font-size: var(--text-xs); color: var(--ink-blue-link); margin: 3px 0 1px; }
+.nudge-ctx  { font-size: var(--text-xs); color: var(--accent); margin: 3px 0 1px; }
 .nudge-to   { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 1px 0; }
 .nudge-msg  { font-size: var(--text-sm); line-height: var(--leading-body); margin-top: 3px; white-space: pre-wrap; word-break: break-word; color: var(--ink-gray-8); }
 .nudge-post-actions,
@@ -627,7 +698,7 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .nudge-empty { padding: 1.4rem; text-align: center; color: var(--ink-gray-5); font-size: var(--text-sm); }
 
 .nudge-card { max-width: 520px; }
-.nudge-ctx-line { font-size: var(--text-sm); color: var(--ink-blue-link); margin: 0.35rem 0 0.7rem; }
+.nudge-ctx-line { font-size: var(--text-sm); color: var(--accent); margin: 0.35rem 0 0.7rem; }
 .nudge-thread { display: flex; flex-direction: column; gap: 0.5rem; max-height: 38vh; overflow: auto; margin-bottom: 0.9rem; }
 .nudge-composer { border-top: 1px solid var(--outline-gray-1); padding-top: 0.75rem; display: flex; flex-direction: column; }
 .nudge-composer-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }

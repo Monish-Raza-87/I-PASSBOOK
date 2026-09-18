@@ -64,7 +64,6 @@
   --ink-gray-7:                #383838;
   --ink-gray-8:                #171717;
   --ink-gray-9:                #0f0f0f;
-  --ink-blue-link:             #0c8ef8;
   --outline-base:              #ffffff;
   --outline-gray-1:            #ededed;
   --outline-gray-2:            #e2e2e2;
@@ -232,6 +231,35 @@
   --outline-violet-8:          #392980;
   --outline-violet-9:          #251959;
   --outline-violet-10:         #150655;
+  --surface-teal-1:            #eefbf8;
+  --surface-teal-2:            #e6f7f4;
+  --surface-teal-3:            #bae8e1;
+  --surface-teal-4:            #97ded4;
+  --surface-teal-5:            #73d1c4;
+  --surface-teal-6:            #35baad;
+  --surface-teal-7:            #09857b;
+  --surface-teal-8:            #10736b;
+  --surface-teal-9:            #125c57;
+  --surface-teal-10:           #114541;
+  --ink-teal-1:                #e6f7f4;
+  --ink-teal-2:                #bae8e1;
+  --ink-teal-3:                #97ded4;
+  --ink-teal-4:                #73d1c4;
+  --ink-teal-5:                #35baad;
+  --ink-teal-6:                #09857b;
+  --ink-teal-7:                #10736b;
+  --ink-teal-8:                #125c57;
+  --ink-teal-9:                #114541;
+  --outline-teal-1:            #e6f7f4;
+  --outline-teal-2:            #bae8e1;
+  --outline-teal-3:            #97ded4;
+  --outline-teal-4:            #73d1c4;
+  --outline-teal-5:            #35baad;
+  --outline-teal-6:            #09857b;
+  --outline-teal-7:            #10736b;
+  --outline-teal-8:            #125c57;
+  --outline-teal-9:            #114541;
+  --outline-teal-10:           #053734;
 
   /* Elevation — shadows stay light-ish in dark mode; depth there comes
      from --surface-elevation-* instead. */
@@ -292,7 +320,6 @@
   --ink-gray-7:                #afafaf;
   --ink-gray-8:                #d9d9d9;
   --ink-gray-9:                #f8f8f8;
-  --ink-blue-link:             #1c6ec4;
   --outline-base:              #171717;
   --outline-gray-1:            #242424;
   --outline-gray-2:            #383838;
@@ -460,6 +487,35 @@
   --outline-violet-8:          #baa8f5;
   --outline-violet-9:          #c2b0fc;
   --outline-violet-10:         #d0c2ff;
+  --surface-teal-1:            #0b2320;
+  --surface-teal-2:            #0a2d29;
+  --surface-teal-3:            #0a3a35;
+  --surface-teal-4:            #0c4942;
+  --surface-teal-5:            #145b54;
+  --surface-teal-6:            #1c7169;
+  --surface-teal-7:            #2da094;
+  --surface-teal-8:            #27bcac;
+  --surface-teal-9:            #51decf;
+  --surface-teal-10:           #7ef3e7;
+  --ink-teal-1:                #0a3a35;
+  --ink-teal-2:                #0c4942;
+  --ink-teal-3:                #145b54;
+  --ink-teal-4:                #1c7169;
+  --ink-teal-5:                #2da094;
+  --ink-teal-6:                #27bcac;
+  --ink-teal-7:                #51decf;
+  --ink-teal-8:                #7ef3e7;
+  --ink-teal-9:                #a0f7ed;
+  --outline-teal-1:            #0a2d29;
+  --outline-teal-2:            #0a3a35;
+  --outline-teal-3:            #0c4942;
+  --outline-teal-4:            #145b54;
+  --outline-teal-5:            #1c7169;
+  --outline-teal-6:            #2da094;
+  --outline-teal-7:            #27bcac;
+  --outline-teal-8:            #51decf;
+  --outline-teal-9:            #7ef3e7;
+  --outline-teal-10:           #a0f7ed;
 
   --elevation-sm: inset 0px 0.5px 0.5px 0.5px #ffffff08, 0px 0px 14px 0px #0000002e, 0px 1px 3px 0px #000000b2;
   --elevation-base: inset 0px 0.5px 0.5px 0.5px #ffffff08, 0px 0px 14px 0px #0000002e, 0px 2px 5px 0px #00000099;
@@ -512,7 +568,6 @@
     --ink-gray-7:            oklch(0.341 0 0);
     --ink-gray-8:            oklch(0.205 0 0);
     --ink-gray-9:            oklch(0.168 0 0);
-    --ink-blue-link:         oklch(0.641 0.186 251.565);
     --outline-gray-1:        oklch(0.946 0 0);
     --outline-gray-2:        oklch(0.913 0 0);
     --outline-gray-3:        oklch(0.83 0 0);
@@ -678,6 +733,35 @@
     --outline-violet-8:      oklch(0.356 0.139 285.299);
     --outline-violet-9:      oklch(0.273 0.109 285.208);
     --outline-violet-10:     oklch(0.226 0.128 277.835);
+    --surface-teal-1:        oklch(0.978 0.014 180.717);
+    --surface-teal-2:        oklch(0.963 0.018 184.27);
+    --surface-teal-3:        oklch(0.897 0.048 185.006);
+    --surface-teal-4:        oklch(0.851 0.072 184.907);
+    --surface-teal-5:        oklch(0.799 0.092 184.055);
+    --surface-teal-6:        oklch(0.716 0.113 185.344);
+    --surface-teal-7:        oklch(0.556 0.096 185.508);
+    --surface-teal-8:        oklch(0.502 0.084 186.188);
+    --surface-teal-9:        oklch(0.431 0.069 188.078);
+    --surface-teal-10:       oklch(0.356 0.054 187.652);
+    --ink-teal-1:            oklch(0.963 0.018 184.27);
+    --ink-teal-2:            oklch(0.897 0.048 185.006);
+    --ink-teal-3:            oklch(0.851 0.072 184.907);
+    --ink-teal-4:            oklch(0.799 0.092 184.055);
+    --ink-teal-5:            oklch(0.716 0.113 185.344);
+    --ink-teal-6:            oklch(0.556 0.096 185.508);
+    --ink-teal-7:            oklch(0.502 0.084 186.188);
+    --ink-teal-8:            oklch(0.431 0.069 188.078);
+    --ink-teal-9:            oklch(0.356 0.054 187.652);
+    --outline-teal-1:        oklch(0.963 0.018 184.27);
+    --outline-teal-2:        oklch(0.897 0.048 185.006);
+    --outline-teal-3:        oklch(0.851 0.072 184.907);
+    --outline-teal-4:        oklch(0.799 0.092 184.055);
+    --outline-teal-5:        oklch(0.716 0.113 185.344);
+    --outline-teal-6:        oklch(0.556 0.096 185.508);
+    --outline-teal-7:        oklch(0.502 0.084 186.188);
+    --outline-teal-8:        oklch(0.431 0.069 188.078);
+    --outline-teal-9:        oklch(0.356 0.054 187.652);
+    --outline-teal-10:       oklch(0.305 0.05 188.673);
   }
 
   [data-theme="dark"] {
@@ -720,7 +804,6 @@
     --ink-gray-7:                oklch(0.754 0 0);
     --ink-gray-8:                oklch(0.885 0 0);
     --ink-gray-9:                oklch(0.979 0 0);
-    --ink-blue-link:             oklch(0.538 0.154 253.819);
     --outline-base:              oklch(0.205 0 0);
     --outline-gray-1:            oklch(0.26 0 0);
     --outline-gray-2:            oklch(0.341 0 0);
@@ -888,6 +971,35 @@
     --outline-violet-8:          oklch(0.775 0.11 294.435);
     --outline-violet-9:          oklch(0.8 0.107 294.723);
     --outline-violet-10:         oklch(0.846 0.085 295.041);
+    --surface-teal-1:            oklch(0.236 0.031 184.523);
+    --surface-teal-2:            oklch(0.271 0.04 184.5);
+    --surface-teal-3:            oklch(0.316 0.05 184.667);
+    --surface-teal-4:            oklch(0.366 0.06 183.454);
+    --surface-teal-5:            oklch(0.427 0.068 185.189);
+    --surface-teal-6:            oklch(0.498 0.079 185.716);
+    --surface-teal-7:            oklch(0.64 0.101 184.813);
+    --surface-teal-8:            oklch(0.718 0.12 183.715);
+    --surface-teal-9:            oklch(0.821 0.122 185.17);
+    --surface-teal-10:           oklch(0.892 0.108 186.68);
+    --ink-teal-1:                oklch(0.316 0.05 184.667);
+    --ink-teal-2:                oklch(0.366 0.06 183.454);
+    --ink-teal-3:                oklch(0.427 0.068 185.189);
+    --ink-teal-4:                oklch(0.498 0.079 185.716);
+    --ink-teal-5:                oklch(0.64 0.101 184.813);
+    --ink-teal-6:                oklch(0.718 0.12 183.715);
+    --ink-teal-7:                oklch(0.821 0.122 185.17);
+    --ink-teal-8:                oklch(0.892 0.108 186.68);
+    --ink-teal-9:                oklch(0.918 0.085 186.632);
+    --outline-teal-1:            oklch(0.271 0.04 184.5);
+    --outline-teal-2:            oklch(0.316 0.05 184.667);
+    --outline-teal-3:            oklch(0.366 0.06 183.454);
+    --outline-teal-4:            oklch(0.427 0.068 185.189);
+    --outline-teal-5:            oklch(0.498 0.079 185.716);
+    --outline-teal-6:            oklch(0.64 0.101 184.813);
+    --outline-teal-7:            oklch(0.718 0.12 183.715);
+    --outline-teal-8:            oklch(0.821 0.122 185.17);
+    --outline-teal-9:            oklch(0.892 0.108 186.68);
+    --outline-teal-10:           oklch(0.918 0.085 186.632);
   }
 }
 
@@ -1005,13 +1117,10 @@
    so nothing here is a new colour — only a shorter way to say it.
    ══════════════════════════════════════════════════════════ */
 :root {
-  /* Accent / "primary" action. Frappe's primary button is neutral, not
-     brand-coloured: surface-gray-10 is near-black in light mode and
-     near-white in dark, so the same token inverts correctly. */
-  --accent:        var(--ink-blue-link);
-  --btn-solid-bg:       var(--surface-gray-10);
-  --btn-solid-bg-hover: var(--surface-gray-9);
-  --btn-solid-fg:       var(--ink-base);
+  /* The accent role (--accent, --btn-solid-*) lives in palette.css, NOT here,
+     because this script rewrites tokens.css wholesale — anything added to this
+     block would be erased on the next run. This file names colours; palette.css
+     names the job. Status categories, below, are semantic and do not move. */
 
   /* Status categories (see STATUS_CATEGORIES in app.js) */
   --st-open-bg:     var(--surface-blue-2);

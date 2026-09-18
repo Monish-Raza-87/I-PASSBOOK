@@ -145,7 +145,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1676 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1680 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4.)
 

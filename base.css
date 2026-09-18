@@ -125,6 +125,14 @@ code, pre, kbd { font-family: var(--font-mono); }
   transition: opacity 0.6s ease, transform 0.6s ease;
 }
 
+/* The intro plays once per device. The pre-paint script in index.html sets this
+   attribute before the body is parsed, so a returning user never sees even a
+   frame of the splash — and, since the video is preload="none" and app.js only
+   calls play() on the first open, they never download it either. */
+html[data-intro="seen"] #splash-screen {
+  display: none;
+}
+
 .splash-video {
   position: absolute;
   top: 50%;

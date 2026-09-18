@@ -18,6 +18,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 
 const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
@@ -131,6 +132,11 @@ const server = http.createServer((req, res) => {
     return send(html
       .replace('<script src="app.js"></script>', AUTH_STUB + '<script src="app.js"></script>')
       .replace('</body>', AUTH_DRIVER + '</body>'), MIME['.html']);
+  }
+
+  if (url === INTRO_PATH) {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    return send(html.replace('</body>', INTRO_DRIVER + '</body>'), MIME['.html']);
   }
 
   const file = path.join(ROOT, url === '/' ? 'index.html' : url);
@@ -282,6 +288,53 @@ const AUTH_DRIVER = `<script>
   }
   out.done = true;
   post();
+  })();
+})();
+<\/script>
+`;
+
+// ── The intro probe ───────────────────────────────────────────────────────────
+// The intro plays once per device. Its quiet failure mode is a dead reference:
+// the splash still disappears either way — the fallback timer guarantees that —
+// so a 404 looks exactly like success from the outside. The only way to tell the
+// two apart is to ask a real browser whether it actually got the video, and then
+// ask a SECOND load on the same profile whether it stayed away. That second
+// question is the whole feature, so it is worth a persistent profile.
+const INTRO_PATH = '/__intro.html';
+
+const INTRO_DRIVER = `<script>
+(function () {
+  function report(o) {
+    try { fetch('/__probe', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
+  }
+  function snap() {
+    var s = document.getElementById('splash-screen');
+    var v = document.getElementById('splash-video');
+    var res = performance.getEntriesByType('resource') || [];
+    var mp4 = res.filter(function (e) { return /intro_ipassbookv2\\.mp4/.test(e.name); });
+    var seen = null;
+    try { seen = localStorage.getItem('introSeen'); } catch (e) {}
+    report({
+      done: true,
+      seen: seen,
+      splashInlineDisplay: s ? s.style.display : null,
+      splashComputed: s ? getComputedStyle(s).display : null,
+      prePaintAttr: document.documentElement.getAttribute('data-intro'),
+      videoDuration: v && isFinite(v.duration) ? v.duration : null,
+      videoReadyState: v ? v.readyState : null,
+      videoErrorCode: v && v.error ? v.error.code : null,
+      mp4Requests: mp4.length,
+    });
+  }
+  // Wait for the splash to actually go away rather than for a fixed delay: a
+  // video that plays to the end dismisses it at ~9s, one that fails dismisses it
+  // at once, and the fallback covers everything between.
+  var t0 = Date.now();
+  (function tick() {
+    var s = document.getElementById('splash-screen');
+    var gone = s && (s.style.display === 'none' || getComputedStyle(s).display === 'none');
+    if (gone || Date.now() - t0 > 25000) { setTimeout(snap, 400); return; }
+    setTimeout(tick, 50);
   })();
 })();
 <\/script>
@@ -628,6 +681,77 @@ if (probe && !probe.error) {
   ok('the token is now in localStorage', probe.token === 'tok-from-probe', probe.token);
   ok('and the auth card is gone', probe.authGone === true);
 }
+
+// ── Phase 4: the intro plays once per device ──────────────────────────────────
+head('the intro video plays once, then stays away');
+
+function waitForProbe(before, ms) {
+  return new Promise(res => {
+    const t0 = Date.now();
+    (function tick() {
+      if (probePosts > before && probeFromBrowser && probeFromBrowser.done) return res(probeFromBrowser);
+      if (Date.now() - t0 > ms) return res(null);
+      setTimeout(tick, 100);
+    })();
+  });
+}
+
+// A real, persistent Chrome profile — because "the second visit" is a claim
+// about a device, not about a page. A fresh profile each time would answer a
+// different question, and would pass whether or not the feature worked.
+const introProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'ipb-intro-'));
+
+async function runIntroLoad(ms) {
+  const before = probePosts;
+  const proc = spawn(chromePath, [
+    '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
+    '--disable-extensions', '--mute-audio',
+    // Muted autoplay is normally allowed, but the intro is the entire point of
+    // this phase — a policy block would show up as "the video is fine but never
+    // played", which is a confusing way to fail.
+    '--autoplay-policy=no-user-gesture-required',
+    '--enable-logging=stderr', '--log-level=0',
+    '--user-data-dir=' + introProfile,
+    `${base}${INTRO_PATH}`,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const got = await waitForProbe(before, ms);
+  try { proc.kill(); } catch { /* already gone */ }
+  return got;
+}
+
+// Real time, not virtual: the video has to actually play, and that takes ~9s.
+const firstIntro = await runIntroLoad(45000);
+ok('the intro probe reported from a real browser', !!firstIntro);
+if (firstIntro) {
+  // readyState >= 1 means Chrome really fetched and parsed the file. Without this
+  // assertion the suite cannot tell a working intro from a missing one, because
+  // the splash disappears either way.
+  ok('the first open really loads the intro video',
+    firstIntro.videoReadyState >= 1 && firstIntro.videoErrorCode === null,
+    { readyState: firstIntro.videoReadyState, error: firstIntro.videoErrorCode });
+  ok('it is the full-length intro, not a truncated read',
+    firstIntro.videoDuration > 8.5 && firstIntro.videoDuration < 9.5,
+    firstIntro.videoDuration);
+  ok('the splash is dismissed afterwards',
+    firstIntro.splashInlineDisplay === 'none', firstIntro.splashInlineDisplay);
+  ok('the device is marked as having seen it',
+    firstIntro.seen === '1', firstIntro.seen);
+  ok('nothing marked it seen before the intro ran',
+    firstIntro.prePaintAttr === null, firstIntro.prePaintAttr);
+}
+
+const secondIntro = await runIntroLoad(30000);
+ok('the second open on the same device reports', !!secondIntro);
+if (secondIntro) {
+  ok('the splash never renders on a return visit',
+    secondIntro.prePaintAttr === 'seen' && secondIntro.splashComputed === 'none',
+    { attr: secondIntro.prePaintAttr, display: secondIntro.splashComputed });
+  // The point of preload="none" plus no autoplay: the ~9.7 MB is not paid again.
+  ok('and the video is not downloaded a second time',
+    secondIntro.mp4Requests === 0, secondIntro.mp4Requests);
+}
+
+try { fs.rmSync(introProfile, { recursive: true, force: true }); } catch {}
 
 server.close();
 

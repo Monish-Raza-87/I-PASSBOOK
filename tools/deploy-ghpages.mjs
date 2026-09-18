@@ -44,12 +44,23 @@ const SERVED = [
   'tokens.css',
   'views.css',
   'vendor/pdf-lib.min.js',
-  'assets/Indrones Intro v2.mp4',
+  'assets/intro_ipassbookv2.mp4',
   'assets/logo.png'
 ]
 
 // Present on gh-pages but not in the repo's main tree — carried over untouched.
 const CARRY = ['.nojekyll']
+
+// Files to DELETE from gh-pages. The build below starts from `read-tree TARGET`,
+// which carries over EVERYTHING already published — so a file simply dropped
+// from SERVED would linger there forever, still downloadable, still in every
+// clone. Anything that is genuinely dead belongs here instead.
+//
+// The intro this replaced: nothing references it any more (index.html points at
+// intro_ipassbookv2.mp4), so it is ~3.9 MB of pure dead weight.
+const PRUNE = [
+  'assets/Indrones Intro v2.mp4'
+]
 
 const argv = process.argv.slice(2)
 const doCommit = argv.includes('--commit')
@@ -130,6 +141,7 @@ console.log(`  files    ${SERVED.length} served, ${changed.length} to update`)
 for (const path of changed) console.log(`             · ${path}`)
 if (!changed.length) console.log('             (already identical — nothing to deploy)')
 console.log(`  carry    ${CARRY.join(', ')}`)
+if (PRUNE.length) console.log(`  prune    ${PRUNE.join(', ')}`)
 console.log(`  cache    ${tgtCache} → ${srcCache}`)
 
 let warned = false
@@ -161,6 +173,10 @@ try {
     const blob = blobAt(SOURCE, path) ?? blobAt(TARGET, path)
     if (blob === null) continue
     git(['update-index', '--add', '--cacheinfo', `100644,${blob},${path}`], { env: idxEnv })
+  }
+
+  for (const path of PRUNE) {
+    git(['update-index', '--force-remove', '--', path], { env: idxEnv })
   }
 
   const tree = git(['write-tree'], { env: idxEnv })

@@ -47,6 +47,16 @@
         if (PALETTES.indexOf(pal) < 0) pal = 'blue';
         document.documentElement.setAttribute('data-palette', pal);
       } catch (e) { /* storage blocked — palette.css's :root default applies */ }
+
+      // The intro plays once per device, on the very first open. Marking it here
+      // (before the body is parsed) lets the stylesheet hide the splash outright,
+      // so a returning user never sees it flash — and, because the video is
+      // preload="none", never downloads it either.
+      try {
+        if (localStorage.getItem('introSeen') === '1') {
+          document.documentElement.setAttribute('data-intro', 'seen');
+        }
+      } catch (e) { /* storage blocked — the intro plays, which is the safe way to be wrong */ }
     })();
   </script>
 </head>
@@ -54,8 +64,12 @@
 
   <!-- ========== SPLASH SCREEN ========== -->
   <div id="splash-screen">
-    <video id="splash-video" class="splash-video" autoplay muted playsinline>
-      <source src="assets/Indrones Intro v2.mp4" type="video/mp4">
+    <!-- preload="none" and no autoplay ON PURPOSE: a returning user must not
+         download this video at all. app.js calls play() only on the first open.
+         It is deliberately NOT in sw.js's SHELL — precaching ~9.7 MB on install
+         would cost every user that download before they ever sign in. -->
+    <video id="splash-video" class="splash-video" muted playsinline preload="none">
+      <source src="assets/intro_ipassbookv2.mp4" type="video/mp4">
     </video>
     <div class="splash-overlay"></div>
     <div class="splash-logo-wrap">

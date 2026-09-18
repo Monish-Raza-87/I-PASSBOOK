@@ -37,24 +37,27 @@ i-passbook-app/
 ├── index.html          # App shell: splash, auth, sidebar, ticket list, detail pane
 ├── app.js              # All frontend logic (~5,350 lines)
 ├── tokens.css          # Design tokens — generated, see docs/09
+├── palette.css         # The accent role + the four selectable palettes (hand-written, not generated)
 ├── base.css            # Reset, typography, splash/auth, app shell, breakpoints
 ├── components.css      # Buttons, inputs, pills, dropdowns, modals
 ├── views.css           # Ticket list, sync bar, ticket detail, intake report, section tables
 ├── tools/
 │   ├── gen-tokens.mjs     # Regenerates tokens.css from frappe/frappe-ui
+│   ├── deploy-ghpages.mjs # Publishes to the gh-pages branch (dry run by default)
+│   ├── serve-local.mjs    # Zero-dependency local server (no npm download)
 │   ├── harness.mjs        # Shared smoke-test harness
 │   ├── smoke-all.mjs      # Runs every suite — the whole test command
-│   └── smoke-*.mjs        # suites: shell, ir-state, intake, boot
+│   └── smoke-*.mjs        # suites: shell, boot, palette, polish, store, backend …
 ├── backend.gs          # Google Apps Script backend (~1,240 lines)
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
 │   ├── logo.png        # App icon (237 KB)
-│   └── Indrones Intro v2.mp4  # Splash screen video (4.1 MB)
+│   └── intro_ipassbookv2.mp4  # Splash screen video (9.7 MB, 9s)
 └── docs/               # ← This knowledge base
 ```
 
-`style.css` no longer exists — it was replaced by the four layered stylesheets above
+`style.css` no longer exists — it was replaced by the five layered stylesheets above
 (see [09 — Design System](09 - Design System.md)).
 
 ## Key Design Decisions

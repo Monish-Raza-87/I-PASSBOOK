@@ -28,7 +28,15 @@ store layout.
 ## App Screens
 
 ### 1. Splash Screen
-- Plays `assets/Indrones Intro v2.mp4` for ~2 seconds
+- Plays `assets/intro_ipassbookv2.mp4` (9.03 s) — **once per device**, on the first
+  open. `localStorage.introSeen` is set when it plays, and the pre-paint script in
+  `index.html` hides the splash off that flag on every open after, so a returning
+  user sees nothing and downloads nothing (the video is `preload="none"`).
+- Dismissal is driven by the video's own `ended` event, not a fixed wait, with an
+  `INTRO_FALLBACK_MS` (9.5 s) backstop so a missing or unplayable file still
+  reaches sign-in. **The fallback must stay ≥ the video's duration** — a shorter
+  timer is what silently cut the previous intro off mid-play; `smoke-shell.mjs`
+  now reads the duration out of the MP4 header and fails if it doesn't.
 - Neutral dark chrome with the "I-PASSBOOK" wordmark
 - Fades out, then checks auth state
 

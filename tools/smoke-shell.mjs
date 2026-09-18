@@ -170,5 +170,70 @@ ok('the danger-zone copy describes the two steps',
 ok('the old "shown below first" claim is gone',
   !/shown below first/.test(appJs), (appJs.match(/[^\n]*shown below[^\n]*/) || [''])[0]);
 
+// ── The intro video ───────────────────────────────────────────────────────────
+// The intro plays once per device and is then skipped. The failure mode this
+// guards is quiet: if the file 404s or the name changes, the splash still goes
+// away — the fallback timer dismisses it — so the app looks fine and just never
+// shows the intro. Nothing else in the suite would notice.
+head('the intro video');
+const swJs = read('../sw.js');
+
+const videoTag = (html.match(/<video id="splash-video"[\s\S]*?<\/video>/) || [''])[0];
+ok('the splash video tag exists', videoTag.length > 0);
+ok('it points at the current intro file',
+  /src="assets\/intro_ipassbookv2\.mp4"/.test(videoTag),
+  videoTag.replace(/\s+/g, ' '));
+ok('and no longer references the file it replaced',
+  !/Indrones Intro v2\.mp4/.test(html) && !/Indrones Intro v2\.mp4/.test(appJs));
+ok('the file it points at exists on disk',
+  fs.existsSync(new URL('../assets/intro_ipassbookv2.mp4', import.meta.url)));
+// preload="none" + no autoplay is what stops a RETURNING user downloading ~9.7 MB
+// for a splash they will never be shown. Either attribute alone would fetch it.
+ok('it is preloaded lazily and not autoplayed',
+  /preload="none"/.test(videoTag) && !/\bautoplay\b/.test(videoTag),
+  videoTag.replace(/\s+/g, ' '));
+// Precaching it in SHELL would make EVERY first-time install pay the whole
+// download before sign-in, which is the opposite of what lazy loading bought.
+ok('it is not precached in the service worker shell',
+  !/intro_ipassbookv2/.test(swJs));
+
+// Read the real duration out of the MP4 header, so the timer below is checked
+// against the file rather than against a number someone typed. This is the bug
+// that shipped before: a 2000ms timer against a 3940ms video, so the intro was
+// always cut off mid-play.
+const mp4DurationMs = (() => {
+  const b = fs.readFileSync(new URL('../assets/intro_ipassbookv2.mp4', import.meta.url));
+  const i = b.indexOf('mvhd');
+  if (i < 0) return null;
+  const v = b[i + 4];
+  if (v === 1) return null;
+  const timescale = b.readUInt32BE(i + 16);
+  const duration = b.readUInt32BE(i + 20);
+  return timescale ? (duration / timescale) * 1000 : null;
+})();
+ok('the intro is a readable MP4', mp4DurationMs !== null, mp4DurationMs);
+
+const fallbackMs = Number((appJs.match(/INTRO_FALLBACK_MS\s*=\s*(\d+)/) || [])[1]);
+ok('app.js declares an intro fallback timer', Number.isFinite(fallbackMs), fallbackMs);
+ok('the fallback is at least as long as the video, so it never cuts it',
+  mp4DurationMs !== null && fallbackMs >= mp4DurationMs,
+  { fallbackMs, mp4DurationMs });
+
+head('the intro plays once, then is skipped');
+ok('app.js keys the "already seen" flag on localStorage',
+  /INTRO_SEEN_KEY/.test(appJs) &&
+  /localStorage\.getItem\(INTRO_SEEN_KEY\)/.test(appJs) &&
+  /localStorage\.setItem\(INTRO_SEEN_KEY/.test(appJs));
+ok('the flag is recorded, not replayed, when the intro is shown',
+  appJs.indexOf("localStorage.setItem(INTRO_SEEN_KEY") < appJs.indexOf('video.play()'),
+  { set: appJs.indexOf("localStorage.setItem(INTRO_SEEN_KEY"), play: appJs.indexOf('video.play()') });
+// The pre-paint script must set this BEFORE the body is parsed, or a returning
+// user sees the splash flash before app.js hides it.
+const prePaint = (html.match(/<head>[\s\S]*?<\/head>/) || [''])[0];
+ok('the pre-paint script sets data-intro before the body parses',
+  /data-intro/.test(prePaint) && /introSeen/.test(prePaint));
+ok('base.css hides the splash off that attribute',
+  /html\[data-intro="seen"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
+
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

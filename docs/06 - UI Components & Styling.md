@@ -107,7 +107,20 @@ must keep writing **inline** `display` values — `applyAccessGating` reads
 `.tab:not([style*="display: none"])`.
 
 ### Splash (`#splash-screen`)
-Fixed overlay at `--z-splash`, Indrones intro video, neutral dark chrome, loader bar.
+Fixed overlay at `--z-splash`, intro video, neutral dark chrome, loader bar.
+
+The intro plays **once per device**. `app.js` records `localStorage.introSeen` when
+it plays, and the pre-paint script sets `data-intro="seen"` on `<html>` before the
+body parses — `base.css` hides the splash off that attribute, so a returning user
+never sees a flash of it. The video is `preload="none"` with no `autoplay`, and
+`app.js` calls `play()` only on that first open, so the ~9.7 MB is never fetched
+again. It is deliberately **not** in `sw.js`'s `SHELL` — precaching it would charge
+every first-time install the whole download before sign-in.
+
+Dismissal listens for the video's `ended` event rather than waiting a fixed time, so
+a re-exported intro needs no code change; `INTRO_FALLBACK_MS` is the backstop when
+`ended` never arrives. Adding an asset here means adding it to `SERVED` in
+`tools/deploy-ghpages.mjs` (and to `PRUNE` if it replaces one).
 
 ### Auth card (`.glass-card`)
 Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and

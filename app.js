@@ -791,47 +791,92 @@ let _openSeq = 0;              // supersedes an in-flight openPassbook()
 const mqDesktop = window.matchMedia('(min-width: 1024px)');
 
 // ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
+// The intro video plays ONCE PER DEVICE — on the very first open, and never
+// again. Every open after that goes straight to sign-in.
+//
+// It is driven by the video's own `ended` event rather than a fixed wait, so
+// re-exporting the intro at a different length needs no code change. The
+// fallback timers below are backstops for the cases where `ended` never
+// arrives — a decode failure, a browser that refuses to play, a 404 — because
+// the user must reach sign-in no matter what the video does.
+const INTRO_SEEN_KEY   = 'introSeen';
+const INTRO_FALLBACK_MS = 9500;   // current video is 9.03s; a little margin over that
+const SPLASH_FADE_MS    = 800;
+
 window.addEventListener('load', () => {
   // Check for local file protocol (login + backend calls won't work)
   if (window.location.protocol === 'file:') {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
   }
 
-  // Give the splash video time to play (4 seconds for the Indrones intro)
-  setTimeout(() => {
+  let entered = false;
+
+  // Everything that used to run when the splash timer expired, unchanged.
+  function enterApp() {
+    if (entered) return;
+    entered = true;
+    splash.style.display = 'none';
+    const stored = loadStoredUser();
+    const storedSession = loadSession();
+    if (stored && storedSession) {
+      currentUser = stored;
+      // Restore the server session token so backend calls are authorized with no
+      // sign-in prompt. localStorage, so this survives a full app close.
+      currentUser.sessionToken = storedSession;
+      showApp();
+      // Refresh role/permissions + departments (drives per-section save-button
+      // gating). Best-effort; the gating fallback is view-only.
+      // No mustChangePassword handling here: a stored session can only exist for
+      // an account whose flag is already cleared — the backend mints no token
+      // while it is set — so a stale stored session simply fails sessionCheck and
+      // takes the ordinary expiry path.
+      refreshMyAccess().then(() => {
+        if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+      });
+    } else if (shouldUseDevAuthBypass()) {
+      currentUser = createDevUser();
+      persistUser(currentUser);
+      showApp();
+    } else {
+      // Half-restored state (a profile with no token, or a token with no
+      // profile) is a stale fragment. Clear BOTH and show the login screen.
+      if (stored || storedSession) clearLocalAuth();
+      showAuth();
+    }
+  }
+
+  let dismissed = false;
+  function dismissSplash(instant) {
+    if (dismissed) return;
+    dismissed = true;
+    if (instant) { enterApp(); return; }
     splash.style.opacity = '0';
     splash.style.transform = 'scale(1.04)';
-    setTimeout(() => {
-      splash.style.display = 'none';
-      const stored = loadStoredUser();
-      const storedSession = loadSession();
-      if (stored && storedSession) {
-        currentUser = stored;
-        // Restore the server session token so backend calls are authorized with no
-        // sign-in prompt. localStorage, so this survives a full app close.
-        currentUser.sessionToken = storedSession;
-        showApp();
-        // Refresh role/permissions + departments (drives per-section save-button
-        // gating). Best-effort; the gating fallback is view-only.
-        // No mustChangePassword handling here: a stored session can only exist for
-        // an account whose flag is already cleared — the backend mints no token
-        // while it is set — so a stale stored session simply fails sessionCheck and
-        // takes the ordinary expiry path.
-        refreshMyAccess().then(() => {
-          if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
-        });
-      } else if (shouldUseDevAuthBypass()) {
-        currentUser = createDevUser();
-        persistUser(currentUser);
-        showApp();
-      } else {
-        // Half-restored state (a profile with no token, or a token with no
-        // profile) is a stale fragment. Clear BOTH and show the login screen.
-        if (stored || storedSession) clearLocalAuth();
-        showAuth();
-      }
-    }, 800);
-  }, 2000);
+    setTimeout(enterApp, SPLASH_FADE_MS);
+  }
+
+  let introSeen = false;
+  try { introSeen = localStorage.getItem(INTRO_SEEN_KEY) === '1'; } catch (e) { /* storage blocked */ }
+
+  // A returning user: no fade, no video, no download. base.css has already
+  // hidden the splash off the pre-paint attribute, so this only makes it
+  // explicit and keeps the element's inline state truthful.
+  if (introSeen) { dismissSplash(true); return; }
+
+  // Marked NOW rather than on `ended`: someone who closes the app mid-intro has
+  // still seen it, and must not be shown it again on every subsequent open.
+  try { localStorage.setItem(INTRO_SEEN_KEY, '1'); } catch (e) { /* storage blocked */ }
+
+  const video = document.getElementById('splash-video');
+  if (!video) { dismissSplash(false); return; }
+
+  // The backstop, armed before play() so it covers every failure mode. `ended`
+  // normally beats it; if the video is missing or unplayable, `error` does.
+  const fallback = setTimeout(() => dismissSplash(false), INTRO_FALLBACK_MS);
+  const finish = () => { clearTimeout(fallback); dismissSplash(false); };
+  video.addEventListener('ended', finish, { once: true });
+  video.addEventListener('error', finish, { once: true });
+  video.play().catch(finish);
 });
 
 function shouldUseDevAuthBypass() {

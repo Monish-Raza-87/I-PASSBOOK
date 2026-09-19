@@ -3,6 +3,29 @@
    Single Page App routing, auth, form rendering & API calls
    ============================================================ */
 
+// ─── VERSION ─────────────────────────────────────────────────────────────────
+// The one place the shipped version is written, and it is SHOWN to every user —
+// on the sign-in card and in the app footer — so the first question in any report
+// ("are you on the latest?") can be answered by looking instead of guessing.
+//
+// It must equal the number in `sw.js`'s CACHE_NAME, because that is the number
+// that decides whether a returning user is actually running this build: the app
+// shell is served stale-while-revalidate, so a device can be a full load behind
+// whatever gh-pages holds. A mismatch is the exact situation this display exists
+// to expose, so `smoke-shell.mjs` fails when the two disagree.
+const APP_VERSION = 'v37';
+
+// Fill every version slot on the page. One writer, so there is one place to look
+// when the number is wrong — the slots themselves are static markup, present on
+// the sign-in card AND in the signed-in footer, so the answer is on screen before
+// anyone has managed to sign in and report that they cannot.
+function paintVersion() {
+  document.querySelectorAll('.app-version').forEach(el => { el.textContent = APP_VERSION; });
+}
+// app.js is the second-to-last script in the body, so the slots below it in
+// index.html already exist. No DOMContentLoaded wait, no boot order to get wrong.
+paintVersion();
+
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
 const CONFIG = {
@@ -1294,7 +1317,13 @@ function wireAuthForm() {
         ? 'A 6-digit code was sent to ' + email + ' earlier. It is valid for 8:30 hours from when it was sent.'
         : 'A 6-digit code is sent to ' + email + '. It is valid for 8:30 hours.';
     }
-    showToast((d && d.codeSent === false) ? 'Use the code from earlier today' : 'Check your inbox for the sign-in code');
+    // Deliberately NO toast here. There used to be one — "Use the code from
+    // earlier today" — and it said the same thing the note above it already says,
+    // in less detail, from the bottom of the screen where it covered the code box
+    // and the Verify button. Reported from the field as the notice "hiding the
+    // screen", appearing over and over, because every retry of a slow sign-in
+    // raised it again. A message that duplicates the one already on screen and
+    // covers the control the user is reaching for is a net loss; the note stays.
   };
 
   // Stage 2: the code from the email, with the password again.

@@ -480,5 +480,38 @@ ok('every precached shell file is in the deploy\'s served list',
     .every(p => p === '' || served.includes(`'${p}'`)),
   [...shellList.matchAll(/'\.\/([^']+)'/g)].map(m => m[1]));
 
+// ── The version the user READS must be the version they are RUNNING ───────────
+// APP_VERSION prints on the sign-in card and in the sidebar footer, so a report
+// can be answered by looking. CACHE_NAME decides which build a returning device
+// actually serves — and the shell is stale-while-revalidate, so a device can be a
+// whole load behind whatever gh-pages holds. Those two disagreeing is EXACTLY the
+// confusion the visible version exists to remove, so they are pinned to each
+// other: bump one and this fails until the other follows.
+head('the version on screen is the version being served');
+const shownVersion = (appJs.match(/^const APP_VERSION = '([^']+)';/m) || [])[1];
+const cacheVersion = (swJs.match(/^const CACHE_NAME = 'ipassbook-([^']+)';/m) || [])[1];
+ok('app.js declares APP_VERSION', !!shownVersion, shownVersion);
+ok('sw.js declares CACHE_NAME in the ipassbook-<v> shape', !!cacheVersion, cacheVersion);
+ok('the number a user reads equals the number their device is running',
+  !!shownVersion && shownVersion === cacheVersion,
+  { shown: shownVersion, cache: cacheVersion });
+// Declaring it is not enough — it has to reach the page. Slots in index.html…
+ok('index.html carries version slots (the sign-in card AND the app footer)',
+  (html.match(/class="app-version"/g) || []).length >= 2,
+  (html.match(/class="app-version"/g) || []).length);
+// …and the credit line, on the sign-in card as well as inside the app.
+ok('the credit is on the sign-in card, not only behind the sign-in',
+  /app-credit/.test((html.match(/<div id="auth-container">[\s\S]*?<\/div>\s*<\/div>/) || [''])[0]) &&
+  /Mr\. Raza, Indrones/.test(html));
+// …filled by one writer, so there is one place to look when the number is wrong.
+ok('app.js fills every slot through the shared .app-version class',
+  /querySelectorAll\('\.app-version'\)/.test(appJs));
+// And the sign-in flow must not raise the toast that covered the code box: the
+// note under the field already states both cases in full, so the toast was a
+// duplicate that sat over the very controls the user was reaching for.
+const otpStep = (appJs.match(/const gotoOtpStep = \([\s\S]*?\n  \};/) || [''])[0];
+ok('the code step sets the inline note', /auth-login-code-note/.test(otpStep));
+ok('...and raises NO toast over the code box', otpStep !== '' && !/showToast/.test(otpStep), otpStep.slice(0, 80));
+
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

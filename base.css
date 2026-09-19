@@ -652,6 +652,37 @@ header {
    queue in showToast() can never fight the stylesheet. */
 #toast.show { transform: translateX(-50%) translateY(0); }
 
+/* ── Made-with credit + build version ────────────────────────────────────────
+   One line, written into the sign-in card AND the foot of the sidebar, so it is
+   on screen before anyone has managed to sign in — and so "which version are you
+   on?" is answered by looking rather than by asking a user to find a menu.
+
+   Small and muted on purpose: it is a caption, not a control, and it sits under
+   the thing the user came for. The heart takes the ACCENT role rather than a
+   hard-coded red, so it belongs to whichever palette is selected instead of
+   fighting it. The version is tabular so it never shifts, and a shade dimmer than
+   the words, because it is the fact you read at a glance, not the thing you read
+   first. */
+.app-credit {
+  color: var(--ink-gray-5);
+  font-size: var(--text-xs);
+  letter-spacing: 0.01em;
+  margin-top: 1rem;
+  text-align: center;
+}
+.credit-heart { color: var(--accent); }
+.credit-dot { margin: 0 0.45em; opacity: 0.55; }
+.app-version { font-variant-numeric: tabular-nums; opacity: 0.85; }
+
+/* In the sidebar the same line is a footer: the sidebar is a flex column and
+   .sidebar-nav takes the free space, so this lands at the bottom on its own and
+   only needs its own rule to separate it from the navigation. */
+.sidebar-credit {
+  margin-top: 0;
+  padding: 0.7rem 0.75rem;
+  border-top: 1px solid var(--outline-gray-1);
+}
+
 /* ══════════════════════════════════════════════════════════
    RESPONSIVE — below lg the sidebar becomes a bottom bar
    ══════════════════════════════════════════════════════════ */

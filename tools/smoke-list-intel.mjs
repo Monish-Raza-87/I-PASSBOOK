@@ -234,7 +234,15 @@ r.ok('the flag\'s tooltip names the limit for that ticket\'s priority',
 r.ok('the age is on the card, worded as the app clock',
   /In status 9d/.test(card) && /ir-age is-late/.test(card));
 r.ok('the second ticket is aged from its raise date, and says "Raised"',
-  /Raised 2d ago/.test(card), (card.match(/Raised [^<]*/) || [''])[0]);
+  // The NUMBER is deliberately not pinned here. This fixture's raise date is fixed
+  // text (`isoDaysAgo(2)` off the suite's NOW, i.e. 16 Sep 2026) while renderIRList
+  // ages it against the real clock — so the card said "2d" on the 18th, "3d" on the
+  // 19th, and the assertion rotted a day after it was written. The arithmetic is
+  // pinned exactly, and date-independently, by the irAge unit assertions above,
+  // which pass an explicit NOW; what belongs HERE is the wording and the BASIS.
+  /Raised \d+d ago/.test(card) &&
+  /This is the age of the IR, not of its status/.test(card),
+  (card.match(/Raised [^<]*/) || [''])[0]);
 r.ok('no card carries an inline style (smoke-intake pins the attribute set)',
   !/style=/.test(card), (card.match(/style="[^"]*"/) || [''])[0]);
 // The date is real Sheet text and the category is writable by any signed-in

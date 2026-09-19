@@ -445,6 +445,48 @@ function appendAuditLinesLocked(subject, lines) {
   return lines.length;
 }
 
+// ── THE SIGN-IN AUDIT ─────────────────────────────────────────────────────────
+// audit/signins.jsonl — the same append-only shape a ticket's log uses, under a
+// subject with no ticket. A sign-in is not ABOUT an IR, so it gets its own file
+// rather than being smeared into one; `auditSubjectFor` already names a non-ticket
+// store for its own subject, and this one is named for what it records.
+//
+// WHY IT EXISTS. A sign-in code is reusable for its whole lifetime by design (see
+// loginOtpStep) — that is the feature, one mail covering the day. The cost is that a
+// code read over someone's shoulder stays live until it expires, and until now
+// NOTHING recorded that a sign-in had happened at all: the audit trail holds section
+// saves, comments and archive moves, every one of them per-ticket, so there was no
+// way to see a code used at 9am and again at 4pm from two different places. This is
+// that record. It is read with `reportRecentSignins`, which is an operator lever run
+// from the editor — there is deliberately no screen for it.
+var SIGNIN_AUDIT_SUBJECT = 'signins';
+
+// "47 min" / "7h 12m" — how long the code being redeemed had been alive. The AGE is
+// the interesting part of the line: a code issued and redeemed within a minute is
+// the ordinary case, while one issued at 9am and redeemed at 4pm is the shape of a
+// code somebody else got hold of.
+function codeAgeLabel(issuedAt, nowMs) {
+  var t = asDate(issuedAt);
+  if (!t) return 'age unknown';
+  var mins = Math.max(0, Math.round((nowMs - t.getTime()) / 60000));
+  if (mins < 60) return mins + ' min';
+  return Math.floor(mins / 60) + 'h ' + ('0' + (mins % 60)).slice(-2) + 'm';
+}
+
+// One line per successful sign-in. `device` is what the BROWSER claimed, so it is a
+// clue and not proof — the point is to make "signed in from two places" visible at a
+// glance, not to establish who was at the keyboard.
+function signinAuditLine(email, codeIssuedAt, device, nowMs) {
+  var note = 'code ' + codeAgeLabel(codeIssuedAt, nowMs) + ' old';
+  var dev  = String(device || '').trim().slice(0, 120);
+  note += dev ? ' · ' + dev : ' · device not reported';
+  return {
+    t: Utilities.formatDate(new Date(nowMs), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    ir: '__AUTH__', sec: 'signin', by: String(email || ''),
+    ev: 'signin', fid: '', old: '', nw: note
+  };
+}
+
 // ── BACKUPS ───────────────────────────────────────────────────────────────────
 // Always a NEW file, never an overwrite: a backup that can be overwritten by the
 // next backup is not a rollback path. This replaces the dated
@@ -1336,7 +1378,8 @@ function doLoginPassword(params) {
   // Placed AFTER the temp-password branch on purpose: a temp-password holder is
   // being sent to the forced-change screen and has no session anyway, so asking
   // them for an emailed code first would be a step that buys nothing.
-  var otpStep = loginOtpStep(email, params.code, userField(u, 'Name'));
+  var otpInfo = {};
+  var otpStep = loginOtpStep(email, params.code, userField(u, 'Name'), otpInfo);
   if (otpStep) return otpStep;
 
   // Last-login stamp. Best-effort: a failure to record it must never fail a
@@ -1349,6 +1392,19 @@ function doLoginPassword(params) {
       writeJsonLocked('users.json', users);
     });
   } catch (e) { /* non-fatal */ }
+
+  // The sign-in audit, in its OWN try so that a failure to write the log can never
+  // reach the caller as a failed login. This is the whole contract of the record: a
+  // log that sometimes blocks the door it is meant to watch is worse than no log,
+  // so nothing here is allowed to throw outward.
+  try {
+    var signinAt = Date.now();
+    withRowLockOrThrow(function () {
+      appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT,
+        [signinAuditLine(email, otpInfo.codeIssuedAt, params.device, signinAt)]);
+    });
+  } catch (e) { /* non-fatal */ }
+
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
@@ -1368,12 +1424,27 @@ function doLoginPassword(params) {
 // Note this is NOT marked used on success (consume=false): that is the whole
 // feature. The attempt counter still applies and is shared across the day, since
 // the entry is — five wrong guesses burn it and force a fresh one.
-function loginOtpStep(email, supplied, name) {
+// `info` is an OUT object the caller owns, filled in only on the success path with
+// the issue time of the code that was accepted — the sign-in audit needs the code's
+// AGE, and this is the one place that knows a code just verified. It is optional so
+// that the return contract stays exactly "a response to send, or null to carry on".
+function loginOtpStep(email, supplied, name, info) {
   var code = (supplied || '').toString().trim();
 
   if (code) {
     var bad = verifyAuthCode(email, 'login', code, false);
-    return bad || null;                       // null → verified, mint the session
+    if (bad) return bad;                       // a refusal, not a verification
+    // Read AFTER the verify rather than before, so the entry found is the one that
+    // was just accepted; verifyAuthCode does not consume it (consume=false), so it
+    // is still live and still findable. Best-effort: an unreadable store must not
+    // fail a sign-in that has already been verified.
+    if (info) {
+      try {
+        var entry = findCodeEntry(codesEntries(), email, 'login');
+        info.codeIssuedAt = entry ? entry.createdAt : null;
+      } catch (e) { /* age unknown — the audit says so rather than guessing */ }
+    }
+    return null;                               // null → verified, mint the session
   }
 
   // No code supplied: this is the first step of the flow. Reuse a live code if
@@ -3263,6 +3334,30 @@ function maintenancePruneAuditLog() {
            ' days across ' + prunedFiles + ' ticket file(s). ' + keptLines + ' entr(y/ies) kept' +
            (unreadable ? ', including ' + unreadable + ' unreadable line(s) kept on purpose.' : '.');
   }));
+}
+
+// Read the sign-in audit — `audit/signins.jsonl`, written on every successful
+// sign-in by doLoginPassword. An operator lever run from the editor, in the same
+// spirit as maintenancePruneAuditLog: the value of the record is that it EXISTS and
+// can be produced on demand, so this prints the window to the execution log rather
+// than living on a screen nobody opens. Read-only, so it takes no lock.
+//
+// What it answers is the question the log was added for: was this one person signing
+// in twice a day, or was one code used from two places? A line whose code was issued
+// hours before it was redeemed is the one to look at.
+function reportRecentSignins(days) {
+  var windowDays = Number(days) > 0 ? Number(days) : 1;
+  var cutoff = Date.now() - windowDays * 24 * 60 * 60 * 1000;
+  var lines = readAuditLines(SIGNIN_AUDIT_SUBJECT).filter(function (l) {
+    var ms = parseAuditTimestamp(l.t);
+    return ms !== null && ms >= cutoff;
+  });
+  if (!lines.length) return report('No sign-ins recorded in the last ' + windowDays + ' day(s).');
+  report('Signed in during the last ' + windowDays + ' day(s):');
+  lines.forEach(function (l) {
+    report('  ' + String(l.t) + '   ' + String(l.by) + '   ' + String(l.nw));
+  });
+  return report(lines.length + ' sign-in(s) in the last ' + windowDays + ' day(s).');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -128,6 +128,32 @@ function confirmSessionAlive() {
 //
 // A successful login on a temporary password returns mustChangePassword with NO
 // token — the caller must route to the password-change screen, not into the app.
+// A short description of this browser, for the sign-in audit (`reportRecentSignins`
+// in the backend prints it). The point is to make "this account signed in from two
+// places" visible, so it only has to be recognisable to a human — it is what the
+// browser CLAIMS, which makes it a clue and not proof. Kept coarse on purpose: an
+// exact version string is noise in a log, and 'Android · Chrome' vs 'Windows · Edge'
+// is the distinction that actually gets looked for.
+function deviceLabel() {
+  const ua = navigator.userAgent || '';
+  const os =
+    /Android/i.test(ua) ? 'Android' :
+    /iPhone|iPad|iPod/i.test(ua) ? 'iOS' :
+    /Windows/i.test(ua) ? 'Windows' :
+    /Mac OS X/i.test(ua) ? 'Mac' :
+    /Linux/i.test(ua) ? 'Linux' : 'unknown OS';
+  // Order matters: Edge's UA carries Chrome and Safari, Chrome's carries Safari, and
+  // an iOS Chrome carries Safari too — so the most specific test has to come first.
+  const br =
+    /Edg\//.test(ua) ? 'Edge' :
+    /OPR\/|Opera/.test(ua) ? 'Opera' :
+    /Firefox\//.test(ua) ? 'Firefox' :
+    /Chrome\//.test(ua) ? 'Chrome' :
+    /Safari\//.test(ua) ? 'Safari' : 'unknown browser';
+  const installed = window.matchMedia?.('(display-mode: standalone)').matches ? ' · home-screen app' : '';
+  return os + ' · ' + br + installed;
+}
+
 function loginBackend(email, password, code) {
   if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
   const fd = new FormData();
@@ -135,6 +161,10 @@ function loginBackend(email, password, code) {
   fd.append('email', email);
   fd.append('password', password);
   if (code) fd.append('code', String(code).trim());
+  // Sent on both steps; the backend only records it on the one that mints the
+  // session. An older cached app.js sends nothing, and the audit line says
+  // "device not reported" rather than failing.
+  fd.append('device', deviceLabel());
   const doFetch = _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       // Apps Script returns JSON after a redirect; parse what came back.

@@ -253,6 +253,13 @@ file (~4 MB of I/O per save on the last day of the month, invisible in month 1 a
 severe by month 12). Per-ticket files are ~40 KB, which suits the only query that
 exists, and two people on different tickets never touch the same file.
 
+`audit/` holds one more file that this action never returns: **`signins.jsonl`**, the
+per-sign-in record (see `login` above). It is the same append-only shape under a
+subject that is not a ticket, so `auditSubjectFor` names it the way it already names
+a non-ticket store, and `maintenancePruneAuditLog` ages it with no special case —
+it reads every `.jsonl` in the folder and filters on `t`. It is read with
+`reportRecentSignins(days)`, not over HTTP.
+
 Within that file it matches **two** line shapes, and the second is the whole reason
 the workflow half of the timeline needs no new storage:
 
@@ -443,6 +450,7 @@ Content-Type: multipart/form-data
 | `email` | string | |
 | `password` | string | |
 | `code` | string | **optional** — the 6-digit sign-in code. Absent on step 1, present on step 2. |
+| `device` | string | **optional** — what the browser calls itself (`Android · Chrome`, `Windows · Edge`). Recorded in the sign-in audit on the step that mints the session; ignored otherwise. An older cached `app.js` sends nothing and the line reads `device not reported` rather than failing. |
 
 **Step 1 — no `code`.** The password is verified, and then:
 
@@ -504,6 +512,23 @@ a **disabled** account is refused, and a temp-password account is answered
 no-account-found message and the temp-password TTL all run first and exactly as
 before — the OTP step is the last thing `doLoginPassword` does before it stamps
 `lastLoginAt` and mints the session.
+
+**A successful step 2 also writes the sign-in audit**, between the `lastLoginAt`
+stamp and the mint, in its own `try`:
+
+```json
+{"t":"19-Sep-2026 09:14:02","ir":"__AUTH__","sec":"signin","by":"asha@indrones.com",
+ "ev":"signin","fid":"","old":"","nw":"code 1 min old · Android · Chrome"}
+```
+
+`nw` carries the **age of the code that was redeemed** and the device the browser
+claimed. The age is the point: a code issued at 9am and redeemed at 4pm reads
+`code 7h 12m old`, which is the shape of a code somebody else got hold of. Neither
+half of this can fail a sign-in — the write is wrapped, the session is minted after
+it, and the age read is wrapped too, so an unreadable `codes.json` records
+`age unknown` rather than refusing a verified login. See
+[10](10 - Auth & Access Model.md) for the full record, and `reportRecentSignins(days)`
+for reading it back from the editor.
 
 ### Auth and access management
 `login` → session, in the two steps documented above. A first sign-in on an

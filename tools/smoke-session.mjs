@@ -200,4 +200,46 @@ r.ok('forceReauth is not defined', !/function forceReauth\s*\(/.test(code));
 r.ok('...and not called either', !/forceReauth\s*\(/.test(code),
   (code.match(/[^\n]*forceReauth[^\n]*/) || [''])[0]);
 
+r.head('the sign-in call tells the backend which device this is');
+// The sign-in audit records what the browser CLAIMS, so the payload has to carry
+// it — a log line saying "device not reported" for every sign-in would be a log
+// nobody can act on. Driven for real: the FormData the app builds is captured and
+// read back, because a regex would only prove the string exists somewhere in the
+// file, not that it is in the request.
+let signinForm = null;
+const D = loadApp('deviceLabel, loginBackend, navigator, window', {
+  fetch: (url, init) => {
+    signinForm = init && init.body;
+    return Promise.resolve({ text: () => Promise.resolve(JSON.stringify({ status: 'error', message: 'nope' })) });
+  },
+});
+const fieldOf = (form, key) => {
+  const hit = (form && form.entries || []).find(e => e[0] === key);
+  return hit ? hit[1] : null;
+};
+
+D.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/119.0 Mobile Safari/537.36';
+await D.loginBackend('someone@indrones.com', 'a-password');
+r.ok('the login request carries a device field',
+  fieldOf(signinForm, 'device') !== null, (signinForm && signinForm.entries));
+r.ok('an Android phone reports as Android · Chrome, not as Safari',
+  fieldOf(signinForm, 'device') === 'Android · Chrome', fieldOf(signinForm, 'device'));
+
+D.navigator.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/119.0 Safari/537.36 Edg/119.0';
+await D.loginBackend('someone@indrones.com', 'a-password');
+r.ok('an Edge browser reports as Edge, not as the Chrome it also claims to be',
+  fieldOf(signinForm, 'device') === 'Windows · Edge', fieldOf(signinForm, 'device'));
+
+D.navigator.userAgent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 Version/17.1 Mobile/15E148 Safari/604.1';
+await D.loginBackend('someone@indrones.com', 'a-password');
+r.ok('a bare iPhone reports iOS · Safari',
+  fieldOf(signinForm, 'device') === 'iOS · Safari', fieldOf(signinForm, 'device'));
+
+D.navigator.userAgent = 'SomethingNobodyHasSeen/1.0';
+await D.loginBackend('someone@indrones.com', 'a-password');
+r.ok('an unrecognised browser says so instead of guessing',
+  fieldOf(signinForm, 'device') === 'unknown OS · unknown browser', fieldOf(signinForm, 'device'));
+r.ok('and the label never carries a version number or a raw UA',
+  !/\d+\.\d+/.test(fieldOf(signinForm, 'device') || ''), fieldOf(signinForm, 'device'));
+
 r.finish();

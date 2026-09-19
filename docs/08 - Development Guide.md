@@ -109,19 +109,14 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 >   later deploy of *this* project, use **Deploy → Manage deployments → pencil →
 >   New version**. A "New deployment" mints a different `/exec` and breaks every
 >   installed client, because the URL lives in a cached `app.js`.
-> - **The deployed backend is still behind the branch, and the frontend is NOT —
->   the frontend went first, on purpose.** `gh-pages` publishes from
->   `category-insights`, so the deployed `app.js` already knows how to ask for the
->   emailed code and renders Stages 3–4. The live backend runs `main`'s code, so
->   sign-in is still password-only: a password login returns a plain token with no
->   `otpRequired`, and the code box simply never appears. Pasting the branch's
->   `backend.gs` and deploying a **New version** is what turns the emailed code on.
+> - **The backend is now current too — done 2026-09-19.** Both halves are live:
+>   `gh-pages` @ `f101611` (`CACHE_NAME` `ipassbook-v34`) serves the emailed-code
+>   frontend and the live backend is the branch's `backend.gs`, so a password login
+>   really does answer `otpRequired` and the code box appears. The steps below still
+>   describe how to get there because they are how the next backend change ships.
 >   **Deploy the backend last, never first** — new backend + old frontend is the
 >   combination that locks everybody out, because the old frontend has nowhere to
->   type the code. **That risk is already behind us**: the frontend has been live
->   since `eb522b5` (cache v32), so this paste is now the safe completion step, not
->   the risky one. The same paste also carries the fix for uploads that vanished on
->   Android phones (see [07](07 - Known Issues & TODO.md)).
+>   type the code.
 >
 > **After the deploy, run `installArchiveTrigger()` once** from the editor, signed in
 > as `monish.raza@indrones.com` — that is the account that owns the Drive folder, and
@@ -263,6 +258,7 @@ one folder:
     ├── comments.json   { "all": { "items": [ … ] } }
     ├── sections/       IR409.json → { "sec-b": {…}, "sec-f": {…} }  +  index.json
     ├── audit/          IR409.jsonl — one JSON object per line, append-only
+    │                   signins.jsonl — the same shape, for sign-ins (see docs/10)
     └── backups/        <store>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
 ```
 

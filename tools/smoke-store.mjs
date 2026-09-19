@@ -939,6 +939,110 @@ const temp = ctx.doLoginPassword({ email: OTP3, password: OTPPW });
 r.ok('a temp-password holder is sent to the forced change, NOT asked for a code',
   temp.status === 'ok' && temp.mustChangePassword === true && mails.length === 0, temp);
 
+// ── THE SIGN-IN AUDIT ─────────────────────────────────────────────────────────
+// The record the reusable code made necessary: a code stays live for its whole
+// lifetime by design, so a code read over someone's shoulder stays live with it. The
+// only defence that fits is knowing a sign-in HAPPENED and how OLD the code was —
+// one issued at 9am and redeemed at 4pm is the shape to look for. This drives the
+// real two-step login and then reads the real audit file back.
+r.head('every successful sign-in leaves a line, and a line nobody can write never blocks the door');
+
+const OTP4 = 'otp.four@indrones.com';
+mkUser(OTP4);
+const signinLines = () => {
+  const folder = store.getFoldersByName('audit').next();
+  const it = folder.getFilesByName('signins.jsonl');
+  if (!it.hasNext()) return [];
+  return it.next().content.split('\n').filter(Boolean).map(l => JSON.parse(l));
+};
+
+// Seeded directly rather than asked for: the tests above deliberately spent the
+// global hourly sign-in ceiling, so `loginOtpStep` would refuse to issue here — and
+// that refusal is the subject of THEM, not of this block.
+const CODE4 = '424242';
+setCodes(codeEntries().filter(e => e.email !== OTP4).concat([{
+  email: OTP4, code: CODE4, purpose: 'login',
+  createdAt: Date.now(), expiresAt: Date.now() + 3600000, attempts: 0, used: false,
+}]));
+
+const baseline = signinLines().length;
+reexec();
+ctx.doLoginPassword({ email: OTP4, password: OTPPW });
+r.ok('step 1 (password only) records NO sign-in — no session was minted',
+  signinLines().length === baseline, signinLines().length + ' line(s), baseline ' + baseline);
+
+const okDevice = ctx.doLoginPassword({ email: OTP4, password: OTPPW, code: CODE4,
+                                       device: 'Android · Chrome' });
+reexec();
+const devLine = signinLines().slice(-1)[0];
+r.ok('a completed sign-in writes exactly one audit line',
+  okDevice.status === 'ok' && !!okDevice.sessionToken && signinLines().length === baseline + 1,
+  signinLines().length + ' line(s)');
+r.ok('the line names the account that signed in',
+  devLine && devLine.by === OTP4, devLine);
+r.ok('it records WHAT the browser claimed, so "two places" is visible',
+  /Android · Chrome/.test(devLine.nw), devLine.nw);
+r.ok('and the age of the code it redeemed',
+  /code 0 min old/.test(devLine.nw), devLine.nw);
+r.ok('the line is dated in the audit trail\'s own format, so the pruner can read it',
+  ctx.parseAuditTimestamp(devLine.t) !== null, devLine.t);
+
+// A WRONG code must leave no trace — the log records sign-ins, not attempts.
+const before = signinLines().length;
+ctx.doLoginPassword({ email: OTP4, password: OTPPW, code: '000000' });
+reexec();
+r.ok('a refused code writes nothing — the audit is sign-ins, not attempts',
+  signinLines().length === before, signinLines().length + ' vs ' + before);
+
+// The whole point of the log: the SAME code, hours later. Backdate the code rather
+// than fake the clock, so the age is computed from a real stored value.
+const aged = codeEntries().map(e =>
+  (e.email === OTP4 && e.purpose === 'login') ? Object.assign({}, e, { createdAt: e.createdAt - 4 * 60 * 60 * 1000 }) : e);
+setCodes(aged);
+reexec();
+const okAged = ctx.doLoginPassword({ email: OTP4, password: OTPPW, code: CODE4 });
+reexec();
+const agedLine = signinLines().slice(-1)[0];
+r.ok('the same code signs in again hours later — that is the feature, not a bug',
+  okAged.status === 'ok' && !!okAged.sessionToken, okAged.status);
+r.ok('...and the line shows its AGE, which is the whole reason the log exists',
+  /code 4h 00m old/.test(agedLine.nw), agedLine.nw);
+r.ok('a sign-in that reports no device says so, rather than recording a blank',
+  /device not reported/.test(agedLine.nw), agedLine.nw);
+
+// The contract: the audit must NEVER be able to fail a sign-in that has already been
+// verified. A record that sometimes blocks the door it watches is worse than none.
+const realAppend = ctx.appendAuditLinesLocked;
+ctx.appendAuditLinesLocked = function () { throw new Error('Drive is unreachable'); };
+reexec();
+const okBroken = ctx.doLoginPassword({ email: OTP4, password: OTPPW, code: CODE4 });
+reexec();
+r.ok('an audit write that THROWS still lets the sign-in through',
+  okBroken.status === 'ok' && !!okBroken.sessionToken, okBroken);
+r.ok('...and the session it returned is real, not a token-shaped error',
+  ctx.sessionCheck({ parameter: { sessionToken: okBroken.sessionToken } }).status !== 'error',
+  okBroken.sessionToken);
+ctx.appendAuditLinesLocked = realAppend;
+reexec();
+r.ok('...and once the store is writable again the log resumes where it left off',
+  (function () { const n = signinLines().length;
+    ctx.doLoginPassword({ email: OTP4, password: OTPPW, code: CODE4 });
+    reexec();
+    return signinLines().length === n + 1; })(), signinLines().length);
+
+// The operator lever that reads it back. There is no screen for this by design, so it
+// prints to the execution log — silenced here only to keep the suite's own output
+// readable, since the assertions are about its RETURN value.
+const realLog = ctx.console.log;
+ctx.console.log = () => {};
+const signinReport = ctx.reportRecentSignins(1);
+const defaultReport = ctx.reportRecentSignins();
+ctx.console.log = realLog;
+r.ok('reportRecentSignins(1) lists the sign-ins of the last day',
+  /sign-in\(s\) in the last 1 day/.test(signinReport), signinReport);
+r.ok('and with no argument it defaults to the day rather than to everything',
+  /sign-in\(s\) in the last 1 day/.test(defaultReport), defaultReport);
+
 // ── ARCHIVING A CLOSED IR'S DRIVE FOLDER ──────────────────────────────────────
 // The feature's whole risk lives in one place: `getOrCreateSectionFolder` finds the
 // IR folder BY NAME, so a folder sitting in `Archive IRs/` must still be found — or

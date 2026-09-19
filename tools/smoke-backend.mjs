@@ -1445,4 +1445,53 @@ r.ok('the extension map covers the phone formats, not only the desktop ones',
 r.ok('mimeFromName reads the LAST extension and lowercases it',
   /toLowerCase\(\)\.match\(\/\\\.\(\[a-z0-9\]\+\)\$\/\)/.test(fnBody('mimeFromName')));
 
+r.head('every sign-in leaves a record, and nothing about that record can refuse a sign-in');
+// A sign-in code is reusable for its whole lifetime by design, so a code read over
+// someone's shoulder stays live with it. The audit line is the only thing that makes
+// that visible, which is why it must exist on every success — and must never be able
+// to fail the sign-in it is recording.
+r.ok('a sign-in audit stream exists, named rather than inlined',
+  /var SIGNIN_AUDIT_SUBJECT = 'signins';/.test(code), (code.match(/SIGNIN_AUDIT_SUBJECT = [^\n]*/) || [''])[0]);
+r.ok('the successful sign-in path writes it',
+  /appendAuditLinesLocked\(SIGNIN_AUDIT_SUBJECT/.test(fnBody('doLoginPassword')));
+// `code` has its comments stripped, so this has to be structural: the audit write
+// must sit inside a try that OPENS after the previous catch (its own, not the
+// last-login stamp's) and CLOSES before the session is minted. Both halves matter —
+// sharing the stamp's try is the same as having no protection at all.
+const loginBody = fnBody('doLoginPassword');
+const auditAt = loginBody.indexOf('appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT');
+const mintAt = loginBody.indexOf('var token = mintSession');
+r.ok('the audit write sits in its OWN try, not the last-login stamp\'s',
+  auditAt > -1 &&
+  loginBody.lastIndexOf('try', auditAt) > loginBody.lastIndexOf('catch', auditAt),
+  'the nearest try/catch keyword before the audit write must be try — otherwise it ' +
+  'shares the last-login stamp\'s catch and can never be non-fatal on its own');
+r.ok('and that try is CLOSED before the session is minted, so a failure cannot escape',
+  auditAt > -1 && mintAt > auditAt && /\bcatch\b/.test(loginBody.slice(auditAt, mintAt)));
+r.ok('the session is minted AFTER the audit attempt, so a slow log cannot lose a token',
+  auditAt < mintAt);
+r.ok('the line records WHO, and the age of the code they redeemed',
+  /by: String\(email \|\| ''\)/.test(fnBody('signinAuditLine')) &&
+  /'code ' \+ codeAgeLabel\(codeIssuedAt, nowMs\) \+ ' old'/.test(fnBody('signinAuditLine')));
+r.ok('a sign-in that reports no device says so instead of recording an empty column',
+  /' · device not reported'/.test(fnBody('signinAuditLine')));
+r.ok('the device string is length-capped rather than trusted',
+  /\.slice\(0, 120\)/.test(fnBody('signinAuditLine')));
+r.ok('the code\'s age is read AFTER the code verifies, never before',
+  fnBody('loginOtpStep').indexOf('verifyAuthCode(email, \'login\', code, false)') <
+  fnBody('loginOtpStep').indexOf('info.codeIssuedAt'));
+// Again structural, because comments are stripped: the age read must be wrapped in
+// its own try/catch so an unreadable codes.json cannot fail a verified sign-in.
+const otpBody = fnBody('loginOtpStep');
+const ageAt = otpBody.indexOf('info.codeIssuedAt');
+r.ok('an unreadable code store leaves the age unknown rather than failing the sign-in',
+  /try/.test(otpBody.slice(otpBody.lastIndexOf('try', ageAt), ageAt)) &&
+  /\bcatch\b/.test(otpBody.slice(ageAt, otpBody.indexOf('return null', ageAt))),
+  otpBody.slice(ageAt, otpBody.indexOf('return null', ageAt)));
+r.ok('an operator can read the log back without a screen for it',
+  /function reportRecentSignins\(days\)/.test(code) &&
+  /readAuditLines\(SIGNIN_AUDIT_SUBJECT\)/.test(fnBody('reportRecentSignins')));
+r.ok('the reader is read-only — it takes no lock',
+  !/withRowLockOrThrow/.test(fnBody('reportRecentSignins')));
+
 r.finish();

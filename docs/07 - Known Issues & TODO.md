@@ -4,14 +4,13 @@
 > lives in JSON files under `_store/` in the owner's Drive
 > (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. Committed and green at that release — **1605 cases across 15 suites** —
-> and **deployed** to `gh-pages` (`4d6a283`, from `category-insights` `4592c83`,
-> `CACHE_NAME` `ipassbook-v28`). The **`backend.gs` on that branch is NOT deployed**:
-> the live Apps Script project still runs `main`'s backend, so sign-in is still
-> password-only and the emailed code never appears. That order is deliberate and must
-> not be inverted — new backend + old frontend is what locks everybody out. See
-> [08](08 - Development Guide.md) for the deploy, which is now just a New version on
-> the existing deployment plus a `CACHE_NAME` bump.
+> workbook. **Both halves are now live (2026-09-19):** the frontend is on `gh-pages`
+> at `f101611` (`CACHE_NAME` `ipassbook-v34`) and the matching `backend.gs` is pasted
+> into the live Apps Script project in place, so sign-in really does demand the
+> emailed code — the owner confirmed it end to end. **The order that got there is the
+> rule for next time: frontend first, always**, because new backend + old frontend is
+> what locks everybody out. See [08](08 - Development Guide.md) for the deploy, which
+> is a New version on the existing deployment plus a `CACHE_NAME` bump.
 >
 > The new store starts **empty** — there was no app data to migrate, by the owner's
 > word. The old "I-Passbook App Repository" spreadsheet is **not read, written or
@@ -82,7 +81,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ### Security
 - ⚠️ **The pre-auth surface is open by necessity.** `ping`, `sessionCheck`, `login`, `changePassword`, `forgotPassword` and `resetPassword` must answer without a session, so the GAS URL being public is not itself the boundary — the **rate limits** are. `login`/`changePassword` share `attempts.json` (5 failures → 15-minute lockout); the two emailed-code paths share one issuer with a **3-codes/hour/email** budget counted across *both* purposes (so a password reset cannot buy extra sign-in codes), a 60-second resend gap, a **per-purpose** global hourly ceiling — **12 reset codes**, **120 sign-in codes**, the looser one justified because a sign-in code is only issued after a correct password — and every mail sits under one daily `MailApp` cap. Weakening any of those re-opens a guessing oracle.
-- ⚠️ **A leaked sign-in code is useful for a whole working day.** The code is deliberately **reusable** (`consume=false`) so one mail covers every sign-in that day, which means a code read over someone's shoulder stays live until the shift ends — the same window as the session it mints. What bounds it is the shared attempt counter (5 wrong guesses burn it) and the password that must be presented alongside it. **The intended mitigation is an audit line per OTP sign-in — it does not exist yet.** The audit trail records section saves, workflow changes and comments, not sign-ins, so there is currently no way to see that a code was used at 9am and again at 4pm from two different places.
+- ⚠️ **A leaked sign-in code is useful for a whole working day.** The code is deliberately **reusable** (`consume=false`) so one mail covers every sign-in that day, which means a code read over someone's shoulder stays live until the shift ends — the same window as the session it mints. What bounds it is the shared attempt counter (5 wrong guesses burn it) and the password that must be presented alongside it. **The mitigation is now in place: every successful sign-in writes a line to `audit/signins.jsonl`** — the account, the time, what the browser claimed to be, and **how old the code was** when it was redeemed. That last field is the signal: a code issued and used within a minute is ordinary, one issued at 9am and redeemed at 4pm is the shape to look for. Read it with `reportRecentSignins(days)` from the editor (there is deliberately no screen for it). The record cannot refuse a sign-in — its write sits in its own `try`, and `smoke-store.mjs` proves a *throwing* audit write still returns a working session.
 - ✅ **Data actions require a session** — `listIRs`, `getPassbook`, `saveSection` and every admin action call `requireAuth`, and the caller's email is read **from the token**, never from a request parameter (`saveSection`'s `savedBy` is the verified email, not the posted one), so the identity cannot be spoofed.
 - ❌ **File uploads shared with anyone-with-link** — `ANYONE_WITH_LINK` sharing on all uploaded files. Deliberate: the link in a passbook has to keep working for a customer. `_store/` is the counterweight — it is `PRIVATE`/`NONE` and is a **sibling** of the upload folders, so hashes, salts and live session tokens are not readable through the Drive UI. That only holds while `_store/` is not link-shared; `initializeStore()` sets it, and re-sharing the folder by hand would undo it silently.
 - ❌ **The IR list is read straight from a link-shared Sheet, bypassing the token gate.** Making the app the pane of glass does not close this; it only stops staff *needing* the Sheet. Moving the read behind the authenticated `listIRs` action is a separate, worthwhile change — and it is now a *small* one, because `listIRs` already joins `irs.json` for the app-owned status.
@@ -142,15 +141,17 @@ completely, and the honest mitigation is named rather than implied.
 - 🔧 **`maintenancePruneAuditLog` reads and rewrites every audit file** it finds, under one lock. Each file is small (~40 KB for a busy ticket), so the whole sweep is bounded, but it is the one editor-run function whose cost grows with the number of tickets. Run it deliberately, not on a schedule nobody watches.
 - 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so `sec-f` writes to `'Section F - Quality Control'` (which therefore also holds Flight Test uploads) and `sec-g` to `'Section H - PDI'` (also Dispatch). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
 - 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_basicReport` → `f_basicReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_basicReport` to a section that no longer exists.
-- 🔧 **The deployed backend is older than `backend.gs`.** The frontend is NOT — it went
-  first, deliberately (the new sign-in needs a screen to type the code into, so an old
-  frontend meeting a new backend locks everyone out; the old backend meeting a new
-  frontend does not). What is outstanding is the **owner step**: paste `backend.gs` into
-  the Apps Script project, **Deploy → Manage deployments → ✏️ → New version**, then run
-  `installArchiveTrigger()` once if it is missing. Until that lands, sign-in is still
-  password-only and `__CONFIG__/theme` writes are refused. See [08](08 - Development Guide.md).
-- 🐛 **File uploads silently vanished on some Android phones — FIXED 2026-09-19, not yet
-  deployed.** The owner reported the camera and file picker "not working" for one user
+- ✅ **The backend caught up with the frontend — 2026-09-19.** The owner pasted
+  `backend.gs` into the Apps Script project as a **New version** on the existing
+  deployment, so the `/exec` URL is unchanged. Proven behaviourally, not from the
+  deploy output: signing out and back in now demands the emailed code, which only the
+  new backend issues. `__CONFIG__/theme` writes and the archive trigger are live with
+  it. The order that got there — **frontend first, always** — is the rule for the next
+  backend change too: a new backend meeting an old frontend locks everyone out, because
+  a password login returns `otpRequired` *instead of* a token and the old frontend has
+  no box to type the code into. See [08](08 - Development Guide.md).
+- ✅ **File uploads silently vanished on some Android phones — FIXED and DEPLOYED
+  2026-09-19.** The owner reported the camera and file picker "not working" for one user
   across two phones. The cause was not the app's UI: Android's document picker (and
   several camera apps) hand Chrome a file it cannot type, so `File.type` arrives as `''`
   even for a plain JPEG. The client passed that straight through as `mimeType`, and the
@@ -163,18 +164,29 @@ completely, and the honest mitigation is named rather than implied.
   file stored as `application/octet-stream` is one that will not preview. A file with no
   name or no contents now **throws** instead of being skipped, so the failure is loud and
   the draft is kept. `smoke-store.mjs` reproduces the phone case behaviourally (the old
-  code fails it), and `smoke-backend.mjs` pins the shape. **This rides the same backend
-  paste as the sign-in work** — it is not fixed on anyone's phone until that deploy.
+  code fails it), and `smoke-backend.mjs` pins the shape.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1702 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1735 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
 `smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it
 calls `saveSection` with a file whose MIME type is empty, which is what an Android
 picker really does — and the 5 that pin the mark decode the PNG and count its
-pixels, because the checks that were there before passed on the broken file.)
+pixels, because the checks that were there before passed on the broken file. The 33
+that arrived with the sign-in audit are the same kind of thing: 15 in
+`smoke-store.mjs` drive the real two-step login and read the real
+`audit/signins.jsonl` back — including that a *throwing* audit write still yields a
+working session — while the rest pin the request that carries the device label and
+the shape of the record.)
+
+One failure was **retired, not fixed**, worth knowing about because it will come
+back if someone re-pins it: `smoke-list-intel.mjs` asserted the card said
+`Raised 2d ago` for a fixture whose raise date is fixed text while `renderIRList`
+ages it against the real clock. It passed on 18 Sep 2026 and failed on the 19th. The
+word *card* now asserts the wording and the basis, and the arithmetic stays pinned
+by the `irAge` assertions above it, which pass an explicit `NOW` and cannot rot.
 
 **A suite that fails inside `smoke-all` but passes on its own is Chrome contention,
 not a regression** — re-run just that suite before believing it. `smoke-boot.mjs`
@@ -318,24 +330,32 @@ and a live end-to-end sign-in. See the verification list in
 
 ### Waiting on the owner, not on code
 
-Everything else on this page is a dev task. These four are the ones that need a
-human with the Google account, and three of them are the *same* five-minute job:
+Everything else on this page is a dev task. These are the ones that need a human with
+the Google account. **Item 1 is done as of 2026-09-19** — both halves are live, so what
+is left is small.
 
-1. **Paste `backend.gs` into the Apps Script project and deploy a New version.**
-   Editor: https://script.google.com/d/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/edit
-   — **Deploy → Manage deployments → ✏️ → New version**. Never "New deployment"
-   (it mints a different `/exec` and breaks every installed client). The `/exec`
-   URL must keep ending `jQXatfT/exec`. **Backend last, never first** — and the
-   frontend has already gone first, so this is now the safe step.
-   This one paste turns on **three** things at once: the emailed sign-in code,
-   `__CONFIG__/theme` writes, and the fix for uploads that vanished on Android.
-2. **Run `installArchiveTrigger()` once** from that editor, signed in as
+1. ✅ **DONE 2026-09-19 — `backend.gs` pasted into the Apps Script project as a New
+   version.** That one paste turned on three things at once: the emailed sign-in code,
+   `__CONFIG__/theme` writes, and the fix for uploads that vanished on Android. Proven
+   by signing out and back in and being asked for the code. **A second paste is owed
+   for the sign-in audit** (see the security note above): `audit/signins.jsonl` is
+   written by `doLoginPassword`, so nothing is recorded until this ships, and
+   `reportRecentSignins()` reports an empty window until then. Editor
+   https://script.google.com/d/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/edit
+   — **Deploy → Manage deployments → ✏️ → New version**. Never "New deployment" (it
+   mints a different `/exec` and breaks every installed client), and the `/exec` URL
+   must keep ending `jQXatfT/exec`. **Backend last, never first** — and the frontend
+   goes first again here, because the device label the audit records comes from
+   `app.js` and an old backend simply ignores the extra field.
+2. **Run `installArchiveTrigger()` once** if the Triggers page is empty, signed in as
    `monish.raza@indrones.com` — the account that owns the Drive folder, because the
-   trigger executes as whoever installed it. Idempotent; confirm exactly one trigger
-   on the Triggers page. Until it exists, closed IR folders are archived only by hand.
-3. **Publish the frontend** if `app.js` has moved since `eb522b5`: `node
-   tools/deploy-ghpages.mjs` to dry-run, then `node tools/deploy-ghpages.mjs --commit
-   --push`. Needs `DEPLOY_SOURCE=category-insights` while the work is on that branch.
+   trigger executes as whoever installed it. Idempotent; confirm exactly one trigger on
+   the Triggers page. Until it exists, closed IR folders are archived only by hand.
+3. **Publish the frontend** whenever `app.js` moves: `node tools/deploy-ghpages.mjs` to
+   dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
+   `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
+   `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
+   shell for a load. The last publish was `f101611` (cache v34).
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs**, 30 days after cutover —
    they are the only record of the old hand-assigned grants, and nothing reads them.
    Drive usage is worth a look at the same time (see "Erase archived IR folders").

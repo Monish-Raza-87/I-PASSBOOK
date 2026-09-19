@@ -259,7 +259,7 @@ enter "the code we emailed you" would be a plain lie with no way forward from th
 screen. The message deliberately does not say which limit was hit — that is
 admin-facing detail, not something a person signing in can act on.
 
-### The gap: a leaked code is useful all day, and nothing records its use
+### The gap, and what closes it: the sign-in audit
 
 The reuse is the feature and it has a cost worth stating plainly. A sign-in code
 read over someone's shoulder, or out of an inbox left open, stays usable for
@@ -267,13 +267,37 @@ read over someone's shoulder, or out of an inbox left open, stays usable for
 on more than one device. A 15-minute reset code, consumed by its one use, has
 neither property.
 
-What bounds it today is the shared attempt counter and the password that must be
-presented alongside every attempt. **The intended mitigation is an audit line for
-every OTP sign-in, and it is NOT implemented.** The audit trail covers section
-saves, workflow changes and comments — not sign-ins — so there is currently no way
-to see that the same code was used at 9am and again at 4pm from two different
-places. Do not claim this exists. It is recorded as a known gap so the trade-off is
-a decision rather than an oversight.
+What bounds it is the shared attempt counter and the password that must be
+presented alongside every attempt. **And since 2026-09-19 every successful sign-in
+also writes a line to `audit/signins.jsonl`** — the record that makes an abused code
+visible rather than merely bounded. One line per session minted:
+
+| Field | Holds |
+|---|---|
+| `t` | the time, in the audit trail's own `dd-MMM-yyyy HH:mm:ss` IST format, so `maintenancePruneAuditLog` ages it correctly with no special case |
+| `by` | the account that signed in — read from the verified identity, never from the request |
+| `nw` | `code <age> old · <device>` |
+| `ir` / `sec` / `ev` | `__AUTH__` / `signin` / `signin`, so the line is recognisable as belonging to no ticket |
+
+**The age is the field that matters.** A code issued and redeemed within a minute is
+an ordinary sign-in; a code issued at 9am and redeemed at 4pm is the shape of a code
+somebody else obtained. The device is what the *browser claimed* (`Android · Chrome`,
+`Windows · Edge`, `iOS · Safari`, plus `· home-screen app` when the PWA is installed)
+— a clue, not proof, and coarse on purpose so a human can scan it.
+
+Read it with **`reportRecentSignins(days)`** from the Apps Script editor — the same
+kind of operator lever as `maintenancePruneAuditLog`, and deliberately not a screen:
+the record's value is that it exists and can be produced on demand.
+
+**The record can never refuse a sign-in.** Its write sits in its own `try`, separate
+from the last-login stamp's, and the session is minted *after* it. A log that
+sometimes blocks the door it is meant to watch would be worse than no log, so this is
+enforced rather than intended: `smoke-store.mjs` replaces `appendAuditLinesLocked`
+with a throwing function, completes a sign-in, and asserts the returned token is a
+real session. Two smaller rules protect it in the same spirit — the code's issue time
+is read *after* the code verifies (so the entry found is the one just accepted, still
+live because `consume=false`), and the read is wrapped so an unreadable `codes.json`
+records `age unknown` instead of failing a verified sign-in.
 
 ## Password recovery
 

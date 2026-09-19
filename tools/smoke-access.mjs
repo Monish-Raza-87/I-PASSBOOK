@@ -219,6 +219,95 @@ r.ok('the fallback still carries a view on the Overview',
 r.ok('and a view everywhere else',
   SECTIONS.every(s => T.canViewSection(s)));
 
+// ── The view-only screen: a write button must not look alive ──────────────────
+// Reported from the field, on a laptop, in Chrome AND Edge, by one user and not
+// the admin: the two evidence buttons — "+ Add image / PDF" and "📷 Capture
+// photo" — rendered normally, highlighted on hover, and clicking them did
+// NOTHING. No error, no dialog, no message, so it was twice blamed on the
+// browser. The cause was here: they shared the COMMENT button's exemption from
+// the disable sweep, and comment comes WITH view, so that exemption is satisfied
+// for every user who can see the section at all. The buttons stayed live while
+// the file inputs they click (`-picker` / `-capture`) were disabled a few lines
+// above — and a disabled control has no activation behaviour, so `input.click()`
+// opened nothing and said nothing. An admin never sees it: admins skip the sweep.
+r.head('a view-only screen disables the WRITE buttons, not just the fields');
+
+const D = loadApp(`
+  applySectionAccessGating, canEditSection,
+  setUser: u => { currentUser = u; },
+  document,
+`);
+
+const VSEC = 'sec-b';
+// A fake element carrying only the surface applySectionAccessGating touches.
+const fakeEl = (...classes) => ({
+  id: '', type: 'button', disabled: false, style: {}, title: '',
+  classList: { contains: c => classes.includes(c), add() {}, remove() {} },
+});
+
+let sweepEls = [];
+let fakeSave = null;
+D.document.querySelector = () => null;
+D.document.getElementById = id => {
+  if (id === VSEC) {
+    return { id: VSEC, style: {}, dataset: {},
+             classList: { contains: () => false, add() {}, remove() {} },
+             querySelectorAll: () => sweepEls, querySelector: () => null };
+  }
+  if (id === 'save-' + VSEC) return fakeSave;
+  return null;                      // every other pane: the `if (!pane) return` guard
+};
+
+const sweepAs = perms => {
+  D.setUser({ email: 'u@indrones.com', sessionToken: 't',
+              access: { role: 'user', permissions: perms, departments: [], triage: false } });
+  sweepEls = [
+    fakeEl('btn-add-evidence'),      // 0  + Add image / PDF
+    fakeEl('btn-add-evidence'),      // 1  📷 Capture photo
+    fakeEl('field-nudge-btn'),       // 2  💬 comment — a read-adjacent act
+    fakeEl('btn-add-row'),           // 3  a write
+    fakeEl('form-input'),            // 4  an ordinary field
+  ];
+  sweepEls[5] = fakeEl(); sweepEls[5].type = 'file';   // 5 the hidden pickers
+  fakeSave = fakeEl('btn');
+  D.applySectionAccessGating();
+  return { add: sweepEls[0], cap: sweepEls[1], comment: sweepEls[2],
+           addRow: sweepEls[3], field: sweepEls[4], file: sweepEls[5], save: fakeSave };
+};
+
+const vo = sweepAs({ [VSEC]: 'view' });
+r.ok('the premise holds — this user really is view-only here',
+  D.canEditSection(VSEC) === false && D.canEditSection('sec-c') === false);
+r.ok('"+ Add image / PDF" is DISABLED — it is a write',
+  vo.add.disabled === true, vo.add);
+r.ok('"📷 Capture photo" is disabled too — same act, same gate',
+  vo.cap.disabled === true, vo.cap);
+// THE regression assertion. The silent click came from these two disagreeing:
+// the button live, the input it clicks dead. Whatever the rule is, a write button
+// and the Save button must answer it the same way.
+r.ok('every write button agrees with Save, which is what makes the click silent-proof',
+  vo.add.disabled === vo.save.disabled && vo.cap.disabled === vo.save.disabled &&
+  vo.addRow.disabled === vo.save.disabled,
+  { add: vo.add.disabled, save: vo.save.disabled, addRow: vo.addRow.disabled });
+r.ok('...and it says WHY, like Save does, instead of hovering like a live button',
+  /view-only/.test(vo.add.title) && /view-only/.test(vo.cap.title), vo.add.title);
+r.ok('the disabled button is styled disabled, not merely inert',
+  vo.add.style.opacity === '0.5' && vo.add.style.cursor === 'not-allowed', vo.add.style);
+// Not an over-correction: commenting is NOT editing, and comment comes with view.
+r.ok('the 💬 comment button stays alive for a view-only user',
+  !vo.comment.disabled, vo.comment.disabled);
+r.ok('the ordinary field is disabled (unchanged behaviour)', vo.field.disabled === true);
+r.ok('the hidden file inputs are disabled (this is what made the click a no-op)',
+  vo.file.disabled === true);
+
+const ed = sweepAs({ [VSEC]: 'edit' });
+r.ok('an EDITOR gets live buttons — the sweep does not run at all',
+  ed.add.disabled === false && ed.cap.disabled === false && ed.save.disabled === false,
+  { add: ed.add.disabled, save: ed.save.disabled });
+r.ok('...and no view-only tooltip is left on them', ed.add.title === '', ed.add.title);
+r.ok('a neighbouring section with no grant does not disable this one\'s buttons',
+  D.canEditSection('sec-c') === false && ed.add.disabled === false);
+
 r.head('an ordinary user is never an admin');
 T.setUser({ email: 'plain@indrones.com', sessionToken: 't', access: { role: 'user', permissions: {}, departments: [] } });
 r.ok('isAdmin() is false', T.isAdmin() === false);

@@ -4397,10 +4397,25 @@ function applySectionAccessGating() {
         // share it. Only writing is gated.
         if (el.classList.contains('sec-export-btn')) return;
         if (el.type === 'file') { el.disabled = true; return; }
-        // Don't disable the section's comment button if the user can comment.
-        if (el.classList.contains('field-nudge-btn') && comment) return;
-        if (el.classList.contains('btn-add-row') ||
-            el.classList.contains('btn-add-evidence') || el.classList.contains('field-nudge-btn')) {
+        // A comment button is about commenting, so it survives for anyone who can
+        // comment — which, since comment comes WITH view, is everyone who can see
+        // the section at all.
+        //
+        // The add-row and add-evidence buttons are WRITES and belong to the same
+        // gate as Save. They used to share the comment button's exemption, and that
+        // exemption is almost always satisfied, so they stayed LIVE on a view-only
+        // screen. Clicking them ran `addEvidenceImage`, which clicks `-picker` — an
+        // input disabled a few lines above — and a disabled control has no
+        // activation behaviour, so the file dialog never opened. No error, no
+        // message, no effect: a button that hovers like a live one and does nothing.
+        // Reported from the field on a laptop and blamed on the browser, because an
+        // admin never sees it (admins skip this whole block).
+        if (el.classList.contains('btn-add-row') || el.classList.contains('btn-add-evidence')) {
+          el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed';
+          el.title = 'You have view-only access to this section';
+          return;
+        }
+        if (el.classList.contains('field-nudge-btn')) {
           if (!comment) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; }
           return;
         }

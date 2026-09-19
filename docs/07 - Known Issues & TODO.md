@@ -150,6 +150,24 @@ completely, and the honest mitigation is named rather than implied.
   backend change too: a new backend meeting an old frontend locks everyone out, because
   a password login returns `otpRequired` *instead of* a token and the old frontend has
   no box to type the code into. See [08](08 - Development Guide.md).
+- ✅ **The two evidence buttons were silently dead on a view-only section — FIXED
+  2026-09-19.** Reported from the field: a user on a laptop, in **both Chrome and
+  Edge**, saw "+ Add image / PDF" and "📷 Capture photo" render normally and
+  highlight on hover, and clicking either did **nothing at all** — no error, no
+  dialog, no message — while the same account worked on a phone and the admin never
+  saw it at all. It was not the browser, the device, or the account's session: the
+  user had **view-only** access to that section. `applySectionAccessGating` disables
+  the Save button and every field on a view-only screen, and `btn-add-evidence` sits
+  in the same sweep — but it shared the **comment** button's exemption, and comment
+  comes *with* view, so that exemption is satisfied for every user who can see the
+  section. The buttons therefore stayed live while the hidden file inputs they click
+  (`-picker`, `-capture`) were disabled a few lines above, and a disabled control has
+  no activation behaviour — so `input.click()` opened nothing, silently. An admin
+  never reproduces it because admins skip the sweep entirely. The buttons are now
+  gated on **edit**, like Save, and carry the same "You have view-only access to this
+  section" tooltip. `smoke-access.mjs` reproduces it: the new assertions fail against
+  the old code with the exact state that caused the silence (`{add: false, save:
+  true}` — Save disabled, the evidence buttons live).
 - ✅ **File uploads silently vanished on some Android phones — FIXED and DEPLOYED
   2026-09-19.** The owner reported the camera and file picker "not working" for one user
   across two phones. The cause was not the app's UI: Android's document picker (and
@@ -168,7 +186,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1735 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1747 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
 `smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it

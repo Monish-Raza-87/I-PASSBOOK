@@ -22,8 +22,21 @@ import { loadApp, makeReporter } from './harness.mjs';
 const r = makeReporter();
 const DAY = 86400000;
 
-// A fixed "now" so every arithmetic assertion is deterministic.
-const NOW = Date.UTC(2026, 8, 18, 12, 0, 0);          // 18 Sep 2026, noon UTC
+// "now", anchored to the REAL clock rather than a frozen date.
+//
+// It was `Date.UTC(2026, 8, 18, 12, 0, 0)` — a fixed 18 Sep 2026 — and that quietly
+// rotted: the unit assertions below all PASS `NOW` explicitly, so they stayed
+// deterministic, but every assertion made against a RENDERED card did not.
+// `renderIRList` calls `irAge(ir)` with no clock, so it ages the fixture against
+// Date.now() while the fixture was built from the frozen NOW. A `statusAt` of
+// "9 days before 18 Sep" reads "In status 9d" on the 18th and "10d" on the 19th,
+// and the suite went red at 17:30 IST on 2026-09-19 for no reason but the date.
+//
+// Tracking the real clock fixes the whole class at once: the fixture and the
+// renderer then read the same clock, and `NOW - n * DAY` renders as exactly n for
+// any n, on any day, forever. The explicit-clock arithmetic below is unchanged and
+// is still fully deterministic, because it supplies `now` itself.
+const NOW = Date.now();
 
 const { T, byId } = loadApp(`
   sectionProgress, daysSince, irAge, irOverdue, irOverdueLimit,
@@ -134,10 +147,14 @@ r.ok('the DISPLAY-only dateRaised is not a clock',
 r.ok('a JS Date string is not accepted as the ISO date either',
   T.irAge(ir({ dateRaisedISO: '2026-08-01T00:00:00Z' }), NOW) === null);
 
+// Written with isoDaysAgo rather than two hard-coded dates: the assertion is that
+// a raise date is read as UTC midnight, which is a claim about the DATE STRING,
+// not about 18 September. Hard-coding the pair pinned it to the calendar the suite
+// happened to be written on and would have expired the next day.
 r.ok('the raise date is read as UTC midnight, so it does not drift by a day',
-  T.irAge(ir({ dateRaisedISO: '2026-09-18' }), NOW).days === 0 &&
-  T.irAge(ir({ dateRaisedISO: '2026-09-17' }), NOW).days === 1,
-  [T.irAge(ir({ dateRaisedISO: '2026-09-18' }), NOW).days, T.irAge(ir({ dateRaisedISO: '2026-09-17' }), NOW).days]);
+  T.irAge(ir({ dateRaisedISO: isoDaysAgo(0) }), NOW).days === 0 &&
+  T.irAge(ir({ dateRaisedISO: isoDaysAgo(1) }), NOW).days === 1,
+  [T.irAge(ir({ dateRaisedISO: isoDaysAgo(0) }), NOW).days, T.irAge(ir({ dateRaisedISO: isoDaysAgo(1) }), NOW).days]);
 
 r.head('the wording says which clock it is');
 const inStatus = T.irAge(ir({ statusAt: NOW - 6 * DAY }), NOW);

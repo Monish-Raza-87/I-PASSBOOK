@@ -117,13 +117,22 @@ Two cuts ship — a portrait phone cut listed first and gated by `media`, then t
 16:9 master as both the desktop cut and the fallback. `<source>` takes the first
 match, so the order is load-bearing.
 
-The intro plays **once per device**. `app.js` records `localStorage.introSeen` when
-it plays, and the pre-paint script sets `data-intro="seen"` on `<html>` before the
-body parses — `base.css` hides the splash off that attribute, so a returning user
-never sees a flash of it. The video is `preload="none"` with no `autoplay`, and
-`app.js` calls `play()` only on that first open, so the download is never paid
-again. Neither cut is in `sw.js`'s `SHELL` — precaching them would charge every
-first-time install ~13 MB before sign-in.
+The intro plays **every time a device arrives at the sign-in screen**. The one
+device that skips it is one that is **already signed in** — nine seconds of video in
+front of a session that was going to resume anyway is a delay, not a welcome. That
+is decided from `localStorage.ipb_user` **and** `localStorage.ipb_session` together,
+in two places that must agree: the pre-paint script in `index.html` sets
+`data-splash="skip"` on `<html>` before the body parses (`base.css` hides the splash
+off that attribute, so no flash), and `app.js`'s boot path re-asks through
+`hasStoredSession()`. `smoke-shell.mjs` pins the two conditions to each other —
+if they drift, a signed-in user gets a video or a signed-out one gets a blank
+screen, and both only ever show up on a real device.
+
+Skipping also has to be free: the video is `preload="none"` with no `autoplay`, and
+the boot path returns before it touches the video, so a resuming device downloads
+nothing. Neither cut is in `sw.js`'s `SHELL` — precaching them would charge every
+first-time install ~13 MB before sign-in. Every other visit does fetch the cut, so
+this is the one place the app spends bandwidth on purpose.
 
 Dismissal listens for the video's `ended` event rather than waiting a fixed time, so
 a re-exported intro needs no code change; `INTRO_FALLBACK_MS` is the backstop when

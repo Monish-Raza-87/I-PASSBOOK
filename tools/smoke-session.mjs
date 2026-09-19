@@ -107,8 +107,15 @@ gone.forEach(([what, re]) => r.ok(what + ' is not referenced in app.js', !re.tes
 // forced a re-login on the next open. Exactly one removal must remain — the one
 // inside clearLocalAuth().
 r.head('the forced-re-login mechanism is gone');
-const removals = (code.match(/localStorage\.removeItem\('ipb_user'\)/g) || []).length;
-r.ok('exactly one ipb_user removal remains (in clearLocalAuth)', removals === 1, removals);
+// The stored profile's key has one definition (`USER_KEY`) and every site refers to
+// it, because hasStoredSession()'s answer is only correct if the name read is the
+// name persistUser() wrote. Counted through either spelling so this stays a test of
+// "one removal remains" rather than a test of how the key is spelled.
+const removals = (code.match(/localStorage\.removeItem\((?:'ipb_user'|USER_KEY)\)/g) || []).length;
+r.ok('exactly one removal of the stored profile remains (in clearLocalAuth)',
+  removals === 1 &&
+  /const USER_KEY\s*=\s*'ipb_user';/.test(code) &&
+  /function clearLocalAuth[\s\S]*?removeItem\(USER_KEY\)/.test(code), removals);
 r.ok('persistUser does not clear the profile',
   !/function persistUser[\s\S]{0,400}removeItem/.test(code));
 

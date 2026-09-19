@@ -258,21 +258,50 @@ ok('the fallback outlasts the longer cut, so it truncates neither',
 ok('the loader bar is timed from the video itself',
   /--intro-ms/.test(appJs) && /var\(--intro-ms/.test(read('../base.css')));
 
-head('the intro plays once, then is skipped');
-ok('app.js keys the "already seen" flag on localStorage',
-  /INTRO_SEEN_KEY/.test(appJs) &&
-  /localStorage\.getItem\(INTRO_SEEN_KEY\)/.test(appJs) &&
-  /localStorage\.setItem\(INTRO_SEEN_KEY/.test(appJs));
-ok('the flag is recorded, not replayed, when the intro is shown',
-  appJs.indexOf("localStorage.setItem(INTRO_SEEN_KEY") < appJs.indexOf('video.play()'),
-  { set: appJs.indexOf("localStorage.setItem(INTRO_SEEN_KEY"), play: appJs.indexOf('video.play()') });
-// The pre-paint script must set this BEFORE the body is parsed, or a returning
-// user sees the splash flash before app.js hides it.
+// The splash plays every time a device arrives at the sign-in screen. The one
+// device that skips it is one that is ALREADY SIGNED IN — nine seconds of video in
+// front of a session that was going to resume anyway is a delay, not a welcome.
+//
+// That decision is made twice: once before paint in index.html (which cannot call
+// into app.js, because app.js has not parsed yet) and once in app.js's boot path.
+// The two must ask the same question, and nothing in this app fails as quietly as
+// they would by drifting: the stylesheet hides the splash while the boot path
+// plays the video, or the boot path skips while the splash is still on screen, and
+// either one only ever shows up on a real device.
+head('the splash skip and the boot path ask the same question');
 const prePaint = (html.match(/<head>[\s\S]*?<\/head>/) || [''])[0];
-ok('the pre-paint script sets data-intro before the body parses',
-  /data-intro/.test(prePaint) && /introSeen/.test(prePaint));
-ok('base.css hides the splash off that attribute',
-  /html\[data-intro="seen"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
+ok('index.html decides the skip before paint, off BOTH stored keys',
+  /getItem\('ipb_user'\)/.test(prePaint) && /getItem\('ipb_session'\)/.test(prePaint));
+// Before the body is parsed, or the person whose session is resuming sees the
+// splash flash for a frame before app.js hides it.
+ok('...and marks it with data-splash="skip"',
+  /setAttribute\('data-splash', 'skip'\)/.test(prePaint));
+ok('base.css hides the splash off that exact attribute',
+  /html\[data-splash="skip"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
+ok('app.js asks it once, through hasStoredSession()',
+  /function hasStoredSession\(\)/.test(appJs) &&
+  /localStorage\.getItem\(USER_KEY\) && localStorage\.getItem\(SESSION_KEY\)/.test(appJs));
+// ...and the NAMES agree, not merely the shape. "index.html reads two keys" is not
+// the claim; "index.html reads the two keys app.js reads" is. A renamed constant on
+// one side is exactly the drift this block exists to catch, and reading the
+// literals out of their declarations is the only way to compare them.
+const userKey = (appJs.match(/const USER_KEY\s*=\s*'([^']+)';/) || [])[1];
+const sessionKey = (appJs.match(/const SESSION_KEY\s*=\s*'([^']+)';/) || [])[1];
+ok('app.js declares the two keys it checks',
+  !!userKey && !!sessionKey, { user: userKey, session: sessionKey });
+ok('index.html checks THOSE keys, spelled the same way',
+  !!userKey && !!sessionKey &&
+  prePaint.includes("getItem('" + userKey + "')") &&
+  prePaint.includes("getItem('" + sessionKey + "')"),
+  { user: userKey, session: sessionKey });
+ok('the boot path consults the same predicate',
+  /if \(hasStoredSession\(\)\) \{ dismissSplash\(true\); return; \}/.test(appJs));
+// The old once-per-device flag is gone, not merely unused: a leftover write would
+// keep working and quietly make the intro once-per-device again for anyone whose
+// key it set, which is the bug the owner asked to have removed.
+ok('the old once-per-device flag is gone from every file',
+  !/introSeen/.test(appJs) && !/introSeen/.test(html) &&
+  !/data-intro/.test(appJs) && !/data-intro/.test(html) && !/data-intro/.test(read('../base.css')));
 
 // The splash is sized to the VIEWPORT, not to the video's own pixels. This is
 // asserted because the wrong version is the one that looks right when you read
@@ -499,10 +528,11 @@ ok('the number a user reads equals the number their device is running',
 ok('index.html carries version slots (the sign-in card AND the app footer)',
   (html.match(/class="app-version"/g) || []).length >= 2,
   (html.match(/class="app-version"/g) || []).length);
-// …and the credit line, on the sign-in card as well as inside the app.
+// …and the credit line, on the sign-in card as well as inside the app. The
+// wording is the owner's, verbatim — "by Mr. Raza For Indrones", capital F.
 ok('the credit is on the sign-in card, not only behind the sign-in',
   /app-credit/.test((html.match(/<div id="auth-container">[\s\S]*?<\/div>\s*<\/div>/) || [''])[0]) &&
-  /Mr\. Raza, Indrones/.test(html));
+  /Mr\. Raza For Indrones/.test(html));
 // …filled by one writer, so there is one place to look when the number is wrong.
 ok('app.js fills every slot through the shared .app-version class',
   /querySelectorAll\('\.app-version'\)/.test(appJs));

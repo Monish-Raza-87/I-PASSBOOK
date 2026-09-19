@@ -49,15 +49,21 @@
         document.documentElement.setAttribute('data-palette', pal);
       } catch (e) { /* storage blocked — palette.css's :root default applies */ }
 
-      // The intro plays once per device, on the very first open. Marking it here
-      // (before the body is parsed) lets the stylesheet hide the splash outright,
-      // so a returning user never sees it flash — and, because the video is
-      // preload="none", never downloads it either.
+      // The splash plays every time this device arrives at the SIGN-IN screen —
+      // it is the app's opening, not a one-off. The single case that skips it is
+      // a device that is already signed in: those people resume straight into the
+      // app, and putting a nine-second video in front of a session that was going
+      // to resume anyway is a delay, not a welcome.
+      //
+      // BOTH keys are required, exactly as hasStoredSession() in app.js requires
+      // them — the pre-paint script cannot call it (app.js has not parsed yet),
+      // so the two conditions are pinned to each other by smoke-shell.mjs. A
+      // half-cleared device therefore plays the intro rather than showing nothing.
       try {
-        if (localStorage.getItem('introSeen') === '1') {
-          document.documentElement.setAttribute('data-intro', 'seen');
+        if (localStorage.getItem('ipb_user') && localStorage.getItem('ipb_session')) {
+          document.documentElement.setAttribute('data-splash', 'skip');
         }
-      } catch (e) { /* storage blocked — the intro plays, which is the safe way to be wrong */ }
+      } catch (e) { /* storage blocked — the splash plays, which is the safe way to be wrong */ }
     })();
   </script>
 </head>
@@ -65,8 +71,10 @@
 
   <!-- ========== SPLASH SCREEN ========== -->
   <div id="splash-screen">
-    <!-- preload="none" and no autoplay ON PURPOSE: a returning user must not
-         download this video at all. app.js calls play() only on the first open.
+    <!-- preload="none" and no autoplay ON PURPOSE: the splash is skipped outright
+         on a device that is already signed in, and a skipped splash must not pay
+         for the video. app.js calls play() itself, and only when the splash is
+         actually going to be shown.
          Neither cut is in sw.js's SHELL — precaching ~13 MB on install would
          cost every user that download before they ever sign in.
 
@@ -148,7 +156,7 @@
       <p id="auth-error" class="auth-error" style="display:none"></p>
       <!-- The credit sits on the sign-in card, not only inside the app: it is the
            one screen everybody sees on every device, every day. -->
-      <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza, Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
+      <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
     </div>
   </div>
 
@@ -233,7 +241,7 @@
            Appearance group in the user menu (top right), because reaching it
            meant scrolling to the bottom of the sidebar. The .sidebar-foot rules
            went with it. -->
-      <p class="app-credit sidebar-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza, Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
+      <p class="app-credit sidebar-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
     </nav>
 
     <!-- ====== WORKSPACE ====== -->

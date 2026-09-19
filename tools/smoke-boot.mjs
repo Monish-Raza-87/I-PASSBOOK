@@ -134,9 +134,12 @@ const server = http.createServer((req, res) => {
       .replace('</body>', AUTH_DRIVER + '</body>'), MIME['.html']);
   }
 
-  if (url === INTRO_PATH) {
+  if (url === INTRO_PATH || url === INTRO_SIGNED_IN_PATH) {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-    return send(html.replace('</body>', INTRO_DRIVER + '</body>'), MIME['.html']);
+    const seed = url === INTRO_SIGNED_IN_PATH ? SIGNED_IN_SEED : '';
+    return send(html
+      .replace('<head>', '<head>' + seed)
+      .replace('</body>', INTRO_DRIVER + '</body>'), MIME['.html']);
   }
 
   const file = path.join(ROOT, url === '/' ? 'index.html' : url);
@@ -294,32 +297,57 @@ const AUTH_DRIVER = `<script>
 `;
 
 // ── The intro probe ───────────────────────────────────────────────────────────
-// The intro plays once per device. Its quiet failure mode is a dead reference:
-// the splash still disappears either way — the fallback timer guarantees that —
-// so a 404 looks exactly like success from the outside. The only way to tell the
-// two apart is to ask a real browser whether it actually got the video, and then
-// ask a SECOND load on the same profile whether it stayed away. That second
-// question is the whole feature, so it is worth a persistent profile.
+// The splash plays every time a device arrives at the sign-in screen, and is
+// skipped only for a device that is already signed in. Both halves of that have a
+// quiet failure mode — a dead video reference still lets the splash disappear (the
+// fallback timer guarantees it), so a 404 looks exactly like success from the
+// outside, and a skip that came from the wrong place still looks like a skip. The
+// only way to tell them apart is to ask a real browser, three times:
+//
+//   1. a fresh device                 → the intro really plays, and really arrives
+//   2. the SAME device again          → it plays AGAIN (the point of the change)
+//   3. the same device, signed in     → no splash, and no 9.7 MB download
+//
+// Load 2 reuses the same profile on purpose. Strictly it no longer has to: what
+// decides the skip is the ABSENCE of a stored session, not a memory of having seen
+// the video, so a fresh profile would answer the same way. Sharing it keeps the
+// claim honest — this is a device that really did play the intro once, being asked
+// to play it again.
 const INTRO_PATH = '/__intro.html';
+
+// The same page, with a stored sign-in seeded before index.html's pre-paint script
+// runs. The seed has to be the FIRST thing in <head>: the attribute the stylesheet
+// keys off is set by that script, at parse time, before anything else could set it.
+const INTRO_SIGNED_IN_PATH = '/__intro-signedin.html';
+const SIGNED_IN_SEED = `<script>try{
+localStorage.setItem('ipb_user', JSON.stringify({name:'Seeded Tester',email:'seeded@indrones.com',initial:'S'}));
+localStorage.setItem('ipb_session','seeded-token');
+}catch(e){}</script>`;
 
 const INTRO_DRIVER = `<script>
 (function () {
   function report(o) {
     try { fetch('/__probe', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
   }
+  // Sampled NOW, while this script is the last thing in the body and \`load\` has
+  // not fired: app.js has already parsed and bound its load handler but has not
+  // run it, so this is the splash as the person would first see it — before any
+  // dismissal. The snapshot below is taken after it is gone and cannot tell a
+  // skipped splash from one that merely finished.
+  var visibleAtStart = null;
+  var s0 = document.getElementById('splash-screen');
+  if (s0) { try { visibleAtStart = getComputedStyle(s0).display !== 'none'; } catch (e) {} }
   function snap() {
     var s = document.getElementById('splash-screen');
     var v = document.getElementById('splash-video');
     var res = performance.getEntriesByType('resource') || [];
     var mp4 = res.filter(function (e) { return /intro_ipassbookv2\\.mp4/.test(e.name); });
-    var seen = null;
-    try { seen = localStorage.getItem('introSeen'); } catch (e) {}
     report({
       done: true,
-      seen: seen,
+      splashVisibleAtStart: visibleAtStart,
       splashInlineDisplay: s ? s.style.display : null,
       splashComputed: s ? getComputedStyle(s).display : null,
-      prePaintAttr: document.documentElement.getAttribute('data-intro'),
+      prePaintAttr: document.documentElement.getAttribute('data-splash'),
       videoDuration: v && isFinite(v.duration) ? v.duration : null,
       videoReadyState: v ? v.readyState : null,
       videoErrorCode: v && v.error ? v.error.code : null,
@@ -683,7 +711,7 @@ if (probe && !probe.error) {
 }
 
 // ── Phase 4: the intro plays once per device ──────────────────────────────────
-head('the intro video plays once, then stays away');
+head('the intro video plays on the way to sign-in, and only a signed-in device skips it');
 
 function waitForProbe(before, ms) {
   return new Promise(res => {
@@ -696,12 +724,10 @@ function waitForProbe(before, ms) {
   });
 }
 
-// A real, persistent Chrome profile — because "the second visit" is a claim
-// about a device, not about a page. A fresh profile each time would answer a
-// different question, and would pass whether or not the feature worked.
+// A real, persistent Chrome profile, shared by all three loads.
 const introProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'ipb-intro-'));
 
-async function runIntroLoad(ms) {
+async function runIntroLoad(ms, pagePath = INTRO_PATH) {
   const before = probePosts;
   const proc = spawn(chromePath, [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
@@ -712,17 +738,16 @@ async function runIntroLoad(ms) {
     '--autoplay-policy=no-user-gesture-required',
     '--enable-logging=stderr', '--log-level=0',
     '--user-data-dir=' + introProfile,
-    `${base}${INTRO_PATH}`,
+    `${base}${pagePath}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const got = await waitForProbe(before, ms);
-  // Give Chrome a moment to write the profile down before killing it. The
-  // "seen" flag goes to the profile's LevelDB asynchronously, and the probe
-  // lands at about the same instant the intro is dismissed — so killing the
-  // process the moment the probe arrives can lose the flag, and the RETURN-VISIT
-  // assertions below then fail for a reason that has nothing to do with the
-  // feature. Seen once for real (2 failures in a full `smoke-all` run, clean on
-  // three re-runs of this suite alone), which is exactly how a flaky test gets
-  // believed over a working feature.
+  // Give Chrome a moment to shut the profile down cleanly before killing it. This
+  // used to be load-bearing: the intro wrote an "already seen" flag to the profile's
+  // LevelDB and killing the process the instant the probe arrived could lose it,
+  // which made the return-visit assertions fail over a working feature. That flag is
+  // gone (nothing is written by the intro any more, so nothing can be lost), and no
+  // assertion now reads anything a previous load wrote — but killing a browser
+  // mid-write is still not worth doing to save 1.5s.
   if (got) await new Promise(r => setTimeout(r, 1500));
   try { proc.kill(); } catch { /* already gone */ }
   return got;
@@ -741,23 +766,43 @@ if (firstIntro) {
   ok('it is the full-length intro, not a truncated read',
     firstIntro.videoDuration > 8.5 && firstIntro.videoDuration < 9.5,
     firstIntro.videoDuration);
+  ok('the splash is on screen before anything dismisses it',
+    firstIntro.splashVisibleAtStart === true, firstIntro.splashVisibleAtStart);
   ok('the splash is dismissed afterwards',
     firstIntro.splashInlineDisplay === 'none', firstIntro.splashInlineDisplay);
-  ok('the device is marked as having seen it',
-    firstIntro.seen === '1', firstIntro.seen);
-  ok('nothing marked it seen before the intro ran',
+  ok('nothing skipped it before paint — this device had no session to resume',
     firstIntro.prePaintAttr === null, firstIntro.prePaintAttr);
 }
 
-const secondIntro = await runIntroLoad(30000);
+// THE POINT OF THE CHANGE. Before this, the intro was once per device and a
+// returning visitor never saw it again; the owner asked for it every time someone
+// goes to the sign-in screen. `mp4Requests` is the honest signal — the splash
+// element ends up display:none whether it played, failed, or was skipped, so the
+// only thing that distinguishes "it played" from "it did not" is whether the
+// browser went and got the video.
+const secondIntro = await runIntroLoad(45000);
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
-  ok('the splash never renders on a return visit',
-    secondIntro.prePaintAttr === 'seen' && secondIntro.splashComputed === 'none',
-    { attr: secondIntro.prePaintAttr, display: secondIntro.splashComputed });
-  // The point of preload="none" plus no autoplay: the ~9.7 MB is not paid again.
-  ok('and the video is not downloaded a second time',
-    secondIntro.mp4Requests === 0, secondIntro.mp4Requests);
+  ok('a device that has already seen the intro is shown it AGAIN',
+    secondIntro.splashVisibleAtStart === true && secondIntro.mp4Requests >= 1,
+    { visibleAtStart: secondIntro.splashVisibleAtStart, mp4: secondIntro.mp4Requests });
+  ok('...because seeing it before is no longer a reason to skip it',
+    secondIntro.prePaintAttr === null, secondIntro.prePaintAttr);
+}
+
+// The one thing that does skip it. A seeded sign-in is put in localStorage before
+// index.html's pre-paint script runs, which is what a resuming device looks like
+// from that script's side.
+const signedInIntro = await runIntroLoad(30000, INTRO_SIGNED_IN_PATH);
+ok('the signed-in device reports', !!signedInIntro);
+if (signedInIntro) {
+  ok('a device that is already signed in never sees the splash',
+    signedInIntro.splashVisibleAtStart === false && signedInIntro.prePaintAttr === 'skip',
+    { visibleAtStart: signedInIntro.splashVisibleAtStart, attr: signedInIntro.prePaintAttr });
+  // preload="none" plus a boot path that returns before touching the video: the
+  // ~9.7 MB is not paid by someone whose session was going to resume anyway.
+  ok('...and does not download the video to find that out',
+    signedInIntro.mp4Requests === 0, signedInIntro.mp4Requests);
 }
 
 try { fs.rmSync(introProfile, { recursive: true, force: true }); } catch {}

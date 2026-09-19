@@ -186,7 +186,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1747 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **1762 cases across 16 suites**, all passing.
 (1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
 its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
 `smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it
@@ -210,11 +210,11 @@ by the `irAge` assertions above it, which pass an explicit `NOW` and cannot rot.
 not a regression** — re-run just that suite before believing it. `smoke-boot.mjs`
 launches real browsers, and twice a full run has produced an empty first paint
 (no icon slots, 33 failures) or a lost `localStorage` flag. The second one is
-understood and fixed: Chrome writes the profile asynchronously, so the intro phase
-now waits ~1.5s after the probe before killing the process, because killing it
-instantly could lose the "seen" flag and make the return-visit assertions fail over
-a working feature. The first one is not diagnosed, only observed — re-run and it is
-gone.
+understood, and the cause has since been removed: Chrome writes the profile
+asynchronously, so a load that killed the process the instant the probe arrived could
+lose the intro's "already seen" flag — and that flag no longer exists, because the
+intro now writes nothing at all. The ~1.5s wait after the probe is kept anyway.
+The first one is not diagnosed, only observed — re-run and it is gone.
 
 Suites are discovered by `readdirSync` — a new `tools/smoke-*.mjs` is picked up with
 no registration step.

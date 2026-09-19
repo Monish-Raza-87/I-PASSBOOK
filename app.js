@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v37';
+const APP_VERSION = 'v38';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -84,11 +84,24 @@ let currentUser = null;
 // Persist/restore the session token. localStorage so reopening the app resumes
 // the session instead of demanding a fresh sign-in.
 const SESSION_KEY = 'ipb_session';
+const USER_KEY    = 'ipb_user';
 function persistSession(token) {
   try { if (token) localStorage.setItem(SESSION_KEY, token); else localStorage.removeItem(SESSION_KEY); } catch { /* private mode */ }
 }
 function loadSession() {
   try { return localStorage.getItem(SESSION_KEY) || null; } catch { return null; }
+}
+
+// True when this device holds BOTH halves of a stored sign-in — exactly the
+// condition enterApp() below uses to go straight into the app, so the splash skip
+// and the boot path cannot disagree. index.html's pre-paint script asks the same
+// question with the same two key names, because it runs before this file is
+// parsed; smoke-shell.mjs pins the two together. If they ever drift, a signed-in
+// user is shown a nine-second video in front of a session that was going to
+// resume anyway.
+function hasStoredSession() {
+  try { return !!(localStorage.getItem(USER_KEY) && localStorage.getItem(SESSION_KEY)); }
+  catch { return false; }
 }
 
 // The ONE place local auth state is torn down, so it can never be half-cleared.
@@ -99,7 +112,7 @@ function loadSession() {
 // ejection path for as long as the login screen is up.
 function clearLocalAuth() {
   try {
-    localStorage.removeItem('ipb_user');
+    localStorage.removeItem(USER_KEY);
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');   // legacy key from the sessionStorage build
     sessionStorage.removeItem(SESSION_KEY);
@@ -844,15 +857,25 @@ let _openSeq = 0;              // supersedes an in-flight openPassbook()
 const mqDesktop = window.matchMedia('(min-width: 1024px)');
 
 // ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
-// The intro video plays ONCE PER DEVICE — on the very first open, and never
-// again. Every open after that goes straight to sign-in.
+// The intro video plays every time this device arrives at the SIGN-IN screen. It
+// is the app's opening, not a one-off: sign out and it plays again.
+//
+// The single exception is a device that is already signed in. Those people resume
+// straight into the app, and nine seconds of video in front of a session that was
+// going to resume anyway is a delay rather than a welcome. That case is decided
+// before paint (index.html) and re-checked here via hasStoredSession(), so what
+// the stylesheet hid and what this function does are the same decision.
+//
+// Note this is the BOOT path only — which is why signing out shows the intro
+// again (signOut() reloads) but an in-app session EXPIRY does not (that path calls
+// showAuth() in place, covering the screen would be actively worse, and the
+// expiry toast is the thing the person needs to read).
 //
 // It is driven by the video's own `ended` event rather than a fixed wait, so
 // re-exporting the intro at a different length needs no code change. The
 // fallback timers below are backstops for the cases where `ended` never
 // arrives — a decode failure, a browser that refuses to play, a 404 — because
 // the user must reach sign-in no matter what the video does.
-const INTRO_SEEN_KEY   = 'introSeen';
 const INTRO_FALLBACK_MS = 9500;   // current video is 9.03s; a little margin over that
 const SPLASH_FADE_MS    = 800;
 
@@ -908,17 +931,10 @@ window.addEventListener('load', () => {
     setTimeout(enterApp, SPLASH_FADE_MS);
   }
 
-  let introSeen = false;
-  try { introSeen = localStorage.getItem(INTRO_SEEN_KEY) === '1'; } catch (e) { /* storage blocked */ }
-
-  // A returning user: no fade, no video, no download. base.css has already
-  // hidden the splash off the pre-paint attribute, so this only makes it
-  // explicit and keeps the element's inline state truthful.
-  if (introSeen) { dismissSplash(true); return; }
-
-  // Marked NOW rather than on `ended`: someone who closes the app mid-intro has
-  // still seen it, and must not be shown it again on every subsequent open.
-  try { localStorage.setItem(INTRO_SEEN_KEY, '1'); } catch (e) { /* storage blocked */ }
+  // A device that is already signed in: no fade, no video, no download.
+  // base.css has already hidden the splash off the pre-paint attribute, so this
+  // only makes it explicit and keeps the element's inline state truthful.
+  if (hasStoredSession()) { dismissSplash(true); return; }
 
   const video = document.getElementById('splash-video');
   if (!video) { dismissSplash(false); return; }
@@ -1023,12 +1039,12 @@ function persistUser(user) {
     picture: user.picture,
     initial: user.initial,
   };
-  try { localStorage.setItem('ipb_user', JSON.stringify(safe)); } catch { /* private mode */ }
+  try { localStorage.setItem(USER_KEY, JSON.stringify(safe)); } catch { /* private mode */ }
 }
 
 function loadStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem('ipb_user') || 'null');
+    return JSON.parse(localStorage.getItem(USER_KEY) || 'null');
   } catch { return null; }
 }
 

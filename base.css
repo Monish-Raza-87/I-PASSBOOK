@@ -125,11 +125,13 @@ code, pre, kbd { font-family: var(--font-mono); }
   transition: opacity 0.6s ease, transform 0.6s ease;
 }
 
-/* The intro plays once per device. The pre-paint script in index.html sets this
-   attribute before the body is parsed, so a returning user never sees even a
-   frame of the splash — and, since the video is preload="none" and app.js only
-   calls play() on the first open, they never download it either. */
-html[data-intro="seen"] #splash-screen {
+/* The splash plays every time this device arrives at the sign-in screen. The one
+   device that skips it is one that is already signed in — the pre-paint script in
+   index.html sets this attribute before the body is parsed, so someone resuming a
+   session never sees even a frame of the splash and, since the video is
+   preload="none" and app.js returns before it touches the video, never downloads
+   it either. */
+html[data-splash="skip"] #splash-screen {
   display: none;
 }
 

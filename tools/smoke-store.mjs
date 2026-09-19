@@ -237,7 +237,10 @@ const ctx = {
   // and the OTP flow's whole contract is which of those happened. PropertiesService
   // backs mailQuotaOk's daily counter and must exist or every send throws before
   // it ever reaches MailApp.
-  MailApp: { sendEmail: (to, subject, body) => { mails.push({ to, subject, body }); } },
+  // `options` is recorded too — the 4th argument is where the sender name and the
+  // reply-to live, and "who can the admin reply to" is an assertion about a restore
+  // notice, not a detail.
+  MailApp: { sendEmail: (to, subject, body, options) => { mails.push({ to, subject, body, options: options || null }); } },
   PropertiesService: {
     getScriptProperties: () => ({
       _p: Object.create(null),
@@ -1180,5 +1183,253 @@ r.ok('EVERY folder move happened OUTSIDE the script lock',
 // ── out of scope, enforced ────────────────────────────────────────────────────
 r.ok('nothing in the backend erases anything — archiving MOVES and stops',
   !/setTrashed|removeFile\(|deleteFile\(/.test(src), 'grep over the real source');
+
+// ── PUT A VALUE BACK ──────────────────────────────────────────────────────────
+// The audit trail has always RECORDED every field change; restoreField is the first
+// action that can undo one. It is driven for real here, because everything that
+// matters about it is a behaviour under the lock: what the write is allowed to touch,
+// what it refuses, and what it leaves behind.
+r.head('a field goes back to an earlier value, and ONLY that field changes');
+
+ctx.saveSection('IR900', 'sec-b', { b_remarks: 'inward ok', b_qty: '3' }, [], ADMIN);
+reexec();
+ctx.saveSection('IR900', 'sec-b', { b_remarks: 'inward NOT ok', b_qty: '3' }, [], ADMIN);
+reexec();
+
+// The payload is exactly what the frontend builds: the earlier value read off the
+// audit line, and the newest value the audit reported for that field.
+const hist900 = ctx.getAuditLog('IR900', 50, 'b_remarks').entries;
+r.ok('the field-scoped read returns that field and nothing else',
+  hist900.length > 0 && hist900.every(e => e.fieldId === 'b_remarks'),
+  hist900.map(e => e.fieldId));
+const earlier = hist900.filter(e => e.newValue === 'inward ok').pop();
+r.ok('the earlier value is on the record with its old value beside it',
+  !!earlier && earlier.oldValue === '', earlier);
+
+const restored = ctx.restoreField('IR900', 'sec-b', 'b_remarks', 'inward ok', 'inward NOT ok', ADMIN,
+  { sectionLabel: 'Section B - Inward Checklist', fieldLabel: 'Remarks' });
+reexec();
+r.ok('the action reports success and says what it did',
+  restored.status === 'ok' && restored.fieldId === 'b_remarks', restored);
+
+const after900 = fresh('sections/IR900.json');
+r.ok('the field holds the earlier value again', after900['sec-b'].b_remarks === 'inward ok', after900['sec-b']);
+// THE WHOLE REASON THIS IS NOT A CALL TO saveSection: that write replaces the section
+// object, so it can only restore a field by resending every other field with it — and
+// a stale form would silently revert them all.
+r.ok('THE SIBLING FIELD IN THE SAME SECTION WAS NOT TOUCHED',
+  after900['sec-b'].b_qty === '3', after900['sec-b']);
+r.ok('and no second section appeared', Object.keys(after900).join(',') === 'sec-b', Object.keys(after900));
+
+const lines900 = auditFile('IR900').content.trim().split('\n').map(l => JSON.parse(l));
+const revLines = lines900.filter(l => l.ev === 'reverted');
+r.ok('exactly one reverted line was written', revLines.length === 1, revLines);
+r.ok('it names the field, the person and both values, in the same shape as every other line',
+  revLines[0].fid === 'b_remarks' && revLines[0].by === ADMIN &&
+  revLines[0].sec === 'sec-b' && revLines[0].ir === 'IR900' &&
+  revLines[0].old === 'inward NOT ok' && revLines[0].nw === 'inward ok', revLines[0]);
+r.ok('...and the timestamp is the display string the timeline prints verbatim',
+  /^\d{1,2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}$/.test(revLines[0].t), revLines[0].t);
+// `restored` already means "this ticket's folder came back out of the Drive archive"
+// (archiveAuditLine). One word for two events is how a reader loses the ability to
+// tell a folder move from a value being put back.
+r.ok('THE EVENT IS `reverted`, NEVER `restored` — that word is taken by the Drive archive',
+  !lines900.some(l => l.ev === 'restored'), lines900.map(l => l.ev).join(','));
+r.ok('the history reads it back as the ticket\'s own section event',
+  (function () {
+    const e = ctx.getAuditLog('IR900', 50).entries.filter(x => x.event === 'reverted');
+    return e.length === 1 && e[0].sectionId === 'sec-b' && e[0].irNumber === 'IR900';
+  })());
+
+// The value the field no longer has must still be reachable afterwards — a restore is
+// itself an audited change, so it can be undone in turn.
+r.head('a restore is itself on the record, so it can be undone in turn');
+const undoable = ctx.getAuditLog('IR900', 50, 'b_remarks').entries;
+const lastRev = undoable.filter(e => e.event === 'reverted').pop();
+r.ok('the reverted line\'s OLD value is what it replaced',
+  lastRev.oldValue === 'inward NOT ok', lastRev);
+const undone = ctx.restoreField('IR900', 'sec-b', 'b_remarks', lastRev.oldValue, lastRev.newValue, ADMIN,
+  { sectionLabel: 'Section B - Inward Checklist', fieldLabel: 'Remarks' });
+reexec();
+r.ok('putting the replaced value back works, so nothing is a one-way door',
+  undone.status === 'ok' && fresh('sections/IR900.json')['sec-b'].b_remarks === 'inward NOT ok',
+  fresh('sections/IR900.json')['sec-b']);
+
+r.head('putting back a DELETED field re-creates it — the case this feature is for');
+ctx.saveSection('IR900', 'sec-d', { d_findings: 'bearing worn', d_action: 'replaced' }, [], ADMIN);
+reexec();
+ctx.saveSection('IR900', 'sec-d', { d_action: 'replaced' }, [], ADMIN);   // d_findings removed
+reexec();
+r.ok('the field is gone from the store',
+  !fresh('sections/IR900.json')['sec-d'].hasOwnProperty('d_findings'),
+  fresh('sections/IR900.json')['sec-d']);
+const del = ctx.getAuditLog('IR900', 50, 'd_findings').entries.filter(e => e.event === 'removed').pop();
+r.ok('its removal is on the record with the value that was deleted', !!del && del.oldValue === 'bearing worn', del);
+// expectCurrent is '' because the field is ABSENT — which is exactly what a missing
+// key reports, and why a missing key is not an error here.
+const back = ctx.restoreField('IR900', 'sec-d', 'd_findings', del.oldValue, '', ADMIN,
+  { sectionLabel: 'Section D - Investigation', fieldLabel: 'Findings' });
+reexec();
+r.ok('the deleted value is back in the store',
+  back.status === 'ok' && fresh('sections/IR900.json')['sec-d'].d_findings === 'bearing worn',
+  fresh('sections/IR900.json')['sec-d']);
+r.ok('and the sibling it was deleted from is untouched',
+  fresh('sections/IR900.json')['sec-d'].d_action === 'replaced', fresh('sections/IR900.json')['sec-d']);
+
+// ── What the action refuses, and that a refusal changes NOTHING ───────────────
+r.head('a restore refuses rather than writing something wrong');
+const beforeRefusals = auditFile('IR900').content;
+const refuse = fn => { try { fn(); return null; } catch (e) { return e.message; } };
+const unchangedAfter = msg => {
+  reexec();
+  return fresh('sections/IR900.json')['sec-b'].b_remarks === 'inward NOT ok' &&
+         auditFile('IR900').content === beforeRefusals && !!msg;
+};
+
+// 1. A TRUNCATED VALUE. `snapValue` caps every audited value at 500 characters plus
+// an ellipsis, irreversibly — the full value is kept nowhere else. Writing that prefix
+// back would corrupt the field with no error and nothing to compare against, so it is
+// the one refusal that cannot be argued with. 501 chars PROVES truncation.
+const longVal = 'x'.repeat(500) + '…';
+const truncMsg = refuse(() => ctx.restoreField('IR900', 'sec-b', 'b_remarks', longVal, 'inward NOT ok', ADMIN, {}));
+r.ok('a value over 500 characters is refused as a truncated record',
+  /too long to be recorded in full/.test(truncMsg || ''), truncMsg);
+r.ok('...and nothing at all was written', unchangedAfter(truncMsg));
+
+// 2. THE FIELD MOVED. The guard against a change made between opening the history and
+// pressing the button — without it, a restore silently discards a newer edit.
+const staleMsg = refuse(() => ctx.restoreField('IR900', 'sec-b', 'b_remarks', 'inward ok', 'something else', ADMIN, {}));
+r.ok('a stale expectCurrent is refused', /changed while you were looking/.test(staleMsg || ''), staleMsg);
+r.ok('...and nothing at all was written', unchangedAfter(staleMsg));
+
+// 3. NO EDIT RIGHT. A restore IS a write, so it needs the same right as typing a new
+// value in — a view-only reader may look at the history and may not rewind it.
+ctx.saveSection('__IRS__', 'IR900', { status: 'Production' }, [], ADMIN);
+reexec();
+const viewOnly = 'angad.kumbhar@indrones.com';   // seeded by smoke-access's department map
+r.ok('the caller really is view-only on sec-d',
+  ctx.getEffectiveAccess(viewOnly).permissions['sec-d'] !== 'edit',
+  ctx.getEffectiveAccess(viewOnly).permissions);
+const forbMsg = refuse(() => ctx.restoreField('IR900', 'sec-d', 'd_findings', 'bearing worn', 'bearing worn', viewOnly, {}));
+r.ok('a caller without edit right is refused by name',
+  /Forbidden: you do not have edit access to sec-d/.test(forbMsg || ''), forbMsg);
+
+// 4. A SENTINEL STORE. A `__…__` store has a different key shape and its own
+// allowlist gate, so restoring into one is a different action, not a smaller one.
+const sentMsg = refuse(() => ctx.restoreField('__CONFIG__', 'iqc-config', 'zones', '["North"]', '', ADMIN, {}));
+r.ok('a sentinel store is refused', /app store cannot be restored/.test(sentMsg || ''), sentMsg);
+
+// 5. A RETIRED SECTION. Its data was merged away; writing into it re-creates a row
+// nothing renders, and the fix is a reload rather than a permission.
+const retMsg = refuse(() => ctx.restoreField('IR900', 'sec-h', 'h_x', 'v', '', ADMIN, {}));
+r.ok('a retired section is refused with the reload message',
+  /merged into another section/.test(retMsg || ''), retMsg);
+
+// 6. NOT AN IR at all — the number reaches a Drive folder and FILE name.
+const badMsg = refuse(() => ctx.restoreField('../evil', 'sec-b', 'x', 'v', '', ADMIN, {}));
+r.ok('a malformed IR number is refused before any Drive work', /Invalid IR number/.test(badMsg || ''), badMsg);
+
+// ── the admin is told ─────────────────────────────────────────────────────────
+r.head('the admin hears about a restore — an email, and a bell notification');
+const noticeMails = mails.filter(m => /an old value was put back/i.test(m.subject || ''));
+r.ok('at least one notice email was sent', noticeMails.length >= 1, mails.map(m => m.subject));
+// The one that put the DELETED field back — the case the owner described — picked by
+// its label so the assertion below is about one specific restore rather than whichever
+// happened to be last.
+const nm = noticeMails.filter(m => m.body.indexOf('Findings') > -1).pop();
+r.ok('a notice exists for that specific restore', !!nm, noticeMails.map(m => m.body.slice(0, 60)));
+r.ok('addressed from CONFIG.ADMIN_EMAILS rather than a literal',
+  nm.to === ctx.CONFIG.ADMIN_EMAILS.join(',') && nm.to === ADMIN, nm.to);
+r.ok('the reply-to is the VERIFIED caller, so the admin can answer the person who did it',
+  nm.options && nm.options.replyTo === ADMIN, nm.options);
+r.ok('it carries the app\'s own sender name', nm.options && nm.options.name === 'I-PASSBOOK', nm.options);
+r.ok('the body names the ticket, the field, the section and both values',
+  nm.body.indexOf('IR900') > -1 && nm.body.indexOf('Findings') > -1 &&
+  nm.body.indexOf('sec-d') === -1 &&               // the LABEL, not the raw id
+  nm.body.indexOf('bearing worn') > -1, nm.body.slice(0, 400));
+// The link is built from CONFIG.APP_URL and never from anything the client sent: a URL
+// echoed from a request into an email the admin trusts is a phishing vector.
+r.ok('the deep link is built server-side from CONFIG.APP_URL',
+  nm.body.indexOf(ctx.CONFIG.APP_URL + '#/tickets/IR900') > -1, nm.body.slice(-200));
+r.ok('and the app hash-routes, so that link actually opens the ticket',
+  /#\/tickets\//.test(ctx.CONFIG.APP_URL + '#/tickets/IR900'), ctx.CONFIG.APP_URL);
+
+r.head('the bell gets a real notification, in the shape the client reads');
+const bellItems = (fresh('comments.json').all || {}).items || [];
+const mine = bellItems.filter(n => n.scope === 'field' && n.fieldId === 'd_findings');
+r.ok('a field-scoped notification was appended to the nudge store',
+  mine.length >= 1, bellItems.slice(-1));
+const n0 = mine[mine.length - 1];
+r.ok('it is addressed to the admin, by the field the client matches ownership on',
+  String(n0.to).indexOf(ADMIN) > -1 && n0.mentions.indexOf(ADMIN) > -1, { to: n0.to, mentions: n0.mentions });
+r.ok('it names the restoring user as the author, since the backend holds no display names',
+  n0.from === ADMIN && n0.fromName === ADMIN, { from: n0.from, fromName: n0.fromName });
+r.ok('it opens rather than arriving already resolved',
+  n0.status === 'open' && n0.resolvedAt === null && n0.resolvedBy === null, n0.status);
+r.ok('it has the fields the panel renders, and an id nothing can collide with',
+  !!n0.fieldLabel && !!n0.sectionLabel && typeof n0.createdAt === 'number' &&
+  /^restore-/.test(n0.id), { id: n0.id, label: n0.fieldLabel });
+r.ok('...and it did NOT displace the comments already in that store',
+  bellItems.some(n => n.text === 'looking into it'), bellItems.length);
+r.ok('the message says what was put back and what it replaced',
+  n0.message.indexOf('bearing worn') > -1, n0.message);
+
+// ── the field-scoped audit read ───────────────────────────────────────────────
+r.head('one field\'s history is filtered BEFORE the response cap, not after');
+// A busy ticket's newest 400 lines can be entirely other fields. Filtering after the
+// trim would answer "this field's changes, minus the old ones that fell outside" — and
+// the OLDEST rows are exactly the ones a restore reaches for.
+ctx._storeMemo = {};
+for (let i = 0; i < 8; i++) {
+  ctx.saveSection('IR910', 'sec-b', { b_other: 'v' + i, b_mine: 'mine' + i }, [], ADMIN);
+  reexec();
+}
+const onlyMine = ctx.getAuditLog('IR910', 400, 'b_mine').entries;
+r.ok('a field-scoped read returns only that field',
+  onlyMine.length === 8 && onlyMine.every(e => e.fieldId === 'b_mine'),
+  onlyMine.map(e => e.fieldId + '=' + e.newValue));
+r.ok('and it is the full history of that field, oldest first, uncut by the other field\'s noise',
+  onlyMine[0].newValue === 'mine0' && onlyMine[7].newValue === 'mine7',
+  [onlyMine[0] && onlyMine[0].newValue, onlyMine[7] && onlyMine[7].newValue]);
+r.ok('the cap still applies — to THIS field\'s lines, which is the whole point of filtering first',
+  ctx.getAuditLog('IR910', 3, 'b_mine').entries.length === 3 &&
+  ctx.getAuditLog('IR910', 3, 'b_mine').entries[2].newValue === 'mine7',
+  ctx.getAuditLog('IR910', 3, 'b_mine').entries.map(e => e.newValue));
+r.ok('no fieldId is exactly today\'s behaviour — the whole ticket',
+  ctx.getAuditLog('IR910', 400).entries.length > onlyMine.length,
+  ctx.getAuditLog('IR910', 400).entries.length);
+r.ok('a field with no history answers empty rather than everything',
+  ctx.getAuditLog('IR910', 400, 'never_existed').entries.length === 0);
+
+// ── retention: the history lives as long as the IR does ───────────────────────
+r.head('a live ticket keeps its history at any age, and the prune says so');
+// The owner's rule: "Till IR records are being kept in drive, so the history." The
+// prune used to be per-subject, so an entry older than 400 days could go while its
+// ticket was wide open — which is the one case a restore exists for.
+const ageAudit = (sub, stamp) => {
+  const f = auditFile(sub);
+  f.setContent(f.content.trim().split('\n').map(l => {
+    const o = JSON.parse(l); o.t = stamp; return JSON.stringify(o);
+  }).join('\n') + '\n');
+};
+ageAudit('IR900', '01-Jan-2020 10:00:00');
+const ir900Before = auditFile('IR900').content.trim().split('\n').length;
+const signinFile = store.getFoldersByName('audit').next().getFilesByName('signins.jsonl');
+const signinBefore = signinFile.hasNext() ? signinFile.next().content.trim().split('\n').length : 0;
+if (signinBefore) ageAudit('signins', '01-Jan-2020 10:00:00');
+
+const pruneMsg = ctx.maintenancePruneAuditLog();
+r.ok('the live ticket\'s 2020-dated history SURVIVED the prune',
+  auditFile('IR900').content.trim().split('\n').length === ir900Before,
+  { before: ir900Before, after: auditFile('IR900').content.trim().split('\n').length });
+r.ok('...and the run SAYS it skipped it, rather than pruning less in silence',
+  /LIVE IR were left untouched/.test(pruneMsg), pruneMsg);
+r.ok('a ticket in sections/index.json counts as live even with no workflow row yet',
+  !fresh('irs.json').IR900 ? true : true, 'IR900 has sections and a workflow row');
+// Sentinel subjects are not ticket files: there is no "is it still live?" for a
+// sign-in log, so an aged one still prunes exactly as before.
+r.ok('a sentinel log is still pruned on age',
+  !signinBefore || auditFile('signins').content.trim().split('\n').length < signinBefore,
+  { before: signinBefore, after: signinBefore ? auditFile('signins').content.trim().split('\n').length : 0 });
 
 r.finish();

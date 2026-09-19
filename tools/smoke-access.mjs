@@ -267,12 +267,15 @@ const sweepAs = perms => {
     fakeEl('field-nudge-btn'),       // 2  💬 comment — a read-adjacent act
     fakeEl('btn-add-row'),           // 3  a write
     fakeEl('form-input'),            // 4  an ordinary field
+    fakeEl(),                        // 5  the hidden pickers (its type is set below)
+    fakeEl('field-hist-btn'),        // 6  🕓 a field's history — a READ
   ];
-  sweepEls[5] = fakeEl(); sweepEls[5].type = 'file';   // 5 the hidden pickers
+  sweepEls[5].type = 'file';
   fakeSave = fakeEl('btn');
   D.applySectionAccessGating();
   return { add: sweepEls[0], cap: sweepEls[1], comment: sweepEls[2],
-           addRow: sweepEls[3], field: sweepEls[4], file: sweepEls[5], save: fakeSave };
+           addRow: sweepEls[3], field: sweepEls[4], file: sweepEls[5],
+           hist: sweepEls[6], save: fakeSave };
 };
 
 const vo = sweepAs({ [VSEC]: 'view' });
@@ -296,6 +299,15 @@ r.ok('the disabled button is styled disabled, not merely inert',
 // Not an over-correction: commenting is NOT editing, and comment comes with view.
 r.ok('the 💬 comment button stays alive for a view-only user',
   !vo.comment.disabled, vo.comment.disabled);
+// Same rule for a field's history: reading what changed and who changed it is a
+// VIEW act, and the feature is useless if only editors can audit an editor. It is
+// safe because the button opens a read-only view — and the restore it may offer is
+// rendered inside the history modal, which is mounted on document.body (outside
+// every pane, so this sweep never reaches it) and checks canEditSection itself.
+r.ok('the 🕓 field-history button stays alive for a view-only user',
+  !vo.hist.disabled, vo.hist.disabled);
+r.ok('...and it is left unstyled, not dimmed like a dead control',
+  vo.hist.style.opacity === undefined, vo.hist.style);
 r.ok('the ordinary field is disabled (unchanged behaviour)', vo.field.disabled === true);
 r.ok('the hidden file inputs are disabled (this is what made the click a no-op)',
   vo.file.disabled === true);
@@ -307,6 +319,44 @@ r.ok('an EDITOR gets live buttons — the sweep does not run at all',
 r.ok('...and no view-only tooltip is left on them', ed.add.title === '', ed.add.title);
 r.ok('a neighbouring section with no grant does not disable this one\'s buttons',
   D.canEditSection('sec-c') === false && ed.add.disabled === false);
+
+r.head('the restore control is gated where it is RENDERED, and gated again on click');
+// The history modal is created with document.createElement and appended to
+// document.body, so it is outside every section pane and the sweep above never
+// reaches it. A control mounted outside a pane CANNOT inherit the pane's gate —
+// that is exactly how the add-row and add-evidence buttons stayed live on a
+// view-only screen. So the restore must carry its own check, and it carries two:
+// one where the modal decides whether to draw it, one in the click handler.
+const appSrc = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const bodyOf = (name) => {
+  const at = appSrc.search(new RegExp('function\\s+' + name + '\\s*\\('));
+  if (at < 0) return '';
+  const rest = appSrc.slice(at);
+  const end = rest.indexOf('\n}');
+  return end < 0 ? rest : rest.slice(0, end + 2);
+};
+const ohm = bodyOf('openHistoryModal');
+r.ok('the modal decides `mayRestore` from canEditSection, not from a flag it was handed',
+  /const mayRestore = fieldId \? canEditSection\(sectionId\) : false;/.test(ohm),
+  (ohm.match(/[^\n]*mayRestore[^\n]*/) || [''])[0]);
+r.ok('and with no edit right it passes NO restore context, so no button is drawn',
+  /restore: mayRestore \? fieldHistView : null,/.test(ohm),
+  (ohm.match(/[^\n]*restore:[^\n]*/) || [''])[0]);
+r.ok('the absence is explained in words, so it is not a silent gap',
+  /You have view-only access here, so you can read this but not change it\./.test(ohm));
+const pfvb = bodyOf('putFieldValueBack');
+r.ok('the click handler checks the same predicate before it writes anything',
+  /if \(!canEditSection\(v\.sectionId\)\)/.test(pfvb),
+  (pfvb.match(/[^\n]*canEditSection[^\n]*/) || [''])[0]);
+r.ok('...and it fires BEFORE the confirm dialog, so no dialog is shown for a write that cannot happen',
+  pfvb.indexOf('if (!canEditSection(') < pfvb.indexOf('confirm('),
+  { gate: pfvb.indexOf('if (!canEditSection('), confirm: pfvb.indexOf('confirm(') });
+r.ok('a view-only click says why, rather than doing nothing',
+  /view-only access to this section/.test(pfvb));
+r.ok('and the renderer never checks access itself — it has no access context to check',
+  !/canEditSection/.test(bodyOf('renderTimelineInto')),
+  (bodyOf('renderTimelineInto').match(/[^\n]*canEditSection[^\n]*/) || ['none — correct']));
 
 r.head('an ordinary user is never an admin');
 T.setUser({ email: 'plain@indrones.com', sessionToken: 't', access: { role: 'user', permissions: {}, departments: [] } });

@@ -242,9 +242,17 @@ unauthorised write is not).
 ### `getAuditLog`
 ```
 GET {BASE_URL}?action=getAuditLog&irNumber=IR409
+GET {BASE_URL}?action=getAuditLog&irNumber=IR409&fieldId=b_remarks
 ```
 Returns the audit trail for one IR, **oldest first** (the frontend reverses for
 display), capped at **400** entries with a `truncated` flag.
+
+`fieldId` is optional and filters to **one field's** lines. It is applied
+**before** the cap, not after — which is the whole point of the parameter: filtering
+afterwards would return the tail of the ticket's newest 400 lines that happen to be
+about that field, so on a busy ticket a field's older changes would fall outside the
+window and its "history" would silently be a recent sample. Absent, the behaviour is
+unchanged.
 
 The read is **one file**: `audit/IR409.jsonl`, resolved by `auditSubjectFor(irNumber,
 sectionId)`. Per-ticket rather than per-month is deliberate — a monthly shard reaches
@@ -301,11 +309,19 @@ about an account:
 
 `forgotPassword` sends through `sendAuthMail`, which enforces a **global** daily
 `MAIL_DAILY_CAP` (400). That cap covers **every** mail this script sends, not just
-auth: `sendNudgeEmail` calls `mailQuotaOk('nudge')` before its own send, and the
-nudge ceiling stops short of the cap by `MAIL_AUTH_RESERVE` (40) so a busy comment
-day cannot starve the reset code. An uncapped path would not merely annoy — it
-would burn the day's quota and silently disable password recovery for the whole
-company. `mailQuotaOk()` is the single gate; add no send site that skips it.
+auth: `sendNudgeEmail` calls `mailQuotaOk('nudge')` before its own send and
+`sendAdminNotice` calls `mailQuotaOk('notice')` before its own, and **both** of those
+charge against the reserve side of the ceiling (`MAIL_AUTH_RESERVE`, 40) so a busy
+comment day — or a busy restore day — cannot starve the reset code. An uncapped path
+would not merely annoy: it would burn the day's quota and silently disable password
+recovery for the whole company. `mailQuotaOk()` is the single gate; add no send site
+that skips it.
+
+`CONFIG.APP_URL` exists for one thing: the deep link in the admin restore notice. It
+is a **CONFIG value and never a request parameter** — the app is hash-routed, so the
+link is `<APP_URL>#/tickets/IR409`. Blanking it is a supported state: `irDeepLink`
+returns `''` and the caller leaves the line out of the body, and nothing else in the
+app reads it.
 
 Both emailed-code paths are capped **across all emails** as well as per email,
 because GAS web apps expose no reliable client IP: without it, 3/hour/address times
@@ -423,16 +439,105 @@ from it:
 > deliberately**, and the one to think twice about is anything sourced from the
 > customer's Form.
 
+### `restoreField`
+Puts **one field's** earlier value back. This is the write behind the 🕓 history
+modal's "Put back" button.
+
+```
+POST {BASE_URL}
+Content-Type: multipart/form-data
+```
+
+| Param | Type | Description |
+|---|---|---|
+| `action` | string | `"restoreField"` |
+| `irNumber` | string | e.g. `"IR409"`. A `__…__` store is **refused** — a sentinel has a different key shape and its own allowlist gate, so restoring into one is a different action, not a smaller version of this one |
+| `sectionId` | string | e.g. `"sec-b"` |
+| `fieldId` | string | e.g. `"b_remarks"` |
+| `value` | string | the value to put back, taken from the audit line's `old` |
+| `expectCurrent` | string | the value the caller believes the field holds **now** |
+| `labels` | JSON string | `{sectionLabel, fieldLabel}` — **display strings only**, used in the admin notice. The backend has no form registry and cannot resolve a field id to a label |
+
+It is deliberately **not** a reuse of `saveSection`. That write is
+`store[sectionId] = fields` — the **whole** section key — so restoring one field
+through it would mean resending the entire section, and a client holding a stale
+form would silently revert every sibling field in it. `restoreField` does a
+server-side read-merge-write of **one key** inside one lock: it copies the stored
+object key-by-key, replaces the single field, and never deletes anything.
+
+**The gate is `saveSection`'s own line, copied verbatim** —
+`access.role !== 'admin' && !canEdit(access.permissions, sectionId)`. That one
+predicate already covers the Overview, because `getEffectiveAccess` folds Triage
+into `permissions[OVERVIEW_KEY]`. The **same** predicate is used on the client
+(`canEditSection`) to decide whether the button is drawn at all.
+
+**`expectCurrent` is the concurrency guard, not ceremony.** The user opened the
+history, saw *was 'A', now 'B'*, and picked 'A'. If someone set it to 'C' in the
+meantime, a blind restore would discard 'C' with nobody knowing. The comparison is
+made **inside the lock**, against what is stored, and uses the same
+`snapValue` truncation on both sides — so a value long enough to be truncated still
+matches. A mismatch changes nothing and refuses in words.
+
+**Refusals.** Each is a thrown `Error` whose message is shown to the user:
+
+| Situation | Message |
+|---|---|
+| `value` longer than **500** characters | *"That earlier value was too long to be recorded in full, so it can be viewed but not put back. Nothing was changed."* |
+| the field moved since the history was opened | *"This field changed while you were looking at its history, so nothing was changed. Reopen the history and put the value back again."* |
+| no edit right on that section | *"Forbidden: you do not have edit access to sec-b."* |
+| a `__…__` store | *"An app store cannot be restored through this action."* |
+| a retired/merged section | *"Section … was merged into another section. Reload the app to get the current version."* |
+| the IR has no sections file yet | *"This IR has no saved data yet, so there is nothing to put back."* |
+
+The **500-character rule** is the one that cannot be argued with. `snapValue` caps
+every audited value at 500 characters plus a trailing `…`, silently and
+irreversibly — the full value is kept **nowhere else**, not in the store and not in a
+backup. Writing that prefix back would corrupt the field with no error and nothing to
+compare against afterwards. The test is exact: `snapValue` can only emit ≤500
+characters or exactly 501, so `length > 500` **proves** truncation. It matters most
+for the JSON-shaped fields (`inwardTable`, `costTable`, `checklist`,
+`imageEvidence`, `dispatchChecklist`, `checkpointEvidence`), whose whole value is one
+long JSON string. Enforced on **both** sides: the frontend's `restoreOfferFor` so the
+button is never offered, and this one so a crafted request cannot write it.
+
+**What it writes.** One `reverted` audit line, in the established shape and with no
+new keys — `old` is the value being **replaced** (what is there now) and `nw` is the
+value **put back**, so *Was / Now* means the same thing on this row as on a `changed`
+row. The event is `reverted` and deliberately not `restored`: that value already
+means *"this ticket's folder came back out of the Drive archive"*
+(`archiveAuditLine`), and one word for two events is how a reader ends up unable to
+tell a folder move from a value being put back.
+
+**Telling the admin.** Three channels, and only the first is inside the lock:
+
+1. The `reverted` line above — free, atomic with the write, visible to everyone who
+   opens the ticket.
+2. An email via `sendAdminNotice` — plain text, `replyTo` = the **verified** caller,
+   recipient from `CONFIG.ADMIN_EMAILS`, subject
+   `[I-PASSBOOK] IR409 — an old value was put back`, body naming the field, its
+   section, was → now, who, when, and a deep link built from **`CONFIG.APP_URL`**.
+   The link is built **server-side** and never echoed from the request: a
+   client-supplied URL in an email the admin trusts is a phishing vector.
+3. An in-app bell record in `comments.json` (`__NUDGES__`/`all`), minted by the
+   backend for the first time and built to match the client's own record shape
+   exactly, so `isForMe` and `renderNudgePanel` need no change.
+
+Both 2 and 3 happen **after** the lock is released, following `saveSection`'s
+`reopenIR` convention: a failure in either is reported in words — *"saved, but the
+admin email was not sent"* — and never fails a restore that has already committed.
+Inside the lock, a mail failure would report an error for a write that succeeded, and
+the user's retry would then be refused by the `expectCurrent` guard.
+
 ### `sendNudgeEmail`
 Relays a comment notification via `MailApp.sendEmail`. The sender is the `replyTo`.
 Requires redeploy and a one-time `script.send_mail` consent (see Development
 Guide). **`MailApp`, never `UrlFetchApp`** — the `UrlFetchApp` scope is what broke
-Google Sign-In in `8541019`, and there are exactly two `MailApp.sendEmail` call
-sites (this one and the auth mail); both check `mailQuotaOk()` first. This one
-checks it as `'nudge'`, from the reserve side of the ceiling, and returns a visible
-`status: 'error'` when the day's mail is spent — the comment still posts, and the
-sender is told the notification did not go. Failing silently would leave people
-believing a colleague had been emailed.
+Google Sign-In in `8541019`, and there are exactly **three** `MailApp.sendEmail` call
+sites (this one, the auth mail, and `sendAdminNotice`); every one checks
+`mailQuotaOk()` first. This one checks it as `'nudge'`, from the reserve side of the
+ceiling, and returns a visible `status: 'error'` when the day's mail is spent — the
+comment still posts, and the sender is told the notification did not go. Failing
+silently would leave people believing a colleague had been emailed.
 
 ### `login`
 Sign-in is **two steps**, and the password alone buys no session.
@@ -574,6 +679,7 @@ var CONFIG = {
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
+  APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
   API_VERSION: 3,
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
@@ -590,7 +696,7 @@ config, because changing one is a security decision, not a setting:
 | Constant | Value | Guards |
 |---|---|---|
 | `MAIL_DAILY_CAP` | 400 | every `MailApp.sendEmail` in the script |
-| `MAIL_AUTH_RESERVE` | 40 | the slots the nudge path may **not** spend |
+| `MAIL_AUTH_RESERVE` | 40 | the slots the **user-triggered** paths (`'nudge'`, `'notice'`) may **not** spend |
 | `CODE_MAX_PER_HOUR` | 3 | codes issued to **one email** per hour — counted across **both** purposes, so asking for a reset cannot buy extra sign-in codes |
 | `CODE_MAX_PER_HOUR_GLOBAL` | 12 | **reset** codes across all emails (the unauthenticated path) |
 | `CODE_MAX_PER_HOUR_GLOBAL_LOGIN` | 120 | **sign-in** codes across all emails — 10x looser, because a sign-in code is only issued after a correct password |

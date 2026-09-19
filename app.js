@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v38';
+const APP_VERSION = 'v39';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3736,13 +3736,20 @@ function renderOverviewEditable() {
     return (v === undefined || v === null) ? (fallback || '') : v;
   };
   const ro = canWrite ? '' : ' disabled';
+  // Same per-field 🕓 History button the lettered sections' fields carry. These two
+  // are hand-rendered here rather than built by buildField, but they are stored IR
+  // data like any other field and their history is worth exactly as much — these are
+  // the two fields CR and Management own, so "who changed the CRM name, and to what"
+  // is a real question about them.
+  const hist = fid =>
+    `<button type="button" class="field-hist-btn" data-field-id="${escJsAttr(fid)}" title="History of this field" onclick="openFieldHistory('${escJsAttr(fid)}')">${iconSvg('clock')}</button>`;
   el.innerHTML =
     `<div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager</label>
+       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager${hist('a_crmOwner')}</label>
        <input class="form-input" type="text" id="a_crmOwner" placeholder="Name of CRM person" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
      </div>
      <div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_contactPhone">Customer Phone</label>
+       <label class="overview-edit-label" for="a_contactPhone">Customer Phone${hist('a_contactPhone')}</label>
        <input class="form-input" type="tel" id="a_contactPhone" placeholder="+91 XXXXX XXXXX" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
      </div>` +
     (canWrite ? '' : `<p class="overview-note">Only Customer Relations and Management can edit these. Everyone can read them.</p>`);
@@ -4168,7 +4175,10 @@ const irNudgeBtn = document.getElementById('ir-nudge-btn');
 if (irNudgeBtn) irNudgeBtn.addEventListener('click', openNudgeModalForIR);
 // IR banner audit-trail / history button
 const irHistoryBtn = document.getElementById('ir-history-btn');
-if (irHistoryBtn) irHistoryBtn.addEventListener('click', openHistoryModal);
+// Wrapped rather than passed directly: openHistoryModal() takes an optional options
+// object, and handing it the click event it would otherwise receive is one property
+// name away from being read as options.
+if (irHistoryBtn) irHistoryBtn.addEventListener('click', () => openHistoryModal());
 // IR banner legacy-record button
 const irLegacyBtn = document.getElementById('ir-legacy-btn');
 if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
@@ -4464,6 +4474,16 @@ function applySectionAccessGating() {
           if (!comment) { el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed'; }
           return;
         }
+        // A field's HISTORY button is a READ and survives for the same reason
+        // exporting a section does: a view-only user may look at what changed and
+        // who changed it. This is safe precisely because the button only opens a
+        // read-only view — the restore it may offer is rendered inside the history
+        // modal, which is mounted on document.body (outside every pane, so this
+        // sweep never reaches it) and therefore checks canEditSection() itself. A
+        // control mounted outside a pane cannot inherit the pane's gate; that is
+        // exactly how the add-row/add-evidence buttons ended up live on a view-only
+        // screen, and it is why the check is stated at the render site.
+        if (el.classList.contains('field-hist-btn')) return;
         el.disabled = true;
       });
     }
@@ -4686,9 +4706,27 @@ function buildField(field, irNumber, sectionId) {
   const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
     ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">${iconSvg('comment')}<span class="comment-count" style="display:none;">0</span></button>`
     : '';
+  // Per-field HISTORY button — the field-level half of the same idea as the ticket's
+  // own 🕓 History button, and it lives in the same slot as the 💬 button for the
+  // same reason: it is about THIS field, and the field's label is the only place
+  // that says which field a thing is about.
+  //
+  // Rendered ALWAYS (the audit is fetched on click, never pre-fetched for every
+  // field of every open ticket), and skipped exactly where the 💬 button is: a
+  // read-only analysis note is not a stored value, and a locked intake field is
+  // auto-filled and editable by no one, so its history is permanently empty and a
+  // button that can only ever say "nothing here" is noise.
+  //
+  // Viewing history is a READ, so this button deliberately survives the view-only
+  // disable sweep — see applySectionAccessGating. The WRITE that history can offer
+  // (putting an old value back) is gated separately, where it is rendered.
+  const fieldHistBtn = (field.type && field.type !== 'analysisNote' && !locked)
+    ? `<button type="button" class="field-hist-btn" data-field-id="${escJsAttr(id)}" title="History of this field" onclick="openFieldHistory('${escJsAttr(id)}')">${iconSvg('clock')}</button>`
+    : '';
+  const fieldBtns = fieldNudgeBtn + fieldHistBtn;
   const labelHtml = field.label
-    ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldNudgeBtn}</label>`
-    : (fieldNudgeBtn ? `<div class="form-label">${fieldNudgeBtn}</div>` : '');
+    ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldBtns}</label>`
+    : (fieldBtns ? `<div class="form-label">${fieldBtns}</div>` : '');
 
   return `
     <div class="form-group${locked ? ' field-locked' : ''}">
@@ -7205,6 +7243,17 @@ function parseAuditTimestamp(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
+// The two Overview fields the Triage panel hand-renders. They are real stored IR
+// data — they live under the `sec-a` key like everything else the Overview writes —
+// but they are NOT in SECTIONS, because that panel builds its own two inputs rather
+// than going through buildField. The lookup above therefore finds nothing for them,
+// and without this table every reader of this helper shows the raw storage key:
+// "a_crmOwner" on a history row is a leak of the schema into the UI.
+const OVERVIEW_FIELD_LABELS = {
+  a_crmOwner:     'Customer Relations Manager',
+  a_contactPhone: 'Customer Phone',
+};
+
 // Human name for a field id, from the forms. Falls back to the raw id for a field
 // no current form declares — a retired one, or one that exists only in history.
 function fieldLabelFor(fieldId) {
@@ -7214,7 +7263,22 @@ function fieldLabelFor(fieldId) {
     const f = SECTIONS[secId].fields.find(x => x.id === fieldId);
     if (f && f.label) return f.label;
   }
-  return fieldId;
+  return OVERVIEW_FIELD_LABELS[fieldId] || fieldId;
+}
+
+// Which section a field id belongs to — the panel it is rendered in, which is also
+// the section whose edit right gates the field's history and any restore of it.
+// Prefers the real registry over the prefix, for the same reason FIELD_SECTION_INDEX
+// exists: `g_missionReport` lives in sec-f and `i_courier` in sec-g, and their
+// prefixes say otherwise. Returns '' for a field no form declares.
+function fieldSectionFor(fieldId) {
+  if (!fieldId) return '';
+  if (FIELD_SECTION_INDEX[fieldId]) return FIELD_SECTION_INDEX[fieldId];
+  // The Overview's two hand-rendered fields are stored under OVERVIEW_KEY, and the
+  // Overview's own gate is Triage — the same pairing the backend's canEdit() makes,
+  // because getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY].
+  if (OVERVIEW_FIELD_LABELS[fieldId]) return OVERVIEW_KEY;
+  return '';
 }
 
 // Sections that no longer exist. History predating the merge still names them, and
@@ -7358,6 +7422,13 @@ const TIMELINE_KINDS = {
   subcatnote:  { icon: 'tag',       label: 'Repair note' },
   upload:   { icon: 'upload',       label: 'File uploaded' },
   comment:  { icon: 'comment',      label: 'Comment' },
+  // An earlier value PUT BACK — the one event a reader must be able to pick out of
+  // a busy list at a glance, because it is the only one that deliberately undoes
+  // somebody else's work. It gets its own word rather than sharing `edit`: the
+  // backend records it under its own event (`reverted`, never `restored` — see
+  // restoreField), and sharing the glyph with the 🕓 History button ties the row to
+  // the feature it came from.
+  revert:   { icon: 'clock',        label: 'Put back' },
   // The Drive archive. Two labels on ONE glyph: both are the same event — the
   // ticket's folder moving between the working set and the archive — and a second
   // picture for the return trip would be two icons for one idea.
@@ -7437,7 +7508,12 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
     }
 
     out.push(Object.assign({}, base, {
-      kind: e.event === 'added' ? 'add' : e.event === 'removed' ? 'remove' : 'edit',
+      kind: e.event === 'added' ? 'add'
+          : e.event === 'removed' ? 'remove'
+          // Its own kind, so a restore is visibly distinct from the edit it undid.
+          // A reader scanning for "why is this the old value again?" is looking for
+          // exactly one row, and folding it into `edit` hides it among the edits.
+          : e.event === 'reverted' ? 'revert' : 'edit',
     }));
   });
 
@@ -7472,6 +7548,151 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
   return (cap && out.length > cap) ? out.slice(out.length - cap) : out;
 }
 
+// ─── PUT A VALUE BACK ─────────────────────────────────────────────────────────
+// The field-history view's own state. Held HERE rather than in the DOM so a value of
+// up to 500 characters never has to be escaped into an attribute: the restore button
+// carries an INDEX into `timeline`, and the handler reads the row back out of it.
+// Only the field-history view sets this; the ticket-level view and the Overview's
+// inline timeline leave it null and render no restore control.
+let fieldHistView = null;
+
+// What the field history can offer for ONE timeline row. THREE answers, deliberately
+// — "not a candidate" and "a candidate that cannot be put back" are different
+// situations, and only one of them deserves a sentence:
+//
+//   null                not a candidate — render nothing at all
+//   {ok:false, reason}  a candidate that cannot be put back — render the reason
+//   {ok:true, value}    offer it, with this value
+//
+// PURE. No DOM, no fetch, no clock — a suite can drive it with fixtures.
+//
+// The IR header is out of scope BY CONSTRUCTION, not by an extra rule: a status,
+// assignee, priority or category change arrives as its own kind ('status', 'assign',
+// …), none of which is in the map below. They live in a different store under a
+// different key shape and are governed by the separate Triage axis, so restoring one
+// is a different decision — including what `statusOwned` would then mean — and it is
+// deliberately not this one.
+const RESTORABLE_KINDS = { edit: true, remove: true, revert: true };
+function restoreOfferFor(item) {
+  if (!item || !item.fieldId) return null;
+  // `add` is the one value-bearing edit that offers nothing: its old value is ''
+  // by construction (the backend writes `line('added', k, '', newJ)`), so "put back"
+  // on it could only ever mean "clear this field" — a delete wearing a restore's
+  // clothes, which is not what anyone opens a history to do.
+  if (!RESTORABLE_KINDS[String(item.kind || '')]) return null;
+  const old = item.oldValue == null ? '' : String(item.oldValue);
+  // THE TRUNCATION RULE, enforced here AND in the backend (restoreField); both are
+  // needed, and they are not redundant. `snapValue` caps every audited value at 500
+  // characters plus a '…', irreversibly — the full value is kept nowhere else — so
+  // writing that prefix back would corrupt the field silently, with nothing left to
+  // compare against. It can only emit <=500 characters or exactly 501, so a length
+  // above 500 PROVES truncation. THIS check is so the button is never offered; the
+  // backend's is so a crafted request cannot write it.
+  if (old.length > 500) {
+    return { ok: false, reason: 'This value was too long to be recorded in full, so it can be viewed but not put back.' };
+  }
+  return { ok: true, value: old };
+}
+
+// The value the audit trail says this field holds NOW: the newest value-bearing row
+// for it. The timeline is oldest-first, so the last match wins.
+//
+// This is what goes out as `expectCurrent`. The restore's guard is "has anything
+// changed since the server told me what this field holds?", and the answer is taken
+// from what the SERVER sent rather than from the input on screen — reading the DOM
+// would be wrong twice over: the input may hold an unsaved edit, and it may not be on
+// screen at all by the time the button is pressed (the modal is mounted on the body
+// and outlives any tab switch).
+//
+// Both sides of that comparison pass through the same 500-character truncation, which
+// is what makes it work on a long value: its audited form is truncated, so comparing
+// against the untruncated stored value would never match on exactly the fields where
+// a restore is most likely to be wanted.
+const VALUE_BEARING_KINDS = { add: true, edit: true, remove: true, revert: true };
+function fieldCurrentFrom(timeline, fieldId) {
+  if (!fieldId) return '';
+  let cur = '';
+  (Array.isArray(timeline) ? timeline : []).forEach(it => {
+    if (!it || String(it.fieldId || '') !== String(fieldId)) return;
+    if (!VALUE_BEARING_KINDS[String(it.kind || '')]) return;
+    cur = it.newValue == null ? '' : String(it.newValue);
+  });
+  return cur;
+}
+
+// The confirmation, then the write. Both halves live here so the button's handler is
+// one line and the two cannot drift apart.
+async function putFieldValueBack(i) {
+  const v = fieldHistView;
+  if (!v) return;
+  const item = v.timeline[i];
+  if (!item) return;
+  const offer = restoreOfferFor(item);
+  if (!offer || !offer.ok) return;
+
+  // The gate, checked HERE, because this button is rendered inside a modal mounted on
+  // `document.body` — outside every section pane, so applySectionAccessGating's
+  // disable sweep never reaches it. A control mounted outside a pane CANNOT inherit
+  // the pane's gate; that is exactly how the add-row and add-evidence buttons stayed
+  // live on a view-only screen, and the symptom there was a button that hovered like
+  // a live one and did nothing. The backend enforces the same rule with the same
+  // predicate; this is so the button is never offered in the first place.
+  if (!canEditSection(v.sectionId)) {
+    showToast('You have view-only access to this section — you can read the history, but not put a value back.');
+    return;
+  }
+
+  const shown = s => (s === '' ? '(empty)' : (s.length > 300 ? s.slice(0, 300) + '…' : s));
+  const label = fieldLabelFor(v.fieldId);
+  const ok = confirm(
+    'Put an earlier value back into "' + label + '"?\n\n' +
+    'Put back:  ' + shown(offer.value) + '\n' +
+    'Replacing: ' + shown(fieldCurrentFrom(v.timeline, v.fieldId)) + '\n\n' +
+    'Everything else on this IR stays exactly as it is. This is recorded in the IR’s own ' +
+    'history and the admin is told.');
+  if (!ok) return;
+  await submitFieldRestore(offer.value);
+}
+
+async function submitFieldRestore(value) {
+  const v = fieldHistView;
+  if (!v) return;
+  const fd = new FormData();
+  fd.append('action', 'restoreField');
+  fd.append('irNumber', v.irNumber);
+  fd.append('sectionId', v.sectionId);
+  fd.append('fieldId', v.fieldId);
+  fd.append('value', value);
+  // The newest value the audit trail reported for this field. The backend refuses the
+  // write if the store no longer matches it — the guard against a change made between
+  // opening the history and pressing the button, which is the one case where a blind
+  // restore would discard somebody else's newer edit with nobody knowing.
+  fd.append('expectCurrent', fieldCurrentFrom(v.timeline, v.fieldId));
+  // Display names only. The backend has no form registry and cannot resolve a field
+  // id to a label, so the two labels travel with the request for the admin notice.
+  fd.append('labels', JSON.stringify({
+    sectionLabel: sectionDisplayName(v.sectionId),
+    fieldLabel: fieldLabelFor(v.fieldId),
+  }));
+  try {
+    const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
+    const data = await res.json();
+    if (data.status !== 'ok') { showToast(data.message || 'The value could not be put back.'); return; }
+    showToast(data.message || 'The earlier value was put back.');
+    // Re-read the ticket rather than patching the screen locally: the store is the
+    // truth, and the audit has a new row on it that the history must show.
+    await loadSectionData(v.irNumber);
+    renderOverviewEditable();
+    await loadActivityLog(v.irNumber);
+    openHistoryModal({ fieldId: v.fieldId, sectionId: v.sectionId });
+  } catch {
+    // Deliberately NOT "nothing was changed": a request that reached the backend and
+    // then lost its response looks identical from here to one that never left, and
+    // claiming the first would be a lie about the one thing the user needs to know.
+    showToast('Could not reach the backend. Reopen the history to see whether the value was put back.');
+  }
+}
+
 // One renderer for both consumers. Markup is the existing `.hist-*` block, reused
 // unchanged so the timeline inherits the modal's styling and the design system's
 // tokens with no new colours.
@@ -7486,8 +7707,26 @@ function renderTimelineInto(el, timeline, opts) {
     return;
   }
   const clip = s => String(s == null ? '' : s).slice(0, 200);
-  const rows = list.slice().reverse().map(it => {
+  // `i` is the index into the caller's OWN timeline — the array they passed, in its
+  // original oldest-first order — and it is what the restore button carries back.
+  // The render reverses for display; the handler must not, or it would read the
+  // wrong row's value back out of `fieldHistView`.
+  const rows = list.map((it, i) => ({ it, i })).reverse().map(({ it, i }) => {
     const meta = TIMELINE_KINDS[it.kind] || { icon: 'dot', label: it.kind || 'Activity' };
+    // The restore control, and THREE answers rather than two — see restoreOfferFor.
+    // It exists only when the caller supplied a restore context, which today means
+    // only the field-history modal: the ticket-level view and the Overview's inline
+    // timeline mix every field together and have no single field to put a value back
+    // into, so they must render no button at all rather than a dead one.
+    let restoreRow = '';
+    if (o.restore) {
+      const offer = restoreOfferFor(it);
+      if (offer && offer.ok) {
+        restoreRow = `<div class="hist-restore-row"><button type="button" class="hist-restore-btn" data-hist-i="${i}" title="Put this earlier value back">${iconSvg('clock')}Put back ${escHtml(clip(it.oldValue))}</button></div>`;
+      } else if (offer) {
+        restoreRow = `<div class="hist-restore-row"><span class="hist-restore-note">${escHtml(offer.reason)}</span></div>`;
+      }
+    }
     // A save row is a whole-section event and its label already says so, so the
     // `(whole section)` chip that used to sit here only repeated it. A field row
     // keeps its human label, resolved through the section index.
@@ -7512,7 +7751,11 @@ function renderTimelineInto(el, timeline, opts) {
         ? `<span class="hist-src">@mention</span>` : '';
       body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
       if (mention) body += `<div class="hist-diff">${mention}</div>`;
-    } else if (it.kind === 'edit' || it.kind === 'remove') {
+    } else if (it.kind === 'edit' || it.kind === 'remove' || it.kind === 'revert') {
+      // One body for all three, because they read the same way and mean the same
+      // thing by it: `old` is what was there before this row's action and `new` is
+      // what is there after. For a `revert` that is "the value it replaced" and "the
+      // value put back", which is exactly the Was/Now a reader expects.
       body = `<div class="hist-diff"><span class="hist-old">Was</span> ${escHtml(clip(it.oldValue))}</div>` +
              `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
     } else if (it.kind === 'add') {
@@ -7538,9 +7781,18 @@ function renderTimelineInto(el, timeline, opts) {
       <div class="hist-top"><span class="hist-ev">${iconSvg(meta.icon)}${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
       <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
       ${body}
+      ${restoreRow}
     </div>`;
   }).join('');
   el.innerHTML = `<div class="hist-list">${rows}</div>`;
+  // Bound here rather than inlined into an `onclick`, because the payload is a field
+  // value of up to 500 characters and it must reach `confirm()` intact. The button
+  // carries an index into the timeline the caller handed us — see fieldHistView.
+  if (o.restore) {
+    el.querySelectorAll('.hist-restore-btn').forEach(b => {
+      b.addEventListener('click', () => putFieldValueBack(Number(b.dataset.histI)));
+    });
+  }
 }
 
 // ─── AUDIT TRAIL / EDIT HISTORY ───────────────────────────────────────────────
@@ -7550,9 +7802,15 @@ function renderTimelineInto(el, timeline, opts) {
 // `quiet` suppresses the toasts. The Overview calls it on every IR open, and
 // an IR with no history on a backend that predates the widened getAuditLog
 // match should render an empty state — not an error toast per open.
-async function fetchAuditEntries(irNumber, limit, quiet) {
+async function fetchAuditEntries(irNumber, limit, quiet, fieldId) {
   try {
-    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}&limit=${limit}`);
+    // A field-scoped read is filtered by the BACKEND, before its 400-line cap. A
+    // filter applied here instead would answer with "this field's rows, minus the
+    // older ones that fell outside the ticket's newest 400" — and the OLDEST rows are
+    // precisely the ones a restore reaches for, so the one read that matters most
+    // would be the one quietly short.
+    const fieldQ = fieldId ? `&fieldId=${encodeURIComponent(fieldId)}` : '';
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=getAuditLog&irNumber=${encodeURIComponent(irNumber)}&limit=${limit}${fieldQ}`);
     const data = await res.json();
     if (data.status === 'ok') return Array.isArray(data.entries) ? data.entries : [];
     if (data.status === 'error' && !quiet) showToast('History: ' + (data.message || 'backend error'));
@@ -7562,28 +7820,84 @@ async function fetchAuditEntries(irNumber, limit, quiet) {
   return [];
 }
 
-async function openHistoryModal() {
+// A field's own 🕓 button. One line, because the section is derived rather than
+// passed: FIELD_SECTION_INDEX knows it for every field a form declares, and the
+// Overview's two hand-rendered fields fall back to OVERVIEW_KEY — the same pairing
+// the backend's canEdit() makes, since Triage folds into permissions['sec-a'].
+function openFieldHistory(fieldId) {
+  return openHistoryModal({ fieldId: fieldId, sectionId: fieldSectionFor(fieldId) });
+}
+
+// The History modal. `opts` is optional and carries exactly one thing: the field this
+// history is about. With it the modal shows one field's changes and offers a restore;
+// without it, the whole ticket's story and no restore.
+//
+//   openHistoryModal()                     the ticket  (the 🕓 History button)
+//   openHistoryModal({fieldId, sectionId}) one field   (a field's own 🕓)
+async function openHistoryModal(opts) {
+  // Guarded deliberately: the ticket-level button is wired as
+  // `addEventListener('click', openHistoryModal)`, so this receives a MouseEvent.
+  // Reading `.fieldId` off an event is undefined — harmless today, and a landmine the
+  // first time an event carries a property by that name.
+  const o = (opts && typeof opts === 'object' && !opts.target) ? opts : {};
+  const fieldId = String(o.fieldId || '');
   if (!currentIR?.irNumber) { showToast('Open an IR first'); return; }
   const irNumber = currentIR.irNumber;
-  const entries = await fetchAuditEntries(irNumber, 400);
-  const timeline = buildTimeline(irNumber, entries, nudges, 400);
+  const sectionId = fieldId ? (o.sectionId || fieldSectionFor(fieldId)) : '';
+  const entries = await fetchAuditEntries(irNumber, 400, false, fieldId);
+  // Comments come along in both views — a comment on a field is part of that field's
+  // story — but a field view takes only that field's, through the same helper the 💬
+  // buttons already use.
+  const comments = fieldId ? commentsForCtx('field', null, fieldId) : (Array.isArray(nudges) ? nudges : []);
+  const timeline = buildTimeline(irNumber, entries, comments, 400);
+  // The restore context, and the ONE thing that decides whether any restore control
+  // is drawn. It is set only for a field view, so the ticket-level modal and the
+  // Overview's inline timeline cannot sprout a button with no single field to write
+  // into. See the note in renderTimelineInto.
+  fieldHistView = fieldId ? { irNumber, sectionId, fieldId, timeline } : null;
+
+  // One modal, ever. Without this, a second open — including the one this does after
+  // a successful restore — stacks a second #history-modal on the body, and
+  // closeHistoryModal's getElementById then removes the newer one and leaves the
+  // older, stale one behind.
+  closeHistoryModal();
+
+  const heading = fieldId ? `History · ${fieldLabelFor(fieldId)}` : `History · ${irNumber}`;
+  // Whether a restore is drawn at all, decided HERE rather than per row. A view-only
+  // user gets the whole history and no button: offering one that refuses on click is
+  // the "hovers like a live control and does nothing" failure this app has already
+  // been bitten by twice. The blurb below says the same thing in words, so the absence
+  // is explained rather than merely a gap.
+  const mayRestore = fieldId ? canEditSection(sectionId) : false;
+  const blurb = fieldId
+    ? `Every recorded change to this field${sectionId ? ' in ' + escHtml(sectionDisplayName(sectionId)) : ''} and any comments on it, newest first.` +
+      (mayRestore ? ' You can put an earlier value back.' : ' You have view-only access here, so you can read this but not change it.')
+    : 'Everything that has happened to this IR — saves, field edits, uploads, triage changes and comments (newest first).';
   const modal = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'history-modal';
   modal.innerHTML = `
     <div class="inward-options-card nudge-card">
       <div class="inward-options-head">
-        <h3>History · ${escHtml(irNumber)}</h3>
+        <h3>${escHtml(heading)}</h3>
         <button type="button" class="inward-options-close" onclick="closeHistoryModal()">&times;</button>
       </div>
-      <div class="nudge-ctx-line">Everything that has happened to this IR — saves, field edits, uploads, triage changes and comments (newest first).</div>
+      <div class="nudge-ctx-line">${blurb}</div>
       <div id="history-list"></div>
     </div>`;
   document.body.appendChild(modal);
-  renderTimelineInto(document.getElementById('history-list'), timeline);
+  renderTimelineInto(document.getElementById('history-list'), timeline, {
+    restore: mayRestore ? fieldHistView : null,
+    emptyText: fieldId
+      ? 'No changes recorded yet for this field.'
+      : undefined,
+  });
   modal.addEventListener('click', e => { if (e.target === modal) closeHistoryModal(); });
 }
-function closeHistoryModal() { document.getElementById('history-modal')?.remove(); }
+function closeHistoryModal() {
+  document.querySelectorAll('#history-modal').forEach(m => m.remove());
+  fieldHistView = null;
+}
 
 // ─── DEMO MODE DATA ──────────────────────────────────────────────────────────
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.

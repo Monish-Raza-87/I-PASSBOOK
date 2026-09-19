@@ -107,8 +107,15 @@ requirement. Backend (`backend.gs`, requires redeploy):
   `{ t, ir, sec, by, ev, fid, old, nw }` — i.e. Timestamp, IR Number, Section ID,
   Saved By, Event, Field ID, Old Value, New Value.
 - Events: `saved` (one marker per **human** section save), `added` / `changed` /
-  `removed` (one line per field), and `uploaded` (one line per uploaded file, with the
+  `removed` (one line per field), `uploaded` (one line per uploaded file, with the
   file name in New Value) — so uploads are traceable too, which they were not before.
+- **`reverted`** is the sixth, appended by `restoreField` when an earlier value is put
+  back. It is deliberately **not** `restored`: that value already means *"this
+  ticket's folder came back out of the Drive archive"* (`archiveAuditLine`), and one
+  word for two events is how a reader ends up unable to tell a folder move from a value
+  being put back. `old` is the value being **replaced** and `nw` is the value **put
+  back**, so *Was / Now* reads the same as on a `changed` row. See
+  [`restoreField`](04%20-%20Backend%20API%20Reference.md#restorefield).
 - Three suppressions keep the log readable, each for a stated reason: derived
   Drive-link keys (`*_links`) and the `done` completion array are never diffed (a
   500-character JSON diff of `done` would drown the real edits on every save), and
@@ -125,9 +132,14 @@ requirement. Backend (`backend.gs`, requires redeploy):
   `IR409.jsonl`, while `__CONFIG__` / `__NUDGES__` / `__KB__` have no ticket and get
   `CONFIG.jsonl` / `NUDGES.jsonl` / `KB.jsonl`. So two people on different tickets
   never touch the same audit file.
-- `getAuditLog(irNumber)` GET action returns the trail for one IR, oldest first,
-  capped at 400 entries. It reads that ticket's file and matches **two** line shapes:
-  an ordinary section line (whose `ir` is the IR) and a workflow line (whose `sec` is
+- `getAuditLog(irNumber, limit, fieldId)` GET action returns the trail for one IR,
+  oldest first, capped at 400 entries. `fieldId` is optional and filters to one
+  field's lines — applied **before** the cap, so the cap bounds that field's history
+  rather than the ticket's. Filtering afterwards would hand back the tail of the
+  ticket's newest 400 lines that happen to be about that field, so a field's older
+  changes would fall outside the window and its "history" would silently be a recent
+  sample. It reads that ticket's file and matches **two** line shapes: an ordinary
+  section line (whose `ir` is the IR) and a workflow line (whose `sec` is
   the IR and whose `ir` is the `__IRS__` store name) — which is what lets triage
   changes appear in the same timeline as saves with no second store. A workflow line
   is reported with the **real** IR in `irNumber`, so a consumer filtering on it cannot
@@ -136,15 +148,78 @@ requirement. Backend (`backend.gs`, requires redeploy):
   bounds the *response*, not the read. Pruning is a manual lever:
   `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`, default 400 days),
   deliberately manual because the audit trail is evidence and must not shrink behind
-  anyone's back. It is per-subject, so it can prune history for a ticket that is still
-  open — the audit cannot tell whether a ticket is closed. A line whose timestamp
-  cannot be parsed is **kept**, never guessed at.
+  anyone's back. **A ticket's history is kept for exactly as long as the ticket is** —
+  the owner's rule (*"Till that IR is completely closed and archived … Till IR records
+  are being kept in drive, so the history"*). The age rule is per **subject**, so
+  without a guard an entry could go while its ticket was wide open, which the function's
+  own comment admitted. It now decides liveness from the IR store (`__IRS__`) **and**
+  `sections/index.json` — the same two the archive sweep reads, so the two cannot
+  disagree about whether an IR is live — and **skips a per-ticket subject entirely**
+  while that IR exists, before the file is even read. Sentinel subjects (`signins`,
+  `config`, `nudges`, `kb`) keep the old behaviour. The returned message says how many
+  ticket files it left untouched and why, rather than silently pruning fewer lines.
+  A line whose timestamp cannot be parsed is **kept**, never guessed at.
 
 Frontend: the IR banner **🕓 History** button opens a modal listing the trail newest
 first, showing who saved, the event, the field, and old→new values. It and the
 Overview's timeline are the **same** renderer over the same pure
 `buildTimeline(...)` — see below. Until the backend is redeployed it shows "No
 history yet".
+
+### One field's history, and putting a value back
+Every **field's** label also carries a small 🕓 button (`buildField`, and the two
+Overview-editable fields). It opens the **same** modal, filtered to that one field:
+one modal, one look, two entry points. The button is a **read**, so it survives the
+view-only sweep, exactly as exporting a section does — a view-only user may see what
+changed and who changed it.
+
+The field's own 🕓 derives its section rather than being passed one
+(`fieldSectionFor`), and the Overview's two hand-rendered fields fall back to
+`OVERVIEW_KEY` — the same pairing the backend's `canEdit()` makes, because
+`getEffectiveAccess` folds Triage into `permissions['sec-a']`. `fieldLabelFor` gained
+a two-entry fallback so `a_crmOwner` and `a_contactPhone` read as words rather than as
+raw ids; they are **not** in `SECTIONS`, so it used to fall back to the id.
+
+Where a row can reproduce a value **in full**, the modal offers **Put back**. Three
+answers, not two (`restoreOfferFor`): *not a candidate* renders nothing at all, *a
+candidate that cannot be put back* renders the reason, and *offered* renders the
+button. The rules:
+
+| Row | Offered? |
+|---|---|
+| `changed` / `removed` / a previous `reverted` | **yes** — the old value is complete |
+| `added` | **no** — its old value is `''` by construction, so "put back" could only mean "clear this field" |
+| `uploaded` | **no** — only the file name is recorded; the Drive URL is deliberately not stored and is not re-derivable |
+| any value over **500** characters | **no** — see the truncation rule below |
+| every Triage kind (`status`, `assign`, `priority`, `category`, …) | **no** — the IR header lives in a different store under a different key shape, governed by the separate Triage axis. Out of scope **by construction**, not by an extra rule that could be forgotten |
+| a whole-section `saved` marker, a comment, an archive move | **no** — not a field value at all |
+
+**The truncation rule is the one that cannot be argued with.** `snapValue` caps every
+audited value at 500 characters plus a trailing `…`, silently and irreversibly — the
+full value is kept **nowhere else**. Writing that prefix back would corrupt the field
+with no error and nothing to compare against. `snapValue` can only emit ≤500
+characters or exactly 501, so `value.length > 500` **proves** truncation. It is
+checked in the frontend (so the button is never offered) **and** in the backend (so a
+crafted request cannot write it); the two are not redundant.
+
+**The restore is gated twice, and both gates are needed.** The modal is created with
+`document.createElement` and appended to `document.body`, so it is **outside every
+section pane** and `applySectionAccessGating`'s disable sweep never reaches it. A
+control mounted outside a pane cannot inherit the pane's gate — that is exactly how
+the add-row and add-evidence buttons stayed live on a view-only screen. So the modal
+decides `mayRestore` from `canEditSection(sectionId)` and draws **no** restore control
+without it (saying so in the blurb rather than leaving a silent gap), and the click
+handler checks the same predicate again before it writes anything. The backend
+enforces the same rule with the same predicate. A view-only user therefore sees the
+whole history and no button: offering one that refuses on click is the "hovers like a
+live control and does nothing" failure this app has already been bitten by twice.
+
+A successful restore re-reads the ticket rather than patching the screen locally — the
+store is the truth, and the audit has a new row the history must show — then reopens
+the field's history so the change is visible where it was made. Both the bell notice
+and the admin email happen **after** the write's lock is released, so a failure in
+either is reported in words ("saved, but the admin email was not sent") and never
+fails a restore that already committed.
 
 ---
 
@@ -267,16 +342,28 @@ maintain it by hand:
 |---|---|---|
 | audit, section | `saved` with no field | `save` |
 | audit, section | `added` / `changed` / `removed` | `add` / `edit` / `remove` |
+| audit, section | event `reverted` — an earlier value put back | `revert` (its own kind, so a restore is visibly distinct from the edit it undid — a reader asking "why is this the old value again?" is looking for exactly one row, and folding it into `edit` hides it among the edits) |
 | audit, workflow | `status` / `assignee`,`assigneeName` / `priority` / `type` | `status` / `assign` / `priority` / `type` |
 | audit, either | event `uploaded` | `upload` |
+| audit, either | event `archived` / `restored` | `archived` / `restored` (branched on the **event**, not on `fid` — these carry no field, and chipping a folder move "Triage" would put a word on the row that no button in the app uses for it) |
 | comment | a `__NUDGES__` item for this IR | `comment` (chip `@mention` when it carries mentions) |
 
 `done[]` deltas are suppressed: completion is already implied by the section save
 that caused them, and each one is a 500-character JSON array. The pure
 `buildTimeline(irNumber, auditEntries, nudgeItems, limit)` is shared by the Overview
-(`limit: 40`) and the 🕓 History modal (`limit: 400`), so the two can never disagree.
-The timestamps are `dd-MMM-yyyy HH:mm:ss`, which is **not** ISO 8601, so they are
-parsed by an explicit month-table parser rather than by `Date.parse`.
+(`limit: 40`) and the 🕓 History modal (`limit: 400`) — the ticket-level one and the
+per-field one both — so the two can never disagree. The timestamps are
+`dd-MMM-yyyy HH:mm:ss`, which is **not** ISO 8601, so they are parsed by an explicit
+month-table parser rather than by `Date.parse`.
+
+The renderer takes one optional `restore` context, and **only** the field-history
+modal supplies it (and only when the viewer may edit there). The ticket-level modal
+and the Overview's inline timeline mix every field together and have no single field
+to write into, so they render no restore control at all rather than a dead one. The
+button carries an **index** into the caller's own oldest-first timeline — never the
+value itself, because that is up to 500 characters and would have to be escaped into
+an attribute — and the list is rendered newest-first, so the index and the display
+order are deliberately different things.
 
 ---
 

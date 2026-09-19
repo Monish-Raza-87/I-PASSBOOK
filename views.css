@@ -793,6 +793,46 @@
   padding: 0 5px;
 }
 
+/* ── PUT A VALUE BACK ────────────────────────────────────────────────────────
+   The restore control under a history row. Rendered only by the field-history view
+   (see renderTimelineInto), and only for a value that can actually go back.
+
+   The button carries the OLD value in its own label — "Put back  AT-2041" — because
+   a row already shows Was and Now and a bare "Put back" would make the reader match
+   the two up by eye. It wraps rather than clipping: a 500-character value would
+   otherwise run off the card. */
+.hist-restore-row { margin-top: 6px; }
+.hist-restore-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 100%;
+  background: var(--surface-gray-2);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  color: var(--ink-gray-8);
+  cursor: pointer;
+  text-align: left;
+  /* A long value must wrap INSIDE the button, so its glyph stays with the first
+     line instead of floating in the middle of a wrapped block. */
+  word-break: break-word;
+}
+.hist-restore-btn .icon { flex: none; color: var(--ink-gray-6); }
+.hist-restore-btn:hover { background: var(--surface-gray-3); border-color: var(--outline-gray-3); }
+
+/* Why a value cannot go back — the same slot, in words. It replaces the button
+   rather than sitting beside a disabled one: a greyed control that explains itself
+   only on hover says nothing at all on a phone. */
+.hist-restore-note {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--ink-gray-5);
+  font-style: italic;
+}
+
 /* The in-page activity log. The modal's 64vh is wrong inside a page that already
    scrolls — it would make the log taller than the viewport on its own. */
 #ir-timeline .hist-list { max-height: 48vh; }

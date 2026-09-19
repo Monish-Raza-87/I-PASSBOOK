@@ -205,12 +205,37 @@
 .sec-nudge-btn:hover,
 .field-nudge-btn:hover { background: var(--surface-gray-3); color: var(--ink-gray-8); }
 
+/* The per-field 🕓 History button — the field-level twin of the ticket's own History
+   button, in the same label slot as the 💬 chip and reading as the same family: one
+   borderless glyph, quiet until hovered.
+   Floated right like its sibling, which is what puts them in ONE right-hand column:
+   a second right-float lands immediately to the left of the first, so the pair sits
+   in markup order (💬 rightmost, 🕓 beside it) with no layout of its own. */
+.field-hist-btn {
+  position: relative;
+  float: right;
+  background: none;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 1px 5px;
+  margin-right: 2px;
+  border-radius: var(--radius-3);
+  color: var(--ink-gray-4);
+  font-family: inherit;
+}
+.field-hist-btn:hover { background: var(--surface-gray-3); color: var(--ink-gray-8); }
+
+
 /* The badge is positioned against the BUTTON BOX, so swapping the emoji for a 1em
    SVG changes how much clearance the -6px offsets have. The section button is
    --text-sm and fine at 1em; the field button is --text-xs, where a 12px glyph
    would leave the 15px badge overlapping it — hence the explicit size below. */
 .field-nudge-btn .icon { width: 14px; height: 14px; vertical-align: middle; }
 .sec-nudge-btn .icon { vertical-align: middle; }
+/* Sized to its sibling chip rather than to --text-xs: the two sit in one column and
+   a mismatched glyph would make the tighter of the two look like the odd one out. */
+.field-hist-btn .icon { width: 14px; height: 14px; vertical-align: middle; }
 
 /* `font-size: 9px` is the one hardcoded px size in this cluster, deliberately: the
    badge is 15px tall and --text-2xs (11px) does not fit inside it. */
@@ -900,9 +925,14 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
      chip floats right inside a label row, and claiming vertical space would
      swallow taps meant for the input underneath it. */
   .sec-nudge-btn::after,
-  .field-nudge-btn::after {
+  .field-nudge-btn::after,
+  .field-hist-btn::after {
     content: '';
     position: absolute;
+    /* The history chip is the LEFTMOST of the two right-floats, so its outward side
+       is its LEFT — the comment chip keeps the right-hand overhang, and giving both
+       the same one would push the pair apart and overlap the input below. */
     inset: 0 -9px;
   }
+  .field-hist-btn::after { inset: 0 -4px 0 -9px; }
 }

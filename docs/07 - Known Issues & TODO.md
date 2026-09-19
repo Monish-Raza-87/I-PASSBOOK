@@ -186,18 +186,18 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1762 cases across 16 suites**, all passing.
-(1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and
-its 69 cases arrived with Stages 3–4; the 15 for the silent-upload fix arrive with
-`smoke-store.mjs`'s first *behavioural* reproduction of a user-reported bug — it
-calls `saveSection` with a file whose MIME type is empty, which is what an Android
-picker really does — and the 5 that pin the mark decode the PNG and count its
-pixels, because the checks that were there before passed on the broken file. The 33
-that arrived with the sign-in audit are the same kind of thing: 15 in
-`smoke-store.mjs` drive the real two-step login and read the real
-`audit/signins.jsonl` back — including that a *throwing* audit write still yields a
-working session — while the rest pin the request that carries the device label and
-the shape of the record.)
+`node tools/smoke-all.mjs` — **1954 cases across 16 suites**, all passing.
+(1762 before the field-history/restore build; 1605 across 15 when the Drive-store
+migration shipped; `smoke-list-intel.mjs` and its 69 cases arrived with Stages 3–4;
+the 15 for the silent-upload fix arrive with `smoke-store.mjs`'s first *behavioural*
+reproduction of a user-reported bug — it calls `saveSection` with a file whose MIME
+type is empty, which is what an Android picker really does — and the 5 that pin the
+mark decode the PNG and count its pixels, because the checks that were there before
+passed on the broken file. The 33 that arrived with the sign-in audit are the same
+kind of thing: 15 in `smoke-store.mjs` drive the real two-step login and read the
+real `audit/signins.jsonl` back — including that a *throwing* audit write still
+yields a working session — while the rest pin the request that carries the device
+label and the shape of the record.)
 
 One failure was **retired, not fixed**, worth knowing about because it will come
 back if someone re-pins it: `smoke-list-intel.mjs` asserted the card said

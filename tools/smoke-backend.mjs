@@ -482,6 +482,16 @@ r.ok('mailQuotaOk reads MAIL_DAILY_CAP', /MAIL_DAILY_CAP/.test(mq), mq.slice(0, 
 r.ok('mailQuotaOk counts per day', /Utilities\.formatDate/.test(mq));
 r.ok('the nudge path stops short of the ceiling, so a busy comment day cannot starve resets',
   /MAIL_AUTH_RESERVE/.test(mq), (mq.match(/var ceiling[^\n]*/) || [''])[0]);
+// 'notice' joins 'nudge' on the reserved side. An admin notice is triggered by a
+// user action (a restore), so it belongs in the same group as the comment nudge:
+// it may neither spend the slots that are the only way back into a locked account,
+// nor be starved by a busy restore day.
+r.ok('the reserved group is named, and it is the two user-triggered kinds',
+  /kind === 'nudge' \|\| kind === 'notice'/.test(mq),
+  (mq.match(/var reserved[^\n]*/) || [''])[0]);
+r.ok('an admin notice is charged against the reserved ceiling, not the full one',
+  /mailQuotaOk\(\s*'notice'\s*\)/.test(fnBody('sendAdminNotice')),
+  (fnBody('sendAdminNotice').match(/[^\n]*mailQuotaOk[^\n]*/) || [''])[0]);
 const capN     = Number((code.match(/MAIL_DAILY_CAP\s*=\s*(\d+)/) || [])[1]);
 const reserveN = Number((code.match(/MAIL_AUTH_RESERVE\s*=\s*(\d+)/) || [])[1]);
 r.ok('the reserve is non-zero and strictly below the cap',
@@ -490,8 +500,14 @@ r.ok('the reserve is non-zero and strictly below the cap',
 // The property, stated structurally: walk to the function enclosing each literal
 // send and require that it consulted the cap. A third sender added later cannot
 // slip through uncapped without failing here.
+//
+// THREE, and the count is the point of the assertion: 1 = sendAuthMail (sign-in
+// codes, resets), 2 = sendNudgeEmail (comment notifications), 3 = sendAdminNotice
+// (an old value was put back). A fourth appearing without this line changing means
+// a new outbound path was added and nobody looked at the daily ceiling — which is
+// how a busy day silently disables password recovery for the whole company.
 const sendSites = [...code.matchAll(/MailApp\.sendEmail/g)];
-r.ok('there are exactly two send sites', sendSites.length === 2, sendSites.length);
+r.ok('there are exactly three send sites', sendSites.length === 3, sendSites.length);
 sendSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   const body  = owner ? fnBody(owner.name) : '';
@@ -499,6 +515,66 @@ sendSites.forEach((m, i) => {
     /mailQuotaOk/.test(body),
     { site: i + 1, fn: owner && owner.name, capped: /mailQuotaOk/.test(body) });
 });
+
+r.head('the admin notice is addressed from CONFIG, and its link is built from CONFIG');
+const san = fnBody('sendAdminNotice');
+r.ok('the recipient set comes from CONFIG.ADMIN_EMAILS',
+  /CONFIG\.ADMIN_EMAILS/.test(san), (san.match(/[^\n]*ADMIN_EMAILS[^\n]*/) || [''])[0]);
+r.ok('...and every recipient passes the same guard as all outbound mail',
+  /isMailRecipientAllowed\(/.test(san),
+  (san.match(/[^\n]*isMailRecipientAllowed[^\n]*/) || [''])[0]);
+r.ok('no recipient means no send, rather than a mail to nobody',
+  /if \(!recipients\.length\) return false;/.test(san));
+r.ok('it never throws — it returns true/false, because the restore already committed',
+  /catch/.test(san) && /return false/.test(san) && !/throw/.test(san),
+  (san.match(/[^\n]*(throw|catch)[^\n]*/g) || []));
+r.ok('the reply-to is the VERIFIED caller, never a client-supplied address',
+  /if \(replyTo\) options\.replyTo = replyTo;/.test(san),
+  (san.match(/[^\n]*replyTo[^\n]*/) || [''])[0]);
+r.ok('and it is passed the authenticated email, not a request field',
+  /sendAdminNotice\([\s\S]{0,240}?,\s*by\)/.test(fnBody('restoreField')),
+  (fnBody('restoreField').match(/[^\n]*sendAdminNotice\([^\n]*/) || [''])[0]);
+
+// The deep link. A URL echoed from a request body into an email the admin trusts is
+// a phishing vector — the admin sees Indrones' own app name in the From line and a
+// link that goes wherever the caller chose. So the base is a CONFIG value and the
+// only request-derived part is the IR number, which is validated and encoded.
+const dl = fnBody('irDeepLink');
+r.ok('irDeepLink builds from CONFIG.APP_URL and nothing else',
+  /CONFIG\.APP_URL/.test(dl) && !/params|e\.parameter|request/i.test(dl),
+  (dl.match(/[^\n]*(params|parameter|APP_URL)[^\n]*/g) || []));
+r.ok('a blank APP_URL yields no link at all, so the line is left out',
+  /if \(!base\) return '';/.test(dl));
+r.ok('the app is hash-routed, so the link lands on the ticket',
+  /'#\/tickets\/'/.test(dl), (dl.match(/[^\n]*#\/tickets[^\n]*/) || [''])[0]);
+r.ok('the IR number is URL-encoded into the fragment',
+  /encodeURIComponent\(String\(irNumber/.test(dl));
+r.ok('the body includes the link only when there is one',
+  /if \(link\) body = body\.concat/.test(fnBody('restoreField')),
+  (fnBody('restoreField').match(/[^\n]*if \(link\)[^\n]*/) || [''])[0]);
+r.ok('APP_URL is configured, so the notice really carries a link',
+  /APP_URL:\s*'https:\/\//.test(code), (code.match(/APP_URL:[^\n]*/) || [''])[0]);
+r.ok('the subject names the IR, so the inbox sorts itself',
+  /'\[I-PASSBOOK\] ' \+ irNumber/.test(fnBody('restoreField')),
+  (fnBody('restoreField').match(/[^\n]*\[I-PASSBOOK\][^\n]*/) || [''])[0]);
+
+// Section and field labels live in the FRONTEND's form registry. The backend has no
+// copy, so the caller sends them — and they are DISPLAY strings only, never used to
+// resolve anything. Same trust level as sendNudgeEmail's `context`/`fromName`.
+r.head('the labels in the notice are display strings, cleaned and capped');
+const nl = fnBody('noticeLabel');
+r.ok('it strips control characters and collapses whitespace',
+  /replace\(/.test(nl) && /\\s\+/.test(nl), (nl.match(/[^\n]*replace[^\n]*/g) || ['']).slice(0, 2));
+r.ok('it caps the length rather than trusting the caller',
+  /substring\(0, 80\)/.test(nl), (nl.match(/[^\n]*80[^\n]*/) || [''])[0]);
+r.ok('and falls back to the id, so a bare request still reads as something',
+  /return s \|\| String\(fallback/.test(nl));
+r.ok('both labels go through it on the way in',
+  (fnBody('restoreField').match(/noticeLabel\(/g) || []).length === 2,
+  fnBody('restoreField').match(/[^\n]*noticeLabel[^\n]*/g));
+r.ok('a malformed labels blob degrades to the ids instead of failing the restore',
+  /try \{ labels = JSON\.parse\(params\.labels \|\| '\{\}'\) \|\| \{\}; \} catch/.test(code),
+  (code.match(/[^\n]*params\.labels[^\n]*/) || [''])[0]);
 
 r.head('forgotPassword cannot be used to enumerate');
 const fp = fnBody('forgotPassword');
@@ -745,7 +821,8 @@ const LOCKED = ['saveSection', 'mintSession', 'doLogout', 'revokeAllSessions', '
   'issueAuthCode', 'verifyAuthCode',
   'createUserRow', 'resetUserPassword', 'setUserStatus',
   'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers',
-  'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog'];
+  'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog',
+  'restoreField', 'appendAdminNotice'];
 LOCKED.forEach(fn => {
   const body = fnBody(fn);
   r.ok(fn + ' takes the lock', /withRowLock(OrThrow)?\(/.test(body));
@@ -1171,6 +1248,257 @@ r.ok('parseAuditTimestamp parses dd-MMM-yyyy explicitly, not via Date.parse',
     return p.length > 100 && !/Date\.parse/.test(p) &&
       /match\(/.test(p) && /'jan'/.test(p);
   })(), fnBody('parseAuditTimestamp').slice(0, 400));
+
+// ── Putting an old value back ─────────────────────────────────────────────────
+r.head('restoreField writes ONE KEY, and nothing else about the IR moves');
+// The tempting shortcut is to reuse saveSection: it already has the gate, the lock
+// and the audit. But its write is `store[sectionId] = fields` — the WHOLE section
+// key — so restoring one field through it means resending the entire section from
+// the client, and a client holding a stale form silently reverts every sibling
+// field in it. That is the exact accident this feature exists to repair.
+const rf = fnBody('restoreField');
+// The lock's closing bracket: the first `});` at or after the audit append — NOT the
+// last `});` in the function, because the bell record's own `appendAdminNotice({…});`
+// would otherwise be mistaken for the lock's end.
+const lockClose = rf.indexOf('});', rf.indexOf('appendAuditLinesLocked('));
+r.ok('restoreField exists and is shaped as its own action', rf.length > 800, rf.length);
+r.ok('it takes one field and the value to put back',
+  /function restoreField\(irNumber, sectionId, fieldId, value, expectCurrent, by, labels\)/.test(code),
+  (code.match(/function restoreField\([^)]*\)/) || [''])[0]);
+r.ok('it never calls saveSection', !/saveSection\(/.test(rf));
+r.ok('it reads the section file itself, inside its own lock',
+  /readIR\(/.test(rf) && /withRowLockOrThrow\(/.test(rf));
+r.ok('and it uses the LOCKED read, never the memoised one',
+  !/readJson\(/.test(rf), (rf.match(/[^\n]*readJson\([^\n]*/g) || ['none — correct']));
+r.ok('there is exactly ONE lock, never a nested second',
+  (rf.match(/withRowLock(OrThrow)?\(/g) || []).length === 1,
+  (rf.match(/[^\n]*withRowLock[^\n]*/g) || []));
+r.ok('the write is writeIR against the id readIR resolved',
+  /writeIR\(irNumber, data, ir\.fileId\)/.test(rf),
+  (rf.match(/[^\n]*writeIR\([^\n]*/) || [''])[0]);
+r.ok('it copies the section key-by-key and replaces ONE field',
+  /Object\.keys\(stored\)\.forEach/.test(rf) && /next\[fieldId\] = restoreVal;/.test(rf),
+  (rf.match(/[^\n]*next\[fieldId\][^\n]*/) || [''])[0]);
+r.ok('and it never deletes a key, so a sibling cannot disappear',
+  !/delete /.test(rf), (rf.match(/[^\n]*delete [^\n]*/g) || ['none — correct']));
+
+r.head('a value that was truncated in the audit can never be written back');
+// snapValue caps an audited value at 500 characters and appends '…', silently and
+// irreversibly: the full old value is kept NOWHERE else, not in the store and not in
+// a backup. Putting the prefix back would corrupt the field with no error. The test
+// can be exact because snapValue can only emit <=500 chars or exactly 501.
+r.ok('the refusal is on the length, and it is stated in words',
+  /restoreVal\.length > 500/.test(rf) && /too long to be recorded in full/.test(rf),
+  (rf.match(/[^\n]*500[^\n]*/) || [''])[0]);
+r.ok('it refuses BEFORE the lock, so a refused restore writes nothing at all',
+  rf.indexOf('restoreVal.length > 500') < rf.indexOf('withRowLockOrThrow('),
+  { refuse: rf.indexOf('restoreVal.length > 500'), lock: rf.indexOf('withRowLockOrThrow(') });
+r.ok('the audit values go through snapValue, so the line has the same shape as a save',
+  (rf.match(/snapValue\(/g) || []).length >= 4,
+  (rf.match(/[^\n]*snapValue[^\n]*/g) || []));
+
+r.head('a stale caller changes nothing');
+// The guard that makes a restore safe to offer: the client sends the value it
+// believes is current, and a mismatch refuses. Without it, a blind restore discards
+// whatever landed in between with nobody knowing.
+r.ok('the expectation is compared against what is STORED, inside the lock',
+  /snapValue\(current\) !== expect/.test(rf),
+  (rf.match(/[^\n]*expect[^\n]*/) || ['']).slice(0, 3));
+r.ok('the comparison uses snapValue on both sides, so a long value still matches',
+  /var expect = \(expectCurrent == null\) \? '' : String\(expectCurrent\);/.test(rf));
+r.ok('the mismatch is refused in words and changes nothing',
+  /changed while you were looking/.test(rf) && /nothing was changed/.test(rf));
+r.ok('the compare-and-write are both inside the lock, so nothing lands between them',
+  rf.indexOf('snapValue(current) !== expect') > rf.indexOf('withRowLockOrThrow(') &&
+  rf.indexOf('snapValue(current) !== expect') < rf.indexOf('writeIR('),
+  { compare: rf.indexOf('snapValue(current) !== expect'), write: rf.indexOf('writeIR(') });
+
+r.head('a removed field is exactly what a restore is for');
+// The owner's own words: "if someone has deleted important info ... if required I
+// can restore that version". A field whose key is gone is not an error — it is the
+// main case, so a missing key reads as an empty current value.
+r.ok('a missing key is read as empty rather than refused',
+  /hasOwnProperty\(fieldId\)/.test(rf) && /var current = hasKey \? stored\[fieldId\] : '';/.test(rf));
+r.ok('and only a file that does not exist yet is refused, in words',
+  /if \(!ir\.fileId\)/.test(rf) && /nothing to put back/.test(rf),
+  (rf.match(/[^\n]*fileId[^\n]*/) || [''])[0]);
+r.ok('that refusal comes before the section is even read, so it cannot half-run',
+  rf.indexOf('if (!ir.fileId)') < rf.indexOf('var data = ir.data;'),
+  { check: rf.indexOf('if (!ir.fileId)'), read: rf.indexOf('var data = ir.data;') });
+
+r.head('restoreField is gated exactly like the save it replaces');
+r.ok('a sentinel store is refused outright — it is a different action, not a smaller one',
+  /String\(irNumber\)\.indexOf\('__'\) === 0/.test(rf) && /cannot be restored through this action/.test(rf));
+r.ok('the IR number is validated', /assertRealIR\(irNumber\)/.test(rf));
+r.ok('the gate is copied VERBATIM from saveSection, so the two cannot drift',
+  /else if \(access\.role !== 'admin' && !canEdit\(access\.permissions, sectionId\)\)/.test(rf) &&
+  /Forbidden: you do not have edit access to /.test(rf),
+  (rf.match(/[^\n]*canEdit\(access\.permissions[^\n]*/) || [''])[0]);
+r.ok('and it is the same line saveSection uses, character for character',
+  (fnBody('saveSection').match(/else if \(access\.role !== 'admin' && !canEdit\(access\.permissions, sectionId\)\)/g) || []).length === 1);
+r.ok('a retired section is refused, so no orphan key is written for a merged one',
+  /RETIRED_SECTION_IDS\.indexOf\(String\(sectionId\)\) > -1/.test(rf) &&
+  /Reload the app to get the current version/.test(rf));
+r.ok('the access check is made BEFORE the lock, so a forbidden caller never blocks a writer',
+  rf.indexOf('getEffectiveAccess(by)') < rf.indexOf('withRowLockOrThrow('),
+  { gate: rf.indexOf('getEffectiveAccess(by)'), lock: rf.indexOf('withRowLockOrThrow(') });
+r.ok('all three ids are required',
+  /if \(!irNumber \|\| !sectionId \|\| !fieldId\)/.test(rf) &&
+  /irNumber, sectionId and fieldId are required/.test(rf));
+
+r.head('the restore is audited as `reverted`, never as `restored`');
+r.ok('a `reverted` line is appended inside the same lock as the write',
+  /appendAuditLinesLocked\(auditSubjectFor\(irNumber, sectionId\)/.test(rf) &&
+  rf.indexOf('appendAuditLinesLocked(') > rf.indexOf('writeIR(') &&
+  rf.indexOf('appendAuditLinesLocked(') < lockClose,
+  { write: rf.indexOf('writeIR('), audit: rf.indexOf('appendAuditLinesLocked('), close: lockClose });
+r.ok('the new event is `reverted`', /ev: 'reverted'/.test(rf),
+  (rf.match(/[^\n]*ev: '[^\n]*/) || [''])[0]);
+// `restored` already means "this ticket's folder came back out of the Drive
+// archive" (archiveAuditLine). One word for two events is how a reader ends up
+// unable to tell a folder move from a value being put back.
+r.ok('and `restored` is not reused for it anywhere in the new code',
+  !/ev: 'restored'/.test(rf) && !/ev: 'restored'/.test(fnBody('appendAdminNotice')),
+  (rf.match(/[^\n]*'restored'[^\n]*/g) || ['none — correct']));
+r.ok('and it is still the archive event, so nothing was renamed out from under it',
+  /'restored'/.test(code) && /function archiveAuditLine\(/.test(code) &&
+  /archiveAuditLine\(irNumber, 'restored'/.test(code),
+  (code.match(/[^\n]*'restored'[^\n]*/g) || []).slice(0, 2));
+r.ok('the line has no keys beyond the established eight',
+  /\{ t: ts, ir: irNumber, sec: sectionId, by: by, ev: 'reverted',/.test(rf) &&
+  /fid: fieldId, old: snapValue\(current\), nw: snapValue\(restoreVal\) \}/.test(rf),
+  (rf.match(/[^\n]*fid: fieldId[^\n]*/) || [''])[0]);
+r.ok('`old` is the value being REPLACED and `nw` the one put back, as on every other row',
+  /old: snapValue\(current\), nw: snapValue\(restoreVal\)/.test(rf));
+r.ok('the timestamp uses the same display format the timeline prints verbatim',
+  /'dd-MMM-yyyy HH:mm:ss'/.test(rf));
+r.ok('the subject is the TICKET, through auditSubjectFor, not the section',
+  /auditSubjectFor\(irNumber, sectionId\)/.test(rf));
+
+// The notices. The durable half of "tell the admin" is the `reverted` line, which is
+// inside the lock and cannot go missing. The loud half is deliberately OUTSIDE: a
+// mail or bell failure reported as a failed restore would be false, and the user's
+// retry would then be refused by the expectCurrent guard — a confusing way to learn
+// the write worked. Same rule as saveSection's reopenIR.
+r.head('both notices are after the lock, and neither can fail the restore');
+r.ok('the lock really does close after the audit append',
+  lockClose > rf.indexOf('appendAuditLinesLocked('), { lockClose, audit: rf.indexOf('appendAuditLinesLocked(') });
+r.ok('the in-app notice is posted outside the locked block',
+  rf.indexOf('appendAdminNotice(') > lockClose,
+  { notice: rf.indexOf('appendAdminNotice('), lockClose });
+r.ok('and the email too', rf.indexOf('sendAdminNotice(') > lockClose,
+  { mail: rf.indexOf('sendAdminNotice('), lockClose });
+r.ok('a bell failure is caught and reported in words, not thrown',
+  /catch \(e\) \{ notes\.push\('the in-app notice could not be posted'\); \}/.test(rf));
+r.ok('a mail failure is caught and reported in words, not thrown',
+  /if \(!sendAdminNotice\([\s\S]{0,120}notes\.push\('the admin email was not sent'\);/.test(rf),
+  (rf.match(/[^\n]*admin email was not sent[^\n]*/) || [''])[0]);
+r.ok('the restore still reports success, with what lagged named in the message',
+  /result\.message \+= ' \(' \+ notes\.join\(', and '\) \+ '\.\)'/.test(rf),
+  (rf.match(/[^\n]*result\.message[^\n]*/) || [''])[0]);
+r.ok('the caller is told what was replaced and what is there now',
+  /was: snapValue\(current\), now: snapValue\(restoreVal\)/.test(rf));
+r.ok('the result names the field and the section, so the client needs no guess',
+  /irNumber: irNumber, sectionId: sectionId, fieldId: fieldId/.test(rf));
+
+r.head('the backend minted a bell record that matches the client\'s own shape');
+// Everything in the bell so far has been written by the CLIENT (sendComment in
+// app.js). This is the first record the server writes, so it must use the exact
+// shape the renderer and isForMe already read, or it will be invisible.
+const aan = fnBody('appendAdminNotice');
+r.ok('it takes its OWN lock, so it is never called inside one',
+  (aan.match(/withRowLock(OrThrow)?\(/g) || []).length === 1,
+  (aan.match(/[^\n]*withRowLock[^\n]*/g) || []));
+r.ok('and it says in words that it must not be called from inside one',
+  /never be called from inside one|Nested locks are forbidden/i.test(src),
+  (src.match(/[^\n]*nested lock[^\n]*/i) || [''])[0]);
+r.ok('it writes comments.json through the sentinel file',
+  /sentinelStoreFile\('__NUDGES__'\)/.test(aan),
+  (aan.match(/[^\n]*__NUDGES__[^\n]*/) || [''])[0]);
+r.ok('it uses the locked read and the locked write',
+  /readJsonLocked\(file\)/.test(aan) && /writeJsonLocked\(file, store\)/.test(aan) &&
+  !/readJson\(/.test(aan),
+  (aan.match(/[^\n]*readJson[^\n]*/g) || []));
+r.ok('it preserves whatever else the \'all\' key carries — the client owns it',
+  /store\.all = keyed;/.test(aan) && /keyed\.items = items;/.test(aan),
+  (aan.match(/[^\n]*(keyed|store\.all)[^\n]*/g) || []).slice(0, 3));
+r.ok('an existing items array is APPENDED to, never replaced',
+  /items\.push\(/.test(aan) && !/items = \[\]/.test(aan),
+  (aan.match(/[^\n]*items[^\n]*/g) || []).slice(0, 4));
+r.ok('the id is a UUID, not a counter a concurrent write could collide with',
+  /'restore-' \+ Utilities\.getUuid\(\)/.test(aan));
+r.ok('it is a FIELD-scoped nudge, so a click can open the field it is about',
+  /scope: 'field'/.test(aan) && /sectionId: n\.sectionId/.test(aan) && /fieldId: n\.fieldId/.test(aan));
+r.ok('ownership is decided by `to` and `mentions`, which is what isForMe reads',
+  /to: recipients\.join\(','\)/.test(aan) && /mentions: recipients/.test(aan),
+  (aan.match(/[^\n]*(to:|mentions:)[^\n]*/g) || []));
+r.ok('the recipients are the admins, lowercased like every other address',
+  /CONFIG\.ADMIN_EMAILS[\s\S]{0,140}toLowerCase\(\)/.test(aan),
+  (aan.match(/[^\n]*ADMIN_EMAILS[^\n]*/) || [''])[0]);
+r.ok('`from` is the verified caller, and fromName too — the backend has no display names',
+  /from: n\.by/.test(aan) && /fromName: n\.by/.test(aan));
+r.ok('it arrives open and unread',
+  /status: 'open'/.test(aan) && /readBy: \[\]/.test(aan) &&
+  /resolvedAt: null/.test(aan) && /resolvedBy: null/.test(aan),
+  (aan.match(/[^\n]*(status:|readBy:|resolvedAt:)[^\n]*/g) || []));
+r.ok('a client timestamp, like every other record in that list',
+  /createdAt: Date\.now\(\)/.test(aan));
+r.ok('the message names both values, so the bell needs no second lookup',
+  /replacing "/.test(aan) && /now "/.test(aan),
+  (aan.match(/[^\n]*message:[^\n]*/) || [''])[0]);
+r.ok('an unconfigured admin list posts nothing rather than an unowned record',
+  /if \(!recipients\.length\) return null;/.test(aan));
+
+// ── The retention rule ────────────────────────────────────────────────────────
+r.head('the prune leaves a LIVE ticket\'s history alone');
+// The owner's rule: "Till that IR is completely closed and archived ... Till IR
+// records are being kept in drive, so the history." The age rule is per SUBJECT, so
+// without this an entry could go while its ticket was still wide open.
+r.ok('liveness is decided from the IR store AND the sections index',
+  /readJsonLocked\(sentinelStoreFile\('__IRS__'\)\)/.test(mpal) &&
+  /var idx = readSectionsIndex\(true\);/.test(mpal) && /idx\.irs/.test(mpal),
+  (mpal.match(/[^\n]*(__IRS__|readSectionsIndex)[^\n]*/g) || []));
+r.ok('a per-ticket subject whose IR still exists is SKIPPED, not pruned',
+  /if \(\/\^IR\\d\+\$\/\.test\(subject\) && live\[subject\]\) \{/.test(mpal),
+  (mpal.match(/[^\n]*skippedLive[^\n]*/g) || ['']).slice(0, 2));
+r.ok('the test is on the subject NAME, so a sentinel file is unaffected',
+  /\^IR\\d\+\$/.test(mpal), (mpal.match(/[^\n]*IR\\d[^\n]*/) || [''])[0]);
+r.ok('the skip happens before the file is read, not line by line',
+  mpal.indexOf('continue;') < mpal.indexOf('parseAuditLines('),
+  { skip: mpal.indexOf('continue;'), read: mpal.indexOf('parseAuditLines(') });
+r.ok('both reads happen under the one lock',
+  mpal.indexOf("sentinelStoreFile('__IRS__')") > mpal.indexOf('withRowLock') &&
+  mpal.indexOf('readSectionsIndex(true)') > mpal.indexOf('withRowLock'),
+  { lock: mpal.indexOf('withRowLock'), irs: mpal.indexOf("sentinelStoreFile('__IRS__')"),
+    index: mpal.indexOf('readSectionsIndex(true)') });
+r.ok('the message says how many were skipped and why, rather than quietly pruning fewer',
+  /skippedLive\+\+/.test(mpal) && /LIVE IR/.test(mpal),
+  (mpal.match(/[^\n]*LIVE IR[^\n]*/) || [''])[0]);
+r.ok('the note is appended to BOTH exits, so a no-op run explains itself too',
+  // Declared once, then appended to the "nothing to prune" return AND the
+  // "pruned N" return — a run that prunes fewer lines than expected must say why.
+  (mpal.match(/skipNote/g) || []).length === 3 &&
+  /days\. Audit unchanged\.' \+ skipNote;/.test(mpal),
+  (mpal.match(/[^\n]*skipNote[^\n]*/g) || []).slice(0, 4));
+r.ok('erring toward keeping: only a file with prunable lines is ever rewritten',
+  /if \(!gone\) \{ keptLines \+= lines\.length; continue; \}/.test(mpal),
+  (mpal.match(/[^\n]*gone[^\n]*/) || [''])[0]);
+r.ok('an unreadable line is KEPT, never pruned by accident',
+  /ms === null/.test(mpal) && /unreadable\+\+/.test(mpal));
+r.ok('it stays manual — no trigger is wired to the audit prune',
+  !/newTrigger\([^)]*maintenancePruneAuditLog/.test(code) &&
+  !/maintenancePruneAuditLog[\s\S]{0,80}create\(\)/.test(code),
+  (code.match(/[^\n]*newTrigger[^\n]*/g) || ['none — correct']));
+
+r.head('nothing in the backend erases anything');
+// The pinned global assertion, restated here because the restore path is a new
+// place where "just clear it" would be a tempting implementation.
+r.ok('no setTrashed / removeFile / deleteFile anywhere',
+  !/setTrashed|removeFile\(|deleteFile\(/.test(code),
+  (code.match(/[^\n]*(setTrashed|removeFile|deleteFile)[^\n]*/g) || ['none — correct']));
+r.ok('and the audit is append-only — the new path only appends lines',
+  /appendAuditLinesLocked/.test(rf) && !/setContent/.test(rf),
+  (rf.match(/[^\n]*setContent[^\n]*/g) || ['none — correct']));
 
 r.head('every stored date goes through asDate');
 // A stored date that round-trips as a STRING makes `exp < now` compare string to

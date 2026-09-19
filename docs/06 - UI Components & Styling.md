@@ -354,8 +354,10 @@ The whole header row is the toggle, so the hit area is the full width.
 |---|---|---|
 | audit, section | `saved` with no field | `save` |
 | audit, section | `added` / `changed` / `removed` | `add` / `edit` / `remove` |
+| audit, section | `event: 'reverted'` | `revert` — "Put back", with its own Was/Now body |
 | audit, workflow | field `status` / `assignee`,`assigneeName` / `priority` / `type` | `status` / `assign` / `priority` / `type` |
 | audit, any | `event: 'uploaded'` | `upload` |
+| audit, any | `event: 'archived'` / `'restored'` | `archived` / `restored` |
 | comment | a nudge item matching this IR | `comment` |
 
 `renderTimelineInto(el, timeline, opts)` reuses the `.hist-*` classes unchanged —
@@ -363,6 +365,25 @@ all token-based, so the design-system rule holds. Rows carry an icon from
 `ICON_PATHS` (below) and read in plain English: `Was` / `Now` rather than `old:` /
 `new:`, one timestamp format for both halves of the list, and the backend's internal
 `workflow` vocabulary never shown.
+
+### The per-field 🕓 button, and the restore row it leads to
+Every field's label carries a small 🕓 beside the 💬 comment button
+(`.field-hist-btn`, in `components.css` next to `.field-nudge-btn`: float right,
+`--text-xs`, transparent border, `.icon` at 14px). It is rendered by `buildField`
+and by the Overview's two hand-rendered fields, and it is on the **same** view-only
+whitelist as `.field-nudge-btn` and `.sec-export-btn` — reading the history is a view
+act, and `applySectionAccessGating` DEFAULT-DISABLES every control inside a pane, so
+anything not named there dies for a view-only user. On a phone it gets a hit-area
+pseudo-element like the nudge chip does, so a 14px glyph still meets the 40px target.
+
+The restore row lives in the field-history modal only (`.hist-restore-row`,
+`.hist-restore-btn`, `.hist-restore-note` — in `views.css`'s history block, **never**
+after the polish block, which must stay last to keep winning):
+a full-width `inline-flex` button whose label is `Put back <value>`, with
+`word-break: break-word` and `max-width: 100%` because the value it names is up to
+200 displayed characters of stored data. When a value is a candidate but cannot be
+put back, the row is a **note** instead — the explanation in italics, not a disabled
+button.
 
 > ⚠️ **Timestamps are parsed explicitly, never with `Date.parse`.** The backend
 > stamps `'dd-MMM-yyyy HH:mm:ss'`, and `Date.parse` returns **`NaN`** for that shape

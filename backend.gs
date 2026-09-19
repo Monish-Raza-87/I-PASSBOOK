@@ -65,6 +65,18 @@ var CONFIG = {
   // match the frontend ADMIN_EMAILS.
   ADMIN_EMAILS: ['monish.raza@indrones.com'],
 
+  // The deployed app's own address, used for ONE thing: building the deep link in
+  // an admin notification email (see sendAdminNotice / irDeepLink).
+  //
+  // It is a CONFIG value and never a client-supplied one. A URL that a client hands
+  // us and we then put in an email the admin trusts is a phishing vector — the
+  // admin sees the app's own sender name and clicks whatever the link says. So the
+  // link is assembled here, from this constant alone. Blank it (or leave it blank
+  // on a fresh clone) and the email simply carries no link.
+  //
+  // The app routes by hash, so a ticket link is APP_URL + '#/tickets/IR409'.
+  APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',
+
   // Session lifetime, in HOURS — one working day (8h30m). Minted at sign-in and
   // ABSOLUTE: it does not slide on use, so an active user is still signed out at
   // the end of the shift and signs in again the next morning.
@@ -1024,6 +1036,14 @@ function verifyAuthCode(email, purpose, code, consume) {
 // This used to be reachable only from sendAuthMail, which meant the cap covered
 // the low-volume path and left the high-volume one open: any signed-in user could
 // loop sendNudgeEmail and take out password recovery for the whole company.
+//
+// `notice` is in the RESERVED group, not the free one, and that is the point of
+// naming it at all. A restore notice is triggered by a signed-in user's action
+// (see restoreField), so it is user-paced like a comment — an uncapped class here
+// would let a busy afternoon of restores spend the slots that are the only way back
+// into a locked account. It is a low-volume path today, but "low volume" is a
+// property of the current UI, not of this function, and the ceiling is the one
+// place that can promise it.
 var MAIL_AUTH_RESERVE = 40;
 
 function mailQuotaOk(kind) {
@@ -1031,7 +1051,8 @@ function mailQuotaOk(kind) {
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   var key   = 'mailcount:' + today;
   var n = Number(props.getProperty(key) || 0);
-  var ceiling = (kind === 'nudge') ? Math.max(0, MAIL_DAILY_CAP - MAIL_AUTH_RESERVE) : MAIL_DAILY_CAP;
+  var reserved = (kind === 'nudge' || kind === 'notice');
+  var ceiling = reserved ? Math.max(0, MAIL_DAILY_CAP - MAIL_AUTH_RESERVE) : MAIL_DAILY_CAP;
   if (n >= ceiling) return false;
   props.setProperty(key, String(n + 1));
   return true;
@@ -1045,6 +1066,63 @@ function sendAuthMail(to, subject, body) {
     MailApp.sendEmail(to, subject, body, { name: 'I-PASSBOOK' });
     return true;
   } catch (e) { return false; }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ADMIN NOTICES — one email per event the admin should hear about as it happens.
+// ──────────────────────────────────────────────────────────────────────────────
+// Today that is exactly one thing: somebody put an old value back (restoreField).
+// The owner's reason for wanting it is traceability — hear about it now rather than
+// reconstruct it later from a failure:
+//
+//   "All high level notification may come to admin, its better for traceability and
+//    ease instead of waiting for failure point and then backtracing via
+//    investigation, time taking."
+//
+// Same swallowing contract as sendAuthMail, and it matters MORE here: this runs
+// AFTER a restore has already been written to the store, so a mail failure must not
+// be reported as a failed restore. It returns true/false, and the caller says
+// "saved, but no email was sent" in words.
+//
+// The recipient set is CONFIG.ADMIN_EMAILS filtered through the same
+// isMailRecipientAllowed guard every other outbound mail uses, so this can never
+// become a way to mail an address the app is not allowed to reach.
+function sendAdminNotice(subject, body, replyTo) {
+  var recipients = (CONFIG.ADMIN_EMAILS || []).filter(function (a) {
+    return isMailRecipientAllowed(a);
+  });
+  if (!recipients.length) return false;
+  if (!mailQuotaOk('notice')) return false;
+  var options = { name: 'I-PASSBOOK' };
+  // The VERIFIED caller, so the admin can reply straight to whoever did it. Same
+  // rule as sendNudgeEmail: never a client-supplied address.
+  if (replyTo) options.replyTo = replyTo;
+  try {
+    MailApp.sendEmail(recipients.join(','), subject, body, options);
+    return true;
+  } catch (e) { return false; }
+}
+
+// A ticket's own address in the deployed app, built from CONFIG.APP_URL and
+// nothing else — see the note there on why a client-supplied URL is refused. The
+// app is hash-routed, so this lands on the ticket's own screen. Returns '' when
+// APP_URL is blank, and every caller must then simply leave the link out.
+function irDeepLink(irNumber) {
+  var base = String(CONFIG.APP_URL || '');
+  if (!base) return '';
+  return base + '#/tickets/' + encodeURIComponent(String(irNumber || ''));
+}
+
+// One client-supplied DISPLAY string, cleaned for a notice. Section and field
+// labels live in the FRONTEND's form registry — the backend has no copy and cannot
+// resolve them — so the caller sends them alongside the restore. They are shown,
+// never used to resolve anything, so this trims, drops control characters, caps the
+// length and falls back to the id. Same trust level as sendNudgeEmail's `context`
+// and `fromName`, which are client-supplied display strings too.
+function noticeLabel(raw, fallback) {
+  var s = String(raw == null ? '' : raw).replace(/[ -]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (s.length > 80) s = s.substring(0, 80) + '…';
+  return s || String(fallback || '');
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1573,7 +1651,7 @@ function doGet(e) {
       getMyAccess:   function () { return getMyAccess(email); },
       listIRs:       function () { return listIRs(); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
-      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit); },
+      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId); },
       listLegacyIRs: function () { return listLegacyIRs(); },
       listUsers:     function () { return listUsers(email); },
     };
@@ -1613,6 +1691,17 @@ function doPost(e) {
         return saveSection(params.irNumber, params.sectionId, fields, files, email);
       },
       sendNudgeEmail:    function () { return sendNudgeEmail(params, email); },
+
+      // Put ONE field back to an earlier audited value. `by` is the VERIFIED email,
+      // never a client value — the audit line and the admin notice both name the
+      // person the token belongs to. The labels are display strings only (the form
+      // registry lives in the frontend); see noticeLabel.
+      restoreField: function () {
+        var labels = {};
+        try { labels = JSON.parse(params.labels || '{}') || {}; } catch (e) { labels = {}; }
+        return restoreField(params.irNumber, params.sectionId, params.fieldId,
+                            params.value, params.expectCurrent, email, labels);
+      },
 
       // Admin-only (each re-checks isAdminEmail — the gate here is only routing).
       createUser:        function () { return createUser(params, email); },
@@ -2612,6 +2701,231 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ACTION: restoreField — put ONE field back to a value it held before
+// ──────────────────────────────────────────────────────────────────────────────
+// The other half of the audit trail. The app has always RECORDED every field change
+// (buildAuditLines → audit/<IR>.jsonl); this is the first action that can undo one,
+// and it exists because the owner asked for what Confluence and Google Workspace
+// both have:
+//
+//   "a fallback safety where if someone has deleted important info thus by edit
+//    history I can go and verify it and if required I can restore that version"
+//
+// ONE KEY, AND THAT IS THE WHOLE REASON THIS IS NOT A CALL TO saveSection. A section
+// save assigns the WHOLE section object (`store[sectionId] = fields`), so restoring
+// one field through it would require the caller to resend every other field in that
+// section — and a screen holding a slightly stale form would silently revert all of
+// them. A bug the user cannot see is worse than the typo they are trying to repair.
+// This reads the store itself, inside the lock, and assigns exactly one key.
+//
+// The permission is saveSection's, copied VERBATIM, because a restore IS a write: a
+// view-only reader may look at the history and may not rewind it, and the person who
+// can retype a value by hand is exactly the person who may put an old one back.
+//
+// `expectCurrent` is a guard, not ceremony. Between opening the history and pressing
+// the button — which is a deliberate, confirm()ed action, so the gap is real — someone
+// else may have set the field to a newer value, and a blind restore would discard that
+// with nobody knowing. It is the value the SERVER last told the caller this field
+// holds (the newest audited value for it), compared below inside the lock against the
+// same snapValue() truncation, so the two sides agree even on a value over 500 chars.
+function restoreField(irNumber, sectionId, fieldId, value, expectCurrent, by, labels) {
+  if (!irNumber || !sectionId || !fieldId)
+    throw new Error('irNumber, sectionId and fieldId are required.');
+
+  // Real IR sections only. A `__…__` store has a different key shape (irs.json is
+  // keyed by IR number, comments.json by 'all') and its own allowlist gate, so
+  // restoring into one is not a smaller version of this — it is a different action
+  // and it is deliberately not offered.
+  if (String(irNumber).indexOf('__') === 0)
+    throw new Error('An app store cannot be restored through this action.');
+  assertRealIR(irNumber);
+
+  var access = getEffectiveAccess(by);
+  if (RETIRED_SECTION_IDS.indexOf(String(sectionId)) > -1)
+    throw new Error('Section ' + sectionId + ' was merged into another section. Reload the app to get the current version.');
+  // Same line as saveSection's, and it covers the Overview for the same reason:
+  // getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY], so
+  // canEdit(..., 'sec-a') is already the right check there — no special case on
+  // either side, and nothing to keep in sync.
+  else if (access.role !== 'admin' && !canEdit(access.permissions, sectionId))
+    throw new Error('Forbidden: you do not have edit access to ' + sectionId + '.');
+
+  // ── THE TRUNCATION REFUSAL. The one refusal that cannot be argued with. ──────
+  //
+  // snapValue caps every audited value at 500 characters and appends '…', silently
+  // and irreversibly — the full old value is kept NOWHERE else, not in the store and
+  // not in a backup. Writing that prefix back would corrupt the field with no error
+  // and nothing to compare against afterwards.
+  //
+  // The test is exact: snapValue can only emit <=500 characters, or exactly 501
+  // (500 + the ellipsis). So `length > 500` PROVES the value is a truncated prefix.
+  // This is checked here as well as in the frontend (restoreOfferFor), because the
+  // frontend's check is a courtesy and this one is the rule.
+  var restoreVal = (value == null) ? '' : String(value);
+  if (restoreVal.length > 500)
+    throw new Error('That earlier value was too long to be recorded in full, so it can be viewed but not put back. Nothing was changed.');
+
+  // What the caller believes the field holds right now. Compared inside the lock.
+  var expect = (expectCurrent == null) ? '' : String(expectCurrent);
+
+  var result = withRowLockOrThrow(function () {
+    var ir   = readIR(irNumber, false, true);
+
+    // No sections file means no history, so no restore can legitimately be here —
+    // and `writeIR` refuses without the id readIR resolved anyway (a name lookup on
+    // the write path is how a ticket gets forked in two). Say it in words instead.
+    if (!ir.fileId)
+      throw new Error('This IR has no saved data yet, so there is nothing to put back.');
+
+    var data = ir.data;
+    var stored = (data[sectionId] && typeof data[sectionId] === 'object') ? data[sectionId] : {};
+
+    // A field the section has never stored, with nothing expected, is a caller
+    // restoring a value that was REMOVED — the owner's own main case ("someone
+    // deleted important info"). So a missing key is not an error; it is exactly
+    // where a restore is supposed to put something back.
+    var hasKey  = stored.hasOwnProperty(fieldId);
+    var current = hasKey ? stored[fieldId] : '';
+
+    // The field moved under the caller. Say so and change NOTHING: a restore that
+    // quietly overwrote a newer value would be the exact accident this feature
+    // exists to repair, committed by the tool meant to repair it.
+    if (snapValue(current) !== expect)
+      throw new Error('This field changed while you were looking at its history, so nothing was changed. Reopen the history and put the value back again.');
+
+    // ONE KEY, copied key-by-key so no sibling field can be touched even if the
+    // stored object carries keys this action has never heard of.
+    var next = {};
+    Object.keys(stored).forEach(function (k) { next[k] = stored[k]; });
+    next[fieldId] = restoreVal;
+    data[sectionId] = next;
+    writeIR(irNumber, data, ir.fileId);
+
+    // Same line shape as every other audit row — {t, ir, sec, by, ev, fid, old, nw}
+    // — so the timeline needs no second reader.
+    //
+    // The event is `reverted`, and deliberately NOT `restored`: that value already
+    // means "this ticket's folder came back out of the Drive archive"
+    // (archiveAuditLine → restoreIRFolder), and the timeline renders it as such.
+    // One word for two events is how a reader ends up unable to tell a folder move
+    // from a value being put back.
+    //
+    // `old` is the value being REPLACED (what is there now) and `nw` is the value
+    // put back — the same direction every other line reads, so "Was / Now" means
+    // the same thing on this row as on a `changed` row.
+    var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), [
+      { t: ts, ir: irNumber, sec: sectionId, by: by, ev: 'reverted',
+        fid: fieldId, old: snapValue(current), nw: snapValue(restoreVal) }
+    ]);
+
+    return {
+      status: 'ok',
+      message: 'The earlier value was put back.',
+      irNumber: irNumber, sectionId: sectionId, fieldId: fieldId,
+      was: snapValue(current), now: snapValue(restoreVal)
+    };
+  });
+
+  // ── THE NOTICES. Both AFTER the lock, and neither may fail the restore. ──────
+  //
+  // The durable, atomic half of "tell the admin" is already done: the `reverted`
+  // line above is inside the same lock as the write, so it cannot exist without the
+  // change and cannot go missing behind it. These two are the loud half, and they
+  // are deliberately outside — inside, a failure in either would report an error for
+  // a restore that has ALREADY committed, and the user's retry would then be refused
+  // by the `expectCurrent` guard, which is a confusing way to learn the write worked.
+  // This mirrors saveSection's `reopenIR` rule: the write is durable, so what lags is
+  // said in words rather than turned into a failure.
+  var sectionLabel = noticeLabel(labels && labels.sectionLabel, sectionId);
+  var fieldLabel   = noticeLabel(labels && labels.fieldLabel, fieldId);
+  var link         = irDeepLink(irNumber);
+  var notes = [];
+  try {
+    appendAdminNotice({
+      irNumber: irNumber, sectionId: sectionId, fieldId: fieldId,
+      sectionLabel: sectionLabel, fieldLabel: fieldLabel,
+      by: by, was: result.was, now: result.now
+    });
+  } catch (e) { notes.push('the in-app notice could not be posted'); }
+
+  var body = [
+    'An earlier value was put back in a passbook.',
+    '',
+    'IR:        ' + irNumber,
+    'Section:   ' + sectionLabel,
+    'Field:     ' + fieldLabel,
+    'By:        ' + by,
+    'When:      ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss') + ' IST',
+    '',
+    'Put back:  ' + (result.now === '' ? '(empty)' : result.now),
+    'It replaced: ' + (result.was === '' ? '(empty)' : result.was),
+    '',
+    'This is recorded in the IR’s own history, and everyone who can edit that',
+    'section can put a value back — so nothing is lost by this. You are being told',
+    'because knowing as it happens is easier than reconstructing it later.'
+  ];
+  if (link) body = body.concat(['', 'Open the ticket: ' + link]);
+  if (!sendAdminNotice('[I-PASSBOOK] ' + irNumber + ' — an old value was put back', body.join('\n'), by))
+    notes.push('the admin email was not sent');
+
+  if (notes.length) result.message += ' (' + notes.join(', and ') + '.)';
+  return result;
+}
+
+// The backend's only in-app notification. Everything in the bell so far has been
+// minted by the CLIENT (sendComment in app.js), so this is the first record the
+// server writes and it is built to match the client's shape exactly — `isForMe`
+// matches on `to`/`mentions`, and renderNudgePanel reads the rest. Nothing in the
+// renderer needs to change for this to appear.
+//
+// Takes its OWN lock, so it must never be called from inside one — nested locks are
+// forbidden here (see withRowLock). It is called after restoreField's lock has been
+// released, which is also what keeps a failure here from failing the restore.
+//
+// The id is a UUID rather than a counter: nudge ids are compared and passed around
+// as strings by the client, and the client's own ids are uuid-based too.
+function appendAdminNotice(n) {
+  var recipients = (CONFIG.ADMIN_EMAILS || []).map(function (a) { return String(a).toLowerCase().trim(); })
+    .filter(Boolean);
+  if (!recipients.length) return null;
+  return withRowLockOrThrow(function () {
+    var file = sentinelStoreFile('__NUDGES__');
+    var store = readJsonLocked(file) || {};
+    // Preserve whatever else the store's 'all' key carries — the client owns this
+    // key and only its `items` array is ours to append to.
+    var keyed = (store.all && typeof store.all === 'object') ? store.all : {};
+    var items = (keyed.items instanceof Array) ? keyed.items : [];
+    items.push({
+      id: 'restore-' + Utilities.getUuid(),
+      irNumber: n.irNumber,
+      scope: 'field',
+      sectionId: n.sectionId,
+      fieldId: n.fieldId,
+      sectionLabel: n.sectionLabel,
+      fieldLabel: n.fieldLabel,
+      // `from` is the verified caller's email. The backend holds no display names —
+      // the client resolves `from` to a name when it renders.
+      from: n.by,
+      fromName: n.by,
+      to: recipients.join(','),
+      mentions: recipients,
+      message: 'Put an earlier value back in "' + n.fieldLabel + '" (' + n.sectionLabel + '): now "' +
+               (n.now === '' ? '(empty)' : n.now) + '", replacing "' + (n.was === '' ? '(empty)' : n.was) + '".',
+      createdAt: Date.now(),
+      readBy: [],
+      status: 'open',
+      resolvedAt: null,
+      resolvedBy: null
+    });
+    keyed.items = items;
+    store.all = keyed;
+    writeJsonLocked(file, store);
+    return items.length;
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ACTION: sendNudgeEmail
 // Sends an automatic nudge email via MailApp (no operator clicks). Restricted so
 // the app can't be used to mail outside Indrones.
@@ -2859,9 +3173,21 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
 // `limit` bounds the RESPONSE. It trims from the OLDEST end, because the caller (a
 // timeline) wants the most recent activity, and the file order is append-only
 // chronological.
+//
+// `fieldId` narrows the read to ONE field's changes — the field history view, the
+// right-click-a-cell equivalent the owner asked for. It filters BEFORE the cap, and
+// that ordering is the whole reason the parameter exists: filtering after the trim
+// would hand back "that field's changes, minus whatever older ones fell outside the
+// ticket's newest 400 lines" — and the OLDEST entries are exactly the ones a
+// restore reaches for. With the filter first, `limit` bounds THIS FIELD's history.
+//
+// A present `fieldId` matches on the line's own `fid`, which means a workflow line
+// about that field (`status`, `assignee`, …) comes back with it — correct, since
+// those ARE that field's history, and the reader already labels them as triage rows.
 var AUDIT_RESPONSE_CAP = 400;
-function getAuditLog(irNumber, limit) {
+function getAuditLog(irNumber, limit, fieldId) {
   if (!irNumber) throw new Error('irNumber is required.');
+  var wantField = (fieldId == null) ? '' : String(fieldId);
   var lines = readAuditLines(auditSubjectFor(irNumber, irNumber));
   var entries = [];
   lines.forEach(function (l) {
@@ -2870,6 +3196,7 @@ function getAuditLog(irNumber, limit) {
     var isSectionRow  = (ir === irNumber);
     var isWorkflowRow = (sec === irNumber && ir.indexOf('__') === 0);
     if (!isSectionRow && !isWorkflowRow) return;
+    if (wantField && String(l.fid || '') !== wantField) return;
     entries.push({
       // `irNumber` is the IR the line is ABOUT, in both halves. A workflow line's
       // own `ir` says `__IRS__` — the store name, not the ticket — so reporting it
@@ -3292,22 +3619,62 @@ function maintenancePruneSessions() {
 var AUDIT_RETENTION_DAYS = 400;
 
 // Per-IR files made this cheaper and safer than the tab version: only the affected
-// tickets are rewritten, where the old code rewrote one whole tab. The RETENTION
-// RULE is unchanged, and so is the wart in it — pruning is per-subject, so an old
-// entry can go while its ticket is still open. The audit records no open/closed
-// state, so a smarter rule is not available here. Noted, not fixed.
+// tickets are rewritten, where the old code rewrote one whole tab.
+//
+// THE RETENTION RULE, and the wart that used to be in it. Pruning is per-subject,
+// so an entry older than 400 days could go while its ticket was still open — the
+// audit records no open/closed state, so a "smarter rule" was not available here.
+//
+// It is available now, from a different direction: the IR's own existence is a
+// fact this function can just look up. The owner's rule for the field history is
+//
+//   "Till IR records are being kept in drive, so the history."
+//
+// so a per-TICKET file is skipped entirely while that IR is still in the store, at
+// any age. This is the piece that makes the field-history promise true rather than
+// true-until-somebody-runs-a-maintenance-lever: an old value on a live ticket stays
+// puttable-back past 400 days, which is precisely the case a restore is for.
+//
+// Liveness is decided through the SAME read runArchiveSweep uses for the same
+// question (`__IRS__` → irs.json), plus sections/index.json — the map of every IR
+// with stored data. The second read matters: a ticket that has saved a section but
+// has no workflow row yet is invisible to the sweep and utterly alive, and it is
+// exactly the ticket a young, half-filled IR is. Erring is toward KEEPING
+// throughout — an unreadable store, an IR in neither map, or a file whose name is
+// not an IR all leave that file alone.
+//
+// Sentinel subjects (signins, config, nudges, kb) are NOT ticket files and keep
+// today's behaviour — there is no "is it still live?" for a sign-in log.
 function maintenancePruneAuditLog() {
   return report(withRowLockOrThrow(function () {
     var folder = getStoreSubfolder(STORE_AUDIT_DIR, false);
     if (!folder) return 'No audit/ folder — nothing to prune.';
 
+    // Two store reads for the whole run, under the same lock. A key that is not an
+    // IR number is filtered out rather than trusted: irs.json keys are validated on
+    // write as real-world ids, not as IR numbers.
+    var live = {};
+    var irsStore = readJsonLocked(sentinelStoreFile('__IRS__')) || {};
+    Object.keys(irsStore).forEach(function (k) { if (/^IR\d+$/.test(k)) live[k] = true; });
+    var idx = readSectionsIndex(true);
+    Object.keys(idx.irs || {}).forEach(function (k) { if (/^IR\d+$/.test(k)) live[k] = true; });
+
     var cutoff = Date.now() - (AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     var files = folder.getFiles();
     var prunedFiles = 0, prunedLines = 0, keptLines = 0, unreadable = 0;
+    var skippedLive = 0;
 
     while (files.hasNext()) {
       var file = files.next();
       var subject = String(file.getName()).replace(/\.jsonl$/, '');
+
+      // A LIVE TICKET'S HISTORY IS NOT PRUNABLE. Skipped before the file is even
+      // read — there is nothing to decide line by line.
+      if (/^IR\d+$/.test(subject) && live[subject]) {
+        skippedLive++;
+        continue;
+      }
+
       var lines = parseAuditLines(file.getBlob().getDataAsString(), subject);
       if (!lines.length) continue;
       // `parseAuditLines` turns an unparseable line into a visible placeholder with
@@ -3329,10 +3696,21 @@ function maintenancePruneAuditLog() {
       keptLines += keep.length;
     }
 
-    if (!prunedLines) return 'Nothing older than ' + AUDIT_RETENTION_DAYS + ' days. Audit unchanged.';
+    // The skip is REPORTED, not silent: a run that prunes fewer lines than the
+    // operator expects should say why, or the next person concludes the rule is
+    // broken and "fixes" it.
+    var skipNote = skippedLive
+      ? ' ' + skippedLive + ' audit file(s) belonging to a LIVE IR were left untouched — the history ' +
+        'is kept as long as the ticket is (see the retention note above), so those entries do not expire on age.'
+      : '';
+
+    if (!prunedLines) {
+      return 'Nothing older than ' + AUDIT_RETENTION_DAYS + ' days. Audit unchanged.' + skipNote;
+    }
     return 'Pruned ' + prunedLines + ' audit entr(y/ies) older than ' + AUDIT_RETENTION_DAYS +
            ' days across ' + prunedFiles + ' ticket file(s). ' + keptLines + ' entr(y/ies) kept' +
-           (unreadable ? ', including ' + unreadable + ' unreadable line(s) kept on purpose.' : '.');
+           (unreadable ? ', including ' + unreadable + ' unreadable line(s) kept on purpose.' : '.') +
+           skipNote;
   }));
 }
 

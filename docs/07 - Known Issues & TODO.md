@@ -134,7 +134,7 @@ completely, and the honest mitigation is named rather than implied.
 - 🔧 **One-working-day sessions** — `localStorage`, **8h30m absolute** from sign-in, never slid forward on use, and no idle timeout inside that window. Deliberate: the daily sign-in is what the emailed code protects, and a session that slides forward on every request never expires for exactly the people who use the app most. It replaced a 30-day sliding session (see the security items above).
 - 🔧 **One admin** — a bus factor of one. Adding another is a one-line `ADMIN_EMAILS` edit plus a GAS redeploy.
 - 🔧 **The 90-second nudge poll is ~40 authenticated GETs/hour/user.** In the sheet version each one scanned the `SESSIONS`, `APP_DATA` and `__NUDGES__` tabs; now it is one memoised `sessions.json` read plus one `comments.json` read, which is strictly cheaper. `lookupSession` is a **pure read** — the absolute expiry removed the throttled slide write this path used to do — so the poll now adds no session writes at all, not merely few. The polling itself is a pre-existing concern and is not fixed here.
-- 🔧 **`ACL` and `ACCESS_REQUESTS` tabs are frozen, not deleted.** They are the only record of the old hand-assigned grants; leave them for 30 days after cutover, then delete.
+- 🔧 **`ACL` and `ACCESS_REQUESTS` tabs are frozen, not deleted.** Nothing has read them since 2026-09-17, when the store moved to Drive JSON. They are the only record of the old hand-assigned grants, so they wait 30 days — deletable from 2026-10-17 (see "Waiting on the owner").
 - 🔧 **The audit has no automatic pruning, cap, rotation or delete path** — `_store/audit/` holds one append-only `.jsonl` file per subject: `IR409.jsonl` per ticket, plus `CONFIG.jsonl` / `NUDGES.jsonl` / `KB.jsonl` for the sentinel stores, whose writes belong to no ticket. There should not be an automatic bound: the audit trail is evidence. The lever is manual and locked — `maintenancePruneAuditLog()` (retains `AUDIT_RETENTION_DAYS`, default 400). The 400-entry cap in `getAuditLog` bounds the *response*.
   - The prune is **per-subject**, so it can delete history for a ticket that is still open. That is the sheet version's behaviour too — not a regression — and the audit cannot currently tell whether a ticket is closed, so a smarter rule is not available yet.
   - `getAuditLog`'s `truncated` flag is **off by one**: it reports `truncated` when there are exactly `cap` entries, so there is nothing hidden. Nothing in `app.js` reads it.
@@ -337,10 +337,11 @@ is left is small.
 1. ✅ **DONE 2026-09-19 — `backend.gs` pasted into the Apps Script project as a New
    version.** That one paste turned on three things at once: the emailed sign-in code,
    `__CONFIG__/theme` writes, and the fix for uploads that vanished on Android. Proven
-   by signing out and back in and being asked for the code. **A second paste is owed
-   for the sign-in audit** (see the security note above): `audit/signins.jsonl` is
-   written by `doLoginPassword`, so nothing is recorded until this ships, and
-   `reportRecentSignins()` reports an empty window until then. Editor
+   by signing out and back in and being asked for the code. **A second paste went in the
+   same day for the sign-in audit** (see the security note above), with the frontend
+   published first as the order requires. To confirm it took, run
+   `reportRecentSignins(1)` from the editor: it prints a line per sign-in, or an empty
+   window if nobody has signed in since the paste. Editor
    https://script.google.com/d/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/edit
    — **Deploy → Manage deployments → ✏️ → New version**. Never "New deployment" (it
    mints a different `/exec` and breaks every installed client), and the `/exec` URL
@@ -355,9 +356,12 @@ is left is small.
    dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
    `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
    `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
-   shell for a load. The last publish was `f101611` (cache v34).
-4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs**, 30 days after cutover —
-   they are the only record of the old hand-assigned grants, and nothing reads them.
+   shell for a load. The last publish was `3286ff0` (cache v35).
+4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
+   the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
+   safe date; they are the only record of the old hand-assigned grants, which is the
+   whole reason to wait. Deleting is right-click → Delete on each tab in the IR
+   workbook. Leaving them costs only clutter, so this is housekeeping, not a fix.
    Drive usage is worth a look at the same time (see "Erase archived IR folders").
 - [ ] Push notifications for IR status changes
 - [ ] Photo gallery view for saved file links

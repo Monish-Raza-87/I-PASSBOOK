@@ -1120,7 +1120,7 @@ function irDeepLink(irNumber) {
 // length and falls back to the id. Same trust level as sendNudgeEmail's `context`
 // and `fromName`, which are client-supplied display strings too.
 function noticeLabel(raw, fallback) {
-  var s = String(raw == null ? '' : raw).replace(/[ -]+/g, ' ').replace(/\s+/g, ' ').trim();
+  var s = String(raw == null ? '' : raw).replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (s.length > 80) s = s.substring(0, 80) + '…';
   return s || String(fallback || '');
 }

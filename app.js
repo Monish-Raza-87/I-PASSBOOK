@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v40';
+const APP_VERSION = 'v41';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -53,7 +53,13 @@ const CONFIG = {
   // password form and no Google button, and nothing else about the app changes.
   // Deleting the second deployment in Apps Script reverts the feature with no code
   // change at all. See docs/05 for the deploy steps.
-  SSO_URL: '',
+  //
+  // Set 2026-09-20, live: the domain-scoped URL Google hands back for a
+  // "Anyone within indrones.com" deployment — note the `/a/macros/indrones.com/`
+  // segment, which is what distinguishes it from GAS_URL above. `?action=ping` on it
+  // answers `{"status":"ok","apiVersion":3}`, which is how it was checked before
+  // this line was written.
+  SSO_URL: 'https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-BZIMMAgzI_71sZZhYHE9vh0We5nDtTydOSny_zZ_yQfIi0z22D7uKj/exec',
 
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
   // without Google auth while this prototype is still being built.

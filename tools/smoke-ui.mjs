@@ -715,13 +715,28 @@ const G = loadApp(`
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch });
 
-r.ok('SSO_URL ships EMPTY, and empty is the whole "off" switch',
-  G.T.CONFIG.SSO_URL === '', JSON.stringify(G.T.CONFIG.SSO_URL));
-r.ok('with it empty, asking for the door reaches the network ZERO times', (() => {
-  gPosts.length = 0;
-  G.T.offerGoogleDoor();
-  return gPosts.length === 0 && G.T._googleDoorOpen === false;
-})(), gPosts.map(p => p.url));
+// The invariant is NOT "it ships empty" — it shipped empty until the second
+// deployment existed, and it is now set. The invariant that keeps this feature
+// reversible and safe is that whichever URL is in there is a deployment of its OWN:
+// empty is the off switch, and anything else must be a script.google.com /exec that
+// is not the primary backend. Pointing it at GAS_URL would send every Google-door
+// call to the "Anyone" deployment, where getActiveUser() is not the signed-in
+// Workspace account, and the door would fail in a way that looks like a bad password.
+r.ok('SSO_URL is its own deployment — empty (the off switch) or a /exec that is NOT the primary backend',
+  G.T.CONFIG.SSO_URL === '' || (
+    G.T.CONFIG.SSO_URL.indexOf('https://script.google.com/') === 0 &&
+    /\/exec$/.test(G.T.CONFIG.SSO_URL) &&
+    G.T.CONFIG.SSO_URL !== G.T.CONFIG.GAS_URL
+  ), JSON.stringify(G.T.CONFIG.SSO_URL));
+r.ok('an EMPTY SSO_URL is the whole off switch — asking for the door reaches the network ZERO times',
+  (() => {
+    const real = G.T.CONFIG.SSO_URL;
+    G.T.CONFIG.SSO_URL = '';
+    gPosts.length = 0;
+    G.T.offerGoogleDoor();
+    G.T.CONFIG.SSO_URL = real;
+    return gPosts.length === 0 && G.T._googleDoorOpen === false && G.T._googleDoorAsked === false;
+  })(), gPosts.map(p => p.url));
 r.ok('...and the button is not merely hidden — its markup ships hidden',
   /id="auth-google-btn"[^>]*style="display:none"/.test(indexSrc),
   (indexSrc.match(/.*auth-google-btn.*/) || [])[0]);

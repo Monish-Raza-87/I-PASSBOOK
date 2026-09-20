@@ -8,7 +8,7 @@
 | Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Emails must end with this domain, plus the `EXTERNAL_EMAILS` exceptions in `backend.gs` |
 | Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` | `true` | Set to `false` in production |
 | IR Repository CSV | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_GID` | `1MPcWvgZ...` / `335027370` | Read directly by the frontend from the link-shared sheet |
-| Google door | `CONFIG.SSO_URL` | `''` (empty) | The **second** deployment's `/exec` URL. Empty is a working state: the Google button is not shown and nothing else changes. See below and [08](08 - Development Guide.md) |
+| Google door | `CONFIG.SSO_URL` | `https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-.../exec` (set 2026-09-20) | The **second** deployment's `/exec` URL. Note the `/a/macros/indrones.com/` segment — that is what marks it as the domain-scoped deployment, not the primary one. Empty is a working state: the Google button is not shown and nothing else changes. See below and [08](08 - Development Guide.md) |
 
 There is **no Google OAuth client ID**. The `CONFIG.SSO_URL` row above is not a
 Client ID and does not need one: it points at a *second deployment of the same

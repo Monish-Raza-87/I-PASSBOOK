@@ -203,6 +203,36 @@ folder the old backend never looks at, and the store starts empty.
 > the old project stays alive, untouched, as the rollback. For any *later* deploy of
 > **this** project, edit the existing deployment.
 
+**Step 2b — the Google door: a SECOND deployment of the same project.** Skip this
+and Google sign-in is simply absent; nothing else about the app changes. Do it out
+of order (after any number of primary re-deploys) and it still works — it only
+needs *a* version, and it is fine for both deployments to serve the same one.
+
+1. Deploy → **New deployment** → Web app, and here — the one place it is required —
+   that is *not* the mistake Step 2's warning is about: the second deployment is
+   **additive**, and the first one's `/exec` is not touched by it.
+   - Description: `Google door`
+   - Execute as: **Me**
+   - Who has access: **Anyone within indrones.com**
+2. Copy **that** `/exec` URL — not the first one — into `CONFIG.SSO_URL` in `app.js`
+   (see [05](05 - Configuration & Secrets.md)), bump `CACHE_NAME`, and deploy the
+   frontend.
+3. Sign out and confirm the Google button appears on the sign-in screen. If it does
+   not, the deployment's access level is wrong: under plain "Anyone",
+   `Session.getActiveUser()` returns `''` for every caller, both Google actions
+   refuse, and the probe — which is designed to fail silently — keeps the button
+   hidden. Check the access level, not the code.
+
+> **Why a second deployment rather than flipping the first.** Google refuses a
+> domain-restricted request at its own edge, before the script runs. Flipping the
+> primary to domain-only would therefore kill the **password** door too, for exactly
+> the people who need it: a shared machine with no Google session, and the external
+> address in `CONFIG.EXTERNAL_EMAILS`, which no domain restriction admits. Two
+> deployments, one script, two doors.
+>
+> Rolling back is deleting the `Google door` deployment and clearing `CONFIG.SSO_URL`.
+> No code change, no data touched.
+
 **Step 3 — verify.** Hard-reload, sign in as the admin, complete the forced
 password change, and open User Access — the footer must read `API v3`. If it does
 not, the deployment was not the one `/exec` serves. Then check seven tabs

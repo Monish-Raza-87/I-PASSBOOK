@@ -99,7 +99,11 @@ video sits on neutral chrome). There is no second one: the captcha image backdro
   (56px header, then `#panes`: list 400px + detail). `body.view-detail` reveals the
   detail pane; the list stays on screen, so ticket switching never leaves the page.
 - **<1024px** — `#sidebar` becomes a fixed bottom bar (icons over labels, counts
-  and the brand hidden), and list / detail are separate full screens.
+  and the brand hidden), and list / detail are separate full screens. The
+  **`Made with … for Indrones V<nn>` credit line is hidden here too** (issue from the
+  field: it "occupied this place" where the menu items needed room). It is only
+  hidden on phone and tablet — the desktop sidebar keeps it, and it is how a report
+  can be answered by looking at the screen.
 
 `renderLayout()` in `app.js` is the only place that sets pane visibility, and it
 must keep writing **inline** `display` values — `applyAccessGating` reads
@@ -157,6 +161,16 @@ at 400 rows. `.ir-card.is-selected` marks the row open in the split pane.
 
 An `.ir-card` also carries the **assignee initials** badge (`.ir-assignee`, from
 `__IRS__`) when the ticket has been triaged to someone.
+
+**Every row is the same height, and that is enforced, not hoped for.** Triaging a
+ticket adds an avatar and marking it Urgent adds a pill; `.ir-card-side` was
+`flex: 0 0 auto` and therefore **wrapped**, so a triaged-urgent IR became two lines
+while its neighbours stayed one — reported as *"why is the tab of IR470 much bigger
+than others? is there a feature that… changes its normal size?"*. There is no
+resizing feature; the row had nowhere to put two more pills. The wrap is gone: the
+row stays one line, the middle text truncates with an ellipsis, and below 640px the
+two least important items (`View Summary ↗`, the Legacy badge) drop out. Every pill
+is still shown at every width that has room for it.
 
 ### Sync bar (`#sync-status`)
 `.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +
@@ -540,10 +554,40 @@ relies on fixed positioning — do not re-parent one into an ancestor with a
 `transform` or `overflow`. Z-index now comes from the `--z-*` scale; the old
 stylesheet had `#user-menu` and `.inward-options-modal` colliding at `200`.
 
+### The Legacy archive modal — a loading state, and one that is kept
+The 🏛 Legacy button embeds the old ~450-tab workbook in an iframe. **The app makes
+zero requests for it** — Google renders the whole workbook, which is why it is slow,
+and why "make it faster" is not a code question here. What was missing was honesty
+about the wait: previously a blank frame, with a "Can't see the record here?" note
+*always* visible, so a slow load and a broken one looked identical.
+
+- `.legacy-loading` (absolute, inset 0, over the frame) holds `.legacy-spinner` and
+  a `role="status" aria-live="polite"` message, with a live **elapsed counter**
+  (`.legacy-loading-elapsed`, `tabular-nums`) so the wait is visibly progressing.
+- It is removed on the iframe's `load` event. `.legacy-fallback` ("Still not
+  showing?") appears **only** after `LEGACY_SLOW_MS` (20s) has passed without a
+  load, or if the load fails — never before.
+- The iframe carries **no `loading="lazy"`**, deliberately: it must start loading
+  when the modal opens, not when it scrolls into view.
+- The loaded frame is **kept in the DOM** (`_legacyLoaded`) keyed by URL + label, so
+  reopening the same archive after the first load is instant, and `closeLegacyModal`
+  detaches rather than destroys it.
+
 ### Toast (`#toast`)
-Bottom-centre, `--z-toast`. `app.js` toggles the `.show` class rather than writing
-a transform inline, and messages **queue** — back-to-back toasts used to overwrite
-each other's text, and the first timer would hide the newer message early.
+Bottom-centre, `--z-toast`, above the phone bottom bar. `app.js` toggles the `.show`
+class rather than writing a transform inline, and writes the message into
+`#toast-text` — never over it — because `#toast-text { pointer-events: none }` is
+what lets the tap through to the pill that listens for it.
+
+**One message, not a queue.** It used to queue: 3 seconds per message plus 300ms
+between, and one save enqueued two (the success line, plus "Saved locally — backend
+unreachable" whenever the sentinel write failed). A save could hold the screen for
+over six seconds, and with `pointer-events: none` there was nothing the user could
+do about it. Now a newer message **replaces** the old one and restarts the clock
+(`TOAST_MS`, 2.5s), the timer handle is kept so a hand dismissal cancels it, and
+the pill is **tappable to dismiss**. The old `_toastBusy` latch is gone: it was
+cleared only by a timer reaching the end of the queue, so one throw in between
+meant no toast could ever be shown again and the last one stayed up for good.
 
 ## Responsive Breakpoints
 

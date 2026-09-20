@@ -23,6 +23,8 @@ const APP_JS = new URL('../app.js', import.meta.url);
 const INDEX  = new URL('../index.html', import.meta.url);
 const appSrc   = fs.readFileSync(APP_JS, 'utf8');
 const indexSrc = fs.readFileSync(INDEX, 'utf8');
+const viewsCode = fs.readFileSync(new URL('../views.css', import.meta.url), 'utf8');
+const componentsCode = fs.readFileSync(new URL('../components.css', import.meta.url), 'utf8');
 
 // Comments are prose ABOUT the change, and several of them name the thing that was
 // removed ("no Sign as … button any more"). Every source assertion below therefore
@@ -482,12 +484,18 @@ r.head('the emoji debt is a ledger, not a licence');
 // app.js's first regex literal and stop stripping comments for a thousand lines, so
 // every emoji below that point was invisible to this count. 45 is what the file
 // actually holds.
+//
+// 45 → 46, decided deliberately: the sync-status line gained a second wording
+// ("Could not refresh — showing the last saved list"), and it carries the SAME ⚠ the
+// line directly above it has always carried. No new emoji was introduced into the
+// file — one more line uses the old one, in the same helper, for the same kind of
+// message. Bumping the ledger is the decision this test exists to force.
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const emojiLines = appCode.split('\n').filter(l => EMOJI.test(l));
 r.ok('no emoji is left in a slot the icon helper fills',
   !/(💬|🔔|🎫)/.test(appCode),
   emojiLines.filter(l => /💬|🔔|🎫/.test(l)));
-r.ok('the count has not grown past the recorded number', emojiLines.length <= 45,
+r.ok('the count has not grown past the recorded number', emojiLines.length <= 46,
   { now: emojiLines.length, budget: 45, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
 r.ok('and none of them sits in the activity-log renderer, which owns its own icons',
   !EMOJI.test(appCode.slice(appCode.indexOf('function renderTimelineInto'),
@@ -506,8 +514,310 @@ r.ok('every lowercase survivor is a deliberate identifier', (() => {
   const bad = appCode.split('\n').filter(l => /ticket/i.test(l) && !allowed.test(l));
   return bad.length === 0;
 })(), appCode.split('\n').filter(l => /ticket/i.test(l)).slice(0, 8));
+// ── The legacy archive: the wait, said out loud ───────────────────────────────
+// The owner reported the archive as slow and asked for it to SAY it is loading. The
+// app makes no request for this view — Google renders a ~450-tab workbook in an
+// iframe — so there is nothing here to speed up; what was wrong was the silence, and
+// a permanent "can't see it?" note that read as broken while it was merely slow.
+r.head('the legacy archive says it is loading, and only cries help when it is');
+const L = loadApp(`legacyTick, LEGACY_SLOW_MS, openLegacyModal, closeLegacyModal, _legacyLoaded`);
+r.ok('the panel is announced to a screen reader and names the archive',
+  /class="legacy-loading" id="legacy-loading" role="status" aria-live="polite"/.test(appCode) &&
+  /Loading the archive…/.test(appCode), (appCode.match(/.*legacy-loading".*/) || [])[0]);
+r.ok('a spinner, and the note that explains the scale of the wait',
+  /class="legacy-spinner"/.test(appCode) && /the old I-PASSBOOK workbook/.test(appCode));
+r.ok('the elapsed count reads in seconds, and rolls into minutes', (() => {
+  const el = { textContent: '' };
+  const modal = { querySelector: () => el };
+  const t0 = Date.now();
+  L.legacyTick(modal, t0);
+  const zero = el.textContent;
+  L.legacyTick(modal, t0 - 5000);
+  const five = el.textContent;
+  L.legacyTick(modal, t0 - 65000);
+  const min = el.textContent;
+  return zero === '0s' && five === '5s' && min === '1m 5s';
+})(), 'expected 0s / 5s / 1m 5s');
+r.ok('and it survives a missing element rather than throwing mid-count', (() => {
+  try { L.legacyTick({ querySelector: () => null }, Date.now()); return true; } catch (e) { return 'threw: ' + e.message; }
+})());
+r.ok('the "open in Sheets" fallback starts hidden — a slow load is not a failure',
+  /id="legacy-fallback" style="display:none"/.test(appCode));
+r.ok('and is revealed only after a real timeout', (() => {
+  const m = /Date\.now\(\) - startedAt < LEGACY_SLOW_MS\) return;/.test(appCode);
+  const reveal = /if \(fb\) fb\.style\.display = 'flex';/.test(appCode);
+  return m && reveal && L.LEGACY_SLOW_MS >= 10000;
+})(), L.LEGACY_SLOW_MS);
+r.ok('the panel goes away on the frame\'s OWN load event, not on a guessed delay',
+  /frame\.addEventListener\('load', done, \{ once: true \}\)/.test(appCode) &&
+  /if \(load\) load\.remove\(\);/.test(appCode));
+r.ok('the archive frame no longer waits to be told it is near the viewport', (() => {
+  const tag = (appCode.match(/<iframe src="\$\{embedUrl\}"[\s\S]{0,200}?>/) || [''])[0];
+  return tag !== '' && !/loading=/.test(tag);
+})(), (appCode.match(/<iframe src="\$\{embedUrl\}"[\s\S]{0,200}?>/) || [''])[0]);
+// Evidence thumbnails keep their lazy loading — they really do scroll into view.
+r.ok('...while the evidence thumbnails keep theirs, which is what lazy is for',
+  /class="evidence-thumb" alt="evidence" loading="lazy"/.test(appCode));
+r.ok('a loaded archive is KEPT, so reopening it is instant rather than re-rendered', (() => {
+  const reopen = /_legacyLoaded\.modal && _legacyLoaded\.key === key/.test(appCode);
+  const kept   = /_legacyLoaded = \{ key, modal \};/.test(appCode);
+  return reopen && kept;
+})(), (appCode.match(/.*_legacyLoaded.*/g) || []).map(l => l.trim()));
+r.ok('closing detaches the frame but does NOT throw the loaded one away', (() => {
+  const from = appCode.indexOf('function closeLegacyModal()');
+  const body = appCode.slice(from, from + 400);
+  return /clearInterval\(_legacyTimer\)/.test(body) && !/_legacyLoaded\s*=/.test(body);
+})(), appCode.slice(appCode.indexOf('function closeLegacyModal()'), appCode.indexOf('function closeLegacyModal()') + 260));
+r.ok('a key that does not match never reattaches the wrong archive',
+  /_legacyLoaded\.key === key/.test(appCode) && /const key = embedUrl \+ '\|' \+ String\(label \|\| ''\)/.test(appCode));
+r.ok('the wait is drawn over the frame, so removing it costs no relayout',
+  /\.legacy-loading \{[\s\S]{0,200}?position: absolute;/.test(componentsCode) &&
+  /\.legacy-frame-wrap \{[^}]*position: relative/.test(componentsCode), (componentsCode.match(/.*legacy-loading \{.*/) || [])[0]);
+r.ok('the spinner is the app\'s own spin animation, so reduced-motion already covers it',
+  /\.legacy-spinner \{[\s\S]{0,220}?animation: spin /.test(componentsCode) &&
+  /@keyframes spin/.test(fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8')));
+
 r.ok('the deep link still works — the route name was NOT renamed',
   /parts\[0\] === 'tickets'/.test(appCode) && T.IR_CATEGORIES.length === 4);
+// ── The way home, and the guard in front of it ────────────────────────────────
+// The owner asked for the product name to be clickable and, in the same breath, for
+// a warning when something is unsaved. The two are one feature: the warning is only
+// honest if it knows what is unsaved, and the flag behind it has to be set on the
+// KEYSTROKE — the draft is written to localStorage on a 400 ms debounce, so a guard
+// that asked the draft would miss every click inside that window.
+r.head('the title is the way home, and leaving with unsaved work asks first');
+const asked = [];
+let answersYes = true;
+const U = loadApp(`
+  _dirtySections, markSectionDirty, hasUnsavedChanges, updateDirtyIndicators,
+  dirtyUnitLabels, confirmLeaveIR, OVERVIEW_KEY, SECTIONS,
+`, { globals: { confirm: msg => { asked.push(msg); return answersYes; } } });
+
+r.ok('a freshly opened IR is clean, and asking costs nothing', (() => {
+  asked.length = 0;
+  return U.hasUnsavedChanges() === false && U.confirmLeaveIR() === true && asked.length === 0;
+})(), { asked: asked.length });
+r.ok('a keystroke in a section marks it unsaved immediately', (() => {
+  U.markSectionDirty('sec-c');
+  return U.hasUnsavedChanges() === true && U._dirtySections.has('sec-c') === true;
+})(), Array.from(U._dirtySections));
+r.ok('and the prompt says WHICH section is at risk, not just "changes"', (() => {
+  asked.length = 0;
+  U.confirmLeaveIR();
+  return asked.length === 1 && asked[0].indexOf('sec-c') !== -1;
+})(), asked);
+r.ok('the wording promises what actually happens — the draft keeps the typing',
+  (() => { asked.length = 0; U.confirmLeaveIR(); return /draft/i.test(asked[0]) && /not recorded until you press Save/i.test(asked[0]); })(),
+  asked);
+r.ok('saying No keeps the user where they are', (() => {
+  answersYes = false;
+  const stayed = U.confirmLeaveIR() === false;
+  answersYes = true;
+  return stayed;
+})());
+r.ok('saving clears it, so a clean screen never prompts again', (() => {
+  U._dirtySections.delete('sec-c');
+  asked.length = 0;
+  return U.hasUnsavedChanges() === false && U.confirmLeaveIR() === true && asked.length === 0;
+})(), Array.from(U._dirtySections));
+r.ok('the Overview counts too — it has no draft, so this flag is its ONLY warning', (() => {
+  U.markSectionDirty(U.OVERVIEW_KEY);
+  const tracked = U.hasUnsavedChanges() === true;
+  U._dirtySections.clear();
+  return tracked;
+})());
+r.ok('the read-only 📋 Report tab cannot be marked — it has nothing to save', (() => {
+  U.markSectionDirty('sec-intake');
+  const clean = U.hasUnsavedChanges() === false;
+  U._dirtySections.clear();
+  return clean;
+})());
+r.ok('the dirty flag is set on the keystroke, not on the 400 ms draft debounce', (() => {
+  const body = appSrc.slice(appSrc.indexOf("addEventListener('input', e => {"));
+  const seg  = body.slice(0, body.indexOf('saveDraft('));
+  return seg.indexOf('markSectionDirty(') !== -1;
+})(), appSrc.slice(appSrc.indexOf("addEventListener('input', e => {")).slice(0, 400));
+r.ok('a restored draft is unsaved too, and says so', (() => {
+  const from = appSrc.indexOf('function restoreDrafts(');
+  return appSrc.slice(from, from + 700).indexOf('markSectionDirty(') !== -1;
+})());
+r.ok('the Overview panel gets its own listeners — it is outside #sections-wrapper',
+  /getElementById\('ir-overview'\)/.test(appCode) && /ir-overview-editable/.test(appCode));
+r.ok('the guard is on BOTH ways home — the title and the Back button — and on neither twice',
+  (() => {
+    const guarded = appCode.match(/if \(confirmLeaveIR\(\)\) goIndex\(\)/g) || [];
+    const back = /backBtn\.addEventListener\('click', \(\) => \{ if \(confirmLeaveIR\(\)\) goIndex\(\); \}\)/.test(appCode);
+    const home = /bindHomeLink\(headerTitle\)/.test(appCode);
+    // Back button, title click, title keydown = three call sites, no more.
+    return guarded.length === 3 && back && home;
+  })(), (appCode.match(/.*confirmLeaveIR.*/g) || []).map(l => l.trim()));
+r.ok('goIndex itself is NOT guarded — a redirect must never raise a prompt',
+  (() => {
+    const from = appCode.indexOf('function goIndex()');
+    return from !== -1 && appCode.slice(from, from + 200).indexOf('confirmLeaveIR') === -1;
+  })());
+r.ok('Enter and Space both work on the title, and Space does not scroll the page',
+  /e\.key !== 'Enter' && e\.key !== ' ' && e\.key !== 'Spacebar'/.test(appCode) &&
+  /e\.preventDefault\(\)/.test(appCode.slice(appCode.indexOf('function bindHomeLink'), appCode.indexOf('function bindHomeLink') + 500)));
+r.ok('the title says it is a control, in the markup as well as the CSS',
+  /id="header-title"[^>]*role="button"[^>]*tabindex="0"/.test(indexCode), (indexCode.match(/.*id="header-title".*/) || [])[0]);
+r.ok('the unsaved dot is drawn on the tab strip, in the tab\'s own right padding',
+  /\.tab\.has-unsaved \{ position: relative; \}/.test(viewsCode) &&
+  /\.tab\.has-unsaved::after \{/.test(viewsCode), (viewsCode.match(/.*has-unsaved.*/g) || []));
+r.ok('and it is named exactly what updateDirtyIndicators toggles',
+  /classList\.toggle\('has-unsaved', _dirtySections\.has\(tab\.dataset\.section\)\)/.test(appCode));
+r.ok('the dot sits BEFORE the polish block — nothing may be appended after it',
+  viewsCode.indexOf('.tab.has-unsaved') < viewsCode.indexOf('POLISH — level:'), {
+    dot: viewsCode.indexOf('.tab.has-unsaved'), polish: viewsCode.indexOf('POLISH — level:'),
+  });
+r.ok('a save marks the section clean BEFORE the toast, not 3 s later with the button',
+  (() => {
+    const from = appCode.indexOf('async function saveSection(');
+    const seg  = appCode.slice(from, from + 3000);
+    const clean = seg.indexOf('_dirtySections.delete(sectionId)');
+    const toast = seg.indexOf('showToast(');
+    return clean !== -1 && toast !== -1 && clean < toast;
+  })());
+r.ok('and the Overview does the same, through its own access sweep',
+  (() => {
+    const from = appCode.indexOf('async function saveOverview(');
+    const seg  = appCode.slice(from, from + 2000);
+    return seg.indexOf('_dirtySections.delete(OVERVIEW_KEY)') !== -1 &&
+           seg.indexOf('applyOverviewGating()') !== -1;
+  })());
+// ── The Google door ───────────────────────────────────────────────────────────
+// The door is DOM-less to test: its two halves are ordinary functions, so this
+// block drives them directly rather than through a click the stub DOM cannot
+// dispatch (harness el() records no listeners).
+r.head('the Google door is inert until a second deployment is named');
+
+const gPosts = [];
+// The reply is armed BEFORE the call, because the stub is asked and answered inside
+// one synchronous step: read afterwards, every call would see whatever the previous
+// assertion had left behind.
+let gReply = null;
+const gFetch = (url, init) => {
+  gPosts.push({ url: String(url), body: init && init.body });
+  if (!gReply) return Promise.reject(new Error('blocked in test'));
+  const reply = gReply;
+  return Promise.resolve({
+    ok: true,
+    text: () => Promise.resolve(JSON.stringify(reply)),
+    json: () => Promise.resolve(reply),
+  });
+};
+const G = loadApp(`
+  CONFIG, offerGoogleDoor, submitGoogleSignIn,
+  googleSignInProbeBackend, googleSignInBackend, googleSso, setAuthError,
+  get _googleDoorOpen() { return _googleDoorOpen; },
+  get _googleDoorAsked() { return _googleDoorAsked; },
+  get _googleProbeEmail() { return _googleProbeEmail; },
+  get currentUser() { return currentUser; },
+`, { capture: true, fetch: gFetch });
+
+r.ok('SSO_URL ships EMPTY, and empty is the whole "off" switch',
+  G.T.CONFIG.SSO_URL === '', JSON.stringify(G.T.CONFIG.SSO_URL));
+r.ok('with it empty, asking for the door reaches the network ZERO times', (() => {
+  gPosts.length = 0;
+  G.T.offerGoogleDoor();
+  return gPosts.length === 0 && G.T._googleDoorOpen === false;
+})(), gPosts.map(p => p.url));
+r.ok('...and the button is not merely hidden — its markup ships hidden',
+  /id="auth-google-btn"[^>]*style="display:none"/.test(indexSrc),
+  (indexSrc.match(/.*auth-google-btn.*/) || [])[0]);
+r.ok('...and the separator with it, so there is no orphan "or" line',
+  /id="auth-or"[^>]*style="display:none"/.test(indexSrc));
+r.ok('the door has no way to be opened by a password — SSO_URL is read, never posted to',
+  !/action=googleSignIn/.test(appSrc) && /googleSso\('googleSignIn'/.test(appCode));
+
+r.head('a probe that cannot answer costs the user nothing');
+r.ok('a dead SSO_URL leaves the button hidden and raises NOTHING', await (async () => {
+  G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
+  gPosts.length = 0;
+  G.T.offerGoogleDoor();
+  await new Promise(res => setImmediate(res));
+  return gPosts.length === 1 && G.T._googleDoorOpen === false;
+})(), { posts: gPosts.length, open: G.T._googleDoorOpen });
+r.ok('the probe is asked exactly once per page load, not on every route back',
+  (() => { G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec'; gPosts.length = 0; G.T.offerGoogleDoor(); return gPosts.length === 0; })(),
+  gPosts.length);
+
+r.head('a probe that answers yes opens the door, and names who it is about to sign in as');
+const G2 = loadApp(`
+  CONFIG, offerGoogleDoor, submitGoogleSignIn, setAuthError,
+  get _googleDoorOpen() { return _googleDoorOpen; },
+  get _googleProbeEmail() { return _googleProbeEmail; },
+  get currentUser() { return currentUser; },
+`, { capture: true, fetch: gFetch });
+gPosts.length = 0;
+G2.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
+gReply = { status: 'ok', email: 'sreenivas.pai@indrones.com', name: 'Sreenivas Pai' };
+G2.T.offerGoogleDoor();
+await new Promise(res => setImmediate(res));
+r.ok('the probe POSTs the probe action, and no session token rides along', (() => {
+  const p = gPosts[0];
+  const keys = p.body ? p.body.entries.map(e => e[0]) : [];
+  return p.url === 'https://sso.example.invalid/exec' &&
+         keys.indexOf('action') !== -1 && keys.indexOf('sessionToken') === -1;
+})(), gPosts.map(p => p.url));
+r.ok('a yes reveals the button through the SAME mode sync that hides it on the code step',
+  G2.T._googleDoorOpen === true && G2.byId.get('auth-google-btn').style.display === '');
+r.ok('and the button says who it will sign in as, so a shared machine is not a surprise',
+  (G2.byId.get('auth-google-btn').getAttribute('aria-label') || '').indexOf('Sreenivas Pai') !== -1,
+  G2.byId.get('auth-google-btn').getAttribute('aria-label'));
+r.ok('the label still starts with the visible words, so the control is announced as itself',
+  /^Sign in with Google/.test(G2.byId.get('auth-google-btn').getAttribute('aria-label') || ''));
+
+r.head('the door itself mints a session the same way the password door does');
+gPosts.length = 0;
+gReply = {
+  status: 'ok', sessionToken: 'tok-google-1', email: 'sreenivas.pai@indrones.com',
+  access: { role: 'user', permissions: {}, departments: [], triage: false },
+};
+await G2.T.submitGoogleSignIn();
+r.ok('a yes signs the user in — finishAuth wrote the session and the user',
+  G2.T.currentUser && G2.T.currentUser.sessionToken === 'tok-google-1' &&
+  G2.T.currentUser.email === 'sreenivas.pai@indrones.com', G2.T.currentUser && G2.T.currentUser.email);
+r.ok('the device label travels, so the audit line can say where it was opened',
+  (() => {
+    // The FIRST post is the door's own; finishAuth then fires the boot reads, and
+    // asserting on the last one would be asserting on a different call entirely.
+    const post = gPosts.find(p => p.body && p.body.entries.some(e => e[0] === 'action' && e[1] === 'googleSignIn'));
+    return !!post && post.body.entries.some(e => e[0] === 'device') &&
+           !post.body.entries.some(e => e[0] === 'sessionToken');
+  })(), gPosts.map(p => p.url));
+
+r.head('a refusal lands on the same error line as a wrong password');
+const G3 = loadApp(`
+  CONFIG, submitGoogleSignIn, setAuthError,
+  get currentUser() { return currentUser; },
+`, { capture: true, fetch: gFetch });
+gPosts.length = 0;
+G3.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
+gReply = { status: 'error', message: 'Set your own password first: sign in with your temporary password, then use Google from then on.' };
+await G3.T.submitGoogleSignIn();
+r.ok('the backend\'s own words are shown, not a generic failure',
+  /Set your own password first/.test(G3.byId.get('auth-error').textContent),
+  G3.byId.get('auth-error').textContent);
+r.ok('no session is invented from a refusal',
+  !G3.T.currentUser || !G3.T.currentUser.sessionToken, G3.T.currentUser && G3.T.currentUser.sessionToken);
+r.ok('and the error line is made visible, the way every other auth error is',
+  G3.byId.get('auth-error').style.display === 'block');
+r.ok('clearing it hides the line again rather than leaving an empty box',
+  (() => { G3.T.setAuthError(''); return G3.byId.get('auth-error').style.display === 'none'; })());
+
+r.head('the two doors share one session model, one error line and one regex');
+r.ok('finishAuth is the password door\'s own function, called unchanged',
+  /finishAuth\(d\.email \|\| _googleProbeEmail, d\)/.test(appCode));
+r.ok('the password form is never replaced — its handler is still wired',
+  /signInBtn\.addEventListener\('click', submitLogin\)/.test(appCode) &&
+  /auth-google-btn/.test(indexSrc) && /id="auth-signin-btn"/.test(indexSrc));
+r.ok('both Google actions are listed as self-authenticating, so no stale token is attached',
+  /googleSignIn\|googleSignInProbe/.test(appCode) &&
+  /\(login\|changePassword\|forgotPassword\|resetPassword\|logout\|sessionCheck\|ping\|googleSignIn\|googleSignInProbe\)/.test(appCode));
+r.ok('nothing in the door reaches for UrlFetchApp or getEffectiveUser — the server half is pinned in smoke-backend',
+  !/UrlFetchApp|getEffectiveUser/.test(appCode));
+
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');
 r.ok('classList.toggle remembers, in both the one- and two-argument form',

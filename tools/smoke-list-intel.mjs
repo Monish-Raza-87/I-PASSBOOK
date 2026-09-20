@@ -328,4 +328,89 @@ T.renderIRList(T.allIRs);
 r.ok('no chip over a historic record nobody has touched',
   !/ir-progress/.test(byId.get('ir-list').innerHTML), byId.get('ir-list').innerHTML.slice(0, 300));
 
+// ── The list's local copy, and the failure path it makes honest ──────────────
+// The list was blank until the whole repository had come down. Now this device's
+// last copy paints first, and — more important than the speed — a total outage STOPS
+// replacing a real list with five fabricated sample IRs. Someone with four hundred
+// real IRs who is shown samples could act on one.
+r.head("the IR list is painted from this device's last copy");
+const SEED = [
+  { irNumber: 'IR700', droneId: 'S25P900', dateRaised: '01-Aug-2026', status: 'Open',
+    customerName: 'Real Customer', issueDesc: 'real one', intake: { spoc: 'real spoc' } },
+];
+
+// A fetch that never succeeds: the sheet read and the backend read both fail, which
+// is the outage this branch exists for.
+const deadFetch = () => Promise.reject(new Error('offline'));
+function loadList(fetchImpl) {
+  return loadApp(`
+    fetchIRs, paintCachedIRList, readIRListCache, writeIRListCache,
+    IR_LIST_CACHE_KEY, getDemoIRs,
+    get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
+    get dataIsDemo() { return _dataIsDemo; },
+    get syncText() { return document.getElementById('sync-status').innerHTML; },
+  `, { capture: true, fetch: fetchImpl || deadFetch });
+}
+
+// `loadApp` gives each instance its OWN localStorage, so the copy is seeded THROUGH
+// the app (writeIRListCache writes `allIRs`) — the only way to reach the sandbox
+// realm's storage from out here.
+const A = loadList();
+const seed = (T, records) => { T.allIRs = records; T.writeIRListCache(); T.allIRs = []; };
+seed(A.T, SEED);
+r.ok('the seeded copy is readable back, in the shape the list needs', (() => {
+  const got = A.T.readIRListCache();
+  return Array.isArray(got) && got.length === 1 && got[0].irNumber === 'IR700';
+})(), A.T.readIRListCache());
+r.ok('painting it puts a real card on screen with NO network at all', (() => {
+  const painted = A.T.paintCachedIRList();
+  return painted === true && A.T.allIRs.length === 1 && /IR700/.test(A.byId.get('ir-list').innerHTML);
+})(), A.T.allIRs.length);
+r.ok('and it does not paint over a list already on screen', (() => {
+  // A manual refresh must not flash stale cards over the fresh ones it just got.
+  A.T.allIRs = [{ irNumber: 'IR800', status: 'Open' }];
+  return A.T.paintCachedIRList() === false && A.T.allIRs[0].irNumber === 'IR800';
+})());
+r.ok('a copy with no records is not a hit — an empty list is not a cached list', (() => {
+  seed(A.T, []);
+  return A.T.readIRListCache() === null;
+})(), A.T.readIRListCache());
+
+r.head('an outage NEVER replaces a real list with sample IRs');
+const B = loadList();
+B.T.allIRs = SEED;
+await B.T.fetchIRs();
+r.ok('the real records are still the ones in memory',
+  B.T.allIRs.length === 1 && B.T.allIRs[0].irNumber === 'IR700', B.T.allIRs.map(x => x.irNumber));
+r.ok('the demo flag stays OFF — nothing fabricated reaches the Insights page',
+  B.T.dataIsDemo === false, B.T.dataIsDemo);
+r.ok('and the status line names what actually happened, not "demo data"',
+  /Could not refresh/.test(B.T.syncText) && !/demo data/.test(B.T.syncText), B.T.syncText);
+
+r.head('a COLD start with nothing real still gets the sample cards');
+const C = loadList();
+await C.T.fetchIRs();
+r.ok('nothing cached and nothing loaded → sample cards, flagged as demo',
+  C.T.dataIsDemo === true && C.T.allIRs.length > 0, C.T.allIRs.length);
+r.ok('and the wording is the one the demo notice is pinned to',
+  /Could not sync — showing demo data/.test(C.T.syncText), C.T.syncText);
+
+r.head('a successful sync replaces the copy, which is the whole invalidation story');
+const SHEET = 'Timestamp,IR Number,Drone Serial,Customer Name\n2026-08-01,IR900,S25P901,Fresh Customer\n';
+const liveFetch = url => String(url).indexOf('gviz/tq') >= 0
+  ? Promise.resolve({ ok: true, text: () => Promise.resolve(SHEET), json: () => Promise.resolve({}) })
+  : Promise.reject(new Error('backend not needed'));
+const D = loadList(liveFetch);
+seed(D.T, SEED);
+r.ok('a fresh read puts the sheet records up and drops the stale ones', await (async () => {
+  await D.T.fetchIRs();
+  const now = D.T.allIRs.map(x => x.irNumber);
+  return now.length === 1 && now[0] === 'IR900';
+})(), D.T.allIRs.map(x => x.irNumber));
+r.ok('...and writes them to the copy, so the next cold start paints the NEW list',
+  (() => { const got = D.T.readIRListCache(); return !!got && got.length === 1 && got[0].irNumber === 'IR900'; })(),
+  D.T.readIRListCache());
+r.ok('the status line credits the Sheet, and no demo flag is set',
+  /loaded from the Sheet/.test(D.T.syncText) && D.T.dataIsDemo === false, D.T.syncText);
+
 r.finish();

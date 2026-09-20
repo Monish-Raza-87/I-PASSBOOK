@@ -337,7 +337,13 @@ r.head('a section save writes ONE key of the ticket file, and a second save keep
 
 // Separate executions = separate store memos. Without this the second save would read
 // its own memo and the merge would be untested.
-const reexec = () => { ctx._storeMemo = {}; ctx._rootFolderMemo = null; ctx._storeFolderMemo = null; };
+const reexec = () => {
+  ctx._storeMemo = {}; ctx._rootFolderMemo = null; ctx._storeFolderMemo = null;
+  // The subfolder memo is per-execution too, and `getStoreSubfolder` is a Drive
+  // SEARCH. Forgetting it here keeps this helper's promise — "a fresh execution,
+  // with nothing carried over" — true for every cache the backend now keeps.
+  ctx._subfolderMemo = {};
+};
 
 ctx.saveSection('IR409', 'sec-b', { b_remarks: 'inward ok', b_qty: '3' }, [], ADMIN);
 reexec();
@@ -507,6 +513,127 @@ r.ok('and getAuditLog reads it back as a WORKFLOW entry for that ticket',
 r.ok('a DIFFERENT ticket\'s audit file knows nothing about IR600',
   !store.getFoldersByName('audit').next().getFilesByName('IR601.jsonl').hasNext() ||
   !/IR600/.test(auditFile('IR601').content), 'IR601.jsonl');
+
+// ── 7b. A save records CHANGES, not a copy of the field list ──────────────────
+// The owner's report, in his words: "in the fields I have not done anything, when I
+// check history it says my name and nothing is there changed". The cause was here.
+// The client posts EVERY field a section declares, so on a section's first save —
+// where the stored record is still {} — an absent key was recorded as `added` once
+// per field, each carrying an empty value. Hundreds of rows naming the saver for a
+// change nobody made, and they buried the one real edit underneath.
+r.head('a first save records the change, not one "added by me" row per declared field');
+
+ctx.saveSection('IR610', 'sec-b', { b_remarks: 'only this one', b_qty: '', b_other: '' }, [], ADMIN);
+reexec();
+const firstLines = auditFile('IR610').content.trim().split('\n').map(l => JSON.parse(l));
+r.ok('NOT one "added by me" row per empty field',
+  firstLines.filter(l => l.ev === 'added' && String(l.nw || '') === '').length === 0,
+  firstLines.map(l => l.ev + ' ' + l.fid));
+r.ok('the field that WAS filled in is recorded, with its value',
+  firstLines.some(l => l.fid === 'b_remarks' && l.nw === 'only this one'),
+  firstLines.filter(l => l.fid === 'b_remarks'));
+r.ok('the save itself is still visible — a save must never become invisible',
+  firstLines.some(l => l.ev === 'saved'), firstLines.map(l => l.ev));
+
+// The same rule in the other direction: dropping a key that held nothing removes
+// nothing. A genuine deletion still records, WITH the value it destroyed — which is
+// exactly what a restore reads to put the field back.
+ctx.saveSection('IR610', 'sec-b', { b_remarks: 'only this one' }, [], ADMIN);
+reexec();
+r.ok('a key dropped while it held nothing is not recorded as "removed"',
+  !auditFile('IR610').content.split('\n').filter(Boolean).map(l => JSON.parse(l))
+    .some(l => l.ev === 'removed' && l.fid === 'b_qty'));
+
+ctx.saveSection('IR610', 'sec-b', { b_qty: '4' }, [], ADMIN);
+reexec();
+ctx.saveSection('IR610', 'sec-b', {}, [], ADMIN);
+reexec();
+const delLines = auditFile('IR610').content.split('\n').filter(Boolean).map(l => JSON.parse(l));
+r.ok('a field that HELD a value and was emptied IS recorded as removed, with the value',
+  delLines.some(l => l.ev === 'removed' && l.fid === 'b_qty' && l.old === '4'),
+  delLines.filter(l => l.fid === 'b_qty'));
+
+// ── 7c. The dead rows ALREADY ON DISK are refused at read time ────────────────
+// Stored history is never rewritten — the backend is under a pinned test that it
+// erases nothing, and rewriting an audit so it reads better is the one thing an
+// audit must never do. So every IR saved before this fix still HAS those rows. The
+// reader refuses them instead, which also has to be true of the reader in
+// `buildTimeline`, on the client, for a payload already cached.
+r.head('a stored row that records nothing is refused by the reader, and a real one is not');
+
+ctx.saveSection('IR611', 'sec-b', { b_remarks: 'real' }, [], ADMIN);
+reexec();
+const deadRows = [
+  { t: '01-Jan-2026 10:00:00', ir: 'IR611', sec: 'sec-b', by: ADMIN, ev: 'added',     fid: 'b_ghost',  old: '',    nw: '' },
+  { t: '01-Jan-2026 10:00:01', ir: 'IR611', sec: 'sec-b', by: ADMIN, ev: 'removed',   fid: 'b_ghost2', old: '',    nw: '' },
+  { t: '01-Jan-2026 10:00:02', ir: 'IR611', sec: 'sec-b', by: ADMIN, ev: 'saved',     fid: '',         old: '',    nw: '' },
+  { t: '01-Jan-2026 10:00:03', ir: 'IR611', sec: 'sec-b', by: ADMIN, ev: 'changed',   fid: 'b_remarks', old: 'was', nw: 'real' },
+];
+auditFile('IR611').setContent(deadRows.map(x => JSON.stringify(x)).join('\n') + '\n');
+reexec();
+const read611 = ctx.getAuditLog('IR611', 50);
+r.ok('an `added` row with an empty value is not returned as history',
+  !read611.entries.some(e => e.fieldId === 'b_ghost'), read611.entries.map(e => e.fieldId));
+r.ok('nor a `removed` row with an empty value',
+  !read611.entries.some(e => e.fieldId === 'b_ghost2'), read611.entries.map(e => e.fieldId));
+r.ok('the section-save marker SURVIVES — the rule is narrow on purpose',
+  read611.entries.some(e => e.event === 'saved'), read611.entries.map(e => e.event));
+r.ok('and a real change survives with both values intact',
+  read611.entries.some(e => e.event === 'changed' && e.oldValue === 'was' && e.newValue === 'real'),
+  read611.entries.filter(e => e.fieldId === 'b_remarks'));
+
+// WHERE the filter sits matters as much as the filter. The response cap keeps the
+// NEWEST rows, so a filter applied after it would let a first save's hundreds of
+// dead rows push the real edits out of the window — and the OLDEST rows are exactly
+// what a restore reaches for.
+ctx.saveSection('IR612', 'sec-b', { b_remarks: 'x' }, [], ADMIN);
+reexec();
+const noisy = [{ t: '03-Jan-2026 09:00:00', ir: 'IR612', sec: 'sec-b', by: ADMIN,
+                 ev: 'changed', fid: 'b_old_real', old: 'was', nw: 'now' }];
+for (let i = 0; i < 450; i++) {
+  noisy.push({ t: '03-Jan-2026 10:00:00', ir: 'IR612', sec: 'sec-b', by: ADMIN,
+               ev: 'added', fid: 'x' + i, old: '', nw: '' });
+}
+auditFile('IR612').setContent(noisy.map(x => JSON.stringify(x)).join('\n') + '\n');
+reexec();
+const capNoisy = ctx.getAuditLog('IR612', 50);
+r.ok('the OLDEST real row survives 450 dead ones — the filter runs BEFORE the cap',
+  capNoisy.entries.some(e => e.fieldId === 'b_old_real'), capNoisy.entries.length + ' entries returned');
+
+// ── 7d. The Overview is a MERGE — and only the Overview ───────────────────────
+// The Overview is the ONE section whose payload is a SUBSET of its record:
+// saveOverview posts the CRM owner and the contact phone, and everything else in
+// sec-a is app-owned — a_activityLog above all. With replace semantics, editing a
+// phone number silently DELETED the activity log, which is the exact opposite of
+// what the intake strip promises. The merge is scoped to the Overview because an
+// ordinary section must still replace: putting a deleted field back depends on a
+// missing key meaning "gone", and the PUT A VALUE BACK block below pins that.
+r.head('an Overview save keeps a_activityLog; an ordinary section still replaces');
+
+ctx.saveSection('IR620', ctx.OVERVIEW_KEY,
+  { a_crmOwner: 'old owner', a_activityLog: 'kept forever' }, [], ADMIN);
+reexec();
+ctx.saveSection('IR620', ctx.OVERVIEW_KEY, { a_crmOwner: 'new owner', a_contactPhone: '999' }, [], ADMIN);
+reexec();
+const ov = fresh('sections/IR620.json')[ctx.OVERVIEW_KEY];
+r.ok('the app-owned a_activityLog SURVIVED the Overview save',
+  ov.a_activityLog === 'kept forever', ov);
+r.ok('...and the posted fields did land', ov.a_crmOwner === 'new owner' && ov.a_contactPhone === '999', ov);
+const ovLines = auditFile('IR620').content.split('\n').filter(Boolean).map(l => JSON.parse(l));
+r.ok('...no "removed" row invented for the key it kept',
+  !ovLines.some(l => l.ev === 'removed' && l.fid === 'a_activityLog'),
+  ovLines.filter(l => l.fid === 'a_activityLog'));
+r.ok('...and the two fields the save was actually about ARE audited',
+  ovLines.some(l => l.fid === 'a_crmOwner' && l.old === 'old owner' && l.nw === 'new owner') &&
+  ovLines.some(l => l.fid === 'a_contactPhone' && l.nw === '999'),
+  ovLines.filter(l => l.fid === 'a_crmOwner' || l.fid === 'a_contactPhone'));
+
+ctx.saveSection('IR620', 'sec-b', { b_remarks: 'a', b_qty: '1' }, [], ADMIN);
+reexec();
+ctx.saveSection('IR620', 'sec-b', { b_remarks: 'a' }, [], ADMIN);
+reexec();
+r.ok('an ORDINARY section still REPLACES — a dropped key really is gone',
+  !('b_qty' in fresh('sections/IR620.json')['sec-b']), fresh('sections/IR620.json')['sec-b']);
 
 // ── 8. getPassbook reads the ticket back through the index ────────────────────
 r.head('getPassbook reads a real ticket back through sections/index.json');
@@ -1431,5 +1558,164 @@ r.ok('a ticket in sections/index.json counts as live even with no workflow row y
 r.ok('a sentinel log is still pruned on age',
   !signinBefore || auditFile('signins').content.trim().split('\n').length < signinBefore,
   { before: signinBefore, after: signinBefore ? auditFile('signins').content.trim().split('\n').length : 0 });
+
+// ── GOOGLE SIGN-IN — A SECOND DOOR, NEVER A REPLACEMENT ───────────────────────
+// Placed LAST on purpose: these cases replace the fake platform's
+// Session.getActiveUser to stand in for the caller's Workspace identity, and
+// nothing after them should be able to see that substitution.
+//
+// Two hazards are the whole point of this block. First, that the door admits
+// someone the password door would refuse — an address with no account (which would
+// be self-signup by another name), a disabled account, or a temp-password holder
+// who would thereby skip the forced first change. Second, that it becomes a way to
+// move the lockout counters, which belong to the password door.
+r.head('the Google door opens for a provisioned account, and only for one');
+
+const realActiveUser = ctx.Session.getActiveUser;
+const asGoogle = email => {
+  ctx.Session.getActiveUser = () => ({ getEmail: () => (email == null ? '' : email) });
+};
+const sessionCount = () => Object.keys((fresh('sessions.json') || {}).tokens || {}).length;
+
+// The mis-deployment case FIRST, because it is the same answer: a deployment left on
+// plain "Anyone" reports no identity, and the door must close rather than fall open.
+asGoogle('');
+reexec();
+const noIdentity = ctx.doGoogleSignIn();
+r.ok('no identity is refused — this is also what a deployment left on "Anyone" says',
+  noIdentity.status === 'error' && /Google did not report/.test(noIdentity.message), noIdentity);
+
+// A Session call that throws (no session, a revoked grant) must read as a refusal.
+ctx.Session.getActiveUser = () => { throw new Error('no active session'); };
+reexec();
+const sessionThrew = ctx.doGoogleSignInProbe();
+r.ok('a Session call that THROWS is a refusal, never a crash',
+  sessionThrew.status === 'error' && /Google did not report/.test(sessionThrew.message), sessionThrew);
+
+asGoogle('outsider@gmail.com');
+reexec();
+const offDomain = ctx.doGoogleSignIn();
+r.ok('an address outside the domain is refused, and the password door is offered',
+  offDomain.status === 'error' && /@indrones\.com Google account/.test(offDomain.message), offDomain);
+
+asGoogle('nobody@indrones.com');
+reexec();
+const noAccount = ctx.doGoogleSignIn();
+r.ok('an in-domain address with NO account is refused — a Google identity is not a membership',
+  noAccount.status === 'error' && /No account found/.test(noAccount.message), noAccount);
+r.ok('...and the refusal did NOT create the account — there is still no self-signup',
+  !(fresh('users.json') || {})['nobody@indrones.com'],
+  Object.keys(fresh('users.json') || {}).length + ' account(s)');
+
+const GDIS = 'g.disabled@indrones.com';
+mkUser(GDIS);
+ctx.withRowLockOrThrow(function () {
+  var users = ctx.readJsonLocked('users.json');
+  users[GDIS].status = 'disabled';
+  ctx.writeJsonLocked('users.json', users);
+});
+asGoogle(GDIS);
+reexec();
+const disabled = ctx.doGoogleSignIn();
+r.ok('a DISABLED account is refused at the Google door too, not only at the password one',
+  disabled.status === 'error' && /disabled/.test(disabled.message), disabled);
+r.ok('...and no session was minted for it', !disabled.sessionToken);
+
+const GTEMP = 'g.temp@indrones.com';
+ctx.createUserRow(GTEMP, 'Temp Holder', ADMIN);   // lands with mustChange = 'yes'
+asGoogle(GTEMP);
+reexec();
+const tempDoor = ctx.doGoogleSignIn();
+r.ok('a TEMP-PASSWORD account is refused, so the forced first change cannot be skipped by Google',
+  tempDoor.status === 'error' && /Set your own password first/.test(tempDoor.message), tempDoor);
+r.ok('...and it says WHICH door to use, rather than only saying no',
+  /temporary password/.test(tempDoor.message), tempDoor.message);
+r.ok('...and no session was minted for it either', !tempDoor.sessionToken);
+
+const GOK = 'g.door@indrones.com';
+mkUser(GOK);
+asGoogle(GOK);
+
+// The probe: the sign-in screen runs this silently, so it must be free of side effects.
+const beforeSessions = sessionCount();
+const beforeLines = signinLines().length;
+reexec();
+const probeOk = ctx.doGoogleSignInProbe();
+reexec();
+r.ok('the probe admits a provisioned account and names it',
+  probeOk.status === 'ok' && probeOk.email === GOK, probeOk);
+r.ok('a PROBE mints no session — which is why running it automatically is free',
+  sessionCount() === beforeSessions, sessionCount() + ' vs ' + beforeSessions);
+r.ok('...writes no sign-in line', signinLines().length === beforeLines,
+  signinLines().length + ' vs ' + beforeLines);
+r.ok('...and reports no token of any kind', !probeOk.sessionToken);
+
+// The door itself.
+asGoogle(GOK);
+reexec();
+const gOk = ctx.doGoogleSignIn({ device: 'Chrome on Windows' });
+reexec();
+r.ok('the door mints a REAL session for a provisioned account',
+  gOk.status === 'ok' && !!gOk.sessionToken && gOk.email === GOK, gOk);
+r.ok('...that the ordinary session check accepts, so it is a session like any other',
+  ctx.sessionCheck({ parameter: { sessionToken: gOk.sessionToken } }).status !== 'error');
+r.ok('...and it carries the same access payload the password door sends',
+  gOk.access && gOk.access.permissions && typeof gOk.access.role !== 'undefined', gOk.access);
+r.ok('the last-login stamp was written, so the admin screen stays truthful',
+  !!(fresh('users.json')[GOK] || {}).lastLoginAt, (fresh('users.json')[GOK] || {}).lastLoginAt);
+
+const gLine = signinLines().slice(-1)[0];
+r.ok('ONE audit line is written, and it names the Google account',
+  signinLines().length === beforeLines + 1 && gLine.by === GOK, gLine);
+r.ok('it says the door was GOOGLE, and does not invent a code age on a door with no code',
+  /google sso/.test(gLine.nw) && !/code /.test(gLine.nw), gLine.nw);
+r.ok('...and it still records the device the browser claimed',
+  /Chrome on Windows/.test(gLine.nw), gLine.nw);
+r.ok('...and it is dated in the pruner\'s own format',
+  ctx.parseAuditTimestamp(gLine.t) !== null, gLine.t);
+
+// The lockout belongs to the password door. A Google click must not clear a lockout
+// (that would be a way to wash away the counter), and must not add to one either
+// (a repeated probe would then lock a user out of their own recovery path).
+const GLOCK = 'g.locked@indrones.com';
+mkUser(GLOCK);
+reexec();
+for (let i = 0; i < 20 && !ctx.lockoutRemaining(GLOCK); i++) ctx.recordFailedLogin(GLOCK);
+reexec();
+r.ok('the password door IS locked out for this account — the setup worked',
+  !!ctx.lockoutRemaining(GLOCK), ctx.lockoutRemaining(GLOCK));
+const lockedUsersBefore = ctx.lockoutRemaining(GLOCK);
+asGoogle(GLOCK);
+reexec();
+const gLocked = ctx.doGoogleSignIn({});
+reexec();
+r.ok('a locked-out account can still enter by Google — a Workspace session is not guessable',
+  gLocked.status === 'ok' && !!gLocked.sessionToken, gLocked);
+r.ok('...and the Google door did NOT clear the password lockout',
+  !!ctx.lockoutRemaining(GLOCK), ctx.lockoutRemaining(GLOCK));
+r.ok('...so the counter is untouched in both directions',
+  !!lockedUsersBefore === !!ctx.lockoutRemaining(GLOCK));
+
+// Three more Google sign-ins in a row must not manufacture a lockout of their own.
+const lockBeforeRepeats = ctx.lockoutRemaining(GLOCK);
+for (let i = 0; i < 5; i++) { asGoogle(GLOCK); reexec(); ctx.doGoogleSignIn({}); }
+reexec();
+r.ok('repeated Google sign-ins cannot lock an account out of its own recovery path',
+  !!lockBeforeRepeats === !!ctx.lockoutRemaining(GLOCK), ctx.lockoutRemaining(GLOCK));
+
+// A refusal must not half-work: no session, no line, no stamp.
+asGoogle('outsider@gmail.com');
+const refusedSessions = sessionCount();
+const refusedLines = signinLines().length;
+reexec();
+const refusedSignin = ctx.doGoogleSignIn({});
+reexec();
+r.ok('a REFUSED google sign-in changes absolutely nothing',
+  refusedSignin.status === 'error' && sessionCount() === refusedSessions &&
+  signinLines().length === refusedLines,
+  { sessions: sessionCount() + '/' + refusedSessions, lines: signinLines().length + '/' + refusedLines });
+
+ctx.Session.getActiveUser = realActiveUser;
+reexec();
 
 r.finish();

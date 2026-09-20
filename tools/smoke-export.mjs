@@ -224,7 +224,10 @@ r.ok('an IQC row with no name falls back to its zone id', (() => {
 r.ok('the cost table renders its five columns in order', (() => {
   const m = T.sectionPdfModel('sec-d', { d_repairTable: [{ particular: 'Motor', qty: '2', rate: '100', cost: '200', remark: 'r' }] }, null);
   const t = m.blocks.find(b => b.kind === 'table');
-  return t.columns.join('|') === 'Particular|Qty|Rate|Cost|Remark' && t.rows[0].join('|') === 'Motor|2|100|200|r';
+  // The headings are the words the owner asked for — "Particular" and "Rate" were
+  // the old table's vocabulary and read as jargon next to a cost and a remark. The
+  // stored KEYS are untouched, so every existing IR's rows still render.
+  return t.columns.join('|') === 'Item description|Qty|Unit cost|Total cost|Remark' && t.rows[0].join('|') === 'Motor|2|100|200|r';
 })(), (T.sectionPdfModel('sec-d', { d_repairTable: [{ particular: 'Motor' }] }, null).blocks.find(b => b.kind === 'table') || {}).rows);
 r.ok('the dispatch checklist renders particular -> status', (() => {
   const m = T.sectionPdfModel('sec-g', { h_dispatchChecklist: { 'Airframe': 'Packed' } }, null);

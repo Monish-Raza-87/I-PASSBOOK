@@ -18,6 +18,37 @@ one sign-in per working day — email + password, then the 6-digit code emailed 
 that address — because the session is 8h30m and **absolute**, so it does not carry
 someone from one shift into the next.
 
+**The Google door — a second way in, never a replacement.** On a browser already
+signed into an @indrones.com Workspace account, a **Sign in with Google** button
+appears above the password form: one click, no password and no emailed code,
+because on that door the Workspace session *is* the factor. It is served by a
+separate deployment of the same backend (see
+[05](05 - Configuration & Secrets.md)); `CONFIG.SSO_URL` empty means the button is
+not shown at all, and nothing else changes.
+
+The password door is not a lesser fallback. It is the door for a shared machine
+with no Google session, and the **only** door for an address outside the company
+domain (`EXTERNAL_EMAILS`), which no domain-restricted deployment will admit. The
+ladder is therefore:
+
+| Situation | Google door |
+|---|---|
+| No Google account reported by the browser | Refuse, and name the password door |
+| Address outside `indrones.com` | Refuse, name the domain, name the password door |
+| No account row | Refuse — **there is still no self-signup**; a Google account is an identity, not a membership |
+| Account disabled | Refuse; an admin must re-enable it |
+| Temp-password account | Refuse and point at the password door, so the **forced first-login change still happens** |
+| Otherwise | Mint a session with the same last-login stamp and audit line as the password door (`google sso · <device>`) |
+
+Two things it deliberately does **not** do. It never touches the lockout counter —
+not `recordFailedLogin` (a Workspace session is not guessable, so there is nothing
+to throttle) and not `clearFailedLogin` either (someone fumbling their password must
+not wash that counter away by clicking the Google button). And it never signs anyone
+in automatically: the sign-in is a **click**, because signing out reloads the page
+and an automatic door would put the next person on a shared laptop straight back
+into the previous person's session. The button's label says who it will sign in as
+where the Workspace account has a name, which is the same protection in words.
+
 There is **no self-signup**. No captcha, no allowlist, no "request
 access" screen, no admin approval queue. Every account is created by the admin.
 The **emailed code is not a way in for a stranger** — it is a second step on an
@@ -339,11 +370,22 @@ Three tabs, all powered by one `?action=listUsers` call:
   `[\s,;]+`, deduped, **skip-and-report** so one typo cannot abort a 19-person
   run), and the one-time credentials panel.
 
+**The page paints from the last saved copy, then refreshes.** One `listUsers` round
+trip against a cold Apps Script container, with seven boot calls already in flight,
+is a long blank page — reported from the field as *"User access page also takes
+forever to load"*. `ipb_access_cache` (localStorage) now holds the last roster, and
+the modal renders it immediately, marking itself `.access-stale` — *"showing the
+last saved copy — refreshing…"* — while the real read runs behind it and overwrites
+the cache on success. It is deliberately **localStorage and not `CacheService`**:
+`listUsers` is written by nine different actions, so one missed invalidation would
+show an admin the roster they just changed as unchanged, which is worse than a slow
+page. A local copy needs no invalidation at all, because the refresh always
+replaces it.
+
 **Temp passwords are never stored.** Only the hash, the salt and the
-`tempPwIssuedAt` timestamp reach the store. A temp password is 5
-unambiguous letters (no `I O 0 1 l`) + `-` + 4 digits, e.g. `Kx7Qm-4392`, and it
-expires after 14 days. It is shown once, with a copy button and an explicit
-warning.
+`tempPwIssuedAt` timestamp reach the store. A temp password is 5 unambiguous
+letters (no `I O 0 1 l`) + `-` + 4 digits, e.g. `Kx7Qm-4392`, and it expires after
+14 days. It is shown once, with a copy button and an explicit warning.
 
 **The credentials txt** is the handover document: link, email, temp password,
 the three first-sign-in steps (including "Add to Home screen"), the view+comment

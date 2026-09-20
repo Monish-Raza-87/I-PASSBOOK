@@ -119,14 +119,24 @@
 .ir-card {
   position: relative;
   /* Flex, not the previous `1fr auto` grid: a card may now carry a third child
-     (the assignee avatar) and a 3-child, 2-column grid reflows the whole row. */
+     (the assignee avatar) and a 3-child, 2-column grid reflows the whole row.
+
+     `nowrap` and `overflow: hidden` are what keep every row the SAME HEIGHT, and
+     they are a fix rather than a style. The owner asked why IR470's tab was bigger
+     than its neighbours. Nothing resizes a row on priority — assigning a ticket
+     adds an avatar and Urgent adds a pill, and this row was `flex-wrap: wrap`, so
+     the one card that had collected enough pills wrapped its side column onto a
+     second line and grew. Its neighbours stayed one line. Now nothing wraps: the
+     middle column shrinks and clips instead, and every card is one line tall. */
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
   gap: 0.6rem;
   padding: 0.6rem 0.9rem;
   border-bottom: 1px solid var(--outline-gray-1);
   background: transparent;
   cursor: pointer;
+  overflow: hidden;
   transition: background 0.1s var(--ease);
 }
 .ir-card:hover { background: var(--surface-gray-1); }
@@ -145,7 +155,21 @@
 }
 
 .ir-card-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-.ir-card-side { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto; }
+/* The side column keeps every pill — a ticket that is Urgent and assigned and late
+   should say all three. It is the MIDDLE text that gives way when there is not
+   enough room, because the serial and the category are also one tap away inside
+   the ticket, and the statuses are not. */
+.ir-card-side {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.ir-card-side > * { flex: 0 0 auto; }
 
 /* Who owns this ticket. Initials only — the full name is in the title attr. */
 .assignee-avatar {
@@ -176,12 +200,27 @@
   gap: 0.3rem;
   font-size: var(--text-xs);
   color: var(--ink-gray-5);
-  flex-wrap: wrap;
+  /* nowrap, not wrap: a second line here is a taller card, which is the whole
+     complaint this rule fixes. `overflow: hidden` lets the middle column shrink
+     to nothing rather than push the pills off the edge. */
+  flex-wrap: nowrap;
+  overflow: hidden;
   min-width: 0;
 }
+.ir-meta > * { flex: 0 0 auto; white-space: nowrap; }
 .ir-sn { color: var(--ink-gray-6); font-weight: var(--weight-medium); }
 .ir-dot { opacity: 0.5; }
 .ir-summary-link { font-size: var(--text-xs); color: var(--accent); white-space: nowrap; }
+
+/* At phone width a card cannot hold every pill and still be one line, so the two
+   that are pure conveniences step out: the Summary link (the same link is in the
+   ticket banner) and the Legacy badge (the ticket says so in words). What is left
+   is what the row is FOR — who has it, how urgent it is, where it stands, whether
+   it is late, and how far along it is. Nothing that carries state is ever hidden. */
+@media (max-width: 639px) {
+  .ir-card-side .ir-summary-link,
+  .ir-card-side .badge-legacy { display: none; }
+}
 
 /* Banner pills for the app-owned triage fields (type, assignee). Status and
    priority reuse the existing .badge-* / .prio-* classes. */
@@ -270,6 +309,23 @@
 }
 .tab:hover { color: var(--ink-gray-8); }
 .tab.active { color: var(--ink-gray-9); border-bottom-color: var(--surface-gray-10); font-weight: var(--weight-semibold); }
+
+/* A section holding typing that has not been saved yet. The dot lives in the tab's
+   right padding, so it never pushes the label around or changes the strip's height,
+   and it is the ONLY standing sign of unsaved work — without it the leave prompt
+   would be the first a user hears of it. Sits above the 2px border so an active
+   tab's underline does not swallow it. */
+.tab.has-unsaved { position: relative; }
+.tab.has-unsaved::after {
+  content: '';
+  position: absolute;
+  top: 0.32rem;
+  right: 0.34rem;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
 
 /* ── Section panes ─────────────────────────────────────────── */
 #sections-wrapper {
@@ -419,14 +475,19 @@
   gap: 8px;
   align-items: center;
 }
+/* ONE column geometry for the header, every row and the Total row, so the three
+   cannot drift apart — and so the Total sits under the Total cost column instead
+   of floating off to the right of nothing. */
 .cost-table-header,
-.cost-table-row {
+.cost-table-row,
+.cost-total {
   display: grid;
   grid-template-columns: 40px 1fr 64px 84px 84px 1.1fr 30px;
   gap: 8px;
   align-items: center;
-  white-space: nowrap;
 }
+.cost-table-header,
+.cost-table-row { white-space: nowrap; }
 
 .activity-table-header,
 .cost-table-header {
@@ -448,6 +509,19 @@
    table still puts inputs in a repeating row. */
 .cost-table-row .form-input { padding: 0 0.5rem; height: 30px; font-size: var(--text-sm); }
 
+/* ── The cost cells: one name per field, shown wherever the header cannot be ──
+   Each control sits in a <label>. On desktop the wrapper is an ordinary box and
+   the label inside it is hidden, because the column header above is already
+   saying the same word — the owner's "the field name is printed twice". At phone
+   width the header is gone and that label comes out to the LEFT of its control,
+   which is the whole fix for "these fields are not clear". One markup both ways:
+   the widths decide which of the two places carries the name, never both. */
+.cost-cell { display: block; min-width: 0; }
+.cost-cell .form-input { width: 100%; }
+.cost-cell-label { display: none; }
+.cost-cell-sn .form-input { text-align: center; }
+.cost-cell-cost .form-input { text-align: right; }
+
 /* Read-only twin of the row grid. Same columns, same restack — only the controls
    differed, so the grid and the mobile rules below are deliberately shared. */
 .activity-table-row.is-readonly {
@@ -460,7 +534,18 @@
 
 /* Both the header cell and the read-only row input carry .cost-sn / .cost-cost,
    so the two rules below are scoped to the row where they differ. */
-.act-day, .cost-sn { text-align: center; font-size: var(--text-sm); color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.act-day { text-align: center; font-size: var(--text-sm); color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+
+/* The row number and the computed cost are both READ-ONLY, so neither gets the
+   white input ground — a box you cannot type in should not look like one. */
+.cost-table-row .cost-sn {
+  text-align: center;
+  color: var(--ink-gray-6);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  background: transparent;
+  border-color: transparent;
+}
 .cost-table-row .cost-cost {
   text-align: right;
   font-weight: var(--weight-medium);
@@ -468,37 +553,78 @@
   background: var(--surface-gray-1);
   border-radius: var(--radius-2);
 }
+
+/* The Total, INSIDE the grid and under the Total cost column. It used to be a line
+   of text floating to the right of the whole table, which is where a number goes
+   when nothing has decided what it belongs to. */
 .cost-total {
   margin-top: 10px;
-  text-align: right;
+  padding-top: 8px;
+  border-top: 1px solid var(--outline-gray-2);
   font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   color: var(--ink-gray-9);
 }
-.cost-total span { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.cost-total-label {
+  grid-column: 1 / 5;
+  text-align: right;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-6);
+}
+.cost-total-value {
+  grid-column: 5 / 7;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 
 /* Cost / inward / IQC tables restack on phones rather than scroll */
 @media (max-width: 639px) {
+  /* The column header goes away HERE, and that is not the old bug coming back.
+     Every field below now carries its own name to its left, so leaving the header
+     up would print the same six words twice on a 360px screen — precisely the
+     duplicity the owner reported, not a fix for it. One name per field, always. */
   .cost-table-header { display: none; }
+
+  /* One field per line: name on the left, control on the right, and the full width
+     of the screen for whatever is typed in. This is the arrangement the owner asked
+     for — "vertically arranged row arrangement for clarity and sufficient space for
+     writing … clearly mark the names of rows to their left". */
   .cost-table-row {
-    grid-template-columns: 26px 1fr 68px;
-    grid-template-areas:
-      "sn particular particular"
-      "sn qty rate"
-      "sn cost cost"
-      "sn remark remark"
-      "sn del del";
-    gap: 5px;
-    padding: 8px 0;
+    grid-template-columns: 1fr;
+    gap: 7px;
+    padding: 10px 0;
     white-space: normal;
   }
-  .cost-sn        { grid-area: sn; }
-  .cost-particular{ grid-area: particular; }
-  .cost-qty       { grid-area: qty; }
-  .cost-rate      { grid-area: rate; }
-  .cost-cost      { grid-area: cost; }
-  .cost-remark    { grid-area: remark; }
-  .cost-del       { grid-area: del; justify-self: end; }
+  .cost-cell {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .cost-cell-label {
+    display: block;
+    flex: 0 0 6rem;
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    color: var(--ink-gray-6);
+    letter-spacing: 0.01em;
+  }
+  .cost-cell .form-input { flex: 1 1 auto; width: auto; }
+  .cost-cell-sn .form-input { text-align: left; }
+
+  /* Remove row is the last line of its own row and sits at the far right of it, so
+     it cannot be hit while reaching for the Remark box directly above. */
+  .cost-cell-del { justify-content: space-between; }
+
+  /* The total keeps the same two-column shape as a row's cells, so it reads as part
+     of the table rather than as a caption under it. */
+  .cost-total {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    padding-top: 10px;
+  }
+  .cost-total-label { grid-column: auto; text-align: left; }
+  .cost-total-value { grid-column: auto; text-align: right; font-size: var(--text-lg); }
 
   .activity-table-header { display: none; }
   .activity-table-row {
@@ -1121,6 +1247,10 @@
 
 .access-email-line { font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--ink-gray-8); white-space: nowrap; }
 .access-loading, .access-empty { font-size: var(--text-sm); color: var(--ink-gray-5); padding: 0.4rem 0; }
+/* What is on screen is this device's remembered copy, and a refresh is in flight.
+   Muted rather than alarming: it is a normal, sub-second state — the point is only
+   that nobody reads a stale roster as the current one. */
+.access-stale { color: var(--ink-gray-4); font-style: italic; }
 .access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
 .access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
 .access-add-row .form-input { flex: 1; min-width: 160px; }

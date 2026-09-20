@@ -306,6 +306,44 @@ about an account:
 | `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
 | `forgotPassword` | Mails a 6-digit **reset** code. Response is byte-identical whether or not the account exists (no enumeration), and it does no throttling of its own — it calls the one shared `issueAuthCode(email, 'reset', CODE_TTL_MIN)`, which is where the per-email budget, the resend gap, the global ceiling and the retire-the-older-code rule live. |
 | `resetPassword` | Redeems the code (5-attempt cap, and a **reset** code is **consumed** by the reset it performs), sets the new password, revokes all sessions, and **returns no token** — the user then signs in, which proves the password was typed correctly. It **preserves** the account's `Status` rather than writing `'active'`: a reset must not re-enable an account an admin deliberately disabled, and it refuses a disabled account outright. It calls the lock-free `redeemCodeIn(…, consume=true)` inside its own wider lock, covering `codes.json`, `users.json` and `sessions.json` together — a redeem is one event, and a nested lock would deadlock rather than queue. |
+| `googleSignIn` | The Google door. Reads `Session.getActiveUser().getEmail()` and mints a session for that address, with the same last-login stamp and sign-in audit shape as `login`. It carries **no I-PASSBOOK credential at all** — the Workspace session is the factor — which is why it lives pre-auth beside `logout`. See below. |
+| `googleSignInProbe` | "Would the door open for the caller?" — asked by the sign-in screen to decide whether to show the button. Mints nothing, audits nothing and touches no counter, so it is safe to run automatically: the answer is about the caller's own identity, which Google is already reporting to them. |
+
+#### The Google door, in full
+
+`Session.getActiveUser()` — **never `getEffectiveUser()`**. The latter returns the
+*script owner*, so under "Execute as: Me" it would report `monish.raza` for every
+caller on earth and make everyone the same person. `smoke-backend.mjs` pins the
+word.
+
+It only works from a deployment whose access is **Anyone within `<domain>`**; under
+plain "Anyone" it returns `''` and the ladder below refuses every time. That is why
+the frontend needs its own deployment URL — see
+[05](05 - Configuration & Secrets.md) and [08](08 - Development Guide.md).
+
+`googleDoorCheck()` is the shared ladder, called by **both** actions so the button
+is only ever offered where the door would actually open, and so that someone who
+tries both doors is never told two different things:
+
+| Condition | Answer |
+|---|---|
+| Google reported no account | "Google did not report an account for this browser. Use your email and password instead." |
+| Address outside `ALLOWED_DOMAIN` | Name the domain, and point at the password door |
+| No account row | "No account found for this email — ask an admin to create one." There is still **no self-signup**: a Google account is an identity, not a membership |
+| `Status` is `disabled` | Refuse; an admin must re-enable it |
+| Temp-password account | Refuse and point at the password door, so the **forced first-login change still happens**. Minting here would be the exact bypass the no-token rule in `doLoginPassword` exists to prevent |
+
+It deliberately does **not** touch `attempts.json`, in either direction. Not
+`recordFailedLogin` — a Workspace session is not guessable, so there is nothing to
+throttle. And not `clearFailedLogin` either: someone fumbling their *password* must
+not be able to wash that counter away by clicking the Google button. The lockout
+counter belongs to the password door, and only the password door moves it.
+
+`signinAuditLine(email, codeIssuedAt, device, nowMs, method)` takes an optional
+fifth argument, so the log reads `google sso · Chrome on Windows` instead of
+claiming a code was redeemed on a door that has no code. The password door's
+literals are unchanged.
+
 
 `forgotPassword` sends through `sendAuthMail`, which enforces a **global** daily
 `MAIL_DAILY_CAP` (400). That cap covers **every** mail this script sends, not just
@@ -404,11 +442,16 @@ folder or file work, because it becomes a Drive folder and file name.
 **Audit.** Every section save calls `buildAuditLines(...)` — a **pure** function, so
 the caller can hold one lock across read → build → write → append — and the append
 happens **last**, inside the same lock. (It previously ran *before* the data write, so
-a save that then failed left an audit entry for a save that never happened.) Two
+a save that then failed left an audit entry for a save that never happened.) Three
 carve-outs: the `__NUDGES__` store is **not audited at all** (comment items already
 carry their own author and timestamp, and a copy of the whole comment array per read /
-markRead was dominating the log), and no bare `saved` marker is written for a
-`__`-sentinel write.
+markRead was dominating the log); no bare `saved` marker is written for a
+`__`-sentinel write; and **an information-free row is never written** — `added` only
+when the new value is not empty, `removed` only when the old value was not empty.
+Without that third rule the first save of a new IR wrote one empty `added` row per
+field in the section, which is what made untouched fields show the user's own name in
+their history. See [03 — Audit trail](03 - Sections Reference.md) for the reader-side
+rule that hides the rows already stored.
 
 **Section A intake strip.** Immediately before the write, `saveSection` deletes
 these keys from any incoming `sec-a` payload, so a crafted save cannot write a
@@ -428,6 +471,25 @@ from it:
 | `a_crmOwner` | Writable through the `sec-a` path, gated on **Triage** — this is what `saveOverview()` posts |
 | `a_contactPhone` | Same — the other Overview-editable field |
 | `a_activityLog` | **Never written by anyone.** It is the legacy hand-typed log, shown read-only; it is in the field table for reading, not for saving |
+
+**The Overview's write is a MERGE; every other section's is a REPLACE.** `saveOverview()`
+posts only two keys into the `sec-a` record, and the write replaces that record
+wholesale — so `a_activityLog` (which the strip above does not save, because stripping
+only drops keys from the *incoming* payload) was deleted every time anyone edited the
+CRM owner or the contact phone. The comment promising that key "survives only as
+read-only history" was contradicted by the replace. For the Overview the stored record
+is now copied first and the posted keys laid over it.
+
+It is scoped to the Overview **on purpose**, and scoping it is load-bearing. An ordinary
+section must keep replace semantics: the client posts every field it declares, so
+replace and merge are equivalent there — and `restoreField`'s whole mechanism depends on
+a **missing key meaning "gone"** rather than "unchanged". A global merge would make a
+removed field unremovable. `smoke-store.mjs` pins exactly that, and it is why this is a
+branch on `sectionId === OVERVIEW_KEY` rather than a change to the write.
+
+The audit diff follows: stored record against the object actually being written — never
+the merged object against itself, which would diff to nothing and lose the very two
+fields the save is about.
 
 > Because the strip is a `delete` — the only mutation `saveSection` makes to a
 > payload — and because the write replaces the whole key, the intake keys never

@@ -174,7 +174,7 @@ const dispatchers = [code.slice(doPostAt, doPostAt + 2600), code.slice(doGetAt, 
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
  'resetPassword', 'getMyAccess', 'listUsers', 'createUser', 'bulkCreateUsers',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
- 'setUserDepartments', 'purgeUsers']
+ 'setUserDepartments', 'purgeUsers', 'googleSignIn', 'googleSignInProbe']
   .forEach(a => r.ok('"' + a + '" is dispatched',
     new RegExp('\\b' + a + '\\s*:').test(dispatchers),
     (dispatchers.match(new RegExp('.{0,30}\\b' + a + '\\s*:')) || ['absent'])[0]));
@@ -1023,8 +1023,20 @@ r.ok('getStoreFolder only ever looks it up',
 r.ok('a missing store folder is an error naming the run of initializeStore()',
   /initializeStore\(\) once/.test(gsf), (gsf.match(/[^\n]*initializeStore[^\n]*/) || [''])[0]);
 r.ok('a subfolder IS creatable, but only when the caller asks',
-  /return create \? getStoreFolder\(\)\.createFolder\(name\) : null/.test(fnBody('getStoreSubfolder')),
+  /create \? getStoreFolder\(\)\.createFolder\(name\) : null/.test(fnBody('getStoreSubfolder')),
   (fnBody('getStoreSubfolder').match(/[^\n]*createFolder[^\n]*/) || [''])[0]);
+// getFoldersByName is a Drive SEARCH, and one save asks for the same subfolder
+// several times. The memo is per-execution, so it cannot serve a stale folder to a
+// later request — but a MISS must NOT be memoised, or a caller with create=true
+// could never create the folder the caller before it merely looked for.
+const gsub = fnBody('getStoreSubfolder');
+r.ok('a hit is answered from the per-execution memo, without a second search',
+  /hasOwnProperty\.call\(_subfolderMemo, name\)/.test(gsub) &&
+  gsub.indexOf('hasOwnProperty.call(_subfolderMemo, name)') < gsub.indexOf('getFoldersByName'),
+  (gsub.match(/[^\n]*_subfolderMemo[^\n]*/) || [''])[0]);
+r.ok('a MISS is deliberately not memoised, so create=true still creates',
+  /if \(folder\) _subfolderMemo\[name\] = folder/.test(gsub),
+  (gsub.match(/[^\n]*_subfolderMemo\[name\][^\n]*/) || [''])[0]);
 
 r.head('initializeStore creates the store and leaves it Restricted');
 const isf = fnBody('initializeStore');
@@ -1197,19 +1209,47 @@ r.ok('it matches the workflow lines by the real IR in `sec`',
 r.ok('and only when `ir` is a sentinel, so a future sentinel cannot leak in',
   /ir\.indexOf\('__'\)\s*===\s*0/.test(gal),
   (gal.match(/[^\n]*isWorkflowRow[^\n]*/) || [''])[0]);
+
+// The line → entry mapping was pulled out into ONE helper so the reader and the
+// save response cannot drift apart. The four assertions below follow the mapping
+// to where it now lives; they still pin exactly what they always did.
+r.head('auditEntryFromLine is the ONE mapping from a stored line to a client entry');
+r.ok('it exists as a helper of its own', fnBody('auditEntryFromLine').length > 200);
+const aef = fnBody('auditEntryFromLine');
+r.ok('it recomputes the workflow test from the same two fields',
+  /sec === irNumber/.test(aef) && /ir\.indexOf\('__'\)\s*===\s*0/.test(aef),
+  (aef.match(/[^\n]*isWorkflowRow[^\n]*/) || [''])[0]);
 r.ok('each entry is labelled with which half it came from',
-  /source:\s*isWorkflowRow\s*\?\s*'workflow'\s*:\s*'section'/.test(gal),
-  (gal.match(/[^\n]*source:[^\n]*/) || [''])[0]);
+  /source:\s*isWorkflowRow\s*\?\s*'workflow'\s*:\s*'section'/.test(aef),
+  (aef.match(/[^\n]*source:[^\n]*/) || [''])[0]);
 r.ok('a workflow line reports no section id, so it cannot be mistaken for a save',
-  /sectionId:\s*isWorkflowRow\s*\?\s*''\s*:\s*sec/.test(gal));
+  /sectionId:\s*isWorkflowRow\s*\?\s*''\s*:\s*sec/.test(aef));
 // An entry has to be attributable to the IR it is ABOUT. Reporting a workflow
 // line's own `ir` verbatim would hand back `__IRS__` — the STORE, not the ticket —
 // and quietly make any future `e.irNumber === irNumber` filter drop every status
 // change. (The frontend happens not to filter on it today, which is exactly why
 // this would rot.)
 r.ok('a workflow line reports the real IR, not the store name in its own field',
-  /irNumber:\s*isWorkflowRow\s*\?\s*sec\s*:\s*ir/.test(gal),
-  (gal.match(/[^\n]*irNumber:[^\n]*/) || [''])[0]);
+  /irNumber:\s*isWorkflowRow\s*\?\s*sec\s*:\s*ir/.test(aef),
+  (aef.match(/[^\n]*irNumber:[^\n]*/) || [''])[0]);
+
+r.head('a line that records nothing is refused by the reader');
+r.ok('an `added` line with an empty new value is not history',
+  /l\.ev === 'added'\s*&&\s*String\(l\.nw\s*\|\| ''\) === ''/.test(gal),
+  (gal.match(/[^\n]*'added'[^\n]*/) || [''])[0]);
+r.ok('a `removed` line with an empty old value is not history',
+  /l\.ev === 'removed'\s*&&\s*String\(l\.old \|\| ''\) === ''/.test(gal),
+  (gal.match(/[^\n]*'removed'[^\n]*/) || [''])[0]);
+// Order matters and is the whole point of the rule: the dead rows must be dropped
+// BEFORE the cap, or a first save's hundreds of empty rows would push the real
+// edits out of the newest 400 — and the oldest rows are what a restore reaches for.
+r.ok('the dead rows are dropped BEFORE the cap, not after it',
+  gal.indexOf("l.ev === 'added'") > -1 &&
+  gal.indexOf("l.ev === 'added'") < gal.indexOf('entries.slice(entries.length - cap)'));
+r.ok('the rule is NARROW — only those two events, so the save marker survives',
+  (gal.match(/l\.ev ===/g) || []).length === 2,
+  (gal.match(/l\.ev ===[^\n]*/g) || ['none']));
+
 r.ok('line order is file order — append-only, so it is already chronological',
   !/\.sort\(/.test(gal));
 r.ok('the response is capped', /AUDIT_RESPONSE_CAP/.test(gal),
@@ -1821,5 +1861,76 @@ r.ok('an operator can read the log back without a screen for it',
   /readAuditLines\(SIGNIN_AUDIT_SUBJECT\)/.test(fnBody('reportRecentSignins')));
 r.ok('the reader is read-only — it takes no lock',
   !/withRowLockOrThrow/.test(fnBody('reportRecentSignins')));
+
+// ── THE GOOGLE DOOR ───────────────────────────────────────────────────────────
+// Behaviour lives in smoke-store.mjs, which calls the real functions. What is pinned
+// HERE is the shape that behaviour cannot show: which identity call is used, that the
+// door is additive, and that it needs no network.
+r.head('the Google door reads the CALLER, and never the script owner');
+const gcall = fnBody('googleCallerEmail');
+r.ok('it uses getActiveUser — the caller — and nothing else',
+  /Session\.getActiveUser\(\)/.test(gcall), (gcall.match(/[^\n]*getActiveUser[^\n]*/) || [''])[0]);
+// The single most dangerous word in this feature. getEffectiveUser returns the
+// SCRIPT OWNER, which under "Execute as: Me" is one person for every caller on
+// earth — so this would not fail, it would silently make everyone monish.raza.
+r.ok('getEffectiveUser appears NOWHERE in the identity path — it would make everyone the owner',
+  !/getEffectiveUser/.test(gcall) && !/getEffectiveUser/.test(fnBody('googleDoorCheck')) &&
+  !/getEffectiveUser/.test(fnBody('doGoogleSignIn')) && !/getEffectiveUser/.test(fnBody('doGoogleSignInProbe')),
+  (code.match(/[^\n]*getEffectiveUser[^\n]*/g) || ['none']));
+r.ok('a Session call that fails is an empty identity, not an exception',
+  /try\s*{/.test(gcall) && /catch/.test(gcall) && /return '';/.test(gcall));
+
+r.head('the refusal ladder is one function, so the probe and the door cannot disagree');
+const gdoor = fnBody('googleDoorCheck');
+r.ok('the probe and the door both go through it',
+  /googleDoorCheck\(\)/.test(fnBody('doGoogleSignIn')) &&
+  /googleDoorCheck\(\)/.test(fnBody('doGoogleSignInProbe')));
+r.ok('an empty identity is refused', /if \(!email\)/.test(gdoor));
+r.ok('a non-domain address is refused against CONFIG.ALLOWED_DOMAIN',
+  /CONFIG\.ALLOWED_DOMAIN/.test(gdoor), (gdoor.match(/[^\n]*ALLOWED_DOMAIN[^\n]*/) || [''])[0]);
+r.ok('an address with no account is refused — there is still no self-signup',
+  /findUser\(email\)/.test(gdoor) && /No account found/.test(gdoor));
+r.ok('a disabled account is refused', /disabled/.test(gdoor));
+r.ok('a temp-password account is refused and sent to the password door',
+  /isTempPasswordAccount\(u\)/.test(gdoor) && /temporary password/i.test(gdoor));
+r.ok('...and it reuses tempPasswordExpired rather than inventing a second TTL',
+  /tempPasswordExpired\(u\)/.test(gdoor));
+// The counter belongs to the password door. Reading OR writing it here would give a
+// probe a way to lock a legitimate user out of their own recovery path.
+r.ok('NOTHING in the Google path touches the lockout counters',
+  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(gdoor) &&
+  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('doGoogleSignIn')) &&
+  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('doGoogleSignInProbe')));
+
+r.head('the probe opens nothing, and the door mints exactly what the password door mints');
+const gprobe = fnBody('doGoogleSignInProbe');
+r.ok('the probe mints no session and writes no audit line',
+  !/mintSession/.test(gprobe) && !/appendAuditLinesLocked/.test(gprobe) && !/writeJsonLocked/.test(gprobe));
+r.ok('...and it reports who it would admit, so the UI can name them',
+  /status: 'ok'/.test(gprobe) && /email:/.test(gprobe) && /name:/.test(gprobe));
+const gsignin = fnBody('doGoogleSignIn');
+r.ok('the door mints a session and returns the same payload shape as the password door',
+  /mintSession\(email\)/.test(gsignin) &&
+  /sessionToken: token/.test(gsignin) && /access: getMyAccess\(email\)/.test(gsignin));
+r.ok('the last-login stamp is written, and is best-effort like the password door\'s',
+  /lastLoginAt/.test(gsignin) && /catch/.test(gsignin));
+r.ok('the sign-in line records the door it came through',
+  /signinAuditLine\(email, null, params\.device, signinAt, 'google'\)/.test(gsignin),
+  (gsignin.match(/[^\n]*signinAuditLine[^\n]*/) || [''])[0]);
+
+r.head('signinAuditLine still writes the old line for everyone else');
+const sal = fnBody('signinAuditLine');
+r.ok('the method argument is OPTIONAL — a caller that passes nothing is unchanged',
+  /signinAuditLine\(email, codeIssuedAt, device, nowMs, method\)/.test(code));
+r.ok('only the google door changes the wording, and it says so without a code age',
+  /=== 'google'/.test(sal) && /'google sso'/.test(sal) && !/code .*google/.test(sal));
+
+r.head('the Google door needs no network and no new permission');
+// The one thing that already broke Google Sign-In once, and the reason this design
+// was chosen over an OAuth Client ID: nothing here calls out.
+r.ok('no UrlFetchApp anywhere — still true after adding this door',
+  !/UrlFetchApp/.test(code), (code.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none']));
+r.ok('it needs no OAuth scope of its own — Session is core',
+  !/ScriptApp\.getOAuthToken|OAuth2/.test(code));
 
 r.finish();

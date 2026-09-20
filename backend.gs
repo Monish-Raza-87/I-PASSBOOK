@@ -1,6 +1,22 @@
 // ============================================================
 //  I-PASSBOOK — Google Apps Script Backend (backend.gs)
-//  Deploy as: Web App → Execute as: Me → Who has access: Anyone
+//
+//  TWO deployments of this one script, and both are required:
+//
+//  1. THE MAIN ONE — Execute as: Me → Who has access: Anyone.
+//     Serves every action the app makes, including password sign-in with its
+//     emailed code. Its /exec URL is the one in the frontend's CONFIG.GAS_URL and
+//     must NOT change. It has to stay on "Anyone": an address outside the domain
+//     (see CONFIG.EXTERNAL_EMAILS), and any machine with no Google session, can
+//     only get in through this door, and a domain restriction blocks the request
+//     at Google's edge before this script ever runs.
+//
+//  2. THE GOOGLE DOOR — same script, same version, Execute as: Me →
+//     Who has access: Anyone within <domain>. It serves ONLY googleSignIn and
+//     googleSignInProbe, and its /exec URL goes in the frontend's CONFIG.SSO_URL.
+//     The domain restriction is what makes Session.getActiveUser() report the
+//     caller: under "Anyone" it returns '' and both actions refuse. Delete this
+//     deployment and Google sign-in disappears; nothing else is affected.
 // ============================================================
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -168,6 +184,7 @@ var STORE_INDEX        = 'sections/index.json';
 var _storeMemo      = {};
 var _rootFolderMemo = null;
 var _storeFolderMemo = null;
+var _subfolderMemo  = {};   // subfolder name → Folder, for this execution only
 
 function getRootFolder() {
   if (!_rootFolderMemo) _rootFolderMemo = DriveApp.getFolderById(CONFIG.DRIVE_ROOT_FOLDER_ID);
@@ -192,9 +209,18 @@ function getStoreFolder() {
 // "this folder does not exist yet" is a legitimate empty answer for a READ — a
 // fresh store has no audit/ until the first save — and never a reason to create.
 function getStoreSubfolder(name, create) {
+  // Memoised per execution, for the same reason `_storeMemo` is: getFoldersByName is
+  // a Drive SEARCH, and one save asks for the same subfolder several times
+  // (`sections/` for the index and the IR file, `audit/` for the lines it appends).
+  // The memo lives in the execution's own global scope, so it cannot serve a stale
+  // folder to a later request. A MISS is deliberately not memoised: a caller with
+  // create=true must still be able to create the folder the previous caller only
+  // looked for.
+  if (Object.prototype.hasOwnProperty.call(_subfolderMemo, name)) return _subfolderMemo[name];
   var it = getStoreFolder().getFoldersByName(name);
-  if (it.hasNext()) return it.next();
-  return create ? getStoreFolder().createFolder(name) : null;
+  var folder = it.hasNext() ? it.next() : (create ? getStoreFolder().createFolder(name) : null);
+  if (folder) _subfolderMemo[name] = folder;
+  return folder;
 }
 
 // A store path is a bare file name in `_store/`, or "sub/file.json".
@@ -488,8 +514,15 @@ function codeAgeLabel(issuedAt, nowMs) {
 // One line per successful sign-in. `device` is what the BROWSER claimed, so it is a
 // clue and not proof — the point is to make "signed in from two places" visible at a
 // glance, not to establish who was at the keyboard.
-function signinAuditLine(email, codeIssuedAt, device, nowMs) {
-  var note = 'code ' + codeAgeLabel(codeIssuedAt, nowMs) + ' old';
+//
+// `method` says which door was used. Only the Google door passes anything, and it
+// passes 'google': there is no code on that door, so recording a code's age would be
+// inventing a fact. Every other caller — including every existing one — produces
+// exactly the line it always did.
+function signinAuditLine(email, codeIssuedAt, device, nowMs, method) {
+  var note = (String(method || '') === 'google')
+    ? 'google sso'
+    : 'code ' + codeAgeLabel(codeIssuedAt, nowMs) + ' old';
   var dev  = String(device || '').trim().slice(0, 120);
   note += dev ? ' · ' + dev : ' · device not reported';
   return {
@@ -1487,6 +1520,128 @@ function doLoginPassword(params) {
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
+// ── GOOGLE SIGN-IN — A SECOND DOOR, NEVER A REPLACEMENT ───────────────────────
+//
+// For anyone whose browser is already signed into their @indrones.com Workspace
+// account, this reads the address Google reports for the CALLER and nothing else.
+// No password, no emailed code: on this door the Workspace session IS the factor.
+//
+// It is deliberately additive. `doLoginPassword` above is untouched and stays a
+// first-class door — the recovery path for a machine with no Google session (a
+// shared laptop, a lab PC, a phone signed into a personal account), and the ONLY
+// door for the external address in CONFIG.EXTERNAL_EMAILS, which no domain-
+// restricted deployment will admit. The forced first-login change still stands in
+// password mode, and this door REFUSES a temp-password account and points it at
+// that door rather than quietly handing it a session: minting one here would be the
+// exact bypass the no-token rule in doLoginPassword exists to prevent.
+//
+// getActiveUser, NEVER getEffectiveUser. The latter returns the SCRIPT OWNER, so
+// under "Execute as: Me" it would report monish.raza for every caller on earth and
+// make everyone the same person. That one word is the difference between an
+// identity source and a catastrophic one.
+//
+// This only works from a deployment whose access is "Anyone within indrones.com".
+// Under plain "Anyone", getActiveUser() returns '' for every caller and the ladder
+// below refuses every time — a closed door, never a broken one. See docs/05.
+function googleCallerEmail() {
+  try {
+    var u = Session.getActiveUser();
+    return usersKey(u && u.getEmail ? u.getEmail() : '');
+  } catch (e) {
+    return '';
+  }
+}
+
+// The refusal ladder, shared by the probe and the door so the button is only ever
+// offered where the door would actually open. Returns { error } to refuse, or
+// { email, user } to admit.
+//
+// Every branch gives the SAME answer the password door gives for the same
+// condition, so someone who tries both doors is never told two different things.
+function googleDoorCheck() {
+  var email = googleCallerEmail();
+  if (!email) {
+    return { error: { status: 'error', message: 'Google did not report an account for this browser. Use your email and password instead.' } };
+  }
+  var at = email.lastIndexOf('@');
+  if ((at === -1 ? '' : email.slice(at + 1)) !== CONFIG.ALLOWED_DOMAIN) {
+    return { error: { status: 'error', message: 'Sign in with your @' + CONFIG.ALLOWED_DOMAIN + ' Google account, or use your email and password instead.' } };
+  }
+  // There is still NO self-signup. A Google account is an identity, not a
+  // membership: the admin provisions the row exactly as before, and this door
+  // cannot create one, re-enable one, or hand one a first password.
+  var u = findUser(email);
+  if (!u) {
+    return { error: { status: 'error', message: 'No account found for this email — ask an admin to create one.' } };
+  }
+  if (userField(u, 'status').toLowerCase() === 'disabled') {
+    return { error: { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' } };
+  }
+  if (isTempPasswordAccount(u)) {
+    var stale = tempPasswordExpired(u);
+    if (stale) return { error: stale };
+    return { error: { status: 'error', message: 'Set your own password first: sign in with your temporary password, then use Google from then on.' } };
+  }
+  return { email: email, user: u };
+}
+
+// POST googleSignInProbe — "would the Google door open for this caller?", asked
+// without opening it. The sign-in screen runs this silently to decide whether to
+// show the button at all.
+//
+// A probe mints no session, writes no audit line and touches no counter, so
+// running it automatically costs nothing and reveals nothing: the answer is about
+// the caller's OWN identity, which Google is already reporting to them. It is the
+// reason a wrong deployment setting shows no button rather than a broken app.
+function doGoogleSignInProbe() {
+  var c = googleDoorCheck();
+  if (c.error) return c.error;
+  return { status: 'ok', email: c.email, name: userField(c.user, 'Name') };
+}
+
+// POST googleSignIn — the door itself. Everything below the ladder mirrors
+// doLoginPassword's success path (last-login stamp, audit line, mint) so the two
+// doors produce identical sessions and one audit trail with two words for how it
+// was opened.
+function doGoogleSignIn(params) {
+  var c = googleDoorCheck();
+  if (c.error) return c.error;
+  var email = c.email;
+
+  // Deliberately NO lockout bookkeeping here, in either direction. Not
+  // recordFailedLogin: a Workspace session is not guessable, so there is nothing
+  // to throttle. And not clearFailedLogin either — someone fumbling their PASSWORD
+  // must not be able to wash that counter away by clicking this button. The
+  // counter belongs to the password door, and only the password door moves it.
+
+  // Last-login stamp, best-effort, exactly as above: failing to record it must
+  // never fail a sign-in that is already authenticated.
+  try {
+    withRowLockOrThrow(function () {
+      var users = readJsonLocked('users.json');
+      if (!users || !users[email]) return;
+      users[email].lastLoginAt = Date.now();
+      writeJsonLocked('users.json', users);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  // The sign-in audit, in its OWN try and closed before the session is minted.
+  // Same contract as the password door: a log that can block the door it watches
+  // is worse than no log, so nothing here may throw outward. The method argument
+  // is what makes the line read `google sso · <device>` instead of claiming a code
+  // was redeemed on a door that has no code.
+  try {
+    var signinAt = Date.now();
+    withRowLockOrThrow(function () {
+      appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT,
+        [signinAuditLine(email, null, params.device, signinAt, 'google')]);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  var token = mintSession(email);
+  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+}
+
 // The sign-in OTP gate, called from doLoginPassword on an already-verified
 // password. Returns null to MEAN "carry on and mint the session", or the response
 // to send back instead.
@@ -1675,6 +1830,13 @@ function doPost(e) {
       resetPassword:  function () { return resetPassword(params); },
       // logout revokes the session it is handed, so it authenticates itself.
       logout:         function () { return doLogout(params.sessionToken); },
+      // The Google door, in both halves. Self-authenticating for the same reason
+      // logout is: the credential is the Workspace session Google reports to the
+      // script, so there is no I-PASSBOOK token to check yet. Serving these from a
+      // "Anyone within indrones.com" deployment is what makes getActiveUser()
+      // report the caller — under plain "Anyone" both refuse and stay silent.
+      googleSignIn:      function () { return doGoogleSignIn(params); },
+      googleSignInProbe: function () { return doGoogleSignInProbe(); },
       ping:           function () { return ping(); },
       sessionCheck:   function () { return sessionCheck(e); },
     };
@@ -2569,6 +2731,9 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
   // Note what is deliberately NOT in this list: a_crmOwner and a_contactPhone,
   // which the Overview panel does write (gated on Triage by the ACL above), and
   // a_activityLog, which nobody writes — it survives only as read-only history.
+  // Stripping is not what keeps it, though: this list only drops keys from the
+  // INCOMING payload. What actually keeps a_activityLog is that the Overview's write
+  // is a merge rather than a replace — see the critical section below.
   if (sectionId === OVERVIEW_KEY) {
     ['a_irNumber','a_droneId','a_dateRaised','a_issueType','a_issueDesc','a_customerName',
      'a_contactEmail','a_incidentLocationWeather','a_evidence','a_companyName'].forEach(function(k) {
@@ -2671,9 +2836,32 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     var data = ir.data;
     var existingFields = (data[sectionId] && typeof data[sectionId] === 'object') ? data[sectionId] : {};
 
-    lines = buildAuditLines(irNumber, sectionId, savedBy, existingFields, fields, uploads);
+    // The Overview is the ONE section whose payload is a SUBSET of its record.
+    // saveOverview posts a_crmOwner and a_contactPhone and nothing else, because
+    // everything else in sec-a is app-owned — a_activityLog above all. Replacing the
+    // record with a two-key object therefore DELETED the activity log on every
+    // Overview save, which is the exact opposite of what the comment on the intake
+    // strip below promises. So for the Overview: stored keys first, the posted ones
+    // over them.
+    //
+    // Every other section must KEEP replace semantics, and that is not an oversight:
+    // the client posts every field it declares, so replace and merge are the same
+    // thing there — and putting a DELETED field back (restoreField) depends on a
+    // missing key meaning "gone" rather than "unchanged". A global merge would make a
+    // removed field unremovable. smoke-store.mjs pins that contract.
+    var next = fields;
+    if (sectionId === OVERVIEW_KEY) {
+      next = {};
+      Object.keys(existingFields).forEach(function (k) { next[k] = existingFields[k]; });
+      Object.keys(fields).forEach(function (k) { next[k] = fields[k]; });
+    }
 
-    data[sectionId] = fields;
+    // Diff the STORED record against the object actually being written — never the
+    // merged object against itself, which would diff to nothing and lose the very
+    // two fields this save is about.
+    lines = buildAuditLines(irNumber, sectionId, savedBy, existingFields, next, uploads);
+
+    data[sectionId] = next;
     writeIR(irNumber, data, ir.fileId);
     appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), lines);
 
@@ -3119,6 +3307,15 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
     var had = ex.hasOwnProperty(k);
     var newJ = snapValue(nw[k]);
     if (!had) {
+      // A key with an EMPTY value is not an addition. The client posts every field
+      // the section declares, so on a section's first save — where the stored
+      // section is still {} — a line here claimed the saver had "added" every field
+      // in that section, one row per field, all naming them. That is the owner's
+      // "untouched fields show my name" report, and it buried the real edits.
+      // Dropping it loses nothing: an absent key and a key holding '' are the same
+      // thing to every reader (snapValue maps both to ''), so the first real value
+      // for this field still diffs correctly against the empty it replaced.
+      if (newJ === '') return;
       lines.push(line('added', k, '', newJ));
     } else if (snapValue(ex[k]) !== newJ) {
       lines.push(line('changed', k, snapValue(ex[k]), newJ));
@@ -3127,7 +3324,14 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
   Object.keys(ex).forEach(function(k) {
     if (/_links$/.test(k)) return;
     if (k === 'done') return;
-    if (!nw.hasOwnProperty(k)) lines.push(line('removed', k, snapValue(ex[k]), ''));
+    // The same rule in the other direction: removing a key that held nothing
+    // removes nothing. A genuine deletion still records, with the value it
+    // destroyed — which is what a restore reads to put the field back.
+    if (!nw.hasOwnProperty(k)) {
+      var wasJ = snapValue(ex[k]);
+      if (wasJ === '') return;
+      lines.push(line('removed', k, wasJ, ''));
+    }
   });
 
   // Uploads leave no trace anywhere else: file keys are `*_links` (skipped above by
@@ -3185,6 +3389,27 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
 // about that field (`status`, `assignee`, …) comes back with it — correct, since
 // those ARE that field's history, and the reader already labels them as triage rows.
 var AUDIT_RESPONSE_CAP = 400;
+
+// ONE mapping from a stored audit line to the entry shape a client reads, so the
+// reader below and every other caller of it cannot drift apart.
+function auditEntryFromLine(l, irNumber) {
+  var ir  = String(l.ir || '');
+  var sec = String(l.sec || '');
+  // A workflow line's own `ir` says `__IRS__` — the store name, not the ticket — so
+  // reporting it verbatim would hand a consumer an entry it cannot attribute, and
+  // make any future `e.irNumber === irNumber` filter silently drop every status
+  // change. `irNumber` is the IR the line is ABOUT, in both halves.
+  var isWorkflowRow = (sec === irNumber && ir.indexOf('__') === 0);
+  return {
+    timestamp: l.t,
+    irNumber: isWorkflowRow ? sec : ir,
+    sectionId: isWorkflowRow ? '' : sec,
+    source: isWorkflowRow ? 'workflow' : 'section',
+    savedBy: l.by, event: l.ev, fieldId: l.fid,
+    oldValue: l.old, newValue: l.nw
+  };
+}
+
 function getAuditLog(irNumber, limit, fieldId) {
   if (!irNumber) throw new Error('irNumber is required.');
   var wantField = (fieldId == null) ? '' : String(fieldId);
@@ -3197,18 +3422,17 @@ function getAuditLog(irNumber, limit, fieldId) {
     var isWorkflowRow = (sec === irNumber && ir.indexOf('__') === 0);
     if (!isSectionRow && !isWorkflowRow) return;
     if (wantField && String(l.fid || '') !== wantField) return;
-    entries.push({
-      // `irNumber` is the IR the line is ABOUT, in both halves. A workflow line's
-      // own `ir` says `__IRS__` — the store name, not the ticket — so reporting it
-      // verbatim would hand a consumer an entry it cannot attribute, and make any
-      // future `e.irNumber === irNumber` filter silently drop every status change.
-      timestamp: l.t,
-      irNumber: isWorkflowRow ? sec : ir,
-      sectionId: isWorkflowRow ? '' : sec,
-      source: isWorkflowRow ? 'workflow' : 'section',
-      savedBy: l.by, event: l.ev, fieldId: l.fid,
-      oldValue: l.old, newValue: l.nw
-    });
+    // A row that records NOTHING is not history. Until buildAuditLines was fixed, a
+    // section's first save wrote an `added` line for every field the section
+    // declares — empty ones included — so every clock in that section named the
+    // saver for a change nobody made. Those rows are already ON DISK for every IR
+    // saved before the fix, and stored history is never rewritten (the backend is
+    // under a pinned test that it erases nothing), so they are refused HERE instead.
+    // Placed before the cap on purpose: dead rows must not push real ones out of
+    // the newest 400, and the oldest rows are what a restore reaches for.
+    if (l.ev === 'added'   && String(l.nw  || '') === '') return;
+    if (l.ev === 'removed' && String(l.old || '') === '') return;
+    entries.push(auditEntryFromLine(l, irNumber));
   });
   var cap = parseInt(limit, 10);
   if (isNaN(cap) || cap <= 0) cap = AUDIT_RESPONSE_CAP;

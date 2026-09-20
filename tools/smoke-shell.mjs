@@ -543,5 +543,55 @@ const otpStep = (appJs.match(/const gotoOtpStep = \([\s\S]*?\n  \};/) || [''])[0
 ok('the code step sets the inline note', /auth-login-code-note/.test(otpStep));
 ok('...and raises NO toast over the code box', otpStep !== '' && !/showToast/.test(otpStep), otpStep.slice(0, 80));
 
+// ── Boot reads `__CONFIG__` ONCE, not once per consumer ───────────────────────
+// The inward dropdowns, the IQC config, the team directory and the palette allowlist
+// are four records in one store. Each consumer used to fetch that store for itself —
+// same URL, same payload, four round trips on the way to a screen the owner already
+// reported as slow. This pins the shape that replaced it: ONE request, all four
+// records applied from its payload, and the post-sign-in palette read served from
+// memory when the boot read has already landed.
+head('one boot read of the shared config store, not one per consumer');
+const fnBodyOf = name => {
+  const from = appJs.indexOf('function ' + name + '(');
+  if (from < 0) return '';
+  // Brace-count from the first `{` so a nested block does not cut the body short.
+  const open = appJs.indexOf('{', from);
+  let depth = 0;
+  for (let i = open; i < appJs.length; i++) {
+    if (appJs[i] === '{') depth++;
+    else if (appJs[i] === '}') { depth--; if (depth === 0) return appJs.slice(from, i + 1); }
+  }
+  return appJs.slice(from);
+};
+ok('exactly one place fetches the whole store',
+  (appJs.match(/loadSentinelAll\('__CONFIG__'\)/g) || []).length === 1);
+const perConsumer = ['loadInwardOptions', 'loadIqcConfig', 'loadTeamDirectory']
+  .filter(n => /loadSentinel(All)?\(/.test(fnBodyOf(n)));
+ok('and none of the three per-record loaders fetches anything itself',
+  perConsumer.length === 0, perConsumer);
+ok('the fan-out hands each record to its own applier',
+  /applyInwardOptions\(sections\['inward-options'\]\)/.test(appJs) &&
+  /applyIqcConfig\(sections\['iqc-config'\]\)/.test(appJs) &&
+  /applyTeamDirectory\(sections\['team-directory'\]\)/.test(appJs));
+ok('a failed read leaves the local copies standing rather than blanking them',
+  /loadSentinelAll\('__CONFIG__'\)\.then\(sections => \{\s*\n\s*if \(!sections\) return;/.test(appJs));
+ok('the palette read is served from the boot payload when it has landed',
+  /const cached = sharedConfigRecord\('theme'\)/.test(fnBodyOf('loadPaletteConfig')) &&
+  /cached !== undefined \? Promise\.resolve\(cached\) : loadSentinel\('__CONFIG__', 'theme'\)/.test(appJs));
+// `undefined` (never read / the read failed) must be distinguishable from a record
+// that is genuinely absent, or a missing theme would re-fetch on every session.
+ok('...and "not read yet" is not confused with "absent from a successful read"',
+  /return _configSections \? _configSections\[sectionId\] : undefined;/.test(fnBodyOf('sharedConfigRecord')));
+ok('the three loaders still paint from localStorage before any network call',
+  ['ipb_inward_options', 'ipb_iqc_config', 'ipb_team_directory']
+    .every(k => appJs.includes(`localStorage.getItem('${k}')`)));
+// The appliers are what a SAVE keeps working through: saveIqcConfig and friends
+// write the same records, and a boot that had stopped applying them would look
+// like a save that silently did nothing.
+ok('the appliers are still the ones the savers round-trip through',
+  /saveSentinel\('__CONFIG__', 'iqc-config'/.test(appJs) &&
+  /saveSentinel\('__CONFIG__', 'inward-options'/.test(appJs) &&
+  /saveSentinel\('__CONFIG__', 'team-directory'/.test(appJs));
+
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

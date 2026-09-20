@@ -51,10 +51,17 @@ store layout.
 - Fades out, then checks auth state
 
 ### 2. Auth Screen
+- **Sign in with Google**, when a second deployment is configured (`CONFIG.SSO_URL`)
+  — revealed by a silent probe of the caller's own Workspace identity, which mints
+  nothing and refuses quietly, so a wrong URL shows no button rather than a broken
+  app. One click, no password, no emailed code. It is an **addition**: the password
+  form below it is not a lesser fallback. See
+  [10 — Auth & Access Model](10 - Auth & Access Model.md).
 - Email + password sign-in, then a 6-digit code emailed to the same address. **There
   is no sign-up** — an admin provisions every account and hands over a temporary
   password (see [10 — Auth & Access Model](10 - Auth & Access Model.md)). The code is
-  issued once and reused for the rest of the working day.
+  issued once and reused for the rest of the working day. A temp-password account is
+  refused on the Google door and sent here, so the forced change still happens.
 - Also lives here: the **forgot-password** flow (email → reset code → new
   password) and the **forced password change** screen a first-time account lands on.
 - Dev bypass: `localhost` + `?dev=1` → auto-creates "Dev Tester" user
@@ -110,7 +117,8 @@ An edit made in the Sheet therefore still works on an untriaged ticket.
 
 ### Fetching IR List (`fetchIRs`)
 ```
-Browser → GET docs.google.com/.../gviz/tq?tqx=out:csv&gid=<Form Responses>
+Browser → localStorage 'ipb_ir_list'  ← this device's last copy, painted first
+       → GET docs.google.com/.../gviz/tq?tqx=out:csv&gid=<Form Responses>
        → parseCSV → mapSheetRows(rows) → setAllIRs()   ← app state merged here
        → No Apps Script deploy required (sheet is link-shared)
        → Falls back to GAS ?action=listIRs, then demo data, on failure
@@ -118,6 +126,21 @@ Browser → GET docs.google.com/.../gviz/tq?tqx=out:csv&gid=<Form Responses>
 > **Note:** The IR list is read directly from the **"Form Responses"** tab by the
 > frontend. The GAS `listIRs` action reads the same tab (`IR_REPO_TAB`) and is
 > kept as a fallback; it also joins `irs.json` for the app-owned status.
+>
+> **The cache is a first paint, not a source of truth.** It exists so the list is on
+> screen before any network call, and it needs no invalidation because the read
+> below always overwrites it — it can only ever be one round trip stale. What it
+> also buys is honesty on the failure path: with a list already on screen, an outage
+> keeps the **real** records and says *"Could not refresh — showing the last saved
+> list"*. The five fabricated sample IRs are reached **only** from a cold start with
+> nothing real to show. Showing samples to someone who has four hundred real IRs is
+> not a placeholder, it is misinformation they could act on.
+>
+> **`listIRs` was NOT promoted to the primary read**, though it was planned. It
+> returns no `intake`, no `extra` and no `dateRaisedISO` and does not split the name
+> from the phone, unlike `mapSheetRows` — promoting it would have silently emptied
+> the 📋 Report tab's raw cells and made Insights treat every IR as undated. See
+> [07](07 - Known Issues & TODO.md).
 
 ### The intake column map (`INTAKE_FIELDS` / `mapSheetRows`)
 `mapSheetRows()` is pure — no fetch, no DOM — so the whole mapping is unit-tested
@@ -164,6 +187,9 @@ Browser → POST GAS_URL with FormData:
            action=saveSection, irNumber, sectionId, savedBy, fields (JSON), files (JSON)
        → If files: uploads to Google Drive → IR###/Section X folder  (outside the lock)
        → ONE locked read-merge-write:  store[sectionId] = fields
+         (for `sec-a` — the Overview — the stored record is copied first and the
+          posted keys laid over it, so a_activityLog survives; every other section
+          keeps replace semantics, which is what `restoreField` depends on)
        → appendAuditLinesLocked() LAST, inside the same lock
        → Returns { status: "ok", message: "..." }
 ```

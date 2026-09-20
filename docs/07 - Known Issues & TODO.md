@@ -85,6 +85,7 @@ completely, and the honest mitigation is named rather than implied.
 - ✅ **Data actions require a session** — `listIRs`, `getPassbook`, `saveSection` and every admin action call `requireAuth`, and the caller's email is read **from the token**, never from a request parameter (`saveSection`'s `savedBy` is the verified email, not the posted one), so the identity cannot be spoofed.
 - ❌ **File uploads shared with anyone-with-link** — `ANYONE_WITH_LINK` sharing on all uploaded files. Deliberate: the link in a passbook has to keep working for a customer. `_store/` is the counterweight — it is `PRIVATE`/`NONE` and is a **sibling** of the upload folders, so hashes, salts and live session tokens are not readable through the Drive UI. That only holds while `_store/` is not link-shared; `initializeStore()` sets it, and re-sharing the folder by hand would undo it silently.
 - ❌ **The IR list is read straight from a link-shared Sheet, bypassing the token gate.** Making the app the pane of glass does not close this; it only stops staff *needing* the Sheet. Moving the read behind the authenticated `listIRs` action is a separate, worthwhile change — and it is now a *small* one, because `listIRs` already joins `irs.json` for the app-owned status.
+  - **Partially addressed (2026-09-20), and the exposure is unchanged.** The reported problem was the *wait*, not the exposure, and that is fixed: a device's last list is painted from `ipb_ir_list` before any network call, and an outage no longer overwrites a real list with sample IRs. But the planned second step — promoting `listIRs` to the primary read — was **deliberately not taken**, because `listIRs` returns no `intake`, no `extra` and no `dateRaisedISO` and does not split the name from the phone, unlike `mapSheetRows`. Promoting it would have silently emptied the 📋 Report tab's raw cells and made Insights treat every IR as undated. Closing this properly needs the two record shapes reconciled first; until then the direct Sheet read stays primary and `listIRs` stays the outage fallback.
 - ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
 - ⚠️ **Everyone signed in can view every section, including Section D and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [10](10 - Auth & Access Model.md).
 - ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
@@ -186,9 +187,10 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **1954 cases across 16 suites**, all passing.
-(1762 before the field-history/restore build; 1605 across 15 when the Drive-store
-migration shipped; `smoke-list-intel.mjs` and its 69 cases arrived with Stages 3–4;
+`node tools/smoke-all.mjs` — **2102 cases across 16 suites**, all passing.
+(1954 before the field-report build; 1762 before the field-history/restore build;
+1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and its
+69 cases arrived with Stages 3–4;
 the 15 for the silent-upload fix arrive with `smoke-store.mjs`'s first *behavioural*
 reproduction of a user-reported bug — it calls `saveSection` with a file whose MIME
 type is empty, which is what an Android picker really does — and the 5 that pin the
@@ -197,7 +199,16 @@ passed on the broken file. The 33 that arrived with the sign-in audit are the sa
 kind of thing: 15 in `smoke-store.mjs` drive the real two-step login and read the
 real `audit/signins.jsonl` back — including that a *throwing* audit write still
 yields a working session — while the rest pin the request that carries the device
-label and the shape of the record.)
+label and the shape of the record. The **148** added by the field-report build are
+mostly of that kind too — the load-bearing ones are **behavioural**, not textual: 21
+in `smoke-ui.mjs` drive the Google door through its real functions under a recording
+transport (a refused probe leaves the button hidden and the console clean; a yes mints
+a session through the password door's own `finishAuth`; neither attaches a session
+token), and 12 in `smoke-list-intel.mjs` seed the IR-list cache *through the app* and
+read it back with no network at all — including that a total outage keeps the real
+records and the demo flag `false`, because showing five fabricated sample IRs to
+someone with four hundred real ones is misinformation they could act on. The rest pin
+the other eleven reports.)
 
 One failure was **retired, not fixed**, worth knowing about because it will come
 back if someone re-pins it: `smoke-list-intel.mjs` asserted the card said

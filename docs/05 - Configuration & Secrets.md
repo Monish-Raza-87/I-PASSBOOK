@@ -8,18 +8,30 @@
 | Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Emails must end with this domain, plus the `EXTERNAL_EMAILS` exceptions in `backend.gs` |
 | Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` | `true` | Set to `false` in production |
 | IR Repository CSV | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_GID` | `1MPcWvgZ...` / `335027370` | Read directly by the frontend from the link-shared sheet |
+| Google door | `CONFIG.SSO_URL` | `''` (empty) | The **second** deployment's `/exec` URL. Empty is a working state: the Google button is not shown and nothing else changes. See below and [08](08 - Development Guide.md) |
 
-There is **no Google OAuth client ID** any more. Google Sign-In was replaced by
-admin-provisioned email + password auth — the admin creates each account and
-hands over a temporary password, and the person sets their own on first sign-in.
-Sign-in is then **two steps**: the password, then a 6-digit code emailed to the
-same address. The code is issued once and reused for **8h30m from the send**, so a
-second sign-in inside that window (another device) needs no second mail. The window
-is a duration from issue, **not** "until the end of the working day" — a first
-sign-in at 2pm leaves the code live until 10:30pm. The session is
-**8h30m and absolute** — one working day, not slid forward on use — so everyone
-starts the day with a sign-in. There is no self-signup, so there is no captcha or
-allowlist either. See [10 — Auth & Access Model](10 - Auth & Access Model.md).
+There is **no Google OAuth client ID**. The `CONFIG.SSO_URL` row above is not a
+Client ID and does not need one: it points at a *second deployment of the same
+Apps Script project*, set to **Execute as: Me → Who has access: Anyone within
+indrones.com**, where `Session.getActiveUser().getEmail()` reports the signed-in
+Workspace account of the person making the request. That is the whole mechanism —
+documented Google behaviour, no Cloud Console project and no `UrlFetchApp` (which
+`smoke-backend.mjs` forbids outright, because it broke Google sign-in once).
+Deleting that second deployment turns the feature off with no code change.
+
+**Google sign-in is additive, never a replacement.** Password + emailed code
+remains a first-class door and the only one for a machine with no Google session
+or an address outside the domain (`EXTERNAL_EMAILS`). Sign-in is **two steps** in
+password mode: the password, then a 6-digit code emailed to the same address. The
+code is issued once and reused for **8h30m from the send**, so a second sign-in
+inside that window (another device) needs no second mail. The window is a duration
+from issue, **not** "until the end of the working day" — a first sign-in at 2pm
+leaves the code live until 10:30pm. The session is **8h30m and absolute** — one
+working day, not slid forward on use — so everyone starts the day with a sign-in.
+A temporary password is refused on the Google door and pointed back at the
+password door, so the forced first-login change still happens. There is no
+self-signup on either door, so there is no captcha or allowlist either. See
+[10 — Auth & Access Model](10 - Auth & Access Model.md).
 
 > ⚠️ **Never commit a credential to this repo.** It is **public**, and `gh-pages`
 > serves it as a live website. That means: no temp password in a commit message,

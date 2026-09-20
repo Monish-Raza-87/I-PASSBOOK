@@ -45,6 +45,7 @@ function el() {
     focus() {}, blur() {},
     setAttribute(n, v) { attrs.set(n, String(v)); },
     getAttribute(n) { return attrs.has(n) ? attrs.get(n) : null; },
+    removeAttribute(n) { attrs.delete(n); },
     scrollIntoView() {}, children: [], insertBefore() {}, closest() { return null; },
   };
 }
@@ -106,12 +107,21 @@ export function loadApp(bindings = '', opts = {}) {
     // array. smoke-store.mjs already loads backend.gs this way and for this reason.
     // Only genuinely non-V8 globals (the ones a bare context lacks) are supplied.
     alert() {},
+    // The app's destructive and navigating prompts. A bare context has neither, so
+    // reaching one used to throw a ReferenceError — which a suite could mistake for
+    // the app refusing. `true` is the user clicking OK, the faithful default.
+    confirm: () => true,
     // No network: every loader takes its failure branch, which is also the branch
     // the "backend unreachable" behaviour depends on.
     fetch: opts.fetch || (() => Promise.reject(new Error('no network in test'))),
     localStorage: storage,
     sessionStorage: storage2,
     navigator: { userAgent: 'node', onLine: true },
+    // A browser always has these; a bare V8 context has neither. Both are no-ops
+    // that change nothing observable, so they cannot make an assertion pass that a
+    // browser would fail — they only let a suite drive a post-auth path (showApp
+    // writes the route into the hash) at all.
+    history: { replaceState() {}, pushState() {}, back() {}, forward() {} },
     location: { hash: '', search: '', hostname: '127.0.0.1', protocol: 'http:', href: 'http://127.0.0.1:3000/' },
     document: {
       getElementById,

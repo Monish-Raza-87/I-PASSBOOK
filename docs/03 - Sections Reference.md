@@ -122,6 +122,16 @@ requirement. Backend (`backend.gs`, requires redeploy):
   the bare `saved` marker is not written for a `__`-sentinel write — every section
   save also fires `patchIRState`, so without that guard each save produced two marker
   lines, one of them contentless.
+- **A fourth suppression, and it is the one that fixed a field report: an
+  information-free row is never written.** An `added` line goes in only when the new
+  value is **not empty**, and a `removed` line only when the old value was not empty.
+  Before this, a key that did not exist and a key holding `''` were treated as
+  different things, so the **first** save of a brand-new IR wrote one
+  `Added — by <you>` row for **every field in the section**, each with an empty value.
+  That is what made untouched fields show the user's own name with nothing changed,
+  and it is why no field anywhere offered *Put back*: an added row has no earlier
+  value by design. The `saved` marker still goes in on every save, so no save ever
+  becomes invisible.
 - **The audit append happens AFTER the data write, inside the same lock.** It used to
   be the other way round, so a failed save left an audit line for a save that never
   happened.
@@ -165,6 +175,23 @@ first, showing who saved, the event, the field, and old→new values. It and the
 Overview's timeline are the **same** renderer over the same pure
 `buildTimeline(...)` — see below. Until the backend is redeployed it shows "No
 history yet".
+
+**The stored noise is not rewritten, and it is not shown either.** IRs saved before
+the fourth suppression above still have those empty `added` rows on disk, and the
+audit trail is evidence — editing history to tidy it is exactly the thing an audit
+exists to prevent, so nothing is deleted and no admin task is involved. Instead the
+same narrow rule is applied where the trail is *read*:
+
+- `getAuditLog` skips an `added` row with an empty value and a `removed` row with an
+  empty value, **before** the 400-row cap — so dead rows cannot crowd real ones out
+  of the window.
+- `buildTimeline` applies the same rule client-side, so an IR reads honestly even
+  from a payload cached before the backend was redeployed.
+
+The rule is deliberately **narrow**: section rows of kind `added` / `removed` only.
+A blanket "both values empty" test would delete the section-save marker (which has no
+field and no values) and every archive or upload row with it. `smoke-timeline.mjs`
+pins the marker and the upload rows as the reason it stays narrow.
 
 ### One field's history, and putting a value back
 Every **field's** label also carries a small 🕓 button (`buildField`, and the two
@@ -617,23 +644,36 @@ question, the lead time, and the Purchase Manager sign-off.
 > control for any of these, tell me and I'll adjust.
 
 ### Cost estimate table (`costTable` type)
-A repeatable repair/replace estimate table mirroring the sheet's Part B layout:
+A repeatable repair/replace estimate table mirroring the sheet's Part B layout.
+The **displayed** column names say what the numbers are; the **stored keys are
+unchanged**, so every IR saved before this rename keeps its data and nothing needs
+migrating.
 
-| Column | Behaviour |
-|---|---|
-| `#` | Read-only serial number (auto, re-numbered on row delete) |
-| Particulars | Free text — the part / labour item |
-| Qty | Number (≥0) |
-| Rate | Number (≥0) — per-unit cost |
-| Cost | **Auto** = Qty × Rate (read-only, recomputed on input) |
-| Remark | Free text |
-| ✕ | Remove row |
+| Column (displayed) | Stored key | Behaviour |
+|---|---|---|
+| `#` | — | Read-only serial number (auto, re-numbered on row delete) |
+| Item description | `particular` | Free text — the part / labour item |
+| Qty | `qty` | Number (≥0) |
+| Unit cost | `rate` | Number (≥0) — per-unit cost |
+| Total cost | `cost` | **Auto** = Qty × Unit cost (read-only, recomputed on input) |
+| Remark | `remark` | Free text — what the earlier sheet called "Rate"/"Cost" is now named in full, and "Remark" is kept |
+| ✕ | — | Remove row |
 
-A **Total Repair Cost: ₹…** line sums Cost across all rows live. `+ Add Row`
-appends a fresh row. **Saved value** is an array
-`[{ particular, qty, rate, cost, remark }, ...]`; completely blank rows are
-dropped on save. On load, saved rows are rebuilt (Cost re-computed); an empty
-saved value re-seeds 3 blank rows so the operator always has inputs ready.
+A **Total Repair Cost: ₹…** line sums Total cost across all rows live, and is a
+real row **inside** the grid so it aligns under the Total cost column rather than
+floating beside the table. `+ Add Row` appends a fresh row.
+
+**On a phone**, each row becomes a labelled stack rather than an unlabelled
+restack: every input carries its column name to its **left**, Total cost is shown
+read-only with its own label, and Remove row sits at the bottom of the row it
+removes. The desktop header row is hidden below 640px — safe precisely because
+every field then carries its own label, and the total line keeps its wording.
+
+**Saved value** is an array `[{ particular, qty, rate, cost, remark }, ...]`;
+completely blank rows are dropped on save. On load, saved rows are rebuilt (Total
+cost re-computed); an empty saved value re-seeds 3 blank rows so the operator
+always has inputs ready. The PDF/CSV export uses the same displayed names —
+`EXPORT_TABLES.costTable`.
 
 ---
 

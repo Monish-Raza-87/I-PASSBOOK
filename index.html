@@ -110,6 +110,15 @@
         <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
+        <!-- The Google door, hidden until a silent probe says it would open. It is
+             FIRST because for most people on most days it is the whole sign-in: one
+             click, no password and no emailed code. The password form below is not a
+             lesser fallback — it is the door for a shared machine with no Google
+             session, and the only door for an account outside the company domain. -->
+        <button type="button" class="btn btn-google" id="auth-google-btn" style="display:none">
+          <span class="google-mark" aria-hidden="true"></span>Sign in with Google
+        </button>
+        <div class="auth-or" id="auth-or" style="display:none"><span>or use your email and password</span></div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <div class="pw-wrap">
           <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
@@ -260,7 +269,11 @@
           <span class="list-toggle-icon" aria-hidden="true"></span>
         </button>
         <div id="back-btn">← Back</div>
-        <div id="header-title">I-PASSBOOK</div>
+        <!-- A way home from anywhere. It is a button, not a link, because it has to
+             be able to STOP: with unsaved typing in a section it asks first rather
+             than navigating away. tabindex/role carry the same affordance to a
+             keyboard, since a div is not focusable by default. -->
+        <div id="header-title" role="button" tabindex="0" title="Go to the IR list">I-PASSBOOK</div>
         <div class="header-actions">
           <div id="nudge-bell" class="nudge-bell" title="Comments &amp; notifications">
             <span class="nudge-bell-icon" aria-hidden="true"></span>
@@ -511,8 +524,11 @@
     </div><!-- end workspace -->
   </div><!-- end app-container -->
 
-  <!-- Toast notification -->
-  <div id="toast" role="status" aria-live="polite"></div>
+  <!-- Toast notification. `aria-live="polite"` announces it; the click handler in
+       app.js dismisses it, so it can never sit over the form waiting for a timer
+       that was lost. The inner span is separate so `pointer-events` can be `auto`
+       on the pill and `none` on its text — otherwise the text node swallows taps. -->
+  <div id="toast" role="status" aria-live="polite" title="Tap to dismiss"><span id="toast-text"></span></div>
 
   <!-- PDF export library. A plain script, deliberately: app.js stays a plain
        end-of-body script with no module system, and this only has to expose

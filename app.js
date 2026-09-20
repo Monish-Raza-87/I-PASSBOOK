@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v39';
+const APP_VERSION = 'v40';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -37,6 +37,23 @@ const CONFIG = {
 
   // Allowed domain — only @indrones.com (plus explicitly-allowlisted) accounts
   ALLOWED_DOMAIN: 'indrones.com',
+
+  // Google sign-in — the SECOND deployment of the same backend script, set to
+  // Execute as: Me + Who has access: Anyone within indrones.com. Only a deployment
+  // with that access level lets Session.getActiveUser() report the CALLER, which is
+  // the entire mechanism; there is no OAuth Client ID and no UrlFetchApp anywhere.
+  //
+  // It is a second deployment, NOT a change to the one above, because flipping the
+  // primary to domain-only would have Google refuse the request before our code
+  // runs — and that would kill the password door too, for exactly the people who
+  // need it: a shared machine with no Google session, and the external address in
+  // the backend's CONFIG.EXTERNAL_EMAILS.
+  //
+  // EMPTY IS A VALID, WORKING STATE. With this blank the sign-in screen shows the
+  // password form and no Google button, and nothing else about the app changes.
+  // Deleting the second deployment in Apps Script reverts the feature with no code
+  // change at all. See docs/05 for the deploy steps.
+  SSO_URL: '',
 
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
   // without Google auth while this prototype is still being built.
@@ -295,6 +312,46 @@ function resetPasswordBackend(email, code, newPassword) {
   return postAuth('resetPassword', { email, code, newPassword });
 }
 
+// ─── GOOGLE SIGN-IN — the same backend, a second deployment ───────────────────
+// See CONFIG.SSO_URL for why this is a second deployment and not a setting on the
+// existing one. Everything here posts to that URL through _origFetch, so no session
+// token is ever attached: the credential is the caller's Workspace session, and
+// sending the previous user's I-PASSBOOK token would be the exact hole this door
+// must not have on a shared machine.
+function googleSso(action, fields) {
+  const fd = new FormData();
+  fd.append('action', action);
+  Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
+  return _origFetch(CONFIG.SSO_URL, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => {
+      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
+    }))
+    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+}
+
+// "Would the Google door open for the person at this browser?" — asked silently, so
+// the sign-in screen knows whether to offer the button at all. A probe mints
+// nothing, logs nothing and counts nothing, so running it automatically is safe.
+function googleSignInProbeBackend() {
+  if (!CONFIG.SSO_URL) return Promise.resolve({ status: 'error', message: 'Google sign-in is not configured.' });
+  return googleSso('googleSignInProbe', {});
+}
+
+// The door itself. Sent on a click and never automatically: signOut reloads the
+// page, so an automatic sign-in would put the NEXT person on a shared laptop
+// straight back into the previous person's session.
+function googleSignInBackend() {
+  if (!CONFIG.SSO_URL) return Promise.resolve({ status: 'error', message: 'Google sign-in is not configured.' });
+  return googleSso('googleSignIn', { device: deviceLabel() });
+}
+
+// The address Google reported for this browser, remembered from the probe so the
+// label can be filled in without a second round trip. Never trusted as an identity:
+// the door re-reads it on the server, and this is only a display fallback.
+let _googleProbeEmail = '';
+let _googleDoorAsked = false;      // one probe per page load, success or not
+let _googleDoorOpen = false;       // the probe said yes — mode changes honour this
+
 // Refresh the caller's role/permissions from the backend (boot + after department
 // changes). Best-effort — a failure leaves the previous access in place, and the
 // gating fallback is view-only, so a failed refresh can never grant edit.
@@ -353,7 +410,15 @@ window.fetch = function (input, init) {
 
     // The auth calls authenticate themselves (credentials in the body) and must
     // never be subject to the session gate below.
-    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping)\b/.test(url);
+    //
+    // googleSignIn/googleSignInProbe are listed for the same reason as login: their
+    // credential is the Workspace session Google reports to the script, and there is
+    // no I-PASSBOOK token to check. They normally go to CONFIG.SSO_URL, which the
+    // first line above already short-circuits — so no token is attached and they are
+    // never gated. They are named here anyway, because that short-circuit is a URL
+    // comparison and an admin who points SSO_URL at the primary URL would otherwise
+    // silently hand whoever was signed in last on this machine their own session.
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleSignIn|googleSignInProbe)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
@@ -831,6 +896,12 @@ const userAvatar  = document.getElementById('user-avatar');
 const syncStatus  = document.getElementById('sync-status');
 const toast       = document.getElementById('toast');
 
+// Tapping the toast dismisses it. The message covers the bottom of the form on a
+// phone, so "wait it out" was the only option it left — and if a timer was ever
+// lost, waiting was not going to end it either. Any pointer or key event closes it.
+['click', 'pointerdown', 'keydown'].forEach(ev =>
+  toast.addEventListener(ev, hideToast));
+
 // ─── SHELL REFS ──────────────────────────────────────────────────────────────
 // The Frappe-style shell (sidebar / list / split pane). These are only touched
 // by the layout + router code below — nothing in the section rendering path
@@ -1104,6 +1175,65 @@ function showAuth() {
   wireAuthForm();
   wirePasswordToggles();
   maskAllPasswords();
+  offerGoogleDoor();
+}
+
+// Ask, once per page load, whether the Google door would open here, and reveal the
+// button only if it would.
+//
+// Silence is the whole contract: no toast, no error line, no console noise, and any
+// answer other than a plain "ok" leaves the button hidden and the password form
+// exactly as it was. A failed probe must cost the user nothing — they cannot act on
+// it, and an unexplained error above the sign-in form reads as a broken app. That is
+// also what makes a wrong SSO_URL safe: the symptom is a missing button, never a
+// broken sign-in.
+function offerGoogleDoor() {
+  const btn = document.getElementById('auth-google-btn');
+  if (!btn) return;
+  // No second deployment configured, or already answered this page load. The latch
+  // matters because showAuth() runs on every route back to the sign-in screen
+  // (a sign-out, an expired session) and must not re-ask each time.
+  if (!CONFIG.SSO_URL || _googleDoorAsked) return;
+  _googleDoorAsked = true;
+  googleSignInProbeBackend().then(d => {
+    if (!d || d.status !== 'ok') return;
+    _googleProbeEmail = d.email || '';
+    _googleDoorOpen = true;
+    // Reveal through the mode sync rather than by hand, so "is the button shown" has
+    // exactly one answer in this file. It is the same function that hides it again
+    // on the code step.
+    setAuthMode(_authMode);
+    const who = (d.name || '').trim();
+    // The name, when the Workspace account has one, so the button states who it is
+    // about to sign in AS. On a shared machine that is the difference between
+    // "Sign in with Google" and "Continue as Sreenivas Pai". The label still starts
+    // with the visible words, which is what keeps it announced as the same control.
+    if (who) btn.setAttribute('aria-label', 'Sign in with Google as ' + who);
+  }).catch(() => { /* stay hidden */ });
+}
+
+// The Google door's click. Module scope, not wireAuthForm's, because it is the one
+// thing on that screen that ignores everything typed into the form: it carries no
+// email, no password and no code, and its whole result is a session or a refusal.
+function submitGoogleSignIn() {
+  const btn = document.getElementById('auth-google-btn');
+  if (btn) btn.disabled = true;
+  setAuthError('');
+  return googleSignInBackend().then(d => {
+    if (btn) btn.disabled = false;
+    // finishAuth() is the same function the password door finishes with, so a Google
+    // session is written, refreshed and routed exactly like any other — one session
+    // model, two ways in. The address comes from the backend, which read it from
+    // Google; the probe's copy is only a fallback and is never trusted as identity.
+    if (d && d.status === 'ok' && d.sessionToken) {
+      finishAuth(d.email || _googleProbeEmail, d);
+      return;
+    }
+    // Every refusal on this door is actionable and says what to do instead — set your
+    // own password first, ask an admin, use your email and password. The password
+    // form is still on screen underneath, so the fallback is one tap away.
+    setAuthError((d && d.message) || 'Google sign-in failed — use your email and password.');
+  });
 }
 
 // Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
@@ -1119,6 +1249,13 @@ function setAuthMode(mode) {
   set('auth-reset-wrap',    mode === 'reset');
   set('auth-back-link',     mode !== 'login');
   set('auth-email',         true);          // every mode needs the email
+  // The Google door belongs to the FIRST step and nowhere else. Left visible on the
+  // code step it would offer a second way in beside a form that is mid-way through
+  // the first — and it is the one control on this screen that ignores everything
+  // typed above it. `_googleDoorOpen` is the probe's answer, so this never reveals
+  // the button on its own.
+  set('auth-google-btn',    mode === 'login' && _googleDoorOpen);
+  set('auth-or',            mode === 'login' && _googleDoorOpen);
   // `required` follows visibility explicitly rather than relying on browsers
   // agreeing that a display:none control is barred from constraint validation —
   // a hidden required input that still validated would make the forgot and reset
@@ -1196,6 +1333,16 @@ function setPasswordRevealed(btn, reveal) {
 // whole risk the mask is there for.
 function maskAllPasswords() {
   document.querySelectorAll('.pw-toggle').forEach(btn => setPasswordRevealed(btn, false));
+}
+
+// The one error line on the sign-in screen. Named rather than inlined so a caller
+// outside wireAuthForm's scope (the Google door) reports a refusal in exactly the
+// same place, in the same style, as a wrong password does.
+function setAuthError(message) {
+  const el = document.getElementById('auth-error');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.display = message ? 'block' : 'none';
 }
 
 // ─── FORCED FIRST-LOGIN PASSWORD CHANGE ──────────────────────────────────────
@@ -1290,8 +1437,9 @@ function wireAuthForm() {
   const forgotBtn  = document.getElementById('auth-forgot-btn');
   const resetBtn   = document.getElementById('auth-reset-btn');
   const resendLink = document.getElementById('auth-resend-link');
-  const errEl      = document.getElementById('auth-error');
-  const showError  = m => { if (errEl) { errEl.textContent = m; errEl.style.display = m ? 'block' : 'none'; } };
+  // The same line the Google door writes to — one definition, so a refusal from
+  // either door appears in one place and in one style.
+  const showError  = setAuthError;
   const emailOf    = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
 
   const submitLogin = () => {
@@ -1427,6 +1575,8 @@ function wireAuthForm() {
   if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
   const backLink = document.getElementById('auth-back-link');
   if (backLink) backLink.addEventListener('click', () => setAuthMode('login'));
+  const googleBtn = document.getElementById('auth-google-btn');
+  if (googleBtn) googleBtn.addEventListener('click', submitGoogleSignIn);
 
   // Enter submits the CURRENT mode, not always login.
   form.addEventListener('submit', ev => {
@@ -1545,8 +1695,15 @@ function setPalette(value) {
 // Read the site-wide allowlist. Read-only and best-effort: on a dead backend the
 // stored preference stands, which is the same degradation every other sentinel
 // read has. Called once per session, after sign-in.
+//
+// The theme record lives in the same store the boot read already fetched, so when
+// that read has landed this is served from memory. It is asked for separately only
+// when the boot read failed, or when sign-in beat it — a second request, but only on
+// a path that was already going to make one.
 function loadPaletteConfig() {
-  return loadSentinel('__CONFIG__', 'theme').then(cfg => {
+  const cached = sharedConfigRecord('theme');
+  const config = cached !== undefined ? Promise.resolve(cached) : loadSentinel('__CONFIG__', 'theme');
+  return config.then(cfg => {
     if (!cfg || typeof cfg !== 'object') return;
     paletteConfig = {
       palettes: Array.isArray(cfg.palettes) ? cfg.palettes : null,
@@ -1798,6 +1955,9 @@ function startAppData() {
   loadIqcConfig();
   // Load team directory (@-mention suggestions) + nudges, and start nudge polling
   loadTeamDirectory();
+  // All three of those read their LOCAL copy above; this is the single network read
+  // that refreshes them. One request, not three — see loadSharedConfig.
+  loadSharedConfig();
   // Load app-owned workflow state (status / assignee / priority / category per IR).
   // Runs alongside the first fetchIRs(); setAllIRs merges whatever has arrived,
   // and loadIRState re-merges + re-renders when it lands, so either order is
@@ -2022,9 +2182,68 @@ function openAccessModal() {
     btn.addEventListener('click', () => { accessTab = btn.dataset.tab; renderAccessTabs(); });
   });
   renderAccessTabs();
+  // Paint the roster from this device's last copy FIRST — on the same frame as the
+  // modal — then refresh behind it. The admin sees the page they came for instead of
+  // "Loading…", and the round trip stops being something they wait on. See
+  // readAccessCache() for why this is localStorage and not a server-side cache.
+  const cached = readAccessCache();
+  if (cached) {
+    accessCache = {
+      users: cached.users,
+      departments: cached.departments || [],
+      apiVersion: cached.apiVersion || 0,
+    };
+    renderAccessPanel();
+    markAccessRefreshing();
+  }
   loadAccessData();
 }
 function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
+
+// ─── THE ACCESS PAGE'S LOCAL COPY ────────────────────────────────────────────
+// `listUsers` is one round trip carrying every account, every department and the
+// permission matrix, and reopening this page paid for all of it again — while seven
+// boot calls were still in flight. The roster is exactly the shape
+// stale-while-revalidate was invented for: paint what we had, then replace it.
+//
+// localStorage rather than a server-side CacheService, deliberately: `listUsers` is
+// written by nine different actions, and ONE missed invalidation would show an admin
+// the roster they had just changed as unchanged — worse than a slow page. A local
+// copy needs no invalidation at all, because the refresh always overwrites it.
+//
+// It lives on the device, so it is also what makes the page survive a dead backend:
+// the admin sees the roster they knew about and the error says what failed.
+const ACCESS_CACHE_KEY = 'ipb_access_cache';
+
+function readAccessCache() {
+  try {
+    const raw = localStorage.getItem(ACCESS_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    // Only a shape we can actually render counts as a cache hit.
+    if (!c || !Array.isArray(c.users) || !c.users.length) return null;
+    return c;
+  } catch { return null; }
+}
+
+function writeAccessCache() {
+  try {
+    localStorage.setItem(ACCESS_CACHE_KEY, JSON.stringify({
+      users: accessCache.users || [],
+      departments: accessCache.departments || [],
+      apiVersion: accessCache.apiVersion || 0,
+    }));
+  } catch { /* non-fatal: the cache is a convenience, never a requirement */ }
+}
+
+// Say that what is on screen is a remembered copy, so an admin who has just changed
+// something elsewhere is not misled by it. Cleared the moment the refresh lands.
+function markAccessRefreshing() {
+  const el = document.getElementById('access-status');
+  if (!el) return;
+  updateAccessStatus();
+  el.innerHTML += ' · <span class="access-stale">showing the last saved copy — refreshing…</span>';
+}
 
 function renderAccessTabs() {
   const modal = document.getElementById('access-modal');
@@ -2071,6 +2290,9 @@ function loadAccessData() {
     .then(data => {
       if (data && data.status === 'ok') {
         accessCache = { users: data.users || [], departments: data.departments || [], apiVersion: data.apiVersion || 0 };
+        // The refresh overwrites the local copy — which is the whole reason this
+        // cache needs no invalidation logic anywhere else in the app.
+        writeAccessCache();
         updateAccessStatus();
         renderAccessPanel();
         return;
@@ -2990,17 +3212,27 @@ async function fetchIRsFromSheet() {
 }
 
 async function fetchIRs() {
-  setSyncStatus('⟳ Syncing with the IR Repository…');
   // Assumed live until a path proves otherwise. Set HERE, before any setAllIRs()
   // call, because setAllIRs() is what repaints the dashboard — a flag set after it
   // would arrive one render too late and leave the previous answer's warning up.
+  // It is now also the first thing set, because the cache paint below calls
+  // setAllIRs() before any network work has happened.
   _dataIsDemo = false;
+
+  // 0. This device's last copy of the list, on screen before ANY network call. See
+  //    readIRListCache(). The read below always replaces it, so it needs no
+  //    invalidation anywhere — it can only ever be one round trip stale.
+  const fromCache = paintCachedIRList();
+  setSyncStatus(fromCache
+    ? `⟳ Refreshing ${allIRs.length} IRs…`
+    : '⟳ Syncing with the IR Repository…');
 
   // 1. Primary: read the sheet directly (no backend deploy needed)
   try {
     const records = await fetchIRsFromSheet();
     if (records && records.length) {
       setAllIRs(records);
+      writeIRListCache();
       _lastSyncAt = new Date();
       setSyncStatus(`✓ ${allIRs.length} IRs loaded from the Sheet`);
       renderIRList(allIRs);
@@ -3018,6 +3250,7 @@ async function fetchIRs() {
     const data = await res.json();
     if (data.status === 'ok') {
       setAllIRs(data.records || []);
+      writeIRListCache();
       _lastSyncAt = new Date();
       setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
       renderIRList(allIRs);
@@ -3025,15 +3258,68 @@ async function fetchIRs() {
     }
     throw new Error(data.message || 'Unknown error');
   } catch (err) {
+    // A REAL list is never replaced by fabricated cards. If a list is already on
+    // screen — painted from this device's cache, or left by an earlier successful
+    // sync — it stays, and the status line says exactly what happened. Showing five
+    // sample IRs to someone who has four hundred real ones is not a placeholder,
+    // it is misinformation, and they could act on it.
+    if (fromCache || allIRs.length) {
+      _dataIsDemo = false;
+      setSyncStatus('⚠ Could not refresh — showing the last saved list');
+      return;
+    }
     setSyncStatus('⚠ Could not sync — showing demo data');
     // Demo mode: render sample cards so UI is visible. The flag exists for the
     // Insights page, which is the one screen where fabricated rows read as
     // statistics rather than as obviously-placeholder cards — a "CRASH: 2" built
-    // from a sample is a number somebody could quote in a meeting.
+    // from a sample is a number somebody could quote in a meeting. Reached only on
+    // a COLD start with nothing real to show.
     _dataIsDemo = true;
     setAllIRs(getDemoIRs());
     renderIRList(allIRs);
   }
+}
+
+// ─── THE IR LIST'S LOCAL COPY ────────────────────────────────────────────────
+// The list is the first screen after sign-in and it used to be empty until the whole
+// repository had come down — the wait the owner named directly. This device's last
+// copy is painted instead, before any network call, and the refresh replaces it in
+// the same round trip.
+//
+// It is ALSO what makes the failure path honest: see the catch in fetchIRs().
+//
+// The full record is stored, `intake` and `extra` included, because the cache is not
+// only a list of cards — an IR opened while the backend is down is built from the
+// cached record, and a trimmed copy would quietly empty its 📋 Report tab.
+const IR_LIST_CACHE_KEY = 'ipb_ir_list';
+
+function readIRListCache() {
+  try {
+    const raw = localStorage.getItem(IR_LIST_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    if (!c || !Array.isArray(c.records) || !c.records.length) return null;
+    return c.records;
+  } catch { return null; }
+}
+
+function writeIRListCache() {
+  try {
+    localStorage.setItem(IR_LIST_CACHE_KEY, JSON.stringify({ at: Date.now(), records: allIRs }));
+  } catch { /* non-fatal: a full quota must never break a sync that succeeded */ }
+}
+
+// Paint the last copy, but only when the screen has nothing yet — a manual refresh
+// of a list already on screen must not flash stale cards over fresh ones.
+// Returns true when a real list is showing, which is what the failure branch needs
+// to know before it decides whether demo data would be a lie.
+function paintCachedIRList() {
+  if (allIRs.length) return false;
+  const records = readIRListCache();
+  if (!records) return false;
+  setAllIRs(records);
+  renderIRList(allIRs);
+  return true;
 }
 
 // Manual re-read of the IR list + app-owned state. Staff should never have
@@ -3882,7 +4168,12 @@ async function saveOverview() {
   if (!canTriage()) { showToast('You need Triage access to edit the Overview'); return; }
   const btn = document.getElementById('save-overview');
   const label = btn ? btn.textContent : '';
-  if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; }
+  // Same double-post guard as saveSection, and for the same reason: the Overview
+  // posts to the same backend action. Its key is OVERVIEW_KEY, so it never collides
+  // with a section save that happens to be in flight.
+  if (_savesInFlight.has(OVERVIEW_KEY)) return;
+  _savesInFlight.add(OVERVIEW_KEY);
+  if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; btn.disabled = true; }
 
   const fields = {
     a_crmOwner:     document.getElementById('a_crmOwner')?.value || '',
@@ -3902,6 +4193,10 @@ async function saveOverview() {
     const data = await res.json();
     if (data.status !== 'ok') throw new Error(data.message || 'Backend error');
     if (btn) { btn.textContent = '✓ Saved!'; btn.className = 'btn saved'; }
+    // Cleaned before the toast, like a section save: the leave guard must read the
+    // truth from the instant the save lands, not 3 s later when the button resets.
+    _dirtySections.delete(OVERVIEW_KEY);
+    updateDirtyIndicators();
     showToast('Overview saved');
     // Keep the in-memory record in step, or a re-render would revert to the old
     // values and look like the save was lost.
@@ -3913,7 +4208,12 @@ async function saveOverview() {
   }
 
   setTimeout(() => {
+    _savesInFlight.delete(OVERVIEW_KEY);
     if (btn) { btn.textContent = label || 'Save Overview'; btn.className = 'btn'; }
+    // Re-enabled through the Overview's own access sweep, never a bare
+    // `disabled = false` — same reason as a section save.
+    if (typeof applyOverviewGating === 'function') applyOverviewGating();
+    else if (btn) btn.disabled = false;
   }, 3000);
 }
 
@@ -4116,10 +4416,47 @@ async function applyTriage() {
   }
 }
 
+// ─── LEGACY RECORD: THE WAIT, MADE HONEST ────────────────────────────────────
+// The app makes ZERO requests for this view — Google renders a ~450-tab workbook
+// inside the iframe — so there is nothing here to await and nothing here to make
+// faster. What there IS to fix is the silence: a blank frame with a permanent
+// "Can't see it?" note underneath reads as hung and as broken at the same time, and
+// a user cannot tell which. So: a spinner, the elapsed count so a long wait reads as
+// long rather than stuck, and the fallback link withheld until the frame has really
+// failed or a generous timeout has passed.
+//
+// The loaded frame is KEPT (detached, not discarded) once it has painted, so
+// reopening the same archive reattaches it instead of paying the render again. And
+// the frame no longer carries `loading="lazy"`: it is on screen the moment it is
+// built, so asking the browser to decide whether it is *near* the viewport only
+// adds a decision to the front of a twenty-second render.
+const LEGACY_SLOW_MS = 20000;
+let _legacyTimer = null;
+let _legacyLoaded = { key: '', modal: null };
+
+function legacyTick(modal, startedAt) {
+  const out = modal.querySelector('.legacy-loading-elapsed');
+  if (!out) return;
+  const secs = Math.round((Date.now() - startedAt) / 1000);
+  out.textContent = secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
+}
+
 // Open a full-screen, read-only embed of the IR's legacy I-PASSBOOK tab. The
 // sheet itself is shown via Google's preview endpoint (no editing UI); a link
 // to open it directly in Google Sheets is provided as a fallback.
 function openLegacyModal(embedUrl, label, openUrl) {
+  const key = embedUrl + '|' + String(label || '');
+  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
+
+  // Reopening the same archive: the frame already painted once, so reattach it and
+  // skip the loading state entirely. This is the difference between a two-second
+  // reopen and a twenty-second one, and it costs nothing but not throwing the
+  // element away.
+  if (_legacyLoaded.modal && _legacyLoaded.key === key) {
+    document.body.appendChild(_legacyLoaded.modal);
+    return;
+  }
+
   let modal = document.getElementById('legacy-modal');
   if (modal) modal.remove();
   modal = document.createElement('div');
@@ -4135,19 +4472,51 @@ function openLegacyModal(embedUrl, label, openUrl) {
         <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
       </div>
       <div class="legacy-frame-wrap">
-        <iframe src="${embedUrl}" class="legacy-frame" title="Legacy record ${escHtml(label || '')}" referrerpolicy="no-referrer" loading="lazy"></iframe>
-        <div class="legacy-fallback">
-          <span>Can't see the record here?</span>
+        <iframe src="${embedUrl}" class="legacy-frame" title="Legacy record ${escHtml(label || '')}" referrerpolicy="no-referrer"></iframe>
+        <div class="legacy-loading" id="legacy-loading" role="status" aria-live="polite">
+          <span class="legacy-spinner" aria-hidden="true"></span>
+          <span class="legacy-loading-title">Loading the archive…</span>
+          <span class="legacy-loading-note">This is the old I-PASSBOOK workbook, and it is a big one. It can take a moment.</span>
+          <span class="legacy-loading-elapsed">0s</span>
+        </div>
+        <div class="legacy-fallback" id="legacy-fallback" style="display:none">
+          <span>Still not showing?</span>
           <a href="${openUrl}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>
         </div>
       </div>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
+
+  const frame = modal.querySelector('.legacy-frame');
+  const startedAt = Date.now();
+  const done = () => {
+    if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
+    const load = modal.querySelector('.legacy-loading');
+    if (load) load.remove();
+    // The frame painted, so this view is worth keeping for a reopen — but only the
+    // one that actually loaded.
+    _legacyLoaded = { key, modal };
+  };
+  if (frame) frame.addEventListener('load', done, { once: true });
+
+  // The clock, and the point at which the fallback stops being noise and becomes
+  // advice. Both stop the moment the frame loads — `done` owns that.
+  legacyTick(modal, startedAt);
+  _legacyTimer = setInterval(() => {
+    legacyTick(modal, startedAt);
+    if (Date.now() - startedAt < LEGACY_SLOW_MS) return;
+    if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
+    const fb = modal.querySelector('.legacy-fallback');
+    if (fb) fb.style.display = 'flex';
+  }, 1000);
 }
 
 function closeLegacyModal() {
+  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
   const m = document.getElementById('legacy-modal');
+  // Detached, NOT discarded — `_legacyLoaded` keeps it so a reopen is instant. The
+  // reference is dropped the moment a different archive is opened.
   if (m) m.remove();
 }
 
@@ -4162,8 +4531,29 @@ function openLegacyWorkbook() {
   openLegacyModal(embedUrl, 'All pre-app records · switch tabs at the bottom', openUrl);
 }
 
-// Back button (mobile only — the desktop split pane keeps the list on screen)
-backBtn.addEventListener('click', goIndex);
+// Back button (mobile only — the desktop split pane keeps the list on screen).
+// Guarded: it and the title do the same thing, so they ask the same question. The
+// guard lives HERE and on the title, never inside goIndex() — goIndex is also the
+// programmatic route (an unknown hash, the legacy deep link), and a prompt in the
+// middle of a redirect would be a bug, not a safeguard.
+backBtn.addEventListener('click', () => { if (confirmLeaveIR()) goIndex(); });
+
+// The product name is the way home from anywhere. It was a plain label; nothing
+// about it said so. Same guard as the Back button.
+bindHomeLink(headerTitle);
+
+function bindHomeLink(el) {
+  if (!el) return;
+  el.addEventListener('click', () => { if (confirmLeaveIR()) goIndex(); });
+  // role="button" alone is not enough — a div is not focusable and Enter/Space do
+  // nothing on it. Space is prevented from scrolling the page, which is what a
+  // native button does.
+  el.addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    e.preventDefault();
+    if (confirmLeaveIR()) goIndex();
+  });
+}
 
 // Activity log toggle. Bound once: the panel is static markup that
 // renderTimelineInto only ever fills, never replaces.
@@ -4197,6 +4587,10 @@ let dispatchRefreshTimer = null;
 document.getElementById('sections-wrapper').addEventListener('input', e => {
   const sec = e.target.closest('.section-content');
   if (!sec) return;
+  // Synchronous, BEFORE the draft debounce below: the leave guard reads this the
+  // moment it is asked, and a 400 ms window of "no changes yet" would let a click
+  // straight after a keystroke walk away without a prompt.
+  markSectionDirty(sec.id);
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => saveDraft(sec.id), 400);
   // Editing Section B (Inward) changes which goods Section H must verify against —
@@ -4208,8 +4602,21 @@ document.getElementById('sections-wrapper').addEventListener('input', e => {
 });
 document.getElementById('sections-wrapper').addEventListener('change', e => {
   const sec = e.target.closest('.section-content');
-  if (sec) saveDraft(sec.id);
+  if (sec) { markSectionDirty(sec.id); saveDraft(sec.id); }
 });
+
+// The Overview is outside #sections-wrapper (index.html explains why), so it needs
+// its own listeners. It has no draft by design, which is exactly why it must feed
+// the dirty flag: otherwise its two editable fields are the one place a user can
+// lose typing with no warning at all.
+const irOverviewPanel = document.getElementById('ir-overview');
+if (irOverviewPanel) {
+  const noteOverviewEdit = e => {
+    if (e.target.closest('#ir-overview-editable')) markSectionDirty(OVERVIEW_KEY);
+  };
+  irOverviewPanel.addEventListener('input', noteOverviewEdit);
+  irOverviewPanel.addEventListener('change', noteOverviewEdit);
+}
 
 // ─── TAB NAVIGATION ──────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {
@@ -4349,6 +4756,12 @@ const FIELD_SECTION_INDEX = (() => {
 })();
 
 function buildSectionForms(irNumber) {
+  // Fresh IR, fresh forms: nothing here is unsaved yet. restoreDrafts() runs after
+  // this and re-marks the sections it puts text back into — those really ARE
+  // unsaved, and the leave guard must treat them that way.
+  _dirtySections.clear();
+  updateDirtyIndicators();
+
   Object.entries(SECTIONS).forEach(([sectionId, section]) => {
     const container = document.getElementById(sectionId + '-form') || document.getElementById(sectionId).querySelector('div');
     if (!container) return;
@@ -4558,24 +4971,36 @@ function buildField(field, irNumber, sectionId) {
     control = `<div>${rows}</div>`;
   } else if (field.type === 'costTable') {
     // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B:
-    // columns Particulars | Qty | Rate | Cost (auto = Qty*Rate) | Remark, plus a total.
+    // columns # | Item description | Qty | Unit cost | Total cost (auto = Qty ×
+    // Unit cost) | Remark, with a Total row INSIDE the same grid, under the Total
+    // cost column.
+    //
+    // The words are the owner's: he asked for "a simple table which had item
+    // description-qty-unit cost-total cost columns for each row. At the end total
+    // comes." The old headers said Particulars / Rate / Cost, and the second one
+    // repeated this field's own label verbatim — the field name printed twice, plus
+    // a header row that vanished entirely on a phone, leaving five unlabelled boxes
+    // stacked with nothing saying which was which.
     const initialRows = 3;
     let rowsHtml = '';
     for (let i = 1; i <= initialRows; i++) rowsHtml += buildCostRow(i);
     control = `
       <div class="cost-table-wrapper" id="${id}">
         <div class="cost-table-header">
-          <span class="cost-sn">#</span>
-          <span class="cost-particular">Particulars For Repair / Replace</span>
-          <span class="cost-qty">Qty</span>
-          <span class="cost-rate">Rate</span>
-          <span class="cost-cost">Cost</span>
-          <span class="cost-remark">Remark</span>
-          <span class="cost-del-h"></span>
+          <span class="cost-cell cost-cell-sn">#</span>
+          <span class="cost-cell cost-cell-particular">Item description</span>
+          <span class="cost-cell cost-cell-qty">Qty</span>
+          <span class="cost-cell cost-cell-rate">Unit cost</span>
+          <span class="cost-cell cost-cell-cost">Total cost</span>
+          <span class="cost-cell cost-cell-remark">Remark</span>
+          <span class="cost-cell cost-cell-del"></span>
         </div>
         <div class="cost-table-body" id="${id}-body">${rowsHtml}</div>
         <button type="button" class="btn-add-row" onclick="addCostRow('${escJsAttr(id)}')">+ Add Row</button>
-        <div class="cost-total">Total Repair Cost: ₹<span id="${id}-total">0.00</span></div>
+        <div class="cost-total">
+          <span class="cost-total-label">Total Repair Cost</span>
+          <span class="cost-total-value">&#8377;<span id="${id}-total">0.00</span></span>
+        </div>
       </div>
     `;
   } else if (field.type === 'inwardTable') {
@@ -4774,20 +5199,42 @@ function buildLegacyActivityRow(row) {
 }
 
 // ─── COST TABLE (Section D Part B) ────────────────────────────────────────────
-// Repair/Replace estimate rows: Particulars | Qty | Rate | Cost (auto) | Remark.
-// Cost per row = Qty × Rate; a running total is shown under the table.
+// Repair/Replace estimate rows: Item description | Qty | Unit cost | Total cost
+// (auto = Qty × Unit cost) | Remark, with a Total row under the table.
+//
+// Every control is wrapped in a labelled cell. On desktop the label inside is
+// hidden and the column header above does the naming, so the words appear exactly
+// once; at phone width the header is gone and that same label comes out to the
+// LEFT of its control. One markup, two widths — and the name of every field is
+// always on screen in the place that width can actually show it.
+
+function costCell(cls, label, inner) {
+  return `<label class="cost-cell ${cls}">` +
+         `<span class="cost-cell-label">${label}</span>${inner}</label>`;
+}
 
 function buildCostRow(sn) {
   const escSn = (sn == null ? '' : sn);
   return `
     <div class="cost-table-row">
-      <input type="number" class="form-input cost-sn" value="${escSn}" readonly />
-      <input type="text"   class="form-input cost-particular" placeholder="Particular..." />
-      <input type="number" class="form-input cost-qty" placeholder="0" min="0" step="any" oninput="recalcCostRow(this)" />
-      <input type="number" class="form-input cost-rate" placeholder="0.00" min="0" step="any" oninput="recalcCostRow(this)" />
-      <input type="text"   class="form-input cost-cost" readonly />
-      <input type="text"   class="form-input cost-remark" placeholder="Remark..." />
-      <button type="button" class="cost-del" onclick="removeCostRow(this)" title="Remove row">&#10005;</button>
+      <label class="cost-cell cost-cell-sn">
+        <span class="cost-cell-label">Row</span>
+        <input type="number" class="form-input cost-sn" value="${escSn}" readonly aria-label="Row number" />
+      </label>
+      ${costCell('cost-cell-particular', 'Item description',
+        '<input type="text" class="form-input cost-particular" placeholder="Item description..." />')}
+      ${costCell('cost-cell-qty', 'Qty',
+        '<input type="number" class="form-input cost-qty" placeholder="0" min="0" step="any" oninput="recalcCostRow(this)" />')}
+      ${costCell('cost-cell-rate', 'Unit cost',
+        '<input type="number" class="form-input cost-rate" placeholder="0.00" min="0" step="any" oninput="recalcCostRow(this)" />')}
+      ${costCell('cost-cell-cost', 'Total cost',
+        '<input type="text" class="form-input cost-cost" readonly aria-label="Total cost, calculated" />')}
+      ${costCell('cost-cell-remark', 'Remark',
+        '<input type="text" class="form-input cost-remark" placeholder="Remark..." />')}
+      <div class="cost-cell cost-cell-del">
+        <span class="cost-cell-label">Remove row</span>
+        <button type="button" class="cost-del" onclick="removeCostRow(this)" title="Remove row" aria-label="Remove this row">&#10005;</button>
+      </div>
     </div>
   `;
 }
@@ -4888,39 +5335,67 @@ function safeUrl(u) {
 // (best-effort) and mirrored to localStorage so edits survive when GAS is
 // unreachable. Falls back to INWARD_OPTIONS_DEFAULTS on load.
 
+// ─── SHARED CONFIG (`__CONFIG__`) ────────────────────────────────────────────
+// The inward dropdown options, the IQC inspection config, the team directory and the
+// palette allowlist are FOUR records in ONE store, and each consumer used to fetch
+// that store for itself: the same URL, the same payload, four round trips on the way
+// to a screen the owner already reported as slow. Each loader below still paints from
+// its own localStorage copy first (that is the instant, offline-safe half); this is
+// the ONE network read that refreshes all of them.
+//
+// A failed read changes nothing — `null` means the local copies stand and any later
+// consumer falls back to its own request, which is the branch each one took before.
+let _configSections = null;
+
+function loadSharedConfig() {
+  loadSentinelAll('__CONFIG__').then(sections => {
+    if (!sections) return;
+    _configSections = sections;
+    applyInwardOptions(sections['inward-options']);
+    applyIqcConfig(sections['iqc-config']);
+    applyTeamDirectory(sections['team-directory']);
+  });
+}
+
+// One record out of the boot read, when it has landed. `undefined` means "not read
+// yet or the read failed" — deliberately NOT `null`, because an absent record in a
+// successful read is a real, empty answer and must not be re-fetched forever.
+function sharedConfigRecord(sectionId) {
+  return _configSections ? _configSections[sectionId] : undefined;
+}
+
 function loadInwardOptions() {
-  // 1. localStorage override (per-device, always available)
+  // localStorage override (per-device, always available). The shared copy lands
+  // separately, via applyInwardOptions().
   try {
     const local = localStorage.getItem('ipb_inward_options');
     if (local) inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, JSON.parse(local));
   } catch {}
-  // 2. Shared config from GAS (best-effort, non-blocking)
-  loadSentinel('__CONFIG__', 'inward-options')
-    .then(saved => {
-      if (saved && saved.options && typeof saved.options === 'object') {
-        inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, saved.options);
-        try { localStorage.setItem('ipb_inward_options', JSON.stringify(saved.options)); } catch {}
-        // Re-render any visible inward table, preserving already-entered values
-        document.querySelectorAll('.inward-table-wrapper').forEach(w => {
-          const tbody = w.querySelector('.inward-table-body');
-          if (!tbody) return;
-          const prior = {};
-          tbody.querySelectorAll('.inward-row').forEach(row => {
-            const m = row.querySelector('.inward-model');
-            const q = row.querySelector('.inward-qty');
-            if (m?.dataset.particular) prior[m.dataset.particular] = { model: m.value, qty: q?.value };
-          });
-          tbody.innerHTML = buildInwardRowsHTML();
-          Object.entries(prior).forEach(([p, cell]) => {
-            if (!cell) return;
-            const m = tbody.querySelector(`.inward-model[data-particular="${p}"]`);
-            const q = tbody.querySelector(`.inward-qty[data-particular="${p}"]`);
-            if (m) m.value = cell.model || '';
-            if (q) q.value = cell.qty || '';
-          });
-        });
-      }
+}
+
+function applyInwardOptions(saved) {
+  if (!saved || !saved.options || typeof saved.options !== 'object') return;
+  inwardOptions = Object.assign({}, INWARD_OPTIONS_DEFAULTS, saved.options);
+  try { localStorage.setItem('ipb_inward_options', JSON.stringify(saved.options)); } catch {}
+  // Re-render any visible inward table, preserving already-entered values
+  document.querySelectorAll('.inward-table-wrapper').forEach(w => {
+    const tbody = w.querySelector('.inward-table-body');
+    if (!tbody) return;
+    const prior = {};
+    tbody.querySelectorAll('.inward-row').forEach(row => {
+      const m = row.querySelector('.inward-model');
+      const q = row.querySelector('.inward-qty');
+      if (m?.dataset.particular) prior[m.dataset.particular] = { model: m.value, qty: q?.value };
     });
+    tbody.innerHTML = buildInwardRowsHTML();
+    Object.entries(prior).forEach(([p, cell]) => {
+      if (!cell) return;
+      const m = tbody.querySelector(`.inward-model[data-particular="${p}"]`);
+      const q = tbody.querySelector(`.inward-qty[data-particular="${p}"]`);
+      if (m) m.value = cell.model || '';
+      if (q) q.value = cell.qty || '';
+    });
+  });
 }
 
 function saveInwardOptions() {
@@ -5022,6 +5497,7 @@ function applyInwardOptions() {
 // IQC_RESULT_OPTIONS_DEFAULTS on load.
 
 function loadIqcConfig() {
+  // Local copy first; the shared one arrives via applyIqcConfig().
   try {
     const local = localStorage.getItem('ipb_iqc_config');
     if (local) {
@@ -5030,14 +5506,14 @@ function loadIqcConfig() {
       if (Array.isArray(cfg.resultOptions)) iqcResultOptions = cfg.resultOptions;
     }
   } catch {}
-  loadSentinel('__CONFIG__', 'iqc-config')
-    .then(saved => {
-      if (!saved) return;
-      if (Array.isArray(saved.zones)) iqcZones = saved.zones;
-      if (Array.isArray(saved.resultOptions)) iqcResultOptions = saved.resultOptions;
-      try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
-      reRenderIqcTables();
-    });
+}
+
+function applyIqcConfig(saved) {
+  if (!saved) return;
+  if (Array.isArray(saved.zones)) iqcZones = saved.zones;
+  if (Array.isArray(saved.resultOptions)) iqcResultOptions = saved.resultOptions;
+  try { localStorage.setItem('ipb_iqc_config', JSON.stringify({ zones: iqcZones, resultOptions: iqcResultOptions })); } catch {}
+  reRenderIqcTables();
 }
 
 function saveIqcConfig() {
@@ -5574,6 +6050,8 @@ function clearDraft(sectionId) {
 function clearAllDrafts() {
   if (!currentIR?.irNumber) return;
   Object.keys(SECTIONS).forEach(clearDraft);
+  _dirtySections.clear();
+  updateDirtyIndicators();
   refreshDraftBanner();
 }
 function hasAnyDraft() {
@@ -5585,6 +6063,10 @@ function restoreDrafts() {
     const draft = loadDraft(secId);
     if (!draft) return;
     restored.push(secId);
+    // A restored draft IS an unsaved change. populateFieldValue writes `.value`
+    // directly, which fires no `input` event, so without this the leave guard
+    // would call a screen full of restored text "clean".
+    markSectionDirty(secId);
     Object.entries(draft).forEach(([fieldId, value]) => {
       populateFieldValue(secId, fieldId, value, true);
     });
@@ -5606,6 +6088,8 @@ function discardAllDrafts() {
   // re-apply the saved backend data so the UI reflects the last saved state.
   Object.keys(SECTIONS).forEach(clearDraft);
   buildSectionForms(currentIR.irNumber);
+  _dirtySections.clear();
+  updateDirtyIndicators();
   if (currentSectionData) {
     Object.entries(currentSectionData).forEach(([secId, fields]) => {
       Object.entries(fields).forEach(([fieldId, value]) => populateFieldValue(secId, fieldId, value));
@@ -5615,16 +6099,99 @@ function discardAllDrafts() {
   showToast('Drafts discarded — saved data restored');
 }
 
+// ─── UNSAVED-CHANGE TRACKING ─────────────────────────────────────────────────
+// Which sections hold typing that has not been saved yet.
+//
+// Why this exists when drafts already persist the text: the guard on the way out
+// (the title, the Back button) must answer "is anything unsaved?" the instant it is
+// clicked, and for 400 ms after a keystroke the stored draft is still empty — so a
+// click in that window would leave without asking. This Set is written on the same
+// keystroke, synchronously, so the answer is never stale.
+//
+// It is the draft's sibling, not the same thing: a draft survives a reload, this
+// does not. A reload is not a navigation this guard can intercept; the draft banner
+// is what covers that case.
+//
+// The Overview is tracked under OVERVIEW_KEY even though it has no tab. It has no
+// draft either (it sits outside #sections-wrapper on purpose — see index.html), so
+// for the Overview this flag is the ONLY thing standing between a half-typed
+// contact phone and a silent exit.
+const _dirtySections = new Set();
+
+function isTrackedUnit(unitId) {
+  return unitId === OVERVIEW_KEY || !!SECTIONS[unitId];
+}
+
+function markSectionDirty(unitId) {
+  if (!isTrackedUnit(unitId)) return;      // the read-only 📋 Report tab has no save
+  if (_dirtySections.has(unitId)) return;
+  _dirtySections.add(unitId);
+  updateDirtyIndicators();
+}
+
+function hasUnsavedChanges() {
+  return _dirtySections.size > 0;
+}
+
+// Paint the "unsaved" dot on the tab strip. The Overview has no tab, so it simply
+// matches nothing here — its warning arrives through the leave prompt, which names
+// it by title.
+function updateDirtyIndicators() {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.classList.toggle('has-unsaved', _dirtySections.has(tab.dataset.section));
+  });
+}
+
+// Human names for the leave prompt, so it says WHICH sections are at risk instead
+// of a bare "you have unsaved changes".
+function dirtyUnitLabels() {
+  return Array.from(_dirtySections).map(id => {
+    if (id === OVERVIEW_KEY) return 'Overview';
+    const t = document.querySelector(`.tab[data-section="${id}"]`);
+    return t ? t.textContent.trim() : id;
+  });
+}
+
+// The one guard shared by the title and the Back button — they do the same thing,
+// so they must ask the same question. `confirm()` rather than a bespoke modal
+// because this is the house idiom for a navigating confirm (see the restore and
+// account prompts) and it cannot be missed or dismissed into a wrong answer.
+function confirmLeaveIR() {
+  if (!hasUnsavedChanges()) return true;
+  const labels = dirtyUnitLabels();
+  const what = labels.length === 1 ? labels[0] : labels.join(', ');
+  return confirm(
+    'You have unsaved changes in ' + what + '.\n\n' +
+    'Nothing you typed is lost — it is kept as a draft on this device and put back ' +
+    'when you open this IR again. But it is not recorded until you press Save.\n\n' +
+    'Leave anyway?'
+  );
+}
+
+// Sections with a save in flight. A Set rather than a boolean so two sections can
+// be saved at once — the guard is per-section, which is the unit the backend writes
+// and the unit the button belongs to.
+const _savesInFlight = new Set();
+
 async function saveSection(sectionId, irNumber) {
   const btn = document.getElementById('save-' + sectionId);
   const btnTop = document.getElementById('save-' + sectionId + '-top');
   const section = SECTIONS[sectionId];
   if (!section) return;
 
+  // A second click while the first request is in flight would post the same section
+  // twice: two writes, two audit batches, and the second one's diff computed against
+  // whatever the first had already stored. The buttons go DEAD for the duration, and
+  // this guard closes the other half — the Save button inside a modal, and a
+  // keyboard submit, both reach here without touching those two elements.
+  if (_savesInFlight.has(sectionId)) return;
+  _savesInFlight.add(sectionId);
+
   const btnLabel = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
   btn.textContent = 'Saving…';
   btn.className = 'btn saving';
-  if (btnTop) { btnTop.textContent = 'Saving…'; btnTop.className = 'btn saving'; }
+  btn.disabled = true;
+  if (btnTop) { btnTop.textContent = 'Saving…'; btnTop.className = 'btn saving'; btnTop.disabled = true; }
 
   // Collect field values
   const formData = new FormData();
@@ -5662,6 +6229,11 @@ async function saveSection(sectionId, irNumber) {
       if (btnTop) { btnTop.textContent = '✓ Saved!'; btnTop.className = 'btn saved'; }
       clearDraft(sectionId);
       refreshDraftBanner();
+      // Marked clean BEFORE the toast, so the header-title guard reads the truth
+      // from the moment the save lands — not 3 seconds later when the button
+      // resets, which is when a click on the title would still see "unsaved".
+      _dirtySections.delete(sectionId);
+      updateDirtyIndicators();
       showToast('Section saved successfully!');
       // For sections with image evidence, pull the freshly-uploaded Drive URLs
       // back into the in-memory state so captions stay paired with images.
@@ -5684,9 +6256,16 @@ async function saveSection(sectionId, irNumber) {
   }
 
   setTimeout(() => {
+    _savesInFlight.delete(sectionId);
     btn.textContent = btnLabel;
     btn.className = 'btn';
-    if (btnTop) { btnTop.textContent = btnLabel; btnTop.className = 'btn'; }
+    // Re-enabled through the ACCESS sweep, never with a bare `disabled = false`.
+    // A blind re-enable would hand Save back to a view-only user whose access
+    // payload arrived while this request was in flight — which is precisely the
+    // silent failure applySectionAccessGating exists to prevent, and it is the
+    // reason smoke-access.mjs asserts that every write control agrees with Save.
+    if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+    else { btn.disabled = false; if (btnTop) btnTop.disabled = false; }
   }, 3000);
 }
 
@@ -5865,7 +6444,7 @@ const EXPORT_TABLES = {
     rows: v => Object.keys(v || {}).map(k => [(v[k] || {}).name || k, (v[k] || {}).result || '', (v[k] || {}).remark || '']),
   },
   costTable: {
-    columns: ['Particular', 'Qty', 'Rate', 'Cost', 'Remark'],
+    columns: ['Item description', 'Qty', 'Unit cost', 'Total cost', 'Remark'],
     rows: v => (Array.isArray(v) ? v : []).map(r => [(r || {}).particular || '', (r || {}).qty || '', (r || {}).rate || '', (r || {}).cost || '', (r || {}).remark || '']),
   },
   dispatchChecklist: {
@@ -6521,27 +7100,46 @@ async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────
-// Toasts queue instead of overwriting: back-to-back messages used to clobber
-// each other's text, and the first timer would hide the newer message early.
-let _toastQueue = [];
-let _toastBusy = false;
+// ONE message at a time, and it REPLACES rather than queues.
+//
+// It used to be a queue: 3 seconds per message plus 300ms between, and one save
+// enqueues two (the success line, and "Saved locally — backend unreachable"
+// whenever the sentinel write fails). So a save could hold the screen for over six
+// seconds, and because the element sat bottom-centre with `pointer-events: none`
+// there was nothing the user could do about it — the owner's "a tile kind of thing
+// in the bottom center … remains there after that and hides the screen behind it".
+//
+// Three changes, and each fixes a different way it could stick:
+//   · replace, don't queue — a newer message overwrites the old and restarts the
+//     clock, so the worst case is one message for one interval, never a backlog;
+//   · the timer handle is KEPT, so dismissing by hand cancels it rather than
+//     leaving a second one to fire against whatever is on screen by then;
+//   · `_toastBusy` is reset defensively, because it used to be cleared only by a
+//     timer reaching the end of the queue — one throw in between and nothing could
+//     ever show a toast again, and the last one would stay up for good.
+const TOAST_MS = 2500;
 
-function showToast(msg) {
-  _toastQueue.push(msg);
-  if (!_toastBusy) drainToastQueue();
+let _toastTimer = null;
+
+function hideToast() {
+  if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+  toast.classList.remove('show');
 }
 
-function drainToastQueue() {
-  const msg = _toastQueue.shift();
-  if (msg === undefined) { _toastBusy = false; return; }
-  _toastBusy = true;
-  toast.textContent = msg;
+function showToast(msg) {
+  // Written INTO the span rather than over it. `toast.textContent = msg` would
+  // replace #toast-text with a bare text node on the first message, which quietly
+  // turns the `#toast-text { pointer-events: none }` rule in base.css into dead
+  // code — the tap-to-dismiss then depends on a rule that no longer applies to
+  // anything. The fallback keeps a stale cached index.html working.
+  const slot = document.getElementById('toast-text');
+  if (slot) slot.textContent = msg; else toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(() => {
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => {
+    _toastTimer = null;
     toast.classList.remove('show');
-    // Let the hide transition finish before the next message slides in.
-    setTimeout(drainToastQueue, 300);
-  }, 3000);
+  }, TOAST_MS);
 }
 
 // ─── NUDGE / TAG / ALERT SYSTEM ───────────────────────────────────────────────
@@ -6565,17 +7163,18 @@ const TEAM_DIRECTORY_DEFAULTS = [
 let teamDirectory = TEAM_DIRECTORY_DEFAULTS.map(d => ({ ...d }));
 
 function loadTeamDirectory() {
+  // Local copy first; the shared one arrives via applyTeamDirectory().
   try {
     const local = localStorage.getItem('ipb_team_directory');
     if (local) { const arr = JSON.parse(local); if (Array.isArray(arr) && arr.length) teamDirectory = arr; }
   } catch {}
-  loadSentinel('__CONFIG__', 'team-directory')
-    .then(saved => {
-      if (saved && Array.isArray(saved.entries) && saved.entries.length) {
-        teamDirectory = saved.entries;
-        try { localStorage.setItem('ipb_team_directory', JSON.stringify(saved.entries)); } catch {}
-      }
-    });
+}
+
+function applyTeamDirectory(saved) {
+  if (saved && Array.isArray(saved.entries) && saved.entries.length) {
+    teamDirectory = saved.entries;
+    try { localStorage.setItem('ipb_team_directory', JSON.stringify(saved.entries)); } catch {}
+  }
 }
 function saveTeamDirectory() {
   if (!isAdmin()) { showToast('Not authorized'); return; }
@@ -7506,6 +8105,30 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
       if (!fid) out.push(Object.assign({}, base, { kind: 'save' }));
       return;
     }
+
+    // A row that records NOTHING is not history.
+    //
+    // Until the backend stopped writing them, a section's FIRST save recorded an
+    // `added` row for every field the section declares — empty ones included —
+    // because the client posts the whole field list and an absent stored key was
+    // read as an addition. Every clock in that section then named the saver for a
+    // change nobody made, which is the owner's report exactly: "in the fields I have
+    // not done anything, when I check history it says my name and nothing is there
+    // changed".
+    //
+    // The backend no longer WRITES those rows, and for the ones already on disk it
+    // refuses them at read time. This is the same rule on the client, and it has to
+    // be here as well because the audit payload is CACHED: an IR opened from a
+    // cached fetch would otherwise keep showing the noise until the next one.
+    //
+    // Deliberately NARROW — `added`/`removed` on SECTION rows only, which is exactly
+    // where this code sits: a workflow row pushes and returns above. A blanket
+    // "both values are empty" rule would delete three things that are not noise:
+    // the `saved` marker (already handled above), `uploaded`/`archived`/`restored`
+    // (they carry no values by design — where a folder lives is the fact), and a
+    // status going from unset to set, where '' → 'Open' is the whole change.
+    if (e.event === 'added'   && base.newValue === '') return;
+    if (e.event === 'removed' && base.oldValue === '') return;
 
     out.push(Object.assign({}, base, {
       kind: e.event === 'added' ? 'add'

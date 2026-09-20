@@ -232,6 +232,61 @@ html[data-splash="skip"] #splash-screen {
 
 .auth-error { color: var(--ink-red-6); text-align: center; margin-top: 1rem; font-size: var(--text-sm); }
 
+/* ── The Google door, and the divider under it ─────────────────────────────── */
+/* A white pill with a real border, not a brand-coloured button: Google's own
+   guidance draws the identity button in ITS colours, and the accent role here
+   belongs to whichever palette the user picked. Keeping it neutral also makes the
+   two doors visually equal — the password form is not the afterthought. */
+.btn-google {
+  background: #fff;
+  color: #3c4043;
+  border-color: var(--outline-gray-3);
+  font-weight: var(--weight-medium);
+}
+.btn-google:hover  { background: #f8f9fa; border-color: var(--outline-gray-4); }
+.btn-google:active { background: #f1f3f4; }
+.btn-google:disabled { opacity: 0.6; }
+
+/* The four-colour G, drawn with gradients rather than loaded as a file: it is four
+   bars of colour, and an inline element keeps the button working offline (this is
+   a PWA) and adds no request to the sign-in screen. */
+.google-mark {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background:
+    conic-gradient(from -45deg,
+      #4285f4 0 25%, #34a853 0 50%, #fbbc05 0 75%, #ea4335 0 100%);
+  /* The white ring + blue centre is what makes it read as the G rather than as a
+     pie chart: a coloured ring around a solid core. */
+  box-shadow: inset 0 0 0 3px #fff;
+  position: relative;
+}
+.google-mark::after {
+  content: '';
+  position: absolute; inset: 4px;
+  border-radius: 50%;
+  background: #4285f4;
+}
+
+/* "or use your email and password" — a hairline that reads as a junction, so the
+   eye knows the form below is the other way in rather than more of the same. */
+.auth-or {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--ink-gray-5);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+}
+.auth-or::before,
+.auth-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--outline-gray-2);
+}
+
 .link-btn {
   background: none;
   border: none;
@@ -486,6 +541,14 @@ header {
   white-space: nowrap;
 }
 
+/* The title is a way home, so it has to LOOK like one. It stays muted until you
+   reach for it: a header that shouts "clickable" competes with the title it is
+   showing. The focus ring is the browser's own, kept rather than suppressed —
+   this is a keyboard-reachable control (role="button", tabindex="0"). */
+#header-title[role="button"] { cursor: pointer; border-radius: var(--radius-2); }
+#header-title[role="button"]:hover { color: var(--accent); }
+#header-title[role="button"]:active { opacity: 0.7; }
+
 .header-actions {
   display: flex;
   align-items: center;
@@ -648,10 +711,18 @@ header {
   box-shadow: var(--elevation-xl);
   max-width: min(420px, calc(100vw - 2rem));
   text-align: center;
-  pointer-events: none;
+  /* Tappable, so it can always be dismissed by hand. `pointer-events: none` used to
+     be here, which made the one thing covering the form the one thing a user could
+     not get rid of — and when a throw orphaned the queue's timer it stayed up for
+     good. The pill takes the tap; the text inside does not, because a text node
+     would otherwise swallow it. */
+  pointer-events: auto;
+  cursor: pointer;
 }
-/* app.js toggles this class rather than writing a transform inline, so the
-   queue in showToast() can never fight the stylesheet. */
+#toast-text { pointer-events: none; }
+/* app.js toggles this class rather than writing a transform inline, so showToast()
+   can never fight the stylesheet — it replaces the message and restarts the one
+   timer, and nothing here needs to know that. */
 #toast.show { transform: translateX(-50%) translateY(0); }
 
 /* ── Made-with credit + build version ────────────────────────────────────────
@@ -708,9 +779,16 @@ header {
     z-index: var(--z-bottombar);
   }
 
+  /* The credit is a caption for the SIDEBAR, and below lg the sidebar is a row of
+     nav tabs with room for nothing else. It was missing from this list, so it
+     stayed in the flow and shoved the four menu items sideways into a column of
+     their own — the owner's "the menu options have been placed to side with
+     insufficient space, and Made with … has occupied this place". Hidden only
+     here: on desktop it is exactly where it was. */
   .sidebar-brand,
   .sidebar-section-label,
-  .nav-count { display: none; }
+  .nav-count,
+  .sidebar-credit { display: none; }
 
   .sidebar-nav {
     flex-direction: row;

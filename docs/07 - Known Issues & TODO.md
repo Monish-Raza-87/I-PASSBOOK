@@ -387,12 +387,18 @@ is left is small.
    published first as the order requires. To confirm it took, run
    `reportRecentSignins(1)` from the editor: it prints a line per sign-in, or an empty
    window if nobody has signed in since the paste. Editor
-   https://script.google.com/d/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/edit
+   https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit
    — **Deploy → Manage deployments → ✏️ → New version**. Never "New deployment" (it
    mints a different `/exec` and breaks every installed client), and the `/exec` URL
    must keep ending `jQXatfT/exec`. **Backend last, never first** — and the frontend
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
+
+   > **`https://script.google.com/d/<deployment-id>/edit` does NOT work.** The editor
+   > is keyed by the **script ID**, not the deployment ID, and the deployment ID is
+   > what appears in the `/exec` URL (`…/macros/s/AKfycb…jQXatfT/exec`). Pasting that
+   > into a `/d/…/edit` link opens Google Drive's *"the file you have requested does
+   > not exist"*. Use the `/home/projects/<script-id>/edit` form above.
 2. **Run `installArchiveTrigger()` once** if the Triggers page is empty, signed in as
    `monish.raza@indrones.com` — the account that owns the Drive folder, because the
    trigger executes as whoever installed it. Idempotent; confirm exactly one trigger on

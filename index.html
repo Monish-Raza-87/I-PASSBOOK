@@ -74,10 +74,43 @@
       if ((location.hash || '').indexOf('#sso') === 0) {
         document.documentElement.setAttribute('data-splash', 'skip');
       }
+
+      // ...and with the splash out of the way, the sign-in form is what would paint
+      // — for someone who has already signed in. The exchange of that code is a
+      // round trip to Apps Script, so the wait screen goes up HERE, before paint,
+      // and app.js takes it down when a real screen is reached. That is what stops
+      // the form sitting on screen through the whole handover, which is what the
+      // owner saw.
+      //
+      // Only a CODE return gets it. `#ssoerr=` is a refusal the door has already
+      // explained — there is nothing to wait for — so it must land straight on the
+      // form with the reason on it. The two are told apart by the `=`: a
+      // `#ssoerr=` hash does not start with `#sso=`.
+      if ((location.hash || '').indexOf('#sso=') === 0) {
+        document.documentElement.setAttribute('data-sso', 'wait');
+      }
     })();
   </script>
 </head>
 <body>
+
+  <!-- ========== THE GOOGLE RETURN: WAIT SCREEN ========== -->
+  <!-- Up while the one-time code the door handed back is exchanged for a session.
+       Raised before paint by the head script above (html[data-sso="wait"]) and
+       taken down by app.js the moment a real screen is reached — showAuth() or
+       showApp() — so it cannot get stuck.
+
+       Dark on purpose: it sits between the intro (black) and the app, so it
+       continues the screen that came before it instead of flashing a bright light
+       -mode page in the middle of a sign-in. The mark is the same borderless one
+       the sign-in card uses and is already in sw.js's SHELL, so it downloads
+       nothing. -->
+  <div id="sso-wait" role="status" aria-live="polite">
+    <img class="sso-wait-mark" src="assets/icon-mark.png" alt="" />
+    <p class="sso-wait-title">Signing you in…</p>
+    <p class="sso-wait-note" id="sso-wait-note">You're on your way to I-PASSBOOK.</p>
+    <div class="sso-wait-track" aria-hidden="true"><div class="sso-wait-sweep"></div></div>
+  </div>
 
   <!-- ========== SPLASH SCREEN ========== -->
   <div id="splash-screen">

@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v42';
+const APP_VERSION = 'v44';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -344,8 +344,23 @@ function resetPasswordBackend(email, code, newPassword) {
 
 // Where the click goes. No parameters: the return address is a server-side
 // constant, so there is no client-supplied URL for anyone to redirect.
+//
+// It goes to GOOGLE'S OWN ACCOUNT PICKER first, with the door as the address to
+// come back to — not straight to the door. The reason is a phone with more than one
+// Google account signed in: Apps Script web apps are served the browser's DEFAULT
+// account and there is no way to ask it for another one, so a personal account
+// being the default does not merely sign the wrong person in — Google refuses the
+// request to the domain-restricted door before any of our code runs, and the person
+// is left on a Google error page with nothing they can do about it. Letting them
+// choose first is the only place that can be fixed from. It costs one tap, and the
+// door still names the account afterwards, so the tap confirms rather than guesses.
+//
+// The picked account has to survive the hop to the door; that is Google's side of
+// this, and it is the one thing not verifiable from here. If it does not, the door
+// says so on its own page rather than signing the wrong person in.
 function googleStartUrl() {
-  return CONFIG.SSO_URL + '?action=googleStart';
+  const door = CONFIG.SSO_URL + '?action=googleStart';
+  return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(door);
 }
 
 // Swap the handoff code for a session. A POST to the MAIN backend via postAuth,
@@ -1195,6 +1210,7 @@ function finishAuth(email, d) {
 }
 
 function showAuth() {
+  endSsoWait();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
   const pc = document.getElementById('password-change');
@@ -1231,9 +1247,40 @@ function submitGoogleSignIn() {
   if (btn) btn.disabled = true;
   setAuthError('');
   const hint = document.getElementById('auth-hint-text');
-  if (hint) hint.textContent = 'Taking you to Google…';
+  if (hint) hint.textContent = 'Taking you to Google — choose your indrones.com account.';
   location.href = googleStartUrl();
   return Promise.resolve();
+}
+
+// ─── THE GOOGLE WAIT SCREEN ──────────────────────────────────────────────────
+const SSO_SLOW_MS = 8000;
+let _ssoSlowTimer = null;
+
+// Raised by index.html BEFORE PAINT for a `#sso=` return, and taken down here. It
+// exists because the exchange of that code is a round trip to Apps Script and the
+// app used to spend it showing the sign-in form to someone who had just signed in.
+//
+// It is cleared from showAuth() and showApp() rather than from finishHandoff()'s
+// two endings, so EVERY route to a real screen clears it and no path can leave a
+// person staring at a sign-in that already finished. That is the whole reason it is
+// not a plain class toggle in one function.
+function endSsoWait() {
+  document.documentElement.removeAttribute('data-sso');
+  if (_ssoSlowTimer) { clearTimeout(_ssoSlowTimer); _ssoSlowTimer = null; }
+}
+
+// The honest version of a wait with nothing to report, which is the same thing the
+// Legacy archive does: a wait whose length is not ours to control. Measured against
+// a cold Apps Script start — a warm exchange lands under a second, and the ones that
+// do not are usually the backend waking up — 8s is past where silence stops reading
+// as "working" and starts reading as "stuck".
+function armSsoSlowNote() {
+  if (_ssoSlowTimer) clearTimeout(_ssoSlowTimer);
+  _ssoSlowTimer = setTimeout(() => {
+    _ssoSlowTimer = null;
+    const note = document.getElementById('sso-wait-note');
+    if (note) note.textContent = 'Still signing you in — the backend can take a moment to wake up.';
+  }, SSO_SLOW_MS);
 }
 
 // Finish what the door started. Split out from boot because it is one flow with
@@ -1246,26 +1293,41 @@ function finishHandoff(h) {
   // Workspace identity and the app cannot, so its words are the only truthful ones
   // available — "sign in with your @indrones.com account" is a real next step, and
   // a generic failure would throw that away.
+  //
+  // A refusal is NOT a wait, so index.html raises no wait screen for one: there is
+  // no round trip to sit through, and the door's sentence is already the answer.
   if (h.error) {
     showAuth();
     setAuthError(h.error);
     return Promise.resolve();
   }
-  showAuth();
-  const hint = document.getElementById('auth-hint-text');
-  if (hint) hint.textContent = 'Signing you in…';
+  // A code IS a wait, and the wait screen is already up — index.html raised it
+  // before paint, so the form never flashed underneath. It stays up until one of
+  // the two endings puts a real screen on: showAuth() for a refusal, or showApp()
+  // from inside finishAuth() for a session. Both clear it.
   const btn = document.getElementById('auth-google-btn');
   if (btn) btn.disabled = true;
+  armSsoSlowNote();
   return googleExchangeBackend(h.code).then(d => {
     if (d && d.status === 'ok' && d.sessionToken) {
-      finishAuth(d.email, d);
+      finishAuth(d.email, d);        // showApp() takes the wait screen down
       return;
     }
     if (btn) btn.disabled = false;
     // Every refusal is actionable and says what to do instead — set your own
-    // password first, ask an admin, use your email and password. The password form
-    // is on screen underneath, so the fallback is one tap away.
+    // password first, ask an admin, use your email and password. showAuth() puts the
+    // password form back and clears the wait screen with it, so the fallback is one
+    // tap away.
+    showAuth();
     setAuthError((d && d.message) || 'Google sign-in failed — use your email and password.');
+  }).catch(() => {
+    // The exchange is a POST whose failure postAuth() already turns into a payload,
+    // so this is belt and braces — but it is load-bearing NOW, because without it a
+    // rejection would leave the wait screen up forever and the only way out would be
+    // a reload.
+    if (btn) btn.disabled = false;
+    showAuth();
+    setAuthError('Could not reach the backend — use your email and password, or try again.');
   });
 }
 
@@ -2009,6 +2071,10 @@ function startAppData() {
 }
 
 function showApp() {
+  // Before the temp-password guard below, not after: that guard DIVERTS to the
+  // password-change screen, and a diverted sign-in still has to lose the wait
+  // screen. Any route to a real screen clears it.
+  endSsoWait();
   // Guard: an account still holding a temporary password must never reach the
   // shell. This is belt-and-braces — the backend mints no session in that state,
   // so finishAuth() cannot be reached with mustChangePassword set — but a guard

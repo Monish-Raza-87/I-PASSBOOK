@@ -84,14 +84,21 @@ store layout.
   code runs — measured against the live deployment on 2026-09-21 at **31.6s** on the
   first call, then 3.7s and 1.5s warm. So `warmBackend()` fires the trivially cheap
   `ping` as soon as a load is known to be heading for this screen (past the two early
-  returns in `app.js`'s `load` handler, so the ~9s intro is spent overlapping it), again
-  from `showAuth()`, and once more on the Google tap with `keepalive` — that one
-  navigates away, and the person then spends seconds at Google's picker. It goes through
+  returns in `app.js`'s `load` handler, so the ~9s intro is a head start), again from
+  `showAuth()`, and once more on the Google tap with `keepalive` — that one navigates
+  away, and the person then spends seconds at Google's picker. It goes through
   `_origFetch` (there is no session to carry, and a warm-up must not touch the session
   gate), never reads its response, swallows every failure, and is coalesced to one
-  request per 15s. This is an **improvement and not a guarantee**: a container that has
-  gone cold again still has to wake, which is why the wait screen's slow note stays
-  exactly where it is.
+  request per 15s.
+  **What is measured and what is not.** A lone call answers in 1.5–3.7s warm against
+  31.6s cold, so a wake-up that finishes before the form is submitted saves most of half
+  a minute. The overlap is not free, though: three pings fired at once measured 9.0s,
+  9.5s and 10.5s each where a lone one is under four, so a submit that catches the
+  wake-up still in flight may queue behind it. Expected to be no worse than the cold
+  start the submit would have paid alone, and **not proven** — the outcome to watch is
+  whether the first sign-in of the day is actually shorter. This is an improvement and
+  **not** a fix for the wait, which is why the wait screen's slow note stays exactly
+  where it is.
 
 ### 3. Main App
 - **Sidebar** (≥1024px) or **bottom nav** (<1024px) — Tickets, Legacy Records,

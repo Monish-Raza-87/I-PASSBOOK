@@ -193,9 +193,19 @@ function confirmSessionAlive() {
 // the wake-up at the worst possible moment. The sign-in screen is the one place in
 // this app where a person is guaranteed to spend seconds doing nothing but typing,
 // and it arrives behind a nine-second intro — so a `ping` fired as soon as we know
-// that screen is coming overlaps the wake-up with time that was already being
-// spent. By the time an email and password are typed and submitted, the container
-// is up, and the login POST lands on a warm one.
+// that screen is coming gives the wake-up that head start instead of charging it to
+// the submit that follows.
+//
+// WHAT IS MEASURED, AND WHAT IS NOT. A lone call to the live deployment answers in
+// 1.5–3.7s warm against 31.6s cold, so a wake-up that finishes before the form is
+// submitted saves the person most of half a minute. What is NOT established is that
+// the overlap itself is free: three pings fired at once were measured at 9.0s, 9.5s
+// and 10.5s each, where a lone one is under four — Apps Script does not serve
+// concurrent calls to this script for nothing, so a submit that catches the wake-up
+// still in flight may queue behind it. That is expected to be no WORSE than the cold
+// start the submit would have paid by itself, but it has not been proven, and the
+// outcome to watch is the one thing this cannot measure from here: whether the first
+// sign-in of the day is really shorter. Do not describe this as a fix for the wait.
 //
 // This is an improvement, NOT a guarantee, and nothing may be built on it: a
 // container that has gone cold again still has to wake, which is why the wait note
@@ -1118,8 +1128,8 @@ window.addEventListener('load', () => {
   // Past both returns, this load is ending on the SIGN-IN screen — the one outcome
   // we can be certain of, and the reason the wake-up is started here rather than in
   // showAuth(), which does not run until the intro below has finished. Nine seconds
-  // of video plus everything the person types is nine-plus seconds of the backend's
-  // cold start paid for by time that was already being spent. See warmBackend().
+  // of video plus everything the person types is a nine-plus-second head start on
+  // the backend's cold start, bought with time nobody was using. See warmBackend().
   warmBackend();
 
   const video = document.getElementById('splash-video');

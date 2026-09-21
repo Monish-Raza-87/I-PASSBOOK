@@ -960,6 +960,27 @@ r.ok('the mark is the already-precached one, so the screen downloads nothing',
 r.ok('the wait screen is hidden by default and shown by the attribute — the splash\'s own pattern',
   /#sso-wait \{[\s\S]*?display: none;/.test(baseSrc) &&
   /html\[data-sso="wait"\] #sso-wait \{ display: flex; \}/.test(baseSrc));
+
+// The owner's second look at this screen, verbatim: "the logo/icon used is not the
+// correct one with proper background etc, it has unclear things in the logo." Both
+// halves of that were real, and both were caused by this one rule.
+// 1. The artwork is a 4:3 lockup (512x384 — the disc, then "Passbook" beside it), so a
+//    square box SQUASHES it. `width: auto` off a height is the rule `.auth-logo` and
+//    `.brand-mark` have always followed; this rule must not be the exception.
+// 2. The disc is dark slate (#323943) and this screen is #0b0b0b by definition, so
+//    without the invert the disc disappears and only the knocked-out white pieces
+//    show — a logo with holes in it. Same treatment, same reason, as the dark theme's
+//    own `[data-theme="dark"] .auth-logo { filter: invert(1); }`.
+// Measured, not guessed: decoded the PNG and composited it on #0b0b0b both ways.
+const waitMarkRule = (baseSrc.match(/\.sso-wait-mark \{[\s\S]*?\n\}/) || [''])[0];
+r.ok('the mark is drawn from a height with width:auto — a square box squashes a 4:3 lockup',
+  /height: \d+px;/.test(waitMarkRule) && /width: auto;/.test(waitMarkRule), waitMarkRule);
+r.ok('...and no width: with a px value, which is the squash itself',
+  !/width: \d+px;/.test(waitMarkRule));
+r.ok('...and it is inverted, or a dark slate disc on #0b0b0b reads as a logo with holes',
+  /filter: invert\(1\);/.test(waitMarkRule), waitMarkRule);
+r.ok('...matching the dark-theme treatment the mark already gets everywhere else',
+  /\[data-theme="dark"\] \.auth-logo \{[\s\S]{0,20}?filter: invert\(1\);/.test(baseSrc));
 r.ok('...and it sits on the splash\'s layer and ground, so the handover does not flash',
   /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc) &&
   /#sso-wait \{[\s\S]*?background: #0b0b0b/.test(baseSrc));

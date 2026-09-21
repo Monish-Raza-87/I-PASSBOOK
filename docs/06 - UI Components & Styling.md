@@ -181,6 +181,20 @@ empty track — the one state that reads as *stuck* rather than *working* — so
 parked centred explicitly instead. The mark is already in `sw.js`'s `SHELL`, so the
 screen downloads nothing.
 
+**The mark is drawn from a height with `width: auto`, and it is inverted** — and both
+halves of that were a real defect, not a preference. The owner's second look reported
+*"the logo/icon used is not the correct one with proper background etc, it has unclear
+things in the logo."* The artwork is a **4:3 lockup** (`512×384`: the disc, then
+"Passbook" beside it), so `.sso-wait-mark` forcing `width: 56px; height: 56px` squashed
+it — the same reason `.auth-logo` and `.brand-mark` have always sized the mark off a
+height. And the disc is a dark slate (`#323943`) on a permanently `#0b0b0b` screen, so
+without `filter: invert(1)` the disc vanished into the ground and only the knocked-out
+white pieces showed, which reads as a logo full of holes. That is the same treatment,
+for the same reason, as the dark theme's own `[data-theme="dark"] .auth-logo`. Both
+were confirmed by decoding the PNG and compositing it on `#0b0b0b` both ways, not by
+guessing — and `smoke-ui.mjs` now pins the height, the `width: auto`, the absence of a
+pixel width, and the invert.
+
 ### Auth card (`.glass-card`)
 Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and
 `--elevation-lg`. No backdrop blur — the light-mode glass cluster is what blocked

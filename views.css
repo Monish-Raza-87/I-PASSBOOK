@@ -118,16 +118,26 @@
 
 .ir-card {
   position: relative;
-  /* Flex, not the previous `1fr auto` grid: a card may now carry a third child
-     (the assignee avatar) and a 3-child, 2-column grid reflows the whole row.
+  /* Two children now, and that is the fix: `.ir-card-main` (which gives way) and
+     `.ir-card-side` (which never does).
 
-     `nowrap` and `overflow: hidden` are what keep every row the SAME HEIGHT, and
-     they are a fix rather than a style. The owner asked why IR470's tab was bigger
-     than its neighbours. Nothing resizes a row on priority — assigning a ticket
-     adds an avatar and Urgent adds a pill, and this row was `flex-wrap: wrap`, so
-     the one card that had collected enough pills wrapped its side column onto a
-     second line and grew. Its neighbours stayed one line. Now nothing wraps: the
-     middle column shrinks and clips instead, and every card is one line tall. */
+     The owner reported IR470's "AN" circle "overlapping above 'open' status i.e.,
+     hiding it". Nothing is painted over anything here — the cause was arithmetic.
+     The list pane is `--list-w`, 400px, so a card has ~371px of content width, and
+     IR470 is the row that had collected the most chips: the avatar, Urgent, Open,
+     Overdue, the completion chip, Legacy and View Summary. `flex-wrap: wrap` was
+     removed earlier because a row that wrapped grew taller than its neighbours,
+     and the replacement — a side column that could SHRINK — was worse in a way
+     nobody saw until IR470: a shrunk column with `justify-content: flex-end`
+     overflows at its inline-start edge, and `overflow: hidden` then slices it.
+     `Open` was being cut in half, and the avatar sat immediately to the left of
+     the cut, which is why it looked like the circle was covering the pill.
+
+     So: nothing that carries state is ever allowed to shrink or clip again (see
+     `.ir-card-side`), and a row is one line because a row that wraps would differ
+     in height from its neighbours. `overflow: hidden` stays — it is safe now that
+     the side column cannot be squeezed — and it is the belt to `.ir-card-main`'s
+     braces if a future chip ever does exceed the pane. */
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
@@ -154,45 +164,111 @@
   background: var(--surface-gray-10);
 }
 
-.ir-card-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-/* The side column keeps every pill — a ticket that is Urgent and assigned and late
-   should say all three. It is the MIDDLE text that gives way when there is not
-   enough room, because the serial and the category are also one tap away inside
-   the ticket, and the statuses are not. */
+/* The only part of the row allowed to give way. A grid, not a column, because the
+   hover line (`.ir-card-hover`) has to occupy the SAME two rows as the title and
+   the meta — that is what makes the reveal cost no height and move nothing.
+   `overflow: hidden` is the clip that keeps a long title or a long serial from
+   widening the row; every child that holds text carries its own ellipsis. */
+.ir-card-main {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* The side column keeps every pill that carries STATE — a ticket that is Urgent,
+   Open and late should say all three, and the owner's rule is that added
+   information must not disturb what is already there.
+
+   `flex: 0 0 auto`, and that is the whole fix: it can no longer shrink, so
+   `justify-content: flex-end` can no longer push a pill out past its own start
+   edge, and `overflow: hidden` is gone because there is nothing left to hide.
+   The pills are never clipped, never squeezed and never overlap — the MIDDLE
+   text gives way instead, because the serial, the category and the date are also
+   one tap away inside the ticket and the statuses are not. */
 .ir-card-side {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   flex-wrap: nowrap;
   justify-content: flex-end;
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
+  flex: 0 0 auto;
 }
 .ir-card-side > * { flex: 0 0 auto; }
 
-/* Who owns this ticket. Initials only — the full name is in the title attr. */
-.assignee-avatar {
-  flex: 0 0 auto;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--radius-9);
-  display: grid;
-  place-items: center;
-  background: var(--surface-gray-3);
-  border: 1px solid var(--outline-gray-1);
-  color: var(--ink-gray-8);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: 0;
-  user-select: none;
+.ir-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
 }
-
 .ir-title {
   font-size: var(--text-base);
   font-weight: var(--weight-semibold);
   color: var(--ink-gray-9);
   letter-spacing: var(--tracking-base);
+  /* nowrap + ellipsis, so a title can never wrap the row taller than its
+     neighbours — the same one-height rule `.ir-card` states above. */
+  flex: 0 0 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Who owns this ticket, in the empty space to the right of the IR number — the
+   owner's own suggestion, and it is where the room actually is: the number is
+   short and the meta line below runs the full width. It replaces the initials
+   circle, which cost a 26px chip in the side column (plus a gap) on exactly the
+   row that could least afford one. Shrinks before anything carrying state, and
+   its own `title` carries the full name if the pane cuts it short. */
+.ir-assignee {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Everything the row cannot hold, revealed on hover — the owner's other half of
+   the rule: "or else show when hovered above it or both." It is a grid item over
+   the SAME two rows as the title and the meta, so showing it changes no height
+   and moves nothing; the two it covers fade out rather than being removed, which
+   is what keeps the box the same size.
+
+   `visibility: hidden` rather than `opacity: 0`, and that is not cosmetic: an
+   `opacity: 0` Summary link would still be in the tab order, so a keyboard user
+   would land on an invisible link. `visibility: hidden` takes it out. */
+.ir-card-hover {
+  grid-area: 1 / 1 / 3 / 1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  visibility: hidden;
+  font-size: var(--text-xs);
+  color: var(--ink-gray-5);
+}
+.ir-hover-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ir-card-hover .ir-summary-link { flex: 0 0 auto; }
+
+/* Guarded on `hover: hover` on purpose: a touch device fires `:hover` on tap and
+   then leaves it stuck, so a phone would swap a row's contents to the hover line
+   and never swap back. There is nothing to reveal by hover on a phone anyway —
+   the phone row carries the same reduced chip set, and the ticket has the rest. */
+@media (hover: hover) {
+  .ir-card:hover .ir-title-row,
+  .ir-card:hover .ir-meta { opacity: 0; }
+  .ir-card:hover .ir-card-hover { visibility: visible; }
 }
 .ir-meta {
   display: flex;
@@ -212,15 +288,11 @@
 .ir-dot { opacity: 0.5; }
 .ir-summary-link { font-size: var(--text-xs); color: var(--accent); white-space: nowrap; }
 
-/* At phone width a card cannot hold every pill and still be one line, so the two
-   that are pure conveniences step out: the Summary link (the same link is in the
-   ticket banner) and the Legacy badge (the ticket says so in words). What is left
-   is what the row is FOR — who has it, how urgent it is, where it stands, whether
-   it is late, and how far along it is. Nothing that carries state is ever hidden. */
-@media (max-width: 639px) {
-  .ir-card-side .ir-summary-link,
-  .ir-card-side .badge-legacy { display: none; }
-}
+/* The phone rule that used to hide the Summary link and the Legacy badge is gone:
+   neither is in the side column at ANY width now — the row keeps only what
+   carries state, and both moved to the hover line (the Summary link there, the
+   Legacy record in words). A phone keeps exactly the chip set a desktop does,
+   which is why there is no longer a breakpoint to keep in step. */
 
 /* Banner pills for the app-owned triage fields (type, assignee). Status and
    priority reuse the existing .badge-* / .prio-* classes. */

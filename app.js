@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v44';
+const APP_VERSION = 'v45';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on

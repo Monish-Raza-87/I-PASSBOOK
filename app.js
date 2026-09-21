@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v46';
+const APP_VERSION = 'v47';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -177,6 +177,70 @@ function confirmSessionAlive() {
       } catch { return true; }        // unparseable → assume alive, do not eject
     }))
     .catch(() => true);               // unreachable → assume alive, do not eject
+}
+
+// ─── WAKING THE BACKEND BEFORE IT IS NEEDED ──────────────────────────────────
+//
+// Apps Script spins the script down when nobody is using it, and the next caller
+// pays the whole wake-up before a single line of our code runs. Measured against
+// the live deployment on 2026-09-21 with the trivially cheap `ping`: 31.6s on the
+// first call, then 3.7s and 1.5s warm. That is half a minute of a person staring
+// at a sign-in screen wondering whether the app has hung — and the Google door
+// pays it TWICE, because the door and the app are two deployments and waking one
+// does not wake the other.
+//
+// Nothing here can make Apps Script start faster. What it can do is stop paying
+// the wake-up at the worst possible moment. The sign-in screen is the one place in
+// this app where a person is guaranteed to spend seconds doing nothing but typing,
+// and it arrives behind a nine-second intro — so a `ping` fired as soon as we know
+// that screen is coming gives the wake-up that head start instead of charging it to
+// the submit that follows.
+//
+// WHAT IS MEASURED, AND WHAT IS NOT. A lone call to the live deployment answers in
+// 1.5–3.7s warm against 31.6s cold, so a wake-up that finishes before the form is
+// submitted saves the person most of half a minute. What is NOT established is that
+// the overlap itself is free: three pings fired at once were measured at 9.0s, 9.5s
+// and 10.5s each, where a lone one is under four — Apps Script does not serve
+// concurrent calls to this script for nothing, so a submit that catches the wake-up
+// still in flight may queue behind it. That is expected to be no WORSE than the cold
+// start the submit would have paid by itself, but it has not been proven, and the
+// outcome to watch is the one thing this cannot measure from here: whether the first
+// sign-in of the day is really shorter. Do not describe this as a fix for the wait.
+//
+// This is an improvement, NOT a guarantee, and nothing may be built on it: a
+// container that has gone cold again still has to wake, which is why the wait note
+// in armSsoSlowNote() stays exactly where it is. Three properties are load-bearing:
+//
+//   • `_origFetch`, never the intercepted fetch. There is no session to carry on
+//     the way to a sign-in screen, and a warm-up must not be able to touch the
+//     session gate or be answered as an expiry.
+//   • the response is never read and every failure is swallowed, including a
+//     rejection. A warm-up that can throw, toast or log is worse than a cold start,
+//     and smoke-boot's clean-console assertion is what holds that line.
+//   • coalesced. Boot reaches the sign-in screen through showAuth(), which is also
+//     reached by a sign-out, an expiry and a refused Google handoff — none of which
+//     needs a second request, because one ping is what wakes a container.
+const WARM_MIN_GAP_MS = 15000;
+let _lastWarmAt = 0;
+
+function warmBackend(opts) {
+  try {
+    if (shouldUseDevAuthBypass()) return;      // localhost dev has no backend to wake
+    if (Date.now() - _lastWarmAt < WARM_MIN_GAP_MS) return;
+    _lastWarmAt = Date.now();
+    // The cache-buster is not decoration: a warm-up served from the browser cache
+    // reaches nothing and wakes nothing, and would report success while doing it.
+    const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
+      + 'action=ping&_=' + Date.now();
+    const init = { cache: 'no-store' };
+    // The one caller that navigates away in its very next statement — the Google
+    // door. Without keepalive the browser is free to cancel the request as the page
+    // unloads, which is precisely the request whose whole job is to still be in
+    // flight while the person is over at Google picking an account.
+    if (opts && opts.keepalive) init.keepalive = true;
+    const p = _origFetch(url, init);
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+  } catch (e) { /* a warm-up must never be able to break the screen it serves */ }
 }
 
 // Exchange email + password for a server session token + access payload.
@@ -1061,6 +1125,13 @@ window.addEventListener('load', () => {
   if (hasStoredSession()) { dismissSplash(true); return; }
   if (isHandoffReturn()) { splash.style.display = 'none'; finishHandoff(_handoff); return; }
 
+  // Past both returns, this load is ending on the SIGN-IN screen — the one outcome
+  // we can be certain of, and the reason the wake-up is started here rather than in
+  // showAuth(), which does not run until the intro below has finished. Nine seconds
+  // of video plus everything the person types is a nine-plus-second head start on
+  // the backend's cold start, bought with time nobody was using. See warmBackend().
+  warmBackend();
+
   const video = document.getElementById('splash-video');
   if (!video) { dismissSplash(false); return; }
 
@@ -1211,6 +1282,11 @@ function finishAuth(email, d) {
 
 function showAuth() {
   endSsoWait();
+  // Every route to this screen is a person about to sign in, and every one of them
+  // may have arrived with the backend asleep — an expiry, a sign-out, a refused
+  // Google handoff. Boot already started the wake-up before the intro, so on a cold
+  // load this is the coalesced no-op it should be. See warmBackend().
+  warmBackend();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
   const pc = document.getElementById('password-change');
@@ -1248,6 +1324,11 @@ function submitGoogleSignIn() {
   setAuthError('');
   const hint = document.getElementById('auth-hint-text');
   if (hint) hint.textContent = 'Taking you to Google — choose your indrones.com account.';
+  // Started here rather than left to the sign-in screen's own call, and keepalive
+  // because the next statement unloads the page. The person then spends seconds at
+  // Google's account picker and on the door page, and that is exactly the stretch
+  // the exchange would otherwise spend waiting for this deployment to wake up.
+  warmBackend({ keepalive: true });
   location.href = googleStartUrl();
   return Promise.resolve();
 }

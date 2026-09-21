@@ -686,10 +686,21 @@ r.ok('and the Overview does the same, through its own access sweep',
            seg.indexOf('applyOverviewGating()') !== -1;
   })());
 // ── The Google door ───────────────────────────────────────────────────────────
-// The door is DOM-less to test: its two halves are ordinary functions, so this
-// block drives them directly rather than through a click the stub DOM cannot
-// dispatch (harness el() records no listeners).
-r.head('the Google door is inert until a second deployment is named');
+// The door is a NAVIGATION, not a fetch, and that is a measured fact rather than a
+// preference: a cross-site fetch from gh-pages to the domain-restricted deployment
+// gets 401 from Google BEFORE our code runs, while the same URL opened as a
+// top-level navigation reports the caller perfectly. So there are two halves:
+//
+//   click → `location.href = SSO_URL + '?action=googleStart'` (LEAVES the page)
+//         → the door sends the browser back to CONFIG.APP_URL with a one-time code
+//           in the fragment → app.js exchanges it on the MAIN backend, which is
+//           "Anyone" and therefore reachable.
+//
+// The blocks below drive the real functions; the fragment cases hand the app a
+// `location` with a hash already set, because that is exactly how the browser
+// delivers the return — `_handoff` is read once, at parse time.
+const HANDOFF_CODE = 'deadbeefdeadbeefdeadbeefdeadbeef';
+const HASH_BASE = { search: '', hostname: '127.0.0.1', protocol: 'http:', href: 'http://127.0.0.1:3000/' };
 
 const gPosts = [];
 // The reply is armed BEFORE the call, because the stub is asked and answered inside
@@ -706,12 +717,20 @@ const gFetch = (url, init) => {
     json: () => Promise.resolve(reply),
   });
 };
+// A getter/setter PAIR, so a test can read where the click navigated to and reset it
+// between assertions. `location` here is the sandbox global app.js actually uses.
+const NAV = `get locationHref() { return location.href; },
+             set locationHref(v) { location.href = v; }`;
+const SESSION_REPLY = {
+  status: 'ok', sessionToken: 'tok-google-1', email: 'sreenivas.pai@indrones.com',
+  access: { role: 'user', permissions: {}, departments: [], triage: false },
+};
+const gexchangePost = () => gPosts.find(p => p.body &&
+  p.body.entries.some(e => e[0] === 'action' && e[1] === 'googleExchange'));
+
+r.head('the Google door is inert until a second deployment is named');
 const G = loadApp(`
-  CONFIG, offerGoogleDoor, submitGoogleSignIn,
-  googleSignInProbeBackend, googleSignInBackend, googleSso, setAuthError,
-  get _googleDoorOpen() { return _googleDoorOpen; },
-  get _googleDoorAsked() { return _googleDoorAsked; },
-  get _googleProbeEmail() { return _googleProbeEmail; },
+  CONFIG, submitGoogleSignIn, setAuthMode, setAuthError, ${NAV},
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch });
 
@@ -719,119 +738,181 @@ const G = loadApp(`
 // deployment existed, and it is now set. The invariant that keeps this feature
 // reversible and safe is that whichever URL is in there is a deployment of its OWN:
 // empty is the off switch, and anything else must be a script.google.com /exec that
-// is not the primary backend. Pointing it at GAS_URL would send every Google-door
-// call to the "Anyone" deployment, where getActiveUser() is not the signed-in
-// Workspace account, and the door would fail in a way that looks like a bad password.
+// is not the primary backend. Pointing it at GAS_URL would send the door's
+// navigation to the "Anyone" deployment, where getActiveUser() is not the signed-in
+// Workspace account, and the door would refuse every caller.
 r.ok('SSO_URL is its own deployment — empty (the off switch) or a /exec that is NOT the primary backend',
   G.T.CONFIG.SSO_URL === '' || (
     G.T.CONFIG.SSO_URL.indexOf('https://script.google.com/') === 0 &&
     /\/exec$/.test(G.T.CONFIG.SSO_URL) &&
     G.T.CONFIG.SSO_URL !== G.T.CONFIG.GAS_URL
   ), JSON.stringify(G.T.CONFIG.SSO_URL));
-r.ok('an EMPTY SSO_URL is the whole off switch — asking for the door reaches the network ZERO times',
+// The mechanism is a navigation, so a page load in the middle of a sign-in must make
+// ZERO Google calls — there is nothing to probe and nothing to fetch.
+r.ok('a plain load makes no Google call at all — the door is opened by a CLICK, not a probe',
+  gPosts.length === 0, gPosts.map(p => p.url));
+r.ok('an EMPTY SSO_URL hides the button AND the separator, so there is no orphan "or" line',
   (() => {
     const real = G.T.CONFIG.SSO_URL;
     G.T.CONFIG.SSO_URL = '';
-    gPosts.length = 0;
-    G.T.offerGoogleDoor();
+    G.T.setAuthMode('login');
+    const hidden = G.byId.get('auth-google-btn').style.display === 'none' &&
+                   G.byId.get('auth-or').style.display === 'none';
     G.T.CONFIG.SSO_URL = real;
-    return gPosts.length === 0 && G.T._googleDoorOpen === false && G.T._googleDoorAsked === false;
-  })(), gPosts.map(p => p.url));
+    return hidden;
+  })());
+r.ok('...and a set SSO_URL is what reveals them, through the one mode sync',
+  (() => {
+    G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
+    G.T.setAuthMode('login');
+    const shown = G.byId.get('auth-google-btn').style.display === '' &&
+                  G.byId.get('auth-or').style.display === '';
+    G.T.CONFIG.SSO_URL = '';
+    G.T.setAuthMode('login');
+    return shown;
+  })());
 r.ok('...and the button is not merely hidden — its markup ships hidden',
   /id="auth-google-btn"[^>]*style="display:none"/.test(indexSrc),
   (indexSrc.match(/.*auth-google-btn.*/) || [])[0]);
 r.ok('...and the separator with it, so there is no orphan "or" line',
   /id="auth-or"[^>]*style="display:none"/.test(indexSrc));
-r.ok('the door has no way to be opened by a password — SSO_URL is read, never posted to',
-  !/action=googleSignIn/.test(appSrc) && /googleSso\('googleSignIn'/.test(appCode));
+r.ok('the door is never posted to — SSO_URL is only ever OPENED',
+  !/action=googleSignIn/.test(appSrc) && !/SSO_URL[^\n]*postAuth/.test(appCode));
 
-r.head('a probe that cannot answer costs the user nothing');
-r.ok('a dead SSO_URL leaves the button hidden and raises NOTHING', await (async () => {
-  G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
-  gPosts.length = 0;
-  G.T.offerGoogleDoor();
-  await new Promise(res => setImmediate(res));
-  return gPosts.length === 1 && G.T._googleDoorOpen === false;
-})(), { posts: gPosts.length, open: G.T._googleDoorOpen });
-r.ok('the probe is asked exactly once per page load, not on every route back',
-  (() => { G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec'; gPosts.length = 0; G.T.offerGoogleDoor(); return gPosts.length === 0; })(),
-  gPosts.length);
+r.head('the click LEAVES the page — that is the mechanism, not a side effect');
+G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
+G.T.locationHref = 'SENTINEL';
+gPosts.length = 0;
+await G.T.submitGoogleSignIn();
+r.ok('the click navigates to the door with the start action and no parameters of its own',
+  G.T.locationHref === 'https://sso.example.invalid/exec?action=googleStart',
+  G.T.locationHref);
+r.ok('...and it is a navigation, not a call: the click itself reaches the network ZERO times',
+  gPosts.length === 0, gPosts.map(p => p.url));
+// The return address is a server-side constant. A `?next=` here would make the app
+// hand an attacker the choice of where Google sends the browser back to.
+r.ok('the start URL carries no return address — it is built from SSO_URL alone',
+  /function googleStartUrl\(\) \{\s*return CONFIG\.SSO_URL \+ '\?action=googleStart';/.test(appCode),
+  (appCode.match(/[^\n]*googleStartUrl[^\n]*/) || [''])[0]);
+r.ok('the button is disabled on the way out, so a second click cannot start a second handoff',
+  G.byId.get('auth-google-btn').disabled === true);
+r.ok('and the screen says what is happening while the browser is leaving',
+  G.byId.get('auth-hint-text').textContent === 'Taking you to Google…',
+  G.byId.get('auth-hint-text').textContent);
+r.ok('an EMPTY SSO_URL means the click does nothing at all',
+  (() => {
+    G.T.CONFIG.SSO_URL = '';
+    G.T.locationHref = 'SENTINEL';
+    G.T.submitGoogleSignIn();
+    return G.T.locationHref === 'SENTINEL';
+  })(), G.T.locationHref);
 
-r.head('a probe that answers yes opens the door, and names who it is about to sign in as');
+r.head('a return from the door is exchanged once, at parse time, on the MAIN backend');
+// The fragment is parsed at module scope, but boot runs on `window.load` — which the
+// stub DOM does not dispatch — so the return is driven explicitly here. The wiring
+// itself is pinned by source further down; what this drives is the exchange.
+gPosts.length = 0;
+gReply = SESSION_REPLY;
 const G2 = loadApp(`
-  CONFIG, offerGoogleDoor, submitGoogleSignIn, setAuthError,
-  get _googleDoorOpen() { return _googleDoorOpen; },
-  get _googleProbeEmail() { return _googleProbeEmail; },
+  CONFIG, isHandoffReturn, finishHandoff, ${NAV},
+  get _handoff() { return _handoff; },
   get currentUser() { return currentUser; },
-`, { capture: true, fetch: gFetch });
+`, { capture: true, fetch: gFetch,
+     globals: { location: Object.assign({}, HASH_BASE, { hash: '#sso=' + HANDOFF_CODE }) } });
+r.ok('the fragment is recognised as a handoff return',
+  G2.T.isHandoffReturn() === true, G2.T.isHandoffReturn());
+r.ok('and read as a CODE, with the prefix stripped exactly once',
+  G2.T._handoff && G2.T._handoff.code === HANDOFF_CODE, G2.T._handoff);
 gPosts.length = 0;
-G2.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
-gReply = { status: 'ok', email: 'sreenivas.pai@indrones.com', name: 'Sreenivas Pai' };
-G2.T.offerGoogleDoor();
-await new Promise(res => setImmediate(res));
-r.ok('the probe POSTs the probe action, and no session token rides along', (() => {
-  const p = gPosts[0];
-  const keys = p.body ? p.body.entries.map(e => e[0]) : [];
-  return p.url === 'https://sso.example.invalid/exec' &&
-         keys.indexOf('action') !== -1 && keys.indexOf('sessionToken') === -1;
-})(), gPosts.map(p => p.url));
-r.ok('a yes reveals the button through the SAME mode sync that hides it on the code step',
-  G2.T._googleDoorOpen === true && G2.byId.get('auth-google-btn').style.display === '');
-r.ok('and the button says who it will sign in as, so a shared machine is not a surprise',
-  (G2.byId.get('auth-google-btn').getAttribute('aria-label') || '').indexOf('Sreenivas Pai') !== -1,
-  G2.byId.get('auth-google-btn').getAttribute('aria-label'));
-r.ok('the label still starts with the visible words, so the control is announced as itself',
-  /^Sign in with Google/.test(G2.byId.get('auth-google-btn').getAttribute('aria-label') || ''));
-
-r.head('the door itself mints a session the same way the password door does');
-gPosts.length = 0;
-gReply = {
-  status: 'ok', sessionToken: 'tok-google-1', email: 'sreenivas.pai@indrones.com',
-  access: { role: 'user', permissions: {}, departments: [], triage: false },
-};
-await G2.T.submitGoogleSignIn();
-r.ok('a yes signs the user in — finishAuth wrote the session and the user',
-  G2.T.currentUser && G2.T.currentUser.sessionToken === 'tok-google-1' &&
-  G2.T.currentUser.email === 'sreenivas.pai@indrones.com', G2.T.currentUser && G2.T.currentUser.email);
+await G2.T.finishHandoff(G2.T._handoff);
+r.ok('the code is exchanged for a session, on the MAIN backend, carrying no stale token',
+  (() => {
+    const p = gexchangePost();
+    if (!p) return false;
+    const keys = p.body.entries.map(e => e[0]);
+    return p.url === G2.T.CONFIG.GAS_URL &&
+           p.body.entries.some(e => e[0] === 'code' && e[1] === HANDOFF_CODE) &&
+           keys.indexOf('sessionToken') === -1;
+  })(), gPosts.map(p => p.url));
 r.ok('the device label travels, so the audit line can say where it was opened',
   (() => {
-    // The FIRST post is the door's own; finishAuth then fires the boot reads, and
-    // asserting on the last one would be asserting on a different call entirely.
-    const post = gPosts.find(p => p.body && p.body.entries.some(e => e[0] === 'action' && e[1] === 'googleSignIn'));
-    return !!post && post.body.entries.some(e => e[0] === 'device') &&
-           !post.body.entries.some(e => e[0] === 'sessionToken');
-  })(), gPosts.map(p => p.url));
+    const p = gexchangePost();
+    return !!p && p.body.entries.some(e => e[0] === 'device' && String(e[1]).length > 0);
+  })(), gexchangePost() && gexchangePost().body.entries);
+r.ok('a yes signs the user in — the password door\'s own finishAuth, unchanged',
+  G2.T.currentUser && G2.T.currentUser.sessionToken === 'tok-google-1' &&
+  G2.T.currentUser.email === 'sreenivas.pai@indrones.com',
+  G2.T.currentUser && G2.T.currentUser.email);
 
-r.head('a refusal lands on the same error line as a wrong password');
-const G3 = loadApp(`
-  CONFIG, submitGoogleSignIn, setAuthError,
-  get currentUser() { return currentUser; },
-`, { capture: true, fetch: gFetch });
+r.head('the handoff code never survives in the address bar');
+// replaceState, not `location.hash = …`: assigning pushes a history entry, and the
+// back button would then land on a URL whose code is already spent — which reads as
+// "that link is no longer valid" on a sign-in that actually worked. The app routes by
+// hash, so `location.hash = …` is everywhere ELSE in this file; the assertion is
+// scoped to the handoff block, where the one thing it must never do is assign.
+const handoffSeg = appCode.slice(appCode.indexOf('const _handoff = (() => {'),
+                                 appCode.indexOf('function isHandoffReturn'));
+r.ok('the spent fragment is wiped with replaceState, not by assigning the hash',
+  /history\.replaceState\(/.test(handoffSeg) && !/location\.hash\s*=/.test(handoffSeg),
+  handoffSeg.slice(0, 160));
+r.ok('...after the code has been read, so the wipe cannot race the read',
+  handoffSeg.indexOf('decodeURIComponent(h.slice(5))') < handoffSeg.indexOf('history.replaceState'));
+r.ok('the fragment is a transient namespace, not a route — it is consumed before routing',
+  /if \(h\.indexOf\('#sso='\) === 0\)/.test(appCode) && /#ssoerr=/.test(appCode));
+
+r.head('a refusal from the door lands on the same error line as a wrong password');
 gPosts.length = 0;
-G3.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
-gReply = { status: 'error', message: 'Set your own password first: sign in with your temporary password, then use Google from then on.' };
-await G3.T.submitGoogleSignIn();
+const G3 = loadApp(`
+  isHandoffReturn, finishHandoff, setAuthError, ${NAV},
+  get _handoff() { return _handoff; },
+  get currentUser() { return currentUser; },
+`, { capture: true, fetch: gFetch,
+     globals: { location: Object.assign({}, HASH_BASE, { hash: '#ssoerr=' +
+       encodeURIComponent('Set your own password first: sign in with your temporary password, then use Google from then on.') }) } });
+r.ok('it is recognised as a return, so the splash is skipped for a refusal too',
+  G3.T.isHandoffReturn() === true);
+await G3.T.finishHandoff(G3.T._handoff);
 r.ok('the backend\'s own words are shown, not a generic failure',
   /Set your own password first/.test(G3.byId.get('auth-error').textContent),
   G3.byId.get('auth-error').textContent);
-r.ok('no session is invented from a refusal',
-  !G3.T.currentUser || !G3.T.currentUser.sessionToken, G3.T.currentUser && G3.T.currentUser.sessionToken);
 r.ok('and the error line is made visible, the way every other auth error is',
   G3.byId.get('auth-error').style.display === 'block');
+r.ok('...and the sign-in screen is the one on show, with the password form one tap away',
+  G3.byId.get('auth-container').style.display !== 'none');
+r.ok('nothing is exchanged — there is no code, so nothing reaches the network',
+  gPosts.length === 0, gPosts.map(p => p.url));
+r.ok('no session is invented from a refusal',
+  !G3.T.currentUser || !G3.T.currentUser.sessionToken, G3.T.currentUser && G3.T.currentUser.sessionToken);
 r.ok('clearing it hides the line again rather than leaving an empty box',
   (() => { G3.T.setAuthError(''); return G3.byId.get('auth-error').style.display === 'none'; })());
 
 r.head('the two doors share one session model, one error line and one regex');
 r.ok('finishAuth is the password door\'s own function, called unchanged',
-  /finishAuth\(d\.email \|\| _googleProbeEmail, d\)/.test(appCode));
+  /finishAuth\(d\.email, d\)/.test(appCode));
 r.ok('the password form is never replaced — its handler is still wired',
   /signInBtn\.addEventListener\('click', submitLogin\)/.test(appCode) &&
   /auth-google-btn/.test(indexSrc) && /id="auth-signin-btn"/.test(indexSrc));
-r.ok('both Google actions are listed as self-authenticating, so no stale token is attached',
-  /googleSignIn\|googleSignInProbe/.test(appCode) &&
-  /\(login\|changePassword\|forgotPassword\|resetPassword\|logout\|sessionCheck\|ping\|googleSignIn\|googleSignInProbe\)/.test(appCode));
+r.ok('googleExchange is listed as self-authenticating, and the deleted pair is gone from the regex',
+  /googleExchange\)/.test((appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]) &&
+  !/googleSignIn\|googleSignInProbe/.test(appCode),
+  (appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]);
 r.ok('nothing in the door reaches for UrlFetchApp or getEffectiveUser — the server half is pinned in smoke-backend',
   !/UrlFetchApp|getEffectiveUser/.test(appCode));
+
+r.head('the splash skip and the handoff return are pinned to each other');
+// index.html decides this BEFORE app.js parses, so that the nine-second intro never
+// flashes on the way into a sign-in that has already started. If the two conditions
+// drift, a Google return pays for the intro and app.js cannot tell anyone.
+r.ok('the pre-paint script skips the splash on a handoff return',
+  /\(location\.hash \|\| ''\)\.indexOf\('#sso'\) === 0/.test(indexSrc),
+  (indexSrc.match(/[^\n]*indexOf\('#sso[^\n]*/) || [''])[0]);
+r.ok('...and its prefix test covers the REFUSAL branch too, not just the code',
+  !/indexOf\('#sso='\)/.test(indexSrc));
+r.ok('app.js makes the same call at boot, for the loads pre-paint cannot cover',
+  /if \(isHandoffReturn\(\)\) \{ splash\.style\.display = 'none'; finishHandoff\(_handoff\); return; \}/.test(appCode));
+r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',
+  appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
+  appCode.indexOf('if (isHandoffReturn()) { splash.style.display'));
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

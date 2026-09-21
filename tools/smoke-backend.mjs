@@ -174,10 +174,22 @@ const dispatchers = [code.slice(doPostAt, doPostAt + 2600), code.slice(doGetAt, 
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
  'resetPassword', 'getMyAccess', 'listUsers', 'createUser', 'bulkCreateUsers',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
- 'setUserDepartments', 'purgeUsers', 'googleSignIn', 'googleSignInProbe']
+ 'setUserDepartments', 'purgeUsers', 'googleExchange']
   .forEach(a => r.ok('"' + a + '" is dispatched',
     new RegExp('\\b' + a + '\\s*:').test(dispatchers),
     (dispatchers.match(new RegExp('.{0,30}\\b' + a + '\\s*:')) || ['absent'])[0]));
+
+// googleStart is dispatched from doGet as a BRANCH, not a map entry, and that is
+// deliberate: it must return an HtmlOutput (a redirect page), so it can never go
+// through buildResponse, which serialises to JSON. A map entry would have to.
+const doGetBody = code.slice(doGetAt, doGetAt + 2600);
+r.ok('"googleStart" is dispatched, and BEFORE the preAuth map',
+  /action === 'googleStart'/.test(doGetBody) &&
+  doGetBody.indexOf('googleStart') < doGetBody.indexOf('preAuth'),
+  { at: doGetBody.indexOf('googleStart'), preAuth: doGetBody.indexOf('preAuth') });
+r.ok('...and it returns early rather than falling through to buildResponse',
+  /if \(action === 'googleStart'\) return doGoogleStart\(\);/.test(doGetBody),
+  (doGetBody.match(/[^\n]*googleStart[^\n]*/) || ['absent'])[0]);
 
 r.ok('an unknown action explains itself to a stale client',
   /backend has been upgraded|unknownAction/i.test(code),
@@ -1863,9 +1875,18 @@ r.ok('the reader is read-only — it takes no lock',
   !/withRowLockOrThrow/.test(fnBody('reportRecentSignins')));
 
 // ── THE GOOGLE DOOR ───────────────────────────────────────────────────────────
+// The door is TWO HALVES ON TWO DEPLOYMENTS, and the reason is measured rather than
+// assumed: a cross-site fetch from the app to the "Anyone within indrones.com"
+// deployment is refused by Google with a 401 BEFORE any of this code runs, while the
+// same URL opened as a top-level NAVIGATION gets through. So half one is a
+// navigation (GET googleStart, on the domain-restricted deployment), and half two is
+// an ordinary POST (googleExchange, on the "Anyone" deployment) carrying back the
+// one-time handoff code half one minted.
+//
 // Behaviour lives in smoke-store.mjs, which calls the real functions. What is pinned
-// HERE is the shape that behaviour cannot show: which identity call is used, that the
-// door is additive, and that it needs no network.
+// HERE is the shape behaviour cannot show: which identity call is used, that the two
+// halves share one mint so a fix cannot land on only one of them, and that the
+// redirect has no client-supplied target.
 r.head('the Google door reads the CALLER, and never the script owner');
 const gcall = fnBody('googleCallerEmail');
 r.ok('it uses getActiveUser — the caller — and nothing else',
@@ -1875,16 +1896,14 @@ r.ok('it uses getActiveUser — the caller — and nothing else',
 // earth — so this would not fail, it would silently make everyone monish.raza.
 r.ok('getEffectiveUser appears NOWHERE in the identity path — it would make everyone the owner',
   !/getEffectiveUser/.test(gcall) && !/getEffectiveUser/.test(fnBody('googleDoorCheck')) &&
-  !/getEffectiveUser/.test(fnBody('doGoogleSignIn')) && !/getEffectiveUser/.test(fnBody('doGoogleSignInProbe')),
+  !/getEffectiveUser/.test(fnBody('doGoogleStart')),
   (code.match(/[^\n]*getEffectiveUser[^\n]*/g) || ['none']));
 r.ok('a Session call that fails is an empty identity, not an exception',
   /try\s*{/.test(gcall) && /catch/.test(gcall) && /return '';/.test(gcall));
 
-r.head('the refusal ladder is one function, so the probe and the door cannot disagree');
+r.head('the refusal ladder is one function, so both halves cannot disagree');
 const gdoor = fnBody('googleDoorCheck');
-r.ok('the probe and the door both go through it',
-  /googleDoorCheck\(\)/.test(fnBody('doGoogleSignIn')) &&
-  /googleDoorCheck\(\)/.test(fnBody('doGoogleSignInProbe')));
+r.ok('the door goes through it', /googleDoorCheck\(\)/.test(fnBody('doGoogleStart')));
 r.ok('an empty identity is refused', /if \(!email\)/.test(gdoor));
 r.ok('a non-domain address is refused against CONFIG.ALLOWED_DOMAIN',
   /CONFIG\.ALLOWED_DOMAIN/.test(gdoor), (gdoor.match(/[^\n]*ALLOWED_DOMAIN[^\n]*/) || [''])[0]);
@@ -1895,28 +1914,105 @@ r.ok('a temp-password account is refused and sent to the password door',
   /isTempPasswordAccount\(u\)/.test(gdoor) && /temporary password/i.test(gdoor));
 r.ok('...and it reuses tempPasswordExpired rather than inventing a second TTL',
   /tempPasswordExpired\(u\)/.test(gdoor));
-// The counter belongs to the password door. Reading OR writing it here would give a
-// probe a way to lock a legitimate user out of their own recovery path.
-r.ok('NOTHING in the Google path touches the lockout counters',
+r.ok('...and every refusal precedes the admit, so no code escapes the ladder',
+  gdoor.indexOf('isTempPasswordAccount') < gdoor.lastIndexOf('return { email: email'),
+  { check: gdoor.indexOf('isTempPasswordAccount'), admit: gdoor.lastIndexOf('return { email: email') });
+// The counter belongs to the password door. Reading OR WRITING it here would give a
+// probe a way to lock a legitimate user out of their own recovery path — and
+// CLEARING it here would let someone wash away their own failed-password count by
+// clicking the Google button, which is a lockout bypass.
+r.ok('NOTHING in either half touches the lockout counters',
   !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(gdoor) &&
-  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('doGoogleSignIn')) &&
-  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('doGoogleSignInProbe')));
+  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('doGoogleStart')) &&
+  !/lockoutRemaining|recordFailedLogin|clearFailedLogin/.test(fnBody('mintGoogleSession')));
 
-r.head('the probe opens nothing, and the door mints exactly what the password door mints');
-const gprobe = fnBody('doGoogleSignInProbe');
-r.ok('the probe mints no session and writes no audit line',
-  !/mintSession/.test(gprobe) && !/appendAuditLinesLocked/.test(gprobe) && !/writeJsonLocked/.test(gprobe));
-r.ok('...and it reports who it would admit, so the UI can name them',
-  /status: 'ok'/.test(gprobe) && /email:/.test(gprobe) && /name:/.test(gprobe));
-const gsignin = fnBody('doGoogleSignIn');
-r.ok('the door mints a session and returns the same payload shape as the password door',
-  /mintSession\(email\)/.test(gsignin) &&
-  /sessionToken: token/.test(gsignin) && /access: getMyAccess\(email\)/.test(gsignin));
+r.head('half one issues a code, and mints nothing');
+const gstart = fnBody('doGoogleStart');
+r.ok('it mints no session and writes no audit line of its own',
+  !/\bmintSession\(/.test(gstart) && !/appendAuditLinesLocked/.test(gstart));
+r.ok('...and issuing the handoff is the only thing it does with an admitted address',
+  /issueHandoff\(c\.email\)/.test(gstart),
+  (gstart.match(/[^\n]*issueHandoff[^\n]*/) || [''])[0]);
+r.ok('a refusal is reported as a refusal, never swallowed into a code',
+  /if \(c\.error\) return handoffRedirect\(null, c\.error\.message\)/.test(gstart));
+
+r.head('the handoff code is a 122-bit secret, and it travels in the URL FRAGMENT');
+const findH = fnBody('findHandoffIn');
+r.ok('it is looked up BY CODE — on the way back there is no address to look it up by',
+  /String\(e\.code\) !== want/.test(findH), findH.slice(0, 260));
+r.ok('...and only among purpose "google" entries, so an emailed code can never be one',
+  /purpose\) !== 'google'/.test(findH));
+r.ok('the code is a hyphen-stripped UUID, not a six-digit code',
+  /Utilities\.getUuid\(\)\.replace\(\/-\/g, ''\)/.test(fnBody('issueHandoff')),
+  (fnBody('issueHandoff').match(/[^\n]*getUuid[^\n]*/) || [''])[0]);
+r.ok('the TTL is in minutes, and short',
+  Number((code.match(/HANDOFF_TTL_MIN\s*=\s*(\d+)/) || [])[1]) > 0 &&
+  Number((code.match(/HANDOFF_TTL_MIN\s*=\s*(\d+)/) || [])[1]) <= 5,
+  (code.match(/HANDOFF_TTL_MIN\s*=\s*\d+/) || ['absent'])[0]);
+// A spent code must be REFUSED, not merely marked. Setting `used = true` and never
+// reading it back is a replay hole, and it is exactly the bug this assertion was
+// written after: the first version of redeemHandoff had it.
+r.ok('redeemHandoff CHECKS used, it does not merely set it',
+  /if \(!found \|\| found\.used\) return refused;/.test(fnBody('redeemHandoff')),
+  (fnBody('redeemHandoff').match(/[^\n]*found\.used[^\n]*/) || [''])[0]);
+r.ok('issuing twice retires the earlier live code for that address',
+  /!\s*e\.used\)\s*e\.used = true/.test(fnBody('issueHandoff')),
+  (fnBody('issueHandoff').match(/[^\n]*e\.used = true[^\n]*/) || [''])[0]);
+r.ok('an unreadable expiry refuses — "cannot tell" must not mean "fresh"',
+  /var exp = asDate\(found\.expiresAt\)/.test(fnBody('redeemHandoff')) &&
+  /if \(!exp \|\| exp\.getTime\(\) < Date\.now\(\)\) return refused;/.test(fnBody('redeemHandoff')));
+r.ok('the refusals do not say whether the code ever existed — no oracle',
+  (fnBody('redeemHandoff').match(/message:\s*'/g) || []).length === 1,
+  (fnBody('redeemHandoff').match(/[^\n]*message:[^\n]*/) || [''])[0]);
+
+r.head('the redirect target is built SERVER-SIDE, so there is no open redirect');
+const hred = fnBody('handoffRedirect');
+r.ok('it reads CONFIG.APP_URL', /CONFIG\.APP_URL/.test(hred));
+// Structural, not a check: there is no client-supplied URL to validate, so there is
+// nothing an attacker can point at their own site. A `?next=` parameter would turn
+// this GET into an open redirect on a Google-hosted origin.
+r.ok('...and reads NO request parameter at all',
+  !/\bparam/.test(hred) && !/\be\.parameter/.test(hred),
+  (hred.match(/[^\n]*param[^\n]*/) || ['none'])[0]);
+r.ok('the code travels in the FRAGMENT, which is never sent to a server',
+  /'#sso='/.test(hred) && !/\?sso=/.test(hred),
+  (hred.match(/[^\n]*#sso[^\n]*/) || [''])[0]);
+r.ok('a refusal comes back as #ssoerr, encoded',
+  /#ssoerr=/.test(hred) && /encodeURIComponent/.test(hred));
+r.ok('the redirect is a page that REPLACES, so the Google door is not in the back button',
+  /location\.replace\(/.test(hred) && !/location\.href\s*=/.test(hred));
+r.ok('the embedded URL is escaped for a <script> block, not just JSON-stringified',
+  /replace\(\/</.test(fnBody('jsStringLiteral')) && /\\\\u003c/.test(fnBody('jsStringLiteral')),
+  fnBody('jsStringLiteral'));
+
+r.head('half two mints EXACTLY what the password door mints, from one shared body');
+const gexch = fnBody('doGoogleExchange');
+const gmint = fnBody('mintGoogleSession');
+// Two halves on two deployments are two chances to fix only one of them, so there is
+// one mint — the same last-login stamp, the same `google sso · <device>` line, the
+// same payload — and half two calls it rather than repeating it.
+r.ok('the exchange mints through mintGoogleSession, not by hand',
+  /mintGoogleSession\(res\.email, params\.device\)/.test(gexch) && !/\bmintSession\(/.test(gexch),
+  (gexch.match(/[^\n]*mintGoogleSession[^\n]*/) || [''])[0]);
+r.ok('a bad code returns the refusal as-is, with no email attached to it',
+  /if \(res\.error\) return res\.error;/.test(gexch) && /res\.email/.test(gexch));
+r.ok('the mint returns the same payload shape as the password door',
+  /\bmintSession\(email\)/.test(gmint) &&
+  /sessionToken: token/.test(gmint) && /access: getMyAccess\(email\)/.test(gmint),
+  (gmint.match(/[^\n]*sessionToken[^\n]*/) || [''])[0]);
 r.ok('the last-login stamp is written, and is best-effort like the password door\'s',
-  /lastLoginAt/.test(gsignin) && /catch/.test(gsignin));
+  /lastLoginAt/.test(gmint) && /catch/.test(gmint));
 r.ok('the sign-in line records the door it came through',
-  /signinAuditLine\(email, null, params\.device, signinAt, 'google'\)/.test(gsignin),
-  (gsignin.match(/[^\n]*signinAuditLine[^\n]*/) || [''])[0]);
+  /signinAuditLine\(email, null, device, signinAt, 'google'\)/.test(gmint),
+  (gmint.match(/[^\n]*signinAuditLine[^\n]*/) || [''])[0]);
+
+r.head('a Google handoff is invisible to the emailed-code throttle');
+// A handoff is not a mailed six-digit code, and counting it would let three Google
+// sign-ins spend a colleague's budget for the reset that is the only way back into a
+// locked account.
+r.ok('issueAuthCode skips purpose "google"',
+  /purpose\) === 'google'\) return;/.test(fnBody('issueAuthCode')),
+  (fnBody('issueAuthCode').match(/[^\n]*'google'[^\n]*/) || [''])[0]);
 
 r.head('signinAuditLine still writes the old line for everyone else');
 const sal = fnBody('signinAuditLine');

@@ -187,7 +187,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **2102 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **2155 cases across 16 suites**, all passing.
 (1954 before the field-report build; 1762 before the field-history/restore build;
 1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and its
 69 cases arrived with Stages 3–4;
@@ -200,15 +200,31 @@ kind of thing: 15 in `smoke-store.mjs` drive the real two-step login and read th
 real `audit/signins.jsonl` back — including that a *throwing* audit write still
 yields a working session — while the rest pin the request that carries the device
 label and the shape of the record. The **148** added by the field-report build are
-mostly of that kind too — the load-bearing ones are **behavioural**, not textual: 21
-in `smoke-ui.mjs` drive the Google door through its real functions under a recording
-transport (a refused probe leaves the button hidden and the console clean; a yes mints
-a session through the password door's own `finishAuth`; neither attaches a session
-token), and 12 in `smoke-list-intel.mjs` seed the IR-list cache *through the app* and
-read it back with no network at all — including that a total outage keeps the real
-records and the demo flag `false`, because showing five fabricated sample IRs to
-someone with four hundred real ones is misinformation they could act on. The rest pin
-the other eleven reports.)
+mostly of that kind too — the load-bearing ones are **behavioural**, not textual —
+and 12 in `smoke-list-intel.mjs` seed the IR-list cache *through the app* and read it
+back with no network at all, including that a total outage keeps the real records and
+the demo flag `false`, because showing five fabricated sample IRs to someone with four
+hundred real ones is misinformation they could act on. The rest pin the other eleven
+reports.)
+
+**The Google door was rebuilt once, and the rebuild is the interesting part.** It
+shipped first as a silent probe plus a background sign-in `fetch`; that design could
+never have worked, and the failure was **measured** rather than guessed — a cross-site
+request from gh-pages to the domain-scoped deployment comes back `401` **from Google,
+before any of our code runs**. The same URL opened as a top-level **navigation**
+reports the caller perfectly. So the door is now two halves: a click that *leaves the
+page*, and a one-time handoff code that comes back in the URL fragment. 35 assertions
+in `smoke-backend.mjs` pin the shape the behaviour cannot show — which identity call
+is used, that `redeemHandoff` **checks** `used` rather than only setting it (a replay
+hole the first version had), that the redirect target is built server-side and reads
+no request parameter, and that the two halves share one mint so a fix cannot land on
+only one of them. 36 in `smoke-ui.mjs` drive the behaviour: the click navigates and
+reaches the network zero times, an empty `SSO_URL` makes it do nothing at all, a
+`#sso=` return exchanges the code on the **primary** backend carrying no stale token,
+a `#ssoerr=` return shows the door's own words with nothing exchanged, the spent
+fragment is wiped with `replaceState` rather than by assigning the hash, and the
+pre-paint splash skip in `index.html` covers the refusal branch too — not just the
+code branch, which would otherwise cost a refused sign-in nine seconds of intro.
 
 One failure was **retired, not fixed**, worth knowing about because it will come
 back if someone re-pins it: `smoke-list-intel.mjs` asserted the card said

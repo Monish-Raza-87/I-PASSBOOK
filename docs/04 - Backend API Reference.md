@@ -294,6 +294,16 @@ and quietly make any `e.irNumber === irNumber` filter drop every status change.
 Lists the pre-app per-IR tabs (legacy workbook, ~IR310–IR441) so the master list
 can badge them and the detail view can show a read-only copy.
 
+### `googleStart`
+The Google door, **half one**. A **GET** (`?action=googleStart`), served by the
+**second, domain-scoped** deployment, and dispatched by a branch at the top of
+`doGet` — before the pre-auth map and before `buildResponse` — because it answers
+with an **HTML redirect page**, not JSON. It reads the caller's Workspace identity,
+runs the refusal ladder, and sends the browser back to `CONFIG.APP_URL` with either a
+one-time handoff code (`#sso=…`) or the reason it refused (`#ssoerr=…`). It is reached
+by a **navigation**, never a `fetch` — see [The Google door, in full](#the-google-door-in-full)
+below for why that is a measured constraint rather than a preference.
+
 ### Pre-auth endpoints
 These answer **before** `requireAuth`, which is why they must never leak anything
 about an account:
@@ -306,24 +316,66 @@ about an account:
 | `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
 | `forgotPassword` | Mails a 6-digit **reset** code. Response is byte-identical whether or not the account exists (no enumeration), and it does no throttling of its own — it calls the one shared `issueAuthCode(email, 'reset', CODE_TTL_MIN)`, which is where the per-email budget, the resend gap, the global ceiling and the retire-the-older-code rule live. |
 | `resetPassword` | Redeems the code (5-attempt cap, and a **reset** code is **consumed** by the reset it performs), sets the new password, revokes all sessions, and **returns no token** — the user then signs in, which proves the password was typed correctly. It **preserves** the account's `Status` rather than writing `'active'`: a reset must not re-enable an account an admin deliberately disabled, and it refuses a disabled account outright. It calls the lock-free `redeemCodeIn(…, consume=true)` inside its own wider lock, covering `codes.json`, `users.json` and `sessions.json` together — a redeem is one event, and a nested lock would deadlock rather than queue. |
-| `googleSignIn` | The Google door. Reads `Session.getActiveUser().getEmail()` and mints a session for that address, with the same last-login stamp and sign-in audit shape as `login`. It carries **no I-PASSBOOK credential at all** — the Workspace session is the factor — which is why it lives pre-auth beside `logout`. See below. |
-| `googleSignInProbe` | "Would the door open for the caller?" — asked by the sign-in screen to decide whether to show the button. Mints nothing, audits nothing and touches no counter, so it is safe to run automatically: the answer is about the caller's own identity, which Google is already reporting to them. |
+| `googleExchange` | The Google door, **half two**. Takes a one-time **handoff code** — 32 hex characters minted a moment earlier by the domain-scoped deployment — and mints a session for the address that code belongs to, with the same last-login stamp and sign-in audit shape as `login`. It carries **no I-PASSBOOK credential at all** (the handoff code is the factor), which is why it lives pre-auth beside `logout`. It runs on the **primary** backend, because that is the deployment the app's own browser can reach. See below. |
+
+The Google door has **two halves on two deployments**, and `googleExchange` is only
+half of it. The other half is a **GET**, not an action in this table:
 
 #### The Google door, in full
 
-`Session.getActiveUser()` — **never `getEffectiveUser()`**. The latter returns the
-*script owner*, so under "Execute as: Me" it would report `monish.raza` for every
-caller on earth and make everyone the same person. `smoke-backend.mjs` pins the
-word.
+**Half one — `GET ?action=googleStart`, on the second (domain-scoped) deployment.**
+It is a **navigation**, and that is measured rather than assumed: a cross-site
+`fetch` from the gh-pages origin to that deployment comes back **401 from Google
+before our code runs**, because a cross-site background request does not carry the
+caller's Google session cookie. The same URL opened as a top-level navigation
+reports the caller perfectly. So the button is a link-shaped click, not a request.
 
-It only works from a deployment whose access is **Anyone within `<domain>`**; under
-plain "Anyone" it returns `''` and the ladder below refuses every time. That is why
-the frontend needs its own deployment URL — see
-[05](05 - Configuration & Secrets.md) and [08](08 - Development Guide.md).
+Because it returns a redirect **page** rather than JSON, `googleStart` is dispatched
+by a **branch at the top of `doGet`**, before the pre-auth map and before
+`buildResponse` — a map entry could not return HTML.
 
-`googleDoorCheck()` is the shared ladder, called by **both** actions so the button
-is only ever offered where the door would actually open, and so that someone who
-tries both doors is never told two different things:
+**Half two — `POST action=googleExchange`, on the primary ("Anyone") deployment.**
+Called by the app the moment it parses the fragment. `redeemHandoff()` looks the code
+up **by code** (at that point there is a code and not yet an address — an emailed
+6-digit code is looked up by the address it was sent to, and there is nothing to look
+it up by here), refuses it if it has been used or has aged out, marks it spent, and
+returns `{ email }`. `mintGoogleSession()` then does everything a Google identity
+implies — one function, called by half two, so the two halves cannot drift.
+
+`HANDOFF_TTL_MIN` is **2 minutes**; the code is single-use, and issuing a new one
+retires any earlier live handoff for the same address, so asking twice cannot leave
+two working codes in the wild. Being 122 bits it needs no attempt counter — the
+counter exists on the emailed code only because six digits *is* walkable. A spent
+code is **checked**, not merely marked: `findHandoffIn` deliberately returns it and
+`redeemHandoff` refuses on `used`, so a caller holding a used code gets the same
+answer as any other rather than a different one that would confirm it was once real.
+For the same reason the refusal never says whether the code existed and expired or
+never existed at all — an unauthenticated caller must not be able to ask a 122-bit
+secret "are you real?".
+
+Google handoffs are also **invisible to the emailed-code throttle**: `issueAuthCode`
+returns early on `purpose === 'google'`, so three Google sign-ins cannot spend a
+colleague's budget for the reset that is the only way back into a locked account.
+They live in the same `codes.json`, with `purpose: 'google'`.
+
+**The redirect back to the app.** `handoffRedirect(code, message)` builds the target
+**server-side from `CONFIG.APP_URL`** and reads **no request parameter** — that is
+the whole open-redirect defence, and it is structural rather than a check, because
+there is no client-supplied URL to validate. The code rides in the URL **fragment**
+(`#sso=…`, or `#ssoerr=…` for a refusal): fragments are never sent to a server, so
+the code cannot land in a proxy log, a CDN log or a `Referer` header. The page does
+`location.replace()` rather than an assignment, so the Google door does not sit in
+the back button, and the URL is escaped for a `<script>` block (`jsStringLiteral`)
+rather than merely JSON-stringified, so a value cannot become markup.
+
+**A GET that mints something.** `<img src="…?action=googleStart">` *can* trigger it,
+and that is fine: the response is a redirect to a **fixed** server-side URL, an
+image's response is discarded and no navigation happens, so an attacker neither
+learns the code nor moves the victim. Issuing a code also grants no access on its
+own — it must still be redeemed, from the app, by whoever holds it.
+
+**The ladder.** `googleDoorCheck()` is the shared refusal ladder, called by the
+door:
 
 | Condition | Answer |
 |---|---|
@@ -332,6 +384,14 @@ tries both doors is never told two different things:
 | No account row | "No account found for this email — ask an admin to create one." There is still **no self-signup**: a Google account is an identity, not a membership |
 | `Status` is `disabled` | Refuse; an admin must re-enable it |
 | Temp-password account | Refuse and point at the password door, so the **forced first-login change still happens**. Minting here would be the exact bypass the no-token rule in `doLoginPassword` exists to prevent |
+
+`Session.getActiveUser()` — **never `getEffectiveUser()`**. The latter returns the
+*script owner*, so under "Execute as: Me" it would report `monish.raza` for every
+caller on earth and make everyone the same person. `smoke-backend.mjs` pins the
+word. It only works from a deployment whose access is **Anyone within `<domain>`**;
+under plain "Anyone" it returns `''` and the ladder refuses every time — a closed
+door, never a broken one. That is why the frontend needs its own deployment URL —
+see [05](05 - Configuration & Secrets.md) and [08](08 - Development Guide.md).
 
 It deliberately does **not** touch `attempts.json`, in either direction. Not
 `recordFailedLogin` — a Workspace session is not guessable, so there is nothing to

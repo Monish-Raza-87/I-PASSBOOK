@@ -208,6 +208,13 @@ and Google sign-in is simply absent; nothing else about the app changes. Do it o
 of order (after any number of primary re-deploys) and it still works — it only
 needs *a* version, and it is fine for both deployments to serve the same one.
 
+> **Any change to `backend.gs` must be re-deployed to BOTH deployments**, because the
+> door's two halves run on different ones: `googleStart` is served by this one, and
+> `googleExchange` by the primary. Publishing a new version to the primary alone leaves
+> the door half-updated — the click leaves for a deployment still running the old code
+> and comes back with a code the new primary may not understand. When in doubt, redeploy
+> the primary first (it is the one every other request uses), then this one.
+
 1. Deploy → **New deployment** → Web app, and here — the one place it is required —
    that is *not* the mistake Step 2's warning is about: the second deployment is
    **additive**, and the first one's `/exec` is not touched by it.
@@ -217,11 +224,13 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 2. Copy **that** `/exec` URL — not the first one — into `CONFIG.SSO_URL` in `app.js`
    (see [05](05 - Configuration & Secrets.md)), bump `CACHE_NAME`, and deploy the
    frontend.
-3. Sign out and confirm the Google button appears on the sign-in screen. If it does
-   not, the deployment's access level is wrong: under plain "Anyone",
-   `Session.getActiveUser()` returns `''` for every caller, both Google actions
-   refuse, and the probe — which is designed to fail silently — keeps the button
-   hidden. Check the access level, not the code.
+3. Sign out and click **Sign in with Google**. If the button does not appear at all,
+   `CONFIG.SSO_URL` is empty. If it appears and the click comes back with *"Google did
+   not report an account for this browser"*, this deployment's access level is wrong:
+   under plain "Anyone", `Session.getActiveUser()` returns `''` for every caller and
+   the ladder refuses every time. Check the access level, not the code. If it comes
+   back with *"That Google sign-in link is no longer valid"*, the primary deployment
+   is not serving the version that has `googleExchange` — see the note above.
 
 > **Why a second deployment rather than flipping the first.** Google refuses a
 > domain-restricted request at its own edge, before the script runs. Flipping the
@@ -229,6 +238,17 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 > the people who need it: a shared machine with no Google session, and the external
 > address in `CONFIG.EXTERNAL_EMAILS`, which no domain restriction admits. Two
 > deployments, one script, two doors.
+>
+> **Why the door is opened by a NAVIGATION and not a `fetch`.** This is the one thing
+> about this feature that is easy to "simplify" back into a bug. A background `fetch`
+> from the gh-pages origin to the domain-scoped deployment is answered by Google with
+> **401 before the script runs** — a cross-site background request does not carry the
+> caller's Google session cookie, and no amount of CORS configuration on our side
+> changes that, because the refusal happens above us. A **top-level navigation** to the
+> same URL reports the caller perfectly. That is why the button sets `location.href`,
+> and why the answer comes back as a one-time code in the URL fragment for the primary
+> deployment to redeem. If you are ever tempted to replace it with a `fetch`, this
+> paragraph is the reason not to.
 >
 > Rolling back is deleting the `Google door` deployment and clearing `CONFIG.SSO_URL`.
 > No code change, no data touched.

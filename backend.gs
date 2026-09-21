@@ -12,11 +12,21 @@
 //     at Google's edge before this script ever runs.
 //
 //  2. THE GOOGLE DOOR — same script, same version, Execute as: Me →
-//     Who has access: Anyone within <domain>. It serves ONLY googleSignIn and
-//     googleSignInProbe, and its /exec URL goes in the frontend's CONFIG.SSO_URL.
-//     The domain restriction is what makes Session.getActiveUser() report the
-//     caller: under "Anyone" it returns '' and both actions refuse. Delete this
-//     deployment and Google sign-in disappears; nothing else is affected.
+//     Who has access: Anyone within <domain>. It serves ONLY googleStart, reached
+//     by the browser NAVIGATING to it, and its /exec URL goes in the frontend's
+//     CONFIG.SSO_URL. The domain restriction is what makes Session.getActiveUser()
+//     report the caller: under "Anyone" it returns '' and the action refuses.
+//     Delete this deployment and Google sign-in disappears; nothing else is
+//     affected.
+//
+//     WHY A NAVIGATION AND NOT A BACKGROUND CALL — measured, not assumed. A page
+//     on a different address (the gh-pages app) calling this URL with fetch() gets
+//     **401** from Google before this script runs, because the caller's Google
+//     session is not attached to a cross-site background request; the identical
+//     URL opened as a navigation gets through and reports the caller. So the door
+//     is a CLICK that leaves the page for about a second and comes straight back
+//     with a one-time handoff code. googleExchange (a POST on deployment 1, which
+//     is "Anyone") swaps that code for a session. See docs/10.
 // ============================================================
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -909,6 +919,16 @@ function globalCodeCap(purpose) {
 // hour" is a count over issued codes, and a one-per-email record would forget
 // every code it replaced. Entries older than a day are dropped on write, so the
 // file stays small — the longest window any reader asks about is one hour.
+//
+// THREE PURPOSES live here and they are not interchangeable:
+//   'reset'  — 6 digits, emailed, 15 min, single use.
+//   'login'  — 6 digits, emailed, 8h30m, REUSABLE inside the day.
+//   'google' — 32 hex chars, NEVER emailed: it is the one-time handoff the Google
+//              door hands back to the browser in a URL fragment. It is looked up BY
+//              CODE, not by email (the app knows the code and not yet the address),
+//              and it is deliberately invisible to the emailed-code throttle below:
+//              counting it would let three Google sign-ins in an hour spend a
+//              person's budget for a password reset. See issueHandoff / redeemHandoff.
 function codesEntries() {
   var c = readJson('codes.json');
   return (c && c.entries instanceof Array) ? c.entries : [];
@@ -960,6 +980,12 @@ function issueAuthCode(email, purpose, ttlMin) {
     var hourAgo = now - 60 * 60 * 1000;
     var recent = 0, newestMs = 0, recentSamePurpose = 0;
     entries.forEach(function (e) {
+      // A Google handoff code is not an emailed code and must not be counted here.
+      // It costs no mail, it is not guessable, and it is not something a person
+      // "asks for" — so spending the hourly budget on it would mean three Google
+      // sign-ins silently refusing a colleague their password reset, which is the
+      // one path back into a locked account.
+      if (String(e.purpose) === 'google') return;
       var at = asDate(e.createdAt);
       var createdMs = at ? at.getTime() : 0;
       if (createdMs > hourAgo && String(e.purpose) === purpose) recentSamePurpose++;
@@ -1585,37 +1611,104 @@ function googleDoorCheck() {
   return { email: email, user: u };
 }
 
-// POST googleSignInProbe — "would the Google door open for this caller?", asked
-// without opening it. The sign-in screen runs this silently to decide whether to
-// show the button at all.
+// ── THE HANDOFF CODE — what the Google door hands back to the browser ─────────
 //
-// A probe mints no session, writes no audit line and touches no counter, so
-// running it automatically costs nothing and reveals nothing: the answer is about
-// the caller's OWN identity, which Google is already reporting to them. It is the
-// reason a wrong deployment setting shows no button rather than a broken app.
-function doGoogleSignInProbe() {
-  var c = googleDoorCheck();
-  if (c.error) return c.error;
-  return { status: 'ok', email: c.email, name: userField(c.user, 'Name') };
+// The door cannot return a session directly. It is a NAVIGATION: the browser is
+// on script.google.com, not in the app, so all this deployment can do is send the
+// browser back to CONFIG.APP_URL — and it must send something that proves, once it
+// arrives, which Workspace account opened the door. That something is a handoff
+// code, and it travels in the URL FRAGMENT (`#sso=…`) for one reason: fragments
+// are never sent to a server, so the code cannot land in a proxy log, a CDN log or
+// a Referer header on the way back.
+//
+// 32 hex characters from Utilities.getUuid — about 122 bits, so it is not
+// guessable, which is what makes googleExchange safe to serve from the "Anyone"
+// deployment where no Google session is attached. Unlike the emailed 6-digit code
+// it needs no attempt counter: an attacker cannot walk 122 bits, and the counter
+// exists only because 6 digits IS walkable.
+var HANDOFF_TTL_MIN = 2;
+
+// Look an entry up BY CODE. This is the whole reason a handoff is not the same
+// thing as an emailed code: at the moment the browser comes back, the app has a
+// code and not yet an email — an emailed code is looked up by the address it was
+// sent to, and there is nothing to look it up by here.
+function findHandoffIn(entries, code) {
+  var want = String(code || '').trim();
+  if (!want) return null;
+  for (var i = entries.length - 1; i >= 0; i--) {
+    var e = entries[i];
+    if (String(e.purpose) !== 'google') continue;
+    if (String(e.code) !== want) continue;
+    return e;                       // used/expired entries are judged by the caller
+  }
+  return null;
 }
 
-// POST googleSignIn — the door itself. Everything below the ladder mirrors
-// doLoginPassword's success path (last-login stamp, audit line, mint) so the two
-// doors produce identical sessions and one audit trail with two words for how it
-// was opened.
-function doGoogleSignIn(params) {
-  var c = googleDoorCheck();
-  if (c.error) return c.error;
-  var email = c.email;
+// Issue one, retiring any earlier live handoff for the same address — so asking
+// twice in two minutes cannot leave two working codes in the wild.
+function issueHandoff(email) {
+  return withRowLockOrThrow(function () {
+    var raw = readJsonLocked('codes.json');
+    var entries = pruneCodesIn((raw && raw.entries instanceof Array) ? raw.entries : []);
+    var now = Date.now();
+    var k = usersKey(email);
+    entries.forEach(function (e) {
+      if (String(e.purpose) === 'google' && usersKey(e.email) === k && !e.used) e.used = true;
+    });
+    var code = Utilities.getUuid().replace(/-/g, '');
+    entries.push({ email: k, code: code, purpose: 'google', createdAt: now,
+                   expiresAt: now + HANDOFF_TTL_MIN * 60 * 1000, attempts: 0, used: false });
+    writeJsonLocked('codes.json', { entries: entries });
+    return code;
+  });
+}
 
-  // Deliberately NO lockout bookkeeping here, in either direction. Not
-  // recordFailedLogin: a Workspace session is not guessable, so there is nothing
-  // to throttle. And not clearFailedLogin either — someone fumbling their PASSWORD
-  // must not be able to wash that counter away by clicking this button. The
-  // counter belongs to the password door, and only the password door moves it.
+// Redeem one: single use, and it dies on the first look whatever the outcome, so
+// a code that was seen by the wrong browser cannot be tried again.
+//
+// `used` is checked, not merely set. findHandoffIn deliberately returns a spent
+// entry when the code matches — the code is the address and a caller holding a
+// used one must get the same refusal as any other, rather than a different answer
+// that would tell them the code was real once.
+//
+// The refusals deliberately do NOT say whether the code existed and expired, or
+// never existed at all. Both are answered the same way because the caller here is
+// unauthenticated — distinguishing them would turn this action into an oracle for
+// "is this a real handoff code", which is the one thing a 122-bit secret must not
+// be asked.
+function redeemHandoff(code) {
+  var refused = { error: { status: 'error', message: 'That Google sign-in link is no longer valid — click Sign in with Google again.' } };
+  return withRowLockOrThrow(function () {
+    var raw = readJsonLocked('codes.json');
+    var entries = (raw && raw.entries instanceof Array) ? raw.entries : [];
+    var found = findHandoffIn(entries, code);
+    if (!found || found.used) return refused;
+    found.used = true;
+    writeJsonLocked('codes.json', { entries: entries });
+    // An unreadable expiry refuses. There is no third answer here: a handoff is
+    // either fresh enough to use or it is not, and treating "cannot tell" as fresh
+    // would be the one way to make a 2-minute window unbounded.
+    var exp = asDate(found.expiresAt);
+    if (!exp || exp.getTime() < Date.now()) return refused;
+    return { email: usersKey(found.email) };
+  });
+}
 
-  // Last-login stamp, best-effort, exactly as above: failing to record it must
-  // never fail a sign-in that is already authenticated.
+// Everything after a Google identity has been established, shared by the two
+// halves so they cannot drift: the handoff door must produce exactly the session
+// the direct door did — same last-login stamp, same `google sso · <device>` audit
+// line, same mint. Extracted rather than copied because the two halves run on two
+// DIFFERENT deployments, and a fix applied to one of two copies is a bug the next
+// reader cannot see.
+//
+// Deliberately NO lockout bookkeeping here, in either direction. Not
+// recordFailedLogin: a Workspace session is not guessable, so there is nothing to
+// throttle. And not clearFailedLogin either — someone fumbling their PASSWORD must
+// not be able to wash that counter away by clicking this button. The counter
+// belongs to the password door, and only the password door moves it.
+function mintGoogleSession(email, device) {
+  // Last-login stamp, best-effort, exactly as the password door records it:
+  // failing to record it must never fail a sign-in that is already authenticated.
   try {
     withRowLockOrThrow(function () {
       var users = readJsonLocked('users.json');
@@ -1634,13 +1727,83 @@ function doGoogleSignIn(params) {
     var signinAt = Date.now();
     withRowLockOrThrow(function () {
       appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT,
-        [signinAuditLine(email, null, params.device, signinAt, 'google')]);
+        [signinAuditLine(email, null, device, signinAt, 'google')]);
     });
   } catch (e) { /* non-fatal */ }
 
   var token = mintSession(email);
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
+
+// Escape a string for embedding inside a <script> block. JSON.stringify alone is
+// not enough: the sequence `</script>` inside a JS string literal still ends the
+// block in an HTML parser, which is how a value becomes markup.
+function jsStringLiteral(s) {
+  return JSON.stringify(String(s)).replace(/</g, '\\u003c');
+}
+
+// Send the browser back to the app, carrying either a fresh handoff code or the
+// reason the door refused.
+//
+// THE TARGET IS BUILT SERVER-SIDE from CONFIG.APP_URL and never from a request
+// parameter. That is the whole open-redirect defence, and it is structural rather
+// than a check: there is no client-supplied URL to validate, so there is nothing
+// an attacker can point at their own site.
+//
+// Apps Script cannot set a status code, so the redirect is a page whose only job
+// is to replace the current history entry. `location.replace` rather than an
+// assignment so the Google page does not sit in the back button.
+function handoffRedirect(code, message) {
+  var base = String(CONFIG.APP_URL || '');
+  var target = code
+    ? base + '#sso=' + code
+    : base + '#ssoerr=' + encodeURIComponent(String(message || 'Google sign-in failed.'));
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
+           + '<title>Signing in…</title></head><body>'
+           + '<p style="font:16px system-ui;padding:24px">Signing you in…</p>'
+           + '<script>location.replace(' + jsStringLiteral(target) + ');</script>'
+           + '</body></html>';
+  return ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML);
+}
+
+// GET googleStart — the door, opened by a CLICK THAT NAVIGATES.
+//
+// A GET that mints something deserves the question "can a hostile page trigger
+// it?". It can: `<img src="…?action=googleStart">` would make this issue a code
+// into the victim's… nothing. The response is a redirect to a FIXED server-side
+// URL; an image's response is discarded and no navigation happens, so the attacker
+// neither learns the code nor moves the victim. Issuing a code also grants no
+// access on its own — it must still be redeemed, from the app, by whoever holds it.
+function doGoogleStart() {
+  var c = googleDoorCheck();
+  if (c.error) return handoffRedirect(null, c.error.message);
+  var code = issueHandoff(c.email);
+  if (!code) return handoffRedirect(null, 'Could not start Google sign-in just now — try again.');
+  return handoffRedirect(code, '');
+}
+
+// POST googleExchange — half two, on the deployment that is "Anyone".
+//
+// It runs on THAT deployment on purpose: the app is calling it from the browser,
+// and a background call to the domain-restricted one is refused by Google before
+// any of this runs. Here there is no Google identity to read and none is needed —
+// the credential is the handoff code, minted a moment ago by the deployment that
+// COULD read it.
+function doGoogleExchange(params) {
+  var res = redeemHandoff(params.code);
+  if (res.error) return res.error;
+  return mintGoogleSession(res.email, params.device);
+}
+
+// POST googleSignIn — REMOVED, and deliberately not kept "for later".
+//
+// It read the caller's Workspace identity from a POST body, which is unreachable:
+// a browser cannot POST to the domain-restricted deployment without Google
+// refusing it first (measured — see the header), and nothing else in this system
+// can supply a Google session at all. It and googleSignInProbe were replaced by
+// doGoogleStart + doGoogleExchange, which reach the same identity by the one route
+// that works. Dead code that looks like a working door is worse than absent: the
+// next person to debug this would try it first.
 
 // The sign-in OTP gate, called from doLoginPassword on an already-verified
 // password. Returns null to MEAN "carry on and mint the session", or the response
@@ -1792,6 +1955,11 @@ function doGet(e) {
   var action = e.parameter.action || '';
   var result;
   try {
+    // The Google door's first half — a NAVIGATION, so it is GET, and it answers
+    // with a redirect page rather than JSON. It is checked before the preAuth map
+    // because it must return an HtmlOutput and never go through buildResponse.
+    if (action === 'googleStart') return doGoogleStart();
+
     var preAuth = {
       ping:         function () { return ping(); },
       sessionCheck: function () { return sessionCheck(e); },
@@ -1830,13 +1998,13 @@ function doPost(e) {
       resetPassword:  function () { return resetPassword(params); },
       // logout revokes the session it is handed, so it authenticates itself.
       logout:         function () { return doLogout(params.sessionToken); },
-      // The Google door, in both halves. Self-authenticating for the same reason
-      // logout is: the credential is the Workspace session Google reports to the
-      // script, so there is no I-PASSBOOK token to check yet. Serving these from a
-      // "Anyone within indrones.com" deployment is what makes getActiveUser()
-      // report the caller — under plain "Anyone" both refuse and stay silent.
-      googleSignIn:      function () { return doGoogleSignIn(params); },
-      googleSignInProbe: function () { return doGoogleSignInProbe(); },
+      // The Google door, half two. Self-authenticating for the same reason logout
+      // is: the credential is the one-time handoff code the domain-restricted
+      // deployment just minted, so there is no I-PASSBOOK token to check yet. It
+      // runs on THIS deployment because it is called from the app's own browser,
+      // and a background call to the domain-restricted one is refused by Google
+      // before this script runs. See doGoogleStart and docs/10.
+      googleExchange: function () { return doGoogleExchange(params); },
       ping:           function () { return ping(); },
       sessionCheck:   function () { return sessionCheck(e); },
     };

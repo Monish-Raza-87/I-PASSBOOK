@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v41';
+const APP_VERSION = 'v42';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -49,6 +49,14 @@ const CONFIG = {
   // need it: a shared machine with no Google session, and the external address in
   // the backend's CONFIG.EXTERNAL_EMAILS.
   //
+  // THIS URL IS OPENED, NEVER FETCHED. It is the one thing about this feature that
+  // is easy to get wrong, and the first version of it did: fetching this URL from
+  // the app gets **401** from Google before any of our code runs, because the
+  // caller's Google session is not attached to a cross-site background request.
+  // Opening the same URL as a navigation reports the caller perfectly. Everything
+  // about the door follows from that one measurement — see the GOOGLE SIGN-IN block
+  // further down, and docs/10.
+  //
   // EMPTY IS A VALID, WORKING STATE. With this blank the sign-in screen shows the
   // password form and no Google button, and nothing else about the app changes.
   // Deleting the second deployment in Apps Script reverts the feature with no code
@@ -56,9 +64,7 @@ const CONFIG = {
   //
   // Set 2026-09-20, live: the domain-scoped URL Google hands back for a
   // "Anyone within indrones.com" deployment — note the `/a/macros/indrones.com/`
-  // segment, which is what distinguishes it from GAS_URL above. `?action=ping` on it
-  // answers `{"status":"ok","apiVersion":3}`, which is how it was checked before
-  // this line was written.
+  // segment, which is what distinguishes it from GAS_URL above.
   SSO_URL: 'https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-BZIMMAgzI_71sZZhYHE9vh0We5nDtTydOSny_zZ_yQfIi0z22D7uKj/exec',
 
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
@@ -318,45 +324,66 @@ function resetPasswordBackend(email, code, newPassword) {
   return postAuth('resetPassword', { email, code, newPassword });
 }
 
-// ─── GOOGLE SIGN-IN — the same backend, a second deployment ───────────────────
-// See CONFIG.SSO_URL for why this is a second deployment and not a setting on the
-// existing one. Everything here posts to that URL through _origFetch, so no session
-// token is ever attached: the credential is the caller's Workspace session, and
-// sending the previous user's I-PASSBOOK token would be the exact hole this door
-// must not have on a shared machine.
-function googleSso(action, fields) {
-  const fd = new FormData();
-  fd.append('action', action);
-  Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
-  return _origFetch(CONFIG.SSO_URL, { method: 'POST', body: fd })
-    .then(r => r.text().then(t => {
-      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-    }))
-    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+// ─── GOOGLE SIGN-IN — the same backend, reached by NAVIGATION ─────────────────
+//
+// See CONFIG.SSO_URL for why this is a second deployment. The part worth knowing
+// here is why this door is a NAVIGATION and not a fetch, because the first version
+// of it was a fetch and could never have worked: a page on gh-pages calling the
+// domain-restricted deployment gets **401** from Google before our code runs, since
+// the caller's Google session is not attached to a cross-site background request.
+// The same URL opened as a navigation reports the caller perfectly. So:
+//
+//   click → the page goes to the door → the door sends it straight back to
+//   CONFIG.APP_URL with a one-time code in the FRAGMENT (`#sso=…`) →
+//   googleExchangeBackend swaps that code for a session, on the MAIN deployment,
+//   which is "Anyone" and therefore reachable from here.
+//
+// The fragment, not a query string, on purpose: fragments are never sent to a
+// server, so the code cannot land in a log or a Referer header. It is single-use
+// and dies after two minutes. We strip it from the address bar immediately.
+
+// Where the click goes. No parameters: the return address is a server-side
+// constant, so there is no client-supplied URL for anyone to redirect.
+function googleStartUrl() {
+  return CONFIG.SSO_URL + '?action=googleStart';
 }
 
-// "Would the Google door open for the person at this browser?" — asked silently, so
-// the sign-in screen knows whether to offer the button at all. A probe mints
-// nothing, logs nothing and counts nothing, so running it automatically is safe.
-function googleSignInProbeBackend() {
-  if (!CONFIG.SSO_URL) return Promise.resolve({ status: 'error', message: 'Google sign-in is not configured.' });
-  return googleSso('googleSignInProbe', {});
+// Swap the handoff code for a session. A POST to the MAIN backend via postAuth,
+// which uses _origFetch — so no session token is ever attached. That matters on a
+// shared machine: the credential here is the handoff code, and riding the previous
+// person's I-PASSBOOK token along would be the exact hole this door must not have.
+function googleExchangeBackend(code) {
+  if (!code) return Promise.resolve({ status: 'error', message: 'Google sign-in did not return a code.' });
+  return postAuth('googleExchange', { code, device: deviceLabel() });
 }
 
-// The door itself. Sent on a click and never automatically: signOut reloads the
-// page, so an automatic sign-in would put the NEXT person on a shared laptop
-// straight back into the previous person's session.
-function googleSignInBackend() {
-  if (!CONFIG.SSO_URL) return Promise.resolve({ status: 'error', message: 'Google sign-in is not configured.' });
-  return googleSso('googleSignIn', { device: deviceLabel() });
-}
+// What the door sent back, read ONCE at boot and then wiped from the address bar.
+//
+// Read synchronously at parse time, before anything can navigate or re-route: the
+// app routes by hash, so `#sso=…` and `#ssoerr=…` are transient values that share a
+// namespace with `#/tickets` and must not survive into a route.
+//
+// replaceState rather than assigning location.hash, because assigning would push a
+// history entry: the back button would then return to a URL whose code is already
+// spent, which reads as "that link is no longer valid" on a sign-in that worked.
+const _handoff = (() => {
+  const h = location.hash || '';
+  let out = null;
+  if (h.indexOf('#sso=') === 0) {
+    out = { code: decodeURIComponent(h.slice(5)) };
+  } else if (h.indexOf('#ssoerr=') === 0) {
+    out = { error: decodeURIComponent(h.slice(8)) || 'Google sign-in failed.' };
+  }
+  if (!out) return null;
+  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* the code is spent anyway */ }
+  return out;
+})();
 
-// The address Google reported for this browser, remembered from the probe so the
-// label can be filled in without a second round trip. Never trusted as an identity:
-// the door re-reads it on the server, and this is only a display fallback.
-let _googleProbeEmail = '';
-let _googleDoorAsked = false;      // one probe per page load, success or not
-let _googleDoorOpen = false;       // the probe said yes — mode changes honour this
+// True while a Google sign-in is arriving. Read by the splash so a return from the
+// door does not sit through the nine-second intro BEFORE it signs in — the intro is
+// the app's opening, and this is the middle of a sign-in that has already started.
+function isHandoffReturn() { return !!_handoff; }
+
 
 // Refresh the caller's role/permissions from the backend (boot + after department
 // changes). Best-effort — a failure leaves the previous access in place, and the
@@ -417,14 +444,13 @@ window.fetch = function (input, init) {
     // The auth calls authenticate themselves (credentials in the body) and must
     // never be subject to the session gate below.
     //
-    // googleSignIn/googleSignInProbe are listed for the same reason as login: their
-    // credential is the Workspace session Google reports to the script, and there is
-    // no I-PASSBOOK token to check. They normally go to CONFIG.SSO_URL, which the
-    // first line above already short-circuits — so no token is attached and they are
-    // never gated. They are named here anyway, because that short-circuit is a URL
-    // comparison and an admin who points SSO_URL at the primary URL would otherwise
-    // silently hand whoever was signed in last on this machine their own session.
-    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleSignIn|googleSignInProbe)\b/.test(url);
+    // googleExchange is listed for the same reason as login: its credential is the
+    // one-time handoff code minted by the Google door, and there is no I-PASSBOOK
+    // token to check yet. Without this, the exchange would ride whatever token was
+    // left on the machine — and on a shared laptop that is the previous person's
+    // session, which is the exact hole this door must not have. It also keeps a
+    // spent handoff code from being answered as "your session expired".
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleExchange)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
@@ -1011,7 +1037,14 @@ window.addEventListener('load', () => {
   // A device that is already signed in: no fade, no video, no download.
   // base.css has already hidden the splash off the pre-paint attribute, so this
   // only makes it explicit and keeps the element's inline state truthful.
+  //
+  // A Google return skips it for the same reason: the sign-in has already started,
+  // and nine seconds of intro in the middle of it is a delay standing between a
+  // person and a session they have already earned. index.html's pre-paint script
+  // makes the same call, so the splash never even paints — the two conditions are
+  // pinned to each other by smoke-shell.mjs.
   if (hasStoredSession()) { dismissSplash(true); return; }
+  if (isHandoffReturn()) { splash.style.display = 'none'; finishHandoff(_handoff); return; }
 
   const video = document.getElementById('splash-video');
   if (!video) { dismissSplash(false); return; }
@@ -1181,63 +1214,57 @@ function showAuth() {
   wireAuthForm();
   wirePasswordToggles();
   maskAllPasswords();
-  offerGoogleDoor();
-}
-
-// Ask, once per page load, whether the Google door would open here, and reveal the
-// button only if it would.
-//
-// Silence is the whole contract: no toast, no error line, no console noise, and any
-// answer other than a plain "ok" leaves the button hidden and the password form
-// exactly as it was. A failed probe must cost the user nothing — they cannot act on
-// it, and an unexplained error above the sign-in form reads as a broken app. That is
-// also what makes a wrong SSO_URL safe: the symptom is a missing button, never a
-// broken sign-in.
-function offerGoogleDoor() {
-  const btn = document.getElementById('auth-google-btn');
-  if (!btn) return;
-  // No second deployment configured, or already answered this page load. The latch
-  // matters because showAuth() runs on every route back to the sign-in screen
-  // (a sign-out, an expired session) and must not re-ask each time.
-  if (!CONFIG.SSO_URL || _googleDoorAsked) return;
-  _googleDoorAsked = true;
-  googleSignInProbeBackend().then(d => {
-    if (!d || d.status !== 'ok') return;
-    _googleProbeEmail = d.email || '';
-    _googleDoorOpen = true;
-    // Reveal through the mode sync rather than by hand, so "is the button shown" has
-    // exactly one answer in this file. It is the same function that hides it again
-    // on the code step.
-    setAuthMode(_authMode);
-    const who = (d.name || '').trim();
-    // The name, when the Workspace account has one, so the button states who it is
-    // about to sign in AS. On a shared machine that is the difference between
-    // "Sign in with Google" and "Continue as Sreenivas Pai". The label still starts
-    // with the visible words, which is what keeps it announced as the same control.
-    if (who) btn.setAttribute('aria-label', 'Sign in with Google as ' + who);
-  }).catch(() => { /* stay hidden */ });
 }
 
 // The Google door's click. Module scope, not wireAuthForm's, because it is the one
 // thing on that screen that ignores everything typed into the form: it carries no
 // email, no password and no code, and its whole result is a session or a refusal.
+//
+// There is no fetch here to await and no failure to show. The click LEAVES the
+// page — that is the mechanism, not a side effect — and whatever comes of it
+// arrives back through #sso= / #ssoerr= and is handled by finishHandoff(). The
+// button is disabled first so a second click cannot start a second handoff while
+// the browser is still on its way out.
 function submitGoogleSignIn() {
+  if (!CONFIG.SSO_URL) return Promise.resolve();
   const btn = document.getElementById('auth-google-btn');
   if (btn) btn.disabled = true;
   setAuthError('');
-  return googleSignInBackend().then(d => {
-    if (btn) btn.disabled = false;
-    // finishAuth() is the same function the password door finishes with, so a Google
-    // session is written, refreshed and routed exactly like any other — one session
-    // model, two ways in. The address comes from the backend, which read it from
-    // Google; the probe's copy is only a fallback and is never trusted as identity.
+  const hint = document.getElementById('auth-hint-text');
+  if (hint) hint.textContent = 'Taking you to Google…';
+  location.href = googleStartUrl();
+  return Promise.resolve();
+}
+
+// Finish what the door started. Split out from boot because it is one flow with
+// three endings — a session, the backend's own refusal, or the door's own refusal —
+// and all three must land on the sign-in screen saying something a person can act
+// on. The code is exchanged once; `_handoff` is already spent by the time this runs,
+// so a reload cannot replay it.
+function finishHandoff(h) {
+  // The door refused before it ever reached the app: it can read the caller's
+  // Workspace identity and the app cannot, so its words are the only truthful ones
+  // available — "sign in with your @indrones.com account" is a real next step, and
+  // a generic failure would throw that away.
+  if (h.error) {
+    showAuth();
+    setAuthError(h.error);
+    return Promise.resolve();
+  }
+  showAuth();
+  const hint = document.getElementById('auth-hint-text');
+  if (hint) hint.textContent = 'Signing you in…';
+  const btn = document.getElementById('auth-google-btn');
+  if (btn) btn.disabled = true;
+  return googleExchangeBackend(h.code).then(d => {
     if (d && d.status === 'ok' && d.sessionToken) {
-      finishAuth(d.email || _googleProbeEmail, d);
+      finishAuth(d.email, d);
       return;
     }
-    // Every refusal on this door is actionable and says what to do instead — set your
-    // own password first, ask an admin, use your email and password. The password
-    // form is still on screen underneath, so the fallback is one tap away.
+    if (btn) btn.disabled = false;
+    // Every refusal is actionable and says what to do instead — set your own
+    // password first, ask an admin, use your email and password. The password form
+    // is on screen underneath, so the fallback is one tap away.
     setAuthError((d && d.message) || 'Google sign-in failed — use your email and password.');
   });
 }
@@ -1258,10 +1285,18 @@ function setAuthMode(mode) {
   // The Google door belongs to the FIRST step and nowhere else. Left visible on the
   // code step it would offer a second way in beside a form that is mid-way through
   // the first — and it is the one control on this screen that ignores everything
-  // typed above it. `_googleDoorOpen` is the probe's answer, so this never reveals
-  // the button on its own.
-  set('auth-google-btn',    mode === 'login' && _googleDoorOpen);
-  set('auth-or',            mode === 'login' && _googleDoorOpen);
+  // typed above it.
+  //
+  // Visibility is now just "is a second deployment configured". It used to depend on
+  // a silent probe's answer, which had to go: the probe was a background call, and
+  // Google refuses those to this deployment (see the GOOGLE SIGN-IN block). So a
+  // machine with no Google session shows the button too, and clicking it lands on
+  // Google's own page — which offers to sign in, and refuses a personal account with
+  // a sentence Google writes, before our code is reached. An absent button would
+  // have been tidier and less honest: it would tell a person the feature does not
+  // exist when the truth is that they are not signed in.
+  set('auth-google-btn',    mode === 'login' && !!CONFIG.SSO_URL);
+  set('auth-or',            mode === 'login' && !!CONFIG.SSO_URL);
   // `required` follows visibility explicitly rather than relying on browsers
   // agreeing that a display:none control is barred from constraint validation —
   // a hidden required input that still validated would make the forgot and reset

@@ -26,6 +26,18 @@ separate deployment of the same backend (see
 [05](05 - Configuration & Secrets.md)); `CONFIG.SSO_URL` empty means the button is
 not shown at all, and nothing else changes.
 
+That click **leaves the page**, and that is the mechanism rather than a side effect:
+a background `fetch` to the domain-restricted deployment is refused by Google with a
+**401 before any of our code runs**, because a cross-site background request does not
+carry the caller's Google session. A top-level navigation to the same URL reports the
+caller perfectly. So the click navigates, the door reads the Workspace identity and
+sends the browser straight back with a **one-time handoff code** in the URL fragment
+(`#sso=…`, or `#ssoerr=…` for a refusal), and the app swaps that code for a session on
+the primary backend. The code is 32 hex characters, single-use and live for two
+minutes; it rides in the fragment, which is never sent to a server, and the redirect
+target is a server-side constant, so the door cannot be turned into an open redirect.
+Both the code and the address-bar trace are gone by the time the app has drawn.
+
 The password door is not a lesser fallback. It is the door for a shared machine
 with no Google session, and the **only** door for an address outside the company
 domain (`EXTERNAL_EMAILS`), which no domain-restricted deployment will admit. The
@@ -46,8 +58,7 @@ to throttle) and not `clearFailedLogin` either (someone fumbling their password 
 not wash that counter away by clicking the Google button). And it never signs anyone
 in automatically: the sign-in is a **click**, because signing out reloads the page
 and an automatic door would put the next person on a shared laptop straight back
-into the previous person's session. The button's label says who it will sign in as
-where the Workspace account has a name, which is the same protection in words.
+into the previous person's session.
 
 There is **no self-signup**. No captcha, no allowlist, no "request
 access" screen, no admin approval queue. Every account is created by the admin.

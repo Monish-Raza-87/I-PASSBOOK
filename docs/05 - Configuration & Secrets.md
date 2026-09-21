@@ -19,6 +19,27 @@ documented Google behaviour, no Cloud Console project and no `UrlFetchApp` (whic
 `smoke-backend.mjs` forbids outright, because it broke Google sign-in once).
 Deleting that second deployment turns the feature off with no code change.
 
+**That URL is OPENED, never fetched — and that is measured, not assumed.** The first
+version of this door called it with a background `fetch`, and it could never have
+worked: a request from the gh-pages origin to the domain-scoped deployment comes back
+**401 from Google before our code runs**, because a cross-site background request does
+not carry the caller's Google session cookie. The same URL opened as a **top-level
+navigation** reports the caller perfectly. So the mechanism is two halves:
+
+1. The click sets `location.href` to `SSO_URL + '?action=googleStart'`. The response is
+   a page whose only job is `location.replace()` back to `CONFIG.APP_URL` with a
+   one-time code in the **fragment** — `#sso=<32 hex>` — or a refusal, `#ssoerr=<why>`.
+2. The app reads that fragment once, at parse time, wipes it with `history.replaceState`,
+   and POSTs `googleExchange` with the code to the **primary** backend, which is
+   "Anyone" and therefore reachable. That call mints the session.
+
+The code is 32 hex characters (~122 bits) from `Utilities.getUuid()`, single-use, and
+live for **two minutes**. It travels in the fragment rather than a query string on
+purpose: fragments are never sent to a server, so it cannot land in a proxy log, a CDN
+log or a `Referer` header. The redirect target is built server-side from
+`CONFIG.APP_URL` and reads no request parameter — that, not a validation step, is what
+makes the door structurally incapable of an open redirect.
+
 **Google sign-in is additive, never a replacement.** Password + emailed code
 remains a first-class door and the only one for a machine with no Google session
 or an address outside the domain (`EXTERNAL_EMAILS`). Sign-in is **two steps** in

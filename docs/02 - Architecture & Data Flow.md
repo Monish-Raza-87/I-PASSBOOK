@@ -99,6 +99,12 @@ store layout.
   whether the first sign-in of the day is actually shorter. This is an improvement and
   **not** a fix for the wait, which is why the wait screen's slow note stays exactly
   where it is.
+  The half that **removes** the wait rather than overlapping part of it is in the
+  backend: a time-driven trigger running an empty `keepBackendWarm()` every minute, so
+  the script is never idle. It has to be installed once from the editor
+  (`installKeepWarmTrigger()`), and one timer has to fire more often than the script is
+  shut down for — 5.5 minutes idle was measured *already cold*, which is why the
+  interval is a minute and not five. See [08 — Development Guide](08 - Development Guide.md).
 
 ### 3. Main App
 - **Sidebar** (≥1024px) or **bottom nav** (<1024px) — Tickets, Legacy Records,

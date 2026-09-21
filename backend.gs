@@ -4490,6 +4490,75 @@ function removeArchiveTrigger() {
                 'Folders already moved to "' + CONFIG.ARCHIVE_FOLDER_NAME + '" stay where they are.');
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// KEEPING THE BACKEND AWAKE — removing the cold start instead of hiding it.
+//
+// Apps Script shuts a script down when nobody is using it, and the next caller pays
+// the entire start-up BEFORE one line of our code runs. Measured against the live
+// deployments on 2026-09-21 with the trivially cheap `ping`: after 5.5 minutes of
+// idle the first call took **29.2 seconds**, and the calls right behind it still
+// took 15.2s and 22.4s — the container is not merely slow to answer, it is slow to
+// arrive. Warm, the same call answers in 1.5–3.7s.
+//
+// Nothing in this file is what is slow. It is the platform, and no amount of
+// trimming here touches it. `warmBackend()` in app.js OVERLAPS the start-up with
+// time the person was already spending on the sign-in screen, which helps only when
+// they spend longer there than the start-up takes — and someone who types their
+// email quickly does not, and the Google door's round trip can meet two of these,
+// one at each deployment.
+//
+// The one lever that removes it is a time-driven trigger calling a function that
+// does nothing: a script with a live execution is not idle, so it is never shut
+// down. The interval has to be SHORTER THAN THE IDLE WINDOW, which is why this is
+// every minute and not the every-five-minutes that looks tidier — 5.5 minutes idle
+// was already measured cold, so a five-minute timer is a timer that arrives late.
+// 1,440 runs a day at well under a second each is a few minutes against the
+// Workspace allowance of six hours of trigger runtime, and keepBackendWarm() cannot
+// throw, so it cannot send anyone a failure email.
+//
+// WHAT THIS DOES NOT PROVE. One trigger belongs to the script, and whether it also
+// keeps the DOMAIN-SCOPED Google door warm cannot be checked from outside — an
+// unauthenticated request to that deployment is turned away by Google before our
+// code runs, so there is no way to observe it from here. The door's round trip also
+// includes Google's account picker and a tap, which gives it a window of its own.
+// If the first sign-in of the day is still slow after this is installed, this is the
+// assumption to doubt first.
+//
+// keepBackendWarm() MUST STAY EMPTY. Every millisecond in it is billed 1,440 times
+// a day, and every Drive read it made would be a thing that can fail.
+//
+//   installKeepWarmTrigger()  — run once from the editor; safe to re-run
+//   removeKeepWarmTrigger()   — stops it, and the cold start comes back
+function keepBackendWarm() {
+  // Deliberately does nothing at all. See the note above before adding anything.
+}
+
+function installKeepWarmTrigger() {
+  var existing = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === 'keepBackendWarm';
+  });
+  if (existing.length) {
+    return report('Already installed — ' + existing.length +
+                  ' trigger(s) call keepBackendWarm. Nothing changed.');
+  }
+  ScriptApp.newTrigger('keepBackendWarm').timeBased().everyMinutes(1).create();
+  return report('Installed. keepBackendWarm now runs every minute, as ' +
+                Session.getEffectiveUser().getEmail() + ', which keeps the backend awake.\n' +
+                'Until this existed, the first sign-in after a quiet spell paid the whole cold ' +
+                'start — measured at 29.2 seconds after 5.5 minutes idle. Run ' +
+                'removeKeepWarmTrigger() to stop it.');
+}
+
+function removeKeepWarmTrigger() {
+  var found = ScriptApp.getProjectTriggers().filter(function (t) {
+    return t.getHandlerFunction() === 'keepBackendWarm';
+  });
+  if (!found.length) return report('No keep-warm trigger installed. Nothing changed.');
+  found.forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  return report('Removed ' + found.length + ' keep-warm trigger(s). The backend goes cold again ' +
+                'after a few minutes quiet, so the first sign-in of the day will be slow again.');
+}
+
 // Parse the app's 'dd-MMM-yyyy HH:mm:ss' stamp into epoch ms, or null.
 // Date.parse() returns NaN for this format in V8 — it would silently scramble any
 // ordering or cutoff built on it, so the format is parsed explicitly here.

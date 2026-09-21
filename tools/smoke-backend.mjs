@@ -1766,9 +1766,10 @@ r.head('the Drive archive has exactly ONE trigger installer, and no hidden ones'
 // the file has quietly acquired the power to create a trigger — or, since the Google
 // door needs to know its own address, the power to do anything else with ScriptApp.
 const scriptAppUses = (code.match(/ScriptApp\.\w+/g) || []);
-r.ok('ScriptApp appears only in the two trigger functions, and in the door\'s own-address read',
+r.ok('ScriptApp appears only in the trigger functions, and in the door\'s own-address read',
   (function () {
-    const allowed = ['installArchiveTrigger', 'removeArchiveTrigger', 'googleSwitchUrl']
+    const allowed = ['installArchiveTrigger', 'removeArchiveTrigger',
+                     'installKeepWarmTrigger', 'removeKeepWarmTrigger', 'googleSwitchUrl']
       .map(fn => fnBody(fn)).join('\n');
     return scriptAppUses.every(u => allowed.indexOf(u) > -1);
   })(), scriptAppUses);
@@ -1783,6 +1784,42 @@ r.ok('both print through report(), because the editor never shows a return value
 r.ok('the sweep CANNOT throw — a nightly failure email is a failure nobody reads',
   /^function archiveClosedIRs\(\) \{\r?\n  try \{\r?\n    return report\(/.test(
     code.slice(code.indexOf('function archiveClosedIRs()'))));
+
+r.head('the backend is kept awake by a trigger that does nothing, on purpose');
+// The cold start is the platform's, not ours: measured 29.2s on the first call after
+// 5.5 minutes idle, against 1.5-3.7s warm. A time-driven trigger running an empty
+// function is the only lever that REMOVES the wait rather than overlapping part of it.
+const kbw = fnBody('keepBackendWarm');
+r.ok('keepBackendWarm exists and is EMPTY of work',
+  kbw.length > 0 &&
+  !/Session\.|DriveApp|SpreadsheetApp|LockService|UrlFetchApp|readJson|getStoreFolder|PropertiesService/
+    .test(kbw), (kbw.match(/[^\n]*\S[^\n]*/g) || []).slice(1, 3));
+r.ok('...and the empty body is deliberate, not an oversight — the comment says so',
+  // Asserted against the RAW source: `code` has comments stripped, and this is one of
+  // the few claims here that lives only in prose — the next person to add a Drive read
+  // to a function that runs 1,440 times a day has to meet the reason not to.
+  /MUST STAY EMPTY/.test(src) && /Deliberately does nothing at all/.test(src));
+r.ok('it is installed by a trigger, every MINUTE, not every five',
+  /newTrigger\('keepBackendWarm'\)\.timeBased\(\)\.everyMinutes\(1\)\.create\(\)/.test(
+    fnBody('installKeepWarmTrigger')),
+  // The interval is the whole feature: 5.5 minutes idle was already measured cold, so
+  // a five-minute timer arrives late and the container is shut down before it fires.
+  'a five-minute timer is a timer that arrives after the script has already gone cold');
+r.ok('the installer is IDEMPOTENT — it lists before it creates',
+  /getProjectTriggers\(\)[\s\S]{0,200}?existing\.length[\s\S]{0,400}?newTrigger/.test(
+    fnBody('installKeepWarmTrigger')));
+r.ok('and it can be undone, so installed-but-unwanted is a state you can leave',
+  /deleteTrigger/.test(fnBody('removeKeepWarmTrigger')));
+r.ok('both print through report(), because the editor never shows a return value',
+  /return report\(/.test(fnBody('installKeepWarmTrigger')) &&
+  /return report\(/.test(fnBody('removeKeepWarmTrigger')));
+r.ok('neither of them can remove the archive sweep, or prune anything',
+  !/archiveClosedIRs|maintenancePrune/.test(fnBody('removeKeepWarmTrigger')) &&
+  !/archiveClosedIRs|maintenancePrune/.test(fnBody('installKeepWarmTrigger')) &&
+  // ...and they only ever delete a trigger they matched BY NAME, never every trigger
+  // the project has: an uninstall that swept the lot would silently kill the nightly
+  // archive sweep with it.
+  /getHandlerFunction\(\) === 'keepBackendWarm'/.test(fnBody('removeKeepWarmTrigger')));
 
 r.head('the archived-folder fork is closed at the source');
 // The regression: getOrCreateSectionFolder used to resolve the IR folder by name

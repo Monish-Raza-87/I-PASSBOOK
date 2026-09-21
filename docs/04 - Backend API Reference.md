@@ -927,6 +927,9 @@ Anytime after go-live:
 
 Once, to turn on automatic archiving:
   installArchiveTrigger()
+
+Once, to stop the first sign-in of the day paying the cold start:
+  installKeepWarmTrigger()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -947,6 +950,9 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `maintenancePruneAuditLog()` | destructive, locked | Retains `AUDIT_RETENTION_DAYS` of audit lines, per subject file. Manual on purpose — the audit trail is evidence and must not shrink behind anyone's back. A line whose timestamp cannot be parsed is **kept**, never pruned by accident |
 | `archiveClosedIRs()` | idempotent, locked | **Reconciles** folder location with ticket status: moves the Drive folder of every IR that has been **`Close`** for more than 30 days (`ARCHIVE_AFTER_DAYS`) into `Archive IRs/`, and brings back any folder whose ticket is no longer closed. **At most 10 folders per run** (`ARCHIVE_MAX_PER_RUN`), and it reports how many are still waiting, so the first sweep can be watched. **Moves only — it never erases.** An IR with no folder is reported, not an error. A folder already where it belongs is skipped, so a second run moves nothing |
 | `installArchiveTrigger()` | idempotent | Creates the **daily** time-driven trigger that calls `archiveClosedIRs()`. A second run does not create a second trigger. Until it is run, archiving happens only when the sweep is invoked by hand — the function says so in its own output so it cannot be forgotten. **It must be run by the account that owns the Drive folder** (`monish.raza@indrones.com`), because the trigger executes as whoever installed it |
+| `keepBackendWarm()` | **does nothing** | The handler for the trigger below. An empty function on purpose: a script with a live execution is not idle, so a time-driven trigger calling this keeps the container from being shut down — which is what removes the cold start instead of merely overlapping it. It must stay empty — every millisecond in it is billed 1,440 times a day. See the cold start's numbers in [08 — Development Guide](08 - Development Guide.md) |
+| `installKeepWarmTrigger()` | idempotent | Creates the **every-minute** time-driven trigger that calls `keepBackendWarm()`. The interval is the feature: the script was measured cold after 5.5 minutes idle, so a five-minute timer arrives after the container is already gone. 1,440 runs a day is a few minutes against the six hours of trigger runtime a Workspace account gets |
+| `removeKeepWarmTrigger()` | idempotent | Deletes only the `keepBackendWarm` triggers — matched by handler name, so it can never take the nightly archive sweep with it. Installed-but-unwanted is a state worth being able to leave |
 
 ### Archiving, and the hazard that had to be closed first
 

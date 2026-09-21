@@ -124,6 +124,25 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 > archived only when `archiveClosedIRs()` is run by hand. Confirm exactly one trigger
 > appears in the project's Triggers page; the function is idempotent, so a second run
 > is safe but should add nothing.
+>
+> **Run `installKeepWarmTrigger()` once too** — same dropdown, any account. It creates
+> an **every-minute** trigger calling `keepBackendWarm()`, an empty function whose
+> whole job is to be an execution. Apps Script shuts a script down when nobody is
+> using it and the next caller pays the entire start-up before a line of our code
+> runs: measured on 2026-09-21 with the trivially cheap `ping` action, the first call
+> after **5.5 minutes idle took 29.2 seconds**, and the calls behind it still took
+> 15.2s and 22.4s — against **1.5–3.7s warm**. The frontend's `warmBackend()` overlaps
+> that start-up with time the person was already spending on the sign-in screen, which
+> only helps when they spend longer there than the start-up takes; this trigger is the
+> half that removes the wait rather than hiding part of it. The interval must stay
+> under the idle window, which is why it is one minute and not five — 5.5 minutes idle
+> was *already cold*. `removeKeepWarmTrigger()` stops it, and it only ever deletes a
+> trigger matched by handler name, so it cannot take the archive sweep with it.
+> **Not verifiable from outside:** one trigger belongs to the script, and whether it
+> also keeps the domain-scoped Google door warm cannot be observed from here — an
+> unauthenticated request to that deployment is turned away by Google before any of
+> our code runs. If the first sign-in of the day is still slow after this is
+> installed, that assumption is the first thing to doubt.
 
 
 **Step 1 — one-time setup (run from the editor, before the deploy).**

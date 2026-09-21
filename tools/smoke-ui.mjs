@@ -856,8 +856,18 @@ r.ok('...and the door it returns to is the START action, so the round trip resta
     const m = G.T.locationHref.match(/continue=([^&]*)/);
     return !!m && decodeURIComponent(m[1]) === 'https://sso.example.invalid/exec?action=googleStart';
   })(), G.T.locationHref);
-r.ok('...and it is a navigation, not a call: the click itself reaches the network ZERO times',
-  gPosts.length === 0, gPosts.map(p => p.url));
+// This assertion used to be "reaches the network ZERO times", and the wake-up makes
+// that no longer the honest form of the claim. What it is really protecting is that
+// nothing about the HANDOFF travels over the network from here: the code is minted
+// by the door and comes back in the URL fragment, so there is no call to await, no
+// failure to show, and no request that could be the sign-in itself. The one request
+// the click now makes is a credential-free ping whose answer is thrown away.
+r.ok('...and it is a navigation, not a call: nothing about the handoff is sent from here',
+  gPosts.filter(p => !/action=ping/.test(p.url)).length === 0,
+  gPosts.filter(p => !/action=ping/.test(p.url)).map(p => p.url));
+r.ok('...the single request it does make is the wake-up, and it carries no credential',
+  gPosts.length === 1 && /action=ping/.test(gPosts[0].url) && !gPosts[0].body,
+  gPosts.map(p => ({ url: p.url, body: !!p.body })));
 // The return address is a server-side constant. A `?next=` here would make the app
 // hand an attacker the choice of where Google sends the browser back to.
 r.ok('the URL carries no return address — every part of it is built from SSO_URL alone',
@@ -970,8 +980,12 @@ r.ok('and the error line is made visible, the way every other auth error is',
   G3.byId.get('auth-error').style.display === 'block');
 r.ok('...and the sign-in screen is the one on show, with the password form one tap away',
   G3.byId.get('auth-container').style.display !== 'none');
-r.ok('nothing is exchanged — there is no code, so nothing reaches the network',
-  gPosts.length === 0, gPosts.map(p => p.url));
+// The refusal route to the sign-in screen is showAuth(), which wakes the backend on
+// the way in — so the claim is that nothing but that wake-up is sent, which is what
+// keeps "a refusal exchanges nothing" true rather than merely quiet.
+r.ok('nothing is exchanged — there is no code, so nothing but the wake-up reaches the network',
+  gPosts.filter(p => !/action=ping/.test(p.url)).length === 0,
+  gPosts.filter(p => !/action=ping/.test(p.url)).map(p => p.url));
 r.ok('no session is invented from a refusal',
   !G3.T.currentUser || !G3.T.currentUser.sessionToken, G3.T.currentUser && G3.T.currentUser.sessionToken);
 r.ok('clearing it hides the line again rather than leaving an empty box',
@@ -1090,6 +1104,115 @@ r.ok('app.js makes the same call at boot, for the loads pre-paint cannot cover',
 r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',
   appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
   appCode.indexOf('if (isHandoffReturn()) { splash.style.display'));
+
+// ── Waking the backend before it is needed ────────────────────────────────────
+r.head('the backend is woken before it is needed, never at the moment it is needed');
+
+// Code only — stripJs has removed comments, so every claim below is about what
+// actually runs rather than about what a comment says runs.
+const fnBody = (name, from = 0) => {
+  const i = appCode.indexOf('function ' + name + '(', from);
+  if (i < 0) return '';
+  const j = appCode.indexOf('\nfunction ', i + 1);
+  return appCode.slice(i, j < 0 ? appCode.length : j);
+};
+
+// The 31.6s cold start measured against the live deployment is the reason this
+// exists at all, so the NUMBER is worth pinning: a warm-up fired after a delay
+// longer than a person takes to type would overlap nothing.
+r.ok('the wake-up is a real request to the real backend, not a placeholder',
+  /_origFetch\(url, init\)/.test(fnBody('warmBackend')) &&
+  /CONFIG\.GAS_URL \+ \(CONFIG\.GAS_URL\.indexOf\('\?'\) >= 0 \? '&' : '\?'\)/.test(fnBody('warmBackend')));
+r.ok('...it asks for the trivially cheap ping, which does no work and mints nothing',
+  /'action=ping&_=' \+ Date\.now\(\)/.test(fnBody('warmBackend')));
+r.ok('it goes through _origFetch, so a warm-up cannot touch the session gate',
+  /_origFetch\(/.test(fnBody('warmBackend')) && !/[^_]fetch\(url/.test(fnBody('warmBackend')));
+r.ok('it carries a cache-buster and no-store, because a cached warm-up reaches nothing',
+  /_=' \+ Date\.now\(\)/.test(fnBody('warmBackend')) && /cache: 'no-store'/.test(fnBody('warmBackend')));
+r.ok('the whole body is inside a try, so a browser that refuses keepalive cannot break a screen',
+  /try \{[\s\S]*?_origFetch\(url, init\)[\s\S]*?\} catch \(e\)/.test(fnBody('warmBackend')));
+r.ok('and the rejection is swallowed — never read, never toasted, never logged',
+  /if \(p && typeof p\.catch === 'function'\) p\.catch\(\(\) => \{\}\)/.test(fnBody('warmBackend')));
+r.ok('it is coalesced, so boot reaching showAuth twice cannot send two',
+  /const WARM_MIN_GAP_MS = \d{4,};/.test(appCode) &&
+  /Date\.now\(\) - _lastWarmAt < WARM_MIN_GAP_MS\) return;/.test(fnBody('warmBackend')));
+r.ok('...and the gap is short enough to cover the typing it exists to overlap',
+  /const WARM_MIN_GAP_MS = (\d+);/.test(appCode) &&
+  Number(appCode.match(/const WARM_MIN_GAP_MS = (\d+);/)[1]) <= 60000,
+  appCode.match(/const WARM_MIN_GAP_MS = (\d+);/));
+r.ok('the dev bypass is skipped, so a localhost session does not poke the live backend',
+  /shouldUseDevAuthBypass\(\)\) return;/.test(fnBody('warmBackend')));
+
+// WHERE it fires is the whole feature. The intro is ~9s of the cold start paid for
+// by time already being spent, and the ordering below is what buys that.
+r.ok('the load that is heading for the sign-in screen wakes the backend BEFORE the intro',
+  appCode.indexOf('warmBackend();') >
+    appCode.indexOf('if (isHandoffReturn()) { splash.style.display') &&
+  appCode.indexOf('warmBackend();') < appCode.indexOf('const video = document.getElementById(\'splash-video\')'));
+r.ok('...and a device with a stored session does not, because its own first call is the wake-up',
+  appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
+  appCode.indexOf('warmBackend();'));
+r.ok('showAuth wakes it too, so an expiry, a sign-out and a refused handoff all start one',
+  /function showAuth\(\) \{\s*\n\s*endSsoWait\(\);[\s\S]{0,400}?warmBackend\(\);/.test(appCode));
+r.ok('showApp does not — there is nothing pre-auth left to wait for once inside',
+  fnBody('showApp').indexOf('warmBackend') === -1);
+r.ok('the Google tap starts one BEFORE it navigates, which is the only call that can be cancelled',
+  appCode.indexOf('warmBackend({ keepalive: true });') > appCode.indexOf('function submitGoogleSignIn()') &&
+  appCode.indexOf('warmBackend({ keepalive: true });') < appCode.indexOf('location.href = googleStartUrl();'));
+r.ok('...and only that one asks to outlive the page',
+  (appCode.match(/keepalive: true/g) || []).length === 1 &&
+  /if \(opts && opts\.keepalive\) init\.keepalive = true;/.test(fnBody('warmBackend')));
+
+// The behaviour itself, not the source: run the real function against a transport
+// that records what it was asked for.
+// Read from the shipped source rather than hard-coded, so a deployment URL change
+// cannot leave this assertion testing a stale string.
+const WARM_GAS_URL = (appSrc.match(/GAS_URL: '([^']+)'/) || [])[1] || '';
+const warm = await (async () => {
+  const calls = [];
+  const okTransport = () => Promise.resolve({ text: () => Promise.resolve('{"status":"ok","apiVersion":3}') });
+  const W = loadApp(`
+    warmBackend, WARM_MIN_GAP_MS, CONFIG,
+    set warmAt(v) { _lastWarmAt = v; },
+    get warmAt() { return _lastWarmAt; },
+  `, { fetch: (url, init) => { calls.push({ url: String(url), init: init || {} }); return okTransport(); } });
+
+  W.warmAt = 0;
+  W.warmBackend();
+  const first = calls.slice();
+  W.warmBackend();                      // immediately again — must coalesce
+  const afterSecond = calls.length;
+
+  W.warmAt = 0;
+  W.warmBackend({ keepalive: true });   // the navigating call
+  const tap = calls[calls.length - 1];
+
+  // A transport that refuses, and one that throws on the way in: neither may
+  // escape. An unhandled rejection here is a fatal error in Node, so a suite that
+  // gets to the assertions below has already proven the swallow.
+  const B = loadApp('warmBackend, CONFIG', { fetch: () => Promise.reject(new Error('blocked')) });
+  const C = loadApp('warmBackend, CONFIG', { fetch: () => { throw new Error('boom'); } });
+  let threw = false;
+  try { B.warmBackend(); C.warmBackend(); } catch (e) { threw = true; }
+  await new Promise(r => setTimeout(r, 30));   // let any rejection surface
+
+  return { first, afterSecond, tap, threw, gap: W.WARM_MIN_GAP_MS };
+})();
+
+r.ok('the wake-up calls the backend exactly once, and stops',
+  warm.first.length === 1, warm.first.length);
+r.ok('the request is the ping on the configured backend',
+  warm.first[0].url.indexOf(WARM_GAS_URL + '?action=ping') === 0,
+  warm.first[0].url);
+r.ok('it is a GET with no body, and no session token can ride on it',
+  !warm.first[0].init.method && !warm.first[0].init.body &&
+  warm.first[0].url.indexOf('sessionToken') === -1);
+r.ok('a second call inside the gap sends nothing extra',
+  warm.afterSecond === 1, warm.afterSecond);
+r.ok('the navigating call asks to outlive the page',
+  warm.first.length === 1 && warm.tap.init.keepalive === true, warm.tap);
+r.ok('a refusing backend cannot throw out of a warm-up', warm.threw === false);
+r.ok('...and neither can a transport that throws on the way in', warm.threw === false);
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

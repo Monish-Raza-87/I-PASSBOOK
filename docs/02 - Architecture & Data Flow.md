@@ -79,6 +79,19 @@ store layout.
 - Stores the display profile in `localStorage` as `ipb_user` and the server
   session token alongside it — **absolute**, 8h30m from sign-in, and never slid
   forward on use
+- The backend is **woken before it is needed**. Apps Script shuts the script down when
+  nobody is using it and the next caller pays the entire start-up before one line of our
+  code runs — measured against the live deployment on 2026-09-21 at **31.6s** on the
+  first call, then 3.7s and 1.5s warm. So `warmBackend()` fires the trivially cheap
+  `ping` as soon as a load is known to be heading for this screen (past the two early
+  returns in `app.js`'s `load` handler, so the ~9s intro is spent overlapping it), again
+  from `showAuth()`, and once more on the Google tap with `keepalive` — that one
+  navigates away, and the person then spends seconds at Google's picker. It goes through
+  `_origFetch` (there is no session to carry, and a warm-up must not touch the session
+  gate), never reads its response, swallows every failure, and is coalesced to one
+  request per 15s. This is an **improvement and not a guarantee**: a container that has
+  gone cold again still has to wake, which is why the wait screen's slow note stays
+  exactly where it is.
 
 ### 3. Main App
 - **Sidebar** (≥1024px) or **bottom nav** (<1024px) — Tickets, Legacy Records,

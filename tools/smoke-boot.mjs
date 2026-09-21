@@ -139,6 +139,7 @@ const server = http.createServer((req, res) => {
     const seed = url === INTRO_SIGNED_IN_PATH ? SIGNED_IN_SEED : '';
     return send(html
       .replace('<head>', '<head>' + seed)
+      .replace('<script src="app.js"></script>', INTRO_STUB + '<script src="app.js"></script>')
       .replace('</body>', INTRO_DRIVER + '</body>'), MIME['.html']);
   }
 
@@ -315,6 +316,33 @@ const AUTH_DRIVER = `<script>
 // to play it again.
 const INTRO_PATH = '/__intro.html';
 
+// Counts the backend wake-up and answers it locally, passing every other call
+// through untouched.
+//
+// The wake-up is a real fetch to script.google.com fired from `load`, so without
+// this the phase would depend on the live backend being reachable — and a cold
+// one is a half-minute hang in the middle of a test that has no stake in it. Only
+// the ping is intercepted: every other request this page makes (the signed-in
+// load's boot calls) behaves exactly as it did before, so this cannot quietly
+// change what the rest of the phase is measuring.
+//
+// It is counted rather than merely blocked because that count IS the assertion:
+// the splash disappears whether or not anything woke the backend, so "the ping
+// left the page during the intro" is only observable from in here.
+const INTRO_STUB = `<script>
+  var _introRealFetch = window.fetch.bind(window);
+  window.fetch = function (url, init) {
+    if (/action=ping/.test(String(url))) {
+      window.__warmPings = (window.__warmPings || 0) + 1;
+      window.__warmPingUrl = String(url);
+      return Promise.resolve(new Response('{"status":"ok","apiVersion":3}',
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }
+    return _introRealFetch(url, init);
+  };
+<\/script>
+`;
+
 // The same page, with a stored sign-in seeded before index.html's pre-paint script
 // runs. The seed has to be the FIRST thing in <head>: the attribute the stylesheet
 // keys off is set by that script, at parse time, before anything else could set it.
@@ -352,6 +380,8 @@ const INTRO_DRIVER = `<script>
       videoReadyState: v ? v.readyState : null,
       videoErrorCode: v && v.error ? v.error.code : null,
       mp4Requests: mp4.length,
+      warmPings: window.__warmPings || 0,
+      warmPingUrl: window.__warmPingUrl || null,
     });
   }
   // Wait for the splash to actually go away rather than for a fixed delay: a
@@ -772,6 +802,13 @@ if (firstIntro) {
     firstIntro.splashInlineDisplay === 'none', firstIntro.splashInlineDisplay);
   ok('nothing skipped it before paint — this device had no session to resume',
     firstIntro.prePaintAttr === null, firstIntro.prePaintAttr);
+  // The wake-up, proven in the one place it can be: a real browser, on the load
+  // that ends at the sign-in screen. The assertion is that it left the page during
+  // the intro — i.e. that the ~9s of video and everything typed afterwards are
+  // spent overlapping Apps Script's cold start rather than waiting behind it.
+  ok('the backend is woken on the way to sign-in, not when the button is pressed',
+    firstIntro.warmPings >= 1 && /action=ping/.test(firstIntro.warmPingUrl || ''),
+    { pings: firstIntro.warmPings, url: firstIntro.warmPingUrl });
 }
 
 // THE POINT OF THE CHANGE. Before this, the intro was once per device and a
@@ -788,6 +825,11 @@ if (secondIntro) {
     { visibleAtStart: secondIntro.splashVisibleAtStart, mp4: secondIntro.mp4Requests });
   ok('...because seeing it before is no longer a reason to skip it',
     secondIntro.prePaintAttr === null, secondIntro.prePaintAttr);
+  // Not once-ever: the container goes cold again, so every arrival at the sign-in
+  // screen earns its own ping. A device that has seen the intro before is still a
+  // person about to sign in.
+  ok('a returning device wakes the backend again', secondIntro.warmPings >= 1,
+    secondIntro.warmPings);
 }
 
 // The one thing that does skip it. A seeded sign-in is put in localStorage before
@@ -803,6 +845,11 @@ if (signedInIntro) {
   // ~9.7 MB is not paid by someone whose session was going to resume anyway.
   ok('...and does not download the video to find that out',
     signedInIntro.mp4Requests === 0, signedInIntro.mp4Requests);
+  // The same early return skips the wake-up, and that is deliberate rather than
+  // incidental: this load is going into the app, whose first real call warms the
+  // backend by being that call. A ping here would be a second, useless request.
+  ok('...and wakes nothing, because its own first call is the wake-up',
+    signedInIntro.warmPings === 0, signedInIntro.warmPings);
 }
 
 try { fs.rmSync(introProfile, { recursive: true, force: true }); } catch {}

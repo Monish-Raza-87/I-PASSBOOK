@@ -310,7 +310,7 @@ about an account:
 
 | Action | Purpose |
 |---|---|
-| `ping` | Version handshake. Returns `API_VERSION`; a stale cached frontend uses it to explain itself instead of failing obscurely. |
+| `ping` | Version handshake. Returns `API_VERSION`; a stale cached frontend uses it to explain itself instead of failing obscurely. The frontend also fires it as a **wake-up** on the way to the sign-in screen, because Apps Script's cold start is measured in tens of seconds and the sign-in screen is the one place overlapping it costs the person nothing — see [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md). |
 | `sessionCheck` | Cheap liveness probe. Called by `confirmSessionAlive()` — which treats an unreachable server as **alive**, because ejecting someone on a flaky connection is the bug, not the fix. **It also fails open on a store error**, with a message that never starts with `unauthorized`: the frontend's interceptor auto-logs-out on that prefix, so a `sessions.json` that cannot be read would sign out all twenty users in the same poll window. |
 | `login` | Email + password → a code, then email + password + code → session token. **Two steps** — the password alone buys no token; see [`login`](#login) below. |
 | `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |

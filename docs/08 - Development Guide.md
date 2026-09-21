@@ -224,13 +224,17 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 2. Copy **that** `/exec` URL — not the first one — into `CONFIG.SSO_URL` in `app.js`
    (see [05](05 - Configuration & Secrets.md)), bump `CACHE_NAME`, and deploy the
    frontend.
-3. Sign out and click **Sign in with Google**. If the button does not appear at all,
-   `CONFIG.SSO_URL` is empty. If it appears and the click comes back with *"Google did
-   not report an account for this browser"*, this deployment's access level is wrong:
-   under plain "Anyone", `Session.getActiveUser()` returns `''` for every caller and
-   the ladder refuses every time. Check the access level, not the code. If it comes
-   back with *"That Google sign-in link is no longer valid"*, the primary deployment
-   is not serving the version that has `googleExchange` — see the note above.
+3. Sign out and click **Sign in with Google**. You should land on a small I-PASSBOOK page
+   saying *Signed in as you@indrones.com* with a **Continue to I-PASSBOOK** button; one
+   tap puts you in. If the button does not appear at all, `CONFIG.SSO_URL` is empty. If it
+   appears and the page says *"Google did not report an account for this browser"*, this
+   deployment's access level is wrong: under plain "Anyone", `Session.getActiveUser()`
+   returns `''` for every caller and the ladder refuses every time. Check the access level,
+   not the code. If you tap Continue and get *"That Google sign-in link is no longer
+   valid"*, the primary deployment is not serving the version that has `googleExchange` —
+   see the note above. If instead you see a page of **HTML source code**, the deployment is
+   serving a version older than the one that switched to `HtmlService` — `ContentService`
+   cannot serve a page, and that is what a page served through it looks like.
 
 > **Why a second deployment rather than flipping the first.** Google refuses a
 > domain-restricted request at its own edge, before the script runs. Flipping the
@@ -249,6 +253,18 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 > and why the answer comes back as a one-time code in the URL fragment for the primary
 > deployment to redeem. If you are ever tempted to replace it with a `fetch`, this
 > paragraph is the reason not to.
+>
+> **Why the door ends with ONE TAP and not a redirect.** Also easy to "simplify" back
+> into a bug, and it already was one. Apps Script cannot bounce a top-level window back
+> on its own, twice over: `ContentService` has **no `HTML` mime type**, so a page served
+> through it goes out as plain text and the user is shown the page's *source*; and since
+> the September 2021 IFRAME sandbox change a script page may not navigate the top window
+> without a user gesture, so a scripted `location.replace()` would move only Google's
+> frame. The shipped version did both and failed silently — the Workspace identity was
+> read and a real code was minted, and the user just saw code. So the door returns an
+> `HtmlService` page carrying one `<a target="_top">` link the user taps. **Do not put a
+> `<script>` or a `location.` assignment back into `handoffPage`**, and do not reach for
+> `ContentService` to serve it — `tools/smoke-backend.mjs` pins both.
 >
 > Rolling back is deleting the `Google door` deployment and clearing `CONFIG.SSO_URL`.
 > No code change, no data touched.

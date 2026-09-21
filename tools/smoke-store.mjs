@@ -186,7 +186,7 @@ function istParts(d) {
 const ctx = {
   console,
   DriveApp: DriveAppFake,
-  MimeType: { PLAIN_TEXT: 'text/plain' },
+  MimeType: { PLAIN_TEXT: 'text/plain', HTML: 'text/html' },
   Utilities: {
     // Faithful to the real Utilities.getUuid(): a v4 UUID — 36 characters, lower
     // case, dashes in the standard places. It used to be 'uuid-N', which was
@@ -271,10 +271,10 @@ const ctx = {
   ContentService: {
     // Faithful to the real pair: createTextOutput(content) returns an object whose
     // setMimeType returns the SAME object, and both the content and the chosen type
-    // can be read back. The Google handoff redirect is an HtmlOutput, so a stub that
-    // swallowed the content would make the whole door untestable.
+    // can be read back.
     createTextOutput: (content) => {
       const out = {
+        _from: 'ContentService',
         _content: String(content == null ? '' : content),
         _mime: 'text/plain',
         setMimeType(m) { out._mime = m; return out; },
@@ -283,7 +283,38 @@ const ctx = {
       };
       return out;
     },
-    MimeType: { JSON: 'json', HTML: 'html', PLAIN_TEXT: 'text/plain' },
+    // ── THE MEMBER THAT IS NOT THERE. DO NOT ADD IT. ──────────────────────────
+    // The real ContentService.MimeType is ATOM, CSV, ICAL, JAVASCRIPT, JSON, RSS,
+    // TEXT, VCARD and XML. There is **no HTML**. An earlier version of this stub
+    // invented one, and that is precisely why the Google door shipped with
+    // `setMimeType(ContentService.MimeType.HTML)` — which passes `undefined`, leaves
+    // the response as plain text, and shows the user the SOURCE of a redirect page
+    // instead of running it. The suite was green while the live app was broken,
+    // because the fake disagreed with the platform.
+    //
+    // `MimeType.HTML` is a real constant — of the OTHER MimeType enum, the one
+    // DriveApp takes for file types (see ctx.MimeType above). Confusing the two is
+    // the whole mistake, so they are deliberately split here the same way.
+    MimeType: { JSON: 'json', PLAIN_TEXT: 'text/plain' },
+  },
+  // The Google door's only output is a PAGE (see handoffPage in backend.gs), so the
+  // stub has to be an HtmlOutput. Only the factory the production code calls is
+  // modelled, plus the readers these tests use. `_from` is bookkeeping for the
+  // tests and is read by no production code — it can therefore never mask a real
+  // API difference, which is exactly what the invented ContentService member did.
+  HtmlService: {
+    createHtmlOutput: (content) => {
+      const out = {
+        _from: 'HtmlService',
+        _content: String(content == null ? '' : content),
+        _title: '',
+        setTitle(t) { out._title = t; return out; },
+        getTitle() { return out._title; },
+        setXFrameOptionsMode(m) { out._xfo = m; return out; },
+        getContent() { return out._content; },
+      };
+      return out;
+    },
   },
 };
 
@@ -1594,12 +1625,12 @@ r.ok('a sentinel log is still pruned on age',
 //
 //   doGoogleStart()   — GET, on the domain-restricted deployment, reached by the
 //                       browser NAVIGATING to it. It can read the caller, and its
-//                       only output is a redirect page back to the app.
+//                       only output is a page carrying ONE link back to the app.
 //   doGoogleExchange()— POST, on the main "Anyone" deployment, called by the app.
 //                       It has no Google identity and does not need one: the
 //                       credential is the one-time code half one just minted.
 //
-// So every refusal below is asserted through half one (a `#ssoerr=` redirect that
+// So every refusal below is asserted through half one (a `#ssoerr=` link that
 // carries the backend's own words) and every minting through half two.
 //
 // Two hazards are the whole point of this block. First, that the door admits
@@ -1615,19 +1646,25 @@ const asGoogle = email => {
 };
 const sessionCount = () => Object.keys((fresh('sessions.json') || {}).tokens || {}).length;
 
-// The redirect page is the ONLY thing half one says, so these three readers are how
-// every assertion below sees it. The target is pulled out of the `location.replace`
-// call, exactly as a browser would execute it.
-const redirectTarget = out => {
-  const m = out && out.getContent ? out.getContent().match(/location\.replace\("([^"]+)"/) : null;
-  return m ? m[1] : '';
+// The door's only output is a page with ONE link on it, so these readers are how
+// every assertion below sees it. The href is pulled out of the anchor the user
+// actually taps — exactly the URL the browser would follow — and the rest of the
+// block checks the properties of that page, because the page IS the door's answer.
+const doorAnchor = out => {
+  const html = (out && out.getContent) ? out.getContent() : '';
+  const tags = html.match(/<a\b[^>]*>/g) || [];
+  return tags.filter(t => /target="_top"/.test(t))[0] || '';
 };
-const redirectCode = out => {
-  const m = redirectTarget(out).match(/#sso=([0-9a-f]{32})$/);
+const doorLink = out => {
+  const m = doorAnchor(out).match(/href="([^"]*)"/);
+  return m ? m[1].replace(/&amp;/g, '&') : '';
+};
+const doorCode = out => {
+  const m = doorLink(out).match(/#sso=([0-9a-f]{32})$/);
   return m ? m[1] : null;
 };
-const redirectError = out => {
-  const m = redirectTarget(out).match(/#ssoerr=([^"&]+)/);
+const doorError = out => {
+  const m = doorLink(out).match(/#ssoerr=([^&"]+)/);
   return m ? decodeURIComponent(m[1]) : '';
 };
 
@@ -1637,28 +1674,28 @@ asGoogle('');
 reexec();
 const noIdentity = ctx.doGoogleStart();
 r.ok('no identity is refused — this is also what a deployment left on "Anyone" says',
-  /Google did not report/.test(redirectError(noIdentity)), redirectError(noIdentity));
-r.ok('...and a refusal is a REDIRECT back to the app, never a code',
-  redirectCode(noIdentity) === null && redirectError(noIdentity) !== '');
+  /Google did not report/.test(doorError(noIdentity)), doorError(noIdentity));
+r.ok('...and a refusal is a LINK back to the app, never a code',
+  doorCode(noIdentity) === null && doorError(noIdentity) !== '');
 
 // A Session call that throws (no session, a revoked grant) must read as a refusal.
 ctx.Session.getActiveUser = () => { throw new Error('no active session'); };
 reexec();
 const sessionThrew = ctx.doGoogleStart();
 r.ok('a Session call that THROWS is a refusal, never a crash',
-  /Google did not report/.test(redirectError(sessionThrew)), redirectError(sessionThrew));
+  /Google did not report/.test(doorError(sessionThrew)), doorError(sessionThrew));
 
 asGoogle('outsider@gmail.com');
 reexec();
 const offDomain = ctx.doGoogleStart();
 r.ok('an address outside the domain is refused, and the password door is offered',
-  /@indrones\.com Google account/.test(redirectError(offDomain)), redirectError(offDomain));
+  /@indrones\.com Google account/.test(doorError(offDomain)), doorError(offDomain));
 
 asGoogle('nobody@indrones.com');
 reexec();
 const noAccount = ctx.doGoogleStart();
 r.ok('an in-domain address with NO account is refused — a Google identity is not a membership',
-  /No account found/.test(redirectError(noAccount)), redirectError(noAccount));
+  /No account found/.test(doorError(noAccount)), doorError(noAccount));
 r.ok('...and the refusal did NOT create the account — there is still no self-signup',
   !(fresh('users.json') || {})['nobody@indrones.com'],
   Object.keys(fresh('users.json') || {}).length + ' account(s)');
@@ -1674,9 +1711,9 @@ asGoogle(GDIS);
 reexec();
 const disabled = ctx.doGoogleStart();
 r.ok('a DISABLED account is refused at the Google door too, not only at the password one',
-  /disabled/.test(redirectError(disabled)), redirectError(disabled));
+  /disabled/.test(doorError(disabled)), doorError(disabled));
 r.ok('...and no code was minted for it, so half two has nothing to redeem',
-  redirectCode(disabled) === null);
+  doorCode(disabled) === null);
 
 const GTEMP = 'g.temp@indrones.com';
 ctx.createUserRow(GTEMP, 'Temp Holder', ADMIN);   // lands with mustChange = 'yes'
@@ -1684,9 +1721,9 @@ asGoogle(GTEMP);
 reexec();
 const tempDoor = ctx.doGoogleStart();
 r.ok('a TEMP-PASSWORD account is refused, so the forced first change cannot be skipped by Google',
-  /Set your own password first/.test(redirectError(tempDoor)), redirectError(tempDoor));
+  /Set your own password first/.test(doorError(tempDoor)), doorError(tempDoor));
 r.ok('...and it says WHICH door to use, rather than only saying no',
-  /temporary password/.test(redirectError(tempDoor)), redirectError(tempDoor));
+  /temporary password/.test(doorError(tempDoor)), doorError(tempDoor));
 
 const GOK = 'g.door@indrones.com';
 mkUser(GOK);
@@ -1694,9 +1731,39 @@ asGoogle(GOK);
 reexec();
 const startOk = ctx.doGoogleStart();
 r.ok('a provisioned account gets a handoff code back',
-  !!redirectCode(startOk), redirectTarget(startOk));
+  !!doorCode(startOk), doorLink(startOk));
 
-// ── THE REDIRECT IS BUILT SERVER-SIDE, SO NOTHING CLIENT-SUPPLIED CAN MOVE IT ──
+// ── THE PAGE THE DOOR ENDS ON, AND WHY IT IS A PAGE AND NOT A REDIRECT ────────
+// This is the shape of a real, shipped bug, so it is pinned from four sides.
+//
+// The door used to answer with `ContentService.createTextOutput(html)
+// .setMimeType(ContentService.MimeType.HTML)` and a `location.replace` back to the
+// app. Both halves of that were wrong and both failed silently:
+//
+//   * ContentService.MimeType has no HTML member, so the mime was `undefined`, the
+//     response went out as PLAIN TEXT, and the user was shown the SOURCE of the
+//     redirect page. The Workspace identity HAD been read and a real code HAD been
+//     issued — the page simply never ran.
+//   * Since the 2021 IFRAME sandbox change an Apps Script page cannot navigate the
+//     top-level window without a user gesture, so even with the right mime the
+//     `location.replace` would have moved only Google's frame and left the app
+//     inside an iframe at the wrong origin.
+//
+// So: HtmlService (the only thing that can serve a page), one link, `target="_top"`,
+// and NO attempt to navigate on its own.
+r.ok('the door answers with an HtmlOutput — ContentService cannot serve HTML at all',
+  startOk._from === 'HtmlService', startOk._from);
+r.ok('...exactly one link on the page, so there is no second way out',
+  (startOk.getContent().match(/<a\b[^>]*>/g) || []).length === 1);
+r.ok('...and it is a link the USER taps, never an automatic navigation',
+  !/location\s*\./.test(startOk.getContent()) &&
+  !/<script/i.test(startOk.getContent()));
+r.ok('...wearing target="_top", or the app would load inside Google\'s sandbox frame',
+  /target="_top"/.test(doorAnchor(startOk)), doorAnchor(startOk));
+r.ok('...and the page says WHICH account was recognised, before anything is signed',
+  startOk.getContent().indexOf(GOK) !== -1);
+
+// ── THE LINK IS BUILT SERVER-SIDE, SO NOTHING CLIENT-SUPPLIED CAN MOVE IT ─────
 // This is the whole open-redirect defence, and it is structural: there is no
 // request parameter to validate because no parameter is read. Asserted rather than
 // described, because "we just do not look at it" is exactly the kind of claim that
@@ -1706,18 +1773,15 @@ const withHostileReturn = ctx.doGoogleStart({
   parameter: { return: 'https://evil.example/steal', action: 'googleStart' },
 });
 r.ok('a `return=` parameter cannot move where the door sends the browser',
-  redirectTarget(withHostileReturn).indexOf('evil.example') === -1, redirectTarget(withHostileReturn));
+  doorLink(withHostileReturn).indexOf('evil.example') === -1, doorLink(withHostileReturn));
 r.ok('...the target is CONFIG.APP_URL, the server-side constant',
-  redirectTarget(withHostileReturn).indexOf(ctx.CONFIG.APP_URL) === 0, redirectTarget(withHostileReturn));
-r.ok('...and the page declares HTML, so the browser runs the redirect rather than showing it',
-  withHostileReturn.getMimeType() === 'html', withHostileReturn.getMimeType());
-r.ok('...and the redirect REPLACES the history entry, so Back does not revisit Google',
-  /location\.replace\(/.test(withHostileReturn.getContent()) &&
-  !/location\.href\s*=/.test(withHostileReturn.getContent()));
+  doorLink(withHostileReturn).indexOf(ctx.CONFIG.APP_URL) === 0, doorLink(withHostileReturn));
+r.ok('...and a hostile parameter does not leak into the page as markup either',
+  withHostileReturn.getContent().indexOf('evil.example') === -1);
 
 // ── THE CODE ITSELF ───────────────────────────────────────────────────────────
 const startAgain = ctx.doGoogleStart();
-const firstCode = redirectCode(startAgain);
+const firstCode = doorCode(startAgain);
 reexec();
 r.ok('only ONE handoff is ever live per address — asking twice retires the first',
   (() => {
@@ -1727,8 +1791,8 @@ r.ok('only ONE handoff is ever live per address — asking twice retires the fir
     return live.length === 1 && live[0].code === firstCode;
   })(), ctx.readJsonLocked('codes.json').entries.filter(e => e.purpose === 'google').length + ' google entries');
 r.ok('...so the earlier code is dead: the older handoff no longer redeems',
-  ctx.redeemHandoff(redirectCode(startOk)).error !== undefined,
-  ctx.redeemHandoff(redirectCode(startOk)));
+  ctx.redeemHandoff(doorCode(startOk)).error !== undefined,
+  ctx.redeemHandoff(doorCode(startOk)));
 
 // A handoff is looked up BY CODE, which is the whole reason it is not an emailed
 // code: when the browser comes back the app holds a code and not yet an address.
@@ -1788,7 +1852,7 @@ r.ok('...and nothing was written for the replay',
 
 asGoogle(GOK);
 reexec();
-const expiring = redirectCode(ctx.doGoogleStart());
+const expiring = doorCode(ctx.doGoogleStart());
 reexec();
 // Age it past its window by moving the expiry, which is what the clock would do.
 ctx.withRowLockOrThrow(function () {
@@ -1803,7 +1867,7 @@ r.ok('a handoff past its two minutes is refused',
 r.ok('...and an unreadable expiry refuses too, rather than meaning "still fresh"',
   (() => {
     asGoogle(GOK); reexec();
-    const c2 = redirectCode(ctx.doGoogleStart());
+    const c2 = doorCode(ctx.doGoogleStart());
     ctx.withRowLockOrThrow(function () {
       var raw = ctx.readJsonLocked('codes.json');
       raw.entries.forEach(function (e) { if (e.code === c2) e.expiresAt = 'not a date'; });
@@ -1820,7 +1884,7 @@ r.ok('an exchange with no code at all is refused, not crashed',
 r.ok('...and a code cannot be pointed at somebody ELSE: the exchange takes no email',
   (() => {
     asGoogle(GOK); reexec();
-    const c3 = redirectCode(ctx.doGoogleStart());
+    const c3 = doorCode(ctx.doGoogleStart());
     reexec();
     const d = ctx.doGoogleExchange({ code: c3, email: 'someone.else@indrones.com' });
     return d.status === 'ok' && d.email === GOK;
@@ -1837,7 +1901,7 @@ asGoogle(THR);
 reexec();
 for (let i = 0; i < 4; i++) {
   reexec();
-  const c = redirectCode(ctx.doGoogleStart());
+  const c = doorCode(ctx.doGoogleStart());
   if (c) ctx.doGoogleExchange({ code: c });
 }
 reexec();
@@ -1868,7 +1932,7 @@ r.ok('the password door IS locked out for this account — the setup worked',
 const lockedUsersBefore = ctx.lockoutRemaining(GLOCK);
 asGoogle(GLOCK);
 reexec();
-const gLocked = ctx.doGoogleExchange({ code: redirectCode(ctx.doGoogleStart()), device: '' });
+const gLocked = ctx.doGoogleExchange({ code: doorCode(ctx.doGoogleStart()), device: '' });
 reexec();
 r.ok('a locked-out account can still enter by Google — a Workspace session is not guessable',
   gLocked.status === 'ok' && !!gLocked.sessionToken, gLocked);
@@ -1881,7 +1945,7 @@ r.ok('...so the counter is untouched in both directions',
 const lockBeforeRepeats = ctx.lockoutRemaining(GLOCK);
 for (let i = 0; i < 5; i++) {
   asGoogle(GLOCK); reexec();
-  ctx.doGoogleExchange({ code: redirectCode(ctx.doGoogleStart()), device: '' });
+  ctx.doGoogleExchange({ code: doorCode(ctx.doGoogleStart()), device: '' });
 }
 reexec();
 r.ok('repeated Google sign-ins cannot lock an account out of its own recovery path',
@@ -1894,7 +1958,7 @@ const refusedLines = signinLines().length;
 reexec();
 const refusedStart = ctx.doGoogleStart();
 reexec();
-const refusedSignin = ctx.doGoogleExchange({ code: redirectCode(refusedStart) || 'b'.repeat(32), device: '' });
+const refusedSignin = ctx.doGoogleExchange({ code: doorCode(refusedStart) || 'b'.repeat(32), device: '' });
 reexec();
 r.ok('a REFUSED google sign-in changes absolutely nothing',
   refusedSignin.status === 'error' && sessionCount() === refusedSessions &&

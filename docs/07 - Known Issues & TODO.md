@@ -187,7 +187,7 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **2155 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **2165 cases across 16 suites**, all passing.
 (1954 before the field-report build; 1762 before the field-history/restore build;
 1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and its
 69 cases arrived with Stages 3–4;
@@ -207,18 +207,42 @@ the demo flag `false`, because showing five fabricated sample IRs to someone wit
 hundred real ones is misinformation they could act on. The rest pin the other eleven
 reports.)
 
-**The Google door was rebuilt once, and the rebuild is the interesting part.** It
-shipped first as a silent probe plus a background sign-in `fetch`; that design could
-never have worked, and the failure was **measured** rather than guessed — a cross-site
-request from gh-pages to the domain-scoped deployment comes back `401` **from Google,
-before any of our code runs**. The same URL opened as a top-level **navigation**
-reports the caller perfectly. So the door is now two halves: a click that *leaves the
-page*, and a one-time handoff code that comes back in the URL fragment. 35 assertions
-in `smoke-backend.mjs` pin the shape the behaviour cannot show — which identity call
-is used, that `redeemHandoff` **checks** `used` rather than only setting it (a replay
-hole the first version had), that the redirect target is built server-side and reads
-no request parameter, and that the two halves share one mint so a fix cannot land on
-only one of them. 36 in `smoke-ui.mjs` drive the behaviour: the click navigates and
+**The Google door was rebuilt TWICE, and the second rebuild is the more instructive
+one.** It shipped first as a silent probe plus a background sign-in `fetch`; that
+design could never have worked, and the failure was **measured** rather than guessed —
+a cross-site request from gh-pages to the domain-scoped deployment comes back `401`
+**from Google, before any of our code runs**. The same URL opened as a top-level
+**navigation** reports the caller perfectly. So the door became two halves: a click
+that *leaves the page*, and a one-time handoff code that comes back in the URL
+fragment. That version reached the owner's browser and showed him **the source of the
+redirect page** — the Workspace identity had been read and a real code minted; the page
+simply never ran.
+
+Two silent failures, both in the return leg. `ContentService.MimeType` has **no `HTML`
+member**, so `setMimeType(ContentService.MimeType.HTML)` passed `undefined` and the
+response went out as plain text — and the suite was **green**, because
+`smoke-store.mjs`'s fake `ContentService` had invented that member, so the mock
+disagreed with the platform while agreeing with the code. And since the September 2021
+IFRAME sandbox change an Apps Script page may not navigate the top-level window without
+a user gesture, so even with the right mime the scripted `location.replace()` would have
+moved only Google's frame. The door now returns an `HtmlService` page with one
+`<a target="_top">` link the user taps — Google's own documented remedy — so sign-in
+costs one tap more than planned and works.
+
+Three lessons are pinned so they cannot un-happen. `ContentService.MimeType` in the
+fake platform no longer has `HTML` (the real constant belongs to DriveApp's `MimeType`
+enum, the other one — and the two are deliberately split in the stub the same way).
+`smoke-backend.mjs` asserts on the **source** that nothing ever asks
+`ContentService.MimeType.HTML`, because a mock can always be made to agree with a bug.
+And the shape of the page is pinned from four sides — it comes from `HtmlService`, every
+link wears `target="_top"`, there is no `<script>` and no `location.` assignment, and
+the identity and the refusal are both escaped on the way in.
+
+35 assertions in `smoke-backend.mjs` pin the shape the behaviour cannot show — which
+identity call is used, that `redeemHandoff` **checks** `used` rather than only setting
+it (a replay hole the first version had), that the link target is built server-side and
+reads no request parameter, and that the two halves share one mint so a fix cannot land
+on only one of them. 36 in `smoke-ui.mjs` drive the behaviour: the click navigates and
 reaches the network zero times, an empty `SSO_URL` makes it do nothing at all, a
 `#sso=` return exchanges the code on the **primary** backend carrying no stale token,
 a `#ssoerr=` return shows the door's own words with nothing exchanged, the spent

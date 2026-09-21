@@ -1614,12 +1614,12 @@ function googleDoorCheck() {
 // ── THE HANDOFF CODE — what the Google door hands back to the browser ─────────
 //
 // The door cannot return a session directly. It is a NAVIGATION: the browser is
-// on script.google.com, not in the app, so all this deployment can do is send the
-// browser back to CONFIG.APP_URL — and it must send something that proves, once it
-// arrives, which Workspace account opened the door. That something is a handoff
-// code, and it travels in the URL FRAGMENT (`#sso=…`) for one reason: fragments
-// are never sent to a server, so the code cannot land in a proxy log, a CDN log or
-// a Referer header on the way back.
+// on script.google.com, not in the app, so all this deployment can do is offer the
+// browser a link back to CONFIG.APP_URL — and it must carry something that proves,
+// once it arrives, which Workspace account opened the door. That something is a
+// handoff code, and it travels in the URL FRAGMENT (`#sso=…`) for one reason:
+// fragments are never sent to a server, so the code cannot land in a proxy log, a
+// CDN log or a Referer header on the way back.
 //
 // 32 hex characters from Utilities.getUuid — about 122 bits, so it is not
 // guessable, which is what makes googleExchange safe to serve from the "Anyone"
@@ -1735,51 +1735,101 @@ function mintGoogleSession(email, device) {
   return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
 }
 
-// Escape a string for embedding inside a <script> block. JSON.stringify alone is
-// not enough: the sequence `</script>` inside a JS string literal still ends the
-// block in an HTML parser, which is how a value becomes markup.
-function jsStringLiteral(s) {
-  return JSON.stringify(String(s)).replace(/</g, '\\u003c');
+// Escape a string for HTML text or a double-quoted attribute. The identity on the
+// page comes from Google and a refusal comes from CONFIG, so neither is
+// client-supplied today — but the output is markup, and a value that becomes
+// markup is a bug waiting for the first person to make one of them controllable.
+function htmlEscape(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-// Send the browser back to the app, carrying either a fresh handoff code or the
-// reason the door refused.
+// The page the door ends on, carrying either a fresh handoff code or the reason it
+// refused. It ends with ONE TAP on a real link, and both halves of that are forced
+// rather than chosen:
 //
-// THE TARGET IS BUILT SERVER-SIDE from CONFIG.APP_URL and never from a request
-// parameter. That is the whole open-redirect defence, and it is structural rather
-// than a check: there is no client-supplied URL to validate, so there is nothing
-// an attacker can point at their own site.
+//   * ContentService cannot serve HTML at all. Its MimeType list is ATOM, CSV,
+//     ICAL, JAVASCRIPT, JSON, RSS, TEXT, VCARD, XML — there is no HTML member, so
+//     `setMimeType(ContentService.MimeType.HTML)` passes `undefined` and the
+//     response goes out as plain text. The door shipped with exactly that bug
+//     once: the browser displayed the source of the redirect page instead of
+//     running it. Hence HtmlService, which is for pages and nothing else.
+//   * Since the 2021 IFRAME sandbox change an Apps Script page renders inside a
+//     frame that may not navigate the top-level window without a user gesture
+//     (`allow-top-navigation-by-user-activation` replaced `allow-top-navigation`).
+//     `location.replace` from here would therefore move only the frame, leaving
+//     the app inside an iframe at the wrong origin, where the URL bar and web
+//     storage are broken. Google's own guidance for this is to give the user a
+//     link to act on, so that is what this is.
 //
-// Apps Script cannot set a status code, so the redirect is a page whose only job
-// is to replace the current history entry. `location.replace` rather than an
-// assignment so the Google page does not sit in the back button.
-function handoffRedirect(code, message) {
+// `target="_top"` is what makes the tap leave the frame. Removing it silently
+// loads the app inside the sandbox, which is the failure this comment exists to
+// prevent.
+//
+// The link target is built SERVER-SIDE from CONFIG.APP_URL and never from a request
+// parameter. That is the open-redirect defence, and it is structural rather than a
+// check: there is no client-supplied URL to validate, so there is nothing an
+// attacker can point at their own site.
+function handoffPage(code, email, message) {
   var base = String(CONFIG.APP_URL || '');
-  var target = code
-    ? base + '#sso=' + code
-    : base + '#ssoerr=' + encodeURIComponent(String(message || 'Google sign-in failed.'));
+  var href, body;
+  if (code) {
+    href = base + '#sso=' + code;
+    body = '<p class="who">Signed in as <strong>' + htmlEscape(email) + '</strong></p>'
+         + '<a class="go" target="_top" href="' + htmlEscape(href) + '">Continue to I-PASSBOOK</a>';
+  } else {
+    // The refusal rides back in the fragment too, so the reason is still on screen
+    // in the app after the tap — the door's own sentence is gone the moment they
+    // leave it, and "Sign in with Google" with no explanation is the state this
+    // branch exists to avoid.
+    href = base + '#ssoerr=' + encodeURIComponent(String(message || 'Google sign-in failed.'));
+    body = '<p class="who">' + htmlEscape(message || 'Google sign-in failed.') + '</p>'
+         + '<a class="go" target="_top" href="' + htmlEscape(href) + '">Back to sign in</a>';
+  }
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
-           + '<title>Signing in…</title></head><body>'
-           + '<p style="font:16px system-ui;padding:24px">Signing you in…</p>'
-           + '<script>location.replace(' + jsStringLiteral(target) + ');</script>'
-           + '</body></html>';
-  return ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML);
+           + '<meta name="viewport" content="width=device-width,initial-scale=1">'
+           + '<title>I-PASSBOOK</title><style>'
+           + 'html,body{margin:0}'
+           + 'body{display:flex;align-items:center;justify-content:center;padding:24px;'
+           + 'box-sizing:border-box;min-height:100vh;text-align:center;background:#f8f8f8;color:#0f0f0f;'
+           + 'font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
+           + '.card{width:100%;max-width:360px;background:#fff;border-radius:14px;'
+           + 'padding:32px 28px;box-shadow:0 1px 2px rgba(15,15,15,.08),0 8px 24px rgba(15,15,15,.06)}'
+           + '.brand{margin:0 0 18px;font-size:12px;font-weight:700;letter-spacing:.1em;color:#383838}'
+           + '.who{margin:0 0 22px;color:#383838}'
+           + '.who strong{color:#0f0f0f;word-break:break-all}'
+           + '.go{display:block;padding:14px 18px;border-radius:10px;background:#005cad;'
+           + 'color:#fff;font-weight:600;text-decoration:none}'
+           + '.go:focus-visible{outline:3px solid #005cad;outline-offset:3px}'
+           + '@media (prefers-color-scheme: dark){'
+           + 'body{background:#171717;color:#f8f8f8}'
+           + '.card{background:#1f1f1f;box-shadow:none}'
+           + '.brand,.who{color:#afafaf}.who strong{color:#f8f8f8}'
+           + '.go{background:#76bef9;color:#0f0f0f}}'
+           + '</style></head><body><div class="card">'
+           + '<p class="brand">I-PASSBOOK</p>' + body + '</div></body></html>';
+  return HtmlService.createHtmlOutput(html);
 }
 
 // GET googleStart — the door, opened by a CLICK THAT NAVIGATES.
 //
 // A GET that mints something deserves the question "can a hostile page trigger
 // it?". It can: `<img src="…?action=googleStart">` would make this issue a code
-// into the victim's… nothing. The response is a redirect to a FIXED server-side
-// URL; an image's response is discarded and no navigation happens, so the attacker
-// neither learns the code nor moves the victim. Issuing a code also grants no
-// access on its own — it must still be redeemed, from the app, by whoever holds it.
+// into the victim's… nothing. The response is a page whose only exit is a link to a
+// FIXED server-side URL; an image's response is discarded and no navigation
+// happens, so the attacker neither learns the code nor moves the victim. Issuing a
+// code also grants no access on its own — it must still be redeemed, from the app,
+// by whoever holds it.
 function doGoogleStart() {
   var c = googleDoorCheck();
-  if (c.error) return handoffRedirect(null, c.error.message);
+  if (c.error) return handoffPage(null, '', c.error.message);
   var code = issueHandoff(c.email);
-  if (!code) return handoffRedirect(null, 'Could not start Google sign-in just now — try again.');
-  return handoffRedirect(code, '');
+  if (!code) return handoffPage(null, '', 'Could not start Google sign-in just now — try again.');
+  return handoffPage(code, c.email, '');
 }
 
 // POST googleExchange — half two, on the deployment that is "Anyone".
@@ -1956,8 +2006,8 @@ function doGet(e) {
   var result;
   try {
     // The Google door's first half — a NAVIGATION, so it is GET, and it answers
-    // with a redirect page rather than JSON. It is checked before the preAuth map
-    // because it must return an HtmlOutput and never go through buildResponse.
+    // with an HtmlOutput page rather than JSON. It is checked before the preAuth map
+    // because it must return that HtmlOutput and never go through buildResponse.
     if (action === 'googleStart') return doGoogleStart();
 
     var preAuth = {

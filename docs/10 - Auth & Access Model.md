@@ -31,11 +31,20 @@ a background `fetch` to the domain-restricted deployment is refused by Google wi
 **401 before any of our code runs**, because a cross-site background request does not
 carry the caller's Google session. A top-level navigation to the same URL reports the
 caller perfectly. So the click navigates, the door reads the Workspace identity and
-sends the browser straight back with a **one-time handoff code** in the URL fragment
-(`#sso=…`, or `#ssoerr=…` for a refusal), and the app swaps that code for a session on
-the primary backend. The code is 32 hex characters, single-use and live for two
-minutes; it rides in the fragment, which is never sent to a server, and the redirect
-target is a server-side constant, so the door cannot be turned into an open redirect.
+answers with a page naming that account and carrying **one link** — `target="_top"`,
+which the user taps — back to the app with a **one-time handoff code** in the URL
+fragment (`#sso=…`, or `#ssoerr=…` for a refusal). The app then swaps that code for a
+session on the primary backend.
+
+That last tap is not a design choice. Apps Script cannot redirect a top-level window on
+its own — since the September 2021 IFRAME sandbox change a script page may not navigate
+the top window without a user gesture, and `ContentService` cannot serve HTML at all,
+so the "bounce straight back" version showed users the source of a page that never ran.
+Both failures are silent, which is why the tests now pin the shape of that page.
+
+The code is 32 hex characters, single-use and live for two minutes; it rides in the
+fragment, which is never sent to a server, and the link target is a server-side
+constant, so the door cannot be turned into an open redirect.
 Both the code and the address-bar trace are gone by the time the app has drawn.
 
 The password door is not a lesser fallback. It is the door for a shared machine

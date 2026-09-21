@@ -1934,7 +1934,10 @@ r.ok('...and issuing the handoff is the only thing it does with an admitted addr
   /issueHandoff\(c\.email\)/.test(gstart),
   (gstart.match(/[^\n]*issueHandoff[^\n]*/) || [''])[0]);
 r.ok('a refusal is reported as a refusal, never swallowed into a code',
-  /if \(c\.error\) return handoffRedirect\(null, c\.error\.message\)/.test(gstart));
+  /if \(c\.error\) return handoffPage\(null, '', c\.error\.message\)/.test(gstart));
+r.ok('...and the admitted address is named ON THE PAGE, so the user sees which account before signing',
+  /handoffPage\(code, c\.email, ''\)/.test(gstart),
+  (gstart.match(/[^\n]*handoffPage\(code[^\n]*/) || [''])[0]);
 
 r.head('the handoff code is a 122-bit secret, and it travels in the URL FRAGMENT');
 const findH = fnBody('findHandoffIn');
@@ -1965,25 +1968,52 @@ r.ok('the refusals do not say whether the code ever existed — no oracle',
   (fnBody('redeemHandoff').match(/message:\s*'/g) || []).length === 1,
   (fnBody('redeemHandoff').match(/[^\n]*message:[^\n]*/) || [''])[0]);
 
-r.head('the redirect target is built SERVER-SIDE, so there is no open redirect');
-const hred = fnBody('handoffRedirect');
-r.ok('it reads CONFIG.APP_URL', /CONFIG\.APP_URL/.test(hred));
+r.head('the door ends on a page with ONE link — an automatic redirect is impossible here');
+const hpage = fnBody('handoffPage');
+const hesc = fnBody('htmlEscape');
+// THE BUG THIS BLOCK EXISTS FOR. The door once answered with
+// `ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML)`
+// and a `location.replace` back to the app — and BOTH halves failed silently:
+// ContentService.MimeType has no HTML member, so the response went out as plain text
+// and the user was shown the source of a page that never ran; and since the 2021
+// IFRAME sandbox change an Apps Script page cannot navigate the top-level window
+// without a user gesture, so it would have moved Google's frame and left the app
+// inside an iframe at the wrong origin.
+r.ok('it serves through HtmlService — the only thing in Apps Script that returns a page',
+  /HtmlService\.createHtmlOutput\(/.test(hpage) && !/ContentService/.test(hpage),
+  (hpage.match(/[^\n]*createHtmlOutput[^\n]*/) || [''])[0]);
+r.ok('THE IMAGINARY MEMBER CANNOT COME BACK: nothing asks ContentService for HTML',
+  !/ContentService\.MimeType\.HTML/.test(code),
+  (code.match(/[^\n]*ContentService\.MimeType\.HTML[^\n]*/) || ['none — good'])[0]);
+r.ok('the page does NOT try to navigate itself — that is what the sandbox forbids',
+  !/location\.replace\(/.test(hpage) && !/location\.href\s*=/.test(hpage) &&
+  !/<script/i.test(hpage));
+r.ok('...and every link on the page wears target="_top", or the tap would only move Google\'s frame',
+  (hpage.match(/<a\b[^>]*>/g) || []).length > 0 &&
+  (hpage.match(/<a\b[^>]*>/g) || []).every(t => /target="_top"/.test(t)),
+  (hpage.match(/<a\b[^>]*>/g) || []).join(' '));
+r.ok('...and nothing else can leave the page: exactly one link per branch, no form, no meta refresh',
+  (hpage.match(/<a\b/g) || []).length === 2 &&        // the code branch, and the refusal branch
+  !/<form|<meta http-equiv="refresh"/i.test(hpage));
+r.ok('it reads CONFIG.APP_URL', /CONFIG\.APP_URL/.test(hpage));
 // Structural, not a check: there is no client-supplied URL to validate, so there is
 // nothing an attacker can point at their own site. A `?next=` parameter would turn
 // this GET into an open redirect on a Google-hosted origin.
 r.ok('...and reads NO request parameter at all',
-  !/\bparam/.test(hred) && !/\be\.parameter/.test(hred),
-  (hred.match(/[^\n]*param[^\n]*/) || ['none'])[0]);
+  !/\bparam/.test(hpage) && !/\be\.parameter/.test(hpage),
+  (hpage.match(/[^\n]*param[^\n]*/) || ['none'])[0]);
 r.ok('the code travels in the FRAGMENT, which is never sent to a server',
-  /'#sso='/.test(hred) && !/\?sso=/.test(hred),
-  (hred.match(/[^\n]*#sso[^\n]*/) || [''])[0]);
-r.ok('a refusal comes back as #ssoerr, encoded',
-  /#ssoerr=/.test(hred) && /encodeURIComponent/.test(hred));
-r.ok('the redirect is a page that REPLACES, so the Google door is not in the back button',
-  /location\.replace\(/.test(hred) && !/location\.href\s*=/.test(hred));
-r.ok('the embedded URL is escaped for a <script> block, not just JSON-stringified',
-  /replace\(\/</.test(fnBody('jsStringLiteral')) && /\\\\u003c/.test(fnBody('jsStringLiteral')),
-  fnBody('jsStringLiteral'));
+  /'#sso='/.test(hpage) && !/\?sso=/.test(hpage),
+  (hpage.match(/[^\n]*#sso[^\n]*/) || [''])[0]);
+r.ok('a refusal comes back as #ssoerr, encoded, so the reason survives into the app',
+  /#ssoerr=/.test(hpage) && /encodeURIComponent/.test(hpage));
+r.ok('every value that reaches the markup is escaped for it',
+  /&amp;/.test(hesc) && /&lt;/.test(hesc) && /&gt;/.test(hesc) &&
+  /&quot;/.test(hesc) && /&#39;/.test(hesc),
+  (hesc.match(/[^\n]*replace\([^\n]*/) || [''])[0]);
+r.ok('...and the identity and the refusal are both escaped on the way in, never bare',
+  /htmlEscape\(email\)/.test(hpage) && /htmlEscape\(message \|\|/.test(hpage) &&
+  !/\+\s*email\s*\+/.test(hpage) && !/\+\s*message\s*\+/.test(hpage));
 
 r.head('half two mints EXACTLY what the password door mints, from one shared body');
 const gexch = fnBody('doGoogleExchange');

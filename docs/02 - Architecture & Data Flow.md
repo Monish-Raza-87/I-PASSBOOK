@@ -52,12 +52,14 @@ store layout.
 
 ### 2. Auth Screen
 - **Sign in with Google**, when a second deployment is configured (`CONFIG.SSO_URL`).
-  One click, no password, no emailed code. The click **leaves the page**: it navigates
-  to the second deployment, which reads the caller's Workspace identity and sends the
-  browser straight back with a one-time code in the URL fragment, which the app swaps
-  for a session on the primary backend. A wrong or missing URL shows **no button** and
-  changes nothing else. It is an **addition**: the password form below it is not a
-  lesser fallback. See [10 — Auth & Access Model](10 - Auth & Access Model.md).
+  No password and no emailed code. The click **leaves the page**: it navigates to the
+  second deployment, which reads the caller's Workspace identity and answers with a page
+  naming that account and carrying **one button** — Apps Script's sandbox forbids a page
+  from navigating the top window on its own, so the user taps it — which returns to the
+  app with a one-time code in the URL fragment that the app swaps for a session on the
+  primary backend. A wrong or missing URL shows **no button** and changes nothing else.
+  It is an **addition**: the password form below it is not a lesser fallback. See
+  [10 — Auth & Access Model](10 - Auth & Access Model.md).
 - Email + password sign-in, then a 6-digit code emailed to the same address. **There
   is no sign-up** — an admin provisions every account and hands over a temporary
   password (see [10 — Auth & Access Model](10 - Auth & Access Model.md)). The code is

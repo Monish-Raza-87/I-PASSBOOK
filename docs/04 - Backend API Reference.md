@@ -298,10 +298,10 @@ can badge them and the detail view can show a read-only copy.
 The Google door, **half one**. A **GET** (`?action=googleStart`), served by the
 **second, domain-scoped** deployment, and dispatched by a branch at the top of
 `doGet` — before the pre-auth map and before `buildResponse` — because it answers
-with an **HTML redirect page**, not JSON. It reads the caller's Workspace identity,
-runs the refusal ladder, and sends the browser back to `CONFIG.APP_URL` with either a
-one-time handoff code (`#sso=…`) or the reason it refused (`#ssoerr=…`). It is reached
-by a **navigation**, never a `fetch` — see [The Google door, in full](#the-google-door-in-full)
+with an **HTML page carrying one link**, not JSON. It reads the caller's Workspace
+identity, runs the refusal ladder, and offers a link back to `CONFIG.APP_URL` carrying
+either a one-time handoff code (`#sso=…`) or the reason it refused (`#ssoerr=…`). It is
+reached by a **navigation**, never a `fetch` — see [The Google door, in full](#the-google-door-in-full)
 below for why that is a measured constraint rather than a preference.
 
 ### Pre-auth endpoints
@@ -330,7 +330,7 @@ before our code runs**, because a cross-site background request does not carry t
 caller's Google session cookie. The same URL opened as a top-level navigation
 reports the caller perfectly. So the button is a link-shaped click, not a request.
 
-Because it returns a redirect **page** rather than JSON, `googleStart` is dispatched
+Because it returns an HTML **page** rather than JSON, `googleStart` is dispatched
 by a **branch at the top of `doGet`**, before the pre-auth map and before
 `buildResponse` — a map entry could not return HTML.
 
@@ -358,21 +358,53 @@ returns early on `purpose === 'google'`, so three Google sign-ins cannot spend a
 colleague's budget for the reset that is the only way back into a locked account.
 They live in the same `codes.json`, with `purpose: 'google'`.
 
-**The redirect back to the app.** `handoffRedirect(code, message)` builds the target
-**server-side from `CONFIG.APP_URL`** and reads **no request parameter** — that is
-the whole open-redirect defence, and it is structural rather than a check, because
+**The page back to the app — one tap, not a redirect.** `handoffPage(code, email, message)`
+returns an `HtmlService` page whose only exit is a link. Two constraints, both measured,
+force that shape, and both failed silently when this door was first written:
+
+- **`ContentService` cannot serve HTML.** Its `MimeType` list is ATOM, CSV, ICAL,
+  JAVASCRIPT, JSON, RSS, TEXT, VCARD and XML — there is **no `HTML`**. So
+  `setMimeType(ContentService.MimeType.HTML)` passes `undefined`, the response goes out
+  as plain text, and the user is shown the **source** of the page instead of running it.
+  (`MimeType.HTML` is real — but on the *other* `MimeType` enum, the one `DriveApp` takes
+  for file types. Confusing the two is the whole mistake.) `HtmlService` is the only thing
+  in Apps Script that returns a page, so the door uses it.
+- **An Apps Script page cannot navigate the top-level window on its own.** Since the
+  September 2021 IFRAME sandbox change, `allow-top-navigation` was replaced by
+  `allow-top-navigation-by-user-activation`, so `location.replace()` from inside the frame
+  throws *"…sandboxed with the 'allow-top-navigation-by-user-activation' flag, but has no
+  user activation"* — and even where it did run it would move only Google's frame, leaving
+  the app inside an iframe at the wrong origin, where the URL bar and web storage are
+  broken. Google's own guidance is to *"add a link or a button for the user to take action
+  on instead"*, which is what this page is.
+
+So the page carries one `<a target="_top">` per branch — the code, or the refusal — and
+**no script at all**. `target="_top"` is what makes the tap leave the frame (link targets
+must be `_top` or `_blank` in IFRAME mode); the link is a plain user-initiated click, which
+is the one navigation the sandbox permits, and with no `google.script.run` in the path there
+is no gesture-expiry race to lose. Both branches also show the account or the refusal
+**before** anything is signed, which is the shared-laptop protection.
+
+| Branch | What the page shows | Where the link goes |
+|---|---|---|
+| `code` | `Signed in as <email>` | `CONFIG.APP_URL#sso=<32 hex>` — **Continue to I-PASSBOOK** |
+| refusal | the door's own sentence | `CONFIG.APP_URL#ssoerr=<encoded>` — **Back to sign in** |
+
+**The link is built server-side** from `CONFIG.APP_URL` and reads **no request parameter**
+— that is the whole open-redirect defence, and it is structural rather than a check, because
 there is no client-supplied URL to validate. The code rides in the URL **fragment**
-(`#sso=…`, or `#ssoerr=…` for a refusal): fragments are never sent to a server, so
-the code cannot land in a proxy log, a CDN log or a `Referer` header. The page does
-`location.replace()` rather than an assignment, so the Google door does not sit in
-the back button, and the URL is escaped for a `<script>` block (`jsStringLiteral`)
-rather than merely JSON-stringified, so a value cannot become markup.
+(`#sso=…`, or `#ssoerr=…` for a refusal): fragments are never sent to a server, so the code
+cannot land in a proxy log, a CDN log or a `Referer` header. The refusal keeps travelling in
+the fragment too, so the door's explanation is still on screen in the app after the tap.
+Every value that reaches the markup goes through `htmlEscape()` — the identity comes from
+Google, and a value that becomes markup is a bug waiting for the first person to make one of
+them controllable.
 
 **A GET that mints something.** `<img src="…?action=googleStart">` *can* trigger it,
-and that is fine: the response is a redirect to a **fixed** server-side URL, an
-image's response is discarded and no navigation happens, so an attacker neither
-learns the code nor moves the victim. Issuing a code also grants no access on its
-own — it must still be redeemed, from the app, by whoever holds it.
+and that is fine: the response is a page whose only exit is a link to a **fixed**
+server-side URL; an image's response is discarded and no navigation happens, so an
+attacker neither learns the code nor moves the victim. Issuing a code also grants no
+access on its own — it must still be redeemed, from the app, by whoever holds it.
 
 **The ladder.** `googleDoorCheck()` is the shared refusal ladder, called by the
 door:

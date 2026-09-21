@@ -27,16 +27,29 @@ not carry the caller's Google session cookie. The same URL opened as a **top-lev
 navigation** reports the caller perfectly. So the mechanism is two halves:
 
 1. The click sets `location.href` to `SSO_URL + '?action=googleStart'`. The response is
-   a page whose only job is `location.replace()` back to `CONFIG.APP_URL` with a
-   one-time code in the **fragment** — `#sso=<32 hex>` — or a refusal, `#ssoerr=<why>`.
+   an `HtmlService` page naming the account it recognised and carrying **one link** —
+   `target="_top"`, because that is the only navigation Apps Script's sandbox permits
+   (see below) — back to `CONFIG.APP_URL` with a one-time code in the **fragment**,
+   `#sso=<32 hex>`, or `#ssoerr=<why>` for a refusal. **The user taps that one link.**
 2. The app reads that fragment once, at parse time, wipes it with `history.replaceState`,
    and POSTs `googleExchange` with the code to the **primary** backend, which is
    "Anyone" and therefore reachable. That call mints the session.
 
+**Why the door cannot send you back by itself.** It was first built as a page that
+`location.replace()`d straight back, which is impossible twice over, and both failures
+are silent. `ContentService.MimeType` has **no `HTML`** member — so a redirect page
+served through it goes out as plain text and the user is shown the page's *source*
+instead of running it. And since the September 2021 IFRAME sandbox change an Apps Script
+page may not navigate the top-level window without a user gesture
+(`allow-top-navigation` became `allow-top-navigation-by-user-activation`), so even with
+the right mime it would have moved only Google's frame and left the app inside an iframe
+at the wrong origin. Google's documented remedy is a link, so sign-in ends with **one
+tap**: *Continue to I-PASSBOOK*, or *Back to sign in* after a refusal.
+
 The code is 32 hex characters (~122 bits) from `Utilities.getUuid()`, single-use, and
 live for **two minutes**. It travels in the fragment rather than a query string on
 purpose: fragments are never sent to a server, so it cannot land in a proxy log, a CDN
-log or a `Referer` header. The redirect target is built server-side from
+log or a `Referer` header. The link target is built server-side from
 `CONFIG.APP_URL` and reads no request parameter — that, not a validation step, is what
 makes the door structurally incapable of an open redirect.
 

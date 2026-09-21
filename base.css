@@ -208,7 +208,21 @@ html[data-splash="skip"] #splash-screen {
 }
 html[data-sso="wait"] #sso-wait { display: flex; }
 
-.sso-wait-mark { width: 56px; height: 56px; display: block; }
+/* NOT a square, and inverted — both learned from the owner looking at it.
+   The artwork is a 4:3 lockup (512x384: the disc, then "Passbook" to its right), so
+   forcing 56x56 SQUASHES it — the mark is drawn at `width: auto` from a height for
+   exactly this reason, the same rule `.auth-logo` and `.brand-mark` have followed
+   from the start. And this screen is dark by definition, so the mark needs the same
+   `invert(1)` the dark theme applies: its disc is a dark slate, which on #0b0b0b
+   leaves only the knocked-out white pieces showing and reads as a logo with holes in
+   it. Inverting keeps the design's internal contrast because the monogram and script
+   are holes in the disc — see the full note on `[data-theme="dark"] .auth-logo`. */
+.sso-wait-mark {
+  height: 56px;
+  width: auto;
+  display: block;
+  filter: invert(1);
+}
 .sso-wait-title {
   margin: 16px 0 0;
   font-size: var(--text-lg);

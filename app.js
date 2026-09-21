@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v45';
+const APP_VERSION = 'v46';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3554,11 +3554,30 @@ function renderIRList(records) {
     // attacker could put an `onerror` payload in the serial field and steal the
     // admin's session token the moment the list rendered.
     const sumUrl = safeUrl(ir.summaryLink);
+    const isLegacy = !!legacyMap[ir.irNumber];
+    // Everything this row cannot hold, assembled ONCE for the hover line. The
+    // owner's rule for this tile: "any additional info if coming in that tile
+    // should either find its place adequately without disturbing other elements
+    // and professional appearance or else show when hovered above it or both."
+    // So the row shows what a list row is FOR, and this line shows the rest.
+    // Built here rather than left to CSS so the two cannot disagree about what
+    // exists — a chip removed from the row cannot silently vanish from the hover.
+    const hoverBits = [
+      owner ? `Assigned to ${escHtml(owner)}` : '',
+      isLegacy ? 'Legacy record' : '',
+      ir.droneId ? escHtml(ir.droneId) : '',
+      ir.category ? escHtml(ir.category) : '',
+      ir.subCategory ? escHtml(ir.subCategory) : '',
+      ir.dateRaised ? escHtml(ir.dateRaised) : '',
+      age ? escHtml(ageLabel(age)) + (late ? ' · overdue' : '') : '',
+    ].filter(Boolean).join(' · ');
     return `
     <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
-      ${owner ? `<span class="assignee-avatar" title="Assigned to ${escHtml(owner)}">${escHtml(initialsOf(owner))}</span>` : ''}
       <div class="ir-card-main">
-        <div class="ir-title">${escHtml(ir.irNumber)}</div>
+        <div class="ir-title-row">
+          <span class="ir-title">${escHtml(ir.irNumber)}</span>
+          ${owner ? `<span class="ir-assignee" title="Assigned to ${escHtml(owner)}">${escHtml(owner)}</span>` : ''}
+        </div>
         <div class="ir-meta">
           <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
           ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
@@ -3566,14 +3585,16 @@ function renderIRList(records) {
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
           ${age ? `<span class="ir-dot">·</span><span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
         </div>
+        <div class="ir-card-hover">
+          <span class="ir-hover-text">${hoverBits}</span>
+          ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
+        </div>
       </div>
       <div class="ir-card-side">
-        ${legacyMap[ir.irNumber] ? `<span class="badge badge-legacy" title="Recorded in the legacy I-PASSBOOK">Legacy</span>` : ''}
         ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(ir.priority)}</span>` : ''}
         <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
         ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
         ${showProg ? progressChip(prog) : ''}
-        ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
       </div>
     </div>
   `;
@@ -3606,17 +3627,14 @@ function wantProgress(ir, prog) {
   return !(ir && ir.isLegacyOnly && prog.done === 0);
 }
 
-// Initials for the assignee chip on a list card. Accepts a display name or an
-// email and never throws on either.
-function initialsOf(nameOrEmail) {
-  const s = String(nameOrEmail || '').trim();
-  if (!s) return '?';
-  const base = s.includes('@') ? s.split('@')[0] : s;
-  const parts = base.split(/[\s._-]+/).filter(Boolean);
-  if (!parts.length) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
+// `initialsOf()` and the `.assignee-avatar` circle it fed were removed with the
+// 2026-09-21 list-row fix. The circle was a 26px chip in the row's side column,
+// and on IR470 — the row carrying the most chips — it was the chip that tipped
+// the column past the 400px list pane's budget, so the browser squeezed the
+// column and sliced the `Open` pill off at its left edge. The owner's read of
+// that was "AN … overlapping above 'open' status", and his fix was the right
+// one: the initial is not worth a chip, and his full name belongs in the empty
+// space to the right of the IR number. See `renderIRList` and `.ir-title-row`.
 
 function updateListCounts(shown) {
   if (navCountEl)  navCountEl.textContent = allIRs.length;

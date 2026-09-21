@@ -12,7 +12,7 @@
 import { loadApp, makeReporter } from './harness.mjs';
 
 const T = loadApp(`
-  setAllIRs, applyIRStateToAllIRs, appState, ownedStatus, markSectionDone, initialsOf,
+  setAllIRs, applyIRStateToAllIRs, appState, ownedStatus, markSectionDone,
   statusCategory, IR_STATUS_VALUES, IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS,
   get allIRs() { return allIRs; },
   get irState() { return irState; }, set irState(v) { irState = v; },
@@ -118,12 +118,13 @@ T.applyIRStateToAllIRs();
 ok('a malformed done[] becomes an empty array, not a crash', Array.isArray(by('IR412').done) && by('IR412').done.length === 0,
   by('IR412').done);
 
-head('initials');
-ok('"Monish Raza" → MR', T.initialsOf('Monish Raza') === 'MR', T.initialsOf('Monish Raza'));
-ok('email → MR', T.initialsOf('monish.raza@indrones.com') === 'MR', T.initialsOf('monish.raza@indrones.com'));
-ok('single word → 2 chars', T.initialsOf('Ravi') === 'RA', T.initialsOf('Ravi'));
-ok('empty → ?', T.initialsOf('') === '?', T.initialsOf(''));
-ok('undefined does not throw', T.initialsOf(undefined) === '?');
+head('the assignee is a name now, not an initials chip');
+// `initialsOf()` and the `.assignee-avatar` circle it fed were removed on
+// 2026-09-21 — see the note where the function used to live in app.js. The five
+// cases that used to pin the initials are gone with it rather than left testing a
+// function no caller has.
+ok('initialsOf is gone, so nothing renders an initials chip',
+  typeof T.initialsOf === 'undefined', typeof T.initialsOf);
 
 head('records with no Sheet date (legacy / demo paths)');
 T.setAllIRs([{ irNumber: 'IR900', status: 'Open' }]);

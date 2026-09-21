@@ -103,8 +103,7 @@ const WANTED = [
   /^\.segments?(-cat|-count)?(::-[a-z-]+|:hover|\.active| .segment-count)?$/,
   /^\.tab(-icon|-label)?(\.active|:hover)?$/,
   /^\.tabs-container(::-[a-z-]+)?$/,
-  /^\.ir-(card|card-main|card-side|title|meta|sn|cat|date|dot|summary-link)(:hover|:active|\.is-selected|::before)?$/,
-  /^\.assignee-avatar$/,
+  /^\.ir-(card|card-main|card-side|card-hover|title-row|title|assignee|hover-text|meta|sn|cat|date|dot|summary-link)(:hover|:active|\.is-selected|::before)?$/,
   /^\.section-divider(:first-child)?$/,
   /^\.analysis-note$/,
   /^\.cc-note$/,
@@ -130,8 +129,8 @@ function pick(css) {
 const componentCss = themed(pick(baseCss) + '\n' + pick(componentsCss) + '\n' + pick(viewsCss));
 
 // ── Fail loudly rather than shipping a preview that renders the wrong app ────
-const required = ['.btn', '.ir-card', '.badge', '.segment', '.tab', '.form-input',
-  '.analysis-note', '.auth-brand', '.assignee-avatar'];
+const required = ['.btn', '.ir-card', '.ir-card-hover', '.ir-assignee', '.badge',
+  '.segment', '.tab', '.form-input', '.analysis-note', '.auth-brand'];
 const missing = required.filter(sel => !componentCss.includes(sel + ' {') && !componentCss.includes(sel + ','));
 if (missing.length) {
   console.error('These component rules were not found — did they get renamed?\n  ' + missing.join('\n  '));
@@ -341,27 +340,40 @@ body {
 // The app's own demo rows (getDemoIRs in app.js), so the preview shows exactly
 // the records a signed-in user sees before the backend is connected — and
 // plainly not anyone's real tickets.
+// `own` is a full name, not initials: the row shows the assignee's name in the
+// space to the right of the IR number, and shows the rest of the ticket's detail
+// on hover. The preview has to render the SAME markup the app does (see
+// renderIRList) or the owner reviews a look the app does not have.
 const IRS = [
-  { n: 'IR409', drone: 'S25P014', cat: 'Hardware Damage', date: '2025-10-01', status: 'In Production', cls: 'badge-open', prio: 'High', own: 'MR' },
-  { n: 'IR408', drone: 'S100-003', cat: 'Firmware Issue', date: '2025-09-28', status: 'QC Investigation', cls: 'badge-pending', prio: 'Medium', own: 'RS' },
-  { n: 'IR407', drone: 'S25P017', cat: 'Battery Issue', date: '2025-09-20', status: 'Open', cls: 'badge-open', prio: 'Urgent', own: 'AN' },
-  { n: 'IR405', drone: 'S25P040', cat: 'RMA / Return', date: '2025-09-10', status: 'Closed', cls: 'badge-closed', prio: '', own: 'RS' },
+  { n: 'IR409', drone: 'S25P014', cat: 'Hardware Damage', date: '2025-10-01', status: 'In Production', cls: 'badge-open', prio: 'High', own: 'Monish Raza', age: '2d', late: false, prog: '4' },
+  { n: 'IR408', drone: 'S100-003', cat: 'Firmware Issue', date: '2025-09-28', status: 'QC Investigation', cls: 'badge-pending', prio: 'Medium', own: 'Ravi Singh', age: '5d', late: false, prog: '2' },
+  { n: 'IR407', drone: 'S25P017', cat: 'Battery Issue', date: '2025-09-20', status: 'Open', cls: 'badge-open', prio: 'Urgent', own: 'Adhik Nair', age: '13d', late: true, prog: '1' },
+  { n: 'IR405', drone: 'S25P040', cat: 'RMA / Return', date: '2025-09-10', status: 'Closed', cls: 'badge-closed', prio: '', own: 'Ravi Singh', age: '23d', late: false, prog: '6' },
 ];
 
 const card = ir => `
   <div class="ir-card">
-    <span class="assignee-avatar" title="Assigned to ${ir.own}">${ir.own}</span>
     <div class="ir-card-main">
-      <div class="ir-title">${ir.n}</div>
+      <div class="ir-title-row">
+        <span class="ir-title">${ir.n}</span>
+        <span class="ir-assignee" title="Assigned to ${ir.own}">${ir.own}</span>
+      </div>
       <div class="ir-meta">
         <span class="ir-sn">${ir.drone}</span>
         <span class="ir-dot">·</span><span class="ir-cat">${ir.cat}</span>
         <span class="ir-dot">·</span><span class="ir-date">${ir.date}</span>
+        <span class="ir-dot">·</span><span class="ir-age${ir.late ? ' is-late' : ''}">${ir.age}</span>
+      </div>
+      <div class="ir-card-hover">
+        <span class="ir-hover-text">Assigned to ${ir.own} · ${ir.drone} · ${ir.cat} · ${ir.date} · ${ir.age}${ir.late ? ' · overdue' : ''}</span>
+        <a href="#" class="ir-summary-link" onclick="return false">View Summary ↗</a>
       </div>
     </div>
     <div class="ir-card-side">
       ${ir.prio ? `<span class="prio prio-${ir.prio.toLowerCase()}">${ir.prio}</span>` : ''}
       <span class="badge ${ir.cls}">${ir.status}</span>
+      ${ir.late ? '<span class="badge badge-danger" title="Past its target date">Overdue</span>' : ''}
+      <span class="ir-progress p${ir.prog}"><span class="ir-progress-bar"></span><span class="ir-progress-text">${ir.prog}/6</span></span>
     </div>
   </div>`;
 

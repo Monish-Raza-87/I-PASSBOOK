@@ -206,18 +206,67 @@ genuinely needed.
 `.ir-card` — flat with dividers rather than floating cards, which holds up better
 at 400 rows. `.ir-card.is-selected` marks the row open in the split pane.
 
-An `.ir-card` also carries the **assignee initials** badge (`.ir-assignee`, from
-`__IRS__`) when the ticket has been triaged to someone.
+An `.ir-card` shows the **assignee's name** as `.ir-assignee`, beside the IR number
+in `.ir-title-row`. It was an initials circle (`.assignee-avatar`, `initialsOf()`)
+until 2026-09-21, and that circle was the last chip to break the row — see below.
+The owner's replacement: *"instead of placing AN in a circle on left of IR470, there
+is plenty of space on the right of all IR numbers … we may write down Adhik Nair in
+small on the right of IR470."* That space really is empty, the number is short, and
+the meta line below runs the full width — so the name costs the row nothing. It
+shrinks and ellipsises before anything carrying state, and its `title` holds the
+full name for when it does.
 
-**Every row is the same height, and that is enforced, not hoped for.** Triaging a
-ticket adds an avatar and marking it Urgent adds a pill; `.ir-card-side` was
-`flex: 0 0 auto` and therefore **wrapped**, so a triaged-urgent IR became two lines
-while its neighbours stayed one — reported as *"why is the tab of IR470 much bigger
-than others? is there a feature that… changes its normal size?"*. There is no
-resizing feature; the row had nowhere to put two more pills. The wrap is gone: the
-row stays one line, the middle text truncates with an ellipsis, and below 640px the
-two least important items (`View Summary ↗`, the Legacy badge) drop out. Every pill
-is still shown at every width that has room for it.
+**Every row is the same height, and every pill that carries state is always whole.**
+This is enforced, not hoped for, and it took two attempts:
+
+1. Triaging a ticket added an avatar and marking it Urgent added a pill, and
+   `.ir-card-side` was `flex-wrap: wrap` — so IR470 became two lines while its
+   neighbours stayed one. Reported as *"why is the tab of IR470 much bigger than
+   others? is there a feature that… changes its normal size?"*.
+2. The wrap was replaced with a side column that could **shrink**
+   (`flex: 0 1 auto` + `overflow: hidden`), which was worse in a way nothing caught
+   until IR470: a shrunk, right-aligned flex column overflows at its **inline-start**
+   edge, and `overflow: hidden` then slices it. `Open` was being cut in half, with
+   the avatar immediately to its left — reported as *"it has AN written in a circle …
+   but it is overlapping above 'open' status i.e., hiding it."* Nothing was painted
+   over anything; the pill was cut, and the circle merely sat where the cut was.
+
+The numbers, because this is arithmetic and not taste: the desktop list pane is
+`--list-w` (`tokens.css`), so a row has ~371px of content width, and IR470 had
+collected the avatar, Urgent, Open, Overdue, the completion chip, Legacy **and**
+`View Summary ↗` — more than a 400px pane holds. So the row now:
+
+- **`.ir-card-side` is `flex: 0 0 auto` with no `overflow`** — it cannot be
+  squeezed, so `justify-content: flex-end` cannot push a pill past its own start
+  edge, and nothing is left to hide. Pills render whole or not at all.
+- **carries only what carries state**: priority, status, the Overdue flag and the
+  completion chip. `Legacy` and `View Summary ↗` left the row at **every** width
+  (not just on phones) — both are already inside the ticket, in words and in the
+  header link. This deleted the old `@media (max-width: 639px)` rule, so a phone now
+  keeps exactly the chip set a desktop does and there is no breakpoint to keep in
+  step.
+- **gives way only in `.ir-card-main`** — `flex: 1 1 auto; min-width: 0`, with
+  `.ir-title` and `.ir-assignee` nowrap+ellipsis so a long title can never wrap the
+  row taller than its neighbours. The middle gives way because the serial, the
+  category and the date are one tap away inside the ticket and the statuses are not.
+
+**Everything the row cannot hold is revealed on hover**, which is the other half of
+the owner's rule: *"any additional info if coming in that tile should either find its
+place adequately without disturbing other elements and professional appearance or
+else show when hovered above it or both."* `.ir-card-hover` is filled by
+`renderIRList` from the same record (assigned-to, the Legacy record in words, serial,
+category, sub-category, date, age and overdue), and it is a **grid item spanning the
+same two rows** as the title and the meta — so revealing it changes no height and
+moves nothing, and the two it covers fade to `opacity: 0` rather than being removed,
+which is what keeps the box the same size.
+
+Three details in that hover line are load-bearing. It uses `visibility: hidden`, not
+`opacity: 0`, because an invisible `opacity: 0` Summary link would still be in the
+tab order and a keyboard user would land on it. The hover rules sit inside
+`@media (hover: hover)`, because a touch device fires `:hover` on tap and leaves it
+stuck — a phone would swap a row's contents to the hover line and never swap back.
+And nothing about the row depends on `position: absolute`, so no overlay can be
+clipped by `#ir-list`'s own scroll box.
 
 ### Sync bar (`#sync-status`)
 `.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +

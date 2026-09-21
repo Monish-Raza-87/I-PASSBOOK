@@ -187,8 +187,8 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **2203 cases across 16 suites**, all passing.
-(2199 before the wait screen's mark was corrected; 2184 before the Google account picker; 2165 before the Google wait screen; 1954 before the field-report build; 1762 before the field-history/restore build;
+`node tools/smoke-all.mjs` — **2213 cases across 16 suites**, all passing.
+(2203 before the IR list row was rebuilt around state-only chips and a hover line; 2199 before the wait screen's mark was corrected; 2184 before the Google account picker; 2165 before the Google wait screen; 1954 before the field-report build; 1762 before the field-history/restore build;
 1605 across 15 when the Drive-store migration shipped; `smoke-list-intel.mjs` and its
 69 cases arrived with Stages 3–4;
 the 15 for the silent-upload fix arrive with `smoke-store.mjs`'s first *behavioural*

@@ -296,8 +296,63 @@ r.ok('the fold is a class on the document root, never an inline width',
   !/sidebar\.style\.(width|display)/.test(appCode));
 r.ok('and it is remembered per device', T.RAIL_KEY === 'rail' && T.LIST_KEY === 'list');
 
-r.head('the IR list folds away, but never into an empty screen');
-r.ok('the control is a real button in the header',
+r.head('a list row carries state, and gives way in the one place that costs nothing');
+// The owner, 2026-09-21: IR470's "AN" circle was "overlapping above 'open' status
+// i.e., hiding it". Nothing was painted over anything — the row had collected more
+// chips than the 400px `--list-w` pane holds, the side column was allowed to
+// shrink, and a shrunk right-aligned flex column overflows at its START edge,
+// where `overflow: hidden` sliced the `Open` pill in half. These assertions pin
+// the three rules that make that impossible, plus the two the owner asked for:
+// the assignee's name beside the IR number, and the rest of the ticket on hover.
+const sideRule = (viewsCode.match(/\.ir-card-side \{[\s\S]*?\n\}/) || [''])[0];
+r.ok('the side column can never be squeezed — flex-basis auto, no shrink',
+  /flex: 0 0 auto;/.test(sideRule) && !/flex: 0 1 auto/.test(sideRule), sideRule);
+r.ok('...and it no longer hides anything, so no pill can be clipped away',
+  !/overflow/.test(sideRule), sideRule);
+r.ok('...while the middle column is still the one that gives way',
+  /\.ir-card-main \{[\s\S]*?flex: 1 1 auto;/.test(viewsCode) &&
+  /\.ir-card-main \{[\s\S]*?min-width: 0;/.test(viewsCode));
+r.ok('a title can never wrap the row taller than its neighbours',
+  /\.ir-title \{[\s\S]*?white-space: nowrap;/.test(viewsCode) &&
+  /\.ir-title \{[\s\S]*?text-overflow: ellipsis;/.test(viewsCode));
+
+// The owner's own fix for the row: "instead of placing AN in a circle on left of
+// IR470 … we may write down Adhik Nair in small on the right of IR470". The circle
+// cost a 26px chip plus a gap in the side column, on exactly the row that could
+// least afford one, and the empty space he pointed at really is empty.
+r.ok('the assignee is a NAME beside the IR number, not an initials chip',
+  /<div class="ir-title-row">[\s\S]{0,200}?<span class="ir-assignee"/.test(appCode),
+  (appCode.match(/class="ir-title-row"[\s\S]{0,160}/) || [''])[0]);
+r.ok('...and the initials circle is gone from the renderer and the stylesheet',
+  !/assignee-avatar/.test(appCode) && !/assignee-avatar/.test(viewsCode) &&
+  !/initialsOf/.test(appCode));
+r.ok('the name is allowed to shrink, and carries the full name for when it does',
+  /\.ir-assignee \{[\s\S]*?flex: 0 1 auto;/.test(viewsCode) &&
+  /\.ir-assignee \{[\s\S]*?text-overflow: ellipsis;/.test(viewsCode) &&
+  /<span class="ir-assignee" title="Assigned to /.test(appCode));
+
+// The owner's other half: "or else show when hovered above it or both."
+r.ok('the hover line exists, and the renderer fills it from the same record',
+  /<div class="ir-card-hover">/.test(appCode) && /hoverBits/.test(appCode));
+r.ok('...it sits over the SAME two grid rows, so revealing it moves nothing',
+  /\.ir-card-hover \{[\s\S]*?grid-area: 1 \/ 1 \/ 3 \/ 1;/.test(viewsCode) &&
+  /\.ir-card-main \{[\s\S]*?display: grid;/.test(viewsCode) &&
+  /\.ir-card-main \{[\s\S]*?grid-template-rows: auto auto;/.test(viewsCode));
+r.ok('...it is out of the tab order at rest — an invisible focusable link is a trap',
+  /\.ir-card-hover \{[\s\S]*?visibility: hidden;/.test(viewsCode) &&
+  /\.ir-card:hover \.ir-card-hover \{ visibility: visible; \}/.test(viewsCode));
+r.ok('...and the hover rules are guarded, because a tap leaves :hover stuck on',
+  /@media \(hover: hover\) \{/.test(viewsCode) &&
+  viewsCode.indexOf('@media (hover: hover)') < viewsCode.indexOf('.ir-card:hover .ir-card-hover'));
+r.ok('the covered title and meta fade rather than being removed, keeping the box',
+  /\.ir-card:hover \.ir-title-row,\s*\n\s*\.ir-card:hover \.ir-meta \{ opacity: 0; \}/.test(viewsCode));
+r.ok('the two conveniences left the row at EVERY width, not just on phones',
+  !/\.ir-card-side[\s\S]{0,400}?badge-legacy/.test(appCode) &&
+  !/@media \(max-width: 639px\) \{\s*\n\s*\.ir-card-side/.test(viewsCode));
+r.ok('...and the Summary link is still rendered, just not in the row',
+  /ir-card-hover[\s\S]{0,200}?ir-summary-link/.test(appCode));
+
+r.head('the IR list folds away, but never into an empty screen');r.ok('the control is a real button in the header',
   /<button[^>]*id="list-toggle"/.test(indexCode) &&
   /id="list-toggle"[\s\S]{0,200}?aria-controls="index-view"/.test(indexCode));
 r.ok('renderLayout still writes INLINE display, for all three panes',

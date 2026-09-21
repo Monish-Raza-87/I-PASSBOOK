@@ -1763,13 +1763,14 @@ r.ok('the normalising write is inside the lock',
 r.head('the Drive archive has exactly ONE trigger installer, and no hidden ones');
 // The behaviour of the sweep is in smoke-store.mjs, where it actually runs. What is
 // asserted here is the shape a behavioural suite cannot see: that nothing else in
-// the file has quietly acquired the power to create a trigger.
+// the file has quietly acquired the power to create a trigger — or, since the Google
+// door needs to know its own address, the power to do anything else with ScriptApp.
 const scriptAppUses = (code.match(/ScriptApp\.\w+/g) || []);
-r.ok('ScriptApp appears only in the two trigger functions',
+r.ok('ScriptApp appears only in the two trigger functions, and in the door\'s own-address read',
   (function () {
-    const outside = ['installArchiveTrigger', 'removeArchiveTrigger']
+    const allowed = ['installArchiveTrigger', 'removeArchiveTrigger', 'googleSwitchUrl']
       .map(fn => fnBody(fn)).join('\n');
-    return scriptAppUses.every(u => outside.indexOf(u) > -1);
+    return scriptAppUses.every(u => allowed.indexOf(u) > -1);
   })(), scriptAppUses);
 r.ok('the installer is IDEMPOTENT — it lists before it creates',
   /getProjectTriggers\(\)[\s\S]{0,200}?existing\.length[\s\S]{0,400}?newTrigger/.test(
@@ -1968,8 +1969,7 @@ r.ok('the refusals do not say whether the code ever existed — no oracle',
   (fnBody('redeemHandoff').match(/message:\s*'/g) || []).length === 1,
   (fnBody('redeemHandoff').match(/[^\n]*message:[^\n]*/) || [''])[0]);
 
-r.head('the door ends on a page with ONE link — an automatic redirect is impossible here');
-const hpage = fnBody('handoffPage');
+r.head('the door ends on a page whose way forward is a link the user taps — an automatic redirect is impossible here');const hpage = fnBody('handoffPage');
 const hesc = fnBody('htmlEscape');
 // THE BUG THIS BLOCK EXISTS FOR. The door once answered with
 // `ContentService.createTextOutput(html).setMimeType(ContentService.MimeType.HTML)`
@@ -1992,9 +1992,39 @@ r.ok('...and every link on the page wears target="_top", or the tap would only m
   (hpage.match(/<a\b[^>]*>/g) || []).length > 0 &&
   (hpage.match(/<a\b[^>]*>/g) || []).every(t => /target="_top"/.test(t)),
   (hpage.match(/<a\b[^>]*>/g) || []).join(' '));
-r.ok('...and nothing else can leave the page: exactly one link per branch, no form, no meta refresh',
-  (hpage.match(/<a\b/g) || []).length === 2 &&        // the code branch, and the refusal branch
+r.ok('...and nothing else can leave the page: two branch links and one shared "not you", no form, no meta refresh',
+  (hpage.match(/<a\b/g) || []).length === 3 &&        // one primary per branch, plus the
+                                                      // single "choose a different account" link
   !/<form|<meta http-equiv="refresh"/i.test(hpage));
+
+// ── THE PHONE THAT HANDS OVER THE WRONG GOOGLE ACCOUNT ────────────────────────
+// The app starts every Google sign-in at Google's own account picker, because a web
+// app is served the browser's DEFAULT account and a phone with a personal account
+// signed in would otherwise be refused by Google before our code ran. This is the
+// other half of that: the page the door ends on can send the person back to the
+// picker, so an account that is merely the WRONG one — not an invalid one — is one
+// tap from being fixed, without a trip back through the app.
+r.head('the door page can send you back to Google\'s picker with the right account');
+const swfn = fnBody('googleSwitchUrl');
+r.ok('the return address is the RUNNING deployment, read from the platform',
+  /ScriptApp\.getService\(\)\.getUrl\(\)/.test(swfn), swfn.slice(0, 200));
+r.ok('...inside a try, because that read is the platform\'s to refuse',
+  /try \{[\s\S]*?catch \(err\) \{ self = ''; \}/.test(swfn), swfn.slice(0, 200));
+r.ok('...and an empty read returns NOTHING, so the caller ships no dead link',
+  /if \(!self\) return '';/.test(swfn));
+r.ok('the target is Google\'s picker, with the encoding it needs for a URL inside a URL',
+  /'https:\/\/accounts\.google\.com\/AccountChooser\?continue='/.test(swfn) &&
+  /encodeURIComponent\(self \+ '\?action=googleStart'\)/.test(swfn),
+  (swfn.match(/[^\n]*AccountChooser[^\n]*/) || [''])[0]);
+r.ok('...and it comes back to the DOOR, not to the app — the app would only re-pick the same account',
+  !/CONFIG\.APP_URL/.test(swfn));
+r.ok('the page carries it on BOTH branches, and only when it is real',
+  /var sw = googleSwitchUrl\(\);/.test(hpage) && /\+ body \+ alt \+/.test(hpage) &&
+  /var alt = sw\s*\n?\s*\?/.test(hpage), (hpage.match(/[^\n]*var alt[^\n]*/) || [''])[0]);
+r.ok('...as a SECOND link, below the primary one, so the page still ends on Continue',
+  /'<a class="alt" target="_top" href="' \+ htmlEscape\(sw\) \+ '"/.test(hpage));
+r.ok('...and the whole thing is still built server-side, with no request parameter to move it',
+  !/\bparam/.test(swfn) && !/\be\.parameter/.test(swfn));
 r.ok('it reads CONFIG.APP_URL', /CONFIG\.APP_URL/.test(hpage));
 // Structural, not a check: there is no client-supplied URL to validate, so there is
 // nothing an attacker can point at their own site. A `?next=` parameter would turn

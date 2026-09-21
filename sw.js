@@ -10,7 +10,7 @@
 //    CACHE_NAME below is what removes that one-load lag, which is why
 //    `tools/deploy-ghpages.mjs` refuses to be quiet about it.
 //  - Other cross-origin (fonts, etc.): default network handling.
-const CACHE_NAME = 'ipassbook-v43';
+const CACHE_NAME = 'ipassbook-v44';
 const SHELL = [
   './',
   './index.html',

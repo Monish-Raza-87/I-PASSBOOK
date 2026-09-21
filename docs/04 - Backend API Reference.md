@@ -378,17 +378,28 @@ force that shape, and both failed silently when this door was first written:
   broken. Google's own guidance is to *"add a link or a button for the user to take action
   on instead"*, which is what this page is.
 
-So the page carries one `<a target="_top">` per branch — the code, or the refusal — and
-**no script at all**. `target="_top"` is what makes the tap leave the frame (link targets
+So the page carries one `<a target="_top">` per branch — the code, or the refusal — plus a
+single shared **"Not you? Choose a different account"** link, and **no script at all**.
+`target="_top"` is what makes the tap leave the frame (link targets
 must be `_top` or `_blank` in IFRAME mode); the link is a plain user-initiated click, which
 is the one navigation the sandbox permits, and with no `google.script.run` in the path there
 is no gesture-expiry race to lose. Both branches also show the account or the refusal
 **before** anything is signed, which is the shared-laptop protection.
 
-| Branch | What the page shows | Where the link goes |
-|---|---|---|
-| `code` | `Signed in as <email>` | `CONFIG.APP_URL#sso=<32 hex>` — **Continue to I-PASSBOOK** |
-| refusal | the door's own sentence | `CONFIG.APP_URL#ssoerr=<encoded>` — **Back to sign in** |
+The "not you" link exists for the phone that holds more than one Google account. A web app
+is served the browser's **default** account and Apps Script offers no way to ask for another,
+so the account that arrives can simply be the wrong one — the wrong *indrones* account, or an
+account with no I-PASSBOOK row, or a disabled one. The link sends the browser to Google's own
+picker with **this page** as the address to come back to, so the newly chosen account is named
+here before anything is signed. Its return address is the running deployment's own URL, read
+from the platform (`ScriptApp.getService().getUrl()`), so it needs no configuration and cannot
+point at another copy of the script; if that read fails the link is **dropped** rather than
+shipped dead.
+
+| Branch | What the page shows | Where the primary link goes | The second link |
+|---|---|---|---|
+| `code` | `Signed in as <email>` | `CONFIG.APP_URL#sso=<32 hex>` — **Continue to I-PASSBOOK** | Google's picker, returning to this door |
+| refusal | the door's own sentence | `CONFIG.APP_URL#ssoerr=<encoded>` — **Back to sign in** | the same |
 
 **The link is built server-side** from `CONFIG.APP_URL` and reads **no request parameter**
 — that is the whole open-redirect defence, and it is structural rather than a check, because

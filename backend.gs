@@ -1748,6 +1748,27 @@ function htmlEscape(s) {
     .replace(/'/g, '&#39;');
 }
 
+// Where someone goes when the account on this page is the wrong one.
+//
+// Phones are why this exists. A browser with two Google accounts signed in feeds a
+// web app its DEFAULT one, and Apps Script offers no way to ask for another, so the
+// only lever is to send the person back to Google's own picker. This page is the
+// place to come back TO, not the app: the app's Google button starts at the picker
+// anyway, but a link from here has to name its own return address, and coming back
+// here means the new account is named on this page before anything is signed in.
+//
+// The URL is the running deployment's own, read from the platform, so this needs no
+// configuration and cannot point at the wrong copy of the script. Empty when that
+// read is unavailable, and the caller drops the link rather than shipping a dead one
+// — a "choose a different account" link that goes nowhere is worse than no link.
+function googleSwitchUrl() {
+  var self = '';
+  try { self = String(ScriptApp.getService().getUrl() || ''); } catch (err) { self = ''; }
+  if (!self) return '';
+  return 'https://accounts.google.com/AccountChooser?continue='
+       + encodeURIComponent(self + '?action=googleStart');
+}
+
 // The page the door ends on, carrying either a fresh handoff code or the reason it
 // refused. It ends with ONE TAP on a real link, and both halves of that are forced
 // rather than chosen:
@@ -1770,6 +1791,12 @@ function htmlEscape(s) {
 // loads the app inside the sandbox, which is the failure this comment exists to
 // prevent.
 //
+// Both branches also carry a SECOND link — "Not you? Choose a different account" —
+// pointing at Google's account picker with this page as the address to come back to
+// (see googleSwitchUrl). It is deliberately second and deliberately not a button:
+// the page's job is still one tap to continue, and this is the way out for the
+// person whose phone handed the browser the wrong account.
+//
 // The link target is built SERVER-SIDE from CONFIG.APP_URL and never from a request
 // parameter. That is the open-redirect defence, and it is structural rather than a
 // check: there is no client-supplied URL to validate, so there is nothing an
@@ -1790,6 +1817,17 @@ function handoffPage(code, email, message) {
     body = '<p class="who">' + htmlEscape(message || 'Google sign-in failed.') + '</p>'
          + '<a class="go" target="_top" href="' + htmlEscape(href) + '">Back to sign in</a>';
   }
+  // Both branches get it, and both need it for a real case: the account that
+  // arrived is the wrong one. On the code branch that means "you picked A, you
+  // wanted B"; on a refusal it means the account was fine but has no I-PASSBOOK
+  // row, or is disabled, or still holds a temporary password — all of which are
+  // things the OTHER indrones account on the same phone may not share. Without
+  // this, the only way back to the picker is the browser's back button, which
+  // lands on the picker only by luck.
+  var sw = googleSwitchUrl();
+  var alt = sw
+    ? '<a class="alt" target="_top" href="' + htmlEscape(sw) + '">Not you? Choose a different account</a>'
+    : '';
   var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
            + '<meta name="viewport" content="width=device-width,initial-scale=1">'
            + '<title>I-PASSBOOK</title><style>'
@@ -1805,13 +1843,16 @@ function handoffPage(code, email, message) {
            + '.go{display:block;padding:14px 18px;border-radius:10px;background:#005cad;'
            + 'color:#fff;font-weight:600;text-decoration:none}'
            + '.go:focus-visible{outline:3px solid #005cad;outline-offset:3px}'
+           + '.alt{display:block;margin-top:16px;font-size:14px;font-weight:600;'
+           + 'color:#005cad;text-decoration:none}'
+           + '.alt:focus-visible{outline:3px solid #005cad;outline-offset:3px}'
            + '@media (prefers-color-scheme: dark){'
            + 'body{background:#171717;color:#f8f8f8}'
            + '.card{background:#1f1f1f;box-shadow:none}'
            + '.brand,.who{color:#afafaf}.who strong{color:#f8f8f8}'
-           + '.go{background:#76bef9;color:#0f0f0f}}'
+           + '.go{background:#76bef9;color:#0f0f0f}.alt{color:#76bef9}}'
            + '</style></head><body><div class="card">'
-           + '<p class="brand">I-PASSBOOK</p>' + body + '</div></body></html>';
+           + '<p class="brand">I-PASSBOOK</p>' + body + alt + '</div></body></html>';
   return HtmlService.createHtmlOutput(html);
 }
 

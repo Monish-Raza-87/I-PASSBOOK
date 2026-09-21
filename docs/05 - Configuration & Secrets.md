@@ -26,11 +26,18 @@ worked: a request from the gh-pages origin to the domain-scoped deployment comes
 not carry the caller's Google session cookie. The same URL opened as a **top-level
 navigation** reports the caller perfectly. So the mechanism is two halves:
 
-1. The click sets `location.href` to `SSO_URL + '?action=googleStart'`. The response is
-   an `HtmlService` page naming the account it recognised and carrying **one link** —
-   `target="_top"`, because that is the only navigation Apps Script's sandbox permits
-   (see below) — back to `CONFIG.APP_URL` with a one-time code in the **fragment**,
-   `#sso=<32 hex>`, or `#ssoerr=<why>` for a refusal. **The user taps that one link.**
+1. The click sets `location.href` to Google's **account picker** —
+   `https://accounts.google.com/AccountChooser?continue=<SSO_URL + '?action=googleStart'>`.
+   The picker comes first because a phone with two Google accounts signed in feeds a web
+   app its **default** one, and a personal account being the default means Google refuses
+   the domain-scoped door before any of our code runs. Nothing in the app can see that, so
+   the only place it can be fixed from is before the browser leaves. After the choice,
+   Google returns to the door, which answers with an `HtmlService` page naming the account
+   it recognised and carrying **two links** — the primary one (`target="_top"`, because that
+   is the only navigation Apps Script's sandbox permits; see below) back to `CONFIG.APP_URL`
+   with a one-time code in the **fragment**, `#sso=<32 hex>`, or `#ssoerr=<why>` for a
+   refusal, plus **"Not you? Choose a different account"** for the account that is merely
+   the wrong one. **The user taps the primary link.**
 2. The app reads that fragment once, at parse time, wipes it with `history.replaceState`,
    and POSTs `googleExchange` with the code to the **primary** backend, which is
    "Anyone" and therefore reachable. That call mints the session.

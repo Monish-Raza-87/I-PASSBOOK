@@ -786,20 +786,35 @@ G.T.CONFIG.SSO_URL = 'https://sso.example.invalid/exec';
 G.T.locationHref = 'SENTINEL';
 gPosts.length = 0;
 await G.T.submitGoogleSignIn();
-r.ok('the click navigates to the door with the start action and no parameters of its own',
-  G.T.locationHref === 'https://sso.example.invalid/exec?action=googleStart',
+// The click goes to GOOGLE'S ACCOUNT PICKER, not straight to the door, and that is
+// the phone fix: a browser with two accounts signed in feeds a web app its DEFAULT
+// one, and if that one is a personal account the domain-restricted door is refused
+// by Google before our code runs — nothing in the app can detect or recover from
+// that, so the choice has to be made before we leave. The door is what Google comes
+// back to, so the account picked is the one the door then names.
+r.ok('the click opens Google\'s account picker, carrying the door as the address to return to',
+  G.T.locationHref === 'https://accounts.google.com/AccountChooser?continue=' +
+    encodeURIComponent('https://sso.example.invalid/exec?action=googleStart'),
   G.T.locationHref);
+r.ok('...and the door it returns to is the START action, so the round trip restarts rather than resuming',
+  (() => {
+    const m = G.T.locationHref.match(/continue=([^&]*)/);
+    return !!m && decodeURIComponent(m[1]) === 'https://sso.example.invalid/exec?action=googleStart';
+  })(), G.T.locationHref);
 r.ok('...and it is a navigation, not a call: the click itself reaches the network ZERO times',
   gPosts.length === 0, gPosts.map(p => p.url));
 // The return address is a server-side constant. A `?next=` here would make the app
 // hand an attacker the choice of where Google sends the browser back to.
-r.ok('the start URL carries no return address — it is built from SSO_URL alone',
-  /function googleStartUrl\(\) \{\s*return CONFIG\.SSO_URL \+ '\?action=googleStart';/.test(appCode),
-  (appCode.match(/[^\n]*googleStartUrl[^\n]*/) || [''])[0]);
+r.ok('the URL carries no return address — every part of it is built from SSO_URL alone',
+  /function googleStartUrl\(\) \{[\s\S]{0,400}?CONFIG\.SSO_URL \+ '\?action=googleStart'/.test(appCode) &&
+  !/location\.search|location\.hash/.test(
+    (appCode.match(/function googleStartUrl\(\) \{[\s\S]*?\n\}/) || [''])[0]),
+  (appCode.match(/function googleStartUrl\(\) \{[\s\S]*?\n\}/) || [''])[0].slice(0, 120));
 r.ok('the button is disabled on the way out, so a second click cannot start a second handoff',
   G.byId.get('auth-google-btn').disabled === true);
-r.ok('and the screen says what is happening while the browser is leaving',
-  G.byId.get('auth-hint-text').textContent === 'Taking you to Google…',
+r.ok('...and the screen names the step it is about to take, so the picker is not a surprise',
+  G.byId.get('auth-hint-text').textContent ===
+    'Taking you to Google — choose your indrones.com account.',
   G.byId.get('auth-hint-text').textContent);
 r.ok('an EMPTY SSO_URL means the click does nothing at all',
   (() => {

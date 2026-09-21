@@ -34,6 +34,13 @@ const r = makeReporter();
 const events = [];
 const mails = [];   // every MailApp.sendEmail the backend makes, in order
 
+// The door's own deployment URL, as `ScriptApp.getService().getUrl()` reports it.
+// Synthetic, but with the REAL shape — a domain-scoped deployment under
+// `/a/macros/indrones.com/` — because the door hands this string to Google's account
+// picker through `encodeURIComponent`, and the slashes and the `/a/` segment are the
+// part of it that has to survive that.
+const DOOR_URL = 'https://script.google.com/a/macros/indrones.com/s/AKfycbSYNTHETICDOORFORTESTS/exec';
+
 class FakeFile {
   constructor(id, name, folder) {
     this.id = id; this.name = name; this.folder = folder;
@@ -268,6 +275,14 @@ const ctx = {
     getScriptTimeZone: () => 'Asia/Kolkata',
   },
   Logger: { log() {} },
+  // The Google door reads its OWN deployment URL from the platform to build the
+  // "choose a different account" link, so that link needs no configuration and
+  // cannot point at the wrong copy of the script. Modelled faithfully —
+  // `ScriptApp.getService()` returns a Service, and `Service.getUrl()` is the web
+  // app URL — because production DROPS the link when that read comes back empty, and
+  // a stub missing entirely would take that silent branch and let a page with no way
+  // out of a wrong account pass as correct.
+  ScriptApp: { getService: () => ({ getUrl: () => DOOR_URL }) },
   ContentService: {
     // Faithful to the real pair: createTextOutput(content) returns an object whose
     // setMimeType returns the SAME object, and both the content and the chosen type
@@ -1659,6 +1674,14 @@ const doorLink = out => {
   const m = doorAnchor(out).match(/href="([^"]*)"/);
   return m ? m[1].replace(/&amp;/g, '&') : '';
 };
+// The SECOND link, the one that goes back to Google's account picker rather than on
+// into the app. Read the same way — the href the browser would follow.
+const doorSwitch = out => {
+  const html = (out && out.getContent) ? out.getContent() : '';
+  const tag = (html.match(/<a\b[^>]*>/g) || []).filter(t => /AccountChooser/.test(t))[0] || '';
+  const m = tag.match(/href="([^"]*)"/);
+  return m ? m[1].replace(/&amp;/g, '&') : '';
+};
 const doorCode = out => {
   const m = doorLink(out).match(/#sso=([0-9a-f]{32})$/);
   return m ? m[1] : null;
@@ -1749,12 +1772,14 @@ r.ok('a provisioned account gets a handoff code back',
 //     `location.replace` would have moved only Google's frame and left the app
 //     inside an iframe at the wrong origin.
 //
-// So: HtmlService (the only thing that can serve a page), one link, `target="_top"`,
-// and NO attempt to navigate on its own.
+// So: HtmlService (the only thing that can serve a page), a link the user taps,
+// `target="_top"`, and NO attempt to navigate on its own.
 r.ok('the door answers with an HtmlOutput — ContentService cannot serve HTML at all',
   startOk._from === 'HtmlService', startOk._from);
-r.ok('...exactly one link on the page, so there is no second way out',
-  (startOk.getContent().match(/<a\b[^>]*>/g) || []).length === 1);
+r.ok('...exactly two links, and the FIRST is the one that continues',
+  (startOk.getContent().match(/<a\b[^>]*>/g) || []).length === 2 &&
+  doorCode(startOk) !== null,
+  (startOk.getContent().match(/<a\b[^>]*>/g) || []).join(' '));
 r.ok('...and it is a link the USER taps, never an automatic navigation',
   !/location\s*\./.test(startOk.getContent()) &&
   !/<script/i.test(startOk.getContent()));
@@ -1762,6 +1787,35 @@ r.ok('...wearing target="_top", or the app would load inside Google\'s sandbox f
   /target="_top"/.test(doorAnchor(startOk)), doorAnchor(startOk));
 r.ok('...and the page says WHICH account was recognised, before anything is signed',
   startOk.getContent().indexOf(GOK) !== -1);
+
+// ── THE PHONE WITH TWO GOOGLE ACCOUNTS ────────────────────────────────────────
+// A web app is served the browser's DEFAULT Google account and Apps Script cannot be
+// asked for another, so a phone holding a personal account and a work one can hand
+// the door the wrong identity — and, because the door deployment admits only
+// @indrones.com, a personal default means Google refuses the request before our code
+// ever runs. Nothing in the app can see that, which is why the app now starts at
+// Google's own picker. These assertions are the other half: the page the door ends
+// on can also send you back to it, without a trip through the app.
+r.ok('the page offers a way OUT of a wrong account, not only a way forward',
+  /Not you\?/.test(startOk.getContent()) && doorSwitch(startOk) !== '',
+  doorSwitch(startOk));
+r.ok('...it goes to GOOGLE\'S picker, not to a page of ours',
+  doorSwitch(startOk).indexOf('https://accounts.google.com/AccountChooser?continue=') === 0,
+  doorSwitch(startOk));
+r.ok('...and comes back to THIS door, so the new account is named here before anything is signed',
+  (() => {
+    const m = doorSwitch(startOk).match(/continue=([^"&]*)/);
+    return !!m && decodeURIComponent(m[1]) === DOOR_URL + '?action=googleStart';
+  })(), doorSwitch(startOk));
+r.ok('...the return address is the RUNNING deployment, read from the platform, so it cannot point at another copy',
+  /ScriptApp\.getService\(\)\.getUrl\(\)/.test(src) &&
+  /try \{ self = String\(ScriptApp/.test(src) && /if \(!self\) return '';/.test(src));
+r.ok('...and a refusal carries it too — a provisioned account is not the only way to pick the wrong one',
+  /Not you\?/.test(noAccount.getContent()) && doorSwitch(noAccount) !== '',
+  doorSwitch(noAccount));
+r.ok('...every link on that page still wears target="_top", both branches included',
+  [startOk, noAccount, disabled].every(o =>
+    (o.getContent().match(/<a\b[^>]*>/g) || []).every(t => /target="_top"/.test(t))));
 
 // ── THE LINK IS BUILT SERVER-SIDE, SO NOTHING CLIENT-SUPPLIED CAN MOVE IT ─────
 // This is the whole open-redirect defence, and it is structural: there is no

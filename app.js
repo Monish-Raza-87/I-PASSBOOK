@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v43';
+const APP_VERSION = 'v44';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -344,8 +344,23 @@ function resetPasswordBackend(email, code, newPassword) {
 
 // Where the click goes. No parameters: the return address is a server-side
 // constant, so there is no client-supplied URL for anyone to redirect.
+//
+// It goes to GOOGLE'S OWN ACCOUNT PICKER first, with the door as the address to
+// come back to — not straight to the door. The reason is a phone with more than one
+// Google account signed in: Apps Script web apps are served the browser's DEFAULT
+// account and there is no way to ask it for another one, so a personal account
+// being the default does not merely sign the wrong person in — Google refuses the
+// request to the domain-restricted door before any of our code runs, and the person
+// is left on a Google error page with nothing they can do about it. Letting them
+// choose first is the only place that can be fixed from. It costs one tap, and the
+// door still names the account afterwards, so the tap confirms rather than guesses.
+//
+// The picked account has to survive the hop to the door; that is Google's side of
+// this, and it is the one thing not verifiable from here. If it does not, the door
+// says so on its own page rather than signing the wrong person in.
 function googleStartUrl() {
-  return CONFIG.SSO_URL + '?action=googleStart';
+  const door = CONFIG.SSO_URL + '?action=googleStart';
+  return 'https://accounts.google.com/AccountChooser?continue=' + encodeURIComponent(door);
 }
 
 // Swap the handoff code for a session. A POST to the MAIN backend via postAuth,
@@ -1232,7 +1247,7 @@ function submitGoogleSignIn() {
   if (btn) btn.disabled = true;
   setAuthError('');
   const hint = document.getElementById('auth-hint-text');
-  if (hint) hint.textContent = 'Taking you to Google…';
+  if (hint) hint.textContent = 'Taking you to Google — choose your indrones.com account.';
   location.href = googleStartUrl();
   return Promise.resolve();
 }

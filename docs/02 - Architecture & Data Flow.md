@@ -52,12 +52,16 @@ store layout.
 
 ### 2. Auth Screen
 - **Sign in with Google**, when a second deployment is configured (`CONFIG.SSO_URL`).
-  No password and no emailed code. The click **leaves the page**: it navigates to the
-  second deployment, which reads the caller's Workspace identity and answers with a page
-  naming that account and carrying **one button** — Apps Script's sandbox forbids a page
-  from navigating the top window on its own, so the user taps it — which returns to the
-  app with a one-time code in the URL fragment that the app swaps for a session on the
-  primary backend. A wrong or missing URL shows **no button** and changes nothing else.
+  No password and no emailed code. The click **leaves the page**: it opens **Google's own
+  account picker** first — a phone with more than one Google account signed in hands a web
+  app its *default* one, and there is no way to ask Apps Script for another, so the choice
+  has to happen before we leave — and then navigates to the second deployment, which reads
+  the caller's Workspace identity and answers with a page naming that account and carrying
+  **one button** — Apps Script's sandbox forbids a page from navigating the top window on
+  its own, so the user taps it — which returns to the app with a one-time code in the URL
+  fragment that the app swaps for a session on the primary backend. That page also offers
+  **"Not you? Choose a different account"**, which goes back to the picker. A wrong or
+  missing URL shows **no button** and changes nothing else.
   The round trip the code is exchanged over is covered by the **wait screen**
   (`#sso-wait`): `index.html` raises it before paint for a `#sso=` return and `app.js`
   takes it down when a real screen is reached, so the sign-in form never shows through

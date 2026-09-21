@@ -262,12 +262,26 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 > without a user gesture, so a scripted `location.replace()` would move only Google's
 > frame. The shipped version did both and failed silently — the Workspace identity was
 > read and a real code was minted, and the user just saw code. So the door returns an
-> `HtmlService` page carrying one `<a target="_top">` link the user taps. **Do not put a
+> `HtmlService` page carrying one `<a target="_top">` link the user taps (plus the
+> secondary "not you" link described below). **Do not put a
 > `<script>` or a `location.` assignment back into `handoffPage`**, and do not reach for
 > `ContentService` to serve it — `tools/smoke-backend.mjs` pins both.
 >
 > Rolling back is deleting the `Google door` deployment and clearing `CONFIG.SSO_URL`.
 > No code change, no data touched.
+>
+> **Why the sign-in starts at Google's account picker.** A phone with a personal Google
+> account and a work one signed in feeds a web app the browser's **default** account, and
+> Apps Script offers no way to ask for a different one — `authuser=0` is what you get. The
+> door deployment admits only `indrones.com`, so a personal default is not merely the wrong
+> person: Google refuses the request at its edge, before our code runs, and the person is
+> left on a Google error page that says nothing we can act on. Nothing in the app can
+> detect that, so the choice has to happen **before the browser leaves** — hence
+> `googleStartUrl()` wraps `SSO_URL` in
+> `https://accounts.google.com/AccountChooser?continue=…`. Do not "simplify" that back to
+> the bare door URL: it silently restores the dead end for exactly the phones this exists
+> for. The door's own page carries the same lever for the account that is merely the wrong
+> one (`googleSwitchUrl`, built from the running deployment's own URL).
 >
 > **The return trip is covered, not blank.** Swapping the handed-back code for a session
 > is one Apps Script round trip, and until it finishes there is no screen to show — so

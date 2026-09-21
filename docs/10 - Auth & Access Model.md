@@ -30,11 +30,23 @@ That click **leaves the page**, and that is the mechanism rather than a side eff
 a background `fetch` to the domain-restricted deployment is refused by Google with a
 **401 before any of our code runs**, because a cross-site background request does not
 carry the caller's Google session. A top-level navigation to the same URL reports the
-caller perfectly. So the click navigates, the door reads the Workspace identity and
+caller perfectly. So the click navigates — first to **Google's own account picker**, and
+then, with the chosen account, to the door, which reads the Workspace identity and
 answers with a page naming that account and carrying **one link** — `target="_top"`,
 which the user taps — back to the app with a **one-time handoff code** in the URL
 fragment (`#sso=…`, or `#ssoerr=…` for a refusal). The app then swaps that code for a
 session on the primary backend.
+
+The picker is not decoration. A browser with more than one Google account signed in feeds
+a web app its **default** account, and Apps Script gives no way to ask for a different one
+— so on a phone holding a personal account and a work one, the door can be handed the
+wrong identity. Worse, because the door deployment is restricted to `indrones.com`, a
+personal default makes Google refuse the request before our code runs, which is a page of
+Google's that we cannot put a message on. Choosing **before** the browser leaves is the
+only place that can be fixed from. For the same reason the door's own page offers **"Not
+you? Choose a different account"**, so an account that is merely the wrong one (the other
+indrones account on the same phone, one with no account row, a disabled one) is one tap
+from being corrected.
 
 That last tap is not a design choice. Apps Script cannot redirect a top-level window on
 its own — since the September 2021 IFRAME sandbox change a script page may not navigate

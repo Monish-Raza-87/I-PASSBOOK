@@ -148,6 +148,39 @@ with seven seconds of intro still to play.
 Adding an asset here means adding it to `SERVED` in `tools/deploy-ghpages.mjs` (and
 to `PRUNE` if it replaces one).
 
+### Google wait screen (`#sso-wait`)
+A full-screen overlay on the splash's own layer (`--z-splash`) and its own black
+ground (`#0b0b0b`), holding the borderless icon mark, "Signing you in…", "You're on
+your way to I-PASSBOOK.", and an indeterminate sweep bar. It exists because the
+owner watched a Google sign-in and reported: *"In transition, it was showing login
+page still while it was loading the app"* — the one-time handoff code is exchanged
+over an Apps Script round trip, and the app used to spend that round trip showing
+the sign-in form to somebody who had already signed in.
+
+It is shown by **attribute, not by a class toggled from `app.js`**, exactly like the
+splash: `index.html`'s pre-paint script sets `data-sso="wait"` on `<html>` before the
+body parses and `base.css` reveals the overlay off that attribute, so there is no
+frame where the form shows through. The gate is the **narrow** prefix
+`'#sso='` — a refusal (`#ssoerr=`) has nothing to wait for and must land straight on
+the form with the door's reason already on it.
+
+It is taken down by `endSsoWait()`, called from **`showAuth()` and `showApp()`**
+rather than from the two endings of `finishHandoff()` — so *every* route to a real
+screen clears it and no path can leave a person staring at a sign-in that already
+finished. In `showApp()` it sits **before** the temporary-password guard, because
+that guard diverts to the password-change screen and a diverted sign-in still has to
+lose the wait. The same call clears the 8-second slow-note timer
+(`SSO_SLOW_MS`, which swaps the line for "Still signing you in — the backend can
+take a moment to wake up."), so a timer cannot fire at a screen that is gone.
+
+The bar is deliberately **indeterminate**: the wait is one round trip, under a second
+warm and several seconds against a cold Apps Script start, so a determinate bar
+would be a guess. The sweep travels inside the track's own width so it never appears
+to stop mid-track, and the global reduced-motion guard would leave it parked as an
+empty track — the one state that reads as *stuck* rather than *working* — so it is
+parked centred explicitly instead. The mark is already in `sw.js`'s `SHELL`, so the
+screen downloads nothing.
+
 ### Auth card (`.glass-card`)
 Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and
 `--elevation-lg`. No backdrop blur — the light-mode glass cluster is what blocked

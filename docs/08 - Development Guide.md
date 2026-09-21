@@ -268,6 +268,17 @@ needs *a* version, and it is fine for both deployments to serve the same one.
 >
 > Rolling back is deleting the `Google door` deployment and clearing `CONFIG.SSO_URL`.
 > No code change, no data touched.
+>
+> **The return trip is covered, not blank.** Swapping the handed-back code for a session
+> is one Apps Script round trip, and until it finishes there is no screen to show — so
+> `index.html` raises `#sso-wait` **before paint** for a `#sso=` return and `app.js`
+> clears it from `showAuth()` and `showApp()`. The owner's report was that the *sign-in
+> form* showed through that gap. Two things not to "tidy up": do not turn the attribute
+> gate into a class toggled from `app.js` (the form would flash underneath for exactly
+> the round trip the screen exists to cover), and do not widen it from `'#sso='` to
+> `'#sso'` (a `#ssoerr=` refusal has nothing to wait for — it must land on the form with
+> the door's reason already on it). `tools/smoke-ui.mjs` pins both, and the attribute
+> round trip itself.
 
 **Step 3 — verify.** Hard-reload, sign in as the admin, complete the forced
 password change, and open User Access — the footer must read `API v3`. If it does

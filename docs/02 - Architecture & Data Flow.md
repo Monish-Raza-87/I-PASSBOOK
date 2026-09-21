@@ -58,6 +58,10 @@ store layout.
   from navigating the top window on its own, so the user taps it — which returns to the
   app with a one-time code in the URL fragment that the app swaps for a session on the
   primary backend. A wrong or missing URL shows **no button** and changes nothing else.
+  The round trip the code is exchanged over is covered by the **wait screen**
+  (`#sso-wait`): `index.html` raises it before paint for a `#sso=` return and `app.js`
+  takes it down when a real screen is reached, so the sign-in form never shows through
+  the handover — see [06 — UI Components & Styling](06 - UI Components & Styling.md).
   It is an **addition**: the password form below it is not a lesser fallback. See
   [10 — Auth & Access Model](10 - Auth & Access Model.md).
 - Email + password sign-in, then a 6-digit code emailed to the same address. **There

@@ -184,6 +184,85 @@ html[data-splash="skip"] #splash-screen {
 }
 
 /* ══════════════════════════════════════════════════════════
+   THE GOOGLE RETURN: THE WAIT SCREEN
+   Up while the one-time code the door handed back is exchanged for a session.
+   Raised BEFORE PAINT by the head script in index.html, so the sign-in form never
+   paints underneath it, and taken down by app.js the moment a real screen is
+   reached. It is hidden by default and shown by the attribute, exactly like the
+   splash — the two are the same kind of thing, which is why the attribute pattern
+   is reused rather than a class toggled from app.js after parsing.
+   ══════════════════════════════════════════════════════════ */
+#sso-wait {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-splash);
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  background: #0b0b0b;   /* the splash's ground, so the handover does not flicker
+                            from black to a light page and back into the app */
+  color: #f8f8f8;
+}
+html[data-sso="wait"] #sso-wait { display: flex; }
+
+.sso-wait-mark { width: 56px; height: 56px; display: block; }
+.sso-wait-title {
+  margin: 16px 0 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+.sso-wait-note {
+  margin: 6px 0 0;
+  max-width: 34ch;
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  color: rgb(248 248 248 / 0.72);
+}
+
+.sso-wait-track {
+  width: 200px;
+  height: 4px;
+  margin-top: 24px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.16);
+  overflow: hidden;
+}
+/* INDETERMINATE on purpose, and that is the honest choice rather than a lazy one:
+   the wait is one Apps Script round trip, under a second warm and a few seconds
+   when the backend is cold. A determinate bar would be a guess, and a bar that
+   fills to 90% and then sits there is worse than one that keeps moving.
+   Fast, with a short hold at the end of each pass, so it reads as "moving toward
+   the app" rather than as a progress bar about to finish.
+   The travel is in the SWEEP's own width (45% of the track), so the offsets are
+   wide: -215% puts its left edge clear of the track, and the hold sits it clear of
+   the right edge, so it never appears to stop mid-track. */
+.sso-wait-sweep {
+  width: 45%;
+  height: 100%;
+  margin-left: 50%;
+  border-radius: 999px;
+  background: var(--accent);
+  transform: translateX(-50%);
+  animation: ssoSweep 1.4s var(--ease) infinite;
+}
+@keyframes ssoSweep {
+  0%   { transform: translateX(-215%); }
+  70%  { transform: translateX(115%); }
+  100% { transform: translateX(115%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The global guard above collapses every animation to 0.01ms with ONE iteration,
+     which would leave this sweep parked off the right edge — an empty track, which
+     is the one state that reads as "stuck" rather than "working". Park it centred
+     instead; the words carry the meaning and the bar carries the state. */
+  .sso-wait-sweep { animation: none; transform: translateX(-50%); }
+}
+
+/* ══════════════════════════════════════════════════════════
    AUTH SCREEN + FIRST-LOGIN PASSWORD CHANGE
    ══════════════════════════════════════════════════════════ */
 #auth-container {

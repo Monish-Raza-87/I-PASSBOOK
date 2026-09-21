@@ -47,6 +47,14 @@ fragment, which is never sent to a server, and the link target is a server-side
 constant, so the door cannot be turned into an open redirect.
 Both the code and the address-bar trace are gone by the time the app has drawn.
 
+Swapping that code for a session is one Apps Script round trip, so the app covers it
+with a **wait screen** rather than the sign-in form: `index.html` raises
+`data-sso="wait"` before paint for a `#sso=` return, and `app.js` clears it from
+`showAuth()` and `showApp()` — every route to a real screen — so no path can leave it
+stuck. A refusal (`#ssoerr=`) raises no wait screen at all: the door has already
+explained itself and there is nothing to sit through. See
+[06 — UI Components & Styling](06 - UI Components & Styling.md).
+
 The password door is not a lesser fallback. It is the door for a shared machine
 with no Google session, and the **only** door for an address outside the company
 domain (`EXTERNAL_EMAILS`), which no domain-restricted deployment will admit. The

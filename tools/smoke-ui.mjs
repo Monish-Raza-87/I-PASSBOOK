@@ -25,6 +25,8 @@ const appSrc   = fs.readFileSync(APP_JS, 'utf8');
 const indexSrc = fs.readFileSync(INDEX, 'utf8');
 const viewsCode = fs.readFileSync(new URL('../views.css', import.meta.url), 'utf8');
 const componentsCode = fs.readFileSync(new URL('../components.css', import.meta.url), 'utf8');
+const baseSrc = fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8');
+const swSrc   = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 
 // Comments are prose ABOUT the change, and several of them name the thing that was
 // removed ("no Sign as … button any more"). Every source assertion below therefore
@@ -815,6 +817,9 @@ gPosts.length = 0;
 gReply = SESSION_REPLY;
 const G2 = loadApp(`
   CONFIG, isHandoffReturn, finishHandoff, ${NAV},
+  armSsoSlowNote, endSsoWait, SSO_SLOW_MS,
+  get htmlEl() { return document.documentElement; },
+  get _ssoSlowTimer() { return _ssoSlowTimer; },
   get _handoff() { return _handoff; },
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch,
@@ -824,7 +829,15 @@ r.ok('the fragment is recognised as a handoff return',
 r.ok('and read as a CODE, with the prefix stripped exactly once',
   G2.T._handoff && G2.T._handoff.code === HANDOFF_CODE, G2.T._handoff);
 gPosts.length = 0;
+// What index.html's pre-paint script raises before app.js has parsed a byte. Set
+// here by hand because the stub DOM never runs it — the gate itself is pinned by
+// source further down; what this drives is the teardown.
+G2.T.htmlEl.setAttribute('data-sso', 'wait');
 await G2.T.finishHandoff(G2.T._handoff);
+r.ok('landing in the app takes the wait screen down',
+  G2.T.htmlEl.getAttribute('data-sso') === null, G2.T.htmlEl.getAttribute('data-sso'));
+r.ok('...and disarms the slow note, so a timer cannot fire at a screen that is gone',
+  G2.T._ssoSlowTimer === null, G2.T._ssoSlowTimer);
 r.ok('the code is exchanged for a session, on the MAIN backend, carrying no stale token',
   (() => {
     const p = gexchangePost();
@@ -864,6 +877,7 @@ r.head('a refusal from the door lands on the same error line as a wrong password
 gPosts.length = 0;
 const G3 = loadApp(`
   isHandoffReturn, finishHandoff, setAuthError, ${NAV},
+  get htmlEl() { return document.documentElement; },
   get _handoff() { return _handoff; },
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch,
@@ -871,7 +885,14 @@ const G3 = loadApp(`
        encodeURIComponent('Set your own password first: sign in with your temporary password, then use Google from then on.') }) } });
 r.ok('it is recognised as a return, so the splash is skipped for a refusal too',
   G3.T.isHandoffReturn() === true);
+// Raised by hand, because a refusal must NOT raise it (index.html's gate is the
+// narrow `#sso=`, pinned by source below). This is the other half of that: if some
+// other path ever did leave it up, the refusal's own route to the sign-in screen
+// takes it down rather than trapping the person behind a wait that already ended.
+G3.T.htmlEl.setAttribute('data-sso', 'wait');
 await G3.T.finishHandoff(G3.T._handoff);
+r.ok('a refusal clears the wait screen too — every route to a real screen does',
+  G3.T.htmlEl.getAttribute('data-sso') === null, G3.T.htmlEl.getAttribute('data-sso'));
 r.ok('the backend\'s own words are shown, not a generic failure',
   /Set your own password first/.test(G3.byId.get('auth-error').textContent),
   G3.byId.get('auth-error').textContent);
@@ -899,15 +920,80 @@ r.ok('googleExchange is listed as self-authenticating, and the deleted pair is g
 r.ok('nothing in the door reaches for UrlFetchApp or getEffectiveUser — the server half is pinned in smoke-backend',
   !/UrlFetchApp|getEffectiveUser/.test(appCode));
 
+r.head('the wait screen covers the handoff — the owner saw the form instead');
+// The owner's report, verbatim: "In transition, it was showing login page still
+// while it was loading the app." The exchange is an Apps Script round trip, and the
+// app used to spend it showing a sign-in form to somebody who had just signed in.
+const waitMarkup = (indexSrc.match(/<div id="sso-wait"[\s\S]*?<\/div>\s*<\/div>/) || [''])[0];
+const waitBlock = appCode.slice(appCode.indexOf('const SSO_SLOW_MS'),
+                                appCode.indexOf('function setAuthMode'));
+r.ok('the screen exists, and carries a mark, a title, a note and a moving bar',
+  /<img class="sso-wait-mark"/.test(waitMarkup) &&
+  /<p class="sso-wait-title">/.test(waitMarkup) &&
+  /<p class="sso-wait-note" id="sso-wait-note">/.test(waitMarkup) &&
+  /<div class="sso-wait-sweep"><\/div>/.test(waitMarkup), waitMarkup.slice(0, 120));
+r.ok('it says where the person is going, not what the software is doing',
+  /on your way to I-PASSBOOK/i.test(waitMarkup), waitMarkup);
+r.ok('the id app.js reaches for at 8s is the one the markup carries',
+  /getElementById\('sso-wait-note'\)/.test(appCode) && /id="sso-wait-note"/.test(indexSrc));
+r.ok('the mark is the already-precached one, so the screen downloads nothing',
+  (() => {
+    const m = waitMarkup.match(/src="([^"]+)"/);
+    return !!m && new RegExp('\\./' + m[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).test(swSrc);
+  })(), (waitMarkup.match(/src="([^"]+)"/) || [])[1]);
+
+r.ok('the wait screen is hidden by default and shown by the attribute — the splash\'s own pattern',
+  /#sso-wait \{[\s\S]*?display: none;/.test(baseSrc) &&
+  /html\[data-sso="wait"\] #sso-wait \{ display: flex; \}/.test(baseSrc));
+r.ok('...and it sits on the splash\'s layer and ground, so the handover does not flash',
+  /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc) &&
+  /#sso-wait \{[\s\S]*?background: #0b0b0b/.test(baseSrc));
+// The sweep's own rule, not the whole file: base.css has other `transition: width`
+// declarations (the legacy progress bar), and a global scan would be testing those.
+const sweepRule = (baseSrc.match(/\.sso-wait-sweep \{[\s\S]*?\n\}/) || [''])[0];
+r.ok('the bar is INDETERMINATE — a determinate bar would be a guess about a round trip',
+  /animation: ssoSweep [\d.]+s var\(--ease\) infinite;/.test(sweepRule) &&
+  !/transition/.test(sweepRule), sweepRule.slice(0, 80));
+r.ok('...and reduced motion parks it centred, because the global guard would leave an empty track',
+  /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.sso-wait-sweep \{ animation: none; transform: translateX\(-50%\); \}/.test(baseSrc));
+
+r.ok('app.js takes it down from showAuth, so a refusal is never behind a wait',
+  /function showAuth\(\) \{\s*\n\s*endSsoWait\(\);/.test(appCode));
+r.ok('...and from showApp, so landing in the app is what ends the wait',
+  /function showApp\(\) \{[\s\S]{0,400}?endSsoWait\(\);/.test(appCode));
+r.ok('...in showApp BEFORE the temp-password guard, which diverts away from the shell',
+  appCode.indexOf('endSsoWait();', appCode.indexOf('function showApp()')) <
+  appCode.indexOf('mustChangePassword', appCode.indexOf('function showApp()')));
+r.ok('the slow note is armed only on the exchange, never for a refusal that has nothing to wait for',
+  appCode.indexOf('armSsoSlowNote();') > appCode.indexOf('if (h.error) {'));
+r.ok('and the exchange has a catch — an unhandled rejection would strand the wait screen',
+  /\.catch\(\(\) => \{[\s\S]{0,400}?showAuth\(\)/.test(waitBlock));
+r.ok('both endings of a failed exchange re-enable the Google button',
+  (waitBlock.match(/btn\.disabled = false;/g) || []).length === 2);
+r.ok('the note text is a real timeout, not a promise that never resolves',
+  /SSO_SLOW_MS = \d{4,}/.test(appCode) && /setTimeout\(\(\) => \{/.test(waitBlock));
+r.ok('clearing the wait also disarms the timer, so it cannot fire at a screen that is gone',
+  /function endSsoWait\(\) \{[\s\S]*?clearTimeout\(_ssoSlowTimer\)/.test(appCode));
+
 r.head('the splash skip and the handoff return are pinned to each other');
 // index.html decides this BEFORE app.js parses, so that the nine-second intro never
 // flashes on the way into a sign-in that has already started. If the two conditions
 // drift, a Google return pays for the intro and app.js cannot tell anyone.
+//
+// The two pre-paint gates are read out of the source SEPARATELY and checked against
+// each other, because they are deliberately NOT the same test: the splash skip covers
+// both branches, and the wait screen covers only a code. An earlier version of this
+// assertion searched the whole file for the narrow form and required it to be absent,
+// which was fine until a second gate legitimately needed it — and then it could not
+// tell the two lines apart at all.
+const gate = re => (indexSrc.match(re) || [''])[0];
+const splashGate = gate(/if \(\(location\.hash \|\| ''\)\.indexOf\('#sso'\) === 0\) \{\s*document\.documentElement\.setAttribute\('data-splash', 'skip'\)/);
+const waitGate = gate(/if \(\(location\.hash \|\| ''\)\.indexOf\('#sso='\) === 0\) \{\s*document\.documentElement\.setAttribute\('data-sso', 'wait'\)/);
 r.ok('the pre-paint script skips the splash on a handoff return',
-  /\(location\.hash \|\| ''\)\.indexOf\('#sso'\) === 0/.test(indexSrc),
-  (indexSrc.match(/[^\n]*indexOf\('#sso[^\n]*/) || [''])[0]);
-r.ok('...and its prefix test covers the REFUSAL branch too, not just the code',
-  !/indexOf\('#sso='\)/.test(indexSrc));
+  /\(\s*location\.hash \|\| ''\)\.indexOf\('#sso'\)/.test(splashGate), splashGate);
+r.ok('...and it uses the BROAD prefix, so a refusal skips the nine-second intro too',
+  splashGate !== '' && waitGate !== '' && splashGate !== waitGate,
+  { splash: splashGate, wait: waitGate });
 r.ok('app.js makes the same call at boot, for the loads pre-paint cannot cover',
   /if \(isHandoffReturn\(\)\) \{ splash\.style\.display = 'none'; finishHandoff\(_handoff\); return; \}/.test(appCode));
 r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',

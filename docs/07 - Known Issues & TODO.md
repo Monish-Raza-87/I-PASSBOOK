@@ -50,7 +50,8 @@ completely, and the honest mitigation is named rather than implied.
   `LOCK_BUSY_MESSAGE`, worded so it cannot be mistaken for an admin-changes message.
   The frontend already keeps the user's entry as a local draft and shows "⚠ Retry
   Save", so nothing is lost; the user just has to press it.
-- ⚠️ **The fixed-name store files are located by a Drive *search*.** `sections/IR*.json`
+- ⚠️ **The fixed-name store files are located by a Drive *search* — narrowed, not closed
+  (2026-09-22).** `sections/IR*.json`
   are protected — `sections/index.json` maps IR → file id and the read is a direct
   `getFileById`, because a search miss right after a create would write a second
   `IR409.json` and silently fork a ticket. The fixed-name files — `users.json`,
@@ -61,8 +62,17 @@ completely, and the honest mitigation is named rather than implied.
   *second* `users.json` — the store forks, and the accounts in the first copy vanish
   from the app's view. It is bounded in practice (the file is created once by
   `initializeStore()`, the store is small, the search is warm) and `sessions.json`
-  refuses to read as "nobody is signed in" — but it is the one place a fork is still
-  possible. The fix is the same pattern as sections: one index file holding their ids.
+  refuses to read as "nobody is signed in".
+  **What changed:** the id a search returns is now remembered, and a file the backend
+  CREATES is remembered the instant it is made, so the window is **one lookup per file
+  per cache lifetime rather than one per lookup** — after the first successful
+  resolution, every later read and write fetches by id and cannot miss. That is what
+  took a Google sign-in from eleven searches to none. **What has not changed:** the
+  first resolution is still a search, so a cache eviction (or a deploy, or a store
+  nobody has read for six hours) re-opens the window for exactly one lookup — and a
+  search that misses at that moment can still fork the file. Closing it properly is
+  still the same pattern as sections: one index file holding their ids, which is the
+  only form of this that needs no cache at all to be correct.
 - ⚠️ **`sections/index.json` is one file that every section save rewrites.** Every
   save, on any ticket, reads and rewrites it. It is serialised by the script lock, so
   it cannot corrupt — it is a *throughput* ceiling, not a correctness hole. Fine at
@@ -127,7 +137,7 @@ completely, and the honest mitigation is named rather than implied.
 - ⚠️ **Checklist UX** — checklist items use dropdown selects instead of more intuitive checkbox UX
 - ⚠️ **No confirmation dialog** — save button has no "are you sure?" for critical sections
 - ⚠️ **Assignment emails read as comments** — `sendNudgeEmail`'s subject is hardcoded to the comment wording, so the notification an assignee receives says "you have a comment". Needs a redeploy to fix — and the redeploy that fixes it is the cutover.
-- ⚠️ **The sign-in wait is improved, not fixed — and the improvement is unverified in the field.** Apps Script shuts the script down when nobody is using it, and the next caller pays the whole start-up before one line of our code runs: measured against the live deployment on 2026-09-21, `ping` took **31.6s** on the first call, then 3.7s and 1.5s. `warmBackend()` now fires that trivially cheap `ping` as soon as a load is known to be heading for the sign-in screen, so the wake-up overlaps the ~9-second intro and everything the person types. **The mechanism is measured; the outcome is not.** Three pings fired at once measured 9.0s / 9.5s / 10.5s each where a lone one is under four, so a submit that catches the wake-up still in flight may queue behind it — expected to be no worse than the cold start the submit would have paid by itself, but not proven. Nothing may be built on the wake-up: a container that has gone cold again still has to wake, which is why the wait screen's 8-second slow note (`SSO_SLOW_MS`) stays exactly where it is. The Google door is the worst case and is **not** warmed by this — the door and the app are two deployments of the same script, and waking one does not wake the other, so the exchange can still pay a second cold start. **The half that removes the wait rather than overlapping it is `installKeepWarmTrigger()`**, an every-minute trigger calling an empty `keepBackendWarm()` — it has to be run once from the editor, and until it is, the cold start is still there in full. One thing about it is **not verifiable from here**: whether that single trigger also keeps the domain-scoped door warm, since an unauthenticated request to that deployment never reaches our code. The thing to watch is whether the first sign-in of the day is actually shorter. See [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
+- ⚠️ **The sign-in wait is improved, not fixed — and the improvement is unverified in the field.** Apps Script shuts the script down when nobody is using it, and the next caller pays the whole start-up before one line of our code runs: measured against the live deployment on 2026-09-21, `ping` took **31.6s** on the first call, then 3.7s and 1.5s. `warmBackend()` now fires that trivially cheap `ping` as soon as a load is known to be heading for the sign-in screen, so the wake-up overlaps the ~9-second intro and everything the person types. **The mechanism is measured; the outcome is not.** Three pings fired at once measured 9.0s / 9.5s / 10.5s each where a lone one is under four, so a submit that catches the wake-up still in flight may queue behind it — expected to be no worse than the cold start the submit would have paid by itself, but not proven. Nothing may be built on the wake-up: a container that has gone cold again still has to wake, which is why the wait screen's 8-second slow note (`SSO_SLOW_MS`) stays exactly where it is. The Google door is the worst case and is **not** warmed by this — the door and the app are two deployments of the same script, and waking one does not wake the other, so the exchange can still pay a second cold start. **The half that removes the wait rather than overlapping it is `installKeepWarmTrigger()`**, an every-minute trigger calling an empty `keepBackendWarm()` — it has to be run once from the editor, and until it is, the cold start is still there in full. One thing about it is **not verifiable from here**: whether that single trigger also keeps the domain-scoped door warm, since an unauthenticated request to that deployment never reaches our code. The thing to watch is whether the first sign-in of the day is actually shorter. **A third and separate cause was found and fixed on 2026-09-22**, and it was ours, not the platform's: the exchange resolved five store files — `codes.json`, `users.json`, `signins.jsonl`, `sessions.json`, `access.json` — by name, twice each, and a name lookup is a Drive *search* at about **0.37s** measured. That is **eleven searches**, and it was most of the 8-10 seconds reported from the field. `findStoreFile` now asks `CacheService` for the file's id first, so a warm sign-in pays **zero** searches; the expected result is about 5-6 seconds instead of 8-10, and the 8-second note should no longer appear. This half is **not measurable from here either** — the real exchange needs the owner's Google identity, and what I could measure is the fallback path and the count of searches, both pinned in `smoke-store.mjs`. What is left is the floor: a ~1.8s platform round trip, three lock acquisitions, and five file reads and writes on top. Those are the next thing to doubt if 5-6 seconds still reads as slow. See [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
 
 ### Technical Debt
 - 🔧 **Large single-file frontend** — all logic in one `app.js` (~5,350 lines and growing); the CSS is split into four layered files (see [09](09 - Design System.md))
@@ -188,8 +198,16 @@ completely, and the honest mitigation is named rather than implied.
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **2246 cases across 16 suites**, all passing.
-(2239 before the keep-warm trigger landed — its 7 are all in `smoke-backend.mjs` and
+`node tools/smoke-all.mjs` — **2273 cases across 16 suites**, all passing.
+(2246 before the store's remembered file ids landed — the 27 new ones are 22 in
+`smoke-store.mjs`, which counts the Drive searches a real Google exchange performs
+(11 before, 0 warm, 4 with the cache emptied) and pins that a bad id, a missing file
+and a `CacheService` that throws all fall back to the search, and 5 in
+`smoke-backend.mjs`, which pin the shape a behavioural suite cannot see: that
+`CacheService` is reached only from the three guarded helpers, that the expiration is
+the platform's maximum rather than a longer value the guard would silently swallow,
+and that the audit rides the same remembered id instead of its own name search;
+2239 before the keep-warm trigger landed — its 7 are all in `smoke-backend.mjs` and
 pin the shape a behavioural suite cannot see: that `keepBackendWarm()` is empty of
 work, that one timer is installed rather than five, and that uninstalling it can only
 ever delete a trigger matched by handler name, so it cannot take the nightly archive

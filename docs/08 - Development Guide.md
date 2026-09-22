@@ -396,7 +396,7 @@ Three rules that the code and the suites both enforce:
   accounts" would have the very next `createUser` persist that emptiness plus one
   account.
 
-Two more details that are load-bearing:
+Three more details that are load-bearing:
 
 - **`sections/index.json` maps IR → file id, and is read via `getFileById`** — a
   direct fetch. `getFilesByName` is a Drive *search* and is eventually consistent:
@@ -411,6 +411,23 @@ Two more details that are load-bearing:
   other, so this is a genuine new cost of the move. `withRowLock` therefore covers
   the **read** as well as the write, and inside it a read is always
   `readJsonLocked` — never the memoised `readJson`, whose copy may predate the lock.
+- **A store file's id is remembered, so a lookup is not a search.** Every read and
+  every write resolves its file by name, and `getFilesByName` is a Drive *search* —
+  measured against the live deployment on 2026-09-22 at about **0.37s**, against
+  1.8s for a call that does no work at all and 0.9s on top of that for one lock plus
+  one search plus one download. A Google sign-in resolved five files twice each and
+  paid **eleven searches**, which was most of the 8-10 second wait reported from the
+  field. `findStoreFile` now asks `CacheService` for the id first and resolves it
+  with `getFileById` — the same direct fetch `sections/index.json` uses — falling
+  back to the search whenever anything about that fails. Read `findStoreFile`'s own
+  comment before changing it: only the **id** may be cached and never a record (the
+  content must still come from Drive inside the caller's lock), the key carries the
+  root folder id so a re-pointed config cannot inherit the old folder's files, a
+  missing file is never remembered as absent, and every cache call is inside a
+  try/catch because a cache may be evicted or refuse to answer at all. `smoke-store.mjs`
+  counts the searches a real exchange performs — **11 before, 0 warm, 4 with the
+  cache emptied** — so a change that quietly stops caching, or one that makes a
+  sign-in depend on the cache, fails there rather than in the field.
 
 ### The two read-only input Sheets
 

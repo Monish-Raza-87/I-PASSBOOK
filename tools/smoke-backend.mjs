@@ -1204,10 +1204,18 @@ r.ok('appendAuditLinesLocked documents that the caller holds the lock',
   /The caller HOLDS THE LOCK/.test(src),
   (src.match(/[^\n]*HOLDS THE LOCK[^\n]*/) || [''])[0]);
 r.ok('it creates the audit/ subfolder only when it must write',
-  /getStoreSubfolder\(STORE_AUDIT_DIR, true\)/.test(fnBody('appendAuditLinesLocked')) &&
-  /getStoreSubfolder\(STORE_AUDIT_DIR, false\)/.test(fnBody('readAuditLines')),
-  { write: fnBody('appendAuditLinesLocked').match(/STORE_AUDIT_DIR, \w+/),
-    read: fnBody('readAuditLines').match(/STORE_AUDIT_DIR, \w+/) });
+  // The decision moved one level down with the remembered ids: `findOrCreateStoreFile`
+  // is the creating form of `findStoreFile`, and the two audit entry points still split
+  // the same way they always did. What must not change is that a READ cannot create the
+  // folder — readAuditLines answers "no audit yet" for a fresh store, and creating one
+  // from a read path would put an empty folder in a store that had none.
+  /findOrCreateStoreFile\(/.test(fnBody('appendAuditLinesLocked')) &&
+  /findStoreFile\(/.test(fnBody('readAuditLines')) &&
+  !/findOrCreateStoreFile/.test(fnBody('readAuditLines')) &&
+  /findStoreFile\(path, true\)/.test(fnBody('findOrCreateStoreFile')) &&
+  /storeFolderFor\(path, !!createFolder\)/.test(fnBody('findStoreFile')),
+  { write: fnBody('appendAuditLinesLocked').match(/find\w*StoreFile/),
+    read: fnBody('readAuditLines').match(/find\w*StoreFile/) });
 r.ok('one unreadable line is turned into a VISIBLE placeholder, never skipped silently',
   /'unreadable'/.test(fnBody('parseAuditLines')) && /line skipped/.test(fnBody('parseAuditLines')),
   (fnBody('parseAuditLines').match(/[^\n]*unreadable[^\n]*/) || [''])[0]);
@@ -1820,6 +1828,53 @@ r.ok('neither of them can remove the archive sweep, or prune anything',
   // the project has: an uninstall that swept the lot would silently kill the nightly
   // archive sweep with it.
   /getHandlerFunction\(\) === 'keepBackendWarm'/.test(fnBody('removeKeepWarmTrigger')));
+
+r.head('store file ids are remembered, and the cache is a speed-up and nothing else');
+// Measured on 2026-09-22: one Drive search plus one download plus one lock cost 0.9s
+// over a call that does no work, so the nine `getFilesByName` searches a Google
+// sign-in used to pay were most of the 8-10 second wait. This block pins the SHAPE of
+// the fix — the behaviour is proved in smoke-store.mjs, which counts the searches a
+// real exchange performs. What a behavioural suite cannot see is that nothing else in
+// the file has quietly acquired a cache write path around these guards.
+const cacheUses = (code.match(/CacheService\.\w+/g) || []);
+r.ok('CacheService is reached only from the three remembered-id helpers',
+  (function () {
+    const allowed = ['rememberedStoreId', 'rememberStoreId', 'forgetStoreId']
+      .map(fn => fnBody(fn)).join('\n');
+    return cacheUses.length > 0 && cacheUses.every(u => allowed.indexOf(u) > -1);
+  })(), cacheUses);
+r.ok('...and EVERY one of them is inside a try/catch, because the cache may be gone',
+  // Matched in the whole source rather than in fnBody: the bodies are short and
+  // fnBody's `\n}` heuristic stops at the first line that begins with a brace, which
+  // these three all do. A bounded window from the helper's own name is exact enough.
+  ['rememberedStoreId', 'rememberStoreId', 'forgetStoreId'].every(fn =>
+    new RegExp('function ' + fn + '\\([\\s\\S]{0,400}?try \\{[\\s\\S]{0,200}?CacheService' +
+               '[\\s\\S]{0,200}?\\}\\s*catch').test(code)),
+  ['rememberedStoreId', 'rememberStoreId', 'forgetStoreId'].map(fn => fnBody(fn).length));
+r.ok('the expiration is the platform\'s own maximum, not a longer one that would throw',
+  // getScriptCache() rejects anything above 21600 seconds, and the throw would be
+  // swallowed by the guard above — so a longer value would silently turn the cache off
+  // rather than fail loudly. This is the one number in the block that must not drift.
+  /var STORE_ID_TTL_SECONDS = 21600;/.test(src));
+r.ok('a remembered id that has gone bad falls back to the SEARCH, never to an error',
+  /findStoreFile/.test(fnBody('storeFileById')) === false &&
+  /getFilesByName/.test(fnBody('findStoreFile')) &&
+  /forgetStoreId\(path\)/.test(fnBody('findStoreFile')));
+r.ok('and only the ID is cached — no record is ever put in the cache',
+  // The content path is untouched: parseStoreJson still reads the blob inside whatever
+  // lock the caller holds. A cached RECORD would be the lost update readJsonLocked exists
+  // to prevent; a cached id cannot be, because nothing here ever moves a store file.
+  /\.put\(storeIdKey\(path\), String\(id\)/.test(fnBody('rememberStoreId')) &&
+  !/setContent|getDataAsString|JSON\.parse/.test(fnBody('rememberStoreId')));
+r.ok('the audit rides the same remembered id instead of its own name search',
+  !/getFilesByName/.test(fnBody('appendAuditLinesLocked')) &&
+  !/getFilesByName/.test(fnBody('readAuditLines')) &&
+  /findOrCreateStoreFile/.test(fnBody('appendAuditLinesLocked')));
+r.ok('a file the backend CREATES is remembered at once, so the next read cannot miss it',
+  // Not only speed: a Drive search is eventually consistent, and the moment after a
+  // create is exactly when a search cannot see the file it just made.
+  /findOrCreateStoreFile/.test(fnBody('writeJson')) &&
+  /rememberStoreId\(path, file\.getId\(\)\)/.test(fnBody('findOrCreateStoreFile')));
 
 r.head('the archived-folder fork is closed at the source');
 // The regression: getOrCreateSectionFolder used to resolve the IR folder by name

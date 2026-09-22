@@ -174,6 +174,38 @@ FakeFolder.prototype.createFile = function (name, content, mime) {
   return f;
 };
 
+// The script cache. Two properties of the real CacheService are load-bearing here and
+// are modelled rather than stubbed: a MISS ANSWERS null (never undefined, never ''),
+// and the cache OUTLIVES an execution — that is the entire point of using it for
+// store file ids, so nothing in `reexec()` may clear it. What a test may clear is
+// `cacheStore` itself, to model an eviction or a first-ever run.
+//
+// The 21600-second ceiling is the platform's own documented maximum for
+// getScriptCache(), and enforcing it here is what pins the constant the backend
+// passes: a longer expiration would throw in production and be swallowed by the
+// backend's try/catch, quietly turning the cache off.
+const cacheStore = new Map();
+// A cache that is unavailable, for the one assertion that matters most about it: a
+// store read must not depend on the cache answering. Set around a single read.
+let cacheDown = false;
+const CacheServiceFake = {
+  getScriptCache() {
+    if (cacheDown) throw new Error('the cache is unavailable');
+    return {
+      get(key) { return cacheStore.has(String(key)) ? cacheStore.get(String(key)) : null; },
+      put(key, value, seconds) {
+        const k = String(key);
+        if (k.length > 250) throw new Error('cache key is longer than 250 characters');
+        if (seconds != null && seconds > 21600) {
+          throw new Error('getScriptCache() expiration must be at most 21600 seconds, got ' + seconds);
+        }
+        cacheStore.set(k, String(value));
+      },
+      remove(key) { cacheStore.delete(String(key)); },
+    };
+  },
+};
+
 // The lock. `held` is what makes the exclusivity claim testable: waitLock REFUSES
 // while a lock is already out, so a nested write is provably rejected rather than
 // allowed to interleave — and the event order proves the read sits inside it.
@@ -193,6 +225,7 @@ function istParts(d) {
 const ctx = {
   console,
   DriveApp: DriveAppFake,
+  CacheService: CacheServiceFake,
   MimeType: { PLAIN_TEXT: 'text/plain', HTML: 'text/html' },
   Utilities: {
     // Faithful to the real Utilities.getUuid(): a v4 UUID — 36 characters, lower
@@ -507,6 +540,126 @@ r.ok('a file that genuinely does not exist answers null, and only null',
   ctx.readJson('nothing-here.json') === null, ctx.readJson('nothing-here.json'));
 r.ok('and the file was left exactly as the test found it — nothing was "repaired"',
   users.content === usersBefore, users.content);
+
+// ── A remembered store file id: a lookup should not be a Drive SEARCH ────────
+r.head('a store file id is remembered, so the next execution does not search for it');
+
+// The key carries the root folder id. Without it, pointing the app at a different
+// Drive folder would resolve to the PREVIOUS folder's files, which is the one way a
+// remembered id could read or write the wrong store.
+r.ok('the remembered-id key names the root folder, so another folder cannot inherit it',
+  ctx.storeIdKey('users.json').indexOf(ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) > -1 &&
+  ctx.storeIdKey('users.json').indexOf('users.json') > -1, ctx.storeIdKey('users.json'));
+
+const usersStoreFile = storeFile('users.json');
+const usersStoreContent = usersStoreFile.content;
+
+cacheStore.clear();              // a first-ever run: nothing remembered yet
+ctx._storeMemo = {};
+events.length = 0;
+const readBeforeCache = ctx.readJson('users.json');
+r.ok('the FIRST read really does search — so the assertion below is not vacuous',
+  events.filter(e => e === 'search:users.json').length === 1, events);
+
+reexec();
+ctx._storeMemo = {};
+events.length = 0;
+const cachedRead = ctx.readJson('users.json');
+r.ok('and the NEXT execution does not search at all — the id came from the cache',
+  events.filter(e => e === 'search:users.json').length === 0, events);
+r.ok('...and it read the same record, so the shortcut changed nothing about the answer',
+  JSON.stringify(cachedRead) === JSON.stringify(readBeforeCache));
+
+// The remembered id is AUTHORITATIVE, exactly as sections/index.json is for a ticket:
+// a file a Drive search cannot see is still the file this path names. That is not
+// only faster — it is the same window that forks a ticket, closed for the fixed-name
+// stores.
+ctx._storeMemo = {};
+usersStoreFile.content = JSON.stringify({ 'somebody@indrones.com': { role: 'admin' } });
+usersStoreFile.invisibleToSearch = true;
+events.length = 0;
+const throughTheBlindSpot = ctx.readJson('users.json');
+r.ok('a search that cannot see the file no longer decides the answer — the id does',
+  !!throughTheBlindSpot && !!throughTheBlindSpot['somebody@indrones.com'],
+  { throughTheBlindSpot, events });
+usersStoreFile.invisibleToSearch = false;
+usersStoreFile.content = usersStoreContent;
+
+// An id that has gone bad must cost a search, not a failure. The cache is a speed-up
+// and nothing else, so every failure path here has to land on the code it replaced.
+reexec();
+ctx._storeMemo = {};
+cacheStore.set(ctx.storeIdKey('users.json'), 'an-id-that-does-not-resolve');
+events.length = 0;
+const healed = ctx.readJson('users.json');
+r.ok('a remembered id that no longer resolves FALLS BACK to the search, and still reads',
+  JSON.stringify(healed) === JSON.stringify(readBeforeCache) &&
+  events.filter(e => e === 'search:users.json').length === 1, { healed, events });
+r.ok('...and the dead id was replaced by the good one, so the next read is fast again',
+  cacheStore.get(ctx.storeIdKey('users.json')) === usersStoreFile.getId(),
+  { cached: cacheStore.get(ctx.storeIdKey('users.json')), real: usersStoreFile.getId() });
+
+// A file that is NOT there is never remembered. Remembering "absent" would mean a file
+// created later by anyone else stays invisible for the life of the cache entry.
+//
+// Two EXECUTIONS, not two reads: `readJson` memoises null for the rest of the
+// execution, so a second read in the same one never reaches Drive and would prove
+// nothing about what the cache remembered.
+ctx._storeMemo = {};
+events.length = 0;
+ctx.readJson('nothing-here.json');
+reexec();
+ctx._storeMemo = {};
+ctx.readJson('nothing-here.json');
+r.ok('a missing file is looked for EVERY execution, never remembered as absent',
+  events.filter(e => e === 'search:nothing-here.json').length === 2, events);
+r.ok('...and nothing was remembered for it',
+  cacheStore.get(ctx.storeIdKey('nothing-here.json')) == null);
+
+// A file this backend CREATES is remembered at once. That is not only speed: a Drive
+// search is eventually consistent, so the moment right after a create is exactly when
+// a search cannot see the new file.
+ctx._storeMemo = {};
+ctx.writeJson('freshly-created.json', { hello: 'world' });
+reexec();
+ctx._storeMemo = {};
+events.length = 0;
+const justMade = ctx.readJson('freshly-created.json');
+r.ok('a file the backend CREATED is found with no search, closing Drive\'s consistency window',
+  !!justMade && justMade.hello === 'world' &&
+  events.filter(e => e === 'search:freshly-created.json').length === 0, { justMade, events });
+
+// Only the ID is remembered, never the record. A read must always see the current
+// file — that is the line readJsonLocked draws, and this cache must not cross it.
+ctx._storeMemo = {};
+storeFile('freshly-created.json').content = JSON.stringify({ hello: 'changed elsewhere' });
+ctx._storeMemo = {};
+r.ok('only the ID is cached — the content is re-read from Drive every single time',
+  ctx.readJson('freshly-created.json').hello === 'changed elsewhere',
+  ctx.readJson('freshly-created.json'));
+
+// Leave the fixture as it was found: the file this section invented, and its key.
+const freshFile = storeFile('freshly-created.json');
+store.files = store.files.filter(f => f !== freshFile);
+allFiles.delete(freshFile.getId());
+cacheStore.delete(ctx.storeIdKey('freshly-created.json'));
+r.ok('...and this section left the store exactly as it found it',
+  !store.getFilesByName('freshly-created.json').hasNext() &&
+  cacheStore.get(ctx.storeIdKey('freshly-created.json')) == null);
+
+// A cache that is broken, absent or refusing may only cost latency. This is the
+// promise the whole change rests on: worst case, it is the code it replaced.
+cacheDown = true;
+reexec();
+ctx._storeMemo = {};
+events.length = 0;
+let brokeOn = null, stillRead = null;
+try { stillRead = ctx.readJson('users.json'); } catch (e) { brokeOn = e.message; }
+cacheDown = false;
+r.ok('a CacheService that THROWS does not break a read — it only makes it slower',
+  !brokeOn && JSON.stringify(stillRead) === JSON.stringify(readBeforeCache), { brokeOn, stillRead });
+r.ok('...and it searched, because there was no cache to ask',
+  events.filter(e => e === 'search:users.json').length === 1, events);
 
 // ── 6. The lock: the READ is inside it, and a second writer is refused ────────
 r.head('the read sits INSIDE the lock — a read-then-merge onto a stale snapshot is the data-loss bug');
@@ -2020,6 +2173,47 @@ r.ok('a REFUSED google sign-in changes absolutely nothing',
   { sessions: sessionCount() + '/' + refusedSessions, lines: signinLines().length + '/' + refusedLines });
 r.ok('...and a refused handoff was never even minted, so there is nothing in the store for it',
   (fresh('codes.json') || { entries: [] }).entries.filter(e => e.email === 'outsider@gmail.com').length === 0);
+
+// ── The cost of one sign-in, pinned ──────────────────────────────────────────
+// Placed last, deliberately: it performs real sign-ins, and the assertions above
+// count sessions and audit lines, so it must not run between them.
+asGoogle(GOK);
+reexec();
+// one lock cost 0.9s over a call that does no work at all, so the nine per-file
+// searches a sign-in used to pay were most of the 8-10 second wait. The pair below
+// is the whole claim: warm, the searches are gone; empty, they are exactly what
+// carries the sign-in.
+events.length = 0;
+const warmStart = ctx.doGoogleStart();
+const warmRes = ctx.doGoogleExchange({ code: doorCode(warmStart), device: 'Chrome on Windows' });
+const warmSearches = events.filter(e => e.indexOf('search:') === 0);
+r.ok('a WARM sign-in still signs in', warmRes.status === 'ok' && !!warmRes.sessionToken, warmRes);
+r.ok('...and it searches for NO store file — every id was already remembered',
+  warmSearches.every(e => !/(codes|users|sessions|access)\.json|signins\.jsonl/.test(e)),
+  warmSearches);
+
+// The control. A deploy, an eviction or a store nobody has read since leaves the
+// cache empty, and the sign-in has to complete anyway: the search is the fallback,
+// and it is the code this change replaced rather than a new dependency.
+cacheStore.clear();
+events.length = 0;
+const coldRes = ctx.doGoogleExchange({ code: doorCode(ctx.doGoogleStart()), device: 'Chrome on Windows' });
+const coldSearches = events.filter(e => e.indexOf('search:') === 0);
+r.ok('with the cache EMPTY the same sign-in still completes', coldRes.status === 'ok' && !!coldRes.sessionToken, coldRes);
+r.ok('...and it DID pay the searches, which is the cost this change removes',
+  coldSearches.length > 0, coldSearches);
+r.ok('...and it searched for the store files a sign-in touches, by name',
+  ['codes.json', 'users.json', 'sessions.json', 'signins.jsonl']
+    .every(n => coldSearches.indexOf('search:' + n) > -1), coldSearches);
+
+// And the point of the exercise: the very next sign-in pays none of that. This is the
+// steady state the app runs in — one sign-in warms the store, the rest are cheap.
+events.length = 0;
+const rewarmRes = ctx.doGoogleExchange({ code: doorCode(ctx.doGoogleStart()), device: 'Chrome on Windows' });
+r.ok('the NEXT sign-in, having paid them once, searches for nothing at all',
+  rewarmRes.status === 'ok' &&
+  events.filter(e => e.indexOf('search:') === 0).length === 0,
+  events.filter(e => e.indexOf('search:') === 0));
 
 ctx.Session.getActiveUser = realActiveUser;
 reexec();

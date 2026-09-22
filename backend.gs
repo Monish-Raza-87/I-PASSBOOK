@@ -245,11 +245,99 @@ function storeNameFor(path) {
   return i < 0 ? p : p.substring(i + 1);
 }
 
+// ── REMEMBERING STORE FILE IDS ────────────────────────────────────────────────
+//
+// `getFilesByName` is a Drive SEARCH, and it is the most expensive thing in this
+// backend after the platform's own round trip. Measured against the live
+// deployment on 2026-09-22, one search plus one download plus one lock cost 0.9s
+// over a call that does no work at all — about 0.37s of it the search. A Google
+// sign-in resolves five store files across three locks, and with the read AND the
+// write of each resolving by name it paid NINE searches, which was most of the
+// 8-10 second wait the owner reported.
+//
+// THE ID IS THE SAFE THING TO REMEMBER, and the reason is a property this store
+// already depends on: nothing in this backend ever trashes, moves or renames a
+// store file. A pinned test enforces that its Drive calls cannot even reach an API
+// that would. So while a file exists its id is stable.
+//
+// What is cached is ONLY the id — never a record. The content is still read from
+// Drive on every read, inside whatever lock the caller holds, so no cache here can
+// serve a stale row to a read-merge-write. This is the same line `readJsonLocked`
+// draws against `readJson`'s memo, and it is why the id cache cannot be the
+// lost-update bug that memo would be.
+//
+// Three guards, because this is the store:
+//   · the key carries the ROOT FOLDER ID, so pointing the app at a different Drive
+//     folder can never resolve to the previous folder's files;
+//   · a remembered id is resolved through getFileById inside a try/catch, so an id
+//     that has gone bad costs one failed call and then a real search;
+//   · a file that is NOT found is never remembered, so a missing store file is
+//     looked for again rather than remembered as absent.
+//
+// The cache is a speed-up and nothing else. CacheService may evict at any moment and
+// may refuse to answer at all; every use is inside try/catch and any failure falls
+// back to the search it replaced. A cache that is empty, broken or missing costs
+// latency, never correctness.
+var STORE_ID_TTL_SECONDS = 21600;   // the platform's own maximum: six hours
+
+function storeIdKey(path) {
+  return 'sfid:' + CONFIG.DRIVE_ROOT_FOLDER_ID + ':' + path;
+}
+
+function rememberedStoreId(path) {
+  try { return CacheService.getScriptCache().get(storeIdKey(path)); }
+  catch (e) { return null; }   // no cache, or a cache that will not answer: search
+}
+
+function rememberStoreId(path, id) {
+  try { CacheService.getScriptCache().put(storeIdKey(path), String(id), STORE_ID_TTL_SECONDS); }
+  catch (e) { /* a cache that cannot be written costs latency, never correctness */ }
+}
+
+function forgetStoreId(path) {
+  try { CacheService.getScriptCache().remove(storeIdKey(path)); }
+  catch (e) { /* as above */ }
+}
+
+// A store file by id, or null. getFileById throws for an id that no longer resolves,
+// and a trashed file is reported as ABSENT rather than returned: readJson's contract
+// is that null means "this file does not exist", and a trashed file must not read as
+// a live one. isTrashed is checked defensively — it is deprecated on newer runtimes
+// and simply absent on some, which must not become a crash.
+function storeFileById(id) {
+  try {
+    var f = DriveApp.getFileById(id);
+    if (typeof f.isTrashed === 'function' && f.isTrashed()) return null;
+    return f;
+  } catch (e) { return null; }
+}
+
 function findStoreFile(path, createFolder) {
+  var remembered = rememberedStoreId(path);
+  if (remembered) {
+    var hit = storeFileById(remembered);
+    if (hit) return hit;
+    forgetStoreId(path);   // the id is dead — pay for the search this one time
+  }
   var folder = storeFolderFor(path, !!createFolder);
   if (!folder) return null;
   var it = folder.getFilesByName(storeNameFor(path));
-  return it.hasNext() ? it.next() : null;
+  var file = it.hasNext() ? it.next() : null;
+  if (file) rememberStoreId(path, file.getId());
+  return file;
+}
+
+// A store file, created if it is not there. The new id is remembered immediately,
+// and that is not only for speed: a Drive search is eventually consistent, so the
+// moment right after a create is exactly the window in which a search cannot see the
+// file it just made. That window is why sections/index.json exists for tickets; for
+// the fixed-name stores this closes it.
+function findOrCreateStoreFile(path) {
+  var file = findStoreFile(path, true);
+  if (file) return file;
+  file = storeFolderFor(path, true).createFile(storeNameFor(path), '', MimeType.PLAIN_TEXT);
+  rememberStoreId(path, file.getId());
+  return file;
 }
 
 function parseStoreJson(path, file) {
@@ -294,8 +382,7 @@ function readJsonLocked(path) {
 // see the note on createUserRow and THE ONE STORE PATH. Call it with the
 // lock already held on every read-merge-write path.
 function writeJson(path, obj) {
-  var file = findStoreFile(path, true);
-  if (!file) file = storeFolderFor(path, true).createFile(storeNameFor(path), '', MimeType.PLAIN_TEXT);
+  var file = findOrCreateStoreFile(path);
   file.setContent(JSON.stringify(obj));
   _storeMemo[path] = obj;
 }
@@ -465,11 +552,12 @@ function parseAuditLines(text, subject) {
 }
 
 function readAuditLines(subject) {
-  var folder = getStoreSubfolder(STORE_AUDIT_DIR, false);
-  if (!folder) return [];
-  var it = folder.getFilesByName(auditFileName(subject));
-  if (!it.hasNext()) return [];
-  return parseAuditLines(it.next().getBlob().getDataAsString(), subject);
+  // Through findStoreFile rather than a name search of its own, so this read rides
+  // the same remembered id as every other store read. It is the READ half of the
+  // busiest store path there is: every section save and every sign-in appends here.
+  var file = findStoreFile(STORE_AUDIT_DIR + '/' + auditFileName(subject), false);
+  if (!file) return [];
+  return parseAuditLines(file.getBlob().getDataAsString(), subject);
 }
 
 // Appends to one subject's file. The caller HOLDS THE LOCK: this is a
@@ -477,17 +565,9 @@ function readAuditLines(subject) {
 // otherwise drop one of the lines.
 function appendAuditLinesLocked(subject, lines) {
   if (!lines || !lines.length) return 0;
-  var folder = getStoreSubfolder(STORE_AUDIT_DIR, true);
-  var name = auditFileName(subject);
-  var it = folder.getFilesByName(name);
-  var file, existing = '';
-  if (it.hasNext()) {
-    file = it.next();
-    existing = file.getBlob().getDataAsString();
-    if (existing && existing.charAt(existing.length - 1) !== '\n') existing += '\n';
-  } else {
-    file = folder.createFile(name, '', MimeType.PLAIN_TEXT);
-  }
+  var file = findOrCreateStoreFile(STORE_AUDIT_DIR + '/' + auditFileName(subject));
+  var existing = file.getBlob().getDataAsString();
+  if (existing && existing.charAt(existing.length - 1) !== '\n') existing += '\n';
   var body = lines.map(function (l) { return JSON.stringify(l); }).join('\n');
   file.setContent(existing + body + '\n');
   return lines.length;

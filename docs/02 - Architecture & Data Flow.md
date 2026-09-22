@@ -248,12 +248,27 @@ There is no `APP_DATA` tab any more. The equivalent layout is:
 | `APP_DATA_BACKUP_<date>` tab | `backups/<store>-<yyyy-MM-dd-HHmmss>.json`, always a **new file** |
 | a row has no name, so its fields are addressed by **position** (`userCol`, `USER_HEADS`, `getRange(i+1, 4)`) | a record has names, so every read-modify-write is a **key** assignment |
 
-Two consequences worth remembering:
+Three consequences worth remembering:
 
 - `sections/index.json` maps IR → **file id**, and the read is a direct fetch
   (`getFileById`). `getFilesByName` is a Drive *search* and is eventually
   consistent, so a miss right after a create would produce a second `IR409.json` and
   silently **fork the ticket**. The search survives only as a self-healing fallback.
+- **A store file's id is remembered, so a lookup is not a search.** Every read and
+  every write resolves its file by name, and a name lookup is a Drive *search* —
+  measured against the live deployment on 2026-09-22 at about **0.37s** each, where a
+  call that does no work at all takes 1.8s and one lock plus one search plus one
+  download costs 0.9s on top of that. One Google sign-in resolved five files, twice
+  each, and paid **eleven searches**: it was most of the 8-10 second wait reported
+  from the field. `findStoreFile` now asks `CacheService` for the id first, resolves
+  it with `getFileById` (a direct fetch — the same call `sections/index.json` uses),
+  and falls back to the search whenever anything about that fails. Only the **id** is
+  cached and never a record: the content is still read from Drive on every read,
+  inside whatever lock the caller holds, so this cannot be the lost update that
+  `readJsonLocked` exists to prevent. A warm sign-in now pays **zero** searches. The
+  cache is a speed-up and nothing else — the key carries the root folder id, an id
+  that no longer resolves is replaced rather than trusted, a missing file is never
+  remembered, and a `CacheService` that throws costs a search and not an error.
 - Drive has no transactions and no atomic append: every write is a whole-file
   replace. So `withRowLock` covers the **read** as well as the write, and every read
   inside it is `readJsonLocked` — never the memoised `readJson`.

@@ -29,8 +29,10 @@
 > went in early as the **Insights** page. **Stages 3 and 4 — the section completion
 > count and the ageing clock with overdue flags — are built and green (2026-09-18) and
 > are live on the frontend**: `gh-pages` publishes from `category-insights`, so the
-> `eb522b5` deploy (cache v32) carries them. The **backend** for that branch is not
-> deployed yet — see the owner step below. Stages 6–8 (canned responses, knowledge
+> `eb522b5` deploy (cache v32) carries them. The **backend** for that branch went in
+> with the same pastes, because the whole of `backend.gs` goes over the wall at once
+> rather than one branch's share of it — all of it is live as of 2026-09-23, so nothing
+> described here is waiting on a deployment. Stages 6–8 (canned responses, knowledge
 > base, CSAT) are designed but unstarted; the plan is the source of truth for those.
 
 ## Known Issues
@@ -137,7 +139,7 @@ completely, and the honest mitigation is named rather than implied.
 - ⚠️ **Checklist UX** — checklist items use dropdown selects instead of more intuitive checkbox UX
 - ⚠️ **No confirmation dialog** — save button has no "are you sure?" for critical sections
 - ⚠️ **Assignment emails read as comments** — `sendNudgeEmail`'s subject is hardcoded to the comment wording, so the notification an assignee receives says "you have a comment". Needs a redeploy to fix — and the redeploy that fixes it is the cutover.
-- ⚠️ **The sign-in wait is improved, not fixed — and the improvement is unverified in the field.** Apps Script shuts the script down when nobody is using it, and the next caller pays the whole start-up before one line of our code runs: measured against the live deployment on 2026-09-21, `ping` took **31.6s** on the first call, then 3.7s and 1.5s. `warmBackend()` now fires that trivially cheap `ping` as soon as a load is known to be heading for the sign-in screen, so the wake-up overlaps the ~9-second intro and everything the person types. **The mechanism is measured; the outcome is not.** Three pings fired at once measured 9.0s / 9.5s / 10.5s each where a lone one is under four, so a submit that catches the wake-up still in flight may queue behind it — expected to be no worse than the cold start the submit would have paid by itself, but not proven. Nothing may be built on the wake-up: a container that has gone cold again still has to wake, which is why the wait screen's 8-second slow note (`SSO_SLOW_MS`) stays exactly where it is. The Google door is the worst case and is **not** warmed by this — the door and the app are two deployments of the same script, and waking one does not wake the other, so the exchange can still pay a second cold start. **The half that removes the wait rather than overlapping it is `installKeepWarmTrigger()`**, an every-minute trigger calling an empty `keepBackendWarm()` — it has to be run once from the editor, and until it is, the cold start is still there in full. One thing about it is **not verifiable from here**: whether that single trigger also keeps the domain-scoped door warm, since an unauthenticated request to that deployment never reaches our code. The thing to watch is whether the first sign-in of the day is actually shorter. **A third and separate cause was found and fixed on 2026-09-22**, and it was ours, not the platform's: the exchange resolved five store files — `codes.json`, `users.json`, `signins.jsonl`, `sessions.json`, `access.json` — by name, twice each, and a name lookup is a Drive *search* at about **0.37s** measured. That is **eleven searches**, and it was most of the 8-10 seconds reported from the field. `findStoreFile` now asks `CacheService` for the file's id first, so a warm sign-in pays **zero** searches; the expected result is about 5-6 seconds instead of 8-10, and the 8-second note should no longer appear. This half is **not measurable from here either** — the real exchange needs the owner's Google identity, and what I could measure is the fallback path and the count of searches, both pinned in `smoke-store.mjs`. What is left is the floor: a ~1.8s platform round trip, three lock acquisitions, and five file reads and writes on top. Those are the next thing to doubt if 5-6 seconds still reads as slow. See [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
+- ⚠️ **The sign-in wait is improved, not fixed — and the improvement is unverified in the field.** Apps Script shuts the script down when nobody is using it, and the next caller pays the whole start-up before one line of our code runs: measured against the live deployment on 2026-09-21, `ping` took **31.6s** on the first call, then 3.7s and 1.5s. `warmBackend()` now fires that trivially cheap `ping` as soon as a load is known to be heading for the sign-in screen, so the wake-up overlaps the ~9-second intro and everything the person types. **The mechanism is measured; the outcome is not.** Three pings fired at once measured 9.0s / 9.5s / 10.5s each where a lone one is under four, so a submit that catches the wake-up still in flight may queue behind it — expected to be no worse than the cold start the submit would have paid by itself, but not proven. Nothing may be built on the wake-up: a container that has gone cold again still has to wake, which is why the wait screen's 8-second slow note (`SSO_SLOW_MS`) stays exactly where it is. The Google door is the worst case and is **not** warmed by this — the door and the app are two deployments of the same script, and waking one does not wake the other, so the exchange can still pay a second cold start. **The half that removes the wait rather than overlapping it is `installKeepWarmTrigger()`**, an every-minute trigger calling an empty `keepBackendWarm()` — **installed 2026-09-23**, run once from the editor, so the container is no longer left to go cold. One thing about it is **not verifiable from here**: whether that single trigger also keeps the domain-scoped door warm, since an unauthenticated request to that deployment never reaches our code. The thing to watch is whether the first sign-in of the day is actually shorter. **A third and separate cause was found and fixed on 2026-09-22**, and it was ours, not the platform's: the exchange resolved five store files — `codes.json`, `users.json`, `signins.jsonl`, `sessions.json`, `access.json` — by name, twice each, and a name lookup is a Drive *search* at about **0.37s** measured. That is **eleven searches**, and it was most of the 8-10 seconds reported from the field. `findStoreFile` now asks `CacheService` for the file's id first, so a warm sign-in pays **zero** searches; the expected result is about 5-6 seconds instead of 8-10, and the 8-second note should no longer appear. This half is **not measurable from here either**, but it *is* deployed — it and the trigger both went in with the 2026-09-23 paste, so the 5-6 seconds is now a real prediction to check rather than one held back by an undeployed backend. The real exchange needs the owner's Google identity, and what I could measure is the fallback path and the count of searches, both pinned in `smoke-store.mjs`. What is left is the floor: a ~1.8s platform round trip, three lock acquisitions, and five file reads and writes on top. Those are the next thing to doubt if 5-6 seconds still reads as slow. See [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
 
 ### Technical Debt
 - 🔧 **Large single-file frontend** — all logic in one `app.js` (~5,350 lines and growing); the CSS is split into four layered files (see [09](09 - Design System.md))
@@ -434,7 +436,17 @@ is left is small.
    `__CONFIG__/theme` writes, and the fix for uploads that vanished on Android. Proven
    by signing out and back in and being asked for the code. **A second paste went in the
    same day for the sign-in audit** (see the security note above), with the frontend
-   published first as the order requires. To confirm it took, run
+   published first as the order requires.
+
+   **A third paste went in on 2026-09-23**, carrying the two changes aimed at the
+   sign-in wait — the every-minute `installKeepWarmTrigger()` and the file-id cache in
+   `findStoreFile`. `installKeepWarmTrigger()` was run the same morning and answered
+   *already installed — 1 trigger(s) call `keepBackendWarm`. Nothing changed.*, so the
+   sweep is live. The owner confirmed the deployment version date matches the paste, so
+   **both halves are deployed**. What is still unproven is the **outcome**, and only the
+   field can show it — see the sign-in-wait note under UX below.
+
+   To confirm a paste took, run
    `reportRecentSignins(1)` from the editor: it prints a line per sign-in, or an empty
    window if nobody has signed in since the paste. Editor
    https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit
@@ -457,7 +469,8 @@ is left is small.
    dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
    `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
    `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
-   shell for a load. The last publish was `3286ff0` (cache v35).
+   shell for a load. The last publish was `a9731cc` (2026-09-21, cache v47) — nine
+   deploys on from the `3286ff0` / v35 this line used to name.
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
    safe date; they are the only record of the old hand-assigned grants, which is the

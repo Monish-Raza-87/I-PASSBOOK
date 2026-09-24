@@ -125,7 +125,9 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 > appears in the project's Triggers page; the function is idempotent, so a second run
 > is safe but should add nothing.
 >
-> **Run `installKeepWarmTrigger()` once too** — same dropdown, any account. It creates
+> **Run `installKeepWarmTrigger()` once too** — same dropdown, any account. **This was
+> done on 2026-09-23**; running it again is safe and answers *already installed — 1
+> trigger(s) call `keepBackendWarm`. Nothing changed.* It creates
 > an **every-minute** trigger calling `keepBackendWarm()`, an empty function whose
 > whole job is to be an execution. Apps Script shuts a script down when nobody is
 > using it and the next caller pays the entire start-up before a line of our code

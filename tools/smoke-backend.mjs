@@ -2208,7 +2208,7 @@ const gmint = fnBody('mintGoogleSession');
 // one mint — the same last-login stamp, the same `google sso · <device>` line, the
 // same payload — and half two calls it rather than repeating it.
 r.ok('the exchange mints through mintGoogleSession, not by hand',
-  /mintGoogleSession\(res\.email, params\.device\)/.test(gexch) && !/\bmintSession\(/.test(gexch),
+  /mintGoogleSession\(res\.email, params\.device, params\.version\)/.test(gexch) && !/\bmintSession\(/.test(gexch),
   (gexch.match(/[^\n]*mintGoogleSession[^\n]*/) || [''])[0]);
 r.ok('a bad code returns the refusal as-is, with no email attached to it',
   /if \(res\.error\) return res\.error;/.test(gexch) && /res\.email/.test(gexch));
@@ -2216,8 +2216,14 @@ r.ok('the mint returns the same payload shape as the password door',
   /\bmintSession\(email\)/.test(gmint) &&
   /sessionToken: token/.test(gmint) && /access: getMyAccess\(email\)/.test(gmint),
   (gmint.match(/[^\n]*sessionToken[^\n]*/) || [''])[0]);
+// The stamp is now a shared helper rather than a copied block, which is a STRONGER
+// statement than the one this assertion used to make: the two doors cannot drift,
+// because there is only one body left to drift. What it still has to prove is that
+// the Google door goes through it, and that it stays best-effort.
 r.ok('the last-login stamp is written, and is best-effort like the password door\'s',
-  /lastLoginAt/.test(gmint) && /catch/.test(gmint));
+  /stampSignin\(users\[email\], version\)/.test(gmint) && /catch/.test(gmint) &&
+  /u\.lastLoginAt = Date\.now\(\)/.test(fnBody('stampSignin')),
+  (gmint.match(/[^\n]*stampSignin[^\n]*/) || [''])[0]);
 r.ok('the sign-in line records the door it came through',
   /signinAuditLine\(email, null, device, signinAt, 'google'\)/.test(gmint),
   (gmint.match(/[^\n]*signinAuditLine[^\n]*/) || [''])[0]);

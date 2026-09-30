@@ -701,7 +701,13 @@ function asDate(v) {
 // USERS — one record per account, keyed by lowercase email.
 // { "someone@indrones.com": { hash, salt, createdAt, createdBy, mustChange,
 //                             passwordChangedAt, status, name, lastLoginAt,
-//                             tempPwIssuedAt } }
+//                             appVersion, tempPwIssuedAt } }
+//
+// `appVersion` is the build the account last SIGNED IN with (see stampSignin),
+// which is what powers the admin's "who is still on the old one?" list. It is a
+// sign-in fact, not a live one: someone who has been signed in all day keeps
+// yesterday's number until they sign in again, and the record's own lastLoginAt
+// is what says how old that answer is.
 //
 // There is NO self-signup. The admin creates every account from the app, which
 // returns a one-time temporary password the admin hands over out-of-band. On
@@ -733,6 +739,39 @@ function userField(u, name) {
   var v = u[name];
   if (v === null || v === undefined) return '';
   return typeof v === 'string' ? v.trim() : String(v);
+}
+
+// The app version a device reports when it signs in, as `v<digits>` — or '' when
+// it reports nothing usable.
+//
+// Validated rather than trusted because this string is a REQUEST BODY value that
+// is stored in users.json, served back by listUsers and rendered into the admin's
+// Versions list. Anything that survives here has to be safe to put in a record
+// and, from there, on a screen. The admin UI escapes it as well; this is the half
+// that keeps the junk out of the store in the first place.
+//
+// Returning '' matters as much as the regex: a device running a cached app.js
+// from before this feature reports no version at all, and that device's last
+// KNOWN version must be kept rather than overwritten with a blank. "Unknown" is
+// not an answer, and the oldest device is the one worth seeing in the list.
+function loginVersion(raw) {
+  var v = String(raw == null ? '' : raw).trim();
+  return /^v\d{1,4}$/.test(v) ? v : '';
+}
+
+// Stamp the sign-in facts onto a user record. MUST be called with the caller
+// already holding the users.json row lock and the store already read — it is a
+// pure in-memory edit, deliberately, because a second read-modify-write here
+// would both cost Drive operations and open a window where two concurrent
+// sign-ins each write back a copy that lost the other's update.
+//
+// `version` blank leaves the stored value alone (see loginVersion above); the
+// same is true of a record that predates the field.
+function stampSignin(u, version) {
+  if (!u) return;
+  u.lastLoginAt = Date.now();
+  var v = loginVersion(version);
+  if (v) u.appVersion = v;
 }
 
 // NOTE: there is deliberately no `saveUser(email, rec)` helper any more. Every
@@ -1093,7 +1132,7 @@ function doDeviceUnlock(params) {
     withRowLockOrThrow(function () {
       var users = readJsonLocked('users.json');
       if (!users || !users[email]) return;
-      users[email].lastLoginAt = Date.now();
+      stampSignin(users[email], params.version);
       writeJsonLocked('users.json', users);
     });
   } catch (e) { /* non-fatal */ }
@@ -1171,6 +1210,10 @@ function createUserRow(email, name, createdBy) {
       status:            'active',
       name:              name || '',
       lastLoginAt:       null,
+      // The app version this account last signed in with, as `v<digits>` — or ''
+      // for an account that has not signed in since the field existed. Read-only
+      // in the admin UI; nothing but a sign-in writes it (stampSignin).
+      appVersion:        '',
       // The stamp the temp-password TTL is measured from. Null on an account
       // whose password was set properly, and then the TTL never applies.
       tempPwIssuedAt:    now
@@ -1776,7 +1819,7 @@ var PWLESS_GENERIC_STAGE1 =
   'Otherwise no code will arrive — if you were given a temporary password, use ' +
   '"Use password instead" below.';
 
-function passwordlessLogin(email, suppliedCode, device) {
+function passwordlessLogin(email, suppliedCode, device, version) {
   var locked = lockoutRemaining(email);
   if (locked) return locked;
 
@@ -1817,7 +1860,7 @@ function passwordlessLogin(email, suppliedCode, device) {
     withRowLockOrThrow(function () {
       var users = readJsonLocked('users.json');
       if (!users || !users[email]) return;
-      users[email].lastLoginAt = Date.now();
+      stampSignin(users[email], version);
       writeJsonLocked('users.json', users);
     });
   } catch (e) { /* non-fatal */ }
@@ -1854,7 +1897,7 @@ function doLoginPassword(params) {
   //
   // Everything about which account state is which lives in passwordlessLogin; this
   // split is only "did the caller bring a password".
-  if (!password) return passwordlessLogin(email, supplied, params.device);
+  if (!password) return passwordlessLogin(email, supplied, params.device, params.version);
 
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
@@ -1923,7 +1966,7 @@ function doLoginPassword(params) {
     withRowLockOrThrow(function () {
       var users = readJsonLocked('users.json');
       if (!users || !users[email]) return;
-      users[email].lastLoginAt = Date.now();
+      stampSignin(users[email], params.version);
       writeJsonLocked('users.json', users);
     });
   } catch (e) { /* non-fatal */ }
@@ -2104,14 +2147,14 @@ function redeemHandoff(code) {
 // throttle. And not clearFailedLogin either — someone fumbling their PASSWORD must
 // not be able to wash that counter away by clicking this button. The counter
 // belongs to the password door, and only the password door moves it.
-function mintGoogleSession(email, device) {
+function mintGoogleSession(email, device, version) {
   // Last-login stamp, best-effort, exactly as the password door records it:
   // failing to record it must never fail a sign-in that is already authenticated.
   try {
     withRowLockOrThrow(function () {
       var users = readJsonLocked('users.json');
       if (!users || !users[email]) return;
-      users[email].lastLoginAt = Date.now();
+      stampSignin(users[email], version);
       writeJsonLocked('users.json', users);
     });
   } catch (e) { /* non-fatal */ }
@@ -2281,7 +2324,7 @@ function doGoogleStart() {
 function doGoogleExchange(params) {
   var res = redeemHandoff(params.code);
   if (res.error) return res.error;
-  return mintGoogleSession(res.email, params.device);
+  return mintGoogleSession(res.email, params.device, params.version);
 }
 
 // POST googleSignIn — REMOVED, and deliberately not kept "for later".
@@ -2818,6 +2861,11 @@ function listUsers(authEmail) {
       mustChangePassword: isTempPasswordAccount(u),
       createdAt: created ? Utilities.formatDate(created, 'Asia/Kolkata', 'dd-MMM-yyyy') : '',
       lastLoginAt: saw ? Utilities.formatDate(saw, 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm') : '',
+      // The build this account last signed in with. '' means "never reported" —
+      // either an account that has not signed in since the field existed, or a
+      // device whose cached app.js predates it. Both are shown as-is rather than
+      // guessed at. No extra Drive read: users.json was already read above.
+      appVersion: userField(u, 'appVersion'),
       isAdmin: isAdminEmail(email),
       departments: access.departments,
       permissions: access.permissions

@@ -261,6 +261,11 @@ const ctx = {
         return p.day + '-' + MONTHS[Number(p.month) - 1] + '-' + p.year +
                ' ' + p.hour + ':' + p.minute + ':' + p.second;
       }
+      // The two the admin roster uses: createdAt as a date, lastLoginAt as a date
+      // and time. istParts already zero-pads, so the padded patterns are direct.
+      const ymd = p.day + '-' + MONTHS[Number(p.month) - 1] + '-' + p.year;
+      if (fmt === 'dd-MMM-yyyy') return ymd;
+      if (fmt === 'dd-MMM-yyyy HH:mm') return ymd + ' ' + p.hour + ':' + p.minute;
       throw new Error('unmocked date format: ' + fmt);
     },
   },
@@ -2349,10 +2354,59 @@ r.ok('a password reset REVOKES the device tokens, so the unlocked phone is out t
            after[reg2nd.deviceToken] && !!after[reg2nd.deviceToken].revokedAt;
   })());
 
+// ── WHICH BUILD each person is on ─────────────────────────────────────────────
+// The banner tells people a new version exists; this is the other half — the half
+// that lets the owner stop chasing them. It rides the sign-in writes that were
+// already happening, so it costs no extra Drive operation, and it must survive a
+// sign-in that CANNOT report a version: that device is the old build, which is
+// exactly the one worth looking at, and blanking its record on every visit would
+// hide the only thing this field exists to show.
+r.head('each sign-in records the build the device is running');
+
+const VDEV = 'version.device@indrones.com';
+mkUser(VDEV);
+reexec();
+const vreg = ctx.doDeviceRegister({}, VDEV);
+const vunlock = ctx.doDeviceUnlock({ deviceToken: vreg.deviceToken, email: VDEV,
+                                     method: 'fingerprint', version: 'v55' });
+r.ok('a sign-in that reports a version stores it on the account',
+  vunlock.status === 'ok' && fresh('users.json')[VDEV].appVersion === 'v55',
+  { status: vunlock.status, stored: fresh('users.json')[VDEV].appVersion });
+
+const vSilent = ctx.doDeviceUnlock({ deviceToken: vreg.deviceToken, email: VDEV, method: 'fingerprint' });
+r.ok('a sign-in that reports NOTHING leaves the last known version standing',
+  vSilent.status === 'ok' && fresh('users.json')[VDEV].appVersion === 'v55',
+  { status: vSilent.status, stored: fresh('users.json')[VDEV].appVersion });
+
+// appVersion arrives in a REQUEST BODY and comes back out as HTML in the admin's
+// Versions list, so it is a stored-XSS surface. It is validated rather than
+// trusted, and the refused value must not become the stored one.
+const vInjected = ctx.doDeviceUnlock({ deviceToken: vreg.deviceToken, email: VDEV, method: 'fingerprint',
+                                       version: '<img src=x onerror=alert(1)>' });
+r.ok('a version that is not v<digits> is refused outright',
+  vInjected.status === 'ok' && fresh('users.json')[VDEV].appVersion === 'v55',
+  { status: vInjected.status, stored: fresh('users.json')[VDEV].appVersion });
+const vLong = ctx.doDeviceUnlock({ deviceToken: vreg.deviceToken, email: VDEV, method: 'fingerprint',
+                                   version: 'v99999' });
+r.ok('...and so is a number no build could have',
+  vLong.status === 'ok' && fresh('users.json')[VDEV].appVersion === 'v55', fresh('users.json')[VDEV].appVersion);
+
+// The admin's Versions tab is fed by listUsers alone, so the field has to be in
+// that payload — and "never reported" has to arrive as '' rather than as a
+// missing key, or the tab would have to guess which of the two it is looking at.
+const roster = ctx.listUsers(ADMIN).users;
+const vrow = roster.filter(u => u.email === VDEV)[0] || {};
+r.ok('listUsers carries the version to the admin, with no extra Drive read',
+  vrow.appVersion === 'v55', vrow);
+r.ok('an account that has never reported one reads as "" rather than as absent',
+  roster.length > 0 && roster.every(u => typeof u.appVersion === 'string'),
+  roster.filter(u => typeof u.appVersion !== 'string').map(u => u.email));
+
 // The cost section needs an unlocked, warm store: re-enroll one device for DEV so
 // the unlock state on this device exists again, and re-sign DEV in so its ids are
 // remembered. (The device token was revoked; a new one is minted, which is the
 // documented behavior for a re-enrollment after a revoke.)
+
 const regReturn = ctx.doDeviceRegister({}, DEV);
 r.ok('a revoked token is NOT reusable — the device must enroll again',
   regReturn.status === 'ok' && regReturn.deviceToken !== reg2nd.deviceToken,

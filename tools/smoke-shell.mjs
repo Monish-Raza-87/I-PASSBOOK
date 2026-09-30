@@ -560,6 +560,41 @@ const otpStep = (appJs.match(/const gotoOtpStep = \([\s\S]*?\n  \};/) || [''])[0
 ok('the code step sets the inline note', /auth-login-code-note/.test(otpStep));
 ok('...and raises NO toast over the code box', otpStep !== '' && !/showToast/.test(otpStep), otpStep.slice(0, 80));
 
+// ── The update notice: two slots, one writer, and a worker that never lies ────
+// A device parked on an old build is the argument for this existing at all. Three
+// things have to hold or it does nothing: the worker must not answer the version
+// question out of its own cache, BOTH screens need a slot (a device stuck at
+// sign-in is the one that most needs telling), and the two slots must be filled by
+// one writer, so there is one place to look when the wording is wrong.
+head('the update notice can be seen, and can be trusted');
+const bannerSlots = appJs.match(/document\.getElementById\('update-banner-(ws|auth)'\)/g) || [];
+ok('app.js binds both banner slots', bannerSlots.length === 2, bannerSlots);
+ok('index.html carries both slots, hidden until there is something to say',
+  (html.match(/class="update-banner" id="update-banner-(ws|auth)" style="display:none"/g) || []).length === 2,
+  html.match(/id="update-banner-[a-z]+"[^>]*/g));
+const writeBanner = (appJs.match(/function paintUpdateBanner\(\)[\s\S]*?\n\}/) || [''])[0];
+ok('one function paints both slots, through the same body',
+  /\[updateBannerWs, updateBannerAuth\]\.forEach/.test(writeBanner), writeBanner.slice(0, 80));
+// Nothing may reach past that writer: a second assignment to a slot is a second
+// place the text can be wrong, and the slots are re-written on every paint.
+ok('...and nothing writes to a slot directly, outside that one function',
+  (appJs.match(/updateBanner(Ws|Auth)\.(innerHTML|style)/g) || []).length === 0,
+  appJs.match(/updateBanner(Ws|Auth)\.(innerHTML|style)/g));
+// sw.js must never precache ITSELF. The app asks for ./sw.js to answer "is a newer
+// build deployed?", and a cached copy of that answer is the one answer worse than
+// no answer at all — right once, then wrong for the life of the cache, because the
+// Cache API ignores the `cache:` mode on the request that asks.
+ok('the worker does not precache its own script', !/'\.\/sw\.js'/.test(shellList), shellList.slice(0, 60));
+ok('...and sw.js states that rule up where the version numbers are explained',
+  /OWN script: never intercepted/.test(swJs) && /isOwnScript/.test(swJs));
+// The probe compares the CACHE_NAME gh-pages is SERVING against the APP_VERSION the
+// page is RUNNING, so the pin above is not cosmetic — it is the premise of the
+// whole check. A worker body without a parseable number reads as "no idea", which
+// is the safe direction: no notice, never a false one.
+ok('the probe\'s premise is the served-vs-running pin above',
+  shownVersion === cacheVersion && /ipassbook-\(v\\d\+\)/.test(appJs),
+  { shown: shownVersion, cache: cacheVersion });
+
 // ── Boot reads `__CONFIG__` ONCE, not once per consumer ───────────────────────
 // The inward dropdowns, the IQC config, the team directory and the palette allowlist
 // are four records in one store. Each consumer used to fetch that store for itself —

@@ -147,6 +147,11 @@
        three modes share the one form (Enter submits whichever is showing). -->
   <div id="auth-container">
     <div class="glass-card animate-slide-up">
+      <!-- Update notice, sign-in slot. See the twin in #workspace for the whole
+           story; the short version is that a device sitting on this screen is
+           exactly the device that needs to hear about a new build, and it never
+           reaches the app's own shell. -->
+      <div class="update-banner" id="update-banner-auth" style="display:none"></div>
       <div class="auth-head">
         <!-- alt="" on purpose: the brand name is the next line down, so this is
              the same information twice and the text is the accessible copy. -->
@@ -352,6 +357,23 @@
           <div id="user-avatar" title="Account">?</div>
         </div>
       </header>
+
+      <!-- ====== UPDATE NOTICE ======
+           Raised by app.js when the deployed build is NEWER than the one this
+           device is running, and applied only when someone taps — never an
+           automatic reload, which would land mid-sentence on whoever is typing.
+
+           It sits here, between the header and #panes, rather than floating:
+           #workspace does not scroll (each pane has its own scroller), so the
+           notice stays put under the header without needing --header-h or
+           --bottombar-h arithmetic, and it cannot collide with the fixed phone
+           bottom bar, which lives in #app-container.
+
+           TWO slots, ONE writer — the same arrangement as .app-version above,
+           and for the same reason: there is one place to look when the notice is
+           wrong. `smoke-shell.mjs` derives the required ids from app.js, so
+           removing either slot below fails the suite. -->
+      <div class="update-banner" id="update-banner-ws" style="display:none"></div>
 
       <div id="panes">
 
@@ -609,9 +631,18 @@
   <script>
     // Register the service worker so the app is installable + offline-capable on
     // phones. The SW never caches the Apps Script backend (live data stays live).
+    //
+    // `updateViaCache: 'none'` is NOT what makes updates land — the default
+    // ('imports') already fetches this worker's script from the network, and
+    // 'none' only extends that to importScripts(), of which sw.js has none. It is
+    // set as a hedge against a browser whose default is not what the spec says,
+    // and nothing should be built on the belief that it is doing work here. The
+    // things that actually move a device forward are in sw.js (`cache: 'reload'`
+    // when filling a new cache, and `cache: 'no-cache'` on navigations) and in
+    // app.js (the probe, and `reg.update()` on load and on resume).
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
+        navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {});
       });
     }
   </script>

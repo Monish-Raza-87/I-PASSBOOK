@@ -348,6 +348,64 @@
 }
 .draft-banner-text { flex: 1; min-width: 200px; }
 
+/* ── Update-available notice ──────────────────────────────────
+   Raised by checkForUpdate() when the DEPLOYED build is newer than the one this
+   device is running. Applying it is a deliberate tap, never an automatic reload —
+   a reload that lands mid-sentence on whoever is typing is worse than an old
+   build.
+
+   This is the .draft-banner SHAPE on purpose, not the #toast one: it sits in the
+   layout (so it cannot cover the form), it has no timer (so it cannot vanish
+   before it has been read), and it goes away when someone says so. The two slots
+   share these rules — the app shell and the sign-in card — because a device stuck
+   on the sign-in screen is exactly the device that most needs to hear this, and
+   it never reaches the app's own shell. */
+.update-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.9rem;
+  background: var(--surface-amber-2);
+  color: var(--ink-amber-8);
+  font-size: var(--text-sm);
+  flex: 0 0 auto;
+}
+.update-banner-text { flex: 1; min-width: 200px; }
+/* .btn is full-width by default; in a banner row it is one item among three. */
+.update-banner-btn { width: auto; }
+/* The ✕ is a bare glyph rather than a .btn: it is a dismissal, not an action, and
+   a pill around it would compete with Update now for the same glance. */
+.update-banner-x {
+  background: none;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
+  padding: 0.2rem;
+  cursor: pointer;
+  border-radius: var(--radius-3);
+}
+.update-banner-x:hover { background: var(--surface-amber-3); }
+
+/* Slot 1 — under the app header, above the panes. A hairline separates it from
+   the header it hangs beneath. */
+#update-banner-ws { border-bottom: 1px solid var(--outline-amber-2); }
+/* Slot 2 — inside the sign-in card, where it has to hold its own edge. */
+#update-banner-auth {
+  border: 1px solid var(--outline-amber-2);
+  border-radius: var(--radius-4);
+  margin-bottom: 1rem;
+}
+
+@media (max-width: 639px) {
+  /* Both controls clear the app's 40px phone tap floor. The ✕ especially: it is
+     the smallest thing in the banner and the one most likely to be poked. */
+  .update-banner-btn { width: auto; min-height: 40px; }
+  .update-banner-x   { min-width: 40px; min-height: 40px; }
+}
+
 /* ── Section tabs ──────────────────────────────────────────
    Sticky directly under the app header on mobile; at the top of the
    detail pane on desktop. Offset comes from --header-h, not 56px. */
@@ -1288,7 +1346,9 @@
   border-bottom: 1px solid var(--outline-gray-1);
   background: var(--surface-gray-1);
 }
-/* Tab strip. Three panes, one listUsers snapshot — see openAccessModal(). */
+/* Tab strip. Four panes, one listUsers snapshot — see openAccessModal(). The
+   Versions pane reads the same snapshot the other three do rather than fetching
+   its own, which is what keeps the roster and the version list from disagreeing. */
 .access-tabs { display: flex; gap: 2px; padding: 0.5rem 1.2rem 0; border-bottom: 1px solid var(--outline-gray-1); }
 .access-tab {
   padding: 0.45rem 0.85rem;

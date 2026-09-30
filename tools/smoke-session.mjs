@@ -183,6 +183,62 @@ const errAt  = lb.indexOf("'Login failed.'");
 r.ok('the pass-through sits BEFORE the generic error fallback',
   passAt > -1 && errAt > -1 && passAt < errAt, { passAt, errAt });
 
+r.head('a reply that is not JSON is retried once — a JSON reply never is');
+// The live failure this exists for: Apps Script answers /exec with a 302 to
+// script.googleusercontent.com, and that second hop intermittently comes back 404
+// carrying a Google HTML page. The old code turned it into one opaque sentence and
+// gave up; the owner met it as "Bad response from server." on a laptop while the
+// identical call from a phone signed in fine.
+//
+// Driven for real, because the difference between "retried" and "not retried" is a
+// call COUNT — a regex over the source could only show that the words are present.
+const HTML_404 = () => Promise.resolve({
+  status: 404, text: () => Promise.resolve('<!DOCTYPE html><title>Page not found</title>'),
+});
+let tries = 0;
+const R = loadApp('loginBackend, setUser: u => { currentUser = u; }', {
+  fetch: () => {
+    tries++;
+    if (tries === 1) return HTML_404();
+    return Promise.resolve({ status: 200, text: () => Promise.resolve(JSON.stringify({ status: 'ok', otpRequired: true })) });
+  },
+});
+R.setUser({ email: 'someone@indrones.com' });
+const retried = await R.loginBackend('someone@indrones.com', '');
+r.ok('an HTML reply is retried, once', tries === 2, tries);
+r.ok('...and the retry\'s answer is the one the caller acts on',
+  !!retried && retried.otpRequired === true, retried);
+
+// A JSON reply proves the SCRIPT ran, so re-sending is never right: it would
+// re-redeem a spent code or re-send a rejected password. This is the half that
+// keeps the retry from becoming a double-submit.
+let jsonTries = 0;
+const J = loadApp('loginBackend, setUser: u => { currentUser = u; }', {
+  fetch: () => {
+    jsonTries++;
+    return Promise.resolve({ status: 200, text: () => Promise.resolve(JSON.stringify({ status: 'error', message: 'Wrong password.' })) });
+  },
+});
+J.setUser({ email: 'someone@indrones.com' });
+const refused = await J.loginBackend('someone@indrones.com', 'nope');
+r.ok('a JSON error is NOT retried', jsonTries === 1, jsonTries);
+r.ok('...and the backend\'s own message still reaches the caller',
+  refused.message === 'Wrong password.', refused);
+
+// When the retry fails too, the report has to say WHICH hop failed. "Bad response
+// from server" cost this session hours: it describes the app's parse failure, not
+// the edge's 404, and sent the hunt looking at the wrong side of the wire.
+let deadTries = 0;
+const X = loadApp('loginBackend, setUser: u => { currentUser = u; }', {
+  fetch: () => { deadTries++; return HTML_404(); },
+});
+X.setUser({ email: 'someone@indrones.com' });
+const dead = await X.loginBackend('someone@indrones.com', '');
+r.ok('a reply that never parses gives up after ONE retry', deadTries === 2, deadTries);
+r.ok('...and names the status, not the parser',
+  !!dead && dead.status === 'error' &&
+  /HTTP 404/.test(dead.message) && !/Bad response/.test(dead.message), dead);
+
 r.head('the poll restarts after an in-page re-login');
 // clearLocalAuth() stops the poll — correct for a dead session, wrong for a LIVE
 // one. Signing in again without a page reload hits showApp()'s `_appBooted` early

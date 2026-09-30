@@ -776,12 +776,11 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH) {
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const got = await waitForProbe(before, ms);
   // Give Chrome a moment to shut the profile down cleanly before killing it. This
-  // used to be load-bearing: the intro wrote an "already seen" flag to the profile's
-  // LevelDB and killing the process the instant the probe arrived could lose it,
-  // which made the return-visit assertions fail over a working feature. That flag is
-  // gone (nothing is written by the intro any more, so nothing can be lost), and no
-  // assertion now reads anything a previous load wrote — but killing a browser
-  // mid-write is still not worth doing to save 1.5s.
+  // is load-bearing again: the full intro records the version it just delivered in
+  // the profile's LevelDB, and the SECOND load's assertion is precisely that it
+  // reads that record and skips the video. Killing the process the instant the
+  // probe arrived could lose the write and fail a working feature. That is the bug
+  // this wait was added for the first time, so it is not worth re-learning.
   if (got) await new Promise(r => setTimeout(r, 1500));
   try { proc.kill(); } catch { /* already gone */ }
   return got;
@@ -815,23 +814,31 @@ if (firstIntro) {
     { pings: firstIntro.warmPings, url: firstIntro.warmPingUrl });
 }
 
-// THE POINT OF THE CHANGE. Before this, the intro was once per device and a
-// returning visitor never saw it again; the owner asked for it every time someone
-// goes to the sign-in screen. `mp4Requests` is the honest signal — the splash
-// element ends up display:none whether it played, failed, or was skipped, so the
-// only thing that distinguishes "it played" from "it did not" is whether the
-// browser went and got the video.
+// THE POINT OF THE CHANGE. The intro is the app's OPENING, delivered once per
+// version: the full video on the first arrival, and on the first arrival after an
+// update, because APP_VERSION is what the key is compared against and the deploy
+// bumps it with CACHE_NAME. Every visit in between gets the brief splash.
+//
+// `mp4Requests` is the honest signal, and here it is the whole assertion: the
+// splash element ends up display:none whether it played, failed, or was skipped,
+// so the only thing that separates the full intro from the brief one is whether
+// the browser went and got the video at all. `splashVisibleAtStart` proves the
+// brief splash is a real screen and not a silent skip — the person still sees the
+// app open, they just do not wait nine seconds for it.
 const secondIntro = await runIntroLoad(45000);
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
-  ok('a device that has already seen the intro is shown it AGAIN',
-    secondIntro.splashVisibleAtStart === true && secondIntro.mp4Requests >= 1,
-    { visibleAtStart: secondIntro.splashVisibleAtStart, mp4: secondIntro.mp4Requests });
-  ok('...because seeing it before is no longer a reason to skip it',
+  ok('a device that has already seen this version\'s intro still gets a splash',
+    secondIntro.splashVisibleAtStart === true, secondIntro.splashVisibleAtStart);
+  ok('...but a brief one, which never fetches the ~9.7 MB video',
+    secondIntro.mp4Requests === 0, secondIntro.mp4Requests);
+  ok('...and it clears itself without being touched',
+    secondIntro.splashInlineDisplay === 'none', secondIntro.splashInlineDisplay);
+  ok('...and it is still not a pre-paint skip, so the splash really painted',
     secondIntro.prePaintAttr === null, secondIntro.prePaintAttr);
   // Not once-ever: the container goes cold again, so every arrival at the sign-in
   // screen earns its own ping. A device that has seen the intro before is still a
-  // person about to sign in.
+  // person about to sign in — and now it gets there sooner.
   ok('a returning device wakes the backend again', secondIntro.warmPings >= 1,
     secondIntro.warmPings);
 }

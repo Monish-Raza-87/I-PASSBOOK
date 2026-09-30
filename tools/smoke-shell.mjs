@@ -303,6 +303,18 @@ ok('the old once-per-device flag is gone from every file',
   !/introSeen/.test(appJs) && !/introSeen/.test(html) &&
   !/data-intro/.test(appJs) && !/data-intro/.test(html) && !/data-intro/.test(read('../base.css')));
 
+// ...and the rule that replaced it is neither of the two that were wrong before.
+// The intro is played in full once per VERSION: not once per device (the owner had
+// that removed, and a key written but never compared against APP_VERSION would
+// bring it straight back), and not on every load (which is what the owner reported
+// and asked to have removed again). Both halves are pinned, because either one
+// alone still produces a bug — the comparison without the write plays it forever,
+// the write without the comparison plays it never.
+ok('the intro is recorded against the running version, not against the device',
+  /localStorage\.setItem\(INTRO_DONE_KEY, APP_VERSION\)/.test(appJs) &&
+  /localStorage\.getItem\(INTRO_DONE_KEY\) === APP_VERSION/.test(appJs) &&
+  /const INTRO_DONE_KEY\s*=\s*'[^']+';/.test(appJs));
+
 // The splash is sized to the VIEWPORT, not to the video's own pixels. This is
 // asserted because the wrong version is the one that looks right when you read
 // it: `min-width/min-height: 100%` with `width/height: auto` reads as full-bleed,

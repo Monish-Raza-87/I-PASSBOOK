@@ -187,7 +187,11 @@ const AUTH_STUB = `<script>
     try { code = String(init.body.get('code') || ''); } catch (e) {}
     var payload;
     if (!code) {
-      payload = { status: 'ok', otpRequired: true, email: 'asha@indrones.com', name: 'Asha', codeSent: true };
+      // The real backend's stage-1 answer names the address and states the
+      // lifetime as a duration (see passwordlessLogin — the reusable-code mail
+      // copy), so the stub mirrors it; the note assertions below read this text.
+      payload = { status: 'ok', otpRequired: true, email: 'asha@indrones.com', name: 'Asha', codeSent: true,
+                  message: 'A 6-digit code is sent to asha@indrones.com. It is valid for 8:30 hours from when it was sent, and the same code works for every sign-in until it expires.' };
     } else if (code === '424242') {
       payload = { status: 'ok', sessionToken: 'tok-from-probe', email: 'asha@indrones.com',
                   access: { role: 'user', permissions: { 'sec-b': 'view' }, departments: [], triage: false } };

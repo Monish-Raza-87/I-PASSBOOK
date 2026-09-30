@@ -60,8 +60,8 @@ function enclosingFn(at) {
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 r.head('the owner\'s security decisions');
-r.ok('API_VERSION is 3 — the Drive-JSON store, a different deployment from v2',
-  /API_VERSION:\s*3\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 4 — v4 adds the passwordless login and the quick-unlock devices',
+  /API_VERSION:\s*4\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -174,7 +174,8 @@ const dispatchers = [code.slice(doPostAt, doPostAt + 2600), code.slice(doGetAt, 
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
  'resetPassword', 'getMyAccess', 'listUsers', 'createUser', 'bulkCreateUsers',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
- 'setUserDepartments', 'purgeUsers', 'googleExchange']
+ 'setUserDepartments', 'purgeUsers', 'googleExchange', 'deviceUnlock',
+ 'deviceRegister', 'deviceRevoke']
   .forEach(a => r.ok('"' + a + '" is dispatched',
     new RegExp('\\b' + a + '\\s*:').test(dispatchers),
     (dispatchers.match(new RegExp('.{0,30}\\b' + a + '\\s*:')) || ['absent'])[0]));
@@ -834,7 +835,8 @@ const LOCKED = ['saveSection', 'mintSession', 'doLogout', 'revokeAllSessions', '
   'createUserRow', 'resetUserPassword', 'setUserStatus',
   'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers',
   'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog',
-  'restoreField', 'appendAdminNotice'];
+  'restoreField', 'appendAdminNotice',
+  'doDeviceRegister', 'doDeviceUnlock', 'doDeviceRevoke', 'revokeAllDevices'];
 LOCKED.forEach(fn => {
   const body = fnBody(fn);
   r.ok(fn + ' takes the lock', /withRowLock(OrThrow)?\(/.test(body));
@@ -1062,6 +1064,8 @@ r.ok('it seeds users.json as an EMPTY object, which is a real state',
   /\['users\.json', \{\}\]/.test(isf), (isf.match(/[^\n]*users\.json[^\n]*/) || [''])[0]);
 r.ok('and sessions.json as { tokens: {} }, the shape lookupSession reads',
   /\['sessions\.json', \{ tokens: \{\} \}\]/.test(isf));
+r.ok('it seeds devices.json as { devices: {} }, the shape the unlock door reads',
+  /\['devices\.json', \{ devices: \{\} \}\]/.test(isf), (isf.match(/[^\n]*devices\.json[^\n]*/) || ['absent'])[0]);
 r.ok('it seeds sections/index.json, or the first IR would fork its own file',
   /\[STORE_INDEX, \{ irs: \{\} \}\]/.test(isf), (isf.match(/[^\n]*STORE_INDEX[^\n]*/) || [''])[0]);
 r.ok('it is idempotent — an existing file is left alone, never re-seeded',
@@ -1576,6 +1580,66 @@ r.ok('and read back through asDate, never compared as a string',
   /asDate\(s\.expiresAt\)/.test(ls) && /asDate\(found\.expiresAt\)/.test(src) &&
   /asDate\(e\.createdAt\)/.test(fnBody('issueAuthCode')),
   (fnBody('redeemCodeIn').match(/[^\n]*asDate\(found\.expiresAt\)[^\n]*/) || [''])[0] || 'asDate');
+
+// ── Quick unlock: the device registry and the unlock door ────────────────────
+// The device token is the server-side half of fingerprint/pattern unlock: an
+// opaque uuid that never leaves the device once it has been handed out, stored
+// per DEVICE (a laptop and a phone each carry their own, never one per account).
+r.head('the device registry (quick unlock)');
+const duBody = fnBody('doDeviceUnlock');
+const drBody = fnBody('doDeviceRegister');
+const mintDeviceAt = duBody.indexOf('mintSession(');
+r.ok('deviceUnlock verifies the token INSIDE one lock — check, stamp, write together',
+  duBody.indexOf('withRowLockOrThrow') < duBody.indexOf('lastUnlockAt'),
+  duBody.slice(duBody.indexOf('withRowLockOrThrow'), duBody.indexOf('withRowLockOrThrow') + 200));
+r.ok('a failed unlock counts against the limiter', /recordFailedLogin\(email\)/.test(duBody));
+r.ok('the limiter check comes before the token read', duBody.indexOf('lockoutRemaining') < duBody.indexOf('withRowLockOrThrow'));
+r.ok('unlock refuses a token that belongs to another email or is revoked',
+  /rec\.revokedAt \|\| usersKey\(rec\.email\) !== email/.test(duBody),
+  (duBody.match(/[^\n]*rec\.revokedAt[^\n]*/) || ['absent'])[0]);
+r.ok('and mintSession comes strictly after the account gates, never before',
+  duBody.indexOf('disabled') < mintDeviceAt && mintDeviceAt > 0 &&
+  duBody.indexOf('isTempPasswordAccount') < mintDeviceAt,
+  { disabled: duBody.indexOf('disabled'), temp: duBody.indexOf('isTempPasswordAccount'), mint: mintDeviceAt });
+r.ok('deviceRegister is authed: the email is the verified one, never the body',
+  /devices\[[^\]]+\]\s*=\s*\{ email: email,/.test(drBody) ||
+  /store\.devices\[token\] = \{ email: email,/.test(drBody),
+  drBody.slice(0, 300));
+r.ok('re-registration is idempotent — a device keeps its token',
+  /return \{ status: 'ok', deviceToken: String\(params\.deviceToken\) \};/.test(drBody));
+r.ok('deviceRevoke matches the token against the VERIFIED email, so one account cannot revoke another\'s device',
+  /usersKey\(rec\.email\) !== email/.test(fnBody('doDeviceRevoke')));
+r.ok('the unlock door audits the method (fingerprint / pattern), not a code age',
+  /signinAuditLine\(email, null, params\.device, signinAt, method\)/.test(duBody),
+  (duBody.match(/[^\n]*signinAuditLine[^\n]*/) || ['absent'])[0]);
+
+// One active session per account (the owner's option A, 2026-09-21): mintSession
+// retires every other live token of the same email, inside the lock the mint
+// already holds. Accepted cost, stated to the owner before the choice: signing in
+// on the phone signs the desktop out.
+r.head('one active session per account (option A)');
+const msBody = fnBody('mintSession');
+r.ok('mintSession retires every other live token of the same email',
+  /Object\.keys\(store\.tokens\)\.forEach/.test(msBody) &&
+  /usersKey\(s\.email\) !== caller/.test(msBody) &&
+  /s\.revokedAt = now/.test(msBody),
+  msBody.slice(msBody.indexOf('Object.keys(store.tokens)'), msBody.indexOf('Object.keys(store.tokens)') + 260));
+r.ok('...marked with revokedAt (not deleted), inside the mint\'s own lock',
+  msBody.indexOf('withRowLockOrThrow') < 60 &&
+  msBody.indexOf('s.revokedAt = now') < msBody.indexOf('writeJsonLocked'),
+  { lock: msBody.indexOf('withRowLockOrThrow'), retire: msBody.indexOf('s.revokedAt = now'), write: msBody.indexOf('writeJsonLocked') });
+r.ok('and there is still no lastSeenAt — the expiry stays absolute',
+  !/lastSeenAt/.test(msBody));
+
+// Every credential-retiring path revokes the devices too — a password change
+// must not leave a stolen phone with its quick unlock.
+r.head('every password path revokes the devices as well as the sessions');
+['changePassword', 'resetPassword', 'revokeAllSessions'].forEach(fn => {
+  const b = fnBody(fn);
+  r.ok(fn + ' revokes the account\'s devices',
+    /revokeDevicesForIn\(devs, email\)/.test(b) && /writeJsonLocked\('devices\.json', devs\)/.test(b),
+    (b.match(/[^\n]*revokeDevicesForIn[^\n]*/) || ['absent'])[0]);
+});
 
 // ── Seeding the owner's mapping ───────────────────────────────────────────────
 r.head('seedDepartments upserts ONE KEY per department and names what it drops');
@@ -2170,8 +2234,9 @@ r.head('signinAuditLine still writes the old line for everyone else');
 const sal = fnBody('signinAuditLine');
 r.ok('the method argument is OPTIONAL — a caller that passes nothing is unchanged',
   /signinAuditLine\(email, codeIssuedAt, device, nowMs, method\)/.test(code));
-r.ok('only the google door changes the wording, and it says so without a code age',
-  /=== 'google'/.test(sal) && /'google sso'/.test(sal) && !/code .*google/.test(sal));
+r.ok('the door wordings are method labels in one map — google sso, and the unlock doors — with no code age',
+  /'google sso'/.test(sal) && /methodNotes/.test(sal) && /'fingerprint unlock'/.test(sal) &&
+  !/code .*google/.test(sal));
 
 r.head('the Google door needs no network and no new permission');
 // The one thing that already broke Google Sign-In once, and the reason this design

@@ -39,13 +39,29 @@ A specialized forensic tool for ArduPilot `.bin` files, integrated as a Global H
 - **IR Bridge**: Analysis results are not just viewed; they can be "Pushed" to a specific IR number via a dropdown, automatically appending the diagnostic summary to the ticket.
 - **Service Desk Integration**: Moved from individual IRs to a centralized Hub to optimize performance.
 
+## 3. Auth Shipped 2026-09-30 (Passwordless + Quick Unlock)
+
+### The Passwordless Daily Door (now with a working backend)
+- **The 2026-09-27 passwordless commits were frontend-only**: the backend still demanded a password on both steps, the code step could never submit, and first-login temp-password accounts had lost their only door. Sign-in was broken as deployed; this cycle rebuilt both ends.
+- **Stage 1**: email only → the reusable 8h30m emailed code (issued or reused, uniform response that is no account-existence oracle).
+- **Stage 2**: email + 6-digit code → the same gates → the same audit line → the session. No password anywhere.
+- The password door survives as an opt-in mode ("Use password instead") for legacy shells and the temp-password first login.
+
+### Quick unlock (fingerprint + pattern)
+- Per-device token in `devices.json`; fingerprint via WebAuthn platform authenticator (`userVerification: required`) as the LOCAL gesture; 3×3 pattern fallback hashed client-side (SHA-256, two-draw setup).
+- Unlock verifies the token pre-auth with uniform refusals + the login limiter; account gates then run; audits the method, not a code age.
+- Every password path (change, reset, revoke-all) revokes the devices too.
+
+### One active session per account ("option A")
+- Chosen 2026-09-21, now implemented: `mintSession` retires every other live token of the account inside its lock. Accepted cost: signing in on the phone signs the desktop out.
+
+### Google door on the phone (PWA)
+- The account picker now opens in a NEW browser tab (`window.open`), not a top-level navigation from the standalone window — the old navigation reached Google with no usable cookie context and showed Google's own "unable to open the file at present" error.
+- Diagnostic, if it still fails: try Google sign-in on the laptop. If the laptop fails too, re-publish the door deployment (New version, keep the URL ending `7uKj`).
+
 ---
 
-## 3. Future Roadmap (Planned)
-
-### Frictionless Auth (Phase 2)
-- **Biometric Unlock**: Implementation of WebAuthn API for Fingerprint and FaceID access.
-- **Pattern Lock**: A custom canvas-based $3\times3$ grid for rapid smartphone unlocking.
+## 4. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

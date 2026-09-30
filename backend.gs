@@ -84,7 +84,11 @@ var CONFIG = {
   // changed is where the data lives. It is bumped anyway because the store moved
   // accounts, so a v2 client and a v3 deployment are genuinely different things
   // and the footer check in docs/08 is how an operator tells them apart.
-  API_VERSION: 3,
+  //
+  // v4 = the passwordless login (email → emailed code, no password at all) and
+  // the quick-unlock devices (devices.json, deviceRegister / deviceUnlock), plus
+  // one active session per account minted everywhere sessions are minted.
+  API_VERSION: 4,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -610,9 +614,9 @@ function codeAgeLabel(issuedAt, nowMs) {
 // inventing a fact. Every other caller — including every existing one — produces
 // exactly the line it always did.
 function signinAuditLine(email, codeIssuedAt, device, nowMs, method) {
-  var note = (String(method || '') === 'google')
-    ? 'google sso'
-    : 'code ' + codeAgeLabel(codeIssuedAt, nowMs) + ' old';
+  var methodNotes = { 'google': 'google sso', 'fingerprint': 'fingerprint unlock', 'pattern': 'pattern unlock' };
+  var methodKey = String(method || '');
+  var note = methodNotes[methodKey] || 'code ' + codeAgeLabel(codeIssuedAt, nowMs) + ' old';
   var dev  = String(device || '').trim().slice(0, 120);
   note += dev ? ' · ' + dev : ' · device not reported';
   return {
@@ -662,6 +666,7 @@ function initializeStore() {
   [['users.json', {}], ['sessions.json', { tokens: {} }], ['codes.json', { entries: [] }],
    ['attempts.json', {}], ['access.json', { departments: {}, memberships: {} }],
    ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
+   ['devices.json', { devices: {} }],
    [STORE_INDEX, { irs: {} }]
   ].forEach(function (pair) {
     if (findStoreFile(pair[0], false)) return;
@@ -799,18 +804,37 @@ function hashPassword(password, salt) {
 // a session slide would lose the newly minted token and eject the user on their
 // very next request. Throws if the lock cannot be taken — a failure to mint must
 // never be mistaken for a token.
+//
+// One ACTIVE SESSION per account (the owner's "option A", chosen 2026-09-21):
+// minting here retires every OTHER live token of the same email, in the same
+// write. The accepted cost was stated to the owner before the choice: signing in
+// on the phone signs the desktop out. That is the feature, not a bug — it is not
+// to be softened into a warning-with-override or a per-device list without
+// asking. Every door (password, passwordless, Google, quick-unlock) mints through
+// this one function, so the rule holds uniformly with no per-door copy to drift.
 function mintSession(email) {
   return withRowLockOrThrow(function () {
     var store = readJsonLocked('sessions.json');
     if (!store || !store.tokens) store = { tokens: {} };
-    var token = Utilities.getUuid();
-    var now   = Date.now();
+    var caller = usersKey(email);
+    var token  = Utilities.getUuid();
+    var now    = Date.now();
     store.tokens[token] = {
-      email:      usersKey(email),
+      email:      caller,
       createdAt:  now,
       expiresAt:  now + CONFIG.SESSION_HOURS * 60 * 60 * 1000,
       revokedAt:  null
     };
+    // The retirement itself: every other live token of this email dies with the
+    // new one. Revoked-at, never deleted — the audit value of "when was it
+    // replaced" survives (see the revoke contract in revokeSessionsForIn).
+    Object.keys(store.tokens).forEach(function (t) {
+      if (t === token) return;
+      var s = store.tokens[t];
+      if (s.revokedAt) return;
+      if (usersKey(s.email) !== caller) return;
+      s.revokedAt = now;
+    });
     // There is deliberately NO lastSeenAt. It existed for the sliding expiry, and
     // with an ABSOLUTE expiry nothing would ever update or read it — a field named
     // "last seen" that only ever held the mint time would be worse than absent,
@@ -893,6 +917,13 @@ function revokeAllSessions(email) {
     if (!store || !store.tokens) return 0;
     var n = revokeSessionsForIn(store, email);
     if (n) writeJsonLocked('sessions.json', store);
+    // The quick-unlock devices go with the sessions: "signed out everywhere"
+    // means everywhere. One more locked touch on the same occasion, not a new
+    // endpoint and not a new lock to reason about.
+    var devs = readJsonLocked('devices.json');
+    if (devs && devs.devices && revokeDevicesForIn(devs, email)) {
+      writeJsonLocked('devices.json', devs);
+    }
     return n;
   });
 }
@@ -906,6 +937,196 @@ function pruneSessions() {
     var n = pruneSessionsIn(store);
     if (n) writeJsonLocked('sessions.json', store);
     return n;
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// QUICK-UNLOCK DEVICES — the registered personal phone/laptop that may mint a
+// session with a local gesture (fingerprint via WebAuthn, or a 3×3 pattern)
+// instead of the daily email+code. Kept in `_store/devices.json`.
+// ──────────────────────────────────────────────────────────────────────────────
+// The honest model, so no reader over-trusts it: the SERVER-side credential is a
+// long random per-device token (a uuid, the handoff record's alphabet) that only
+// ever lives on that one device; the fingerprint or pattern is the LOCAL gesture
+// that happens before the token is presented — the platform authenticator's
+// user-verification prompt, not something this backend can verify. So the token
+// gates remotely (a stolen token never leaves the device) and the gesture gates
+// locally. The daily mailed code stays exactly as strong as it was — this is a
+// second door for a device that has already done a real sign-in once.
+//
+// { devices: { "<32-hex token>": { email, createdAt, lastUnlockAt, revokedAt } } }
+//
+// A MISSING or malformed devices.json follows the sessions.json rule: throw, and
+// name the file — a wrong store is wrong, not "no devices registered".
+function devicesRegister() {
+  var d = readJson('devices.json');
+  if (!d || !d.devices || typeof d.devices !== 'object') {
+    throw new Error('Store file devices.json is missing or malformed — run initializeStore() from the Apps Script editor.');
+  }
+  return d.devices;
+}
+
+// Drop device tokens unused for 90 days, in an already-read store. The caller
+// holds the lock and does the write.
+function pruneDevicesIn(store) {
+  var cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  var n = 0;
+  Object.keys(store.devices).forEach(function (t) {
+    var rec = store.devices[t];
+    if (rec.revokedAt) { delete store.devices[t]; n++; return; }
+    var last = asDate(rec.lastUnlockAt) || asDate(rec.createdAt);
+    if (!last || last.getTime() < cutoff) { delete store.devices[t]; n++; }
+  });
+  return n;
+}
+
+// Revoke every registered device for an email IN an already-read store — the
+// revokeSessionsForIn contract, extended to devices. Password change/reset and
+// account disable retire the phone's quick-unlock too: a password change that
+// left a permanent device token alive would make that change cosmetic for
+// anyone holding the phone.
+function revokeDevicesForIn(store, email) {
+  email = usersKey(email);
+  if (!email || !store || !store.devices) return 0;
+  var now = Date.now(), n = 0;
+  Object.keys(store.devices).forEach(function (t) {
+    var rec = store.devices[t];
+    if (usersKey(rec.email) !== email || rec.revokedAt) return;
+    rec.revokedAt = now;
+    n++;
+  });
+  return n;
+}
+
+// The TOP-LEVEL revoke, for callers that do not already hold a lock — same shape
+// as revokeAllSessions, and used by exactly the same occasions plus it: password
+// change/reset, disable, purge.
+function revokeAllDevices(email) {
+  if (!usersKey(email)) return 0;
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('devices.json');
+    if (!store || !store.devices) return 0;
+    var n = revokeDevicesForIn(store, email);
+    if (n) writeJsonLocked('devices.json', store);
+    return n;
+  });
+}
+
+// REACHED BY: the app's own Settings/setup flow, carrying the SESSION token —
+// this action is AUTHED and `email` is the verified one from requireAuth, never
+// a client value.
+//
+// Idempotent on the device's existing token: a device registered once keeps that
+// token (the frontend only re-calls this when it holds none). A second device
+// mints a second token — the registry is per-DEVICE, never per-account, or
+// enrolling the laptop would silently break the phone's unlock.
+function doDeviceRegister(params, email) {
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('devices.json');
+    if (!store || typeof store.devices !== 'object') store = { devices: {} };
+    var existing = params.deviceToken ? store.devices[String(params.deviceToken)] : null;
+    if (existing && !existing.revokedAt && usersKey(existing.email) === email) {
+      return { status: 'ok', deviceToken: String(params.deviceToken) };
+    }
+    var token = Utilities.getUuid().replace(/-/g, '');
+    store.devices[token] = { email: email, createdAt: Date.now(), lastUnlockAt: null, revokedAt: null };
+    pruneDevicesIn(store);
+    writeJsonLocked('devices.json', store);
+    return { status: 'ok', deviceToken: token };
+  });
+}
+
+// THE UNLOCK DOOR. Pre-auth and self-authenticating in the logout/googleExchange
+// pattern: the credential (the device token) is in the body, there is no session
+// to check yet, and every refusal is UNIFORM — "Unlock failed — sign in with
+// your email and code." — never distinguishing a wrong token, a revoked one, an
+// unknown email or a disabled account for an UNVERIFIED caller. Only after the
+// token verifies may a message get specific, because then the caller has proved
+// possession.
+//
+// Throttling reuses the login limiter keyed on the CLAIMED email: five failures
+// of any kind lock that email's door for 15 minutes, exactly as the password
+// door already does. A wrong-guess flood cannot then probe tokens forever, and
+// the exposure is the same one the password door already accepts (a caller who
+// knows an email can lock that email's door out).
+function doDeviceUnlock(params) {
+  var email = usersKey(params.email);
+  var token = String(params.deviceToken || '');
+  var method = (params.method === 'pattern') ? 'pattern' : 'fingerprint';
+  if (!email || !token) return { status: 'error', message: 'Unlock failed — sign in with your email and code.' };
+
+  var locked = lockoutRemaining(email);
+  if (locked) return locked;
+
+  // Validate the token inside ONE lock: read, check, stamp, write — one key
+  // touch, never a whole-file rewrite of someone else's record.
+  var verified = withRowLockOrThrow(function () {
+    var store = readJsonLocked('devices.json');
+    if (!store || typeof store.devices !== 'object') store = { devices: {} };
+    var rec = store.devices[token];
+    if (!rec || rec.revokedAt || usersKey(rec.email) !== email) return false;
+    store.devices[token].lastUnlockAt = Date.now();
+    pruneDevicesIn(store);
+    writeJsonLocked('devices.json', store);
+    return true;
+  });
+  if (!verified) {
+    recordFailedLogin(email);
+    return { status: 'error', message: 'Unlock failed — sign in with your email and code.' };
+  }
+
+  // The account gates, in mintGoogleSession's order (exists → enabled → temp).
+  // A verified token has proved itself; these refusals are allowed to be
+  // specific, because this caller is authenticated on the device axis.
+  var u = findUser(email);
+  if (!u) return { status: 'error', message: 'No account found for this email — ask an admin to create one.' };
+  if (userField(u, 'status').toLowerCase() === 'disabled') {
+    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+  }
+  if (isTempPasswordAccount(u)) {
+    var stale = tempPasswordExpired(u);
+    if (stale) return stale;
+    return { status: 'error', message: 'This account starts with its admin-issued password once — sign in with it to set your real one.' };
+  }
+
+  try {
+    withRowLockOrThrow(function () {
+      var users = readJsonLocked('users.json');
+      if (!users || !users[email]) return;
+      users[email].lastLoginAt = Date.now();
+      writeJsonLocked('users.json', users);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  try {
+    var signinAt = Date.now();
+    withRowLockOrThrow(function () {
+      appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT,
+        [signinAuditLine(email, null, params.device, signinAt, method)]);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  var sessionToken = mintSession(email);
+  return { status: 'ok', sessionToken: sessionToken, email: email, access: getMyAccess(email) };
+}
+
+// REMOVING a device's quick unlock — "sign out and forget this device". Authed:
+// params.deviceToken must belong to the VERIFIED email (a second account's token
+// is out of reach, no matter what the body carries). Deleting the record, not
+// just revoking, keeps devices.json from accreting tombstones this app never
+// lists; a revoked-but-unpruned record would be refused by doDeviceUnlock all
+// the same.
+function doDeviceRevoke(params, email) {
+  var token = String(params.deviceToken || '');
+  if (!token) return { status: 'ok' };
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('devices.json');
+    if (!store || typeof store.devices !== 'object') return { status: 'ok' };
+    var rec = store.devices[token];
+    if (!rec || usersKey(rec.email) !== email) return { status: 'ok' };
+    delete store.devices[token];
+    writeJsonLocked('devices.json', store);
+    return { status: 'ok' };
   });
 }
 
@@ -1357,6 +1578,12 @@ function changePassword(params) {
     if (sess && sess.tokens) {
       if (revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
     }
+    // …and the quick-unlock devices. Same lock, same reason: another user's
+    // password change must not leave a standing device token alive.
+    var devs = readJsonLocked('devices.json');
+    if (devs && devs.devices) {
+      if (revokeDevicesForIn(devs, email)) writeJsonLocked('devices.json', devs);
+    }
   });
 
   clearFailedLogin(email);
@@ -1450,6 +1677,8 @@ function resetPassword(params) {
 
     var sess = readJsonLocked('sessions.json');
     if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
+    var devs = readJsonLocked('devices.json');
+    if (devs && devs.devices && revokeDevicesForIn(devs, email)) writeJsonLocked('devices.json', devs);
     return { status: 'ok', message: 'Password set. Sign in with your new password.' };
   });
 
@@ -1528,6 +1757,83 @@ function lockoutRemaining(email) {
   return { status: 'error', message: 'Too many wrong attempts. Try again in ' + mins + ' min.' };
 }
 
+// ── THE PASSWORDLESS DOOR ─────────────────────────────────────────────────────
+// The daily sign-in: email → emailed 6-digit code → session. No password at any
+// step. Dispatched from doLoginPassword whenever the password comes up empty, and
+// the password path above is untouched, so legacy shells and the "Use password
+// instead" link keep working unchanged.
+//
+// The enumeration rule here matches forgotPassword, not doLoginPassword's: an
+// account that cannot receive a session (unknown email, disabled, temp-password)
+// is answered with ONE and the same response — an `otpRequired` success whose
+// message says a code will only arrive for an onboarded account. A differing
+// message would turn this unauthenticated step into an oracle for "is this a
+// real account", and the whole point of the uniform shape is that it cannot be.
+// The temp-password guidance in the message is generic on purpose: it names no
+// one, and it is the sentence a new hire needs to find the password door.
+var PWLESS_GENERIC_STAGE1 =
+  'If this email has an onboarded account, a 6-digit sign-in code is on its way. ' +
+  'Otherwise no code will arrive — if you were given a temporary password, use ' +
+  '"Use password instead" below.';
+
+function passwordlessLogin(email, suppliedCode, device) {
+  var locked = lockoutRemaining(email);
+  if (locked) return locked;
+
+  var u = findUser(email);
+
+  // STAGE 1 — email only, no code. Reuse the live reusable code if there is one;
+  // otherwise issue + mail, all of it loginOtpStep's existing behaviour.
+  if (!suppliedCode) {
+    if (!u || userField(u, 'status').toLowerCase() === 'disabled' || isTempPasswordAccount(u)) {
+      return { status: 'ok', otpRequired: true, codeSent: false, message: PWLESS_GENERIC_STAGE1 };
+    }
+    return loginOtpStep(email, '', userField(u, 'Name'), {});
+  }
+
+  // STAGE 2 — email + code. The code IS the credential, so the account gates run
+  // here exactly where the password door runs them: a disabled or temp-password
+  // account gets no session through this door either. A wrong / expired / burned
+  // code is answered by verifyAuthCode (inside loginOtpStep) — uniform for both a
+  // real and an unknown email, since neither can hold a live code.
+  if (userField(u || {}, 'status').toLowerCase() === 'disabled') {
+    recordFailedLogin(email);
+    return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
+  }
+  if (isTempPasswordAccount(u)) {
+    var stale = tempPasswordExpired(u);
+    if (stale) return stale;
+    return { status: 'error', message: 'This account starts with its admin-issued password once — use "Use password instead" to set your real one.' };
+  }
+  var otpInfo = {};
+  var otpStep = loginOtpStep(email, suppliedCode, userField(u, 'Name'), otpInfo);
+  if (otpStep) return otpStep;      // a refusal, not a verification
+
+  // From here the closing is the password door's last mile, word for word:
+  // last-login stamp, the audit line (the default one, carrying the code's age),
+  // then the mint. Shared deliberately rather than copied, so the two doors
+  // cannot drift on what a session means.
+  try {
+    withRowLockOrThrow(function () {
+      var users = readJsonLocked('users.json');
+      if (!users || !users[email]) return;
+      users[email].lastLoginAt = Date.now();
+      writeJsonLocked('users.json', users);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  try {
+    var signinAt = Date.now();
+    withRowLockOrThrow(function () {
+      appendAuditLinesLocked(SIGNIN_AUDIT_SUBJECT,
+        [signinAuditLine(email, otpInfo.codeIssuedAt, device, signinAt)]);
+    });
+  } catch (e) { /* non-fatal */ }
+
+  var token = mintSession(email);
+  return { status: 'ok', sessionToken: token, email: email, access: getMyAccess(email) };
+}
+
 // Sign in: verify email + password against the USERS tab, then mint a session.
 //
 // A user whose row still says "Must Change Password" gets NO session token back —
@@ -1536,7 +1842,19 @@ function lockoutRemaining(email) {
 function doLoginPassword(params) {
   var email    = usersKey(params.email);
   var password = (params.password || '').toString();
-  if (!email || !password) return { status: 'error', message: 'Enter your email and password.' };
+  var supplied = (params.code || '').toString().trim();
+  if (!email) return { status: 'error', message: 'Enter your email and password.' };
+
+  // ── THE PASSWORDLESS DOOR (2026-09-30) ──────────────────────────────────────
+  // The daily sign-in carries NO password: step one is an email that earns the
+  // 8h30m reusable code, step two is that code. The password path below is left
+  // byte-for-byte as it was, for legacy shells and for the "Use password instead"
+  // link — which is also the only door a temp-password (first-login) account has,
+  // so it is not dead code.
+  //
+  // Everything about which account state is which lives in passwordlessLogin; this
+  // split is only "did the caller bring a password".
+  if (!password) return passwordlessLogin(email, supplied, params.device);
 
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
@@ -2053,10 +2371,10 @@ function loginOtpStep(email, supplied, name, info) {
                    ('0' + (LOGIN_OTP_TTL_MIN % 60)).slice(-2);
     sendAuthMail(email, 'Your I-PASSBOOK sign-in code',
       'Your I-PASSBOOK sign-in code is ' + issued + '.\n\n' +
-      'It is valid for ' + ttlLabel + ' hours from now. You can reuse this same code for ' +
-      'every sign-in until it expires — so if you are already signed in on another ' +
-      'device, you do not need a new one.\n\n' +
-      'If you did not try to sign in, someone may have your password — tell an admin.');
+      'It is valid for ' + ttlLabel + ' hours from now, and you can reuse this same ' +
+      'code for every sign-in until it expires. Note: signing in on a new device ' +
+      'signs the previous device out — one device stays signed in per account.\n\n' +
+      'If you did not try to sign in, someone may be using your email — tell an admin.');
     return {
       status: 'ok', otpRequired: true, email: email, name: name, codeSent: true,
       message: 'We emailed you a 6-digit sign-in code.'
@@ -2175,7 +2493,11 @@ function doPost(e) {
       // runs on THIS deployment because it is called from the app's own browser,
       // and a background call to the domain-restricted one is refused by Google
       // before this script runs. See doGoogleStart and docs/10.
+      // The Google door's handoff code and the device quick-unlock token are
+      // both in the body, both self-authenticating, both refused uniformly —
+      // see doGoogleExchange and doDeviceUnlock.
       googleExchange: function () { return doGoogleExchange(params); },
+      deviceUnlock:   function () { return doDeviceUnlock(params); },
       ping:           function () { return ping(); },
       sessionCheck:   function () { return sessionCheck(e); },
     };
@@ -2214,6 +2536,11 @@ function doPost(e) {
       deleteDepartment:  function () { return deleteDepartment(params, email); },
       setUserDepartments: function () { return setUserDepartments(params, email); },
       purgeUsers:        function () { return purgeUsers(params, email); },
+
+      // Quick-unlock enrollment. Authed: the token minted here never leaves the
+      // device, and the email comes from the verified session, never the body.
+      deviceRegister: function () { return doDeviceRegister(params, email); },
+      deviceRevoke:   function () { return doDeviceRevoke(params, email); },
     };
     result = authed[action] ? authed[action]() : unknownAction(action);
   } catch (err) {

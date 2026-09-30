@@ -896,24 +896,28 @@ r.head('a return from the door is exchanged once, at parse time, on the MAIN bac
 gPosts.length = 0;
 gReply = SESSION_REPLY;
 const G2 = loadApp(`
-  CONFIG, isHandoffReturn, finishHandoff, ${NAV},
+  CONFIG, isHandoffReturn, finishHandoff, checkHandoff, ${NAV},
   armSsoSlowNote, endSsoWait, SSO_SLOW_MS,
   get htmlEl() { return document.documentElement; },
   get _ssoSlowTimer() { return _ssoSlowTimer; },
-  get _handoff() { return _handoff; },
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch,
      globals: { location: Object.assign({}, HASH_BASE, { hash: '#sso=' + HANDOFF_CODE }) } });
 r.ok('the fragment is recognised as a handoff return',
   G2.T.isHandoffReturn() === true, G2.T.isHandoffReturn());
+// checkHandoff() reads the fragment and REPLACES the address bar in the same
+// call (there is no module-scope _handoff any more — the SSO-stability work made
+// the read idempotent via sessionStorage instead), so the code is still
+// recoverable after the recogniser has consumed the hash.
 r.ok('and read as a CODE, with the prefix stripped exactly once',
-  G2.T._handoff && G2.T._handoff.code === HANDOFF_CODE, G2.T._handoff);
+  G2.T.checkHandoff() && G2.T.checkHandoff().code === HANDOFF_CODE,
+  G2.T.checkHandoff());
 gPosts.length = 0;
 // What index.html's pre-paint script raises before app.js has parsed a byte. Set
 // here by hand because the stub DOM never runs it — the gate itself is pinned by
 // source further down; what this drives is the teardown.
 G2.T.htmlEl.setAttribute('data-sso', 'wait');
-await G2.T.finishHandoff(G2.T._handoff);
+await G2.T.finishHandoff(G2.T.checkHandoff());
 r.ok('landing in the app takes the wait screen down',
   G2.T.htmlEl.getAttribute('data-sso') === null, G2.T.htmlEl.getAttribute('data-sso'));
 r.ok('...and disarms the slow note, so a timer cannot fire at a screen that is gone',
@@ -943,7 +947,9 @@ r.head('the handoff code never survives in the address bar');
 // "that link is no longer valid" on a sign-in that actually worked. The app routes by
 // hash, so `location.hash = …` is everywhere ELSE in this file; the assertion is
 // scoped to the handoff block, where the one thing it must never do is assign.
-const handoffSeg = appCode.slice(appCode.indexOf('const _handoff = (() => {'),
+// checkHandoff() — there is no module-scope _handoff; the read replaces the
+// address bar in the same call, driven through sessionStorage fallback.
+const handoffSeg = appCode.slice(appCode.indexOf('function checkHandoff() {'),
                                  appCode.indexOf('function isHandoffReturn'));
 r.ok('the spent fragment is wiped with replaceState, not by assigning the hash',
   /history\.replaceState\(/.test(handoffSeg) && !/location\.hash\s*=/.test(handoffSeg),
@@ -956,9 +962,8 @@ r.ok('the fragment is a transient namespace, not a route — it is consumed befo
 r.head('a refusal from the door lands on the same error line as a wrong password');
 gPosts.length = 0;
 const G3 = loadApp(`
-  isHandoffReturn, finishHandoff, setAuthError, ${NAV},
+  isHandoffReturn, finishHandoff, setAuthError, checkHandoff, ${NAV},
   get htmlEl() { return document.documentElement; },
-  get _handoff() { return _handoff; },
   get currentUser() { return currentUser; },
 `, { capture: true, fetch: gFetch,
      globals: { location: Object.assign({}, HASH_BASE, { hash: '#ssoerr=' +
@@ -970,7 +975,7 @@ r.ok('it is recognised as a return, so the splash is skipped for a refusal too',
 // other path ever did leave it up, the refusal's own route to the sign-in screen
 // takes it down rather than trapping the person behind a wait that already ended.
 G3.T.htmlEl.setAttribute('data-sso', 'wait');
-await G3.T.finishHandoff(G3.T._handoff);
+await G3.T.finishHandoff(G3.T.checkHandoff());
 r.ok('a refusal clears the wait screen too — every route to a real screen does',
   G3.T.htmlEl.getAttribute('data-sso') === null, G3.T.htmlEl.getAttribute('data-sso'));
 r.ok('the backend\'s own words are shown, not a generic failure',
@@ -995,10 +1000,11 @@ r.head('the two doors share one session model, one error line and one regex');
 r.ok('finishAuth is the password door\'s own function, called unchanged',
   /finishAuth\(d\.email, d\)/.test(appCode));
 r.ok('the password form is never replaced — its handler is still wired',
-  /signInBtn\.addEventListener\('click', submitLogin\)/.test(appCode) &&
+  /signInBtn\.addEventListener\('click', \(\) => \(_authMode === 'login' \? submitPwd\(\) : submitLogin\(\)\)\)/.test(appCode) &&
   /auth-google-btn/.test(indexSrc) && /id="auth-signin-btn"/.test(indexSrc));
-r.ok('googleExchange is listed as self-authenticating, and the deleted pair is gone from the regex',
-  /googleExchange\)/.test((appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]) &&
+r.ok('googleExchange AND deviceUnlock are listed as self-authenticating, and the deleted pair is gone from the regex',
+  /googleExchange/.test((appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]) &&
+  /deviceUnlock/.test((appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]) &&
   !/googleSignIn\|googleSignInProbe/.test(appCode),
   (appCode.match(/const isAuthCall = [^\n]*/) || [''])[0]);
 r.ok('nothing in the door reaches for UrlFetchApp or getEffectiveUser — the server half is pinned in smoke-backend',
@@ -1009,8 +1015,13 @@ r.head('the wait screen covers the handoff — the owner saw the form instead');
 // while it was loading the app." The exchange is an Apps Script round trip, and the
 // app used to spend it showing a sign-in form to somebody who had just signed in.
 const waitMarkup = (indexSrc.match(/<div id="sso-wait"[\s\S]*?<\/div>\s*<\/div>/) || [''])[0];
+// The quick-unlock module sits between finishHandoff's endings and setAuthMode, so
+// the block is cut at ITS first code line — appCode is comment-stripped, so a
+// banner comment is not findable there.
 const waitBlock = appCode.slice(appCode.indexOf('const SSO_SLOW_MS'),
-                                appCode.indexOf('function setAuthMode'));
+                                appCode.indexOf("const UNLOCK_KEY = 'ipb_unlock'") > 0
+                                  ? appCode.indexOf("const UNLOCK_KEY = 'ipb_unlock'")
+                                  : appCode.indexOf('function setAuthMode'));
 r.ok('the screen exists, and carries a mark, a title, a note and a moving bar',
   /<img class="sso-wait-mark"/.test(waitMarkup) &&
   /<p class="sso-wait-title">/.test(waitMarkup) &&
@@ -1100,10 +1111,10 @@ r.ok('...and it uses the BROAD prefix, so a refusal skips the nine-second intro 
   splashGate !== '' && waitGate !== '' && splashGate !== waitGate,
   { splash: splashGate, wait: waitGate });
 r.ok('app.js makes the same call at boot, for the loads pre-paint cannot cover',
-  /if \(isHandoffReturn\(\)\) \{ splash\.style\.display = 'none'; finishHandoff\(_handoff\); return; \}/.test(appCode));
+  /const handoff = checkHandoff\(\);\s*\n\s*if \(handoff\) \{ splash\.style\.display = 'none'; finishHandoff\(handoff\); return; \}/.test(appCode));
 r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',
   appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
-  appCode.indexOf('if (isHandoffReturn()) { splash.style.display'));
+  appCode.indexOf('const handoff = checkHandoff();'));
 
 // ── Waking the backend before it is needed ────────────────────────────────────
 r.head('the backend is woken before it is needed, never at the moment it is needed');

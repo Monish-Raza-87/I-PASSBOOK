@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v49';
+const APP_VERSION = 'v50';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -284,7 +284,10 @@ function deviceLabel() {
 }
 
 function loginBackend(email, password, code) {
-  if (!email || !password) return Promise.resolve({ status: 'error', message: 'Enter your email and password.' });
+  // The password may legitimately be EMPTY — that is the passwordless door, where
+  // stage 1 (no code) asks for a code and stage 2 (code) redeems it. Only the
+  // email is mandatory everywhere.
+  if (!email) return Promise.resolve({ status: 'error', message: 'Enter your email.' });
   const fd = new FormData();
   fd.append('action', 'login');
   fd.append('email', email);
@@ -551,7 +554,7 @@ window.fetch = function (input, init) {
     // left on the machine — and on a shared laptop that is the previous person's
     // session, which is the exact hole this door must not have. It also keeps a
     // spent handoff code from being answered as "your session expired".
-    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleExchange)\b/.test(url);
+    const isAuthCall = /[?&]action=(login|changePassword|forgotPassword|resetPassword|logout|sessionCheck|ping|googleExchange|deviceUnlock)\b/.test(url);
 
     const sessionToken = (currentUser && currentUser.sessionToken) || null;
     const email = (currentUser && currentUser.email) || '';
@@ -1301,6 +1304,7 @@ function finishAuth(email, d) {
   persistUser(currentUser);
   _authToastShown = false;   // fresh session — allow one expiry hint again
   showApp();
+  maybePromptQuickUnlock(email);
   refreshMyAccess().then(() => { if (typeof applySectionAccessGating === 'function') applySectionAccessGating(); });
 }
 
@@ -1316,8 +1320,22 @@ function showAuth() {
   _otpEmail = '';
   _otpPassword = null;
 
-  // Change: Default mode is now 'otp' instead of 'login' to bypass password
-  setAuthMode('otp');
+  // Default mode: quick unlock where a registered device has one on file, and
+  // the email step for everyone else. NEVER the bare 'otp' code step — setAuthMode
+  // 2026-09-27's default once made the screen open on a code box no code had been
+  // requested for, because the passwordless door's stage 1 had not been shipped
+  // (see the 'Your sign-in timed out' dead end in submitOtp's history).
+  const quick = loadUnlock();
+  // A fingerprint record opens on the fingerprint door; a pattern-only record on
+  // the pattern canvas. Both still offer the email door one tap away.
+  let quickMode = 'email';
+  if (quick && quick.deviceToken && quick.email) {
+    quickMode = (quick.credentialId || quick.mode === 'fingerprint') ? 'unlock' : (quick.patternHash ? 'pattern' : 'email');
+  }
+  setAuthMode(quickMode);
+  // A pattern device opens straight onto a drawable canvas, not a blank box that
+  // draws only after the "Use pattern" tap.
+  if (quickMode === 'pattern') patternForUnlock();
 
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
@@ -1328,12 +1346,6 @@ function showAuth() {
     const emailEl = document.getElementById('auth-email');
     if (emailEl) emailEl.value = storedUser.email;
   }
-
-  // FORCE HIDE: Ensure password field is gone regardless of mode
-  const pwField = document.getElementById('auth-password');
-  if (pwField) pwField.style.display = 'none';
-  const pwWrap = pwField ? pwField.closest('.pw-wrap') : null;
-  if (pwWrap) pwWrap.style.display = 'none';
 
   // Change: Removed 'auth-email' from clearing list so pre-fill persists
   ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
@@ -1362,11 +1374,28 @@ function submitGoogleSignIn() {
   const hint = document.getElementById('auth-hint-text');
   if (hint) hint.textContent = 'Taking you to Google — choose your indrones.com account.';
   // Started here rather than left to the sign-in screen's own call, and keepalive
-  // because the next statement unloads the page. The person then spends seconds at
-  // Google's account picker and on the door page, and that is exactly the stretch
-  // the exchange would otherwise spend waiting for this deployment to wake up.
+  // because the next statement unloads nothing — but the round trip to Google is
+  // still the stretch the exchange would otherwise spend waiting for this
+  // deployment to wake up.
   warmBackend({ keepalive: true });
-  location.href = googleStartUrl();
+  // A NEW TAB, deliberately location.href. On the phone the app runs as an
+  // installed PWA (standalone window), and a top-level navigation from that
+  // window reaches Google with no usable Google session/cookie context — the
+  // reported failure was Google's own "unable to open the file at present" page.
+  // Opening the chooser in a real browser tab puts the request in Chrome's cookie
+  // jar, which is where the account picker needs its answer to come from. The
+  // door's last hop is still a top-level navigation back to APP_URL#sso=, which
+  // hands the code to the original app window as before.
+  // window.open guarded: it is the one call in this flow that a stripped window
+  // (a test harness, an odd in-app browser) may not offer, and the fallback keeps
+  // the door working rather than throwing on a screen with no buttons left.
+  if (typeof window.open === 'function') {
+    window.open(googleStartUrl(), '_blank');
+    if (btn) btn.disabled = false;
+    if (hint) hint.textContent = 'Continue at Google — the sign-in opens in a new tab.';
+  } else {
+    location.href = googleStartUrl();
+  }
   return Promise.resolve();
 }
 
@@ -1453,26 +1482,384 @@ function finishHandoff(h) {
   });
 }
 
-// Show/hide the pieces each mode needs. Everything lives inside #auth-form, so
-// the browser's own Enter-to-submit keeps working in all four modes.
+// ─── QUICK UNLOCK — fingerprint (WebAuthn) + pattern on a registered device ──
+// A registered device may mint the working day's session with a LOCAL gesture:
+// the platform's own biometric prompt (WebAuthn, userVerification: required) or
+// a drawn 3×3 pattern. What the server holds is the per-device token — and that
+// token is only ever offered from the sign-in screen in exchange for a gesture
+// that happened on the same device. The stored email of the device's owner is in
+// the record too, because the sign-in screen shows no email field in unlock mode.
+//
+// What this is NOT: a stronger remote door. The daily emailed code remains the
+// security; quick unlock trades a little of it for the daily friction, on the
+// device the owner already unlocked to get to this screen. A password change
+// or an admin disable revokes the registration — see revokeDevicesForIn.
+const UNLOCK_KEY = 'ipb_unlock';
+
+function loadUnlock() {
+  try { return JSON.parse(localStorage.getItem(UNLOCK_KEY) || 'null'); } catch (e) { return null; }
+}
+function saveUnlock(rec) {
+  try { localStorage.setItem(UNLOCK_KEY, JSON.stringify(rec)); } catch (e) { /* storage blocked */ }
+}
+function clearUnlock() {
+  try { localStorage.removeItem(UNLOCK_KEY); } catch (e) { /* storage blocked */ }
+}
+
+// The platform-authenticator gate, resolved lazily: fingerprint support is not
+// synchronously knowable, so the check runs once when setup is first asked for.
+async function quickUnlockBiometricAvailable() {
+  try {
+    if (!window.PublicKeyCredential || typeof window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable !== 'function') return false;
+    return await window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+  } catch (e) { return false; }
+}
+
+// base64url for a credential id (client-side only state; the backend never
+// sees it, so this is a convenience, not a wire format).
+function bytesToB64url(bytes) {
+  let s = '';
+  bytes.forEach(b => { s += String.fromCharCode(b); });
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function bytesFromB64url(str) {
+  const s = str.replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s + '=='.slice((s.length + 2) % 4));
+  return Uint8Array.from(raw, ch => ch.charCodeAt(0));
+}
+
+// The unlock gesture. No rpId is given (it binds to this origin) and no
+// allowCredentials (any resident credential on the device may answer); what the
+// gesture must produce is the biometric's own accept. The signature the device
+// returns is NOT verified server-side — Apps Script has no Web Crypto — so the
+// honest label for this check is "the finger was read", nothing more.
+async function unlockFingerprintGesture() {
+  const challenge = crypto.getRandomValues(new Uint8Array(32));
+  const cred = await navigator.credentials.get({
+    publicKey: { challenge, userVerification: 'required', timeout: 60000 }
+  });
+  return !!cred;
+}
+
+// Enrollment. Two credentials are minted together: the server's device token
+// (devices.json, via the AUTHED action) and the platform passkey. The local
+// record keeps the email, the token and the credential id — the id exists only
+// on this device, so a lost phone leaves a token the phone itself guards.
+function deviceRegisterBackend() {
+  const fd = new FormData();
+  fd.append('action', 'deviceRegister');
+  // Deliberately the NORMAL fetch, not _origFetch: this is an AUTHED call, and
+  // the interceptor is what attaches the session token. postAuth would go out
+  // naked and be refused.
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => {
+      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
+    }))
+    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+}
+
+function deviceRevokeBackend(deviceToken) {
+  const fd = new FormData();
+  fd.append('action', 'deviceRevoke');
+  fd.append('deviceToken', deviceToken);
+  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => {
+      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
+    }))
+    .catch(() => ({ status: 'error', message: 'Network error.' }));
+}
+
+// Unlocking = the gesture, then the token, in that order. Nothing reaches the
+// backend unless the platform accepted the finger / the pattern matched — so a
+// wrong gesture cannot even attempt a server guess on the token.
+async function submitUnlock(method, patternSeq) {
+  const rec = loadUnlock();
+  if (method === 'pattern') {
+    if (!rec || !rec.patternHash || !patternSeq) { setAuthMode('email'); return; }
+    const drawn = await patternHashOf(patternSeq);
+    if (drawn !== rec.patternHash) { setAuthError('Wrong pattern — try again.'); resetPatternCanvas(); return; }
+  } else {
+    if (!rec || !rec.deviceToken || !rec.email) { clearUnlock(); setAuthMode('email'); return; }
+  }
+  const btn = document.getElementById('auth-unlock-btn');
+  if (method === 'fingerprint') {
+    if (btn) { btn.disabled = true; btn.textContent = 'Unlocking…'; }
+    setAuthError('');
+    try {
+      // allowCredentials from the stored id when there is one, so the prompt
+      // names the exact key this device registered.
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const opts = { challenge, userVerification: 'required', timeout: 60000 };
+      if (rec.credentialId) opts.allowCredentials = [{ id: bytesFromB64url(rec.credentialId), type: 'public-key' }];
+      const cred = await navigator.credentials.get({ publicKey: opts });
+      if (!cred) throw new Error('cancelled');
+    } catch (e) {
+      if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+      setAuthError('The fingerprint prompt was cancelled — try again, or use your email code.');
+      return;
+    }
+  }
+  postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel() }).then(d => {
+    if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+    if (d && d.status === 'ok' && d.sessionToken) { finishAuth(rec.email, d); return; }
+    setAuthError((d && d.message) || 'Unlock failed — sign in with your email and code.');
+    if (method === 'pattern') resetPatternCanvas();
+  }).catch(() => {
+    if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+    setAuthError('Could not reach the backend — use your email and code.');
+  });
+}
+
+// ─── THE PATTERN ENGINE — one canvas, three uses (unlock, setup, re-setup) ───
+// 3×3 dots on a square canvas; a sequence qualifies at 4 dots. Dots carry the
+// neutral palette in both themes; the drawn line follows the same values. All
+// geometry is derived from the canvas size, so a bigger canvas needs no new math.
+const PATTERN_MIN_DOTS = 4;
+
+function patternHashOf(seq) {
+  const bytes = new TextEncoder().encode(seq.join('-') + '|ipb-pattern');
+  return crypto.subtle.digest('SHA-256', bytes).then(buf =>
+    Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join(''));
+}
+
+// drawSequence paints dots+path from a sequence; blankCanvas clears.
+// attachPatternCanvas wires pointer events once per canvas element, and calls
+// back with the FINISHED sequence — the pattern logic lives above the canvas,
+// so setup and unlock share the engine without sharing state.
+function patternDots(canvas) {
+  const m = canvas.width * 0.18, step = (canvas.width - 2 * m) / 2;
+  return [0,1,2].flatMap(r => [0,1,2].map(c => ({ x: m + c * step, y: m + r * step, n: r * 3 + c + 1 })));
+}
+function paintPattern(canvas, seq, hover) {
+  const ctx = canvas.getContext('2d');
+  const dpi = (typeof isDarkTheme === 'function' && isDarkTheme());
+  const bg   = dpi ? '#2a2a2e' : '#f2f2f5';
+  const dim  = dpi ? '#4a4a52' : '#d1d5db';
+  const live = dpi ? '#e8eaed' : '#4b5563';
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const dots = patternDots(canvas);
+  const picked = new Set(seq || []);
+  ctx.strokeStyle = live + '88'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  if (seq && seq.length > 1) {
+    ctx.beginPath();
+    seq.forEach((n, i) => {
+      const d = dots[n - 1];
+      if (i === 0) ctx.moveTo(d.x, d.y); else ctx.lineTo(d.x, d.y);
+    });
+    if (hover) { const h = dots[hover - 1]; ctx.lineTo(h.x, h.y); }
+    ctx.stroke();
+  }
+  dots.forEach(d => {
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, 9, 0, Math.PI * 2);
+    ctx.fillStyle = picked.has(d.n) ? live : dim;
+    ctx.fill();
+  });
+}
+function resetPatternCanvas() {
+  const c = document.getElementById('pattern-canvas');
+  if (c) paintPattern(c, []);
+  const t = document.getElementById('pattern-title');
+  if (t) t.textContent = 'Draw your pattern to unlock.';
+}
+function attachPatternCanvas(canvas, onPattern) {
+  if (!canvas || canvas.dataset.pwired === '1') {
+    return;
+  }
+  canvas.dataset.pwired = '1';
+  let seq = [];
+  const dotAt = (ev) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (ev.clientX - r.left) * (canvas.width / r.width);
+    const y = (ev.clientY - r.top)  * (canvas.height / r.height);
+    const R = canvas.width * 0.10;
+    const d = patternDots(canvas).find(dd => Math.hypot(dd.x - x, dd.y - y) <= R * 1.9);
+    return d ? d.n : null;
+  };
+  paintPattern(canvas, []);
+  canvas.addEventListener('pointerdown', ev => {
+    ev.preventDefault();
+    canvas.setPointerCapture(ev.pointerId);
+    seq = []; paintPattern(canvas, seq, dotAt(ev));
+    canvas._active = true;
+  });
+  canvas.addEventListener('pointermove', ev => {
+    if (!canvas._active) return;
+    const n = dotAt(ev);
+    if (n && seq.indexOf(n) < 0) { seq.push(n); }
+    paintPattern(canvas, seq, n);
+  });
+  const end = () => {
+    if (!canvas._active) return;
+    canvas._active = false;
+    const out = seq.slice();
+    seq = [];
+    paintPattern(canvas, out);
+    if (out.length >= PATTERN_MIN_DOTS) onPattern(out);
+    else paintPattern(canvas, []);
+  };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', () => { canvas._active = false; seq = []; paintPattern(canvas, []); });
+}
+
+// The sign-in screen's pattern mode: draw = verify = attempt the server call.
+async function patternForUnlock() {
+  const title = document.getElementById('pattern-title');
+  if (title) title.textContent = 'Draw your pattern to unlock.';
+  const canvas = document.getElementById('pattern-canvas');
+  if (canvas && canvas.dataset.pwired !== '1') {
+    attachPatternCanvas(canvas, seq => submitUnlock('pattern', seq));
+  }
+  if (canvas) paintPattern(canvas, []);
+}
+
+// ─── SETUP — offered from the user's own profile menu, never sprung on them ──
+// Enrollment: server token first (it is authed), then the passkey, then the
+// local record. If the platform refuses a passkey, the fall-back offer is the
+// pattern — never a silent failure.
+async function beginQuickUnlockSetup() {
+  const st = loadUnlock();
+  if (st) { if (!st.patternHash) openPatternSetup(); else return offerRemoveUnlock(); return; }
+  const biometric = await quickUnlockBiometricAvailable();
+  if (biometric) {
+    const email = (currentUser && currentUser.email) || '';
+    try {
+      const challenge = crypto.getRandomValues(new Uint8Array(32));
+      const cred = await navigator.credentials.create({ publicKey: {
+        challenge,
+        rp: { name: 'I-PASSBOOK' },
+        user: { id: new TextEncoder().encode(email), name: email, displayName: (currentUser && currentUser.name) || email },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
+        attestation: 'none'
+      }});
+      const reg = await deviceRegisterBackend();
+      if (!reg || reg.status !== 'ok' || !reg.deviceToken) {
+        showToast((reg && reg.message) || 'Registering this device failed — try again.');
+        return;
+      }
+      saveUnlock({ email, mode: 'fingerprint', deviceToken: reg.deviceToken,
+                   credentialId: bytesToB64url(new Uint8Array(cred.rawId)) });
+      syncQuickUnlockMenu();
+      showToast('Fingerprint unlock is on for this device — a pattern can be added from this menu too.');
+      return;
+    } catch (e) { /* passkey refused — fall through to the pattern offer */ }
+  }
+  // No platform biometric (or the passkey was refused): the pattern is the
+  // quick-unlock door. The device token exists before the overlay opens, so a
+  // record is always complete by the time a first draw can be saved.
+  const reg = await deviceRegisterBackend();
+  if (!reg || reg.status !== 'ok' || !reg.deviceToken) {
+    showToast((reg && reg.message) || 'Registering this device failed — try again.');
+    return;
+  }
+  saveUnlock({ email: (currentUser && currentUser.email) || '', mode: 'pattern', deviceToken: reg.deviceToken });
+  syncQuickUnlockMenu();
+  openPatternSetup();
+}
+function offerRemoveUnlock() {
+  const st = loadUnlock();
+  if (!st) return;
+  if (window.confirm('Remove Quick unlock from this device?')) {
+    clearUnlock();
+    if (st.deviceToken) deviceRevokeBackend(st.deviceToken);
+    showToast('Quick unlock removed.');
+  }
+  syncQuickUnlockMenu();
+}
+
+// In-app pattern setup: a small overlay carrying the same canvas engine. Two
+// draws — the second must match the first, or nothing is stored.
+function openPatternSetup() {
+  if (document.getElementById('pattern-setup-overlay')) return;
+  const ov = document.createElement('div');
+  ov.id = 'pattern-setup-overlay';
+  ov.innerHTML =
+    '<div class="glass-card pattern-setup-card">' +
+      '<div class="auth-head"><div class="auth-brand">Set your pattern</div>' +
+      '<p class="auth-hint" id="pattern-setup-title">Draw a pattern to unlock — 4 dots or more.</p></div>' +
+      '<canvas id="pattern-setup-canvas" width="240" height="240"></canvas>' +
+      '<p id="pattern-setup-note" class="auth-hint"></p>' +
+      '<button type="button" class="signout-btn" id="pattern-setup-cancel">Cancel</button>' +
+    '</div>';
+  document.body.appendChild(ov);
+  ov.style.display = 'flex';
+  let first = null;
+  const title = ov.querySelector('#pattern-setup-title');
+  const note  = ov.querySelector('#pattern-setup-note');
+  attachPatternCanvas(ov.querySelector('#pattern-setup-canvas'), async (seq) => {
+    if (!first) {
+      first = await patternHashOf(seq);
+      title.textContent = 'Draw it once more to confirm.';
+      note.textContent = '';
+    } else {
+      const second = await patternHashOf(seq);
+      if (second === first) {
+        const rec = loadUnlock();
+        if (rec) { rec.patternHash = first; rec.mode = rec.credentialId ? 'fingerprint' : 'pattern'; saveUnlock(rec); }
+        ov.remove();
+        syncQuickUnlockMenu();
+        showToast('Pattern saved — quick unlock now uses it on the sign-in screen.');
+      } else {
+        first = null;
+        title.textContent = 'Draw a pattern to unlock — 4 dots or more.';
+        note.textContent = 'The two draws did not match — start again.';
+      }
+    }
+  });
+  ov.querySelector('#pattern-setup-cancel').addEventListener('click', () => ov.remove());
+}
+
+// The offer, once per device, after a real sign-in: a toast, a menu entry —
+// never a screen that forces the question.
+function maybePromptQuickUnlock(email) {
+  try {
+    if (loadUnlock()) return;
+    if (!window.PublicKeyCredential) return;
+    if (!window.matchMedia('(display-mode: standalone)').matches) return;
+    if (localStorage.getItem('ipb_unlock_offer') === email + ':seen') return;
+    try { localStorage.setItem('ipb_unlock_offer', email + ':seen'); } catch (e) { /* toast anyway */ }
+    showToast('Tip: fingerprint quick unlock can be turned on from your profile menu (top right).');
+  } catch (e) { /* never gate a sign-in on the offer */ }
+}
+
+//
+// Modes: 'email' (stage 1 — email earns the code, the daily door), 'otp'
+// (stage 2 — the code), 'login' (the password door: legacy shells + the
+// temp-password first login, which changePassword can only ever take from a
+// typed admin-issued password), 'unlock' / 'pattern' (quick unlock on a
+// registered device), 'forgot' / 'reset' (unchanged).
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
 
-  // PASSWORDLESS OVERRIDE: Never show password or its buttons, regardless of mode
-  set('auth-password',      false);
-  set('auth-signin-btn',    false);
-  set('auth-forgot-link',   false);
+  // The password is the opt-in door — visible ONLY in 'login'. Everywhere else it
+  // stays hidden with the wrap that pads it, by the same explicit set the rest of
+  // the switches use, so there is exactly one place to look when a field shows.
+  const pwMode = (mode === 'login');
+  const pwWrap = document.querySelector('#auth-form .pw-wrap');
+  set('auth-password', pwMode);
+  if (pwWrap) pwWrap.style.display = pwMode ? '' : 'none';
+  const pwIn = document.getElementById('auth-password');
+  if (pwIn) pwIn.required = pwMode;
 
-  set('auth-login-code-wrap',      mode === 'otp');
+  set('auth-signin-btn',    mode === 'email' || pwMode);
+  set('auth-forgot-link',   mode === 'email' || pwMode);
+  set('auth-login-code-wrap', mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
-  set('auth-back-link',     mode !== 'login');
-  set('auth-email',         true);          // every mode needs the email
-  // The Google door belongs to the FIRST step and nowhere else. Left visible on the
-  // code step it would offer a second way in beside a form that is mid-way through
-  // the first — and it is the one control on this screen that ignores everything
-  // typed above it.
+  set('auth-quick',         mode === 'unlock' || mode === 'pattern');
+  set('auth-pattern',       mode === 'pattern');
+  set('auth-back-link',     mode !== 'email' && mode !== 'login');
+  // The email field feeds every typed door — except quick unlock, which knows
+  // the email from its own record and shows none.
+  set('auth-email',         mode !== 'unlock' && mode !== 'pattern');
+  // The Google door belongs to the FIRST step and nowhere else. Left visible on
+  // the code step it would offer a second way in beside a form that is mid-way
+  // through the first — and it is the one control on this screen that ignores
+  // everything typed above it.
   //
   // Visibility is now just "is a second deployment configured". It used to depend on
   // a silent probe's answer, which had to go: the probe was a background call, and
@@ -1482,14 +1869,9 @@ function setAuthMode(mode) {
   // a sentence Google writes, before our code is reached. An absent button would
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
-  set('auth-google-btn',    true && !!CONFIG.SSO_URL);
-  set('auth-or',            true && !!CONFIG.SSO_URL);
-  // `required` follows visibility explicitly rather than relying on browsers
-  // agreeing that a display:none control is barred from constraint validation —
-  // a hidden required input that still validated would make the forgot and reset
-  // steps unsubmittable.
-  const passIn = document.getElementById('auth-password');
-  if (passIn) passIn.required = false;
+  const firstStep = (mode === 'email' || pwMode);
+  set('auth-google-btn',    firstStep && !!CONFIG.SSO_URL);
+  set('auth-or',            firstStep && !!CONFIG.SSO_URL);
   const hint = document.getElementById('auth-hint-text');
   if (hint) {
     hint.textContent = mode === 'forgot'
@@ -1498,8 +1880,16 @@ function setAuthMode(mode) {
         ? 'Enter the code from your email and choose a new password.'
         : mode === 'otp'
           ? 'One more step. Enter the code we emailed you.'
-          : 'Sign in with the credentials your admin gave you.';
+          : mode === 'unlock'
+            ? 'Registered device — unlock, or fall back below.'
+            : pwMode
+              ? 'Sign in with the credentials your admin gave you.'
+              : 'We’ll email you a 6-digit sign-in code.';
   }
+  // The stage-1 button reads differently per door it opens: the email step
+  // requests a code, the password step signs in.
+  const signBtn = document.getElementById('auth-signin-btn');
+  if (signBtn) signBtn.textContent = pwMode ? 'Sign in' : 'Send me a code';
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
   if (mode === 'otp') {
@@ -1670,7 +2060,37 @@ function wireAuthForm() {
   const showError  = setAuthError;
   const emailOf    = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
 
+  // STAGE 1 of the daily door (mode 'email'): the email alone earns the code.
+  // There is no password here and none is sent; the response is the backend's
+  // own sentence — uniform in shape whether an account received a code or not,
+  // which is what keeps this step from being an oracle — and it is shown to the
+  // user as the note on the code step, not recomposed locally.
   const submitLogin = () => {
+    const email = emailOf();
+    if (!email) { showError('Enter your email.'); return; }
+    signInBtn.disabled = true; signInBtn.textContent = 'Sending…';
+    showError('');
+    currentUser = currentUser || {};
+    currentUser.email = email;
+    loginBackend(email, '').then(d => {
+      signInBtn.disabled = false; signInBtn.textContent = 'Send me a code';
+      if (d && d.status === 'ok' && d.otpRequired) {
+        _otpEmail = email;
+        _otpPassword = '';
+        if (otpIn) otpIn.value = '';
+        setAuthMode('otp');
+        const note = document.getElementById('auth-login-code-note');
+        if (note && d && d.message) note.textContent = d.message;
+        return;
+      }
+      showError((d && d.message) || 'Could not send a sign-in code.');
+    });
+  };
+
+  // The password door (mode 'login'). A legacy shell's flow, and the ONLY door a
+  // first-login temp-password account has: changePassword is paid with the
+  // admin-issued password, so it can never go through here passwordless.
+  const submitPwd = () => {
     const email = emailOf();
     const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
@@ -1718,17 +2138,17 @@ function wireAuthForm() {
     // covers the control the user is reaching for is a net loss; the note stays.
   };
 
-  // Stage 2: the code from the email, with the password again.
+  // Stage 2: the code from the email — from the passwordless door (no password
+  // held) or the password door's stage 1 (password held). Both close the same
+  // way; the password, when there is one, rides along so the backend's legacy
+  // stage can verify it again.
   const submitOtp = () => {
     const code = ((otpIn && otpIn.value) || '').trim();
     if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
-    // The in-memory password is the only copy — a page reload between the two
-    // steps leaves nothing to send, so say so plainly and restart the flow
-    // instead of posting an empty password and reporting a bogus wrong password.
-    if (!_otpPassword) { showError('Your sign-in timed out — please sign in again.'); setAuthMode('login'); return; }
+    if (!_otpEmail) { showError('Enter your email first.'); setAuthMode('email'); return; }
     otpBtn.disabled = true; otpBtn.textContent = 'Verifying…';
     showError('');
-    loginBackend(_otpEmail, _otpPassword, code).then(d => {
+    loginBackend(_otpEmail, _otpPassword || '', code).then(d => {
       otpBtn.disabled = false; otpBtn.textContent = 'Verify code';
       if (d && d.status === 'ok' && d.sessionToken) {
         _otpPassword = null;
@@ -1794,17 +2214,31 @@ function wireAuthForm() {
     });
   };
 
-  if (signInBtn)  signInBtn.addEventListener('click', submitLogin);
+  // The password door has its own submit call: same handler for a click and for
+  // Enter, so the two doors cannot drift apart later.
+  if (signInBtn) signInBtn.addEventListener('click', () => (_authMode === 'login' ? submitPwd() : submitLogin()));
   if (otpBtn)     otpBtn.addEventListener('click', submitOtp);
   if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
   if (resetBtn)   resetBtn.addEventListener('click', submitReset);
   if (resendLink) resendLink.addEventListener('click', resend);
   const forgotLink = document.getElementById('auth-forgot-link');
   if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
+  // The back door exists in every sub-mode: unlock, pattern, code, forgot,
+  // reset — and from the password door too. 'email' is the screen every one of
+  // those is a variation of, so 'login' as the target was wrong once email mode
+  // became the default.
   const backLink = document.getElementById('auth-back-link');
-  if (backLink) backLink.addEventListener('click', () => setAuthMode('login'));
+  if (backLink) backLink.addEventListener('click', () => setAuthMode('email'));
   const googleBtn = document.getElementById('auth-google-btn');
   if (googleBtn) googleBtn.addEventListener('click', submitGoogleSignIn);
+
+  // Quick unlock, on the sign-in screen.
+  const unlockBtn = document.getElementById('auth-unlock-btn');
+  if (unlockBtn) unlockBtn.addEventListener('click', () => submitUnlock('fingerprint'));
+  const patternLink = document.getElementById('auth-pattern-link');
+  if (patternLink) patternLink.addEventListener('click', () => { setAuthMode('pattern'); patternForUnlock(); });
+  const quickOut = document.getElementById('auth-quick-out');
+  if (quickOut) quickOut.addEventListener('click', () => setAuthMode('email'));
 
   // Enter submits the CURRENT mode, not always login.
   form.addEventListener('submit', ev => {
@@ -1812,6 +2246,8 @@ function wireAuthForm() {
     if (_authMode === 'forgot') submitForgot();
     else if (_authMode === 'reset') submitReset();
     else if (_authMode === 'otp') submitOtp();
+    else if (_authMode === 'login') submitPwd();
+    else if (_authMode === 'unlock') submitUnlock('fingerprint');
     else submitLogin();
   });
 }
@@ -2902,6 +3338,7 @@ function createUserMenu() {
       <div class="user-menu-email">${currentUser?.email || ''}</div>
       ${buildAppearanceGroup()}
       ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access</button>' : ''}
+      <button class="signout-btn" id="quick-unlock-btn">Turn on Quick unlock</button>
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
     document.body.appendChild(menu);
@@ -2915,6 +3352,14 @@ function createUserMenu() {
     });
     syncAppearanceMenu();
     document.getElementById('signout-btn').addEventListener('click', signOut);
+    // Quick unlock. What the row does depends on where the device already is:
+    // nothing here → enroll; a token but no pattern → add the pattern; a full
+    // record → offer removal. syncQuickUnlockMenu keeps the label right.
+    document.getElementById('quick-unlock-btn').addEventListener('click', () => {
+      menu.style.display = 'none';
+      beginQuickUnlockSetup();
+    });
+    syncQuickUnlockMenu();
     const adminBtn = document.getElementById('access-admin-btn');
     if (adminBtn) adminBtn.addEventListener('click', () => { menu.style.display = 'none'; openAccessModal(); });
     document.addEventListener('click', (e) => {
@@ -2922,6 +3367,19 @@ function createUserMenu() {
     });
   }
   return menu;
+}
+
+// The menu row's label IS the state: nothing registered yet = the setup offer;
+// a token but no pattern = the pattern is the missing half; a full record = the
+// removal offer. Called on enrollment, on pattern saves and on removal, and
+// from createUserMenu when the menu is first built.
+function syncQuickUnlockMenu() {
+  const btn = document.getElementById('quick-unlock-btn');
+  if (!btn) return;
+  const st = loadUnlock();
+  if (!st) btn.textContent = 'Turn on Quick unlock';
+  else if (!st.patternHash) btn.textContent = 'Add unlock pattern';
+  else btn.textContent = 'Remove Quick unlock';
 }
 
 function toggleUserMenu() {

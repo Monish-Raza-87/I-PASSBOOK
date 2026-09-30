@@ -2215,6 +2215,149 @@ r.ok('the NEXT sign-in, having paid them once, searches for nothing at all',
   events.filter(e => e.indexOf('search:') === 0).length === 0,
   events.filter(e => e.indexOf('search:') === 0));
 
+// ── QUICK UNLOCK: the passwordless door and the device registry ───────────────
+// Behavioral, like the rest: the real doLoginPassword / doDeviceRegister /
+// doDeviceUnlock against the real Drive-fake. The claim under test is stored
+// state — sessions retired, devices revoked, limiters counting — not source text.
+r.head('the passwordless door reuses the emailed code, and no temp-password account slips past it');
+
+// A live code for DEV is seeded rather than issued: earlier sections spent the
+// 120-per-hour sign-in ceiling, and this block tests the CODE, not the ceiling.
+const DEV = 'quick.device@indrones.com';
+mkUser(DEV);
+const DEVCODE = '135790';
+setCodes(codeEntries().concat([{
+  email: DEV, code: DEVCODE, purpose: 'login',
+  createdAt: Date.now(), expiresAt: Date.now() + 510 * 60 * 1000, attempts: 0, used: false,
+}]));
+reexec();
+
+let pless1 = ctx.doLoginPassword({ email: DEV });
+r.ok('stage 1 (email only, passwordless) asks for a code and mints NO session',
+  pless1.status === 'ok' && pless1.otpRequired === true && !pless1.sessionToken, pless1);
+r.ok('...it REUSED the live code — no mail, codeSent:false',
+  pless1.codeSent === false, pless1.message);
+
+const outsiderStage1 = ctx.doLoginPassword({ email: 'nobody.at.all@indrones.com' });
+r.ok('stage 1 answers IDENTICALLY for an email with no account — no existence oracle',
+  outsiderStage1.status === 'ok' && outsiderStage1.otpRequired === true && outsiderStage1.codeSent === false,
+  outsiderStage1);
+
+reexec();
+const plessSession = ctx.doLoginPassword({ email: DEV, code: DEVCODE });
+r.ok('stage 2 (email + emailed code) mints a REAL session without a password anywhere',
+  plessSession.status === 'ok' && !!plessSession.sessionToken && !!plessSession.access, plessSession);
+
+// A temp-password holder MUST NOT pass the passwordless door: the temp password is
+// the only credential that can pay changePassword, so a code could never replace it.
+ctx.withRowLockOrThrow(function () {
+  var users = ctx.readJsonLocked('users.json');
+  users[DEV].mustChange = 'yes';
+  ctx.writeJsonLocked('users.json', users);
+});
+reexec();
+const plessTemp = ctx.doLoginPassword({ email: DEV, code: DEVCODE });
+r.ok('a temp-password holder is REFUSED at the code step, with the way out stated',
+  plessTemp.status === 'error' && /Use password instead/.test(plessTemp.message), plessTemp);
+ctx.withRowLockOrThrow(function () {
+  var users = ctx.readJsonLocked('users.json');
+  users[DEV].mustChange = '';
+  ctx.writeJsonLocked('users.json', users);
+});
+reexec();
+
+r.head('a device enrolls, unlocks, and retires the session it replaces');
+
+const reg1 = ctx.doDeviceRegister({}, DEV);
+r.ok('a first enrollment mints a 32-hex device token',
+  reg1.status === 'ok' && /^[0-9a-f]{32}$/.test(reg1.deviceToken), reg1);
+const regAgain = ctx.doDeviceRegister({ deviceToken: reg1.deviceToken }, DEV);
+r.ok('re-enrollment with the same token returns it unchanged — idempotent',
+  regAgain.status === 'ok' && regAgain.deviceToken === reg1.deviceToken, regAgain);
+const reg2nd = ctx.doDeviceRegister({}, DEV);
+r.ok('a SECOND device mints its OWN token — the registry is per device, not per account',
+  reg2nd.status === 'ok' && reg2nd.deviceToken !== reg1.deviceToken, reg2nd);
+
+const unlock1 = ctx.doDeviceUnlock({ deviceToken: reg2nd.deviceToken, email: DEV,
+                                     method: 'fingerprint', device: 'Android 14 · PWA' });
+r.ok('an unlock mints a REAL session', unlock1.status === 'ok' && !!unlock1.sessionToken &&
+  !!unlock1.access, unlock1.status + ' ' + String(unlock1.message || ''));
+r.ok('...the session shape is untouched: 8h30m absolute, no lastSeenAt',
+  (function () { const t = fresh('sessions.json').tokens[unlock1.sessionToken];
+    return t.expiresAt - t.createdAt === 8.5 * 3600 * 1000 && !('lastSeenAt' in t); })(),
+  fresh('sessions.json').tokens[unlock1.sessionToken]);
+r.ok('...the device stamped its lastUnlockAt',
+  (function () { const d = (fresh('devices.json') || { devices: {} }).devices;
+    return !!d[reg2nd.deviceToken] && typeof d[reg2nd.deviceToken].lastUnlockAt === 'number'; })(),
+  (fresh('devices.json') || { devices: {} }).devices[reg2nd.deviceToken]);
+r.ok('...and option A retires the session that was live before it',
+  (function () { const t = fresh('sessions.json').tokens[plessSession.sessionToken];
+    return t && typeof t.revokedAt === 'number'; })(),
+  fresh('sessions.json').tokens[plessSession.sessionToken]);
+r.ok('the audit line names the unlock method, not a code age',
+  /fingerprint unlock/.test(signinLines().slice(-1)[0].nw), signinLines().slice(-1)[0]);
+
+const wrongTok = ctx.doDeviceUnlock({ deviceToken: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+                                      email: DEV, method: 'pattern' });
+r.ok('a WRONG token is refused uniformly — it cannot even be told apart from a wrong email',
+  wrongTok.status === 'error' &&
+  /Unlock failed — sign in with your email and code\./.test(wrongTok.message), wrongTok.message);
+
+r.ok('each failure counts against the email limiter — five end in a lockout',
+  (function () { let locked = false;
+    for (let i = 0; i < 6 && !locked; i++) {
+      const res = ctx.doDeviceUnlock({ deviceToken: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', email: DEV, method: 'pattern' });
+      locked = /Too many wrong attempts/.test(res.message || '');
+    }
+    return locked || !!ctx.lockoutRemaining(DEV); })(),
+  ctx.lockoutRemaining(DEV));
+
+// The limiter's lockout then refuses the door outright, before the token is even read.
+r.ok('the lockout now refuses the unlock door outright',
+  /Too many wrong attempts/.test(ctx.doDeviceUnlock({ deviceToken: reg2nd.deviceToken, email: DEV, method: 'pattern' }).message || ''),
+  ctx.doDeviceUnlock({ deviceToken: reg2nd.deviceToken, email: DEV, method: 'pattern' }).message || '');
+
+// The limiter's lockout belongs to THIS next test, not to DEV's permanent state.
+ctx.clearFailedLogin(DEV);
+reexec();
+
+r.ok('the correct token but a DISABLED account is refused — with a specific message, since the token verified',
+  (function () {
+    ctx.withRowLockOrThrow(function () {
+      var users = ctx.readJsonLocked('users.json');
+      users[DEV].status = 'disabled';
+      ctx.writeJsonLocked('users.json', users);
+    });
+    reexec();
+    const res = ctx.doDeviceUnlock({ deviceToken: reg2nd.deviceToken, email: DEV, method: 'fingerprint' });
+    ctx.withRowLockOrThrow(function () {
+      var users = ctx.readJsonLocked('users.json');
+      users[DEV].status = 'active';
+      ctx.writeJsonLocked('users.json', users);
+    });
+    reexec();
+    return res.status === 'error' && /disabled/.test(res.message);
+  })());
+
+r.ok('a password reset REVOKES the device tokens, so the unlocked phone is out the same way every session is',
+  (function () {
+    const before = (fresh('devices.json') || { devices: {} }).devices;
+    if (!before[reg1.deviceToken] || !before[reg2nd.deviceToken]) return false;
+    ctx.revokeAllDevices(DEV);
+    const after = (fresh('devices.json') || { devices: {} }).devices;
+    return after[reg1.deviceToken] && !!after[reg1.deviceToken].revokedAt &&
+           after[reg2nd.deviceToken] && !!after[reg2nd.deviceToken].revokedAt;
+  })());
+
+// The cost section needs an unlocked, warm store: re-enroll one device for DEV so
+// the unlock state on this device exists again, and re-sign DEV in so its ids are
+// remembered. (The device token was revoked; a new one is minted, which is the
+// documented behavior for a re-enrollment after a revoke.)
+const regReturn = ctx.doDeviceRegister({}, DEV);
+r.ok('a revoked token is NOT reusable — the device must enroll again',
+  regReturn.status === 'ok' && regReturn.deviceToken !== reg2nd.deviceToken,
+  regReturn.deviceToken);
+
 ctx.Session.getActiveUser = realActiveUser;
 reexec();
 

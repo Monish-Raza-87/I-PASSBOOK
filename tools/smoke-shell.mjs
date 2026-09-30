@@ -118,7 +118,12 @@ ok('saveDraft ignores non-SECTIONS panes',
 // Matched as `href="…"`, not as a bare filename: index.html's comment above the
 // links names palette.css too, and a bare indexOf would find the prose first and
 // happily report the wrong order.
-const cascade = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css']
+// desk.css is a deliberate sixth entry, and its position — LAST, after
+// views.css — is what it depends on: it is the ERPNext Desk prototype, it wins
+// over the `POLISH — level:` block at the end of views.css by cascade order
+// alone, and it is scoped to the sign-in screen and the IR list. Listing it here
+// is what fails if someone reorders the links.
+const cascade = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css', 'desk.css']
   .map(f => html.indexOf(`href="${f}"`));
 ok('the stylesheet cascade order is unchanged',
   cascade.every((v, i) => v >= 0 && (i === 0 || v > cascade[i - 1])), cascade);

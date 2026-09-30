@@ -37,6 +37,7 @@ const SERVED = [
   'app.js',
   'base.css',
   'components.css',
+  'desk.css',
   'index.html',
   'manifest.json',
   'palette.css',

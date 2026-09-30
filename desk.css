@@ -1,0 +1,272 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   desk.css — the ERPNext Desk look, on TWO screens.
+
+   WHAT THIS IS
+   The owner asked for the mobile UI to look like ERPNext. Rather than convert
+   every screen blind, this file converts the two he asked to see first — the
+   sign-in screen and the IR list — so he can open them on his phone and decide
+   before the rest of the app moves. Every rule below is scoped to
+   `#auth-container`, `#password-change` or `#index-view`.
+
+   If he approves it, this becomes the new polish level and the remaining
+   screens are converted into it. If he does not, deleting this file and its one
+   <link> in index.html undoes the whole thing — that is why it is a separate
+   stylesheet and not edits scattered through the other five.
+
+   WHY IT LOADS LAST
+   index.html links it after views.css, which is where the `POLISH — level:
+   NOTICEABLE` block lives. That block is last-in-the-last-file on purpose and
+   wins by cascade order alone. This file therefore OVERRIDES it on these two
+   screens and leaves it governing every other one. It is a layer in front of
+   that block, not a replacement for it — yet.
+
+   WHY SO LITTLE OF THIS IS COLOUR
+   The app already sits on Frappe's design tokens, which are the same grey family
+   ERPNext Desk uses, and its controls are already Desk-shaped: --radius-4 (8px)
+   is Frappe's own component radius, .form-input is a 32px grey-100 field with a
+   grey-200 hairline, and .btn's default is the dark neutral Desk uses for its
+   primary action. So "make it look like Desk" is not a repaint. It is three
+   moves: a flat panel with a hairline border and a 1px shadow instead of a
+   lifted glass card, a page ground behind it, and NEUTRAL active states instead
+   of accent-tinted ones. Everything else here is a legibility fix.
+
+   THE PART THAT IS NOT A MATTER OF TASTE
+   Measured against the real oklch values in tokens.css, on the pill's own
+   tinted ground, five of the six status pills fail WCAG AA in BOTH themes:
+
+                shipped            light    dark     →   fixed to      light  dark
+     Open       --ink-blue-5         3.01 ✗   3.24 ✗      --ink-blue-8    5.97   8.56
+     Paused     --ink-amber-6        2.93 ✗   3.89 ✗      --ink-amber-8   6.48   8.31
+     Resolved   --ink-green-6        3.85 ✗   3.73 ✗      --ink-green-8   7.20   9.36
+     Closed     --ink-gray-6         7.03 ✓   5.11 ✓      --ink-gray-7   10.55   6.63
+     Legacy     --ink-violet-5       4.03 ✗   2.32 ✗      --ink-violet-7   7.01  6.35
+     Overdue    --ink-red-6          4.44 ✗   3.38 ✗      --ink-red-7      5.68  4.81
+
+   The muted grey the list uses for its meta line is the same story: --ink-gray-5
+   is 4.18:1 on the page and 3.76:1 on a hovered row in light, 4.18 and 3.40 in
+   dark. --ink-gray-6 is 7.80 / 7.03 and 6.29 / 5.11 on the same grounds.
+
+   Both fixes are GLOBAL, deliberately, and applied outside the screen scopes
+   below: a status pill that cannot be read is a defect, not a design direction,
+   and half-fixing it would leave the detail screen's pills disagreeing with the
+   list's. The TEXT greys are scoped, because those are a look; the pill and
+   priority steps are not.
+
+   WHAT IS DELIBERATELY NOT HERE
+   The phone bottom bar needs nothing: base.css already renders it flat white
+   with a hairline top border and no shadow, which is what Desk's mobile strip
+   is. It was left alone rather than restated. The 9s intro, the splash, the
+   Google door's own colours and every tap-target floor the app keeps (40px
+   chips, 16px phone fields) are untouched — Desk's 28px controls are built for a
+   mouse, and this is a phone.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════════
+   1 · TOKENS
+   Every value is an existing app token or one of the four shadows below;
+   nothing here introduces a colour, so it follows all four palettes and both
+   themes with no further work.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  /* Desk's own metrics: --border-radius 8px, a grey-200 hairline for panels and
+     a grey-100 hairline inside a list, and `0 1px 2px rgba(0,0,0,.1)` for a
+     card. The app's --elevation-lg (the glass card's) is much heavier. */
+  --desk-radius:      var(--radius-4);
+  --desk-panel-line:  var(--outline-gray-2);
+  --desk-row-line:    var(--outline-gray-1);
+  --desk-shadow:      0 1px 2px rgba(0, 0, 0, 0.1);
+
+  /* The page the panel sits on, and the panel. Not simply "grey page, white
+     card": in dark mode a white-card reading inverts and the panel has to be
+     the LIGHTER of the two, or it reads as a hole. Hence a pair per theme. */
+  --desk-ground:      var(--surface-gray-1);
+  --desk-panel:       var(--surface-base);
+
+  /* Desk's --text-muted is its grey-700; on this scale the step that clears AA
+     on every ground the list uses is grey-6. Measured, not chosen by eye. */
+  --desk-muted:       var(--ink-gray-6);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   2 · STATUS AND PRIORITY — a legibility fix, applied everywhere
+   Outside the screen scopes on purpose: see the header. These restate six
+   token names, so every pill in the app moves at once and stays consistent.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  --st-open-fg:     var(--ink-blue-8);     /* 5.97 light / 8.56 dark */
+  --st-paused-fg:   var(--ink-amber-8);    /* 6.48 / 8.31 */
+  --st-resolved-fg: var(--ink-green-8);    /* 7.20 / 9.36 */
+  --st-closed-fg:   var(--ink-gray-7);     /* 10.55 / 6.63 */
+  --st-legacy-fg:   var(--ink-violet-7);   /* 7.01 / 6.35 */
+  --st-danger-fg:   var(--ink-red-7);      /* 5.68 / 4.81 */
+}
+
+/* Desk's indicator pill has no border — the tinted ground IS the shape. The
+   app's had a 1px one, so dropping it also hands every row 2px back, which
+   matters on this list: the side column can never shrink (see views.css
+   .ir-card-side) and the row is a fixed single line. */
+.badge-open,
+.badge-pending,
+.badge-closed,
+.badge-resolved,
+.badge-legacy,
+.badge-danger { border-color: transparent; }
+
+/* Desk sizes the dot at 6px. The app's is 5px with a 5px gap; 6px with the
+   existing gap reads the same at this size and costs 1px of width against the
+   2px the border gave back. The PILL's own font size is left at --text-2xs:
+   Desk uses its 12px step, but growing these would widen the side column on
+   every row, and a squeezed pill column is the exact defect the owner reported
+   as an avatar "covering" the status. Legibility was the problem here, not the
+   type scale. */
+.badge::before { width: 6px; height: 6px; }
+
+/* Priority is text plus a dot in the same colour, so it needs the same
+   treatment as the pills: 4.18:1 (low), and blue-6/amber-7 in the middle, on
+   the row ground. */
+.prio-low    { color: var(--ink-gray-6);  /* 7.80 / 6.29 */ }
+.prio-medium { color: var(--ink-blue-8);  /* 6.69 / 11.36 */ }
+.prio-high   { color: var(--ink-amber-8); /* 7.12 / 10.87 */ }
+.prio-urgent { color: var(--ink-red-7);   /* 6.69 / 6.87  — unchanged, already AA */ }
+
+/* ══════════════════════════════════════════════════════════════
+   3 · SCREEN ONE — SIGN IN
+   The single visible change: the card stops floating. Desk is a page with a
+   panel on it, not a panel in space — so the heavy elevation, the 12px radius
+   and the 1.75rem padding all come down, and the ground behind it separates
+   the panel from the page instead.
+   ══════════════════════════════════════════════════════════════ */
+[data-theme="dark"] {
+  --desk-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --desk-ground: var(--surface-base);
+  --desk-panel:  var(--surface-elevation-1);
+}
+
+#auth-container,
+#password-change { background: var(--desk-ground); }
+
+#auth-container .glass-card,
+#password-change .glass-card {
+  background: var(--desk-panel);
+  border: 1px solid var(--desk-panel-line);
+  border-radius: var(--desk-radius);
+  box-shadow: var(--desk-shadow);
+  padding: 1.5rem;
+}
+
+/* The brand line: Desk headings track tighter than the app's 0.06em, which was
+   set when the wordmark was the only thing on the card. */
+#auth-container .auth-brand { letter-spacing: 0.02em; }
+
+/* Secondary copy at the AA step. `.auth-full` and `.auth-hint` are both
+   --ink-gray-5 (4.18:1 on a white card). */
+#auth-container .auth-full,
+#auth-container .auth-hint,
+#password-change .auth-hint,
+#auth-container .auth-or { color: var(--desk-muted); }
+
+/* The failure line: a centred red sentence becomes Desk's alert — a tinted,
+   bordered, left-aligned block. Same tokens the app's .badge-danger uses, so it
+   cannot drift from the meaning it carries. */
+#auth-container .auth-error {
+  margin-top: 1rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--st-danger-bd);
+  border-radius: var(--desk-radius);
+  background: var(--st-danger-bg);
+  color: var(--st-danger-fg);
+  font-size: var(--text-xs);
+  text-align: left;
+}
+
+/* Phones: the auth buttons keep the app's own 32px height on a mouse, but the
+   three doors on this screen are the only things to press on it. 44px is the
+   platform's recommended target. This is the one place Desk's 28px is
+   deliberately NOT followed. */
+@media (max-width: 639px) {
+  #auth-container .btn,
+  #password-change .btn { height: 44px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4 · SCREEN TWO — THE IR LIST
+   Scoped to #index-view, which wraps the toolbar, the sync line and the list —
+   and nothing else (the detail banner at #ir-banner is a sibling pane, so the
+   polish gradient stays on it). Not behind a media query: this is ONE component
+   that renders in the phone pane and in the desktop split pane, and a list that
+   changed character at a breakpoint would be two lists.
+   ══════════════════════════════════════════════════════════════ */
+
+/* The toolbar stops being a gradient wash. This is the polish block's
+   #ir-banner/.list-toolbar rule, undone for the list only. */
+#index-view .list-toolbar { background: var(--desk-panel); }
+#index-view .list-count { color: var(--desk-muted); }
+#index-view #sync-status { color: var(--desk-muted); }
+#index-view #sync-status .sync-meta { color: var(--desk-muted); }
+
+/* Filters: Desk's chips are NEUTRAL. The accent-tinted active chip is the
+   polish block's most visible single rule, and it is the one the owner will
+   notice either way — the palette then says "you are here" nowhere on this
+   screen. That is the trade Desk makes, and it is the point of the prototype.
+
+   The radius is Frappe's 8px component radius, not the full-round one the
+   badges use: Desk draws an indicator PILL round and a filter chip as a rounded
+   rect, and this bar sits directly under an 8px search field and beside 8px
+   buttons. A round chip there would read as a second design system. */
+#index-view .segment {
+  border-radius: var(--desk-radius);
+  padding: 4px 10px;
+  color: var(--desk-muted);
+  font-size: var(--text-xs);
+}
+#index-view .segment:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+#index-view .segment.active { background: var(--surface-gray-3); color: var(--ink-gray-9); }
+#index-view .segment-count { color: var(--desk-muted); }
+#index-view .segment.active .segment-count { color: var(--ink-gray-7); }
+
+/* The search field. 16px on a phone is not a style choice — iOS zooms the
+   viewport for any focused field under 16px, and this is the field with the
+   most to type in. The same rule already exists in components.css for
+   .form-input; .search-bar is a different class and was missed. */
+@media (max-width: 639px) {
+  #index-view .search-bar { font-size: 16px; }
+}
+/* Still short of AA and knowingly left there: --ink-gray-4 at 3.76:1. A
+   placeholder is text, so this is a real (small) debt, but raising it to the
+   muted step would make it read as a value already typed into the box. */
+#index-view .search-bar::placeholder { color: var(--ink-gray-5); }
+
+/* The row. Desk's mobile list rows are tighter and full-bleed: a hairline
+   between rows and no card around them, which is what .ir-card already is —
+   so this only tightens the padding and states the row's own background. */
+#index-view .ir-card { padding: 0.5rem 0.9rem; background: var(--desk-panel); }
+#index-view .ir-card:hover { background: var(--surface-gray-1); }
+#index-view .ir-card:active { background: var(--surface-gray-2); }
+
+/* The polish block's hover slide, switched off for these rows: a Desk list row
+   answers the pointer by lighting up, it does not move. The base transition is
+   restated without `transform` so nothing is left animating a property that
+   never changes. */
+#index-view .ir-card { transition: background 0.1s var(--ease); }
+@media (prefers-reduced-motion: no-preference) {
+  #index-view .ir-card:hover { transform: none; }
+}
+
+/* Selected row: the accent bar stays — it is a "you are here" state and the
+   four palettes exist for exactly that — but the fill is neutral, as Desk's
+   selected list row is. */
+#index-view .ir-card.is-selected { background: var(--surface-gray-2); }
+
+/* Row text. The title is the identifier and already reads at grey-900, so it
+   needs no rule of its own — only everything secondary moves to the measured
+   step. */
+#index-view .ir-assignee,
+#index-view .ir-meta,
+#index-view .ir-card-hover { color: var(--desk-muted); }
+#index-view .ir-progress-text,
+#index-view .ir-age { color: var(--desk-muted); }
+
+/* Overdue answers in the danger colour, and it is the one place on a row where
+   a coloured word is right. --st-danger-fg is re-pointed above, so this needs
+   no rule of its own — only the note that it moved with the pills. */
+#index-view .ir-age.is-late { color: var(--st-danger-fg); }

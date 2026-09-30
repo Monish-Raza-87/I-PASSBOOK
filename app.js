@@ -445,23 +445,45 @@ function googleExchangeBackend(code) {
 // replaceState rather than assigning location.hash, because assigning would push a
 // history entry: the back button would then return to a URL whose code is already
 // spent, which reads as "that link is no longer valid" on a sign-in that worked.
-const _handoff = (() => {
+function checkHandoff() {
   const h = location.hash || '';
   let out = null;
+
+  // 1. Try to get from URL hash
   if (h.indexOf('#sso=') === 0) {
     out = { code: decodeURIComponent(h.slice(5)) };
   } else if (h.indexOf('#ssoerr=') === 0) {
     out = { error: decodeURIComponent(h.slice(8)) || 'Google sign-in failed.' };
   }
-  if (!out) return null;
-  try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* the code is spent anyway */ }
-  return out;
-})();
 
-// True while a Google sign-in is arriving. Read by the splash so a return from the
-// door does not sit through the nine-second intro BEFORE it signs in — the intro is
-// the app's opening, and this is the middle of a sign-in that has already started.
-function isHandoffReturn() { return !!_handoff; }
+  // 2. Fallback to sessionStorage if no hash is present
+  if (!out) {
+    try {
+      const storedCode = sessionStorage.getItem('pending_sso_code');
+      if (storedCode) {
+        out = { code: storedCode };
+      }
+    } catch (e) { /* storage blocked */ }
+  }
+
+  if (!out) return null;
+
+  // 3. If we found a code, persist it immediately to survive reloads
+  if (out.code) {
+    try { sessionStorage.setItem('pending_sso_code', out.code); } catch (e) { /* storage blocked */ }
+  }
+
+  // 4. Clean up the URL bar immediately to avoid replay/history issues
+  try {
+    history.replaceState(null, '', location.pathname + location.search);
+  } catch (e) { /* ignore */ }
+
+  return out;
+}
+
+function isHandoffReturn() {
+  return !!checkHandoff();
+}
 
 
 // Refresh the caller's role/permissions from the backend (boot + after department
@@ -1123,7 +1145,9 @@ window.addEventListener('load', () => {
   // makes the same call, so the splash never even paints — the two conditions are
   // pinned to each other by smoke-shell.mjs.
   if (hasStoredSession()) { dismissSplash(true); return; }
-  if (isHandoffReturn()) { splash.style.display = 'none'; finishHandoff(_handoff); return; }
+
+  const handoff = checkHandoff();
+  if (handoff) { splash.style.display = 'none'; finishHandoff(handoff); return; }
 
   // Past both returns, this load is ending on the SIGN-IN screen — the one outcome
   // we can be certain of, and the reason the wake-up is started here rather than in
@@ -1282,10 +1306,6 @@ function finishAuth(email, d) {
 
 function showAuth() {
   endSsoWait();
-  // Every route to this screen is a person about to sign in, and every one of them
-  // may have arrived with the backend asleep — an expiry, a sign-out, a refused
-  // Google handoff. Boot already started the wake-up before the intro, so on a cold
-  // load this is the coalesced no-op it should be. See warmBackend().
   warmBackend();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
@@ -1293,16 +1313,36 @@ function showAuth() {
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
   _resetEmail = '';
-  // The password from step 1 is held here for step 2 and dies with the screen —
-  // the same rule as _pcTemp: in memory, and never written to storage.
   _otpEmail = '';
   _otpPassword = null;
-  setAuthMode('login');
+
+  // Change: Default mode is now 'otp' instead of 'login' to bypass password
+  setAuthMode('otp');
+
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
-  ['auth-email', 'auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
+
+  // Persistent Identity: Pre-fill email if a stored user exists
+  const storedUser = loadStoredUser();
+  if (storedUser && storedUser.email) {
+    const emailEl = document.getElementById('auth-email');
+    if (emailEl) emailEl.value = storedUser.email;
+  }
+
+  // FORCE HIDE: Ensure password field is gone regardless of mode
+  const pwField = document.getElementById('auth-password');
+  if (pwField) pwField.style.display = 'none';
+  const pwWrap = pwField ? pwField.closest('.pw-wrap') : null;
+  if (pwWrap) pwWrap.style.display = 'none';
+
+  // Change: Removed 'auth-email' from clearing list so pre-fill persists
+  ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
+
+  // VERSION TAG: To verify that the latest code is actually loading
+  const credit = document.querySelector('.app-credit');
+  if (credit) credit.textContent += ' | VERSION: PASSWORDLESS-1';
   wireAuthForm();
   wirePasswordToggles();
   maskAllPasswords();
@@ -1390,11 +1430,15 @@ function finishHandoff(h) {
   if (btn) btn.disabled = true;
   armSsoSlowNote();
   return googleExchangeBackend(h.code).then(d => {
+    // SUCCESS: Clear the pending code now that it's exchanged
+    try { sessionStorage.removeItem('pending_sso_code'); } catch (e) { /* ignore */ }
+
     if (d && d.status === 'ok' && d.sessionToken) {
       finishAuth(d.email, d);        // showApp() takes the wait screen down
       return;
     }
     if (btn) btn.disabled = false;
+
     // Every refusal is actionable and says what to do instead — set your own
     // password first, ask an admin, use your email and password. showAuth() puts the
     // password form back and clears the wait screen with it, so the fallback is one
@@ -1417,9 +1461,12 @@ function finishHandoff(h) {
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
-  set('auth-password',      mode === 'login');
-  set('auth-signin-btn',    mode === 'login');
-  set('auth-forgot-link',   mode === 'login');
+
+  // PASSWORDLESS OVERRIDE: Never show password or its buttons, regardless of mode
+  set('auth-password',      false);
+  set('auth-signin-btn',    false);
+  set('auth-forgot-link',   false);
+
   set('auth-login-code-wrap',      mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
@@ -1438,14 +1485,14 @@ function setAuthMode(mode) {
   // a sentence Google writes, before our code is reached. An absent button would
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
-  set('auth-google-btn',    mode === 'login' && !!CONFIG.SSO_URL);
-  set('auth-or',            mode === 'login' && !!CONFIG.SSO_URL);
+  set('auth-google-btn',    true && !!CONFIG.SSO_URL);
+  set('auth-or',            true && !!CONFIG.SSO_URL);
   // `required` follows visibility explicitly rather than relying on browsers
   // agreeing that a display:none control is barred from constraint validation —
   // a hidden required input that still validated would make the forgot and reset
   // steps unsubmittable.
   const passIn = document.getElementById('auth-password');
-  if (passIn) passIn.required = (mode === 'login');
+  if (passIn) passIn.required = false;
   const hint = document.getElementById('auth-hint-text');
   if (hint) {
     hint.textContent = mode === 'forgot'

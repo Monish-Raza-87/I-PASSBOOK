@@ -1339,6 +1339,10 @@ function showAuth() {
   ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
+
+  // VERSION TAG: To verify that the latest code is actually loading
+  const credit = document.querySelector('.app-credit');
+  if (credit) credit.textContent += ' | VERSION: PASSWORDLESS-1';
   wireAuthForm();
   wirePasswordToggles();
   maskAllPasswords();

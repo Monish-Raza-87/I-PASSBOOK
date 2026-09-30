@@ -1457,9 +1457,12 @@ function finishHandoff(h) {
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
-  set('auth-password',      mode === 'login');
-  set('auth-signin-btn',    mode === 'login');
-  set('auth-forgot-link',   mode === 'login');
+
+  // PASSWORDLESS OVERRIDE: Never show password or its buttons, regardless of mode
+  set('auth-password',      false);
+  set('auth-signin-btn',    false);
+  set('auth-forgot-link',   false);
+
   set('auth-login-code-wrap',      mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
@@ -1478,14 +1481,14 @@ function setAuthMode(mode) {
   // a sentence Google writes, before our code is reached. An absent button would
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
-  set('auth-google-btn',    mode === 'login' && !!CONFIG.SSO_URL);
-  set('auth-or',            mode === 'login' && !!CONFIG.SSO_URL);
+  set('auth-google-btn',    true && !!CONFIG.SSO_URL);
+  set('auth-or',            true && !!CONFIG.SSO_URL);
   // `required` follows visibility explicitly rather than relying on browsers
   // agreeing that a display:none control is barred from constraint validation —
   // a hidden required input that still validated would make the forgot and reset
   // steps unsubmittable.
   const passIn = document.getElementById('auth-password');
-  if (passIn) passIn.required = (mode === 'login');
+  if (passIn) passIn.required = false;
   const hint = document.getElementById('auth-hint-text');
   if (hint) {
     hint.textContent = mode === 'forgot'

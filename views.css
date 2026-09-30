@@ -1669,6 +1669,36 @@
 .ir-age.is-late { color: var(--st-danger-fg); font-weight: var(--weight-medium); }
 .meta-pill.meta-late { color: var(--st-danger-fg); background: var(--st-danger-bg); border-color: var(--st-danger-bd); }
 
+/* ─────── QUICK UNLOCK (2026-09-30) ─────── */
+/* Brand-NEW selectors, so these sit BEFORE the polish block: smoke-polish
+   requires the polish block's rules only to RESTATE selectors that exist
+   earlier, which makes the block's position load-bearing — a sole definition
+   appended after it would silently become polish-shaped. These selectors are
+   restated by nothing, above or below, so their position in the cascade is not
+   what makes them apply. */
+#auth-quick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.btn-quick { min-height: 40px; font-weight: 600; }
+#auth-quick .btn-ghost,
+#auth-quick .link-btn { min-height: 40px; }
+#auth-pattern { display: block; }
+#pattern-canvas {
+  display: block;
+  margin: 8px auto 12px;
+  width: 240px;
+  height: 240px;
+  touch-action: none;      /* the draw is a pointer gesture, not a page scroll */
+  border-radius: 12px;
+}
+.pattern-setup-overlay {
+  position: fixed; inset: 0; z-index: 90;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+}
+.pattern-setup-card {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 20px 24px; max-width: 320px; width: calc(100% - 32px);
+}
+
 /* ══════════════════════════════════════════════════════════
    POLISH — level: NOTICEABLE
 

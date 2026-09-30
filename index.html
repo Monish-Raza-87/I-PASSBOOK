@@ -153,6 +153,23 @@
         <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
+        <!-- QUICK UNLOCK: shown only when this device holds a registered token
+             (ipb_unlock). The fingerprint runs the platform's own biometric
+             prompt; the pattern is the registered fallback. "Use email code
+             instead" is always one tap away — a quick unlock that cannot be
+             left is a lock nobody signs around. -->
+        <div id="auth-quick" style="display:none">
+          <button type="button" class="btn btn-quick" id="auth-unlock-btn">Unlock with fingerprint</button>
+          <button type="button" id="auth-pattern-link" class="btn btn-ghost">Use pattern</button>
+          <button type="button" id="auth-quick-out" class="link-btn">Use email code instead</button>
+        </div>
+
+        <!-- The pattern canvas, for the unlock gesture AND the two-draw setup. -->
+        <div id="auth-pattern" style="display:none">
+          <p id="pattern-title" class="auth-hint"></p>
+          <canvas id="pattern-canvas" width="240" height="240"></canvas>
+        </div>
+
         <!-- The Google door, shown when a second deployment is configured. It is
              FIRST because for most people on most days it is the whole sign-in: one
              click, no password and no emailed code. The password form below is not a
@@ -165,7 +182,7 @@
         <button type="button" class="btn btn-google" id="auth-google-btn" style="display:none">
           <span class="google-mark" aria-hidden="true"></span>Sign in with Google
         </button>
-        <div class="auth-or" id="auth-or" style="display:none"><span>or use your email and password</span></div>
+        <div class="auth-or" id="auth-or" style="display:none"><span>or use your email</span></div>
         <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
         <div class="pw-wrap">
           <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />

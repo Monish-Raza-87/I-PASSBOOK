@@ -411,6 +411,56 @@ r.head('the watch starts on every boot path, and reads its own version right');
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+r.head('the admin can SEE who is behind, without asking anyone');
+
+const VNAV = NAV + `
+  renderVersionsTab,
+  get accessCache() { return accessCache; },
+`;
+{
+  const { T, byId } = loadApp(VNAV, { capture: true, fetch: makeFetch(SW_BODY('v55'), { calls: [] }) });
+  T.accessCache.users = [
+    { email: 'zoe@indrones.com', name: 'Zoe', appVersion: 'v55', lastLoginAt: '01-Oct-2026 09:00' },
+    { email: 'abe@indrones.com', name: 'Abe', appVersion: 'v54', lastLoginAt: '30-Sep-2026 18:00' },
+    { email: 'cal@indrones.com', name: '', appVersion: undefined, lastLoginAt: '' },
+  ];
+  T.renderVersionsTab();
+  const html = byId.get('access-panels').innerHTML;
+
+  // Ordered by build, newest first, with the unknown bucket LAST — the eye should
+  // land on the version most people are on, not on the bucket label.
+  const order = ['v55', 'v54', 'not reported'].map(v => html.indexOf('>' + v + ' <'));
+  r.ok('the list groups by build, newest first, "not reported" last',
+    order.every(i => i > -1) && order[0] < order[1] && order[1] < order[2], order);
+  r.ok('every person appears under their build',
+    html.includes('zoe@indrones.com') && html.includes('abe@indrones.com') && html.includes('cal@indrones.com'));
+  r.ok('every group carries its count', (html.match(/acc-badge/g) || []).length >= 3,
+    (html.match(/acc-badge[^"]*/g) || []));
+  // "behind" is against the ADMIN's own build, so someone ahead of the admin is not
+  // flagged — and someone on an unknown build is never flagged either, because
+  // "we do not know" is not "they are behind".
+  r.ok('an older build is marked behind, and the unknown bucket is not',
+    /v54[\s\S]{0,200}?behind/.test(html) && !/not reported[\s\S]{0,200}?behind/.test(html),
+    (html.match(/[^\n]*behind[^\n]*/g) || []).length);
+  r.ok('the header names the version the admin is running, so the comparison is visible',
+    html.includes('v55') && /This app is/.test(html));
+  r.ok('a person who has never signed in reads "never" rather than a blank',
+    html.includes('last signed in never'), (html.match(/last signed in [^<]*/g) || []));
+  // The roster can come from a localStorage cache written by an OLDER build, so the
+  // stored value is not trustworthy even though the backend validates it on write.
+  T.accessCache.users = [{ email: 'x@indrones.com', name: '', appVersion: '<img src=x onerror=alert(1)>', lastLoginAt: '' }];
+  T.renderVersionsTab();
+  const nasty = byId.get('access-panels').innerHTML;
+  r.ok('a stored version is escaped on render, not trusted because the backend validates it',
+    !/<img src=x/.test(nasty) && /&lt;img src=x/.test(nasty), (nasty.match(/&lt;img[^<]*/) || [''])[0]);
+
+  T.accessCache.users = [];
+  T.renderVersionsTab();
+  r.ok('an empty roster says so instead of drawing an empty list',
+    /No accounts yet/.test(byId.get('access-panels').innerHTML));
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 r.head('the reported version rides the sign-in that is already happening');
 
 r.ok('the login payload carries the running build',

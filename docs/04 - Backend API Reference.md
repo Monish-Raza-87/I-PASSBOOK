@@ -721,6 +721,7 @@ Content-Type: multipart/form-data
 | `password` | string | |
 | `code` | string | **optional** — the 6-digit sign-in code. Absent on step 1, present on step 2. |
 | `device` | string | **optional** — what the browser calls itself (`Android · Chrome`, `Windows · Edge`). Recorded in the sign-in audit on the step that mints the session; ignored otherwise. An older cached `app.js` sends nothing and the line reads `device not reported` rather than failing. |
+| `version` | string | **optional** — the build the browser is running, as `v<digits>` (`v55`). Stamped onto the account as `appVersion` on the step that mints the session; see [Which build each device is running](#which-build-each-device-is-running). An older cached `app.js` sends nothing, and **nothing is written** — a sign-in that cannot report a version must never blank the last one known. |
 
 **Step 1 — no `code`.** The password is verified, and then:
 
@@ -808,6 +809,51 @@ admin-issued temp password stops at `mustChangePassword` and goes through
 Access is granted only through the admin actions listed under
 [Access Control](#access-control-two-levels-viewcomment-or-edit); there is no
 self-service path in either direction.
+
+#### Which build each device is running
+
+The app announces its own updates in-app (a banner and a manual tap — see
+[08 — Development Guide](08 - Development Guide.md#how-a-deploy-reaches-the-devices-already-running-the-app)),
+so nobody has to be mailed or chased. The other half of that is being able to look:
+**👥 User Access → Versions** groups people by the build they last signed in with,
+off the `listUsers` roster the modal already loads. No new endpoint, no extra request.
+
+Four sign-in paths carry a `version` field — the password door (`doLoginPassword`),
+the passwordless door (`passwordlessLogin`, the email-only half of the same `login`
+action), the quick unlock (`deviceUnlock`), and the Google door's `googleExchange`.
+All four land on one helper:
+
+```js
+function loginVersion(raw) {                 // backend.gs
+  var v = String(raw == null ? '' : raw).trim();
+  return /^v\d{1,4}$/.test(v) ? v : '';      // anything else → ''
+}
+function stampSignin(u, version) {           // one body, four callers
+  if (!u) return;
+  u.lastLoginAt = Date.now();
+  var v = loginVersion(version);
+  if (v) u.appVersion = v;                   // ONLY when valid — never `|| ''`
+}
+```
+
+Three properties are deliberate and are each covered by a test:
+
+- **It costs nothing.** `stampSignin()` runs inside the `lastLoginAt` write that was
+  already happening, inside the same lock and the same read-modify-write. Zero extra
+  Drive operations — `users.json` is simply wider by one field.
+- **A sign-in that reports nothing does not erase what is known.** The device running
+  the *oldest* build is the one whose cached `app.js` predates the field, and it is
+  the one worth seeing. Writing `|| ''` here would blank its record on every visit.
+- **It is validated on write, and escaped on render.** `appVersion` arrives in a
+  request body, is stored in `users.json`, and comes back out as HTML in the Versions
+  list — so it is a stored-XSS surface. `loginVersion()` refuses anything that is not
+  `v<digits>`, and the admin list `escHtml()`s it anyway.
+
+`listUsers` returns `appVersion` per row, `''` meaning *never reported* (an account
+that has not signed in since the field existed, or a device whose cached `app.js`
+predates it). `''` is returned rather than the key being omitted, so the Versions tab
+never has to guess which of the two it is looking at. `createUserRow` seeds the field
+empty for the same reason.
 
 ---
 

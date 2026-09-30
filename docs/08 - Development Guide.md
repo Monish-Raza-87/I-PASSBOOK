@@ -87,6 +87,53 @@ Two things not to forget on every deploy:
   (`main <sha> → gh-pages <sha>`) is how you check, and `git ls-remote origin gh-pages`
   confirms what is actually live.
 
+### How a deploy reaches the devices already running the app
+
+Nobody has to be told, asked, or chased. The deploy **is** the announcement, and the
+mechanism is three small things that only work together:
+
+1. **`sw.js` never answers the version question from its own cache.** The app asks
+   for `./sw.js` to find out whether a newer build is deployed — a same-origin,
+   non-navigation request, which is exactly the shape the stale-while-revalidate
+   branch serves out of cache. The Cache API ignores a request's `cache:` mode, so
+   `cache: 'no-store'` on the probe cannot save it: `sw.js` has to exclude its own
+   URL from that branch. **That exclusion looks like dead code and is not.** Without
+   it the banner is right exactly once, and then lies for the life of the cache.
+2. **A new `CACHE_NAME` is filled with fresh bodies.** Install fetches each SHELL
+   entry through `new Request(u, { cache: 'reload' })`, which bypasses the browser's
+   HTTP cache and refreshes it. GitHub Pages serves with a ~10-minute max-age, so a
+   plain `cache.addAll` could move the version number while leaving the old `app.js`
+   inside it.
+3. **The page itself is told.** Nothing in the service-worker lifecycle reloads an
+   open page, so `app.js` probes, shows a banner, and reloads **only** when someone
+   taps Update.
+
+The practical consequence for anyone shipping:
+
+- **Bump `APP_VERSION` in `app.js` and `CACHE_NAME` in `sw.js` together.** A suite
+  pins them to each other, and they are the two halves of the comparison that
+  detects an update. Bumping also re-arms the one-per-version intro on every device.
+- **Nobody needs an email, and nobody needs chasing.** A device on the old build
+  shows the amber banner (`A new version of I-PASSBOOK is ready — vNN`) on its next
+  open, or within ~5 minutes of the next foreground. Tapping it settles the new
+  worker, calls `reg.update()`, and reloads.
+- **To see who is where: 👥 User Access → Versions.** It reads the roster the modal
+  already loads — no extra request — and groups people by the build they last signed
+  in with, marking anyone behind the admin's own version. `not reported` means the
+  account has not signed in since the field existed, or its device is running a
+  cached `app.js` that predates it.
+- **The version is honest by construction.** It is stamped by `stampSignin()` on the
+  sign-in write that was already happening — zero extra Drive operations — and it is
+  never blanked by a sign-in that cannot report one, because *that* device is the one
+  worth looking at.
+
+**Two limits, stated so they are not read as failures.** A device on a build older
+than this mechanism cannot be handed the fix by it: that first hop per device may
+need a manual refresh (or, once, clearing site data), and everything after it is
+automatic. And on an **installed iOS home-screen app** the tap may not take until the
+app is fully closed and reopened — that is the platform, not the build. If the version
+does not move, the banner correctly reappears rather than claiming success.
+
 ## Deploying the Backend (GAS)
 
 GAS separates the **editor** code from the **deployed** version that serves

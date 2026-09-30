@@ -1,5 +1,5 @@
 # I-PASSBOOK Project Milestone Log
-*Last Updated: 2026-09-30*
+*Last Updated: 2026-10-01*
 
 This document serves as the authoritative record of architectural changes, bug fixes, and feature blueprints implemented during the recent development cycle.
 
@@ -61,7 +61,59 @@ A specialized forensic tool for ArduPilot `.bin` files, integrated as a Global H
 
 ---
 
-## 4. Future Roadmap (Planned)
+## 4. In-App Update Notice + Version Reporting (2026-10-01)
+
+### The problem the owner actually reported
+He refreshed the app on his phone and it stayed on the old build. gh-pages was serving
+that build the whole time — the deploy was fine, the **update mechanism** was not.
+Five separate causes, all real, and the fifth is the one that would have shipped a
+feature that lies:
+
+1. Navigations went **through** GitHub Pages' ~10-minute HTTP cache.
+2. A brand new `CACHE_NAME` was filled by `cache.addAll(SHELL)` — bare fetches, so
+   the HTTP cache could put the *previous* build's bodies inside the new cache.
+3. `skipWaiting()` + `clients.claim()` hand over to a new worker, but **nothing
+   reloads the open page**, so it kept running the old `app.js`.
+4. Registration was bare and nothing ever called `reg.update()`.
+5. **A version probe poisons itself.** A same-origin `fetch('./sw.js')` is
+   intercepted by the worker's own stale-while-revalidate branch, and the Cache API
+   ignores a request's `cache:` mode — so the probe is correct exactly once, and then
+   answered from a cache the worker just wrote. Fixing the *check* required excluding
+   the worker's own URL.
+
+### What shipped
+- **`sw.js`**: the self-script exclusion (3a); new caches filled via
+  `new Request(u, { cache: 'reload' })`; navigations revalidated with `'no-cache'`
+  so the offline fallback still has an HTTP entry to fall back on. `skipWaiting` and
+  `claim` are kept deliberately — a plain refresh is the habit that must keep working.
+- **The banner**: an amber, in-flow notice on **both** the sign-in card and the app
+  shell (a device parked at sign-in is the one that most needs telling). The probe
+  reads `CACHE_NAME` out of the served `sw.js`, compares it **strictly newer** against
+  `APP_VERSION`, and is throttled to one per 5 minutes with every failure silent.
+- **The tap is the only thing that reloads.** It settles a pending install first
+  (a reload during install would be served by the worker being replaced and land back
+  on the old build), then `reg.update()`, then reload. It refuses outright while a
+  save is in flight, and prompts when the User Access modal or a draft is open. A
+  `controllerchange` listener is kept only as a belt — with `skipWaiting()` it fires
+  at *install* time, so it could never be the trigger.
+- **👥 User Access → Versions**: who is on which build, grouped off the roster the
+  modal already loads. The owner asked for no broadcast and no chasing — the banner
+  is the announcement, and this tab is how he checks without asking anyone.
+- **`backend.gs`**: `stampSignin()` writes `appVersion` inside the `lastLoginAt` write
+  that was already happening — **zero extra Drive operations**. Validated on write
+  (it is stored-XSS surface: it arrives in a body and is rendered as HTML), and never
+  blanked by a sign-in that cannot report one.
+
+### Honest limits
+- The fix **cannot bootstrap itself**: a device on the previous build gets to the new
+  one through the *old* machinery, so that first hop per device may need a manual
+  refresh. Everything after it is automatic.
+- On an **installed iOS home-screen app** the tap may not take until the app is fully
+  closed and reopened. If the version does not move, the banner correctly reappears.
+
+---
+
+## 5. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -1681,7 +1681,8 @@
 #auth-quick .btn-ghost,
 #auth-quick .link-btn { min-height: 40px; }
 #auth-pattern { display: block; }
-#pattern-canvas {
+#pattern-canvas,
+#pattern-setup-canvas {          /* the sign-in canvas and the setup overlay's */
   display: block;
   margin: 8px auto 12px;
   width: 240px;

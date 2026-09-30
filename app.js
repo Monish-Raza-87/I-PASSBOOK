@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v52';
+const APP_VERSION = 'v53';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1681,7 +1681,24 @@ function deviceRevokeBackend(deviceToken) {
 async function submitUnlock(method, patternSeq) {
   const rec = loadUnlock();
   if (method === 'pattern') {
-    if (!rec || !rec.patternHash || !patternSeq) { setAuthMode('email'); return; }
+    // An incomplete draw is not an attempt — the engine never calls back with
+    // fewer than PATTERN_MIN_DOTS dots, so this is only the belt to that brace.
+    if (!patternSeq) return;
+    // A draw with nothing to check it against has to SAY so, and land on a door
+    // that opens. This used to be `setAuthMode('email')` and nothing else: on a
+    // fingerprint device whose record had no pattern yet (the state right after
+    // enrolling), tapping "Use pattern", drawing any pattern, and being thrown to
+    // the email/Google form with no fingerprint in sight and no reason given. The
+    // owner reported it verbatim as landing "on a login page of either signin
+    // with google or with code and not showing option to choose fingerprint".
+    if (!rec || !rec.patternHash) {
+      const hasFingerprint = !!(rec && rec.deviceToken && (rec.credentialId || rec.mode === 'fingerprint'));
+      setAuthMode(hasFingerprint ? 'unlock' : 'email');
+      setAuthError(hasFingerprint
+        ? 'No pattern is set on this device yet — unlock with your fingerprint, then add one from your profile menu (top right).'
+        : 'No quick unlock is set up on this device — sign in with your email and code.');
+      return;
+    }
     const drawn = await patternHashOf(patternSeq);
     if (drawn !== rec.patternHash) { setAuthError('Wrong pattern — try again.'); resetPatternCanvas(); return; }
   } else {
@@ -1882,6 +1899,12 @@ function openPatternSetup() {
   if (document.getElementById('pattern-setup-overlay')) return;
   const ov = document.createElement('div');
   ov.id = 'pattern-setup-overlay';
+  // The CLASS is load-bearing, not decoration: the stylesheet styles
+  // `.pattern-setup-overlay` — fixed, inset 0, a dimming ground. An unstyled <div>
+  // appended to the end of <body> lands BELOW a full-height app layout, i.e.
+  // off-screen, so the overlay was built correctly every time and never seen. The
+  // owner met exactly that as "clicking add unlock pattern nothing happened".
+  ov.className = 'pattern-setup-overlay';
   ov.innerHTML =
     '<div class="glass-card pattern-setup-card">' +
       '<div class="auth-head"><div class="auth-brand">Set your pattern</div>' +
@@ -1956,7 +1979,18 @@ function setAuthMode(mode) {
   set('auth-login-code-wrap', mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
-  set('auth-quick',         mode === 'unlock' || mode === 'pattern');
+  const quickOn = (mode === 'unlock' || mode === 'pattern');
+  set('auth-quick',         quickOn);
+  // Only the doors this device can actually open. A fingerprint record with no
+  // pattern yet still offered "Use pattern", and drawing on it fell through to the
+  // email form — the door was drawn, not merely hidden. Read from the record each
+  // time rather than once at boot, because the record changes while the page stays
+  // open (the setup overlay writes it).
+  if (quickOn) {
+    const q = loadUnlock() || {};
+    set('auth-unlock-btn',   !!(q.credentialId || q.mode === 'fingerprint'));
+    set('auth-pattern-link', !!q.patternHash);
+  }
   set('auth-pattern',       mode === 'pattern');
   set('auth-back-link',     mode !== 'email' && mode !== 'login');
   // The email field feeds every typed door — except quick unlock, which knows

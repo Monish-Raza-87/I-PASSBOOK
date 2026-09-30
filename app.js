@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v50';
+const APP_VERSION = 'v51';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -297,11 +297,7 @@ function loginBackend(email, password, code) {
   // session. An older cached app.js sends nothing, and the audit line says
   // "device not reported" rather than failing.
   fd.append('device', deviceLabel());
-  const doFetch = _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.text().then(t => {
-      // Apps Script returns JSON after a redirect; parse what came back.
-      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-    }))
+  const doFetch = postJson(_origFetch, fd)
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
         currentUser.sessionToken = data.sessionToken;
@@ -348,6 +344,43 @@ function loginBackend(email, password, code) {
   ]);
 }
 
+// ─── ONE PLACE THAT READS A BACKEND REPLY ─────────────────────────────────────
+// Every self-authenticating POST in this file lands here, because they share one
+// failure that is NOT the backend's fault. Apps Script answers a /exec call with a
+// 302 to script.googleusercontent.com, and that second hop intermittently comes
+// back 404 carrying a Google HTML page — "Sorry, unable to open the file at
+// present" — which has nothing to do with this app and no JSON in it.
+//
+// It is intermittent, not a deployment fault, and the honest evidence is the same
+// call behaving differently on two devices minutes apart: on 2026-09-30 the owner
+// signed in from a phone, while the identical request from a laptop — same shell,
+// same URL, verified byte-for-byte against what gh-pages serves — came back as
+// that HTML page and surfaced as "Bad response from server." The old code turned
+// every such reply into one opaque sentence and gave up.
+//
+// So a reply that will not parse is retried ONCE, as a fresh request (following
+// the dead redirect again would only 404 again). A JSON reply is never retried,
+// including the backend's own errors: JSON proves the script ran, and re-sending
+// a redeemed code or a rejected password would be worse than reporting it.
+//
+// The HTTP status is carried into the message. "Bad response from server" told
+// nobody which hop failed; "(HTTP 404)" says the edge, not the script, and turns
+// the next report into something answerable.
+function postJson(fetchFn, fd) {
+  const attempt = (left) => fetchFn(CONFIG.GAS_URL, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => {
+      // Apps Script returns JSON after a redirect; parse what came back.
+      try { return JSON.parse(t); }
+      catch (e) {
+        if (left > 0) return attempt(left - 1);
+        const http = (r && typeof r.status === 'number') ? ' (HTTP ' + r.status + ')' : '';
+        return { status: 'error', message: 'The server sent an unexpected reply' + http + '. Please try again.' };
+      }
+    }))
+    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+  return attempt(1);
+}
+
 // POST helper for every self-authenticating auth call (the password lifecycle).
 // Goes through _origFetch so it carries no session token and can never trip the
 // session gate — a wrong reset code must not look like an expired session.
@@ -355,11 +388,7 @@ function postAuth(action, fields) {
   const fd = new FormData();
   fd.append('action', action);
   Object.keys(fields).forEach(k => fd.append(k, fields[k]));
-  return _origFetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.text().then(t => {
-      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-    }))
-    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+  return postJson(_origFetch, fd);
 }
 
 // Set a new password. Used both for the forced first-login change (currentPassword
@@ -1064,8 +1093,16 @@ let _openSeq = 0;              // supersedes an in-flight openPassbook()
 const mqDesktop = window.matchMedia('(min-width: 1024px)');
 
 // ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
-// The intro video plays every time this device arrives at the SIGN-IN screen. It
-// is the app's opening, not a one-off: sign out and it plays again.
+// The FULL intro plays on the FIRST arrival on this device, and again after an
+// update — the app's opening, not a tax on every visit. Everything in between
+// gets a brief splash that any tap clears.
+//
+// It used to play in full every time a device reached the sign-in screen, which
+// is what the owner was shown and then asked to undo: a daily sign-in paid nine
+// seconds of video for an intro it had already delivered. "After an update" is
+// keyed on APP_VERSION — the same number the deploy bumps with CACHE_NAME — so
+// shipping a new shell hands every device its intro once more, which is exactly
+// the case where the intro is telling someone something new.
 //
 // The single exception is a device that is already signed in. Those people resume
 // straight into the app, and nine seconds of video in front of a session that was
@@ -1073,10 +1110,11 @@ const mqDesktop = window.matchMedia('(min-width: 1024px)');
 // before paint (index.html) and re-checked here via hasStoredSession(), so what
 // the stylesheet hid and what this function does are the same decision.
 //
-// Note this is the BOOT path only — which is why signing out shows the intro
-// again (signOut() reloads) but an in-app session EXPIRY does not (that path calls
-// showAuth() in place, covering the screen would be actively worse, and the
-// expiry toast is the thing the person needs to read).
+// Note this is the BOOT path only — which is why signing out goes through it and
+// gets the same brief splash as any other return, while an in-app session EXPIRY
+// does not touch it at all (that path calls showAuth() in place, covering the
+// screen would be actively worse, and the expiry toast is the thing the person
+// needs to read).
 //
 // It is driven by the video's own `ended` event rather than a fixed wait, so
 // re-exporting the intro at a different length needs no code change. The
@@ -1085,6 +1123,27 @@ const mqDesktop = window.matchMedia('(min-width: 1024px)');
 // the user must reach sign-in no matter what the video does.
 const INTRO_FALLBACK_MS = 9500;   // current video is 9.03s; a little margin over that
 const SPLASH_FADE_MS    = 800;
+// The brief splash a device that has already seen this version's intro gets
+// instead: long enough to read as the app opening, short enough that nobody
+// waits on it — and any tap, click or key clears it on the spot.
+const INTRO_DONE_KEY    = 'ipb_intro_ver';
+const INTRO_SHORT_MS    = 1400;
+
+// Which intro this device owes. The stored value is the VERSION whose full intro
+// was watched, compared against APP_VERSION — so bumping the version at deploy
+// time IS the "play it again after an update" mechanism: no separate migration,
+// and no second list that could drift out of step with the one on screen.
+//
+// Storage being blocked reads as "not seen", so the full intro plays — of the two
+// ways to be wrong, showing the intro again beats an app that never shows its own
+// opening.
+function introDeliveredForThisVersion() {
+  try { return localStorage.getItem(INTRO_DONE_KEY) === APP_VERSION; }
+  catch (e) { return false; }
+}
+function markIntroDelivered() {
+  try { localStorage.setItem(INTRO_DONE_KEY, APP_VERSION); } catch (e) { /* storage blocked */ }
+}
 
 window.addEventListener('load', () => {
   // Check for local file protocol (login + backend calls won't work)
@@ -1162,6 +1221,22 @@ window.addEventListener('load', () => {
   const video = document.getElementById('splash-video');
   if (!video) { dismissSplash(false); return; }
 
+  // A device that has already watched THIS version's intro gets the brief splash.
+  // It clears itself in a moment, and a tap, click or key clears it at once — so
+  // the wait is never something a person has to sit through to reach the form.
+  //
+  // Placed after warmBackend() on purpose: a returning device is still a person
+  // about to sign in, and the cold start waiting behind the form is the same one.
+  // It has to be BEFORE play() for the other half of the point — the video is
+  // never fetched, so the ~9.7 MB is paid only by whoever is going to watch it.
+  if (introDeliveredForThisVersion()) {
+    const brief = setTimeout(() => dismissSplash(false), INTRO_SHORT_MS);
+    const skipNow = () => { clearTimeout(brief); dismissSplash(false); };
+    splash.addEventListener('pointerdown', skipNow, { once: true });
+    splash.addEventListener('keydown', skipNow, { once: true });
+    return;
+  }
+
   // The loader bar under the intro is timed from the video itself rather than a
   // number in the stylesheet — it used to finish at 1.85s while nine seconds of
   // video were still playing, which read as a stuck progress bar. --intro-ms is
@@ -1176,7 +1251,17 @@ window.addEventListener('load', () => {
   // The backstop, armed before play() so it covers every failure mode. `ended`
   // normally beats it; if the video is missing or unplayable, `error` does.
   const fallback = setTimeout(() => dismissSplash(false), INTRO_FALLBACK_MS);
-  const finish = () => { clearTimeout(fallback); dismissSplash(false); };
+  const finish = () => {
+    clearTimeout(fallback);
+    // Recorded HERE rather than when the full intro was chosen, so closing the tab
+    // two seconds in does not cost the person the rest of it next time — the debt
+    // is paid when the intro is actually delivered. Every way of finishing counts:
+    // `ended`, a decode error, a refusal to play. A device whose video cannot play
+    // would otherwise replay nine seconds of it on every single load, which is the
+    // worse of the two failures.
+    markIntroDelivered();
+    dismissSplash(false);
+  };
   video.addEventListener('ended', finish, { once: true });
   video.addEventListener('error', finish, { once: true });
   video.play().catch(finish);
@@ -1550,23 +1635,15 @@ function deviceRegisterBackend() {
   fd.append('action', 'deviceRegister');
   // Deliberately the NORMAL fetch, not _origFetch: this is an AUTHED call, and
   // the interceptor is what attaches the session token. postAuth would go out
-  // naked and be refused.
-  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.text().then(t => {
-      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-    }))
-    .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
+  // naked and be refused. postJson takes the fetch to use for exactly this reason.
+  return postJson(fetch, fd);
 }
 
 function deviceRevokeBackend(deviceToken) {
   const fd = new FormData();
   fd.append('action', 'deviceRevoke');
   fd.append('deviceToken', deviceToken);
-  return fetch(CONFIG.GAS_URL, { method: 'POST', body: fd })
-    .then(r => r.text().then(t => {
-      try { return JSON.parse(t); } catch { return { status: 'error', message: 'Bad response from server.' }; }
-    }))
-    .catch(() => ({ status: 'error', message: 'Network error.' }));
+  return postJson(fetch, fd);
 }
 
 // Unlocking = the gesture, then the token, in that order. Nothing reaches the

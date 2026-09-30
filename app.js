@@ -13,7 +13,13 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v54';
+//
+// It carries a second job now: `checkForUpdate()` reads the DEPLOYED sw.js out of
+// the network and compares its number against this one to decide whether to raise
+// the "update available" notice. That comparison is only meaningful because the
+// two numbers are pinned together — which is why the pin is load-bearing and not
+// just a tidy convention.
+const APP_VERSION = 'v55';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -243,6 +249,192 @@ function warmBackend(opts) {
   } catch (e) { /* a warm-up must never be able to break the screen it serves */ }
 }
 
+// ─── IS A NEWER BUILD DEPLOYED? ──────────────────────────────────────────────
+// The owner refreshed and stayed on the old build. The reasons live in sw.js (a
+// navigation served through the browser's HTTP cache, and a brand-new cache
+// filled with bodies that cache had already gone stale on). What is left for the
+// app is to NOTICE, and to make applying an update one deliberate tap — never an
+// automatic reload, which would land mid-sentence on whoever is typing.
+//
+// The signal is gh-pages' own version number, read out of the DEPLOYED sw.js:
+// CACHE_NAME is `ipassbook-vNN`, and APP_VERSION must equal it in the build that
+// is running (`smoke-shell.mjs` fails when they disagree). So "the number in the
+// served sw.js is higher than mine" is exactly "a newer build is deployed" — a
+// statement about the shell, and not a guess about a worker's lifecycle. That
+// distinction is the whole point: the service-worker events alone cannot answer
+// this question. A browser that never re-checks `sw.js` files no `updatefound`
+// at all, and the shell is stale-while-revalidate, so a device can be running
+// week-old code with no event fired anywhere.
+//
+// The probe must reach the NETWORK. It is same-origin and not a navigation —
+// exactly the shape sw.js's stale-while-revalidate branch serves out of cache —
+// and the Cache API ignores a request's `cache:` mode, so `cache: 'no-store'`
+// here is NOT sufficient on its own. sw.js excludes its own URL from that branch
+// for this reason. The two halves are one mechanism; neither works alone.
+const UPDATE_PROBE_MIN_GAP_MS  = 5 * 60 * 1000;
+const UPDATE_INSTALL_SETTLE_MS = 5000;
+const UPDATE_READY_MSG = 'A new version of I-PASSBOOK is ready';
+
+const updateBannerWs   = document.getElementById('update-banner-ws');
+const updateBannerAuth = document.getElementById('update-banner-auth');
+
+// The newer version the last probe found, e.g. 'v55'. Null means "nothing newer
+// found" — which is also the state before the first probe, so an offline device
+// simply never sees a banner and nothing has to special-case it.
+let _updateTarget = null;
+// The version whose ✕ was tapped, for THIS page session only. Deliberately not
+// localStorage: a stored dismissal would keep suppressing a real notice if the ✕
+// happened to be tapped while a CDN edge was briefly serving a mixed build. A
+// fresh open asks again, which is the behaviour asked for — a notice, not a nag.
+let _updateDismissedFor = null;
+let _updateTapped = false;
+let _updateReloaded = false;
+let _lastProbeAt = 0;
+let _probing = false;
+
+// `v55` → 55. Anything else → null, so a malformed or missing number reads as
+// "no idea" and can never be mistaken for "newer".
+function versionNumber(v) {
+  const m = /^v(\d+)$/.exec(String(v == null ? '' : v).trim());
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// One writer for both slots, matching paintVersion() above. `onclick` attributes
+// rather than bound listeners because the two slots would otherwise need two
+// copies of the same two handlers — and because they are re-written on every
+// paint, which would leak a listener each time. Top-level function declarations
+// are window properties in a classic script, so the attributes resolve.
+function paintUpdateBanner() {
+  const show = !!_updateTarget && _updateTarget !== _updateDismissedFor;
+  [updateBannerWs, updateBannerAuth].forEach(el => {
+    if (!el) return;
+    if (!show) { el.innerHTML = ''; el.style.display = 'none'; return; }
+    el.innerHTML =
+      `<span class="update-banner-text">${escHtml(UPDATE_READY_MSG)}` +
+        ` <strong>${escHtml(_updateTarget)}</strong> — the app will restart.</span>` +
+      `<button type="button" class="btn btn-sm update-banner-btn" onclick="applyUpdate()">Update now</button>` +
+      `<button type="button" class="update-banner-x" onclick="dismissUpdateBanner()"` +
+        ` title="Not now" aria-label="Not now">&times;</button>`;
+    el.style.display = 'flex';
+  });
+}
+
+function dismissUpdateBanner() {
+  _updateDismissedFor = _updateTarget;
+  paintUpdateBanner();
+}
+
+// Returns a promise for testability; every failure is silent, because a probe
+// that cannot reach the network (offline, a captive portal, a slow backend) must
+// look exactly like "no update" and never surface as an error on the screen.
+function checkForUpdate(force) {
+  if (_probing) return Promise.resolve(false);
+  const now = Date.now();
+  if (!force && now - _lastProbeAt < UPDATE_PROBE_MIN_GAP_MS) return Promise.resolve(false);
+  _lastProbeAt = now;
+  _probing = true;
+  return fetch('./sw.js', { cache: 'no-store' })
+    .then(r => (r && r.ok ? r.text() : ''))
+    .then(text => {
+      _probing = false;
+      const m = /CACHE_NAME\s*=\s*['"]ipassbook-(v\d+)['"]/.exec(text || '');
+      const served = m ? versionNumber(m[1]) : null;
+      const mine = versionNumber(APP_VERSION);
+      // STRICTLY newer, not merely different: gh-pages publishes every file in one
+      // commit, but a CDN edge can serve a mixed set for a short window, and on
+      // `!==` a device whose app.js was already ahead of the edge's sw.js would be
+      // told to "update" to an older build.
+      if (served == null || mine == null || served <= mine) return false;
+      _updateTarget = 'v' + served;
+      paintUpdateBanner();
+      // The probe is the signal; this is what actually installs the new worker.
+      // Asking now means the tap below is a reload rather than a wait.
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) {
+        navigator.serviceWorker.getRegistration()
+          .then(reg => { if (reg) reg.update(); })
+          .catch(() => {});
+      }
+      return true;
+    })
+    .catch(() => { _probing = false; return false; });
+}
+
+// A reload issued while a new worker is still installing is served by the worker
+// being REPLACED — i.e. it lands straight back on the version being left behind,
+// and the notice reappears, which reads as a broken button. So wait for the
+// handover to settle first, but never longer than someone will accept after
+// pressing Update.
+function waitForInstallToSettle(reg) {
+  return new Promise(resolve => {
+    const deadline = setTimeout(resolve, UPDATE_INSTALL_SETTLE_MS);
+    const settle = () => {
+      if (reg.installing || reg.waiting) return;
+      clearTimeout(deadline);
+      resolve();
+    };
+    [reg.installing, reg.waiting].forEach(w => {
+      if (w && typeof w.addEventListener === 'function') w.addEventListener('statechange', settle);
+    });
+    settle();
+  });
+}
+
+function reloadOnce() {
+  if (_updateReloaded) return;
+  _updateReloaded = true;
+  try { location.reload(); } catch (e) { /* nothing left to try */ }
+}
+
+function applyUpdate() {
+  // The tap is consent to restart the APP. It is not consent to lose a save that
+  // is still in flight.
+  if (_savesInFlight.size > 0) { showToast('Still saving — try again in a moment.'); return; }
+  // The admin modal keeps its pending department ticks in the DOM and nowhere else
+  // — savePeopleMatrix() reads them back out of the table — so a reload discards
+  // them silently. A section draft is the opposite case (localStorage, restored by
+  // restoreDrafts()), but it still gets a prompt: "your entries are safe" is not
+  // something anyone should have to find out afterwards.
+  if (document.getElementById('access-modal') &&
+      !confirm('Discard the unsaved changes in User Access and update now?')) return;
+  if (hasAnyDraft() &&
+      !confirm('Your unsaved entries are kept and restored after the restart. Update now?')) return;
+
+  _updateTapped = true;
+  const ready = (navigator.serviceWorker && navigator.serviceWorker.getRegistration)
+    ? navigator.serviceWorker.getRegistration()
+    : Promise.resolve(undefined);
+  Promise.resolve(ready)
+    .then(reg => {
+      if (!reg) return null;
+      return waitForInstallToSettle(reg).then(() => reg.update());
+    })
+    .catch(() => {})
+    .then(() => reloadOnce());
+}
+
+// A belt for the case where the handover lands just after the settle deadline
+// above expired. It can NOT be the trigger: sw.js calls skipWaiting(), so this
+// fires the moment a new worker installs — usually long before anyone asked for
+// anything — and reloading on it unconditionally would reload a page nobody
+// clicked (and would break the intro timing smoke-boot.mjs pins). The flag is the
+// whole guard.
+if (navigator.serviceWorker && typeof navigator.serviceWorker.addEventListener === 'function') {
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (_updateTapped) reloadOnce(); });
+}
+
+function startUpdateWatch() {
+  checkForUpdate();
+  // A phone RESUMES an installed app far more often than it navigates it, and iOS
+  // does not guarantee visibilitychange on a restored standalone page, so all
+  // three signals are wired. The throttle inside checkForUpdate makes the
+  // redundancy free: three prompts to look again still cost at most one request.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') checkForUpdate();
+  });
+  window.addEventListener('pageshow', e => { if (e && e.persisted) checkForUpdate(); });
+  window.addEventListener('focus', () => checkForUpdate());
+}
+
 // Exchange email + password for a server session token + access payload.
 // Stores the session, clears any stale sessionError, and returns the backend's
 // parsed {status,...} so the caller can surface the real rejection reason.
@@ -297,6 +489,14 @@ function loginBackend(email, password, code) {
   // session. An older cached app.js sends nothing, and the audit line says
   // "device not reported" rather than failing.
   fd.append('device', deviceLabel());
+  // The build this device is RUNNING, so the admin's Versions list can answer
+  // "who is still on the old one?" without anyone being asked. It rides a request
+  // that is already being made and a user record that is already being rewritten
+  // on every sign-in, so it costs nothing. The backend validates the shape and
+  // keeps the last known value when this is absent — a device whose cached app.js
+  // cannot report a version is exactly the device worth seeing in that list, so
+  // "unknown" must not overwrite a real answer.
+  fd.append('version', APP_VERSION);
   const doFetch = postJson(_origFetch, fd)
     .then(data => {
       if (data && data.status === 'ok' && data.sessionToken) {
@@ -494,7 +694,7 @@ function googleStartUrl() {
 // person's I-PASSBOOK token along would be the exact hole this door must not have.
 function googleExchangeBackend(code) {
   if (!code) return Promise.resolve({ status: 'error', message: 'Google sign-in did not return a code.' });
-  return postAuth('googleExchange', { code, device: deviceLabel() });
+  return postAuth('googleExchange', { code, device: deviceLabel(), version: APP_VERSION });
 }
 
 // What the door sent back, read ONCE at boot and then wiped from the address bar.
@@ -1180,6 +1380,14 @@ window.addEventListener('load', () => {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
   }
 
+  // Start the update watch FIRST, above every early return below. Three of the
+  // paths out of this handler — an already-signed-in device, a Google return, and
+  // the brief-splash device that has seen this version's intro — are exactly the
+  // ones that must still be told a newer build exists, and all three leave before
+  // reaching warmBackend(). The check is one small request and is throttled, so
+  // starting it here costs the boot nothing measurable.
+  startUpdateWatch();
+
   let entered = false;
 
   // Everything that used to run when the splash timer expired, unchanged.
@@ -1722,7 +1930,7 @@ async function submitUnlock(method, patternSeq) {
       return;
     }
   }
-  postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel() }).then(d => {
+  postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel(), version: APP_VERSION }).then(d => {
     if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
     if (d && d.status === 'ok' && d.sessionToken) { finishAuth(rec.email, d); return; }
     setAuthError((d && d.message) || 'Unlock failed — sign in with your email and code.');
@@ -2981,6 +3189,7 @@ function openAccessModal() {
         <button type="button" class="access-tab" data-tab="people">People &amp; departments</button>
         <button type="button" class="access-tab" data-tab="depts">Departments</button>
         <button type="button" class="access-tab" data-tab="create">Create people</button>
+        <button type="button" class="access-tab" data-tab="versions">Versions</button>
       </div>
       <div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>
     </div>`;
@@ -3125,7 +3334,72 @@ function renderAccessPanel() {
   if (!panels) return;
   if (accessTab === 'depts')       renderDepartmentsTab();
   else if (accessTab === 'create') renderCreateTab();
+  else if (accessTab === 'versions') renderVersionsTab();
   else                             renderPeopleTab();
+}
+
+// ─── TAB 4: which build each account is running ──────────────────────────────
+// The answer to "has everyone picked up the new version?" without asking anyone.
+// It reads the SAME listUsers snapshot the other three tabs read — no extra
+// request, no extra Drive read — and the number it shows is the version that
+// account last SIGNED IN with, which is why each row carries its last-sign-in
+// time beside it: "v54, three days ago" and "v54, ten minutes ago" are very
+// different answers to the question this tab exists to ask.
+//
+// "Behind" is measured against the version of the app the ADMIN IS LOOKING AT,
+// not against each other — a whole company on v54 is not "up to date" just
+// because it agrees with itself, and this screen is read by whoever deploys.
+function renderVersionsTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  const users = accessCache.users || [];
+  if (!users.length) {
+    panels.innerHTML = '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
+    return;
+  }
+
+  const mine = versionNumber(APP_VERSION);
+  const groups = {};
+  users.forEach(u => {
+    // `|| ''` covers a localStorage roster cached before the backend carried the
+    // field: undefined must read as "not reported", never as a blank cell.
+    const v = String(u.appVersion || '').trim() || 'not reported';
+    (groups[v] = groups[v] || []).push(u);
+  });
+  // Newest build first, and the un-known group last — the eye should land on the
+  // version most people are on, not on the bucket label.
+  const label = Object.keys(groups).sort((a, b) => {
+    const na = versionNumber(a), nb = versionNumber(b);
+    if (na === null) return 1;
+    if (nb === null) return -1;
+    return nb - na;
+  });
+
+  const blocks = label.map(v => {
+    const n = versionNumber(v);
+    const stale = n !== null && mine !== null && n < mine;
+    const rows = groups[v]
+      .slice()
+      .sort((a, b) => String(a.email).localeCompare(String(b.email)))
+      .map(u => `<div class="acc-matrix-sub">${escHtml(u.email)}${u.name ? ' · ' + escHtml(u.name) : ''} · last signed in ${escHtml(u.lastLoginAt || 'never')}</div>`)
+      .join('');
+    return `
+      <div class="access-section">
+        <h3>${escHtml(v)} <span class="acc-badge${stale ? ' acc-badge-temp' : ''}">${groups[v].length}</span>${stale ? ' <span class="acc-badge acc-badge-temp">behind</span>' : ''}</h3>
+        ${rows}
+      </div>`;
+  }).join('');
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>Who is on which version</h3>
+      <p class="access-hint">The build each account last signed in with. This app is
+        <strong>${escHtml(APP_VERSION)}</strong> — anyone on an older number has not
+        picked up the update yet, and they will be offered it on their next sign-in.
+        A version is recorded at sign-in, so the time beside each person is how fresh
+        that answer is.</p>
+      ${blocks}
+    </div>`;
 }
 
 // ─── TAB 1: people × departments matrix ──────────────────────────────────────

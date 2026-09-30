@@ -239,6 +239,52 @@ r.ok('...and names the status, not the parser',
   !!dead && dead.status === 'error' &&
   /HTTP 404/.test(dead.message) && !/Bad response/.test(dead.message), dead);
 
+r.head('a credential the first attempt SPENDS is never retried');
+// The retry shipped without this distinction and broke the Google door the same
+// evening: attempt one redeemed the handoff code and minted the session, the reply
+// was lost to the same edge hop the retry exists for, and attempt two answered
+// "that Google sign-in link is no longer valid" — for a code it had burned itself,
+// while a good session was thrown away with it. Counted, because the bug is a call
+// count and nothing in the source would look wrong.
+let exTries = 0;
+const G = loadApp('googleExchangeBackend, navigator, window', {
+  fetch: () => { exTries++; return HTML_404(); },
+});
+await G.googleExchangeBackend('deadbeefdeadbeefdeadbeefdeadbeef');
+r.ok('googleExchange is attempted exactly once, even when the reply is lost',
+  exTries === 1, exTries);
+
+let rpTries = 0;
+const P = loadApp('resetPasswordBackend', {
+  fetch: () => { rpTries++; return HTML_404(); },
+});
+await P.resetPasswordBackend('someone@indrones.com', '123456', 'a-new-password');
+r.ok('resetPassword is attempted exactly once — its code is single use',
+  rpTries === 1, rpTries);
+
+let fpTries = 0;
+const Q = loadApp('forgotPasswordBackend', {
+  fetch: () => { fpTries++; return HTML_404(); },
+});
+await Q.forgotPasswordBackend('someone@indrones.com');
+r.ok('forgotPassword is attempted exactly once — a second call would issue a SECOND code',
+  fpTries === 1, fpTries);
+
+// ...and the door that must KEEP retrying still does. The emailed login code is
+// reusable inside its window, so re-redeeming it is harmless — which is why the
+// owner's OTP sign-in was never affected by any of this.
+let keepTries = 0;
+const K = loadApp('loginBackend, setUser: u => { currentUser = u; }', {
+  fetch: () => {
+    keepTries++;
+    if (keepTries === 1) return HTML_404();
+    return Promise.resolve({ status: 200, text: () => Promise.resolve(JSON.stringify({ status: 'ok', otpRequired: true })) });
+  },
+});
+K.setUser({ email: 'someone@indrones.com' });
+await K.loginBackend('someone@indrones.com', '');
+r.ok('login still retries, because its emailed code is REUSABLE', keepTries === 2, keepTries);
+
 r.head('the poll restarts after an in-page re-login');
 // clearLocalAuth() stops the poll — correct for a dead session, wrong for a LIVE
 // one. Signing in again without a page reload hits showApp()'s `_appBooted` early

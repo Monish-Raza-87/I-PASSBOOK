@@ -13,7 +13,7 @@
 // shell is served stale-while-revalidate, so a device can be a full load behind
 // whatever gh-pages holds. A mismatch is the exact situation this display exists
 // to expose, so `smoke-shell.mjs` fails when the two disagree.
-const APP_VERSION = 'v51';
+const APP_VERSION = 'v52';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -366,7 +366,10 @@ function loginBackend(email, password, code) {
 // The HTTP status is carried into the message. "Bad response from server" told
 // nobody which hop failed; "(HTTP 404)" says the edge, not the script, and turns
 // the next report into something answerable.
-function postJson(fetchFn, fd) {
+//
+// `retries` is NOT always 1 — see CREDENTIAL_SPENDING_ACTIONS below. Retrying is
+// only safe for a call whose credential survives a second attempt.
+function postJson(fetchFn, fd, retries) {
   const attempt = (left) => fetchFn(CONFIG.GAS_URL, { method: 'POST', body: fd })
     .then(r => r.text().then(t => {
       // Apps Script returns JSON after a redirect; parse what came back.
@@ -378,8 +381,34 @@ function postJson(fetchFn, fd) {
       }
     }))
     .catch(err => ({ status: 'error', message: 'Network error: ' + (err && err.message ? err.message : 'unable to reach backend') }));
-  return attempt(1);
+  return attempt(retries === undefined ? 1 : retries);
 }
+
+// Actions whose credential the FIRST attempt spends. A retry on one of these cannot
+// recover a lost reply — it can only destroy an attempt that already worked.
+//
+// This is not theoretical. The retry shipped on 2026-09-30 without this list and
+// broke the Google door the same evening: attempt one redeemed the handoff code and
+// minted the session, the reply was lost to the same edge hop the retry exists for,
+// and attempt two came back "That Google sign-in link is no longer valid" — for a
+// code it had just burned itself, while a perfectly good session was discarded with
+// it. The emailed-code door looked fine throughout, because ITS code is reusable.
+//
+// The distinction is the code's, not the call's, so it is stated once here and read
+// off the backend's own rules (backend.gs, CODES):
+//   'login'  — 8h30m, REUSABLE inside the window, so a second attempt re-redeems the
+//              same code and cannot burn it. Deliberately NOT in this list.
+//   'reset'  — single use. IN this list.
+//   'google' — one-time, burned on the FIRST look whatever the outcome. IN this list.
+// A device token is not consumed, so deviceUnlock and the register/revoke pair are
+// safe to retry. changePassword has no code at all.
+const CREDENTIAL_SPENDING_ACTIONS = {
+  googleExchange: true,
+  resetPassword:  true,
+  // A retry here would issue a SECOND code and retire the first, so the mail the
+  // person is about to read could be the one that no longer works.
+  forgotPassword: true,
+};
 
 // POST helper for every self-authenticating auth call (the password lifecycle).
 // Goes through _origFetch so it carries no session token and can never trip the
@@ -388,7 +417,7 @@ function postAuth(action, fields) {
   const fd = new FormData();
   fd.append('action', action);
   Object.keys(fields).forEach(k => fd.append(k, fields[k]));
-  return postJson(_origFetch, fd);
+  return postJson(_origFetch, fd, CREDENTIAL_SPENDING_ACTIONS[action] ? 0 : 1);
 }
 
 // Set a new password. Used both for the forced first-login change (currentPassword

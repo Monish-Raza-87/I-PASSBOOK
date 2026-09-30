@@ -1306,10 +1306,6 @@ function finishAuth(email, d) {
 
 function showAuth() {
   endSsoWait();
-  // Every route to this screen is a person about to sign in, and every one of them
-  // may have arrived with the backend asleep — an expiry, a sign-out, a refused
-  // Google handoff. Boot already started the wake-up before the intro, so on a cold
-  // load this is the coalesced no-op it should be. See warmBackend().
   warmBackend();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
@@ -1317,11 +1313,12 @@ function showAuth() {
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
   _resetEmail = '';
-  // The password from step 1 is held here for step 2 and dies with the screen —
-  // the same rule as _pcTemp: in memory, and never written to storage.
   _otpEmail = '';
   _otpPassword = null;
-  setAuthMode('login');
+
+  // Change: Default mode is now 'otp' instead of 'login' to bypass password
+  setAuthMode('otp');
+
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
 
@@ -1332,6 +1329,7 @@ function showAuth() {
     if (emailEl) emailEl.value = storedUser.email;
   }
 
+  // Change: Removed 'auth-email' from clearing list so pre-fill persists
   ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });

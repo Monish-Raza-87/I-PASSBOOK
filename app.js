@@ -1329,6 +1329,12 @@ function showAuth() {
     if (emailEl) emailEl.value = storedUser.email;
   }
 
+  // FORCE HIDE: Ensure password field is gone regardless of mode
+  const pwField = document.getElementById('auth-password');
+  if (pwField) pwField.style.display = 'none';
+  const pwWrap = pwField ? pwField.closest('.pw-wrap') : null;
+  if (pwWrap) pwWrap.style.display = 'none';
+
   // Change: Removed 'auth-email' from clearing list so pre-fill persists
   ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';

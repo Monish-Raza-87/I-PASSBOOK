@@ -56,7 +56,7 @@
 .pv-app .list-title { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.16em; font-size: var(--text-sm); }
 .pv-app .list-title::before { content: "01 / "; color: var(--ind-yellow); }
 .pv-app .list-count { font-family: var(--font-mono); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
-.pv-app .search-bar { padding: 0.4rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .search-bar { padding: 0.4rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); color: var(--ink-gray-1); font-size: var(--text-base); }
 .pv-app .search-bar::placeholder { color: var(--ink-gray-6); }
 .pv-app .segment { padding: 0.2rem 0.5rem; border: 1px solid var(--outline-gray-8); color: var(--ink-gray-4); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
 .pv-app .segment.active { border-color: var(--ind-yellow); color: var(--ind-yellow); background: var(--surface-gray-9); }
@@ -93,7 +93,7 @@
 .pv-app .auth-brand { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.24em; color: var(--ink-gray-1); }
 .pv-app .auth-full { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
 .pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-4); }
-.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); color: var(--ink-gray-1); font-size: var(--text-base); }
 .pv-app .form-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
 .pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ind-yellow); background: var(--ind-yellow); color: var(--ind-ink-on-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; font-weight: var(--weight-semibold); }
 .pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-8); background: transparent; color: var(--ink-gray-2); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
@@ -144,6 +144,7 @@
       <a class="pv-tab" href="a.html">Option A — Desk, finished</a>
       <a class="pv-tab is-here" href="b.html">Option B — Indrones Industrial</a>
       <a class="pv-tab" href="c.html">Option C — Modern SaaS light</a>
+      <a class="pv-tab" href="d.html">Option D — Tabler arrangement</a>
     </nav>
   </div>
   <div class="pv-screens">
@@ -485,9 +486,10 @@
     <div><h2>Why you might pick it</h2><ul><li>Unmistakably Indrones — the dark canvas and yellow read as the same family as the website</li><li>Monospace numbers line up in columns, which is what you want in a 412-row list of IR keys</li><li>Dark is genuinely better on a phone in a hangar or an oil field, and for battery</li><li>The instrument framing makes a log analyser look like it belongs rather than like a bolt-on</li></ul></div>
     <div><h2>What it costs you</h2><ul><li>A bigger change than the other two — the dark theme exists in the app, but this makes it the default</li><li>The yellow has to clear WCAG AA on dark. It does (about 11.2:1, measured at build time), but it may still get nudged for contrast rather than taste</li><li>Technical labelling can read as cold to someone who is not an engineer</li></ul></div>
     <div><h2>The fine print</h2><ul>
-      <li>These four screens are drawn from the app's real markup, its real class names and its real colour tokens. The layout is shared between all three options — only the language changes.</li>
+      <li>All four pages carry identical markup, taken from the app's real class names, and colour from its real tokens. Only the styling differs — in Option D that styling is mostly arrangement.</li>
       <li>They are static. Adopting one is a separate pass through the app; that pass is the expensive part, which is why you are choosing first.</li>
       <li>Sample records are shown (IR-412 and friends). The statuses, categories and REPAIR sub-categories are the real ones.</li>
+      
     </ul></div>
   </div>
 </div>

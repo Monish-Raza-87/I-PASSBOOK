@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v56';
+const APP_VERSION = 'v57';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1282,6 +1282,7 @@ const appCont     = document.getElementById('app-container');
 const indexView   = document.getElementById('index-view');
 const detailView  = document.getElementById('detail-view');
 const insightsView = document.getElementById('insights-view');
+const logView     = document.getElementById('log-view');
 const irList      = document.getElementById('ir-list');
 const searchInput = document.getElementById('search-input');
 const backBtn     = document.getElementById('back-btn');
@@ -1313,7 +1314,7 @@ const listToggle    = document.getElementById('list-toggle');
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
 // renderLayout() translates it into the inline display of the three panes.
-let currentView = 'index';     // 'index' | 'detail' | 'insights'
+let currentView = 'index';     // 'index' | 'detail' | 'insights' | 'log'
 let activeSegment = 'all';     // IR-list filter segment
 let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
 let _appBooted = false;        // showApp() guard — it re-binds listeners
@@ -2846,6 +2847,7 @@ function renderLayout() {
   const desktop  = mqDesktop.matches;
   const detail   = currentView === 'detail';
   const insights = currentView === 'insights';
+  const log      = currentView === 'log';
   // A pane that OWNS the screen on a phone. Below lg, #panes is a COLUMN, so the
   // list and the open pane are separate full screens and the open one hides the
   // list. On desktop they sit side by side, so the list hides only when the user
@@ -2855,12 +2857,13 @@ function renderLayout() {
   // panes are flex:1 with a zero basis, so the IR list took the TOP HALF of the
   // screen — toolbar, search, both segment strips and #sync-status — with the
   // dashboard squeezed into the strip underneath it. "Keep the list beside the
-  // dashboard" is true on a laptop and impossible in a column.
+  // dashboard" is true on a laptop and impossible in a column. `log` is the same
+  // pane shape and is included from the start rather than inheriting the bug.
   //
   // Folding it is only safe because the SAME change gives Insights the back
   // button below: that is what stops the fold stranding anyone, which is the
   // worry the old comment here was trying to answer.
-  const full       = detail || insights;
+  const full       = detail || insights || log;
   const listHidden = full && (!desktop || storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
@@ -2868,14 +2871,16 @@ function renderLayout() {
   // that pane's display is the app's only "an IR is open" flag and nothing else
   // may live in it.
   if (insightsView) insightsView.style.display = insights ? 'flex' : 'none';
+  if (logView) logView.style.display = log ? 'flex' : 'none';
   // The detail's back button goes to the list; the dashboard's does the same.
   // Both are phone-only — on desktop the list never leaves the screen.
   backBtn.style.display    = (!desktop && full) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
   // Suppresses #detail-placeholder's "No IR selected" empty state, which shows
-  // whenever body.view-detail is absent — including on the dashboard, where an
-  // "no IR selected" message is simply wrong.
+  // whenever body.view-detail is absent — including on the dashboard and the
+  // analyser, where an "no IR selected" message is simply wrong.
   document.body.classList.toggle('view-insights', insights);
+  document.body.classList.toggle('view-log', log);
 
   // On desktop the list stays on screen, so mark which row is open.
   if (irList) {
@@ -2886,20 +2891,20 @@ function renderLayout() {
 
   // Which section the user is in. A ticket belongs to the IRs item — it is a row
   // of that list, not a section of its own.
-  markActiveNav(insights ? 'insights' : 'tickets');
+  markActiveNav(insights ? 'insights' : (log ? 'log' : 'tickets'));
 }
 
 // The nav never showed which section you were in: `.nav-item.active` has a rule
 // in base.css and NOTHING ever applied it, so tapping Insights produced no
 // feedback anywhere on screen and read as a dead tap — which is half of "even
-// after clicking on insight tile it is not opening". Two items, because the two
-// other nav entries are not sections: Legacy Records opens a modal, and User
-// Access opens one too.
+// after clicking on insight tile it is not opening". Three items now; the other
+// two nav entries are not sections, because Legacy Records and User Access each
+// open a modal rather than a pane.
 //
 // `aria-current` rides along with the class: the highlight is colour, and colour
 // alone is not an announcement.
 function markActiveNav(name) {
-  [['nav-tickets', 'tickets'], ['nav-insights', 'insights']].forEach(([id, route]) => {
+  [['nav-tickets', 'tickets'], ['nav-insights', 'insights'], ['nav-log', 'log']].forEach(([id, route]) => {
     const el = document.getElementById(id);
     if (!el) return;
     const on = route === name;
@@ -2920,6 +2925,7 @@ function markActiveNav(name) {
 //   #/tickets            → the list (desktop keeps whatever IR was open)
 //   #/tickets/IR409      → that IR's passbook
 //   #/insights           → the counts dashboard
+//   #/log                → the flight-log analyser
 //   #/legacy             → opens the read-only legacy workbook modal
 // showIndex()/openPassbook()/showInsights() stay the view functions; the router
 // only decides when to call them, so nothing here re-implements rendering.
@@ -2927,6 +2933,7 @@ function currentRoute() {
   const parts = (location.hash || '').replace(/^#\/?/, '').split('/').filter(Boolean);
   if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
   if (parts[0] === 'insights') return { name: 'insights' };
+  if (parts[0] === 'log') return { name: 'log' };
   if (parts[0] === 'legacy') return { name: 'legacy' };
   // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
   // rather than on a blank pane, which is why `insights` had to be matched above.
@@ -2947,6 +2954,11 @@ function goTicket(irNumber) {
 function goInsights() {
   if (location.hash === '#/insights') { showInsights(); return; }
   location.hash = '#/insights';
+}
+
+function goLog() {
+  if (location.hash === '#/log') { showLog(); return; }
+  location.hash = '#/log';
 }
 
 async function handleRoute() {
@@ -2982,6 +2994,18 @@ async function handleRoute() {
     // the list was loading, and painting now would land on top of where they went.
     if (currentRoute().name !== 'insights') return;
     showInsights();
+    return;
+  }
+
+  if (r.name === 'log') {
+    if (currentView === 'log') return;
+    // The analyser's IR picker lists allIRs, so the same cold-deep-link wait the
+    // dashboard does applies here.
+    if (!allIRs.length && _irsReady) { try { await _irsReady; } catch { /* paint anyway */ } }
+    if (!currentUser) return;                   // signed out while waiting
+    // Re-read the route AFTER the await, exactly as the insights branch above does.
+    if (currentRoute().name !== 'log') return;
+    showLog();
     return;
   }
 
@@ -4146,6 +4170,469 @@ if (insightsView) {
                           category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
       renderInsights();
     }
+  });
+}
+
+// ─── LOG ANALYSER ─────────────────────────────────────────────────────────────
+//
+// ArduPilot DataFlash (.bin) flight logs, read by dataflash.js entirely in the
+// browser. THE FILE IS NEVER UPLOADED. Only the derived report — a few KB — is
+// kept, and only when the engineer pushes it into an IR. That is what makes a
+// 100 MB log cost the Drive store nothing: its price is per OPERATION, and there
+// is no operation.
+//
+// The markup is assembled from classes that already exist for other screens
+// (.insights-card / .insights-h / .badge / .btn / .empty-state). That is
+// deliberate, not laziness — the UI direction that wins the design review re-skins
+// this screen along with everything else, instead of leaving a fourth thing to
+// restyle. Nothing here invents a colour, a radius or a shadow.
+const LOG_TARGET_KEY = 'ipassbook.log.target';
+
+// One object, mutated in place, so the event handlers below and renderLog() can
+// never disagree about what is on screen.
+const logState = {
+  target:    '',      // IR number the report will be pushed into
+  fileName:  '',
+  fileSize:  0,
+  progress:  0,
+  busy:      false,
+  report:    null,    // the DataFlash report, or null
+  error:     '',
+  openJump:  '',      // the parameter group a finding last jumped to
+  pushed:    '',      // the IR the current report was last pushed into
+};
+
+// The target IR survives a reload — an engineer analysing three logs for the same
+// ticket should not re-pick it three times. Wrapped because a private window
+// throws on access rather than returning null.
+try { logState.target = localStorage.getItem(LOG_TARGET_KEY) || ''; } catch (_) { /* private mode */ }
+
+// Verdict → the badge family the status pills already use. A PASS is not a status
+// called "Open" — it only borrows the green, which is why the word is written out
+// rather than being left to the colour.
+const LOG_VERDICTS = {
+  PASS:   { cls: 'badge-open',    word: 'Pass',   note: 'Nothing in the declared thresholds was crossed.' },
+  REVIEW: { cls: 'badge-pending', word: 'Review', note: 'Something is worth a human looking at. This is not by itself proof of a fault.' },
+  FAIL:   { cls: 'badge-danger',  word: 'Fail',   note: 'A physical or control limit was crossed.' },
+};
+const LOG_SEVERITIES = {
+  fail:   { cls: 'badge-danger',  word: 'Fail' },
+  review: { cls: 'badge-pending', word: 'Review' },
+  info:   { cls: 'badge-open',    word: 'Info' },
+};
+
+const logVerdictInfo = v => LOG_VERDICTS[v] || LOG_VERDICTS.REVIEW;
+const logSevInfo     = s => LOG_SEVERITIES[s] || LOG_SEVERITIES.info;
+
+function logBytes(n) {
+  if (!n) return '0 B';
+  if (n < 1024) return n + ' B';
+  if (n < 1048576) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
+
+// A flight log's clock. Minutes:seconds because a flight is minutes long, and the
+// tenth is kept — a 500 ms saturation run is not findable at whole seconds.
+function logClock(sec) {
+  if (sec == null || !isFinite(sec)) return '—';
+  const s = Math.max(0, sec);
+  const m = Math.floor(s / 60);
+  return m + ':' + (s - m * 60).toFixed(1).padStart(4, '0');
+}
+
+function logTodayISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+// ── the report, rendered ──────────────────────────────────────────────────────
+//
+// Shared by the analyser pane and the read-only field on a passbook, so the two
+// can never drift into showing different things. `jump` is what separates them:
+// only the pane gives the parameter groups element ids, because rendering those
+// ids in the passbook too would put a second #log-group-RCOU in the same document.
+
+function logFindingsHTML(report, jump) {
+  const findings = report.findings || [];
+  if (!findings.length) {
+    return `<div class="insights-card"><div class="log-finding">
+      <div class="log-finding-top"><span class="badge badge-open">No findings</span></div>
+      <div class="log-finding-body">Nothing in the declared thresholds was crossed. That is the finding.</div>
+    </div></div>`;
+  }
+  // Only a finding whose source message actually has a parameter group is
+  // jumpable. A button that scrolls nowhere is worse than no button.
+  const hasGroup = name => !!(name && (report.parameters || []).some(p => p.message === name));
+  return findings.map(f => {
+    const sev = logSevInfo(f.severity);
+    const canJump = jump && hasGroup(f.message);
+    const at = f.atSeconds == null ? '' :
+      (canJump
+        ? `<button type="button" class="log-at" data-jump="${escHtml(f.message)}" title="Show this message's numbers">${logClock(f.atSeconds)}</button>`
+        : `<span class="log-at">${logClock(f.atSeconds)}</span>`);
+    return `<div class="insights-card"><div class="log-finding">
+      <div class="log-finding-top">
+        <span class="badge ${sev.cls}">${sev.word}</span>
+        <span class="log-finding-title">${escHtml(f.title)}</span>
+        ${at}
+      </div>
+      <div class="log-finding-body">${escHtml(f.detail || '')}</div>
+      ${f.message ? `<div class="log-note">Source: ${escHtml(f.message)}</div>` : ''}
+    </div></div>`;
+  }).join('');
+}
+
+function logParametersHTML(report, jump) {
+  const params = report.parameters || [];
+  if (!params.length) return '';
+  const groups = new Map();
+  params.forEach(p => {
+    if (!groups.has(p.message)) groups.set(p.message, []);
+    groups.get(p.message).push(p);
+  });
+  const rows = [...groups.entries()].map(([name, list]) => `
+    <div class="log-group"${jump ? ` id="log-group-${escHtml(name)}"` : ''}>
+      <h3 class="insights-h log-group-title">${escHtml(name)}</h3>
+      <div class="log-scroll">
+        <table class="log-table">
+          <thead><tr><th>Column</th><th>Unit</th><th>N</th><th>Min</th><th>Max</th><th>Mean</th></tr></thead>
+          <tbody>${list.map(p => `<tr>
+            <td>${escHtml(p.column)}</td>
+            <td>${escHtml(p.unit || '—')}</td>
+            <td>${p.count}</td>
+            <td>${p.min == null ? '—' : p.min}</td>
+            <td>${p.max == null ? '—' : p.max}</td>
+            <td>${p.mean == null ? '—' : p.mean}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>`).join('');
+  return `<div class="insights-block">
+    <h3 class="insights-h">Every tracked parameter</h3>
+    <div class="log-stack">${rows}</div>
+  </div>`;
+}
+
+function logReportHTML(report, opts) {
+  const jump = !!(opts && opts.jump);
+  const v = logVerdictInfo(report.verdict);
+  const m = report.meta || {};
+  const duration = m.durationSeconds == null ? '—' : logClock(m.durationSeconds);
+  return `
+    <div class="insights-block">
+      <div class="log-verdict">
+        <span class="badge ${v.cls}">${v.word}</span>
+        <span class="log-verdict-n">${v.word}</span>
+        ${report.fileName ? `<span class="log-verdict-file">${escHtml(report.fileName)}${report.fileBytes ? ' · ' + logBytes(report.fileBytes) : ''}</span>` : ''}
+      </div>
+      <p class="log-note">${v.note}</p>
+      <div class="log-meta">
+        <span><b>Firmware</b> ${escHtml(m.firmware || 'not reported in this log')}</span>
+        <span><b>Vehicle</b> ${escHtml(m.vehicle || '—')}</span>
+        <span><b>Duration</b> ${duration}</span>
+        <span><b>Frames</b> ${(m.frames || 0).toLocaleString()}</span>
+        ${m.skippedBytes ? `<span><b>Unread bytes</b> ${m.skippedBytes}</span>` : ''}
+        ${m.truncated ? '<span><b>Ends mid-frame</b> yes</span>' : ''}
+      </div>
+    </div>
+    <div class="insights-block">
+      <h3 class="insights-h">Findings</h3>
+      <div class="log-stack">${logFindingsHTML(report, jump)}</div>
+    </div>
+    ${logParametersHTML(report, jump)}`;
+}
+
+// ── what gets STORED ──────────────────────────────────────────────────────────
+//
+// The report above is the screen's shape; this is the passbook's. They differ on
+// purpose: the passbook does not need every message's frame count, and trimming it
+// here is what keeps the stored report at a few KB instead of growing with the log.
+
+function logReportForStore(report, fileName, fileSize) {
+  const m = report.meta || {};
+  return {
+    version: (window.DataFlash && window.DataFlash.VERSION) || '',
+    pushedAt: new Date().toISOString(),
+    file: fileName || '',
+    fileBytes: fileSize || 0,
+    verdict: report.verdict,
+    meta: {
+      firmware: m.firmware || '',
+      vehicle: m.vehicle || '',
+      durationSeconds: m.durationSeconds == null ? null : m.durationSeconds,
+      frames: m.frames || 0,
+      skippedBytes: m.skippedBytes || 0,
+      truncated: !!m.truncated,
+      messages: (m.messages || []).slice(0, 12),
+    },
+    findings: (report.findings || []).map(f => ({
+      severity: f.severity, title: f.title, atSeconds: f.atSeconds,
+      detail: f.detail || '', message: f.message || null,
+    })),
+    parameters: report.parameters || [],
+  };
+}
+
+// The prose half of the push. Short on purpose: the numbers are in the stored
+// report, and this field is the engineer's own narrative — it is APPENDED to, never
+// replaced, so a summary that restated every parameter would bury what they wrote.
+function logSummaryText(report, fileName, fileSize, stamp) {
+  const m = report.meta || {};
+  const lines = [];
+  lines.push('— Flight log analysis (' + stamp + ') —');
+  lines.push('File: ' + (fileName || 'unnamed') + (fileSize ? ' (' + logBytes(fileSize) + ')' : '') +
+             (m.firmware ? ' · ' + m.firmware : ''));
+  lines.push('Verdict: ' + report.verdict);
+  const findings = report.findings || [];
+  if (!findings.length) {
+    lines.push('No findings — nothing in the declared thresholds was crossed.');
+  } else {
+    findings.slice(0, 12).forEach(f => {
+      lines.push('• [' + logSevInfo(f.severity).word + '] ' + f.title +
+                 (f.atSeconds == null ? '' : ' at ' + logClock(f.atSeconds)));
+    });
+    if (findings.length > 12) lines.push('• …and ' + (findings.length - 12) + ' more, in the stored report above.');
+  }
+  lines.push('The stored report and the full parameter table are attached to this section as "Flight Log Analysis".');
+  return lines.join('\n');
+}
+
+// ── the pane ──────────────────────────────────────────────────────────────────
+
+function logTargetSelectHTML() {
+  const known = allIRs.some(ir => ir.irNumber === logState.target);
+  // A remembered target that has since left the list still has to be SELECTABLE,
+  // or the dropdown reads "Choose an IR…" while the push would use the remembered
+  // one — the one failure the reader cannot diagnose from the screen.
+  const orphan = logState.target && !known
+    ? `<option value="${escHtml(logState.target)}" selected>${escHtml(logState.target)} (not in the list)</option>` : '';
+  return `<select id="log-target" class="form-input" aria-label="IR to push the report into">
+      <option value=""${logState.target ? '' : ' selected'}>Choose an IR…</option>
+      ${orphan}
+      ${allIRs.map(ir => `<option value="${escHtml(ir.irNumber)}"${ir.irNumber === logState.target ? ' selected' : ''}>${escHtml(ir.irNumber)} · ${escHtml(ir.droneId || 'no drone id')}</option>`).join('')}
+    </select>`;
+}
+
+function renderLog() {
+  const body = document.getElementById('log-body');
+  if (!body) return;
+
+  // The script tag is in index.html before app.js, so this only fires if THAT
+  // failed to load — which is worth saying plainly rather than showing an empty
+  // pane. Deliberately NO glyph: the emoji ledger in smoke-ui.mjs only goes down,
+  // and a message this rare is not a reason to spend one.
+  if (!window.DataFlash) {
+    body.innerHTML = `<div class="empty-state">The flight-log reader did not load. Reload the app and try again.</div>`;
+    return;
+  }
+
+  const r = logState.report;
+  const parts = [];
+
+  // 1 — the file. Picking one starts the read; there is no second "Analyse" tap.
+  parts.push(`<div class="insights-block">
+    <h3 class="insights-h">Flight log (.bin)</h3>
+    <div class="log-actions">
+      <input type="file" id="log-file" accept=".bin,.BIN,application/octet-stream" />
+      ${logState.fileName ? `<span class="log-verdict-file">${escHtml(logState.fileName)} · ${logBytes(logState.fileSize)}</span>` : ''}
+      ${logState.fileName && !logState.busy ? `<button type="button" class="btn btn-ghost" id="log-clear">Clear</button>` : ''}
+    </div>
+    <p class="log-note">Read on this device. The .bin is never uploaded — only the report below is kept, and only if you push it into an IR.</p>
+  </div>`);
+
+  // 2 — progress. Only while reading, and only ever in place (see paintLogProgress).
+  if (logState.busy) {
+    parts.push(`<div class="insights-block">
+      <div class="log-progress"><div style="width:${Math.round(logState.progress * 100)}%"></div></div>
+      <p class="log-note">Reading… ${Math.round(logState.progress * 100)}%</p>
+    </div>`);
+  }
+
+  // 3 — a rejection is a real answer, not a failure to hide.
+  if (logState.error) {
+    parts.push(`<div class="insights-block">
+      <h3 class="insights-h">That file could not be read</h3>
+      <p class="log-note">${escHtml(logState.error)}</p>
+    </div>`);
+  }
+
+  // 4 — the report.
+  if (r) parts.push(logReportHTML(r, { jump: true }));
+
+  // 5 — the push. Beneath the verdict, because that is the decision it follows, and
+  // it is the only thing here that WRITES.
+  if (r && !logState.busy) {
+    const canPush = canEditSection('sec-d');
+    parts.push(`<div class="insights-block">
+      <h3 class="insights-h">Push into an IR</h3>
+      <div class="log-actions">
+        ${logTargetSelectHTML()}
+        <button type="button" class="btn" id="log-push"${canPush && logState.target ? '' : ' disabled'}>Push to IR</button>
+      </div>
+      <p class="log-note">${canPush
+        ? 'Appends the summary to Section D → Description of Investigation (it never overwrites what is already written), stamps the Analysis Date if it is empty, and stores the full report on the section.'
+        : 'You do not have edit rights on Section D, so the report cannot be pushed from this account.'}</p>
+      ${logState.pushed ? `<p class="log-note">Pushed into <b>${escHtml(logState.pushed)}</b>. Open it to read the note that was written.</p>` : ''}
+    </div>`);
+  }
+
+  body.innerHTML = `<div class="log-stack">${parts.join('')}</div>`;
+}
+
+// Progress repaints the BAR, not the pane. A re-render per chunk would rebuild the
+// whole report markup — and, worse, throw away the file input's own state.
+function paintLogProgress(p) {
+  const bar = logView && logView.querySelector('.log-progress > div');
+  if (bar) bar.style.width = Math.round(p * 100) + '%';
+  const note = logView && logView.querySelector('.log-progress + .log-note');
+  if (note) note.textContent = 'Reading… ' + Math.round(p * 100) + '%';
+}
+
+// The jump a finding's timestamp performs: to that message's own numbers, which is
+// the next thing the reader wants and the only thing this screen can honestly
+// offer. It flashes what it landed on and clears itself.
+function jumpToLogGroup(name) {
+  const el = document.getElementById('log-group-' + name);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.classList.remove('is-flash');
+  void el.offsetWidth;               // restart the flash if it is already lit
+  el.classList.add('is-flash');
+  setTimeout(() => el.classList.remove('is-flash'), 1400);
+}
+
+async function analyseLogFile(file) {
+  logState.fileName = file.name || '';
+  logState.fileSize = file.size || 0;
+  logState.busy = true;
+  logState.progress = 0;
+  logState.report = null;
+  logState.error = '';
+  logState.pushed = '';
+  renderLog();
+
+  try {
+    const report = await window.DataFlash.analyseFile(file, p => {
+      logState.progress = p;
+      paintLogProgress(p);
+    });
+    if (report && report.ok === false) {
+      logState.error = report.error || 'The file could not be read.';
+    } else {
+      logState.report = report;
+    }
+  } catch (err) {
+    logState.error = 'The log could not be read: ' + ((err && err.message) || String(err));
+  }
+  logState.busy = false;
+  renderLog();
+}
+
+function resetLog() {
+  logState.fileName = '';
+  logState.fileSize = 0;
+  logState.progress = 0;
+  logState.busy = false;
+  logState.report = null;
+  logState.error = '';
+  logState.pushed = '';
+  const inp = document.getElementById('log-file');
+  if (inp) inp.value = '';
+  renderLog();
+}
+
+async function pushLogToIR() {
+  const report = logState.report;
+  const irNumber = logState.target;
+  if (!report) { showToast('Analyse a log first.'); return; }
+  if (!irNumber) { showToast('Choose the IR to push into.'); return; }
+  if (!canEditSection('sec-d')) { showToast('You do not have edit rights on Section D.'); return; }
+  if (logState.busy) return;
+
+  logState.busy = true;
+  renderLog();
+  try {
+    // Open the IR itself rather than writing behind the screen. The engineer sees
+    // what landed in Section D, which is the only trustworthy confirmation of a
+    // write. replaceState keeps the URL honest without firing a second hashchange
+    // on top of the open done here.
+    history.replaceState(null, '', '#/tickets/' + encodeURIComponent(irNumber));
+    await openPassbook(irNumber);
+
+    const stamp = logTodayISO();
+    const ta = document.getElementById('d_investigation');
+    if (ta) {
+      const existing = (ta.value || '').replace(/\s+$/, '');
+      const block = logSummaryText(report, logState.fileName, logState.fileSize, stamp);
+      ta.value = existing ? existing + '\n\n' + block : block;
+    }
+    const dateEl = document.getElementById('d_analysisDate');
+    if (dateEl && !dateEl.value) dateEl.value = stamp;
+
+    // Hand the stored report to the section so collectSectionValues() carries it
+    // through this save AND every later Section D save, instead of dropping it.
+    currentSectionData['sec-d'] = currentSectionData['sec-d'] || {};
+    currentSectionData['sec-d'].d_logAnalysis = logReportForStore(report, logState.fileName, logState.fileSize);
+
+    await saveSection('sec-d', irNumber);
+    logState.pushed = irNumber;
+  } catch (err) {
+    showToast('Could not push the report: ' + ((err && err.message) || String(err)));
+  }
+  logState.busy = false;
+  renderLog();
+}
+
+// The read-only side: the report as it sits on a passbook. No ids, no jumps —
+// see the note above logFindingsHTML.
+function renderLogAnalysis(fieldId, value) {
+  const el = document.getElementById(fieldId);
+  if (!el) return;
+  if (!value || !value.verdict) {
+    el.innerHTML = `<p class="log-note">No flight-log report has been pushed into this IR.</p>`;
+    return;
+  }
+  const report = {
+    verdict: value.verdict,
+    meta: value.meta || {},
+    findings: value.findings || [],
+    parameters: value.parameters || [],
+    fileName: value.file || '',
+    fileBytes: value.fileBytes || 0,
+  };
+  const when = value.pushedAt ? String(value.pushedAt).slice(0, 10) : '';
+  el.innerHTML = `${when ? `<p class="log-note">Pushed ${escHtml(when)}${value.version ? ' · reader v' + escHtml(value.version) : ''}</p>` : ''}
+    ${logReportHTML(report, { jump: false })}`;
+}
+
+function showLog() {
+  currentView = 'log';
+  renderLayout();
+  headerTitle.textContent = 'Log Analyser';
+  // Renders from whatever is in memory; handleRoute() is what waits for the IR
+  // list. Re-rendering on every entry keeps a re-entry from showing a stale pane.
+  renderLog();
+}
+
+if (logView) {
+  logView.addEventListener('change', e => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    if (t.id === 'log-target') {
+      logState.target = t.value || '';
+      try { localStorage.setItem(LOG_TARGET_KEY, logState.target); } catch (_) { /* private mode */ }
+      renderLog();
+      return;
+    }
+    if (t.id === 'log-file' && t.files && t.files[0]) analyseLogFile(t.files[0]);
+  });
+  logView.addEventListener('click', e => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('#log-clear')) { resetLog(); return; }
+    if (t.closest('#log-push')) { pushLogToIR(); return; }
+    const at = t.closest('[data-jump]');
+    if (at) jumpToLogGroup(at.dataset.jump);
   });
 }
 
@@ -5840,6 +6327,11 @@ const SECTIONS = {
       { id: 'd_partA',            label: 'Part A — Investigation',          type: 'divider' },
       { id: 'd_analysisBy',     label: 'Analysis Performed By', type: 'text', placeholder: 'Engineer / analyst name' },
       { id: 'd_analysisDate',   label: 'Analysis Date',         type: 'date' },
+      // Written ONLY by the Log Analyser's "Push to IR" — there is no input for it,
+      // so it is read back from the section's own data on load and carried through
+      // every save (see collectSectionValues). It sits above the free-text fields
+      // because it is the evidence those fields are about.
+      { id: 'd_logAnalysis',    label: 'Flight Log Analysis',    type: 'logAnalysis' },
       { id: 'd_intro',          label: '',                       type: 'analysisNote' },
       { id: 'd_investigation',  label: 'Description of Investigation', type: 'textarea', placeholder: 'Summarise the investigation performed, logs/telemetry reviewed, tests done...' },
       { id: 'd_evidence',       label: 'Investigation Evidence (Images)', type: 'imageEvidence' },
@@ -6213,6 +6705,11 @@ function buildField(field, irNumber, sectionId) {
         <div class="iqc-table-body">${buildIqcRowsHTML()}</div>
         ${adminBtn}
       </div>`;
+  } else if (field.type === 'logAnalysis') {
+    // Read-only, and machine-written: the Log Analyser's "Push to IR" is the only
+    // thing that ever puts a value here. An empty container is built and
+    // populateFieldValue() fills it from the loaded section data.
+    control = `<div class="log-analysis" id="${id}"></div>`;
   } else if (field.type === 'analysisNote') {
     // Dynamic read-only intro line: "Dear customer, analysis of IRXXX for your
     // system with ID XXXXX has been completed. Its findings are as below."
@@ -6290,9 +6787,12 @@ function buildField(field, irNumber, sectionId) {
   const locked = !!field.locked;
   const lockIcon = locked ? ' <span class="field-lock-icon" title="Auto-filled from the customer IR form — not editable">&#128274;</span>' : '';
   // Per-field nudge / comment button. Hidden when the whole section isn't
-  // commentable for this user (skipped for read-only analysis notes too).
+  // commentable for this user (skipped for the two read-only types too — an
+  // analysis note and a pushed flight-log report are not stored values anyone can
+  // annotate, so a button there could only ever be noise).
+  const noFieldBtns = field.type === 'analysisNote' || field.type === 'logAnalysis';
   const canFieldComment = sectionId ? canCommentSection(sectionId) : true;
-  const fieldNudgeBtn = (field.type && field.type !== 'analysisNote' && canFieldComment && !locked)
+  const fieldNudgeBtn = (field.type && !noFieldBtns && canFieldComment && !locked)
     ? `<button type="button" class="field-nudge-btn" data-field-id="${escJsAttr(id)}" title="Comments on this field" onclick="openNudgeModalForField('${escJsAttr(id)}')">${iconSvg('comment')}<span class="comment-count" style="display:none;">0</span></button>`
     : '';
   // Per-field HISTORY button — the field-level half of the same idea as the ticket's
@@ -6309,7 +6809,7 @@ function buildField(field, irNumber, sectionId) {
   // Viewing history is a READ, so this button deliberately survives the view-only
   // disable sweep — see applySectionAccessGating. The WRITE that history can offer
   // (putting an old value back) is gated separately, where it is rendered.
-  const fieldHistBtn = (field.type && field.type !== 'analysisNote' && !locked)
+  const fieldHistBtn = (field.type && !noFieldBtns && !locked)
     ? `<button type="button" class="field-hist-btn" data-field-id="${escJsAttr(id)}" title="History of this field" onclick="openFieldHistory('${escJsAttr(id)}')">${iconSvg('clock')}</button>`
     : '';
   const fieldBtns = fieldNudgeBtn + fieldHistBtn;
@@ -6900,6 +7400,8 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
 
   // analysisNote is a read-only display line built from currentIR — nothing to populate.
   if (field?.type === 'analysisNote') return;
+  // logAnalysis is read-only too, but it DOES carry a value: the stored report.
+  if (field?.type === 'logAnalysis') { renderLogAnalysis(fieldId, value); return; }
   // divider is a static sub-heading — no value to populate.
   if (field?.type === 'divider') return;
 
@@ -7090,6 +7592,12 @@ function collectSectionValues(sectionId) {
       };
       const newFiles = entries.filter(e => e.file).map(e => e.file);
       if (newFiles.length) fileFields.push({ id: attachId, files: newFiles });
+    } else if (field.type === 'logAnalysis') {
+      // Carried through, not collected. There is no input to read — the value lives
+      // only in the section data the analyser wrote it to, and dropping it here
+      // would mean a perfectly ordinary Section D save quietly deleted the report.
+      const held = currentSectionData?.[sectionId]?.[field.id];
+      if (held) fieldValues[field.id] = held;
     } else if (field.type === 'dispatchChecklist') {
       fieldValues[field.id] = collectDispatchChecklist(field.id);
     } else if (field.type === 'courierName') {
@@ -9117,6 +9625,9 @@ const ICON_PATHS = {
   // WRONG — it already means the client's Report tab — so the counts get their own
   // three columns, which is what the page is.
   chart:          '<path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="13" y="8" width="3" height="9"/><rect x="18" y="14" width="3" height="3"/>',
+  // The Log Analyser's nav glyph. A telemetry trace, because that is what the
+  // screen reads: a signal with a spike in it, which is the thing it is looking for.
+  pulse:          '<path d="M3 12h3.5l2.5-6.5 3.5 13 2.5-6.5H21"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
@@ -9144,6 +9655,7 @@ function initIcons() {
     ['#nudge-bell .nudge-bell-icon',         'bell'],
     ['#nav-tickets .nav-icon',               'ir'],
     ['#nav-insights .nav-icon',              'chart'],
+    ['#nav-log .nav-icon',                   'pulse'],
     ['#legacy-workbook-btn .nav-icon',       'legacy'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],

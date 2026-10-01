@@ -306,6 +306,15 @@
           <span class="nav-label">Insights</span>
         </a>
 
+        <!-- Reads an ArduPilot flight log (.bin) entirely in the browser and
+             reports what went wrong with it. A plain hash link with no JS
+             binding, exactly like the two above: the hashchange listener is the
+             whole mechanism. -->
+        <a class="nav-item" id="nav-log" href="#/log" title="Log Analyser">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label">Log Analyser</span>
+        </a>
+
         <!-- Opens the read-only legacy workbook. The id is load-bearing:
              app.js binds openLegacyWorkbook() to it. -->
         <button type="button" class="nav-item" id="legacy-workbook-btn"
@@ -612,6 +621,27 @@
           </div>
         </div>
 
+        <!-- ====== LOG ANALYSER VIEW ====== -->
+        <!-- A FOURTH sibling pane, on the same principle as #insights-view
+             above: on desktop the IR list keeps its place beside this one, and
+             folding the analyser into the detail pane would make that pane's
+             display stop meaning "an IR is open".
+
+             Deliberately carries no class="section-content" — the suites count
+             panes by that literal, and the nine sections are what they count.
+
+             EMPTY here rather than carrying a skeleton: this pane's first frame
+             is the file picker, which app.js writes on the way in. A skeleton
+             would promise a result before any file has been chosen. -->
+        <div id="log-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title">Log Analyser</span>
+            </div>
+          </div>
+          <div id="log-body" class="log-body"></div>
+        </div>
+
       </div><!-- end panes -->
     </div><!-- end workspace -->
   </div><!-- end app-container -->
@@ -627,6 +657,11 @@
        window.PDFLib before app.js runs. Vendored, not CDN — the app has to work
        offline (it is a PWA) and must not depend on a third party at runtime. -->
   <script src="vendor/pdf-lib.min.js"></script>
+  <!-- Flight-log reader (ArduPilot DataFlash), for the Log Analyser. A plain
+       script for the same reasons as pdf-lib above, and written in-house rather
+       than vendored because the obvious library is GPL-3.0 and this repo is
+       public. It only has to expose window.DataFlash before app.js runs. -->
+  <script src="dataflash.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on

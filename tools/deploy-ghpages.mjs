@@ -44,6 +44,7 @@ const SERVED = [
   'app.js',
   'base.css',
   'components.css',
+  'dataflash.js',
   'desk.css',
   'index.html',
   'manifest.json',

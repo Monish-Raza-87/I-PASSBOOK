@@ -40,6 +40,11 @@ const TARGET = 'gh-pages'
 // and precaching five mock pages into every install would be a cost with no
 // benefit. It is seven files plus one stylesheet, listed here one by one, which is
 // also what makes deleting the whole directory later a two-line change.
+//
+// `plan.html` is the build plan itself — a document the owner reads on his phone,
+// not part of the app. It carries its own styles and loads nothing at all, so it
+// cannot drift when the app's tokens change, and like `preview/` it stays out of
+// sw.js's SHELL.
 const SERVED = [
   'app.js',
   'base.css',
@@ -49,6 +54,7 @@ const SERVED = [
   'index.html',
   'manifest.json',
   'palette.css',
+  'plan.html',
   'sw.js',
   'tokens.css',
   'views.css',

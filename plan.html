@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-PASSBOOK Build Plan</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --line-strong: #b9bfcc;
+    --accent: #2440d8;
+    --accent-soft: #e8ebfb;
+    --warn: #9a4a00;
+    --warn-soft: #fdf0dd;
+    --warn-line: #e8c48a;
+    --ok: #1d6b45;
+    --ok-soft: #e2f3ea;
+    --stop: #a51f2c;
+    --stop-soft: #fbe8ea;
+    --stop-line: #e5aab1;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --surface-2: #1e2431;
+      --fg: #e7eaf1;
+      --fg-muted: #98a1b3;
+      --line: #2a3140;
+      --line-strong: #3b4354;
+      --accent: #8fa2ff;
+      --accent-soft: #1d2440;
+      --warn: #e8b06a;
+      --warn-soft: #2c2314;
+      --warn-line: #55411f;
+      --ok: #6fd3a0;
+      --ok-soft: #14291f;
+      --stop: #f08e97;
+      --stop-soft: #2e1519;
+      --stop-line: #5c2b32;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --surface-2: #1e2431;
+    --fg: #e7eaf1;
+    --fg-muted: #98a1b3;
+    --line: #2a3140;
+    --line-strong: #3b4354;
+    --accent: #8fa2ff;
+    --accent-soft: #1d2440;
+    --warn: #e8b06a;
+    --warn-soft: #2c2314;
+    --warn-line: #55411f;
+    --ok: #6fd3a0;
+    --ok-soft: #14291f;
+    --stop: #f08e97;
+    --stop-soft: #2e1519;
+    --stop-line: #5c2b32;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-block: 0 4rem;
+  }
+  .wrap { max-width: 74ch; margin: 0 auto; padding-inline: 16px; }
+
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    padding-block: 2.5rem 2rem;
+    margin-bottom: 2rem;
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fg-muted);
+    font-weight: 600;
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-size: clamp(1.65rem, 5vw, 2.3rem);
+    line-height: 1.15;
+    margin: 0 0 0.7rem;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.05rem;
+    color: var(--fg-muted);
+    margin: 0;
+    max-width: 62ch;
+  }
+  .meta {
+    margin-top: 1.3rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .meta b { color: var(--fg); font-weight: 600; }
+
+  h2 {
+    font-size: 1.3rem;
+    line-height: 1.25;
+    margin: 0 0 0.35rem;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1rem;
+    margin: 1.8rem 0 0.5rem;
+    letter-spacing: -0.005em;
+  }
+  h4 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--fg-muted);
+    margin: 1.5rem 0 0.5rem;
+  }
+  p { margin: 0 0 0.9rem; }
+  a { color: var(--accent); }
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.08em 0.35em;
+  }
+  strong { font-weight: 650; }
+
+  section {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.4rem;
+    margin-bottom: 1.1rem;
+    border-left: 3px solid var(--line-strong);
+  }
+  section.is-urgent { border-left-color: var(--stop); }
+  section.is-phase { border-left-color: var(--accent); }
+  section.is-quiet { border-left-color: var(--line-strong); }
+  .sec-head { margin-bottom: 1rem; }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+  .sec-sub {
+    color: var(--fg-muted);
+    font-size: 0.95rem;
+    margin: 0.4rem 0 0;
+    max-width: 62ch;
+  }
+
+  .chip {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .chip-stop { background: var(--stop-soft); color: var(--stop); border-color: var(--stop-line); }
+  .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+  .chip-ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok); }
+  .chip-do   { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .chip-plan { background: var(--surface-2); color: var(--fg-muted); border-color: var(--line-strong); }
+
+  .callout {
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    margin: 1rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    font-size: 0.95rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout.stop { background: var(--stop-soft); border-color: var(--stop-line); }
+  .callout.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+  .callout.ok   { background: var(--ok-soft);   border-color: var(--ok); }
+  .callout .ct {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .callout.stop .ct { color: var(--stop); }
+  .callout.warn .ct { color: var(--warn); }
+  .callout.ok .ct { color: var(--ok); }
+
+  nav.jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.6rem;
+  }
+  nav.jump a {
+    font-size: 0.82rem;
+    text-decoration: none;
+    color: var(--fg-muted);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+  }
+  nav.jump a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  ul, ol { margin: 0 0 0.9rem; padding-left: 1.25rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--fg-muted); }
+
+  .table-scroll { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; min-width: 34rem; }
+  th, td { text-align: left; padding: 0.6rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th {
+    background: var(--surface-2);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-muted);
+    font-weight: 650;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .grid2 { display: grid; gap: 0.9rem; }
+  @media (min-width: 620px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    background: var(--bg);
+  }
+  .card h4 { margin-top: 0; }
+  .card p:last-child { margin-bottom: 0; }
+
+  .phase-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+  }
+  .phase-row h2 { margin: 0; }
+
+  footer.end {
+    margin-top: 2rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--line);
+    color: var(--fg-muted);
+    font-size: 0.88rem;
+  }
+</style>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Indrones · I-PASSBOOK</p>
+    <h1>The Build Plan</h1>
+    <p class="standfirst">
+      Everything you asked for, in the order that keeps your data safe while it happens.
+      The safety machinery is built <em>before</em> the risky change, never after.
+    </p>
+    <div class="meta">
+      <span><b>Date</b> 1 October 2026</span>
+      <span><b>App at</b> v57</span>
+      <span><b>Phases</b> 6</span>
+      <span><b>Status</b> for your review</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="jump">
+    <a href="#s0">0 · Read this first</a>
+    <a href="#s1">1 · What you decided</a>
+    <a href="#s2">2 · How this stays safe</a>
+    <a href="#s3">3 · Phase 0</a>
+    <a href="#s4">4 · Phase 1</a>
+    <a href="#s5">5 · Phase 2</a>
+    <a href="#s6">6 · Phase 3</a>
+    <a href="#s7">7 · Phase 4</a>
+    <a href="#s8">8 · Phase 5</a>
+    <a href="#s9">9 · The order</a>
+    <a href="#s10">10 · Honest limits</a>
+    <a href="#s11">11 · What I need</a>
+  </nav>
+
+  <section id="s0" class="is-urgent">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 0</span>
+      <div class="phase-row">
+        <h2>Read this first: the IR list is currently public</h2>
+        <span class="chip chip-stop">Fix first</span>
+      </div>
+      <p class="sec-sub">
+        You said the IR data is sensitive. Before anything else in this plan, here is the one finding
+        that changes the order of work — verified in your code today, not remembered.
+      </p>
+    </div>
+
+    <p>
+      The app's main IR list is not fetched through the logged-in backend. It is fetched
+      <strong>straight from a link-shared Google source, with no login at all</strong>, and that path is tried
+      <em>first</em> — it returns before the protected route is ever consulted. The comment beside it in the
+      code is explicit that this was deliberate, to avoid needing a backend deploy for the list.
+    </p>
+
+    <p>What travels over that path, per IR:</p>
+    <ul>
+      <li>IR number, date raised, incident date, current status</li>
+      <li>Drone serial number</li>
+      <li>Who is reporting — <strong>a named person</strong></li>
+      <li>Their <strong>email address</strong></li>
+      <li>The free-text description of the problem, and what support was requested</li>
+    </ul>
+
+    <div class="callout stop">
+      <span class="ct">Why this matters</span>
+      <p>
+        That is customer identities, customer contact details and a reliability record of your aircraft,
+        readable by anyone who has the link — and the link is derivable from the app's own JavaScript,
+        which anyone can load. It is not a hypothetical: it is the app's primary data path right now.
+        The older legacy workbook is shared the same way, and is embedded the same way.
+      </p>
+    </div>
+
+    <p>
+      <strong>The fix is small and it does not need the big migration.</strong> The protected route on your
+      backend already exists and already reads the same records — the app simply never reaches it because
+      the public path answers first. So Phase 0 is: stop the browser reading the public source, route the list
+      through the backend you already have, then take both sources from "anyone with the link" back to
+      restricted, where the backend can still read them as their owner.
+    </p>
+
+    <p>
+      The only cost is that the list becomes slightly slower, because it goes through Apps Script.
+      <strong>That is the price of not publishing it</strong>, and Phase 3 removes the cost entirely.
+    </p>
+
+    <p class="mono" style="font-size:0.85rem;color:var(--fg-muted)">
+      Also to verify in Phase 0: the sharing setting on your Drive root folder and the evidence folders.
+      Nothing in that folder should be link-shared either.
+    </p>
+  </section>
+
+  <section id="s1" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 1</span>
+      <h2>What you decided</h2>
+      <p class="sec-sub">Frozen, so the rest of this document can build on it without re-asking.</p>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Question</th><th>Your answer</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>The data model</td><td><strong>The app owns everything.</strong> The Sheet stays intake only; the app owns workflow state.</td></tr>
+          <tr><td>Navigation</td><td>Rail along the top on web. On a phone, the screen belongs to the fields — no rail, a collapsible list instead.</td></tr>
+          <tr><td>Languages</td><td>Interface only. English, Hindi, Marathi.</td></tr>
+          <tr><td>Backend</td><td>Move it. Database chosen for speed, with the free plan and no payment method.</td></tr>
+          <tr><td>Evidence</td><td>Files live in <em>your</em> Drive, in a folder per IR, inside your master folder.</td></tr>
+          <tr><td>The board</td><td>A real workflow everyone sees — <strong>both</strong> views, with a switch.</td></tr>
+          <tr><td>Customer door</td><td>Google Form now, an AI assistant later.</td></tr>
+          <tr><td>Detail window</td><td>Rolling 12 months from today, plus every open IR of any age.</td></tr>
+          <tr><td>Counts</td><td>Every IR ever, forever — in stats, insights and numbers.</td></tr>
+          <tr><td>Sign-in</td><td>Everyone has a Workspace account.</td></tr>
+          <tr><td>Backups</td><td>Change journal plus a nightly full export, readable, in your Drive.</td></tr>
+          <tr><td>Second copy</td><td>Your own servers, syncing the backup folder in realtime.</td></tr>
+          <tr><td>Retention</td><td>Rotate, don't keep everything. Archives written once, kept forever.</td></tr>
+          <tr><td>Cold spare</td><td>Plan it now, build it last.</td></tr>
+          <tr><td>Illustrations</td><td>Open Doodles; Humaaans as the conditional second.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="s2" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 2</span>
+      <h2>How this build stays safe</h2>
+      <p class="sec-sub">Six rules that apply to every phase below. They are the reason the order is what it is.</p>
+    </div>
+
+    <ol>
+      <li><strong>The net goes up before the risky change, not after.</strong> Backups are built and <em>tested</em> while nothing is at stake, so the migration is the safest thing we do, not the scariest.</li>
+      <li><strong>Nothing is ever overwritten.</strong> Every backup is a new, dated file. This is already the rule in your code, and it is what makes the realtime sync to your servers safe — the sync accumulates history instead of faithfully copying a mistake.</li>
+      <li><strong>A backup nobody has restored from is not a backup.</strong> Before the migration, we rebuild the app from an export file once and prove it works.</li>
+      <li><strong>Readable, not just restorable.</strong> A spreadsheet you can open on your phone tomorrow morning, plus raw data that a program can rebuild from. Both, because they do different jobs.</li>
+      <li><strong>The backup is the most sensitive thing in the system.</strong> A full readable copy of every IR, every customer email and every user account is a bigger prize than the app itself. It never gets shared, and its folder permissions are the tightest in the whole setup.</li>
+      <li><strong>Failures announce themselves.</strong> Success is silent; failure sends you a message. A backup that quietly stopped working three months ago is worse than no backup, because you were relying on it.</li>
+    </ol>
+
+    <div class="callout warn">
+      <span class="ct">One honest trade on the backup</span>
+      <p>
+        You want to read it in Excel tomorrow morning, so it cannot be encrypted in a way that only a
+        program can open. That means the backup folder is a complete, readable copy of everything.
+        The protection is therefore folder permissions and your account's security, not a password on the
+        file — and that is worth knowing deliberately rather than discovering later.
+      </p>
+    </div>
+  </section>
+
+  <section id="s3" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 0</span>
+      <div class="phase-row">
+        <h2>Close the leak</h2>
+        <span class="chip chip-stop">Urgent</span>
+        <span class="chip chip-plan">Days, not weeks</span>
+      </div>
+      <p class="sec-sub">Nothing about the app's look changes. The data simply stops being public.</p>
+    </div>
+
+    <ul>
+      <li>Remove the direct read from the browser. The list comes through the protected backend route that already exists.</li>
+      <li>Take both Google sources from link-shared to restricted sharing. The backend still reads them, because it runs as their owner.</li>
+      <li>Rebuild the Legacy view from backend data instead of embedding the live workbook, which is what forces it to stay link-shared today.</li>
+      <li>Verify the sharing on your Drive root folder and the evidence folders.</li>
+      <li>Add a check to the test suite that fails if a public read path ever comes back.</li>
+    </ul>
+
+    <p>
+      <strong>What you'll see:</strong> the list takes about a second longer to appear. Nothing else.
+      <strong>What changes:</strong> your IR data stops being readable by strangers, today, without waiting
+      for any of the rest of this plan.
+    </p>
+  </section>
+
+  <section id="s4" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 1</span>
+      <div class="phase-row">
+        <h2>The safety net</h2>
+        <span class="chip chip-do">Build second</span>
+        <span class="chip chip-plan">1–2 weeks</span>
+      </div>
+      <p class="sec-sub">
+        This is the phase you care about most, and it is deliberately before the migration.
+        It works on the store you have today, so it needs nothing else to be finished first.
+      </p>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <h4>The change journal</h4>
+        <p>
+          A small record appended as work happens, so a crash at 4pm costs you minutes instead of a
+          whole day. Written inside the same server call that already saves your edits, so it costs
+          nothing extra.
+        </p>
+      </div>
+      <div class="card">
+        <h4>The nightly full export</h4>
+        <p>
+          Every night: a Google Sheet you can open on your phone with a tab per record type, plus CSV
+          files, plus the raw data a restore actually rebuilds from. Into a dated folder.
+        </p>
+      </div>
+      <div class="card">
+        <h4>The rotation</h4>
+        <p>
+          14 daily, 8 weekly, 12 monthly, one yearly forever. About 625 MB steady, flat forever —
+          instead of 55 GB over ten years, which would have filled your entire Google account.
+        </p>
+      </div>
+      <div class="card">
+        <h4>The yearly archives</h4>
+        <p>
+          IRs that leave the 12-month window are exported <em>once</em> into a dated archive file that is
+          never touched again. Small, permanent, and never rewritten — so the thing that grows forever
+          is not the thing written every night.
+        </p>
+      </div>
+      <div class="card">
+        <h4>Backup health, visible</h4>
+        <p>
+          The export records its own success, and the app shows <strong>"Last backup: last night,
+          23:40 ✓"</strong> on the admin screen. You'd see it every day without doing anything.
+        </p>
+      </div>
+      <div class="card">
+        <h4>Failure is loud</h4>
+        <p>
+          An email on failure only. Plus an independent daily check from your own GitHub repo — it lives
+          outside Google, so it still barks if the whole Google side stops.
+        </p>
+      </div>
+      <div class="card">
+        <h4>The restore rehearsal</h4>
+        <p>
+          A script that rebuilds the store from an export, run once for real into a scratch folder. Until
+          that has happened, we are guessing — and guessing is what fails at the worst moment.
+        </p>
+      </div>
+      <div class="card">
+        <h4>Drive → your servers</h4>
+        <p>
+          Your part. Point the sync at the <strong>backup folder</strong>, never at the live working
+          folder — mirroring the live data in realtime would copy an accident within seconds.
+        </p>
+      </div>
+    </div>
+
+    <div class="callout ok">
+      <span class="ct">Why this ordering is the safe one</span>
+      <p>
+        By the end of Phase 1 you have a readable copy of everything, refreshed nightly, copied to
+        machines you own, and proven restorable. <em>Then</em> we touch the data layer. If the migration
+        goes wrong, the answer to "can we get it back?" is already yes, and it was answered before
+        anything was at risk.
+      </p>
+    </div>
+  </section>
+
+  <section id="s5" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 2</span>
+      <div class="phase-row">
+        <h2>The seam</h2>
+        <span class="chip chip-do">Build third</span>
+        <span class="chip chip-plan">Internal — you see nothing</span>
+      </div>
+      <p class="sec-sub">
+        One file gets one job: talking to the backend. Everything else asks it. This is a small change
+        that makes two big ones survivable.
+      </p>
+    </div>
+
+    <p>Your app is one 10,000-line file, and backend calls are scattered through it. That single fact is what makes replacing the backend frightening, and what makes building new screens awkward.</p>
+
+    <ul>
+      <li>Every backend call moves into one file. Nothing else calls the backend directly.</li>
+      <li><strong>It makes the migration survivable:</strong> swapping the backend becomes changing one file instead of hunting through ten thousand lines.</li>
+      <li><strong>It lets work run in parallel:</strong> new screens get built against the seam while the migration happens behind it.</li>
+      <li><strong>No build step, no npm, no new stylesheet.</strong> A library can simply be placed in the repo — your vendored PDF library is already the proof of that.</li>
+    </ul>
+  </section>
+
+  <section id="s6" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 3</span>
+      <div class="phase-row">
+        <h2>The migration</h2>
+        <span class="chip chip-do">Build fourth</span>
+        <span class="chip chip-plan">The big one</span>
+      </div>
+      <p class="sec-sub">
+        The app stops asking a server for data and asks a database directly. This is what makes it fast,
+        and it is the permanent fix for Section 0.
+      </p>
+    </div>
+
+    <h4>Why the free plan is safe, in numbers</h4>
+    <p>At your size — around 500 IRs, 150 of them live, about 15 people using it:</p>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>Per day</th><th class="num">Used</th><th class="num">Free limit</th><th class="num">Of the limit</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Writes — saves, statuses, new IRs, nudges</td><td class="num">~200</td><td class="num">20,000</td><td class="num">1%</td></tr>
+          <tr><td>Storage</td><td class="num">~50 MB</td><td class="num">1 GiB</td><td class="num">5%</td></tr>
+          <tr><td>Reads, if every screen loads everything</td><td class="num">~45,000</td><td class="num">50,000</td><td class="num">90% ⚠</td></tr>
+          <tr><td>Reads, with the live set and caching</td><td class="num">~5,000</td><td class="num">50,000</td><td class="num">10%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>
+      Writes and storage were never the risk, and they get <em>safer</em> as the archive grows. Reads are the
+      only thing that can bite, and only if caching is skipped. Caching is therefore not an optimisation;
+      <strong>it is what makes the free plan safe</strong>. And there is no payment method on the account at all,
+      so no mechanism exists that could produce an invoice — the worst case is the database refusing until
+      the quota resets at midnight Pacific, never a bill.
+    </p>
+
+    <h4>What moves where</h4>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Part</th><th>Where it lives after the migration</th></tr></thead>
+        <tbody>
+          <tr><td>Reading and writing IRs, users, access</td><td>The database, straight from the browser — milliseconds, no server in the path</td></tr>
+          <tr><td>Permissions</td><td>Enforced by the database's own rules, not by server code</td></tr>
+          <tr><td>Sign-in</td><td>Google, one tap, restricted to your company domain</td></tr>
+          <tr><td>Evidence files</td><td>Your Drive, unchanged — one folder per IR</td></tr>
+          <tr><td>Email, Chat posts, the nightly export, provisioning accounts</td><td>The backend keeps these, because they need a secret or a mailbox. A cold start there delays an email, not your screen.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Three things worth knowing up front</h4>
+    <ul>
+      <li><strong>Permissions get encoded into the sign-in token.</strong> Your access model is department-based. Putting each person's departments into their sign-in token means permission checks need no lookups at all — fast and simple. The cost is that a change takes up to an hour to reach someone who is already signed in.</li>
+      <li><strong>Departments could become Google Groups</strong>, which would delete a private list the app maintains today — and delete a known bug in it at the same time.</li>
+      <li><strong>Insights reads precomputed counts</strong>, not every IR: twelve small documents a year instead of thousands of reads. The archive files stay in Drive for questions nobody anticipated, loaded only when you actually ask one.</li>
+    </ul>
+
+    <h4>How the data moves, safely</h4>
+    <ol>
+      <li>A <strong>copy</strong> migration, never a move. The old store is left exactly as it is, untouched, for three months.</li>
+      <li>It <strong>verifies itself</strong>: every record compared before and after, and it refuses to switch if anything disagrees.</li>
+      <li>Your <strong>nightly backup is the rollback path</strong> — and by now it has been rehearsed.</li>
+      <li>An <strong>archived period is loadable on demand</strong>. When you click a bar for a year that is past the 12-month window, the app offers one button — "Load this year from the archive" — so you never hit a dead end, and you never wait unless you asked.</li>
+    </ol>
+  </section>
+
+  <section id="s7" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 4</span>
+      <div class="phase-row">
+        <h2>The screens</h2>
+        <span class="chip chip-do">Build fifth, overlapping Phase 3</span>
+      </div>
+      <p class="sec-sub">
+        Everything from your list. The good news first: <strong>seven of them are a redraw, not a build</strong>
+        — the data already exists and only needs a screen.
+      </p>
+    </div>
+
+    <h4>Already have the data — these are drawings</h4>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>What you asked for</th><th>What is already there</th></tr></thead>
+        <tbody>
+          <tr><td>Timeline</td><td>A built timeline on the ticket, moved once already</td></tr>
+          <tr><td>Notification inbox</td><td>Notifications, an unread count, a bell, a panel, an email per assignment</td></tr>
+          <tr><td>Evidence gallery / photogrid</td><td>Multiple images <em>and</em> PDFs per field, each with a caption, plus a camera capture</td></tr>
+          <tr><td>History in logs</td><td>A full audit trail, already per IR and per field</td></tr>
+          <tr><td>Four coloured spinners</td><td>A spinner already exists and the status colours are already contrast-checked</td></tr>
+          <tr><td>Multi-step sign-in</td><td>Already three steps: email, emailed code, then a forced first change</td></tr>
+          <tr><td>IRs in list or tile view</td><td>The data is there. The tile is a second width budget, and the row is already measured to the pixel.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Genuinely new</h4>
+    <ul>
+      <li>
+        <strong>The board — the masterpiece.</strong> Both views with a switch.
+        <em>Stages:</em> Inward Checklist, IQC Visual Inspection, Investigation, Production (Rework),
+        Quality Test Report, PDI Report / Dispatch Record. <em>Statuses:</em> Open, Paused, Resolved, Closed.
+        <div class="callout warn" style="margin:0.6rem 0 0">
+          <span class="ct">One honest requirement</span>
+          <p>
+            The app records which sections have been <em>saved</em> — and only ever adds, never removes. That is
+            not the same as knowing which stage an IR is <em>in</em>. A stage board needs a real
+            "current stage" field on the record. That is a small data-model change, and without it the
+            board would be guessing.
+          </p>
+        </div>
+      </li>
+      <li><strong>Inline video</strong> in evidence.</li>
+      <li><strong>Charts and stats</strong> on Insights, drawn as vector graphics so they follow all four colour presets and both themes for free.</li>
+      <li><strong>A People card</strong> counting what each person is carrying and what is overdue. It counts assignees, so it is called People and not Departments — a card saying "Departments" while counting something else would be worse than no card.</li>
+      <li><strong>A Users screen</strong>, an <strong>Account screen</strong>, and <strong>Account settings</strong>.</li>
+      <li><strong>A customisation card</strong> — and this is mostly a redraw too: four colour presets already exist, so the card is a face on something already built, plus density.</li>
+      <li><strong>A dense task list</strong> and a <strong>condensed layout</strong>.</li>
+      <li><strong>Empty states with illustrations</strong> — Open Doodles, chosen by you.</li>
+      <li><strong>Form polish</strong> — icons, validation, better feedback. The sign-in button currently shows only a label change during a cold start of up to half a minute, which is the weakest feedback anywhere in the app.</li>
+    </ul>
+
+    <h4>Two things that are decisions, not code</h4>
+    <ul>
+      <li><strong>Incident location.</strong> Real map tiles need a paid key, and the location is a customer's site — while the app already has a public-read problem we are fixing in Phase 0. My recommendation stands: store the coordinates, show them as text, link out to a map. No tiles, no key, no new exposure.</li>
+      <li><strong>Privacy, terms and FAQ.</strong> I can write the FAQ from how the app actually behaves. I will not invent a privacy policy or terms — a plausible-looking fake is worse than none, and you should choose a reviewed template or supply the words.</li>
+    </ul>
+  </section>
+
+  <section id="s8" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">PHASE 5</span>
+      <div class="phase-row">
+        <h2>Bridges, languages, polish</h2>
+        <span class="chip">Last</span>
+      </div>
+      <p class="sec-sub">The pieces that connect outward, once everything inward is solid.</p>
+    </div>
+
+    <h4>The three Google bridges</h4>
+    <ul>
+      <li><strong>Chat</strong> — IR notifications into a space. The webhook address is a secret, so it lives on the backend and never in the app's code, where anyone could read it and post as you.</li>
+      <li><strong>Drive</strong> — one evidence folder per IR, inside your master folder. Files stay yours, at every age, even after the app forgets the link.</li>
+      <li><strong>Sheets</strong> — the customer intake form, and your legacy workbook, both read by the backend rather than published.</li>
+    </ul>
+
+    <h4>Hindi and Marathi</h4>
+    <p>
+      There is <strong>no translation system in the app at all</strong> — every label is hard-coded English.
+      The single most useful thing here is to put the indirection in <em>now</em>, while only English ships,
+      because retrofitting it later is the expensive version of the same job. The translations themselves then
+      become one file rather than a rewrite.
+    </p>
+
+    <h4>The cold spare</h4>
+    <p>
+      Planned now, built last. Your app's screens are static files that would still load even if Google
+      turned everything off — it is the data that would vanish. So the spare is a mode that opens a backup
+      file you already have and shows your records read-only. Slower, and not for everyday use. It exists so
+      that the answer to "what if the terms change" is a file on your own machine, not a phone call.
+    </p>
+  </section>
+
+  <section id="s9" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 9</span>
+      <h2>The order, at a glance</h2>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Phase</th><th>What</th><th>You see</th></tr></thead>
+        <tbody>
+          <tr><td class="num">0</td><td>Close the public read path</td><td>Nothing, except the list is a second slower. Your data stops being public.</td></tr>
+          <tr><td class="num">1</td><td>The safety net</td><td>A backup folder filling nightly, a health line in the app, a proven restore.</td></tr>
+          <tr><td class="num">2</td><td>The seam</td><td>Nothing. Internal.</td></tr>
+          <tr><td class="num">3</td><td>The migration</td><td>The app gets fast. Sign-in becomes one tap.</td></tr>
+          <tr><td class="num">4</td><td>The screens</td><td>Everything else you asked for. Can overlap Phase 3.</td></tr>
+          <tr><td class="num">5</td><td>Bridges, languages, spare</td><td>Chat notifications, Hindi and Marathi, the disaster mode.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="s10" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 10</span>
+      <h2>Honest limits</h2>
+      <p class="sec-sub">The parts where I would rather set the expectation now than explain later.</p>
+    </div>
+
+    <ul>
+      <li><strong>"100% data safety" is not a thing anyone can promise</strong> — not me, not Google. What this plan does instead is make a loss survivable: two independent copies, one of them on machines you own, plus a restore that has actually been performed.</li>
+      <li><strong>"Forever free" is not a promise either.</strong> What is true is stronger and narrower: there is no payment method, so no invoice can be created; and the free quota is used at about a tenth. Terms could still change, which is precisely what the cold spare is for.</li>
+      <li><strong>Phase 0 makes the list slower.</strong> That is a real regression, accepted deliberately, and Phase 3 removes it.</li>
+      <li><strong>The board needs a new field</strong> ("current stage") or it will be guessing from an append-only list.</li>
+      <li><strong>A permission change takes up to an hour</strong> to reach someone already signed in, once permissions live in the sign-in token.</li>
+      <li><strong>The archive seam is real.</strong> Counts cover everything; clicking into a period older than a year loads it on demand rather than instantly.</li>
+      <li><strong>Translations and legal text need a person.</strong> Software can carry them; it cannot vouch for them.</li>
+    </ul>
+  </section>
+
+  <section id="s11" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 11</span>
+      <h2>What I need from you</h2>
+    </div>
+
+    <ol>
+      <li><strong>Phase 0 — shall I start it?</strong> It is small, it is urgent, and it is independent of every other decision in this document.</li>
+      <li><strong>Incident location</strong> — text plus a link out, or a real map with a paid key?</li>
+      <li><strong>Who reviews the Hindi and Marathi</strong> before they go live?</li>
+      <li><strong>Who writes the privacy policy and terms</strong> — you, or a template you choose?</li>
+      <li><strong>The board's stage field</strong> — do you want "current stage" to be set by hand at Triage, or to move automatically as sections are saved?</li>
+    </ol>
+
+    <p style="margin-bottom:0">
+      Everything else in this document is decided and ready to build.
+    </p>
+  </section>
+
+  <footer class="end">
+    <p>
+      I-PASSBOOK build plan · 1 October 2026 · prepared for the owner's review.
+      Phases 0–2 change nothing you look at; Phase 3 is the one you will feel;
+      Phase 4 is the one you asked for.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

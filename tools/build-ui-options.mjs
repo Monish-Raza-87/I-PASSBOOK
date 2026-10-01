@@ -472,6 +472,26 @@ const BOARD_CHROME = `
 /* Visible to a screen reader only. The step letters are decoration; the section
    name is the part worth announcing, and the bars carry no text at all. */
 .pv-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The verdict list — a row per claim, its verdict beside it, its evidence under.
+   THIS BLOCK WAS IN THE WRONG PLACE and it rendered as one run-on line: it lived
+   in the empty-states skin, which is inlined only on empty.html, so on board.html
+   the classes matched nothing and <b>It is a drawing of data you have</b> sat
+   flush against <span>No migration</span> with no space and no rule between rows.
+   Every test passed and the CSS was valid; it is only visible by rendering the
+   page. It belongs in the shared sheet, like the rest of the chrome, because
+   BOTH boards use it — a skin is inlined per page and cannot be shared. */
+.pv-lic { margin-top: 0.2rem; }
+.pv-lic-row { padding: 0.6rem 0; border-bottom: 1px solid var(--outline-gray-2); }
+.pv-lic-row b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-lic-row p { margin: 0.25rem 0 0; color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
+.pv-lic-row .yes { margin-left: 0.5rem; color: var(--st-resolved-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.pv-lic-row .no { margin-left: 0.5rem; color: var(--st-danger-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+/* .warn had NO RULE AT ALL — not here and not in the skin it was copied from —
+   so on both boards a "Decide" verdict rendered as plain text wedged against the
+   claim it belongs to, while "No migration" beside it was coloured and spaced.
+   Half a list looking styled is worse than none of it looking styled. */
+.pv-lic-row .warn { margin-left: 0.5rem; color: var(--st-paused-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
 `;
 
 // ── THE FOUR OPTIONS ─────────────────────────────────────────────────────────
@@ -1323,9 +1343,9 @@ const chooserPage = () => `<!doctype html>
     <div class="pv-pick" style="margin:0.9rem 0 0">
       <a class="pv-card" href="board.html">
         <span class="k">Review 3 &mdash; the board</span>
-        <h2>Two sets of columns, and three ways a card can move</h2>
-        <p>Four columns the app is already counting, six columns that need one fifteen-line mapping,
-           and the decision underneath both: does saving a section move the card, or does a person?
+        <h2>Every IR in one board, and three ways a card can move</h2>
+        <p>One board whose columns are the sections, holding all 412 IRs at once &mdash; plus the
+           decision underneath it: does saving a section move the card, or does a person?
            The answer decides whether "In status 3d" stays true.</p>
         <span class="go">Open the board &rarr;</span>
       </a>
@@ -2090,13 +2110,6 @@ const EMPTY_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 .pv-tok [fill="#FF5678"] { fill: var(--accent); }
 .pv-tok [fill="#000000"] { fill: var(--ink-gray-9); }
 
-.pv-lic { margin-top: 0.2rem; }
-.pv-lic-row { padding: 0.6rem 0; border-bottom: 1px solid var(--outline-gray-2); }
-.pv-lic-row b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.pv-lic-row p { margin: 0.25rem 0 0; color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
-.pv-lic-row .yes { margin-left: 0.5rem; color: var(--st-resolved-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
-.pv-lic-row .no { margin-left: 0.5rem; color: var(--st-danger-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
-
 /* Four presets, one artwork, no overrides. Nested data-palette works because
    palette.css sets the accent role as custom properties, and custom properties
    inherit — so the attribute re-themes everything under it. */
@@ -2261,162 +2274,137 @@ ${demo('Humaaans', 'eleven fills: skin, hair, jumper, jeans — a whole fixed fi
 // this page is checked back against app.js's own arrays, so none of it can rot
 // quietly.
 
-// The fourteen stages, in the app's own order — IR_STATUS_VALUES verbatim.
-const KB_STATUSES = ['Open', 'Hold', 'Close', 'Inward', 'Visual Inspection',
-  'QC Investigation', 'Production', 'QC', 'Flight Test', 'PDI', 'Approval',
-  'Delivered', 'Remote Support', 'Other'];
+// ── the one rule the whole board follows ────────────────────────────────────
+//
+// EVERY IR has a status. The status says which section the IR is in. So the
+// columns ARE the sections. That is the entire mechanism; nothing else is being
+// decided here, and the first version of this page managed to make it look hard
+// by arguing about it for four screens.
+//
+// The only thing that needs care is this: the app has fourteen statuses and only
+// ten of them name a section. The other four — Open, Remote Support, Hold and the
+// finished ones — would fall off a board whose columns were sections alone. So
+// they get columns of their own at the two ends, and the result is that every
+// status lands in exactly one column and the counts add up to every IR there is.
+//
+// Written out rather than imported, because this builder reads CSS and HTML as
+// text and never evaluates app.js. smoke-preview.mjs is what makes that safe: it
+// reads the fourteen statuses out of app.js and requires this page to place each
+// of them exactly once.
+const KB_IR_TOTAL = 412;
 
-// The four buckets and the stages inside them — STATUS_CATEGORIES verbatim.
-// The counts are the ones the app's own segment strip already prints on the
-// list screen, so the board and the strip agree on screen rather than in prose.
-const KB_BUCKETS = [
-  ['Open',     37,  'open',     'Open · Inward · Visual Inspection · QC Investigation · Production · QC · Flight Test · PDI · Approval · Remote Support'],
-  ['Paused',    6,  'paused',   'Hold'],
-  ['Resolved', 318, 'resolved', 'Delivered'],
-  ['Closed',    51,  'closed',  'Close · Other'],
+// Left to right. `stages` is the app's own status values that land in the column,
+// and the union of every `stages` array is IR_STATUS_VALUES exactly — the
+// property the smoke test checks, and the reason no IR can be missing from it.
+const KB_COLUMNS = [
+  { key: 'start', title: 'Not started', stages: ['Open', 'Remote Support'], n: 11, cards: [
+    { no: 'IR-396', sn: 'D25G-0102', cat: 'REPAIR',         age: '44d', who: '',        done: 0 },
+    { no: 'IR-388', sn: 'H25P-0018', cat: 'REMOTE SUPPORT', age: '52d', who: 'P. Nair', done: 0 },
+  ] },
+  { key: 'hold', title: 'Paused', stages: ['Hold'], n: 6, cards: [
+    { no: 'IR-402', sn: 'D10G-0221', cat: 'CRASH', age: '41d', who: '', done: 1, late: true },
+  ] },
+  { key: 'B', letter: 'B', title: 'Inward Checklist', stages: ['Inward'], n: 4, cards: [
+    { no: 'IR-415', sn: 'VTR-0011',  cat: 'GENERAL MAINTENANCE', age: '4d',  who: '',         done: 0 },
+    { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',               age: '19d', who: 'A. Sharma', done: 1, late: true },
+  ] },
+  { key: 'C', letter: 'C', title: 'IQC Visual Inspection', stages: ['Visual Inspection'], n: 3, cards: [
+    { no: 'IR-411', sn: 'H25P-0029', cat: 'REPAIR', age: '8d', who: 'P. Nair', done: 1 },
+  ] },
+  { key: 'D', letter: 'D', title: 'Investigation', stages: ['QC Investigation'], n: 7, cards: [
+    { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR', age: '23d', who: 'R. Kumar',  done: 2, late: true },
+    { no: 'IR-408', sn: 'S25P-0044', cat: 'CRASH',  age: '25d', who: 'A. Sharma', done: 2, late: true },
+  ] },
+  { key: 'E', letter: 'E', title: 'Production (Rework)', stages: ['Production'], n: 5, cards: [
+    { no: 'IR-406', sn: 'VTR-0007', cat: 'GENERAL MAINTENANCE', age: '29d', who: 'P. Nair', done: 3 },
+  ] },
+  { key: 'F', letter: 'F', title: 'Quality Test Report', stages: ['QC', 'Flight Test'], n: 4, cards: [
+    { no: 'IR-403', sn: 'D10G-0207', cat: 'CRASH', age: '31d', who: 'R. Kumar', done: 4 },
+  ] },
+  { key: 'G', letter: 'G', title: 'PDI Report/Dispatch Record', stages: ['PDI', 'Approval'], n: 3, cards: [
+    { no: 'IR-401', sn: 'S25P-0014', cat: 'REMOTE SUPPORT', age: '36d', who: 'A. Sharma', done: 5 },
+  ] },
+  { key: 'done', title: 'Finished', stages: ['Delivered', 'Close', 'Other'], n: 369, quiet: true, cards: [
+    { no: 'IR-398', sn: 'VTR-0003', cat: 'GENERAL MAINTENANCE', age: '58d', who: 'P. Nair', done: 6 },
+  ] },
 ];
 
-// Which column of the SIX-SECTION board a stage belongs in. This mapping does
-// not exist in the app today — STATUS_CATEGORIES stops at four buckets — and it
-// is the one piece of new code the stage board would need. Written out as pairs
-// so the page can print the mapping as a table rather than only use it.
-const KB_MAP = [
-  ['Inward',            'B', 'Inward Checklist'],
-  ['Visual Inspection', 'C', 'IQC Visual Inspection'],
-  ['QC Investigation',  'D', 'Investigation'],
-  ['Production',        'E', 'Production (Rework)'],
-  ['QC',                'F', 'Quality Test Report'],
-  ['Flight Test',       'F', 'Quality Test Report'],
-  ['PDI',               'G', 'PDI Report/Dispatch Record'],
-  ['Approval',          'G', 'PDI Report/Dispatch Record'],
-  ['Open',              '—', 'Not in a build stage'],
-  ['Remote Support',    '—', 'Not in a build stage'],
-  ['Hold',              '—', 'Stays where it is, flagged'],
-  ['Delivered',         '—', 'Off the board'],
-  ['Close',             '—', 'Off the board'],
-  ['Other',             '—', 'Off the board'],
+// The big picture in one bar, from the four numbers the list screen's segment
+// strip already prints — so the bar and the strip cannot disagree.
+const KB_MIX = [
+  ['Open', 37, 'open'],
+  ['Paused', 6, 'paused'],
+  ['Resolved', 318, 'resolved'],
+  ['Closed', 51, 'closed'],
 ];
-
-// The seven columns the stage board draws, with the counts that add up to the
-// Open tile above (4+3+7+5+4+3+11 = 37). That is the whole relationship between
-// the two boards: the stage board is a zoom into one bucket. The other 375 IRs
-// are off it, and saying so is more honest than a board that looks like it holds
-// everything.
-const KB_STAGES = [
-  ['B', 'Inward Checklist',      'Inward',               4],
-  ['C', 'IQC Visual Inspection', 'Visual Inspection',    3],
-  ['D', 'Investigation',         'QC Investigation',     7],
-  ['E', 'Production (Rework)',   'Production',           5],
-  ['F', 'Quality Test Report',   'QC · Flight Test',     4],
-  ['G', 'PDI / Dispatch',        'PDI · Approval',       3],
-  ['—', 'Not in a build stage', 'Open · Remote Support', 11],
-];
-
-// The sample cards. Same vocabulary as the list screen's ROWS — the four real
-// categories, the real drone-serial shapes, the real 4/6 chip — so the owner
-// judges the board against rows that look like his rows.
-const KB_CARD = { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',            age: '19d', who: 'A. Sharma', done: 2, late: true  };
-const KB_BY_BUCKET = {
-  open: [
-    KB_CARD,
-    { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR',             age: '23d', who: 'R. Kumar', done: 2, late: true },
-    { no: 'IR-406', sn: 'VTR-0007',  cat: 'GENERAL MAINTENANCE', age: '29d', who: 'P. Nair',  done: 3 },
-  ],
-  paused: [
-    { no: 'IR-402', sn: 'D10G-0221', cat: 'CRASH',             age: '41d', who: '',         done: 1, late: true },
-  ],
-  resolved: [
-    { no: 'IR-401', sn: 'S25P-0014', cat: 'REMOTE SUPPORT',    age: '36d', who: 'A. Sharma', done: 6 },
-  ],
-  closed: [
-    { no: 'IR-398', sn: 'VTR-0003',  cat: 'GENERAL MAINTENANCE', age: '58d', who: 'P. Nair', done: 6 },
-  ],
-};
-const KB_BY_STAGE = {
-  B: [
-    { no: 'IR-415', sn: 'VTR-0011',  cat: 'GENERAL MAINTENANCE', age: '4d',  who: '',          done: 0 },
-    KB_CARD,
-  ],
-  C: [
-    { no: 'IR-411', sn: 'H25P-0029', cat: 'REPAIR',             age: '8d',  who: 'P. Nair',   done: 1 },
-  ],
-  D: [
-    { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR',             age: '23d', who: 'R. Kumar',  done: 2, late: true },
-    { no: 'IR-408', sn: 'S25P-0044', cat: 'CRASH',              age: '25d', who: 'A. Sharma', done: 2, late: true },
-  ],
-  E: [
-    { no: 'IR-406', sn: 'VTR-0007',  cat: 'GENERAL MAINTENANCE', age: '29d', who: 'P. Nair',   done: 3 },
-  ],
-  F: [
-    { no: 'IR-403', sn: 'D10G-0207', cat: 'CRASH',              age: '31d', who: 'R. Kumar',  done: 4 },
-  ],
-  G: [
-    { no: 'IR-401', sn: 'S25P-0014', cat: 'REMOTE SUPPORT',     age: '36d', who: 'A. Sharma', done: 5 },
-  ],
-  '—': [
-    { no: 'IR-396', sn: 'D25G-0102', cat: 'REPAIR',             age: '44d', who: '',          done: 0 },
-    { no: 'IR-388', sn: 'H25P-0018', cat: 'REMOTE SUPPORT',     age: '52d', who: 'P. Nair',   done: 0 },
-  ],
-};
 
 // One card. Written in the app's own list-row vocabulary — .ir-title, .ir-sn,
 // .ir-cat, .ir-age, .ir-progress — because the point of a board is that it draws
 // rows the app already has, and a card invented for the preview would have the
 // owner approving a board for a row the app cannot render.
-const kbCard = (c, cls) => `
-              <div class="pv-kb-card${c.late ? ' is-late' : ''}${cls ? ' ' + cls : ''}">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">${esc(c.no)}</span>
-                  <span class="ir-age${c.late ? ' is-late' : ''}">${esc(c.age)}</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">${esc(c.sn)}</span><span class="ir-dot">·</span><span class="ir-cat">${esc(c.cat)}</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee${c.who ? '' : ' pv-kb-unassigned'}">${c.who ? esc(c.who) : 'Unassigned'}</span>
-                  <span class="ir-progress p${c.done}${c.done >= 6 ? ' is-complete' : ''}" title="${c.done} of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">${c.done}/6</span></span>
-                </div>
-              </div>`;
+const kbCard = (c) => {
+  if (c.ghost) return `
+                <div class="pv-kb-card pv-kb-card-ghost"><span class="pv-kb-ghost-label">${esc(c.ghost)}</span></div>`;
+  const cls = [c.late ? 'is-late' : '', c.just ? 'pv-kb-card-just' : ''].filter(Boolean).join(' ');
+  return `
+                <div class="pv-kb-card${cls ? ' ' + cls : ''}">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">${esc(c.no)}</span>
+                    <span class="ir-age${c.late ? ' is-late' : ''}">${esc(c.age)}</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">${esc(c.sn)}</span><span class="ir-dot">·</span><span class="ir-cat">${esc(c.cat)}</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee${c.who ? '' : ' pv-kb-unassigned'}">${c.who ? esc(c.who) : 'Unassigned'}</span>
+                    <span class="ir-progress p${c.done}${c.done >= 6 ? ' is-complete' : ''}" title="${c.done} of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">${c.done}/6</span></span>
+                  </div>
+                </div>`;
+};
 
-const kbCol = (title, sub, count, cards, more, cls) => `
-            <div class="pv-kb-col${cls ? ' ' + cls : ''}">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">${title}</span><span class="pv-kb-col-count">${count}</span></div>
-              ${sub ? `<span class="pv-kb-col-sub">${sub}</span>` : ''}
-              <div class="pv-kb-col-body">${cards.join('')}${more ? `<span class="pv-kb-more">+${more} more</span>` : ''}</div>
-            </div>`;
+// A column. The `over` argument is what lets the three rule demos re-place the
+// same card — that is the whole point of them: one card, one event, three rules.
+const kbCol = (col, over = {}) => {
+  const cards = over.cards || col.cards;
+  const n = over.n === undefined ? col.n : over.n;
+  const cls = over.cls || '';
+  return `
+              <div class="pv-kb-col${col.quiet ? ' pv-kb-col-quiet' : ''}${cls ? ' ' + cls : ''}">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">${col.letter ? col.letter + ' · ' : ''}${esc(col.title)}</span><span class="pv-kb-col-count">${n}</span></div>
+                <span class="pv-kb-col-sub">${col.stages.map(esc).join(' · ')}</span>
+                <div class="pv-kb-col-body">${cards.map(c => kbCard(c)).join('')}${n > cards.length ? `<span class="pv-kb-more">+${n - cards.length} more</span>` : ''}</div>
+              </div>`;
+};
+const kbOf = key => KB_COLUMNS.find(c => c.key === key);
 
 // A scrollable region needs a keyboard route in, or a board is mouse-only.
 const kbBoard = (label, cols) => `
-          <div class="pv-kb-board" role="region" aria-label="${esc(label)}" tabindex="0">${cols.join('')}
-          </div>`;
+            <div class="pv-kb-board" role="region" aria-label="${esc(label)}" tabindex="0">${cols.join('')}
+            </div>`;
+
+const kbStrip = () => `
+            <div class="pv-kb-strip">
+              ${KB_MIX.map(([, n, k]) => `<span class="pv-kb-seg pv-kb-seg-${k}" style="width:${(n / KB_IR_TOTAL * 100).toFixed(2)}%"></span>`).join('')}
+            </div>
+            <div class="pv-kb-legend">
+              ${KB_MIX.map(([label, n, k]) => `<span class="pv-kb-key"><i class="pv-kb-dot pv-kb-seg-${k}"></i>${label} <b>${n}</b></span>`).join('')}
+              <span class="pv-kb-key pv-kb-key-total">All <b>${KB_IR_TOTAL}</b></span>
+            </div>`;
 
 const kbJump = () => `
   <nav class="pv-jump">
-    <a href="#today">What you can build today</a>
-    <a href="#stages">The six-section board</a>
+    <a href="#board">The board</a>
     <a href="#moves">How a card moves</a>
     <a href="#place">Where it lives</a>
     <a href="#limits">What it costs</a>
   </nav>`;
 
-const CAVEAT_TODAY = `
+const CAVEAT_BOARD = `
       <div class="pv-caveat">
-        <b>The four columns are not four statuses — they are a mapping over fourteen.</b>
-        The stage the app stores is <b>Inward</b>, <b>Production</b>, <b>Flight Test</b> and so on;
-        <b>statusCategory()</b> folds all fourteen into these four buckets, and the strip of count
-        tiles on your list screen is already counting them. So this board is buildable with
-        <b>no new field, no backend change and no migration</b>: it is a second drawing of a number
-        the app already sums. What it is not is informative — Open is 37 IRs that are at ten
-        different real stages, and a column that wide tells you nothing you did not know.
-      </div>`;
-
-const CAVEAT_STAGES = `
-      <div class="pv-caveat">
-        <b>This board needs one small thing that does not exist yet.</b>
-        <b>statusCategory()</b> maps fourteen stages onto four buckets. Mapping them onto the six
-        sections instead is the table above — about fifteen lines of pure function, no backend, no
-        new field, no write. The seven columns add up to the Open tile from the first board and no
-        more: <b>the other 375 IRs are off the board entirely</b>, because a board shows work in
-        progress and an IR that is Delivered is not in progress. A board that looked like it held
-        everything would be a lie you could not see.
+        <b>Two things the board cannot say, and both are the app's doing rather than the board's.</b>
+        A <b>Paused</b> IR keeps its status as Hold, so the app no longer knows which section it was
+        paused in — which is why Paused is a column of its own rather than the card sitting where it
+        stopped. And <b>Finished</b> is deliberately one wide column: 369 IRs that need no action do
+        not deserve eight columns of screen, and the count is the useful part. Both are columns
+        rather than omissions, so the totals still add up to all 412.
       </div>`;
 
 const CAVEAT_MOVES = `
@@ -2427,130 +2415,100 @@ const CAVEAT_MOVES = `
         here."</i> And from <b>syncIRStateAfterSectionSave()</b>: <i>"Status is no longer mirrored
         from a section form… A section save that happens to post a status key must not be able to
         move the workflow clock."</i> Both sentences exist because someone already tried rule 2 and
-        took it out. The reason is in the third column of the table above: <b>statusAt</b>.
+        took it out. The reason is the clock: <b>statusAt</b>, which is what "In status 3d" and the
+        overdue limits are measured from.
       </div>`;
 
 const boardBoard = () => kbJump() + `
 
-  <section class="pv-block" id="today">
-    <span class="pv-kicker">Board A — buildable today, with nothing new</span>
-    <h2 class="pv-block-title">Four columns the app is already counting</h2>
-    <p class="pv-block-note">Columns are the four buckets <b>statusCategory()</b> produces, in the
-    app's own words: Open, Paused, Resolved, Closed. Cards are drawn with the list row's own
-    classes, and every number on them is one the app computes today — the age, the category, the
-    assignee and the <b>4/6</b> chip are all on the card you already have.</p>
+  <section class="pv-block" id="board">
+    <span class="pv-kicker">The board</span>
+    <h2 class="pv-block-title">Every IR has a status. The status says which section it is in. So the columns are the sections.</h2>
+    <p class="pv-block-note">That is the whole mechanism. The app has fourteen statuses and ten of
+    them name one of your six sections, so those are the middle six columns. The other four —
+    Open, Remote Support, Hold and the finished ones — get columns at the two ends so that nothing
+    falls off the board.</p>
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Bucket board</b><span>the four numbers the list screen's segment strip already prints</span></div>
-      <div class="pv-demo-pad">${kbBoard('IR board, one column per status bucket', KB_BUCKETS.map(([name, n, key, sub]) =>
-        kbCol(name, sub, n, KB_BY_BUCKET[key].map(c => kbCard(c)), n - KB_BY_BUCKET[key].length, '')))}</div>
+      <div class="pv-demo-cap"><b>All ${KB_IR_TOTAL} IRs</b><span>every status the app has lands in exactly one column</span></div>
+      <div class="pv-demo-pad">${kbStrip()}
+${kbBoard('IR board, one column per status group, all ' + KB_IR_TOTAL + ' IRs', KB_COLUMNS.map(c => kbCol(c)))}</div>
     </div>
-${CAVEAT_TODAY}
-  </section>
-
-  <section class="pv-block" id="stages">
-    <span class="pv-kicker">Board B — the one you were picturing</span>
-    <h2 class="pv-block-title">Columns are the six sections, which means the board and the tab strip agree</h2>
-    <p class="pv-block-note">This is the board that earns its place, and it is a zoom into one tile.
-    The columns are the app's own six sections — the same six the ticket's tab strip already
-    shows — plus one for the IRs that have a stage but no section yet. A card that moves right is
-    an IR moving through the same six things the tabs are named after.</p>
-    <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Stage board</b><span>the 37 open IRs, by section — the same 37 as the Open tile</span></div>
-      <div class="pv-demo-pad">${kbBoard('IR board, one column per build stage', KB_STAGES.map(([letter, title, subs, n]) => kbCol(
-        `${letter === '—' ? '' : letter + ' · '}${title}`, subs, n,
-        KB_BY_STAGE[letter].map(c => kbCard(c)), n - KB_BY_STAGE[letter].length, letter === '—' ? 'pv-kb-col-muted' : '')))}
-      </div>
-    </div>
-    <div class="pv-demo pv-demo-pad">
-      <table class="pv-kb-map">
-        <thead><tr><th>Stage as it is stored</th><th>Column it lands in</th></tr></thead>
-        <tbody>
-          ${KB_MAP.map(([stage, letter, col]) => `<tr><td>${esc(stage)}</td><td>${letter === '—' ? `<span class="pv-kb-off">${esc(col)}</span>` : `<b>${letter}</b> · ${esc(col)}`}</td></tr>`).join('\n          ')}
-        </tbody>
-      </table>
-    </div>
-${CAVEAT_STAGES}
+${CAVEAT_BOARD}
   </section>
 
   <section class="pv-block" id="moves">
-    <span class="pv-kicker">The decision this board exists to make</span>
-    <h2 class="pv-block-title">Three rules for how a card moves. One of them the app already wrote down.</h2>
+    <span class="pv-kicker">The one decision the board needs from you</span>
+    <h2 class="pv-block-title">When a section is saved, does the card move?</h2>
     <p class="pv-block-note">One event, drawn three ways: <b>Ravi saves Section D on IR-409</b>,
     which is sitting in the Investigation column with 2 of 6 sections saved.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 1 — set by hand, in Triage</b><span>what the app does today</span></div>
+      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Triage</b><span>what the app does today</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 1: the card does not move', [
-        kbCol('C · IQC Visual Inspection', 'Visual Inspection', 3, [kbCard(KB_BY_STAGE.C[0])], 2),
-        kbCol('D · Investigation', 'QC Investigation', 7, KB_BY_STAGE.D.map(c => kbCard(c)), 5, 'pv-kb-col-here'),
-        kbCol('E · Production', 'Production', 5, [kbCard(KB_BY_STAGE.E[0])], 4),
+        kbCol(kbOf('C')),
+        kbCol(kbOf('D'), { cls: 'pv-kb-col-here' }),
+        kbCol(kbOf('E')),
       ])}</div>
     </div>
-    <p class="pv-block-note"><b>Nothing moves.</b> A section being saved is not a stage change, so
-    IR-409 stays in D until somebody opens Triage and says otherwise. The cost is that the board
-    is only as current as the last person to triage — and this is the rule the app's own comments
-    argue for.</p>
+    <p class="pv-block-note"><b>Nothing moves.</b> Saving a section is not a stage change, so IR-409
+    stays in D until somebody opens Triage. The cost is that the board is only as current as the
+    last person to triage — and this is the rule the app's own comments argue for.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 2 — it moves itself when a section is saved</b><span>the rule the app tried and removed</span></div>
+      <div class="pv-demo-cap"><b>Rule 2 — it moves itself on save</b><span>the rule the app tried and removed</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 2: the card advances on save', [
-        kbCol('D · Investigation', 'QC Investigation', 6, [kbCard(KB_BY_STAGE.D[1])], 5),
-        kbCol('E · Production', 'Production', 6, [kbCard(KB_BY_STAGE.D[0], 'pv-kb-card-just'), kbCard(KB_BY_STAGE.E[0])], 4, 'pv-kb-col-here'),
-        kbCol('F · Quality Test Report', 'QC · Flight Test', 4, [kbCard(KB_BY_STAGE.F[0])], 3),
+        kbCol(kbOf('D'), { cards: [kbOf('D').cards[1]], n: 6 }),
+        kbCol(kbOf('E'), { cards: [kbOf('D').cards[0], kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
+        kbCol(kbOf('F')),
       ])}</div>
     </div>
-    <p class="pv-block-note"><b>IR-409 slides to E the moment D is saved.</b> Three things go wrong
-    with it. <b>done[] only records saved, never finished</b> — a section saved with three empty
+    <p class="pv-block-note"><b>IR-409 slides into E the moment D is saved.</b> Three things go
+    wrong. <b>done[] only records saved, never finished</b>, so a section saved with three empty
     fields moves the card just as far as a completed one. <b>The stage and the sections drift apart</b>
     the first time somebody works on F before finishing E, which your engineers will do. And
-    <b>statusAt is overwritten on every save</b>, so "In status 3d" becomes permanently 0d and the
-    overdue limits stop meaning anything.</p>
+    <b>the clock resets on every save</b> — the time an IR has been in its stage would read 0 days
+    forever, and the overdue limits stop meaning anything.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 3 — it advances itself, and anyone can push it back</b><span>the one worth discussing</span></div>
+      <div class="pv-demo-cap"><b>Rule 3 — it advances, and anyone can push it back</b><span>the one worth talking about</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 3: advance on save, drag to correct', [
-        kbCol('C · IQC Visual Inspection', 'Visual Inspection', 3, [kbCard(KB_BY_STAGE.C[0])], 2),
-        kbCol('D · Investigation', 'QC Investigation', 6, [
-          kbCard(KB_BY_STAGE.D[1]),
-          `<div class="pv-kb-card pv-kb-card-ghost"><span class="pv-kb-ghost-label">Drop IR-409 here — back to Investigation</span></div>`,
-        ], 4),
-        kbCol('E · Production', 'Production', 6, [kbCard(KB_BY_STAGE.D[0], 'pv-kb-card-dragging'), kbCard(KB_BY_STAGE.E[0])], 4),
+        kbCol(kbOf('C')),
+        kbCol(kbOf('D'), { cards: [kbOf('D').cards[1], { ghost: 'IR-409 can be dragged back here' }], n: 6 }),
+        kbCol(kbOf('E'), { cards: [Object.assign({}, kbOf('D').cards[0], { just: true }), kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
       ])}</div>
     </div>
-    <p class="pv-block-note"><b>It advances, and the person who knows better can drag it back.</b>
-    The catch is that a drag is a write, and every drag would need to say whether it moved the
-    clock. The shape that survives: <b>saving a section proposes a move, and only a hand-set
-    change writes statusAt</b> — so the board stays current without the ageing clock becoming
-    fiction. That is rule 1's guarantee kept, with rule 2's freshness bought on top.</p>
+    <p class="pv-block-note"><b>It advances, and the person who knows better drags it back.</b>
+    A drag is a write, so each one has to say whether it moved the clock. The shape that survives:
+    <b>saving a section proposes a move, and only a person setting the stage writes the clock.</b>
+    The board stays current and the ageing stays true.</p>
 ${CAVEAT_MOVES}
   </section>
 
   <section class="pv-block" id="place">
     <span class="pv-kicker">Where the board goes</span>
     <h2 class="pv-block-title">A switch beside the filters, not a seventh tab</h2>
-    <p class="pv-block-note">The board is another view of the list you already have, so it reads
-    the same rows, the same search box and the same filters — a separate "Board" tab would mean
-    filtering twice and finding different numbers on each. One switch on the List screen, and both
-    views obey whatever is typed above them.</p>
+    <p class="pv-block-note">The board is another view of the list you already have, so it reads the
+    same rows, the same search box and the same filters — a separate "Board" tab would mean filtering
+    twice and finding different numbers on each. One switch on the List screen, and both views obey
+    whatever is typed above them.</p>
     <div class="pv-demo pv-demo-pad">
       <div class="pv-kb-toolbar">
-        <div class="list-toolbar-top"><span class="list-title">IRs</span><span class="list-count">412</span>
+        <div class="pv-kb-ltbar">
+          <span class="pv-kb-ltitle">IRs</span>
+          <span class="pv-kb-lcount">${KB_IR_TOTAL}</span>
           <span class="pv-kb-switch"><span class="pv-kb-switch-btn is-on">List</span><span class="pv-kb-switch-btn">Board</span></span>
         </div>
-        <div class="segments">
-          <span class="segment active">All<span class="segment-count">412</span></span>
-          <span class="segment">Open<span class="segment-count">37</span></span>
-          <span class="segment">Paused<span class="segment-count">6</span></span>
-          <span class="segment">Resolved<span class="segment-count">318</span></span>
-          <span class="segment">Closed<span class="segment-count">51</span></span>
+        <div class="pv-kb-viewsegs">
+          <span class="pv-kb-viewseg is-on">All<span class="pv-kb-viewseg-n">${KB_IR_TOTAL}</span></span>
+          ${KB_MIX.map(([label, n]) => `<span class="pv-kb-viewseg">${label}<span class="pv-kb-viewseg-n">${n}</span></span>`).join('')}
         </div>
       </div>
     </div>
     <div class="pv-caveat">
-      <b>One thing the switch does not solve.</b> The count tiles count <i>every</i> IR and the
-      board shows 37 of them. If the switch sits above the tiles the numbers will disagree with
-      what is on screen, so the tiles have to move <i>into</i> the board view as column totals —
-      which is what the headers above already are.
+      <b>One thing the switch does not solve.</b> The count tiles count <i>every</i> IR and a board
+      column shows a few cards plus a number. The tiles have to move <i>into</i> the board view as
+      column totals — which is what the headers above already are — or the two will appear to
+      disagree.
     </div>
   </section>
 
@@ -2559,25 +2517,29 @@ ${CAVEAT_MOVES}
     <h2 class="pv-block-title">The honest list</h2>
     <div class="pv-lic">
       <div class="pv-lic-row"><b>It is a drawing of data you have</b><span class="yes">No migration</span>
-        <p>Every card on this page is built from fields the app already stores: <b>ir.status</b>,
-        the assignee, the category, the raised date, and <b>ir.done[]</b>. Adopting a board is a
-        rendering pass, not a data change.</p></div>
+        <p>Every card is built from fields the app already stores: <b>ir.status</b>, the assignee, the
+        category, the raised date, and <b>ir.done[]</b>. Adopting a board is a rendering pass, not a
+        data change.</p></div>
+      <div class="pv-lic-row"><b>A ten-line map is the only new code</b><span class="yes">Small</span>
+        <p>The app folds its fourteen statuses into four buckets today. Pointing them at your six
+        sections instead is a pure function with no backend, no new field and no write — and which
+        status goes in which column is written out under each column heading above, where you can
+        check it against the ticket.</p></div>
       <div class="pv-lic-row"><b>Dragging needs a write per drag</b><span class="warn">Decide</span>
-        <p>A drag that persists is a store write and an audit entry. That is fine — the app already
-        writes on every triage save — but it is a decision about who may drag, and it is the TR
-        access axis, not a new one.</p></div>
+        <p>A drag that persists is a store write and an audit entry, which the app already does on
+        every triage save. What needs deciding is who may drag — that is the TR access axis, not a
+        new one.</p></div>
       <div class="pv-lic-row"><b>The board is inert</b><span class="warn">By rule</span>
-        <p>Nothing on this page can be dragged, clicked or scrolled by script — the review pages
-        are forbidden a <b>&lt;script&gt;</b> and a test enforces it. The third rule above is a
-        picture of a drag, not a drag.</p></div>
+        <p>Nothing here can be dragged or clicked by script — the review pages are forbidden a
+        <b>&lt;script&gt;</b> and a test enforces it. Rule 3 above is a picture of a drag, not a drag.</p></div>
       <div class="pv-lic-row"><b>No subtasks, no swimlanes, no WIP limits</b><span class="no">Not shown</span>
-        <p>Real kanban tools add cards inside cards and cap how many may sit in a column. Neither
-        maps onto anything the app stores, so neither is drawn. If you want one, say which.</p></div>
+        <p>Real kanban tools put cards inside cards and cap how many may sit in a column. Neither maps
+        onto anything the app stores, so neither is drawn. If you want one, say which.</p></div>
       <div class="pv-lic-row"><b>On your phone it is one column at a time</b><span class="warn">Sideways</span>
-        <p>A board is wide by nature. On the phone it scrolls sideways inside its own frame — the
-        page itself never scrolls sideways — so you see one column and the edge of the next. That
-        is the honest cost of a board on a 390px screen, and it is why board A may be the better
-        phone answer even though board B is the better one.</p></div>
+        <p>A board is wide by nature. On the phone it scrolls sideways inside its own frame — the page
+        itself never scrolls — so you see one column and the edge of the next. That is the honest cost
+        of a board on a 390px screen, and the reason the counts in the headers matter: they are what
+        you read without scrolling.</p></div>
     </div>
   </section>
 `;
@@ -2602,17 +2564,58 @@ const BOARD_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 .pv-kb-board:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .pv-kb-col { flex: 0 0 15rem; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
-/* The column the worked example is talking about. A left edge rather than a
-   tinted fill, so it reads as a marker and not as a state the app has. */
+/* The column the worked example is talking about. A coloured rule under the
+   header rather than a tinted fill, so it reads as a marker pointing at
+   something and not as a state the app has — nothing in I-PASSBOOK has an
+   accent-filled card. */
 .pv-kb-col-here > .pv-kb-col-head { border-bottom-color: var(--accent); }
 .pv-kb-col-here > .pv-kb-col-head .pv-kb-col-count { background: var(--accent-soft); color: var(--accent); }
-.pv-kb-col-muted { opacity: 0.72; }
+/* Finished. 369 of the 412 IRs live here and none of them need looking at, so
+   the column is drawn flat rather than dimmed to the point of unreadable: the
+   count still has to be legible, because the count is the whole information. */
+.pv-kb-col-quiet > .pv-kb-col-head { border-bottom-style: dashed; }
+.pv-kb-col-quiet .pv-kb-col-body { opacity: 0.75; }
 .pv-kb-col-head { display: flex; align-items: baseline; gap: 0.5rem; padding-bottom: 0.35rem; border-bottom: 2px solid var(--outline-gray-2); }
 .pv-kb-col-title { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .pv-kb-col-count { flex: 0 0 auto; min-width: 1.6rem; padding: 0.05rem 0.4rem; border-radius: var(--radius-9); background: var(--surface-gray-3); color: var(--ink-gray-7); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; font-variant-numeric: tabular-nums; }
 .pv-kb-col-sub { color: var(--ink-gray-5); font-size: var(--text-2xs); line-height: 1.3; }
 .pv-kb-col-body { display: flex; flex-direction: column; gap: 0.4rem; }
 .pv-kb-more { color: var(--ink-gray-5); font-size: var(--text-xs); padding: 0.15rem 0.1rem; }
+
+/* ── the app's own list-row words, carried rather than assumed ──────────────
+   Copied declaration for declaration from views.css (:207, :226, :273-288,
+   :1763-1796). This is not duplication for its own sake, and it is the second
+   time this page has been caught by the same trap.
+
+   A review page loads tokens.css, palette.css, the shared skeleton and its OWN
+   skin. It never loads views.css. Option D's skin DOES carry these classes — but
+   it scopes every one of them under .pv-app, and NO BOARD PAGE HAS A .pv-app
+   ELEMENT. So .pv-app .ir-meta reached nothing, and the board drew app
+   vocabulary with rules that applied to none of it. It showed, and only by
+   looking: the meta line ran together as "H25P-0032·REPAIR" because .ir-meta's
+   flex gap was missing, the 2/6 chip's bar had no width or height because
+   .ir-progress-bar's were missing, and the IR number was not bold because
+   .ir-title's weight was missing. Every card on the page and every assertion in
+   this repo stayed green, because "the rule exists" and "the rule applies" are
+   different claims and only one of them was being checked.
+
+   These come FIRST, so the board's own overrides below win by order at equal
+   specificity. .ir-cat deliberately has no rule here, because it has none in the
+   app either — it is styled entirely by .ir-meta and .ir-meta > *, both below. */
+.pv-kb-card .ir-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); letter-spacing: var(--tracking-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-kb-card .ir-assignee { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-kb-card .ir-meta { display: flex; align-items: center; gap: 0.3rem; font-size: var(--text-xs); color: var(--ink-gray-5); flex-wrap: nowrap; overflow: hidden; min-width: 0; }
+.pv-kb-card .ir-meta > * { flex: 0 0 auto; white-space: nowrap; }
+.pv-kb-card .ir-sn { color: var(--ink-gray-6); font-weight: var(--weight-medium); }
+.pv-kb-card .ir-dot { opacity: 0.5; }
+.pv-kb-card .ir-age { color: var(--ink-gray-5); }
+.pv-kb-card .ir-age.is-late { color: var(--st-danger-fg); font-weight: var(--weight-medium); }
+.pv-kb-card .ir-progress { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.pv-kb-card .ir-progress-bar { display: block; width: 30px; height: 4px; border-radius: var(--radius-9); background: var(--surface-gray-3); overflow: hidden; }
+.pv-kb-card .ir-progress-bar::after { content: ''; display: block; height: 100%; width: 0; border-radius: inherit; background: var(--ink-gray-6); }
+.pv-kb-card .ir-progress-text { font-size: var(--text-2xs); line-height: 1; color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
+.pv-kb-card .ir-progress.is-complete .ir-progress-bar::after { background: var(--ink-green-7); }
+.pv-kb-card .ir-progress.is-complete .ir-progress-text { color: var(--ink-green-7); font-weight: var(--weight-semibold); }
 
 /* A card. 8px radius and the soft shadow are D's card geometry, so a board card
    and a list card are the same object seen two ways. */
@@ -2626,28 +2629,56 @@ const BOARD_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 .pv-kb-card-foot .ir-assignee { font-size: var(--text-2xs); }
 .pv-kb-unassigned { color: var(--ink-amber-7); font-weight: var(--weight-medium); }
 
-/* The two states that only exist because rule 3 is being explained: a card in
-   flight, and the slot it is going back to. They are pictures of a gesture, and
-   the dashed edge is what says so. */
+/* The two states that only exist because rule 3 is being explained: the card
+   that has just arrived, and the dashed slot it would go back to. They are
+   pictures of a gesture, and the dashed edge is what says so. */
 .pv-kb-card-just { border-color: var(--accent); box-shadow: var(--elevation-md); }
-.pv-kb-card-dragging { opacity: 0.55; transform: rotate(-1.2deg); }
-.pv-kb-card-ghost { align-items: center; justify-content: center; min-height: 4.6rem; border-style: dashed; border-color: var(--accent-soft-line); background: var(--accent-soft); box-shadow: none; }
-.pv-kb-ghost-label { color: var(--accent); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; }
+.pv-kb-card-ghost { align-items: center; justify-content: center; min-height: 4.2rem; border-style: dashed; border-color: var(--outline-gray-3); background: var(--surface-gray-1); box-shadow: none; }
+.pv-kb-ghost-label { color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; }
 
-/* The stage table. Plain, because it is reference and not a component. */
-.pv-kb-map { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
-.pv-kb-map th { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--outline-gray-2); color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.06em; text-transform: uppercase; text-align: left; }
-.pv-kb-map td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--outline-gray-1); vertical-align: top; }
-.pv-kb-map tr:last-child td { border-bottom: 0; }
-.pv-kb-map td:first-child { width: 40%; font-weight: var(--weight-medium); }
-.pv-kb-off { color: var(--ink-gray-5); }
+/* The whole-picture bar. One bar split in proportion to the four numbers the
+   list screen's segment strip already prints, so the board and the strip cannot
+   disagree on screen — which is the only place a disagreement would be noticed.
+   Segments are filled with the SOLID status ink (--st-*-fg) and not the tint
+   (--st-*-bg): a tint is designed to sit behind text on a card and at 9% width
+   it would read as an empty gap rather than as a segment. */
+.pv-kb-strip { display: flex; height: 0.6rem; margin-bottom: 0.5rem; border-radius: var(--radius-3); overflow: hidden; background: var(--surface-gray-2); }
+.pv-kb-seg { display: block; height: 100%; }
+.pv-kb-seg-open { background: var(--st-open-fg); }
+.pv-kb-seg-paused { background: var(--st-paused-fg); }
+.pv-kb-seg-resolved { background: var(--st-resolved-fg); }
+.pv-kb-seg-closed { background: var(--st-closed-fg); }
+.pv-kb-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.9rem; margin-bottom: 0.75rem; color: var(--ink-gray-6); font-size: var(--text-2xs); }
+.pv-kb-key { display: inline-flex; align-items: center; gap: 0.3rem; font-variant-numeric: tabular-nums; }
+.pv-kb-key b { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+.pv-kb-key-total { margin-left: auto; padding-left: 0.9rem; border-left: 1px solid var(--outline-gray-2); }
+/* The legend's swatch reuses the segment's own class for its fill, so a colour
+   cannot be right in the bar and wrong in the key beside it. */
+.pv-kb-dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-9); }
 
 /* The List | Board switch, drawn where the app already puts a control of this
-   kind. Not interactive on a review page — it is a picture of a switch. */
-.pv-kb-toolbar { display: flex; flex-direction: column; gap: 0.55rem; }
+   kind. Not interactive on a review page — it is a picture of a switch.
+   THE FIRST VERSION OF THIS DEMO WAS UNSTYLED. It borrowed the app's own class
+   names (list-toolbar-top, segments, segment, segment-count), which live in
+   views.css — and a review page loads tokens.css and palette.css only, never
+   views.css. So the classes matched nothing: the switch sat in a cramped box and
+   the counts ran together as bare text ("All412 Open37Paused6…"). It validated,
+   every test passed, and the owner would have been shown a picture of a control
+   that is not what the app draws. Borrowing a class name is not borrowing a rule;
+   if this page wants the app's look it has to carry the declarations, and these
+   are written in D's measured geometry with this board's own names. */
+.pv-kb-toolbar { display: flex; flex-direction: column; gap: 0.6rem; }
+.pv-kb-ltbar { display: flex; align-items: baseline; gap: 0.5rem; }
+.pv-kb-ltitle { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.pv-kb-lcount { color: var(--ink-gray-6); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .pv-kb-switch { display: inline-flex; flex: 0 0 auto; margin-left: auto; padding: 2px; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-gray-1); }
 .pv-kb-switch-btn { padding: 0.2rem 0.6rem; border-radius: var(--radius-2); color: var(--ink-gray-6); font-size: var(--text-xs); }
 .pv-kb-switch-btn.is-on { background: var(--surface-base); color: var(--ink-gray-9); font-weight: var(--weight-medium); box-shadow: var(--elevation-sm); }
+.pv-kb-viewsegs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-kb-viewseg { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0.2rem 0.55rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-xs); }
+.pv-kb-viewseg.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-kb-viewseg-n { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-kb-viewseg.is-on .pv-kb-viewseg-n { color: var(--accent); }
 
 /* The progress chip's base and its six fills, copied declaration for declaration
    from views.css:1772-1791. The parts board carries only .p4 because it only ever
@@ -2687,7 +2718,7 @@ const BOARD_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 const REVIEW_BOARDS = [
   { file: 'preview/parts.html', skin: PARTS_SKIN, what: 'the components, one at a time' },
   { file: 'preview/empty.html', skin: EMPTY_SKIN, what: 'the empty states, and what could sit in them' },
-  { file: 'preview/board.html', skin: BOARD_SKIN, what: 'the board, and how a card moves between columns' },
+  { file: 'preview/board.html', skin: BOARD_SKIN, what: 'the whole board at once, and how a card moves between columns' },
 ];
 const SKINS = [...OPTIONS.map(o => o.skin), ...REVIEW_BOARDS.map(b => b.skin)];
 
@@ -2719,7 +2750,7 @@ FILES['empty.html'] = boardPage(EMPTY_SKIN,
   'empty', emptyBoard());
 FILES['board.html'] = boardPage(BOARD_SKIN,
   'I-PASSBOOK — IR board',
-  'The IR list as a board — two sets of columns it could use, and the real decision: how a card moves between them.',
+  'The IR list as a board — every IR in one picture, and the real decision underneath it: how a card moves between columns.',
   'board', boardBoard());
 
 // ── self-check ───────────────────────────────────────────────────────────────

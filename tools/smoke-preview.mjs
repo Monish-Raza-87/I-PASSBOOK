@@ -416,93 +416,120 @@ r.ok('board: links the SAME hashed stylesheet as the four options',
   (BOARD.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1] === (PAGE.a.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1]);
 r.ok('board: renders none of the four option screens',
   !/class="pv-phone"/.test(BOARD) && !/class="pv-screens"/.test(BOARD));
-r.ok('board: carries the five headed sections it promises',
-  ['today', 'stages', 'moves', 'place', 'limits'].every(id => BOARD.includes(`id="${id}"`)));
-r.ok('board: and a jump list that reaches all five',
-  ['#today', '#stages', '#moves', '#place', '#limits'].every(h => BOARD.includes(`href="${h}"`)));
+r.ok('board: carries the four headed sections it promises',
+  ['board', 'moves', 'place', 'limits'].every(id => BOARD.includes(`id="${id}"`)));
+r.ok('...and a jump list that reaches all four',
+  ['#board', '#moves', '#place', '#limits'].every(h => BOARD.includes(`href="${h}"`)));
+// The first version of this page carried two competing boards, a fourteen-row
+// mapping table and a five-block walk through the argument. The owner's verdict
+// was that it had made a very simple mechanism look difficult, so these are the
+// pieces that must NOT come back: a second board (#stages), the table
+// (.pv-kb-map), the muted-column state, and the old five-block ids.
+r.ok('board: the second board and the mapping table stay gone',
+  !/id="today"/.test(BOARD) && !/id="stages"/.test(BOARD) &&
+  !/pv-kb-map/.test(BOARD) && !/pv-kb-col-muted/.test(BOARD));
 
 // The fourteen stages. Read out of app.js rather than typed here, so a status
 // added to the app without a column to hold it fails the build instead of
 // rendering as a card in no column at all.
 const statusValues = [...((appJs.match(/const IR_STATUS_VALUES\s*=\s*\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([^']+)'/g)].map(m => m[1]);
 r.ok('board: the app really does store fourteen workflow stages', statusValues.length === 14, statusValues.join(' '));
-// The mapping table's first column, which is where every stage on the board is
-// named. Every cell is read back and required to be one of the app's own.
-const mappedStages = [...BOARD.matchAll(/<tr><td>([^<]+)<\/td>/g)].map(m => m[1]);
-r.ok('board: every stage in the mapping table is one of the app\'s own',
-  mappedStages.length === 14 && mappedStages.every(s => statusValues.includes(s)),
-  mappedStages.filter(s => !statusValues.includes(s)));
-// Set equality, not order: the board groups the mapping by column, which is a
-// different order from the app's own list. A status the app can store and the
-// board cannot place is exactly the silent hole this catches.
-r.ok('...and the board places all fourteen, so none can fall off it unnoticed',
-  mappedStages.length === statusValues.length &&
-  [...mappedStages].sort().join('|') === [...statusValues].sort().join('|'));
 
-// The four buckets, read from STATUS_CATEGORIES' own keys.
+// The board is ONE board now, and the assertion that replaces the old mapping
+// table is stronger than the table ever was: it does not check that fourteen
+// rows exist, it checks the property those rows were there to demonstrate.
+// Each column prints the app's own status values under its heading; the union of
+// all nine must be IR_STATUS_VALUES EXACTLY — every status placed, no status
+// placed twice, nothing invented. A status the app can store and the board cannot
+// place is precisely the silent hole this catches, and it is the failure mode a
+// reader of the board could never see: the card would simply be nowhere.
+const mainBoard = BOARD.slice(BOARD.indexOf('id="board"'), BOARD.indexOf('id="moves"'));
+const colRe = /<span class="pv-kb-col-title">([^<]*)<\/span><span class="pv-kb-col-count">(\d+)<\/span>/g;
+const boardCols = [...mainBoard.matchAll(colRe)].map(m => ({ title: m[1], n: Number(m[2]) }));
+const placedStages = [...mainBoard.matchAll(/<span class="pv-kb-col-sub">([^<]*)<\/span>/g)]
+  .flatMap(m => m[1].split(/\s*·\s*/).filter(Boolean));
+r.ok('board: every stage a column claims is one of the app\'s own',
+  placedStages.length > 0 && placedStages.every(s => statusValues.includes(s)),
+  placedStages.filter(s => !statusValues.includes(s)));
+r.ok('...and the nine columns place all fourteen, each exactly once',
+  placedStages.length === statusValues.length &&
+  [...placedStages].sort().join('|') === [...statusValues].sort().join('|'),
+  `${placedStages.length} placed: ${placedStages.join('/')}`);
+
+// The four buckets are still statusCategory's four, and the strip above the board
+// still speaks in them — that is the whole-picture half of the page, and it must
+// agree with the list screen it is standing in for.
 const statusCats = (appJs.match(/const STATUS_CATEGORIES\s*=\s*\{([\s\S]*?)\n\};/) || [])[1] || '';
 const bucketKeys = [...statusCats.matchAll(/^\s*([a-z]+):\s*\[/gm)].map(m => m[1]);
-r.ok('board: the four columns are statusCategory\'s four buckets',
+r.ok('board: the four buckets are statusCategory\'s four, in its own order',
   bucketKeys.join(',') === 'open,paused,resolved,closed', bucketKeys.join(','));
-r.ok('...and the card that claims to be in one really is a stage from that bucket',
-  bucketKeys.every(k => new RegExp(`<span class="pv-kb-col-title">${k[0].toUpperCase() + k.slice(1)}</span>`).test(BOARD)));
+const stripLegend = [...BOARD.matchAll(/pv-kb-dot pv-kb-seg-([a-z]+)"><\/i>([A-Za-z]+) <b>(\d+)<\/b>/g)]
+  .map(m => ({ key: m[1], label: m[2], n: Number(m[3]) }));
+r.ok('...and the whole-picture bar names each of them once',
+  stripLegend.length === 4 && stripLegend.map(s => s.key).join(',') === bucketKeys.join(','),
+  stripLegend.map(s => `${s.key}=${s.n}`).join(' '));
 
-// The count the board prints in a column head is not a decoration: the page says
-// the seven stage columns add up to the Open tile and no more. A board whose
-// totals drifted would have the owner approve a workflow against arithmetic that
-// is wrong, which is the one error nobody reading a board can see.
-const countIn = (html, title) => {
-  const m = html.match(new RegExp(`<span class="pv-kb-col-title">${title}</span><span class="pv-kb-col-count">(\\d+)</span>`));
-  return m ? Number(m[1]) : null;
-};
-const todayHtml = BOARD.slice(BOARD.indexOf('id="today"'), BOARD.indexOf('id="stages"'));
-const stagesHtml = BOARD.slice(BOARD.indexOf('id="stages"'), BOARD.indexOf('id="moves"'));
-const bucketCounts = ['Open', 'Paused', 'Resolved', 'Closed'].map(t => countIn(todayHtml, t));
-r.ok('board: the four buckets are all drawn with a count', bucketCounts.every(n => n !== null), bucketCounts.join(' '));
 // The totals the app's own segment strip prints on the list screen — the same
 // five numbers the preview shows there. Compared rather than trusted, because
 // "these are the counts from the list screen" is a claim the page makes in prose.
 const stripCounts = [...(PAGE.d.match(/<div class="segments">([\s\S]*?)<\/div>/) || [])[1].matchAll(/<span class="segment(?: active)?">[^<]*<span class="segment-count">(\d+)<\/span>/g)].map(m => Number(m[1]));
-r.ok('board: the bucket counts are the ones the list screen prints, not new ones',
-  bucketCounts.join(',') === stripCounts.slice(1).join(','),
-  `board=${bucketCounts.join(',')} strip=${stripCounts.join(',')}`);
+r.ok('board: the four buckets carry the counts the list screen prints, not new ones',
+  stripLegend.map(s => s.n).join(',') === stripCounts.slice(1).join(','),
+  `board=${stripLegend.map(s => s.n).join(',')} strip=${stripCounts.join(',')}`);
 r.ok('...and they still add up to the total on the strip',
-  bucketCounts.reduce((a, b) => a + b, 0) === stripCounts[0],
-  `${bucketCounts.reduce((a, b) => a + b, 0)} vs ${stripCounts[0]}`);
-// The claim in CAVEAT_STAGES, made checkable: the stage board is a zoom into one
-// bucket. If these two numbers ever disagree the page is lying in a caveat, which
-// is worse than lying on a card.
-const stageCols = [...stagesHtml.matchAll(/<span class="pv-kb-col-count">(\d+)<\/span>/g)].map(m => Number(m[1]));
-r.ok('board: the stage columns are seven, and they sum to the Open bucket',
-  stageCols.length === 7 && stageCols.reduce((a, b) => a + b, 0) === bucketCounts[0],
-  `${stageCols.join('+')}=${stageCols.reduce((a, b) => a + b, 0)} vs Open=${bucketCounts[0]}`);
+  stripLegend.reduce((a, s) => a + s.n, 0) === stripCounts[0],
+  `${stripLegend.reduce((a, s) => a + s.n, 0)} vs ${stripCounts[0]}`);
+// The bar is proportional or it is a lie, and 100% is the only honest total for
+// segments whose widths are computed from the counts above.
+const segWidths = [...BOARD.matchAll(/class="pv-kb-seg pv-kb-seg-[a-z]+" style="width:([\d.]+)%"/g)].map(m => Number(m[1]));
+r.ok('...and the bar is drawn to scale, so its four segments fill exactly one whole',
+  segWidths.length === 4 && Math.abs(segWidths.reduce((a, b) => a + b, 0) - 100) < 0.05,
+  segWidths.join('+') + '=' + segWidths.reduce((a, b) => a + b, 0));
+
+// THE arithmetic this board exists to be trusted on. Every IR is in a column and
+// no IR is in two, so the nine column counts must sum to the total the list screen
+// prints — and that total must be the one the legend and the demo caption also
+// say. A board whose columns drifted would have the owner approve a workflow
+// against arithmetic that is wrong, which is the one error nobody reading a board
+// can see.
+r.ok('board: the nine columns are all drawn with a count',
+  boardCols.length === 9 && boardCols.every(c => Number.isFinite(c.n)),
+  boardCols.map(c => c.title).join(' | '));
+const colSum = boardCols.reduce((a, c) => a + c.n, 0);
+r.ok('board: every IR is in one of the nine columns and none is in two',
+  colSum === stripCounts[0], `${colSum} vs ${stripCounts[0]}`);
+r.ok('...and the legend, the caption and the switch demo all say the same total',
+  BOARD.includes(`<span class="pv-kb-key pv-kb-key-total">All <b>${colSum}</b></span>`) &&
+  BOARD.includes(`<b>All ${colSum} IRs</b>`) &&
+  (BOARD.match(new RegExp(`class="pv-kb-lcount">${colSum}<`, 'g')) || []).length === 1,
+  `sum=${colSum}`);
 
 // The six section letters and names, checked against SECTION_IDS / SECTION_SHORT
 // rather than against the literal list in the builder — that literal is the one
 // thing on this page that can rot silently, and this is what stops it.
-// SECTION_SHORT carries NINE keys, not six: A, H and I are still in the table,
-// named "Overview (formerly Section A)", "PDI (now part of G)" and "Dispatch (now
-// part of G)". They are retired tabs kept for old links, so a check that asked
-// for six would fail on the app being right — and one that asked the board to
-// print all nine would have it draw three sections the ticket has not had for
-// months. The six are SECTION_IDS, already read in section 7 above; the board is
-// held to those and only those.
+// The board prints each section under the app's OWN short name (so the column
+// heading and the tab a user taps are the same words), which is why the heading is
+// matched here and not a paraphrase of it.
 const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z])':\s*'([^']+)'/g)].map(m => [m[1].replace('sec-', '').toUpperCase(), m[2]]));
 const liveSections = sectionIds.map(id => id.replace('sec-', '').toUpperCase());
-r.ok('board: the app has nine tab names but only six are live sections',
-  Object.keys(shortNames).length === 9 && liveSections.length === 6,
-  `names=${Object.keys(shortNames).join(',')} live=${liveSections.join(',')}`);
-const mappedLetters = [...BOARD.matchAll(/<td><b>([A-G])<\/b> /g)].map(m => m[1]);
-r.ok('...and every section column on the board is one of the six',
-  mappedLetters.length > 0 && mappedLetters.every(l => liveSections.includes(l)), [...new Set(mappedLetters)].join(','));
-r.ok('...and every one of the six is reachable from a stage',
-  liveSections.every(l => mappedLetters.includes(l)), liveSections.join(','));
+const colLetters = boardCols.map(c => (c.title.match(/^([A-G]) · /) || [])[1]).filter(Boolean);
+r.ok('...and the six section columns drawn are the app\'s six live sections',
+  colLetters.join(',') === liveSections.join(','), `${colLetters.join(',')} vs ${liveSections.join(',')}`);
+r.ok('...and each is named with the app\'s own short name for it',
+  liveSections.every(l => shortNames[l] && boardCols.some(c => c.title === `${l} · ${shortNames[l]}`)),
+  liveSections.filter(l => !shortNames[l]));
 // ...and nothing the app has RETIRED is drawn as if it were current.
 r.ok('...and no retired section is drawn as a live column',
-  !mappedLetters.some(l => !liveSections.includes(l)) && !/formerly Section A/.test(BOARD));
-r.ok('...and the board prints each section under the app\'s own name for it',
-  liveSections.every(l => shortNames[l] && BOARD.includes(shortNames[l])),
-  liveSections.filter(l => !shortNames[l] || !BOARD.includes(shortNames[l])));
+  !colLetters.some(l => !liveSections.includes(l)) && !/formerly Section A/.test(BOARD));
+// The two end columns are the honest part: they exist because four of the
+// fourteen statuses name no section at all, and without them those IRs would be
+// nowhere. They must be columns like any other, carrying a count, and not a
+// footnote with a number in prose.
+r.ok('...and the four statuses that name no section still get a column each',
+  boardCols[0].title === 'Not started' && boardCols[0].n > 0 &&
+  boardCols[1].title === 'Paused' && boardCols[1].n > 0 &&
+  boardCols[8].title === 'Finished' && boardCols[8].n > 0,
+  boardCols.map(c => `${c.title}=${c.n}`).join(' '));
 
 // The chip. A board draws every count there is, so it needs all six fills — the
 // parts board carries only .p4 because it only ever draws 4/6. Copied from
@@ -551,14 +578,61 @@ r.ok('board: the board scrolls inside its own frame, never the page',
 // 449px wide in a board whose columns are 240px.
 r.ok('board: no column is a bare child of a demo pad — every one is inside a frame',
   !/pv-demo-pad">\s*<div class="pv-kb-col/.test(BOARD) &&
-  (BOARD.match(/class="pv-kb-board"/g) || []).length === 5,
+  (BOARD.match(/class="pv-kb-board"/g) || []).length === 4,
   `${(BOARD.match(/class="pv-kb-board"/g) || []).length} frames`);
 r.ok('...and every board on the page is named and reachable by keyboard',
   (BOARD.match(/class="pv-kb-board"/g) || []).length === (BOARD.match(/class="pv-kb-board"[^>]*tabindex="0"/g) || []).length &&
   (BOARD.match(/class="pv-kb-board"[^>]*aria-label="[^"]+"/g) || []).length === (BOARD.match(/class="pv-kb-board"/g) || []).length,
   `${(BOARD.match(/class="pv-kb-board"/g) || []).length} boards`);
 
-// ── 10. The owner can reach it ──────────────────────────────────────────────
+// ── 10. Every class a page DRAWS has a rule that page can actually reach ────
+// This is the check that would have caught two real defects that shipped past
+// every other assertion here.
+//
+// A review page loads exactly two things: the shared sheet (tokens.css +
+// palette.css + the skeleton + the chrome) and its OWN skin, inlined in a
+// <style> block. It does NOT load views.css or components.css. So a page that
+// borrows the app's own class names gets nothing at all — and nothing is exactly
+// what it fails to report. The board drew its List|Board switch with
+// list-toolbar-top / segments / segment / segment-count (all in views.css) and
+// rendered as bare run-together text: "All412 Open37Paused6Resolved318Closed51".
+// Separately, the verdict list (.pv-lic) lived in the empty-states skin, and a
+// skin is inlined PER PAGE — so on board.html it matched nothing and every claim
+// ran into its own verdict with no space and no rule between rows. Both were
+// valid CSS, both passed every test, and both were only visible by rendering the
+// page and looking at it. Borrowing a class name is not borrowing a rule.
+r.head('every class a page draws has a rule that page can actually reach');
+const bodyOf = h => h.slice(h.indexOf('<body'));
+const classesIn = h => [...new Set([...bodyOf(h).matchAll(/class="([^"]*)"/g)]
+  .flatMap(m => m[1].split(/\s+/)).filter(Boolean))];
+Object.entries({ ...PAGE, index: chooser, parts: PARTS, empty: EMPTY, board: BOARD }).forEach(([k, html]) => {
+  const own = (html.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+  const reachable = css + '\n' + own;
+  const drawn = classesIn(html).filter(c => c.startsWith('pv-'));
+  const orphans = drawn.filter(c => !new RegExp(`\\.${c}(?![\\w-])`).test(reachable));
+  r.ok(`${k}: all ${drawn.length} pv- classes it draws are styled somewhere it loads`,
+    drawn.length > 0 && orphans.length === 0, orphans.join(' '));
+});
+// The boards borrow the APP's own vocabulary on purpose — a card is an .ir-title,
+// an .ir-sn and an .ir-progress chip, because the point of the page is to draw
+// rows the app already draws. That is only honest if the page carries the
+// declarations too. It is not enough that the class appears SOMEWHERE in the
+// page's CSS either: option D's skin carries all of these scoped under
+// `.pv-app`, and no board page has a .pv-app element — so the rule existed and
+// applied to nothing, which is what a computed-style check in a browser found
+// and no static check did. These must be in the board's OWN layer, which is the
+// text appended after D's skin, and .ir-cat is deliberately absent because the
+// app has no rule for it either (it is styled by .ir-meta and .ir-meta > *).
+const boardOwn = boardSkin.slice(dSkin.length);
+const borrowed = ['ir-title', 'ir-sn', 'ir-dot', 'ir-age', 'ir-assignee', 'ir-meta', 'ir-progress', 'ir-progress-bar', 'ir-progress-text'];
+const orphanBorrowed = borrowed.filter(c => !new RegExp(`\\.pv-kb-card[^{}]*\\.${c}(?![\\w-])`).test(boardOwn));
+r.ok('board: every app class a board card draws is carried by the board\'s OWN layer',
+  orphanBorrowed.length === 0, orphanBorrowed.join(' '));
+r.ok('...and .ir-meta carries its gap and its > * rule, which is the whole line',
+  /\.pv-kb-card \.ir-meta\s*\{[^}]*gap:/.test(boardOwn) &&
+  /\.pv-kb-card \.ir-meta > \*\s*\{[^}]*white-space:\s*nowrap/.test(boardOwn));
+
+// ── 11. The owner can reach it ──────────────────────────────────────────────
 r.head('every preview file is served, and none of it is in the app\'s shell');
 const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/board.html', 'preview/preview.css'];
 PREVIEW_FILES.forEach(f => r.ok(`deploy serves ${f}`, deployJs.includes(`'${f}'`)));

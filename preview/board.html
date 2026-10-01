@@ -9,7 +9,7 @@
      serves same-origin subresources stale-while-revalidate, so without it a
      rebuilt preview.css would be answered from the cache once and the review
      would be of the previous build. A new hash is a new URL. -->
-<link rel="stylesheet" href="preview.css?v=8c9e244d" />
+<link rel="stylesheet" href="preview.css?v=bbf9c164" />
 <style>
 
 
@@ -240,17 +240,58 @@
 .pv-kb-board:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
 .pv-kb-col { flex: 0 0 15rem; display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
-/* The column the worked example is talking about. A left edge rather than a
-   tinted fill, so it reads as a marker and not as a state the app has. */
+/* The column the worked example is talking about. A coloured rule under the
+   header rather than a tinted fill, so it reads as a marker pointing at
+   something and not as a state the app has — nothing in I-PASSBOOK has an
+   accent-filled card. */
 .pv-kb-col-here > .pv-kb-col-head { border-bottom-color: var(--accent); }
 .pv-kb-col-here > .pv-kb-col-head .pv-kb-col-count { background: var(--accent-soft); color: var(--accent); }
-.pv-kb-col-muted { opacity: 0.72; }
+/* Finished. 369 of the 412 IRs live here and none of them need looking at, so
+   the column is drawn flat rather than dimmed to the point of unreadable: the
+   count still has to be legible, because the count is the whole information. */
+.pv-kb-col-quiet > .pv-kb-col-head { border-bottom-style: dashed; }
+.pv-kb-col-quiet .pv-kb-col-body { opacity: 0.75; }
 .pv-kb-col-head { display: flex; align-items: baseline; gap: 0.5rem; padding-bottom: 0.35rem; border-bottom: 2px solid var(--outline-gray-2); }
 .pv-kb-col-title { flex: 1 1 auto; min-width: 0; font-size: var(--text-sm); font-weight: var(--weight-semibold); }
 .pv-kb-col-count { flex: 0 0 auto; min-width: 1.6rem; padding: 0.05rem 0.4rem; border-radius: var(--radius-9); background: var(--surface-gray-3); color: var(--ink-gray-7); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; font-variant-numeric: tabular-nums; }
 .pv-kb-col-sub { color: var(--ink-gray-5); font-size: var(--text-2xs); line-height: 1.3; }
 .pv-kb-col-body { display: flex; flex-direction: column; gap: 0.4rem; }
 .pv-kb-more { color: var(--ink-gray-5); font-size: var(--text-xs); padding: 0.15rem 0.1rem; }
+
+/* ── the app's own list-row words, carried rather than assumed ──────────────
+   Copied declaration for declaration from views.css (:207, :226, :273-288,
+   :1763-1796). This is not duplication for its own sake, and it is the second
+   time this page has been caught by the same trap.
+
+   A review page loads tokens.css, palette.css, the shared skeleton and its OWN
+   skin. It never loads views.css. Option D's skin DOES carry these classes — but
+   it scopes every one of them under .pv-app, and NO BOARD PAGE HAS A .pv-app
+   ELEMENT. So .pv-app .ir-meta reached nothing, and the board drew app
+   vocabulary with rules that applied to none of it. It showed, and only by
+   looking: the meta line ran together as "H25P-0032·REPAIR" because .ir-meta's
+   flex gap was missing, the 2/6 chip's bar had no width or height because
+   .ir-progress-bar's were missing, and the IR number was not bold because
+   .ir-title's weight was missing. Every card on the page and every assertion in
+   this repo stayed green, because "the rule exists" and "the rule applies" are
+   different claims and only one of them was being checked.
+
+   These come FIRST, so the board's own overrides below win by order at equal
+   specificity. .ir-cat deliberately has no rule here, because it has none in the
+   app either — it is styled entirely by .ir-meta and .ir-meta > *, both below. */
+.pv-kb-card .ir-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); letter-spacing: var(--tracking-base); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-kb-card .ir-assignee { font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-5); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pv-kb-card .ir-meta { display: flex; align-items: center; gap: 0.3rem; font-size: var(--text-xs); color: var(--ink-gray-5); flex-wrap: nowrap; overflow: hidden; min-width: 0; }
+.pv-kb-card .ir-meta > * { flex: 0 0 auto; white-space: nowrap; }
+.pv-kb-card .ir-sn { color: var(--ink-gray-6); font-weight: var(--weight-medium); }
+.pv-kb-card .ir-dot { opacity: 0.5; }
+.pv-kb-card .ir-age { color: var(--ink-gray-5); }
+.pv-kb-card .ir-age.is-late { color: var(--st-danger-fg); font-weight: var(--weight-medium); }
+.pv-kb-card .ir-progress { display: inline-flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.pv-kb-card .ir-progress-bar { display: block; width: 30px; height: 4px; border-radius: var(--radius-9); background: var(--surface-gray-3); overflow: hidden; }
+.pv-kb-card .ir-progress-bar::after { content: ''; display: block; height: 100%; width: 0; border-radius: inherit; background: var(--ink-gray-6); }
+.pv-kb-card .ir-progress-text { font-size: var(--text-2xs); line-height: 1; color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
+.pv-kb-card .ir-progress.is-complete .ir-progress-bar::after { background: var(--ink-green-7); }
+.pv-kb-card .ir-progress.is-complete .ir-progress-text { color: var(--ink-green-7); font-weight: var(--weight-semibold); }
 
 /* A card. 8px radius and the soft shadow are D's card geometry, so a board card
    and a list card are the same object seen two ways. */
@@ -264,28 +305,56 @@
 .pv-kb-card-foot .ir-assignee { font-size: var(--text-2xs); }
 .pv-kb-unassigned { color: var(--ink-amber-7); font-weight: var(--weight-medium); }
 
-/* The two states that only exist because rule 3 is being explained: a card in
-   flight, and the slot it is going back to. They are pictures of a gesture, and
-   the dashed edge is what says so. */
+/* The two states that only exist because rule 3 is being explained: the card
+   that has just arrived, and the dashed slot it would go back to. They are
+   pictures of a gesture, and the dashed edge is what says so. */
 .pv-kb-card-just { border-color: var(--accent); box-shadow: var(--elevation-md); }
-.pv-kb-card-dragging { opacity: 0.55; transform: rotate(-1.2deg); }
-.pv-kb-card-ghost { align-items: center; justify-content: center; min-height: 4.6rem; border-style: dashed; border-color: var(--accent-soft-line); background: var(--accent-soft); box-shadow: none; }
-.pv-kb-ghost-label { color: var(--accent); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; }
+.pv-kb-card-ghost { align-items: center; justify-content: center; min-height: 4.2rem; border-style: dashed; border-color: var(--outline-gray-3); background: var(--surface-gray-1); box-shadow: none; }
+.pv-kb-ghost-label { color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); text-align: center; }
 
-/* The stage table. Plain, because it is reference and not a component. */
-.pv-kb-map { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
-.pv-kb-map th { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--outline-gray-2); color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.06em; text-transform: uppercase; text-align: left; }
-.pv-kb-map td { padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--outline-gray-1); vertical-align: top; }
-.pv-kb-map tr:last-child td { border-bottom: 0; }
-.pv-kb-map td:first-child { width: 40%; font-weight: var(--weight-medium); }
-.pv-kb-off { color: var(--ink-gray-5); }
+/* The whole-picture bar. One bar split in proportion to the four numbers the
+   list screen's segment strip already prints, so the board and the strip cannot
+   disagree on screen — which is the only place a disagreement would be noticed.
+   Segments are filled with the SOLID status ink (--st-*-fg) and not the tint
+   (--st-*-bg): a tint is designed to sit behind text on a card and at 9% width
+   it would read as an empty gap rather than as a segment. */
+.pv-kb-strip { display: flex; height: 0.6rem; margin-bottom: 0.5rem; border-radius: var(--radius-3); overflow: hidden; background: var(--surface-gray-2); }
+.pv-kb-seg { display: block; height: 100%; }
+.pv-kb-seg-open { background: var(--st-open-fg); }
+.pv-kb-seg-paused { background: var(--st-paused-fg); }
+.pv-kb-seg-resolved { background: var(--st-resolved-fg); }
+.pv-kb-seg-closed { background: var(--st-closed-fg); }
+.pv-kb-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem 0.9rem; margin-bottom: 0.75rem; color: var(--ink-gray-6); font-size: var(--text-2xs); }
+.pv-kb-key { display: inline-flex; align-items: center; gap: 0.3rem; font-variant-numeric: tabular-nums; }
+.pv-kb-key b { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+.pv-kb-key-total { margin-left: auto; padding-left: 0.9rem; border-left: 1px solid var(--outline-gray-2); }
+/* The legend's swatch reuses the segment's own class for its fill, so a colour
+   cannot be right in the bar and wrong in the key beside it. */
+.pv-kb-dot { width: 0.5rem; height: 0.5rem; border-radius: var(--radius-9); }
 
 /* The List | Board switch, drawn where the app already puts a control of this
-   kind. Not interactive on a review page — it is a picture of a switch. */
-.pv-kb-toolbar { display: flex; flex-direction: column; gap: 0.55rem; }
+   kind. Not interactive on a review page — it is a picture of a switch.
+   THE FIRST VERSION OF THIS DEMO WAS UNSTYLED. It borrowed the app's own class
+   names (list-toolbar-top, segments, segment, segment-count), which live in
+   views.css — and a review page loads tokens.css and palette.css only, never
+   views.css. So the classes matched nothing: the switch sat in a cramped box and
+   the counts ran together as bare text ("All412 Open37Paused6…"). It validated,
+   every test passed, and the owner would have been shown a picture of a control
+   that is not what the app draws. Borrowing a class name is not borrowing a rule;
+   if this page wants the app's look it has to carry the declarations, and these
+   are written in D's measured geometry with this board's own names. */
+.pv-kb-toolbar { display: flex; flex-direction: column; gap: 0.6rem; }
+.pv-kb-ltbar { display: flex; align-items: baseline; gap: 0.5rem; }
+.pv-kb-ltitle { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.pv-kb-lcount { color: var(--ink-gray-6); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .pv-kb-switch { display: inline-flex; flex: 0 0 auto; margin-left: auto; padding: 2px; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-gray-1); }
 .pv-kb-switch-btn { padding: 0.2rem 0.6rem; border-radius: var(--radius-2); color: var(--ink-gray-6); font-size: var(--text-xs); }
 .pv-kb-switch-btn.is-on { background: var(--surface-base); color: var(--ink-gray-9); font-weight: var(--weight-medium); box-shadow: var(--elevation-sm); }
+.pv-kb-viewsegs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-kb-viewseg { display: inline-flex; align-items: baseline; gap: 0.35rem; padding: 0.2rem 0.55rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-xs); }
+.pv-kb-viewseg.is-on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-kb-viewseg-n { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-kb-viewseg.is-on .pv-kb-viewseg-n { color: var(--accent); }
 
 /* The progress chip's base and its six fills, copied declaration for declaration
    from views.css:1772-1791. The parts board carries only .p4 because it only ever
@@ -322,7 +391,7 @@
 <div class="pv-page">
   <div class="pv-top">
     <h1>I-PASSBOOK — IR board</h1>
-    <p>The IR list as a board — two sets of columns it could use, and the real decision: how a card moves between them.</p>
+    <p>The IR list as a board — every IR in one picture, and the real decision underneath it: how a card moves between columns.</p>
     <nav class="pv-tabs">
       <a class="pv-tab" href="index.html">The four options</a>
       <a class="pv-tab" href="parts.html">Parts</a>
@@ -331,534 +400,438 @@
     </nav>
   </div>
   <nav class="pv-jump">
-    <a href="#today">What you can build today</a>
-    <a href="#stages">The six-section board</a>
+    <a href="#board">The board</a>
     <a href="#moves">How a card moves</a>
     <a href="#place">Where it lives</a>
     <a href="#limits">What it costs</a>
   </nav>
 
-  <section class="pv-block" id="today">
-    <span class="pv-kicker">Board A — buildable today, with nothing new</span>
-    <h2 class="pv-block-title">Four columns the app is already counting</h2>
-    <p class="pv-block-note">Columns are the four buckets <b>statusCategory()</b> produces, in the
-    app's own words: Open, Paused, Resolved, Closed. Cards are drawn with the list row's own
-    classes, and every number on them is one the app computes today — the age, the category, the
-    assignee and the <b>4/6</b> chip are all on the card you already have.</p>
+  <section class="pv-block" id="board">
+    <span class="pv-kicker">The board</span>
+    <h2 class="pv-block-title">Every IR has a status. The status says which section it is in. So the columns are the sections.</h2>
+    <p class="pv-block-note">That is the whole mechanism. The app has fourteen statuses and ten of
+    them name one of your six sections, so those are the middle six columns. The other four —
+    Open, Remote Support, Hold and the finished ones — get columns at the two ends so that nothing
+    falls off the board.</p>
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Bucket board</b><span>the four numbers the list screen's segment strip already prints</span></div>
+      <div class="pv-demo-cap"><b>All 412 IRs</b><span>every status the app has lands in exactly one column</span></div>
       <div class="pv-demo-pad">
-          <div class="pv-kb-board" role="region" aria-label="IR board, one column per status bucket" tabindex="0">
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">Open</span><span class="pv-kb-col-count">37</span></div>
-              <span class="pv-kb-col-sub">Open · Inward · Visual Inspection · QC Investigation · Production · QC · Flight Test · PDI · Approval · Remote Support</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-412</span>
-                  <span class="ir-age is-late">19d</span>
+            <div class="pv-kb-strip">
+              <span class="pv-kb-seg pv-kb-seg-open" style="width:8.98%"></span><span class="pv-kb-seg pv-kb-seg-paused" style="width:1.46%"></span><span class="pv-kb-seg pv-kb-seg-resolved" style="width:77.18%"></span><span class="pv-kb-seg pv-kb-seg-closed" style="width:12.38%"></span>
+            </div>
+            <div class="pv-kb-legend">
+              <span class="pv-kb-key"><i class="pv-kb-dot pv-kb-seg-open"></i>Open <b>37</b></span><span class="pv-kb-key"><i class="pv-kb-dot pv-kb-seg-paused"></i>Paused <b>6</b></span><span class="pv-kb-key"><i class="pv-kb-dot pv-kb-seg-resolved"></i>Resolved <b>318</b></span><span class="pv-kb-key"><i class="pv-kb-dot pv-kb-seg-closed"></i>Closed <b>51</b></span>
+              <span class="pv-kb-key pv-kb-key-total">All <b>412</b></span>
+            </div>
+
+            <div class="pv-kb-board" role="region" aria-label="IR board, one column per status group, all 412 IRs" tabindex="0">
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">Not started</span><span class="pv-kb-col-count">11</span></div>
+                <span class="pv-kb-col-sub">Open · Remote Support</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-396</span>
+                    <span class="ir-age">44d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">D25G-0102</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
+                    <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
+                  </div>
                 </div>
-                <div class="ir-meta"><span class="ir-sn">D25G-0114</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-388</span>
+                    <span class="ir-age">52d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0018</span><span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+9 more</span></div>
               </div>
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-409</span>
-                  <span class="ir-age is-late">23d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">Paused</span><span class="pv-kb-col-count">6</span></div>
+                <span class="pv-kb-col-sub">Hold</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-402</span>
+                    <span class="ir-age is-late">41d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">D10G-0221</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
+                    <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+5 more</span></div>
               </div>
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-406</span>
-                  <span class="ir-age">29d</span>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">B · Inward Checklist</span><span class="pv-kb-col-count">4</span></div>
+                <span class="pv-kb-col-sub">Inward</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-415</span>
+                    <span class="ir-age">4d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0011</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
+                    <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
+                  </div>
                 </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-412</span>
+                    <span class="ir-age is-late">19d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">D25G-0114</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+2 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
+                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-411</span>
+                    <span class="ir-age">8d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+2 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
+                <span class="pv-kb-col-sub">QC Investigation</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-409</span>
+                    <span class="ir-age is-late">23d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
                 </div>
-              </div><span class="pv-kb-more">+34 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">Paused</span><span class="pv-kb-col-count">6</span></div>
-              <span class="pv-kb-col-sub">Hold</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-402</span>
-                  <span class="ir-age is-late">41d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">D10G-0221</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
-                  <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+5 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">Resolved</span><span class="pv-kb-col-count">318</span></div>
-              <span class="pv-kb-col-sub">Delivered</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-401</span>
-                  <span class="ir-age">36d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0014</span><span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p6 is-complete" title="6 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">6/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+317 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">Closed</span><span class="pv-kb-col-count">51</span></div>
-              <span class="pv-kb-col-sub">Close · Other</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-398</span>
-                  <span class="ir-age">58d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0003</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p6 is-complete" title="6 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">6/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+50 more</span></div>
-            </div>
-          </div></div>
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-408</span>
+                    <span class="ir-age is-late">25d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+5 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production (Rework)</span><span class="pv-kb-col-count">5</span></div>
+                <span class="pv-kb-col-sub">Production</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-406</span>
+                    <span class="ir-age">29d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+4 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
+                <span class="pv-kb-col-sub">QC · Flight Test</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-403</span>
+                    <span class="ir-age">31d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">D10G-0207</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p4" title="4 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">4/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+3 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">G · PDI Report/Dispatch Record</span><span class="pv-kb-col-count">3</span></div>
+                <span class="pv-kb-col-sub">PDI · Approval</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-401</span>
+                    <span class="ir-age">36d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">S25P-0014</span><span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p5" title="5 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">5/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+2 more</span></div>
+              </div>
+              <div class="pv-kb-col pv-kb-col-quiet">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">Finished</span><span class="pv-kb-col-count">369</span></div>
+                <span class="pv-kb-col-sub">Delivered · Close · Other</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-398</span>
+                    <span class="ir-age">58d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0003</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p6 is-complete" title="6 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">6/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+368 more</span></div>
+              </div>
+            </div></div>
     </div>
 
       <div class="pv-caveat">
-        <b>The four columns are not four statuses — they are a mapping over fourteen.</b>
-        The stage the app stores is <b>Inward</b>, <b>Production</b>, <b>Flight Test</b> and so on;
-        <b>statusCategory()</b> folds all fourteen into these four buckets, and the strip of count
-        tiles on your list screen is already counting them. So this board is buildable with
-        <b>no new field, no backend change and no migration</b>: it is a second drawing of a number
-        the app already sums. What it is not is informative — Open is 37 IRs that are at ten
-        different real stages, and a column that wide tells you nothing you did not know.
-      </div>
-  </section>
-
-  <section class="pv-block" id="stages">
-    <span class="pv-kicker">Board B — the one you were picturing</span>
-    <h2 class="pv-block-title">Columns are the six sections, which means the board and the tab strip agree</h2>
-    <p class="pv-block-note">This is the board that earns its place, and it is a zoom into one tile.
-    The columns are the app's own six sections — the same six the ticket's tab strip already
-    shows — plus one for the IRs that have a stage but no section yet. A card that moves right is
-    an IR moving through the same six things the tabs are named after.</p>
-    <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Stage board</b><span>the 37 open IRs, by section — the same 37 as the Open tile</span></div>
-      <div class="pv-demo-pad">
-          <div class="pv-kb-board" role="region" aria-label="IR board, one column per build stage" tabindex="0">
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">B · Inward Checklist</span><span class="pv-kb-col-count">4</span></div>
-              <span class="pv-kb-col-sub">Inward</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-415</span>
-                  <span class="ir-age">4d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0011</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
-                  <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
-                </div>
-              </div>
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-412</span>
-                  <span class="ir-age is-late">19d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">D25G-0114</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+2 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-              <span class="pv-kb-col-sub">Visual Inspection</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-411</span>
-                  <span class="ir-age">8d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+2 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
-              <span class="pv-kb-col-sub">QC Investigation</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-409</span>
-                  <span class="ir-age is-late">23d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div>
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-408</span>
-                  <span class="ir-age is-late">25d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+5 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production (Rework)</span><span class="pv-kb-col-count">5</span></div>
-              <span class="pv-kb-col-sub">Production</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-406</span>
-                  <span class="ir-age">29d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+4 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
-              <span class="pv-kb-col-sub">QC · Flight Test</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-403</span>
-                  <span class="ir-age">31d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">D10G-0207</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p4" title="4 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">4/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+3 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">G · PDI / Dispatch</span><span class="pv-kb-col-count">3</span></div>
-              <span class="pv-kb-col-sub">PDI · Approval</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-401</span>
-                  <span class="ir-age">36d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0014</span><span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p5" title="5 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">5/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+2 more</span></div>
-            </div>
-            <div class="pv-kb-col pv-kb-col-muted">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">Not in a build stage</span><span class="pv-kb-col-count">11</span></div>
-              <span class="pv-kb-col-sub">Open · Remote Support</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-396</span>
-                  <span class="ir-age">44d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">D25G-0102</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee pv-kb-unassigned">Unassigned</span>
-                  <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
-                </div>
-              </div>
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-388</span>
-                  <span class="ir-age">52d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0018</span><span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p0" title="0 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">0/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+9 more</span></div>
-            </div>
-          </div>
-      </div>
-    </div>
-    <div class="pv-demo pv-demo-pad">
-      <table class="pv-kb-map">
-        <thead><tr><th>Stage as it is stored</th><th>Column it lands in</th></tr></thead>
-        <tbody>
-          <tr><td>Inward</td><td><b>B</b> · Inward Checklist</td></tr>
-          <tr><td>Visual Inspection</td><td><b>C</b> · IQC Visual Inspection</td></tr>
-          <tr><td>QC Investigation</td><td><b>D</b> · Investigation</td></tr>
-          <tr><td>Production</td><td><b>E</b> · Production (Rework)</td></tr>
-          <tr><td>QC</td><td><b>F</b> · Quality Test Report</td></tr>
-          <tr><td>Flight Test</td><td><b>F</b> · Quality Test Report</td></tr>
-          <tr><td>PDI</td><td><b>G</b> · PDI Report/Dispatch Record</td></tr>
-          <tr><td>Approval</td><td><b>G</b> · PDI Report/Dispatch Record</td></tr>
-          <tr><td>Open</td><td><span class="pv-kb-off">Not in a build stage</span></td></tr>
-          <tr><td>Remote Support</td><td><span class="pv-kb-off">Not in a build stage</span></td></tr>
-          <tr><td>Hold</td><td><span class="pv-kb-off">Stays where it is, flagged</span></td></tr>
-          <tr><td>Delivered</td><td><span class="pv-kb-off">Off the board</span></td></tr>
-          <tr><td>Close</td><td><span class="pv-kb-off">Off the board</span></td></tr>
-          <tr><td>Other</td><td><span class="pv-kb-off">Off the board</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-
-      <div class="pv-caveat">
-        <b>This board needs one small thing that does not exist yet.</b>
-        <b>statusCategory()</b> maps fourteen stages onto four buckets. Mapping them onto the six
-        sections instead is the table above — about fifteen lines of pure function, no backend, no
-        new field, no write. The seven columns add up to the Open tile from the first board and no
-        more: <b>the other 375 IRs are off the board entirely</b>, because a board shows work in
-        progress and an IR that is Delivered is not in progress. A board that looked like it held
-        everything would be a lie you could not see.
+        <b>Two things the board cannot say, and both are the app's doing rather than the board's.</b>
+        A <b>Paused</b> IR keeps its status as Hold, so the app no longer knows which section it was
+        paused in — which is why Paused is a column of its own rather than the card sitting where it
+        stopped. And <b>Finished</b> is deliberately one wide column: 369 IRs that need no action do
+        not deserve eight columns of screen, and the count is the useful part. Both are columns
+        rather than omissions, so the totals still add up to all 412.
       </div>
   </section>
 
   <section class="pv-block" id="moves">
-    <span class="pv-kicker">The decision this board exists to make</span>
-    <h2 class="pv-block-title">Three rules for how a card moves. One of them the app already wrote down.</h2>
+    <span class="pv-kicker">The one decision the board needs from you</span>
+    <h2 class="pv-block-title">When a section is saved, does the card move?</h2>
     <p class="pv-block-note">One event, drawn three ways: <b>Ravi saves Section D on IR-409</b>,
     which is sitting in the Investigation column with 2 of 6 sections saved.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 1 — set by hand, in Triage</b><span>what the app does today</span></div>
+      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Triage</b><span>what the app does today</span></div>
       <div class="pv-demo-pad">
-          <div class="pv-kb-board" role="region" aria-label="Rule 1: the card does not move" tabindex="0">
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-              <span class="pv-kb-col-sub">Visual Inspection</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-411</span>
-                  <span class="ir-age">8d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+2 more</span></div>
-            </div>
-            <div class="pv-kb-col pv-kb-col-here">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
-              <span class="pv-kb-col-sub">QC Investigation</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-409</span>
-                  <span class="ir-age is-late">23d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
+            <div class="pv-kb-board" role="region" aria-label="Rule 1: the card does not move" tabindex="0">
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
+                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-411</span>
+                    <span class="ir-age">8d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+2 more</span></div>
               </div>
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-408</span>
-                  <span class="ir-age is-late">25d</span>
+              <div class="pv-kb-col pv-kb-col-here">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
+                <span class="pv-kb-col-sub">QC Investigation</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-409</span>
+                    <span class="ir-age is-late">23d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
                 </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+5 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production</span><span class="pv-kb-col-count">5</span></div>
-              <span class="pv-kb-col-sub">Production</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-406</span>
-                  <span class="ir-age">29d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+4 more</span></div>
-            </div>
-          </div></div>
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-408</span>
+                    <span class="ir-age is-late">25d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+5 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production (Rework)</span><span class="pv-kb-col-count">5</span></div>
+                <span class="pv-kb-col-sub">Production</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-406</span>
+                    <span class="ir-age">29d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+4 more</span></div>
+              </div>
+            </div></div>
     </div>
-    <p class="pv-block-note"><b>Nothing moves.</b> A section being saved is not a stage change, so
-    IR-409 stays in D until somebody opens Triage and says otherwise. The cost is that the board
-    is only as current as the last person to triage — and this is the rule the app's own comments
-    argue for.</p>
+    <p class="pv-block-note"><b>Nothing moves.</b> Saving a section is not a stage change, so IR-409
+    stays in D until somebody opens Triage. The cost is that the board is only as current as the
+    last person to triage — and this is the rule the app's own comments argue for.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 2 — it moves itself when a section is saved</b><span>the rule the app tried and removed</span></div>
+      <div class="pv-demo-cap"><b>Rule 2 — it moves itself on save</b><span>the rule the app tried and removed</span></div>
       <div class="pv-demo-pad">
-          <div class="pv-kb-board" role="region" aria-label="Rule 2: the card advances on save" tabindex="0">
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
-              <span class="pv-kb-col-sub">QC Investigation</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-408</span>
-                  <span class="ir-age is-late">25d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+5 more</span></div>
-            </div>
-            <div class="pv-kb-col pv-kb-col-here">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production</span><span class="pv-kb-col-count">6</span></div>
-              <span class="pv-kb-col-sub">Production</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late pv-kb-card-just">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-409</span>
-                  <span class="ir-age is-late">23d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
+            <div class="pv-kb-board" role="region" aria-label="Rule 2: the card advances on save" tabindex="0">
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
+                <span class="pv-kb-col-sub">QC Investigation</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-408</span>
+                    <span class="ir-age is-late">25d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+5 more</span></div>
               </div>
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-406</span>
-                  <span class="ir-age">29d</span>
+              <div class="pv-kb-col pv-kb-col-here">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production (Rework)</span><span class="pv-kb-col-count">6</span></div>
+                <span class="pv-kb-col-sub">Production</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-409</span>
+                    <span class="ir-age is-late">23d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
                 </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+4 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
-              <span class="pv-kb-col-sub">QC · Flight Test</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-403</span>
-                  <span class="ir-age">31d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">D10G-0207</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p4" title="4 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">4/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+3 more</span></div>
-            </div>
-          </div></div>
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-406</span>
+                    <span class="ir-age">29d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+4 more</span></div>
+              </div>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
+                <span class="pv-kb-col-sub">QC · Flight Test</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-403</span>
+                    <span class="ir-age">31d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">D10G-0207</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p4" title="4 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">4/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+3 more</span></div>
+              </div>
+            </div></div>
     </div>
-    <p class="pv-block-note"><b>IR-409 slides to E the moment D is saved.</b> Three things go wrong
-    with it. <b>done[] only records saved, never finished</b> — a section saved with three empty
+    <p class="pv-block-note"><b>IR-409 slides into E the moment D is saved.</b> Three things go
+    wrong. <b>done[] only records saved, never finished</b>, so a section saved with three empty
     fields moves the card just as far as a completed one. <b>The stage and the sections drift apart</b>
     the first time somebody works on F before finishing E, which your engineers will do. And
-    <b>statusAt is overwritten on every save</b>, so "In status 3d" becomes permanently 0d and the
-    overdue limits stop meaning anything.</p>
+    <b>the clock resets on every save</b> — the time an IR has been in its stage would read 0 days
+    forever, and the overdue limits stop meaning anything.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 3 — it advances itself, and anyone can push it back</b><span>the one worth discussing</span></div>
+      <div class="pv-demo-cap"><b>Rule 3 — it advances, and anyone can push it back</b><span>the one worth talking about</span></div>
       <div class="pv-demo-pad">
-          <div class="pv-kb-board" role="region" aria-label="Rule 3: advance on save, drag to correct" tabindex="0">
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-              <span class="pv-kb-col-sub">Visual Inspection</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-411</span>
-                  <span class="ir-age">8d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
-                </div>
-              </div><span class="pv-kb-more">+2 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
-              <span class="pv-kb-col-sub">QC Investigation</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-408</span>
-                  <span class="ir-age is-late">25d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">A. Sharma</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
-              </div><div class="pv-kb-card pv-kb-card-ghost"><span class="pv-kb-ghost-label">Drop IR-409 here — back to Investigation</span></div><span class="pv-kb-more">+4 more</span></div>
-            </div>
-            <div class="pv-kb-col">
-              <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production</span><span class="pv-kb-col-count">6</span></div>
-              <span class="pv-kb-col-sub">Production</span>
-              <div class="pv-kb-col-body">
-              <div class="pv-kb-card is-late pv-kb-card-dragging">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-409</span>
-                  <span class="ir-age is-late">23d</span>
-                </div>
-                <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">R. Kumar</span>
-                  <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
-                </div>
+            <div class="pv-kb-board" role="region" aria-label="Rule 3: advance on save, drag to correct" tabindex="0">
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
+                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-411</span>
+                    <span class="ir-age">8d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0029</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p1" title="1 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">1/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+2 more</span></div>
               </div>
-              <div class="pv-kb-card">
-                <div class="pv-kb-card-top">
-                  <span class="ir-title">IR-406</span>
-                  <span class="ir-age">29d</span>
+              <div class="pv-kb-col">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
+                <span class="pv-kb-col-sub">QC Investigation</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-408</span>
+                    <span class="ir-age is-late">25d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">S25P-0044</span><span class="ir-dot">·</span><span class="ir-cat">CRASH</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">A. Sharma</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
                 </div>
-                <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
-                <div class="pv-kb-card-foot">
-                  <span class="ir-assignee">P. Nair</span>
-                  <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                <div class="pv-kb-card pv-kb-card-ghost"><span class="pv-kb-ghost-label">IR-409 can be dragged back here</span></div><span class="pv-kb-more">+4 more</span></div>
+              </div>
+              <div class="pv-kb-col pv-kb-col-here">
+                <div class="pv-kb-col-head"><span class="pv-kb-col-title">E · Production (Rework)</span><span class="pv-kb-col-count">6</span></div>
+                <span class="pv-kb-col-sub">Production</span>
+                <div class="pv-kb-col-body">
+                <div class="pv-kb-card is-late pv-kb-card-just">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-409</span>
+                    <span class="ir-age is-late">23d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">H25P-0032</span><span class="ir-dot">·</span><span class="ir-cat">REPAIR</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">R. Kumar</span>
+                    <span class="ir-progress p2" title="2 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">2/6</span></span>
+                  </div>
                 </div>
-              </div><span class="pv-kb-more">+4 more</span></div>
-            </div>
-          </div></div>
+                <div class="pv-kb-card">
+                  <div class="pv-kb-card-top">
+                    <span class="ir-title">IR-406</span>
+                    <span class="ir-age">29d</span>
+                  </div>
+                  <div class="ir-meta"><span class="ir-sn">VTR-0007</span><span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span></div>
+                  <div class="pv-kb-card-foot">
+                    <span class="ir-assignee">P. Nair</span>
+                    <span class="ir-progress p3" title="3 of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">3/6</span></span>
+                  </div>
+                </div><span class="pv-kb-more">+4 more</span></div>
+              </div>
+            </div></div>
     </div>
-    <p class="pv-block-note"><b>It advances, and the person who knows better can drag it back.</b>
-    The catch is that a drag is a write, and every drag would need to say whether it moved the
-    clock. The shape that survives: <b>saving a section proposes a move, and only a hand-set
-    change writes statusAt</b> — so the board stays current without the ageing clock becoming
-    fiction. That is rule 1's guarantee kept, with rule 2's freshness bought on top.</p>
+    <p class="pv-block-note"><b>It advances, and the person who knows better drags it back.</b>
+    A drag is a write, so each one has to say whether it moved the clock. The shape that survives:
+    <b>saving a section proposes a move, and only a person setting the stage writes the clock.</b>
+    The board stays current and the ageing stays true.</p>
 
       <div class="pv-caveat">
         <b>The app has already answered two of these three, in its own source.</b>
@@ -867,36 +840,36 @@
         here."</i> And from <b>syncIRStateAfterSectionSave()</b>: <i>"Status is no longer mirrored
         from a section form… A section save that happens to post a status key must not be able to
         move the workflow clock."</i> Both sentences exist because someone already tried rule 2 and
-        took it out. The reason is in the third column of the table above: <b>statusAt</b>.
+        took it out. The reason is the clock: <b>statusAt</b>, which is what "In status 3d" and the
+        overdue limits are measured from.
       </div>
   </section>
 
   <section class="pv-block" id="place">
     <span class="pv-kicker">Where the board goes</span>
     <h2 class="pv-block-title">A switch beside the filters, not a seventh tab</h2>
-    <p class="pv-block-note">The board is another view of the list you already have, so it reads
-    the same rows, the same search box and the same filters — a separate "Board" tab would mean
-    filtering twice and finding different numbers on each. One switch on the List screen, and both
-    views obey whatever is typed above them.</p>
+    <p class="pv-block-note">The board is another view of the list you already have, so it reads the
+    same rows, the same search box and the same filters — a separate "Board" tab would mean filtering
+    twice and finding different numbers on each. One switch on the List screen, and both views obey
+    whatever is typed above them.</p>
     <div class="pv-demo pv-demo-pad">
       <div class="pv-kb-toolbar">
-        <div class="list-toolbar-top"><span class="list-title">IRs</span><span class="list-count">412</span>
+        <div class="pv-kb-ltbar">
+          <span class="pv-kb-ltitle">IRs</span>
+          <span class="pv-kb-lcount">412</span>
           <span class="pv-kb-switch"><span class="pv-kb-switch-btn is-on">List</span><span class="pv-kb-switch-btn">Board</span></span>
         </div>
-        <div class="segments">
-          <span class="segment active">All<span class="segment-count">412</span></span>
-          <span class="segment">Open<span class="segment-count">37</span></span>
-          <span class="segment">Paused<span class="segment-count">6</span></span>
-          <span class="segment">Resolved<span class="segment-count">318</span></span>
-          <span class="segment">Closed<span class="segment-count">51</span></span>
+        <div class="pv-kb-viewsegs">
+          <span class="pv-kb-viewseg is-on">All<span class="pv-kb-viewseg-n">412</span></span>
+          <span class="pv-kb-viewseg">Open<span class="pv-kb-viewseg-n">37</span></span><span class="pv-kb-viewseg">Paused<span class="pv-kb-viewseg-n">6</span></span><span class="pv-kb-viewseg">Resolved<span class="pv-kb-viewseg-n">318</span></span><span class="pv-kb-viewseg">Closed<span class="pv-kb-viewseg-n">51</span></span>
         </div>
       </div>
     </div>
     <div class="pv-caveat">
-      <b>One thing the switch does not solve.</b> The count tiles count <i>every</i> IR and the
-      board shows 37 of them. If the switch sits above the tiles the numbers will disagree with
-      what is on screen, so the tiles have to move <i>into</i> the board view as column totals —
-      which is what the headers above already are.
+      <b>One thing the switch does not solve.</b> The count tiles count <i>every</i> IR and a board
+      column shows a few cards plus a number. The tiles have to move <i>into</i> the board view as
+      column totals — which is what the headers above already are — or the two will appear to
+      disagree.
     </div>
   </section>
 
@@ -905,25 +878,29 @@
     <h2 class="pv-block-title">The honest list</h2>
     <div class="pv-lic">
       <div class="pv-lic-row"><b>It is a drawing of data you have</b><span class="yes">No migration</span>
-        <p>Every card on this page is built from fields the app already stores: <b>ir.status</b>,
-        the assignee, the category, the raised date, and <b>ir.done[]</b>. Adopting a board is a
-        rendering pass, not a data change.</p></div>
+        <p>Every card is built from fields the app already stores: <b>ir.status</b>, the assignee, the
+        category, the raised date, and <b>ir.done[]</b>. Adopting a board is a rendering pass, not a
+        data change.</p></div>
+      <div class="pv-lic-row"><b>A ten-line map is the only new code</b><span class="yes">Small</span>
+        <p>The app folds its fourteen statuses into four buckets today. Pointing them at your six
+        sections instead is a pure function with no backend, no new field and no write — and which
+        status goes in which column is written out under each column heading above, where you can
+        check it against the ticket.</p></div>
       <div class="pv-lic-row"><b>Dragging needs a write per drag</b><span class="warn">Decide</span>
-        <p>A drag that persists is a store write and an audit entry. That is fine — the app already
-        writes on every triage save — but it is a decision about who may drag, and it is the TR
-        access axis, not a new one.</p></div>
+        <p>A drag that persists is a store write and an audit entry, which the app already does on
+        every triage save. What needs deciding is who may drag — that is the TR access axis, not a
+        new one.</p></div>
       <div class="pv-lic-row"><b>The board is inert</b><span class="warn">By rule</span>
-        <p>Nothing on this page can be dragged, clicked or scrolled by script — the review pages
-        are forbidden a <b>&lt;script&gt;</b> and a test enforces it. The third rule above is a
-        picture of a drag, not a drag.</p></div>
+        <p>Nothing here can be dragged or clicked by script — the review pages are forbidden a
+        <b>&lt;script&gt;</b> and a test enforces it. Rule 3 above is a picture of a drag, not a drag.</p></div>
       <div class="pv-lic-row"><b>No subtasks, no swimlanes, no WIP limits</b><span class="no">Not shown</span>
-        <p>Real kanban tools add cards inside cards and cap how many may sit in a column. Neither
-        maps onto anything the app stores, so neither is drawn. If you want one, say which.</p></div>
+        <p>Real kanban tools put cards inside cards and cap how many may sit in a column. Neither maps
+        onto anything the app stores, so neither is drawn. If you want one, say which.</p></div>
       <div class="pv-lic-row"><b>On your phone it is one column at a time</b><span class="warn">Sideways</span>
-        <p>A board is wide by nature. On the phone it scrolls sideways inside its own frame — the
-        page itself never scrolls sideways — so you see one column and the edge of the next. That
-        is the honest cost of a board on a 390px screen, and it is why board A may be the better
-        phone answer even though board B is the better one.</p></div>
+        <p>A board is wide by nature. On the phone it scrolls sideways inside its own frame — the page
+        itself never scrolls — so you see one column and the edge of the next. That is the honest cost
+        of a board on a 390px screen, and the reason the counts in the headers matter: they are what
+        you read without scrolling.</p></div>
     </div>
   </section>
 

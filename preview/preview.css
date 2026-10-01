@@ -1390,3 +1390,23 @@ html { -webkit-text-size-adjust: 100%; }
 /* Visible to a screen reader only. The step letters are decoration; the section
    name is the part worth announcing, and the bars carry no text at all. */
 .pv-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The verdict list — a row per claim, its verdict beside it, its evidence under.
+   THIS BLOCK WAS IN THE WRONG PLACE and it rendered as one run-on line: it lived
+   in the empty-states skin, which is inlined only on empty.html, so on board.html
+   the classes matched nothing and <b>It is a drawing of data you have</b> sat
+   flush against <span>No migration</span> with no space and no rule between rows.
+   Every test passed and the CSS was valid; it is only visible by rendering the
+   page. It belongs in the shared sheet, like the rest of the chrome, because
+   BOTH boards use it — a skin is inlined per page and cannot be shared. */
+.pv-lic { margin-top: 0.2rem; }
+.pv-lic-row { padding: 0.6rem 0; border-bottom: 1px solid var(--outline-gray-2); }
+.pv-lic-row b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-lic-row p { margin: 0.25rem 0 0; color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
+.pv-lic-row .yes { margin-left: 0.5rem; color: var(--st-resolved-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.pv-lic-row .no { margin-left: 0.5rem; color: var(--st-danger-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+/* .warn had NO RULE AT ALL — not here and not in the skin it was copied from —
+   so on both boards a "Decide" verdict rendered as plain text wedged against the
+   claim it belongs to, while "No migration" beside it was coloured and spaced.
+   Half a list looking styled is worse than none of it looking styled. */
+.pv-lic-row .warn { margin-left: 0.5rem; color: var(--st-paused-fg); font-size: var(--text-xs); font-weight: var(--weight-medium); }

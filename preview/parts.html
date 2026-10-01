@@ -9,7 +9,7 @@
      serves same-origin subresources stale-while-revalidate, so without it a
      rebuilt preview.css would be answered from the cache once and the review
      would be of the previous build. A new hash is a new URL. -->
-<link rel="stylesheet" href="preview.css?v=77f022a7" />
+<link rel="stylesheet" href="preview.css?v=8c9e244d" />
 <style>
 
 
@@ -224,40 +224,28 @@
 }
 
 
-/* ── the board's own chrome ── */
-.pv-app.is-demo { display: block; min-height: 0; background: var(--surface-base); }
-.pv-jump { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.75rem; }
-.pv-jump a { padding: 0.35rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-sm); text-decoration: none; }
-.pv-jump a:hover { border-color: var(--accent-soft-line); background: var(--accent-soft); }
-.pv-block { margin-bottom: 2.75rem; }
-.pv-kicker { display: block; color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.06em; text-transform: uppercase; }
-.pv-block-title { margin: 0.2rem 0 0.4rem; font-size: var(--text-2xl); font-weight: var(--weight-semibold); }
-.pv-block-note { max-width: 68ch; color: var(--ink-gray-7); font-size: var(--text-sm); }
-.pv-demo { margin-bottom: 1rem; overflow: hidden; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); box-shadow: var(--elevation-sm); }
-.pv-demo-cap { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-gray-1); }
-.pv-demo-cap b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.pv-demo-cap span { color: var(--ink-gray-6); font-size: var(--text-xs); }
-.pv-demo-pad { padding: 0.9rem; }
-.pv-demo-ticket { padding: 0.9rem 0; }
-/* On the ticket demos the tab strip insets itself by 0.9rem, so the compact bar
-   above it has to inset to match — otherwise the two rows read as unrelated. The
-   extra .pv-app is load-bearing: without it this ties on specificity with the
-   .progress-steps rule below and loses, because that one comes later.
+/* The board's own furniture — the jump row, the blocks, the demo card, the
+   caveat — is in BOARD_CHROME, in the shared sheet, because BOTH boards use it.
+   This block is only what the parts board alone needs. */
 
-   The auto width is load-bearing too, and it is the whole reason this rule has a
+/* On the ticket demos the tab strip insets itself by 0.9rem, so the compact bar
+   above it has to inset to match — otherwise the two rows read as unrelated.
+
+   The auto width is load-bearing, and it is the whole reason this rule has a
    width in it at all. The base rule sets width:100%, which resolves against the
    containing block's CONTENT box — and a margin is added outside that. So "100%
    wide, with 0.9rem each side" is 1.8rem wider than the space it has, and the bar
    runs out past the right edge of the frame. A block with width:auto is sized to
    fit its margins instead, which is what was meant. It showed up as a 14px spill
    in a geometry probe at phone width and nowhere else: at desktop width the demo
-   frame is wide enough to absorb it. */
+   frame is wide enough to absorb it.
+
+   The three class names are load-bearing: .pv-app .progress-steps below is two,
+   so this has to be three to win. It used to also need to come last, back when
+   both rules were in this skin; now the base rule is in the later sheet and this
+   still wins on specificity, which is the arrangement that cannot break by
+   someone re-ordering a file. */
 .pv-demo-ticket .pv-app .progress-steps { width: auto; margin: 0 0.9rem 0.7rem; }
-.pv-caveat { margin: -0.25rem 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--outline-gray-2); border-left: 3px solid var(--accent); border-radius: var(--radius-3); background: var(--surface-gray-1); color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
-.pv-caveat b { color: var(--ink-gray-9); font-weight: var(--weight-medium); }
-/* Visible to a screen reader only. The step letters are decoration; the section
-   name is the part worth announcing, and the bars carry no text at all. */
-.pv-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ── .steps — Tabler 1.6.1 geometry, three states instead of two ──
    Tabler marks a POSITION: .step-item.active, and every item after it is greyed

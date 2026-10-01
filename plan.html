@@ -325,23 +325,42 @@
     <div class="sec-head">
       <span class="sec-num">SECTION 0</span>
       <div class="phase-row">
-        <h2>Read this first: the IR list is currently public</h2>
+        <h2>Read this first: the IR list is fetched without a login</h2>
         <span class="chip chip-stop">Fix first</span>
       </div>
       <p class="sec-sub">
         You said the IR data is sensitive. Before anything else in this plan, here is the one finding
-        that changes the order of work — verified in your code today, not remembered.
+        that changes the order of work — read in your code today, not remembered.
       </p>
     </div>
 
     <p>
-      The app's main IR list is not fetched through the logged-in backend. It is fetched
-      <strong>straight from a link-shared Google source, with no login at all</strong>, and that path is tried
-      <em>first</em> — it returns before the protected route is ever consulted. The comment beside it in the
-      code is explicit that this was deliberate, to avoid needing a backend deploy for the list.
+      The app's main IR list does not go through the logged-in backend. It fetches the list straight from
+      Google, and the request carries <strong>no credentials at all</strong> — no token, no cookie. Whatever
+      that path can reach, anyone can reach. It is tried <em>first</em>, and it returns before the protected
+      route is ever consulted.
     </p>
 
-    <p>What travels over that path, per IR:</p>
+    <p>
+      <strong>How serious that is depends entirely on one sharing setting</strong>, and you have told me the
+      sheet is restricted to your company: view for everyone at Indrones, edit for a few. If that is right,
+      the no-login fetch has been failing quietly all along and the protected backend has been serving the
+      list. We can find out in five seconds, because the app's own status line says which path answered:
+    </p>
+
+    <div class="callout">
+      <span class="ct">The five-second test</span>
+      <p>
+        Open the app and watch the sync line above the list.<br>
+        &nbsp;&nbsp;<code>✓ N IRs loaded from the Sheet</code> — the no-login fetch worked. The data is reachable
+        without signing in.<br>
+        &nbsp;&nbsp;<code>✓ N IRs loaded</code> — two words shorter. The fetch failed and the protected backend
+        served it.<br>
+        The difference is the whole question, and it is not a difference anyone would notice by accident.
+      </p>
+    </div>
+
+    <p>What travels over that path, if it is live — per IR:</p>
     <ul>
       <li>IR number, date raised, incident date, current status</li>
       <li>Drone serial number</li>
@@ -350,32 +369,38 @@
       <li>The free-text description of the problem, and what support was requested</li>
     </ul>
 
-    <div class="callout stop">
-      <span class="ct">Why this matters</span>
+    <div class="callout warn">
+      <span class="ct">The two findings that hold either way</span>
       <p>
-        That is customer identities, customer contact details and a reliability record of your aircraft,
-        readable by anyone who has the link — and the link is derivable from the app's own JavaScript,
-        which anyone can load. It is not a hypothetical: it is the app's primary data path right now.
-        The older legacy workbook is shared the same way, and is embedded the same way.
+        <strong>1. A read path that only falls back on failure.</strong> The app tries the no-login route first
+        and switches to the protected one only when that fails. Nothing warns you if the sharing setting ever
+        changes — and then dead code becomes a live feed, silently, with no deploy and no sign on screen.
+      </p>
+      <p>
+        <strong>2. Every Indrones account can read the whole list.</strong> If the sheet is company-restricted,
+        then customer names, email addresses, drone serials and problem descriptions are readable by every
+        account in the company — regardless of what the app's own per-section permissions allow. That may be
+        exactly what you want. Today it is a side effect rather than a decision.
       </p>
     </div>
 
     <p>
       <strong>The fix is small and it does not need the big migration.</strong> The protected route on your
-      backend already exists and already reads the same records — the app simply never reaches it because
-      the public path answers first. So Phase 0 is: stop the browser reading the public source, route the list
-      through the backend you already have, then take both sources from "anyone with the link" back to
-      restricted, where the backend can still read them as their owner.
+      backend already exists and already reads the same records — the app simply prefers the other one. Phase 0
+      is: stop the browser reading the unauthenticated source, route the list through the backend you already
+      have, and make the sharing setting something the app never depends on. Then it stops mattering which way
+      the setting points.
     </p>
 
     <p>
       The only cost is that the list becomes slightly slower, because it goes through Apps Script.
-      <strong>That is the price of not publishing it</strong>, and Phase 3 removes the cost entirely.
+      Phase 3 removes that cost entirely.
     </p>
 
     <p class="mono" style="font-size:0.85rem;color:var(--fg-muted)">
       Also to verify in Phase 0: the sharing setting on your Drive root folder and the evidence folders.
-      Nothing in that folder should be link-shared either.
+      Nothing in that folder should be reachable without signing in either. The legacy workbook is embedded
+      live today, which is what forces it to stay link-shared — Phase 0 renders it from backend data instead.
     </p>
   </section>
 
@@ -407,6 +432,9 @@
           <tr><td>Retention</td><td>Rotate, don't keep everything. Archives written once, kept forever.</td></tr>
           <tr><td>Cold spare</td><td>Plan it now, build it last.</td></tr>
           <tr><td>Illustrations</td><td>Open Doodles; Humaaans as the conditional second.</td></tr>
+          <tr><td>Incident location</td><td>Free options only — store the coordinates, show them as text, link out to a map. No paid key.</td></tr>
+          <tr><td>Hindi and Marathi</td><td>Translated by me, for your review.</td></tr>
+          <tr><td>Privacy policy &amp; terms</td><td>Drafted by me from what the app actually does, reviewed with you. The company details and the legal choices stay yours.</td></tr>
         </tbody>
       </table>
     </div>
@@ -786,12 +814,12 @@
     </div>
 
     <ol>
-      <li><strong>Phase 0 — shall I start it?</strong> It is small, it is urgent, and it is independent of every other decision in this document.</li>
-      <li><strong>Incident location</strong> — text plus a link out, or a real map with a paid key?</li>
-      <li><strong>Who reviews the Hindi and Marathi</strong> before they go live?</li>
-      <li><strong>Who writes the privacy policy and terms</strong> — you, or a template you choose?</li>
-      <li><strong>The board's stage field</strong> — do you want "current stage" to be set by hand at Triage, or to move automatically as sections are saved?</li>
+      <li><strong>Phase 0 — shall I start it?</strong> Small, and independent of every other decision here.</li>
+      <li><strong>Should every Indrones account be able to read the full IR list?</strong> If the company-restricted sharing is deliberate, say so and Phase 0 leaves it alone. If it is not, Phase 0 routes that list through the app's own per-section permissions instead of around them.</li>
+      <li><strong>The board's stage field</strong> — you asked to see it before deciding. A preview board is the next thing I build, so you can look at both views on your phone and choose.</li>
     </ol>
+
+    <p><strong>Closed since the last draft:</strong> incident location (free options only), translations (mine, for your review), the privacy policy and terms (drafted by me from real behaviour, reviewed with you), and the backup rotation (14 / 8 / 12, as you approved).</p>
 
     <p style="margin-bottom:0">
       Everything else in this document is decided and ready to build.

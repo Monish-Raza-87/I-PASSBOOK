@@ -1486,6 +1486,72 @@
   padding: 0.9rem 1rem 1.4rem;
 }
 
+/* ══════════════════════════════════════════════════════════
+   LOG ANALYSER (#log-view)
+
+   LAYOUT ONLY. There is deliberately no colour, shadow, radius or font size
+   invented here — every rule below is flex, gap, or a token, and the blocks
+   themselves are the app's existing .badge / .btn / .empty-state. That is what
+   lets the winning UI direction re-skin the analyser for free instead of
+   leaving it as a fourth thing to restyle, and tools/smoke-log.mjs fails the
+   build if a raw colour or a px font size ever appears in this block.
+   ══════════════════════════════════════════════════════════ */
+.log-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.9rem 1rem 1.4rem;
+}
+
+.log-stack { display: flex; flex-direction: column; gap: 0.75rem; }
+
+/* The verdict: the answer first, and the counts beside it rather than buried. */
+.log-verdict { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; }
+.log-verdict-n { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
+.log-verdict-file { color: var(--ink-gray-6); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+.log-meta { display: flex; flex-wrap: wrap; gap: 0.2rem 1.1rem; color: var(--ink-gray-6); font-size: var(--text-sm); }
+.log-meta b { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+.log-meta code { font-family: var(--font-mono); font-size: var(--text-xs); }
+
+/* A finding. `.ir-card` supplies the box; these three only arrange what is
+   inside it, so a direction that restyles .ir-card restyles this too. */
+.log-finding { display: flex; flex-direction: column; gap: 0.35rem; }
+.log-finding-top { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
+.log-finding-title { font-weight: var(--weight-medium); color: var(--ink-gray-9); }
+.log-finding-body { color: var(--ink-gray-7); font-size: var(--text-sm); }
+.log-at {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-gray-6);
+  cursor: pointer;
+}
+.log-at:hover { color: var(--accent); }
+
+/* The full parameter table. `min-width: 0` on the scroller is what stops a long
+   column name widening the pane instead of scrolling inside it. */
+.log-scroll { overflow-x: auto; min-width: 0; }
+.log-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.log-table th, .log-table td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--outline-gray-1); white-space: nowrap; }
+.log-table th { color: var(--ink-gray-6); font-weight: var(--weight-medium); font-size: var(--text-xs); }
+.log-table td { color: var(--ink-gray-8); font-variant-numeric: tabular-nums; }
+.log-table tbody tr:last-child td { border-bottom: 0; }
+.log-group-title { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--ink-gray-6); }
+.log-group { scroll-margin-top: 1rem; }
+
+/* What a finding's timestamp lands on. A token rather than a new colour, and it
+   clears itself — nothing on this screen stays lit after the jump is read. */
+.log-group.is-flash { background: var(--accent-soft); transition: background 0.35s var(--ease); }
+
+/* The progress bar. Neutral on purpose: the accent belongs to whatever the
+   chosen direction makes it, and this only has to read as "still working". */
+.log-progress { height: 6px; border-radius: var(--radius-9); background: var(--surface-gray-3); overflow: hidden; }
+.log-progress > div { height: 100%; width: 0; background: var(--accent); transition: width 0.2s var(--ease); }
+
+.log-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.log-target { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; color: var(--ink-gray-7); font-size: var(--text-sm); }
+.log-note { color: var(--ink-gray-6); font-size: var(--text-sm); line-height: var(--leading-body); }
+
 .insights-skeleton {
   height: 64px;
   border-radius: var(--radius-4);
@@ -1628,6 +1694,7 @@
   #sections-wrapper { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 1.5rem); }
   .ir-list { padding-bottom: calc(var(--bottombar-h) + var(--safe-b)); }
   .insights-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
+  .log-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
 }
 
 /* ══════════════════════════════════════════════════════════

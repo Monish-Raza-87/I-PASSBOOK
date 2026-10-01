@@ -20,7 +20,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v56';
+const CACHE_NAME = 'ipassbook-v57';
 const SHELL = [
   './',
   './index.html',
@@ -32,6 +32,7 @@ const SHELL = [
   './views.css',
   './desk.css',      // the ERPNext Desk prototype; must load LAST
   './vendor/pdf-lib.min.js',
+  './dataflash.js',   // the flight-log reader; load order must match index.html
   './app.js',
   './manifest.json',
   './assets/icon-192.png',

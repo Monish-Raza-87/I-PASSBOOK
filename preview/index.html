@@ -29,6 +29,8 @@
 .sw-b span:nth-child(3) { background: #ffc400; } .sw-b span:nth-child(4) { background: #f8f8f8; }
 .sw-c span:nth-child(1) { background: #ffffff; } .sw-c span:nth-child(2) { background: #f3f3f3; }
 .sw-c span:nth-child(3) { background: #ededed; } .sw-c span:nth-child(4) { background: #3b6fd4; }
+.sw-d span:nth-child(1) { background: #f3f3f3; } .sw-d span:nth-child(2) { background: #ffffff; }
+.sw-d span:nth-child(3) { background: #e2e2e2; } .sw-d span:nth-child(4) { background: #0475d3; }
 </style>
 </head>
 <body class="pv">
@@ -36,10 +38,10 @@
   <div class="pv-top" style="margin-bottom:1.25rem">
     <h1 style="font-size:var(--text-xl);font-weight:var(--weight-semibold)">I-PASSBOOK — pick a design direction</h1>
     <p style="color:var(--ink-gray-6);font-size:var(--text-sm);max-width:60ch">
-      Three options. Each one shows the SAME four screens — sign-in, IR list, ticket,
-      Insights — drawn from the app's real markup and its real colour tokens. The
-      layout is identical between them; only the design language changes. Open them
-      in any order; they link to each other.
+      Four options. Each one shows the SAME four screens — sign-in, IR list, ticket,
+      Insights — drawn from the app's real markup and its real colour tokens. A, B
+      and C change the design language and leave the layout alone; D changes the
+      arrangement. Open them in any order; they link to each other.
     </p>
   </div>
 
@@ -66,6 +68,13 @@
       <p>Soft canvas, white cards, generous spacing. The Linear / Stripe register.</p>
       <span class="go">Open option C →</span>
     </a>
+    <a class="pv-card" href="d.html">
+      <span class="k">Option D</span>
+      <h2>Tabler arrangement</h2>
+      <div class="pv-swatches sw-d"><span></span><span></span><span></span><span></span></div>
+      <p>The layout you liked in Tabler — page header, filter card, hairline rows — in your own colours.</p>
+      <span class="go">Open option D →</span>
+    </a>
   </div>
 
   <div class="pv-card-note">
@@ -74,8 +83,13 @@
       The app currently runs <b>two</b> design languages at once: the ERPNext Desk look
       on the sign-in screen and the IR list, and a softer accent-tinted look on the
       ticket, Insights and every modal. That seam — not any single screen — is the
-      main reason it reads as unfinished. All three options collapse it to one
-      language; that is the actual fix, and the colours are the easy part.
+      main reason it reads as unfinished. Options A, B and C each collapse it to one
+      language; D replaces the arrangement as well, so it is a bigger job.
+    </p>
+    <p>
+      Option D is the layout from <b>Tabler</b> — page header, filter card, a results
+      card of hairline rows — drawn with your own tokens and your own blue. No
+      Bootstrap and no Tabler file is in the repo, and no seventh stylesheet is added.
     </p>
     <p>
       If it looks out of date, add a <code>?1</code> to the address and reload: the

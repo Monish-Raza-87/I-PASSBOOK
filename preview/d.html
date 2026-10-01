@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="robots" content="noindex, nofollow" />
-<title>UI option C — Modern SaaS light</title>
+<title>UI option D — Tabler arrangement</title>
 <!-- The ?v= is a content hash, and it is load-bearing: the app's service worker
      serves same-origin subresources stale-while-revalidate, so without it a
      rebuilt preview.css would be answered from the cache once and the review
@@ -12,128 +12,199 @@
 <link rel="stylesheet" href="preview.css?v=77f022a7" />
 <style>
 
-.pv { background: var(--surface-gray-1); color: var(--ink-gray-9); }
+/* ── Option D — the Tabler arrangement ───────────────────────────────────────
+   The arrangement is the point, so most of this is structure rather than
+   colour: blocks become cards with a NAMED header strip, the controls are
+   separated from the data, and the list becomes one card of hairline rows.
+   The accent is the app's own blue, unchanged — that is deliberate, because
+   arrangement and colour are two separate decisions and this option only
+   answers the first one. */
 
-.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.5rem 1rem 3.5rem; }
-.pv-top { padding-bottom: 0.9rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--outline-gray-1); }
+.pv { background: var(--surface-gray-2); color: var(--ink-gray-8); }
+
+/* ── review chrome ── */
+.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.pv-top { padding-bottom: 0.9rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--outline-gray-1); }
 .pv-top h1 { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 .pv-top > p { color: var(--ink-gray-6); font-size: var(--text-sm); }
-.pv-tab { padding: 0.3rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-sm); }
-.pv-tab.is-here { background: var(--accent); border-color: var(--accent); color: var(--btn-solid-fg); }
-.pv-shot-cap b { color: var(--ink-gray-9); }
+.pv-tab { padding: 0.25rem 0.7rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-tab.is-here { background: var(--accent-soft); border-color: var(--accent-soft-line); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-shot-cap b { color: var(--ink-gray-9); font-weight: var(--weight-semibold); }
 .pv-shot-cap span { color: var(--ink-gray-5); }
-.pv-phone { border: 1px solid var(--outline-gray-1); border-radius: var(--radius-6); background: var(--surface-gray-1); box-shadow: var(--elevation-sm); }
-.pv-notes { margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--outline-gray-1); }
+.pv-phone { border: 1px solid var(--outline-gray-3); border-radius: var(--radius-2); }
+.pv-notes { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-1); }
 .pv-notes h2 { font-size: var(--text-md); font-weight: var(--weight-semibold); }
 .pv-notes li { color: var(--ink-gray-7); font-size: var(--text-sm); }
 .pv-version { color: var(--ink-gray-5); font-size: var(--text-xs); }
 
-/* shell */
-.pv-app .sidebar { background: var(--surface-base); border-right: 1px solid var(--outline-gray-1); }
-.pv-app .sidebar-brand { border-bottom: 1px solid var(--outline-gray-1); }
-.pv-app .brand-mark { background: var(--accent); border-radius: var(--radius-2); }
-.pv-app .brand-text { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.pv-app .nav-item { border-radius: var(--radius-4); color: var(--ink-gray-7); font-size: var(--text-sm); margin-bottom: 2px; cursor: pointer; }
+/* ── the rail ── */
+.pv-app { background: var(--surface-gray-2); }
+.pv-app .sidebar { flex: 0 0 200px; background: var(--surface-base); border-right: 1px solid var(--outline-gray-2); }
+.pv-app .sidebar-brand { padding: 0.9rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .brand-mark { background: var(--accent); border-radius: var(--radius-1); }
+.pv-app .brand-text { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-sm); }
+.pv-app .sidebar-nav { padding: 0.6rem 0.5rem; gap: 2px; }
+.pv-app .nav-item { padding: 0.4rem 0.55rem; border-radius: var(--radius-1); color: var(--ink-gray-7); font-size: var(--text-sm); cursor: pointer; }
 .pv-app .nav-item:hover { background: var(--surface-gray-1); color: var(--ink-gray-9); }
 .pv-app .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
 .pv-app .nav-icon { background: var(--surface-gray-4); border-radius: var(--radius-1); }
 .pv-app .nav-item.active .nav-icon { background: var(--accent); }
-.pv-app .nav-count { font-size: var(--text-2xs); color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
-.pv-app .topbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
-.pv-app .topbar-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.pv-app .bell { background: var(--surface-gray-3); border-radius: 999px; }
-.pv-app .avatar { background: var(--accent); color: var(--btn-solid-fg); border-radius: 999px; font-weight: var(--weight-medium); }
+.pv-app .nav-count { padding: 0.05rem 0.4rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); color: var(--ink-gray-6); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
 
-/* list */
-.pv-app .list-toolbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
-.pv-app .list-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
-.pv-app .list-count { padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--surface-gray-2); color: var(--ink-gray-7); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
-.pv-app .search-bar { padding: 0.5rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-gray-1); color: var(--ink-gray-9); font-size: var(--text-base); }
+/* ── the navbar ── */
+.pv-app .topbar { padding: 0.6rem 0.9rem; background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-2); }
+.pv-app .topbar-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-app .bell { background: var(--surface-gray-3); border-radius: var(--radius-1); }
+/* A rounded SQUARE avatar, not a circle. It is a small thing and it is one of
+   the ones that makes an arrangement read as Tabler rather than as generic. */
+.pv-app .avatar { background: var(--accent-soft); border: 1px solid var(--accent-soft-line); color: var(--accent); border-radius: var(--radius-1); font-weight: var(--weight-medium); }
+
+/* ── the cards ───────────────────────────────────────────────────────────────
+   One rule, applied six times. A Tabler card is a heading strip over a body,
+   and the strip is what gives the passbook sections their names back. */
+.pv-app .list-toolbar,
+.pv-app .ir-list,
+.pv-app #ir-banner,
+.pv-app .overview-panel,
+.pv-app .section-content,
+.pv-app .insights-filters,
+.pv-app .insights-block {
+  background: var(--surface-base);
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-1);
+  overflow: hidden;
+}
+
+/* ── the list: a filter card, then a results card ── */
+.pv-app .list-toolbar { margin: 0.9rem; padding: 0 0 0.75rem; gap: 0.55rem; }
+.pv-app .list-toolbar-top { padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .list-title { font-size: var(--text-3xl); font-weight: var(--weight-semibold); }
+.pv-app .list-count { padding: 0.1rem 0.45rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-gray-1); color: var(--ink-gray-6); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.pv-app .list-toolbar > .search-bar,
+.pv-app .list-toolbar > .segments { margin: 0 0.85rem; }
+.pv-app .search-bar { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-base); }
 .pv-app .search-bar::placeholder { color: var(--ink-gray-5); }
-.pv-app .segment { padding: 0.25rem 0.65rem; border-radius: 999px; background: var(--surface-gray-2); color: var(--ink-gray-7); font-size: var(--text-xs); cursor: pointer; }
-.pv-app .segment.active { background: var(--accent); color: var(--btn-solid-fg); font-weight: var(--weight-medium); }
+.pv-app .segment { padding: 0.2rem 0.55rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-xs); cursor: pointer; }
+.pv-app .segment:hover { background: var(--surface-gray-1); }
+.pv-app .segment.active { background: var(--accent-soft); border-color: var(--accent-soft-line); color: var(--accent); font-weight: var(--weight-medium); }
 .pv-app .segment-count { color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
-.pv-app .segment.active .segment-count { color: var(--btn-solid-fg); opacity: 0.75; }
-.pv-app .sync-status { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.pv-app .ir-list { gap: 0.6rem; padding: 0.75rem 0.9rem; }
-.pv-app .ir-card { padding: 0.75rem 0.85rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); cursor: pointer; }
-.pv-app .ir-card:hover { box-shadow: var(--elevation-md); }
-.pv-app .ir-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pv-app .segment.active .segment-count { color: var(--accent); opacity: 0.7; }
+.pv-app .sync-status { padding: 0 0.85rem 0.4rem; font-size: var(--text-xs); color: var(--ink-gray-5); }
+
+/* The results. One card, hairline rows, the answer pinned right. The flex reset
+   matters: the skeleton gives .ir-list flex-grow, which is invisible while the
+   list has no background and looks like a bug the moment it has one. */
+.pv-app .ir-list { flex: 0 0 auto; margin: 0 0.9rem 0.9rem; }
+.pv-app .ir-card { padding: 0.5rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); cursor: pointer; }
+.pv-app .ir-card:last-child { border-bottom: 0; }
+.pv-app .ir-card:hover { background: var(--surface-gray-1); }
+.pv-app .ir-card.is-selected { background: var(--accent-soft); box-shadow: inset 2px 0 0 var(--accent-bar); }
 .pv-app .ir-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
 .pv-app .ir-assignee { font-size: var(--text-xs); color: var(--ink-gray-6); }
 .pv-app .ir-meta { font-size: var(--text-xs); color: var(--ink-gray-6); }
 .pv-app .ir-dot { color: var(--ink-gray-4); }
-.pv-app .ir-age.is-late { color: var(--ink-red-8); }
-.pv-app .prio { font-size: var(--text-2xs); letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-gray-5); }
-/* Pills, tinted from the app's semantic status tokens. Those are the layer the
-   app already maintains (tokens.css:1126-1148): bg/fg/bd per status, so a retuned
-   status colour moves all three options at once rather than just this one. */
-.pv-app .badge { display: inline-flex; align-items: center; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: var(--text-2xs); font-weight: var(--weight-medium); border: 1px solid transparent; }
+.pv-app .ir-age.is-late { color: var(--ink-red-8); font-weight: var(--weight-medium); }
+.pv-app .prio { padding: 0.1rem 0.4rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); color: var(--ink-gray-6); font-size: var(--text-2xs); letter-spacing: var(--tracking-2xs); text-transform: uppercase; }
+/* The app's own status layer (tokens.css:1119-1154), reused rather than
+   re-invented, so a retuned status colour moves every option at once. */
+.pv-app .badge { display: inline-flex; align-items: center; padding: 0.1rem 0.45rem; border: 1px solid transparent; border-radius: var(--radius-1); font-size: var(--text-2xs); font-weight: var(--weight-medium); }
 .pv-app .badge-open { background: var(--st-open-bg); color: var(--st-open-fg); border-color: var(--st-open-bd); }
 .pv-app .badge-pending { background: var(--st-paused-bg); color: var(--st-paused-fg); border-color: var(--st-paused-bd); }
 .pv-app .badge-resolved { background: var(--st-resolved-bg); color: var(--st-resolved-fg); border-color: var(--st-resolved-bd); }
 .pv-app .badge-closed { background: var(--st-closed-bg); color: var(--st-closed-fg); border-color: var(--st-closed-bd); }
 .pv-app .badge-danger { background: var(--st-danger-bg); color: var(--st-danger-fg); border-color: var(--st-danger-bd); }
 
-/* auth */
-.pv-app.is-auth { background: var(--surface-gray-1); }
-.pv-app .glass-card { padding: 1.75rem 1.5rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-6); box-shadow: var(--elevation-lg); }
-.pv-app .auth-logo { background: var(--accent); border-radius: var(--radius-3); }
+/* ── auth ── */
+.pv-app .glass-card { padding: 1.5rem; background: var(--surface-base); border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); box-shadow: var(--elevation-sm); }
+.pv-app .auth-logo { background: var(--accent); border-radius: var(--radius-1); }
 .pv-app .auth-brand { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
 .pv-app .auth-full { font-size: var(--text-xs); color: var(--ink-gray-6); }
 .pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-6); }
-.pv-app .form-input { padding: 0.55rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-base); }
+.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-base); }
 .pv-app .form-label { font-size: var(--text-xs); color: var(--ink-gray-7); font-weight: var(--weight-medium); }
-.pv-app .btn { padding: 0.55rem 1rem; border: 1px solid var(--btn-solid-bg); border-radius: var(--radius-4); background: var(--btn-solid-bg); color: var(--btn-solid-fg); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
-.pv-app .btn-ghost { border-color: transparent; background: transparent; }
-.pv-app .link-btn { border: 0; background: none; color: var(--accent); font-size: var(--text-xs); }
-.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.45rem; border: 1px solid var(--outline-gray-3); border-radius: 50%; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.45rem; border: 1px solid var(--outline-gray-3); border-radius: var(--radius-1); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); }
-.pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
+.pv-app .auth-or::before,
+.pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
 
-/* ticket */
-.pv-app #ir-banner { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
-.pv-app #ir-banner-title { font-size: var(--text-xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+/* ── buttons ─────────────────────────────────────────────────────────────────
+   40px is Tabler's own button height and it is also the app's tap-target rule,
+   so the densest option here is not allowed to make the controls small. */
+.pv-app .btn { min-height: 40px; padding: 0.5rem 0.9rem; border: 1px solid var(--btn-solid-bg); border-radius: var(--radius-1); background: var(--btn-solid-bg); color: var(--btn-solid-fg); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.pv-app .btn-google,
+.pv-app .btn-secondary { min-height: 40px; padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
+.pv-app .btn-ghost { min-height: 40px; padding: 0.5rem 0.8rem; border: 1px solid transparent; border-radius: var(--radius-1); background: transparent; color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-app .btn-ghost:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+.pv-app .link-btn { border: 0; background: none; color: var(--accent); font-size: var(--text-xs); }
+
+/* ── the ticket ── */
+.pv-app #ir-banner { margin: 0.9rem 0.9rem 0; padding: 0.9rem; }
+.pv-app #ir-banner-title { font-size: var(--text-3xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
 .pv-app #ir-banner-sub { font-size: var(--text-xs); color: var(--ink-gray-6); }
-.pv-app .overview-panel { margin: 0.9rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); }
+.pv-app .overview-panel { margin: 0.9rem; padding: 0 0 0.9rem; }
+.pv-app .overview-head { margin: 0; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); }
 .pv-app .overview-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
-.pv-app .overview-k { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-gray-5); }
+.pv-app .overview-grid { margin: 0.75rem 0.85rem 0; }
+.pv-app .overview-k { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-2xs); color: var(--ink-gray-5); }
 .pv-app .overview-v { font-size: var(--text-sm); color: var(--ink-gray-9); }
-.pv-app .tabs-container { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
-.pv-app .tab { padding: 0.45rem 0.75rem; border-radius: var(--radius-3); font-size: var(--text-sm); color: var(--ink-gray-6); cursor: pointer; }
-.pv-app .tab.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
-.pv-app .section-content { margin: 0.9rem; padding: 1rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); }
-.pv-app .section-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+/* Tabler's tabs are an UNDERLINE, not a pill: the strip stays flat and the
+   section you are in is the one with the accent rule under it. */
+.pv-app .tabs-container { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-2); }
+.pv-app .tab { padding: 0.55rem 0.6rem; border-bottom: 2px solid transparent; border-radius: 0; color: var(--ink-gray-6); font-size: var(--text-sm); cursor: pointer; }
+.pv-app .tab.active { border-bottom-color: var(--accent); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-app .section-content { margin: 0.9rem; padding: 0 0 0.9rem; }
+.pv-app .section-content > .section-title { margin: 0; padding: 0.6rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-app .section-content > *:not(.section-title) { margin: 0 0.85rem; }
 
-/* insights */
-.pv-app .insights-body { background: var(--surface-gray-1); }
-.pv-app .insights-total { font-size: var(--text-sm); color: var(--ink-gray-7); }
+/* ── insights ── */
+.pv-app .insights-filters { padding: 0.85rem; }
+.pv-app .insights-filter span { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-2xs); color: var(--ink-gray-5); font-weight: var(--weight-medium); }
+.pv-app .insights-total { font-size: var(--text-sm); color: var(--ink-gray-6); }
 .pv-app .insights-total strong { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
-.pv-app .insights-card { padding: 0.75rem 0.85rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); cursor: pointer; }
-.pv-app .insights-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.pv-app .insights-card-n { font-size: var(--text-2xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
-.pv-app .insights-card-label { font-size: var(--text-2xs); color: var(--ink-gray-6); }
-.pv-app .insights-h { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-bottom: 0.6rem; }
-.pv-app .insights-subcat { padding: 0.25rem 0.6rem; border-radius: 999px; background: var(--surface-base); border: 1px solid var(--outline-gray-1); font-size: var(--text-xs); color: var(--ink-gray-8); }
+.pv-app .insights-card { padding: 0.65rem 0.8rem; background: var(--surface-base); border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); cursor: pointer; }
+.pv-app .insights-card:hover { background: var(--surface-gray-1); }
+.pv-app .insights-card.active { background: var(--accent-soft); border-color: var(--accent-soft-line); box-shadow: inset 0 2px 0 var(--accent-bar); }
+.pv-app .insights-card-n { font-size: var(--text-4xl); font-weight: var(--weight-semibold); color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: var(--tracking-2xs); color: var(--ink-gray-6); }
+.pv-app .insights-block { padding: 0 0 0.85rem; }
+.pv-app .insights-h { margin: 0; padding: 0.55rem 0.85rem; border-bottom: 1px solid var(--outline-gray-1); color: var(--ink-gray-6); font-size: var(--text-xs); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: var(--tracking-xs); }
+.pv-app .insights-block > *:not(.insights-h) { margin: 0.75rem 0.85rem 0; }
+.pv-app .insights-subcat { padding: 0.2rem 0.55rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-1); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-xs); }
 .pv-app .insights-subcat.is-others { border-style: dashed; color: var(--ink-gray-6); }
 .pv-app .insights-subcat-n { color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
 .pv-app .insights-mix-row { font-size: var(--text-sm); }
-.pv-app .insights-mix-n { font-variant-numeric: tabular-nums; color: var(--ink-gray-8); }
+.pv-app .insights-mix-n { color: var(--ink-gray-8); font-variant-numeric: tabular-nums; }
+
+/* ── on a phone ──────────────────────────────────────────────────────────────
+   The skeleton turns the rail into the bottom bar below 640px. These are the
+   same rules once it has — and the flex reset is load-bearing: a media query
+   adds no specificity, so without it the 200px rail width would become a 200px
+   -tall bottom bar. */
+@media (max-width: 639px) {
+  .pv-app .sidebar { flex: 0 0 auto; border-right: 0; border-top: 1px solid var(--outline-gray-2); }
+  .pv-app .sidebar-nav { padding: 0.4rem; }
+  .pv-app .nav-item { padding: 0.4rem 0.2rem; }
+  .pv-app .list-title { font-size: var(--text-2xl); }
+  .pv-app .list-toolbar,
+  .pv-app .ir-list,
+  .pv-app #ir-banner,
+  .pv-app .overview-panel,
+  .pv-app .section-content { margin-left: 0.6rem; margin-right: 0.6rem; }
+}
 
 </style>
 </head>
 <body class="pv">
 <div class="pv-page">
   <div class="pv-top">
-    <h1>I-PASSBOOK — UI option C: Modern SaaS light</h1>
-    <p>Soft canvas, white cards, generous spacing. The Linear / Stripe register.</p>
+    <h1>I-PASSBOOK — UI option D: Tabler arrangement</h1>
+    <p>The layout you liked in Tabler — page header, filter card, hairline rows — in your own colours.</p>
     <nav class="pv-tabs">
       <a class="pv-tab" href="index.html">All three</a>
       <a class="pv-tab" href="a.html">Option A — Desk, finished</a>
       <a class="pv-tab" href="b.html">Option B — Indrones Industrial</a>
-      <a class="pv-tab is-here" href="c.html">Option C — Modern SaaS light</a>
-      <a class="pv-tab" href="d.html">Option D — Tabler arrangement</a>
+      <a class="pv-tab" href="c.html">Option C — Modern SaaS light</a>
+      <a class="pv-tab is-here" href="d.html">Option D — Tabler arrangement</a>
     </nav>
   </div>
   <div class="pv-screens">
@@ -471,14 +542,17 @@
     </div>
   </div>
   <div class="pv-notes">
-    <div><h2>What it is</h2><p>A light grey canvas with white cards floating on it, gentle shadows, wide corner radii and a tinted primary button. It is the visual language of every well-made product tool, which means nobody has to learn it — and it makes a form-heavy passbook feel lighter than it is.</p></div>
-    <div><h2>Why you might pick it</h2><ul><li>Instantly familiar. Nothing on screen asks to be learnt.</li><li>Cards separate the passbook sections clearly, which suits a nine-section form</li><li>The softest of the three on a small screen — big tap targets, nothing cramped</li><li>Ages well and looks deliberate rather than inherited</li></ul></div>
-    <div><h2>What it costs you</h2><ul><li>The least dense. Noticeably fewer IRs per phone screen, and this list is 412 rows.</li><li>The shadow-and-card look is everywhere, so it makes the app look like a product, not like Indrones</li><li>Two competing ideas meet here: a heavy data list wants density and a SaaS card wants air</li></ul></div>
+    <div><h2>What it is</h2><p>This one is about ARRANGEMENT rather than colour. Every block gets a card with a named header strip; the filters sit in a card of their own above the results; and the IR list becomes a single card of hairline-separated rows with the answer — status, priority, overdue — pinned in a fixed right-hand column you scan down by shape instead of by reading. Corners are 4px and nothing floats. The colour is the blue you already have; the arrangement is the part that came from Tabler.</p></div>
+    <div><h2>Why you might pick it</h2><ul><li>Answers in front: status, priority and overdue sit in one right-hand column, so a screen of IRs is scanned by shape rather than read row by row</li><li>The densest arrangement here — hairline rows fit more IRs per phone screen than floating cards do</li><li>Every block carries its name in a header strip, so a nine-section passbook reads as nine labelled cards instead of one long form</li><li>Controls and data are separate objects: the filter card is obviously a control, the results card is obviously data</li><li>Crisp rather than soft — 4px corners and no shadows hold up better at 400 rows than rounded, floating cards</li><li>Flat and square means less ink on screen, which is what makes a dense list readable on a phone</li></ul></div>
+    <div><h2>What it costs you</h2><ul><li>Tabler is Bootstrap underneath. Taking its arrangement means rebuilding the app shell, not swapping a stylesheet — this is the biggest job of the four by a wide margin.</li><li>Tabler uses a hamburger drawer on a phone, never a bottom bar. Adopting it properly changes the phone navigation you already have.</li><li>Flat and square also reads as a tool rather than a product — less friendly than Option C and less familiar than A</li><li>Dense rows are short rows: the 40px tap-target rule has to be enforced by hand or this gets fiddly on a phone</li><li>Two of the four screens are standing in for a Tabler page header rather than having one of their own</li></ul></div>
     <div><h2>The fine print</h2><ul>
       <li>All four pages carry identical markup, taken from the app's real class names, and colour from its real tokens. Only the styling differs — in Option D that styling is mostly arrangement.</li>
       <li>They are static. Adopting one is a separate pass through the app; that pass is the expensive part, which is why you are choosing first.</li>
       <li>Sample records are shown (IR-412 and friends). The statuses, categories and REPAIR sub-categories are the real ones.</li>
-      
+      <li>Nothing from Tabler is in this repo. No Bootstrap, no Tabler CSS, no seventh stylesheet — every rule above is written with your own tokens.</li>
+      <li>Tabler on a phone is a hamburger drawer rather than a bottom bar. These four screens share one markup and keep your bottom bar, so that single difference is described above rather than shown.</li>
+      <li>This option is about arrangement, so its colours are free: it could be combined with Option A's neutrality or Option C's softness. The two are independent axes.</li>
+      <li>Fields are 14px, which is what the app really uses. On a phone the app raises them to 16px so iOS stops zooming the page, and this arrangement keeps that rule.</li>
     </ul></div>
   </div>
 </div>

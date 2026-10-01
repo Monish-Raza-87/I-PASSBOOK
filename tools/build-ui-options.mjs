@@ -85,6 +85,7 @@ const REQUIRED = [
   'form-input', 'btn', 'btn-ghost', 'btn-secondary', 'link-btn', 'auth-or',
   'banner-main', 'banner-pills', 'banner-actions',
   'tabs-container', 'tab', 'section-content', 'section-title',
+  'ir-progress', 'ir-progress-bar', 'ir-progress-text',
   'form-group', 'form-label', 'overview-panel', 'overview-head', 'overview-title',
   'insights-filters', 'insights-filter', 'insights-total', 'insights-cards',
   'insights-card', 'insights-card-n', 'insights-card-label',
@@ -1236,7 +1237,579 @@ const chooserPage = () => `<!doctype html>
       app's service worker caches what it serves, and every page here carries a
       build hash so a fresh build is a fresh address.
     </p>
+
+  <div class="pv-card-note">
+    <h2>Then the parts, one at a time</h2>
+    <p>
+      Choosing a direction and choosing a <i>component</i> are different decisions, and
+      judging six components while four whole screens compete for attention is how a good
+      piece gets rejected for the company it kept. So the pieces from real Tabler that are
+      worth having — spinners, milestone steps, clean toasts, charts, a people board — are
+      built on a board of their own, in option D's language, and reviewed one at a time.
+    </p>
+    <div class="pv-pick" style="margin:0.9rem 0 0">
+      <a class="pv-card" href="parts.html">
+        <span class="k">Review 1 &mdash; four components</span>
+        <h2>Steps, charts, People, spinner and toast</h2>
+        <p>Three ways to draw the six saved sections, four charts drawn from numbers
+           Insights already computes, the answer to the department board, and the two
+           pieces you would feel rather than look at.</p>
+        <span class="go">Open the parts board &rarr;</span>
+      </a>
+    </div>
   </div>
+</div>
+</body>
+</html>
+`;
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// REVIEW 1 — the component board (preview/parts.html)
+// ═════════════════════════════════════════════════════════════════════════════
+// The four options answer "what should the app look like". This page answers a
+// different question — "which of these individual pieces earns its place" — one
+// at a time, without a whole screen of noise around each. It is D-only on
+// purpose: D is the approved direction, and skinning a component board four ways
+// would turn every judgement into a comparison.
+//
+// It is written by this same builder on purpose. It inherits the token check, the
+// NOT_A_COLOUR check, the no-script / no-third-party rule, the scoping rule and
+// the --check staleness gate without a line of new machinery; what it adds is D's
+// own skin, so the pieces arrive in the language that was approved.
+
+// The six steps, mirroring SECTION_IDS / SECTION_LABELS / SECTION_SHORT in
+// app.js. Written out rather than imported, because this file reads CSS and HTML
+// as text and never evaluates app.js.
+const BOARD_STEPS = [
+  ['B', 'Inward', 'Inward Checklist'],
+  ['C', 'IQC', 'IQC Visual Inspection'],
+  ['D', 'Investigation', 'Investigation'],
+  ['E', 'Production', 'Production (Rework)'],
+  ['F', 'Quality Test', 'Quality Test Report'],
+  ['G', 'PDI/Dispatch', 'PDI Report/Dispatch Record'],
+];
+// A deliberately UNEVEN passbook: B, C, D and F are saved, E never was. That hole
+// is the entire reason the strip below cannot use Tabler's own shortcut — a tidy
+// four-in-a-row would hide the problem the page exists to show.
+const BOARD_DONE = ['sec-b', 'sec-c', 'sec-d', 'sec-f'];
+const stepDone = i => BOARD_DONE.includes('sec-' + BOARD_STEPS[i][0].toLowerCase());
+// "this step is done AND so is the next one" — which is what makes the line
+// between them solid. Computed here rather than in CSS because the connector
+// belongs to the item on its LEFT and a selector cannot look backwards.
+const stepLinked = i => stepDone(i) && i + 1 < BOARD_STEPS.length && stepDone(i + 1);
+
+// Tabler's .steps with THREE states instead of two. Tabler marks a POSITION and
+// greys everything after it (.step-item.active ~ .step-item), which is right for
+// a linear wizard and wrong for us: ir.done[] is a set that can have holes, so
+// section F can be saved while E never was. Each dot therefore carries its own
+// state and nothing is inferred from what precedes it. That is the one place this
+// deliberately departs from Tabler, and it is the finding the board is here to
+// make — see the note on the skin below.
+const stepsStrip = () => `
+        <ul class="steps">
+          ${BOARD_STEPS.map(([letter, short, full], i) => `
+          <li class="step-item${stepDone(i) ? ' is-done' : ''}${stepLinked(i) ? ' is-linked' : ''}">
+            <span class="step-n">${letter}</span>
+            <span class="step-short">${short}</span>
+            <span class="step-full">${full}</span>
+          </li>`).join('')}
+        </ul>`;
+
+// Tabler's OTHER progress idiom: .progress-steps, a row of pill bars instead of
+// dots and a line. It is the more compact of the two and reads better on a phone,
+// so both are on the board and you pick.
+const compactSteps = () => `
+        <ul class="progress-steps">
+          ${BOARD_STEPS.map(([letter], i) => `
+          <li class="progress-steps-item${stepDone(i) ? ' is-done' : ''}"><span class="pv-sr">Section ${letter}${stepDone(i) ? ' saved' : ' not saved yet'}</span></li>`).join('')}
+        </ul>`;
+
+// One bar split into six segments, each keeping its own colour — Tabler's
+// .progress-stacked. It answers "how far through, and WHERE the holes are" in a
+// single row, which a smooth bar cannot.
+const stackedBar = () => `
+        <div class="progress-stacked">
+          ${BOARD_STEPS.map(([letter], i) => `
+          <div class="progress"><div class="progress-bar${stepDone(i) ? ' is-done' : ''}"><span class="pv-sr">Section ${letter}</span></div></div>`).join('')}
+        </div>`;
+
+// The chip the app draws today, copied out of views.css so the board can show it
+// beside the new ideas. smoke-preview.mjs asserts the copied fill width still
+// matches views.css, so this copy cannot drift into a comparison against
+// something the app does not actually do.
+const currentChip = () => `
+        <span class="ir-progress p4" title="4 of 6 sections saved">
+          <span class="ir-progress-bar"></span>
+          <span class="ir-progress-text">4/6</span>
+        </span>`;
+
+// A tab strip, twice: once plain, once with each tab carrying its own saved
+// state. The second is not a different control — it is the same control with the
+// state moved onto it, which is the whole point of variant B.
+const tabRow = withState => `
+        <div class="tabs-container">
+          <span class="tab${withState ? ' is-saved' : ''}">Report</span>
+          ${BOARD_STEPS.map(([letter, short], i) =>
+            `<span class="tab${i === 0 ? ' active' : ''}${withState && stepDone(i) ? ' is-saved' : ''}">${letter}&#8202;&#183;&#8202;${short}</span>`).join('')}
+        </div>`;
+
+// ── the charts ───────────────────────────────────────────────────────────────
+// Real shapes, real vocabulary. Every figure below is the shape the existing
+// aggregator already produces — counts per month off dateRaisedISO, the status
+// mix off insightsSummary().statuses, the categories off .categories. Nothing here
+// is a second source of truth, so a chart can never disagree with the count above
+// it, and a drawing is all that has to be written.
+//
+// HTML columns rather than SVG bars, deliberately: an SVG stretched with
+// preserveAspectRatio="none" distorts its own rounded corners and any text inside
+// it, and one that is not stretched has to reconcile a fixed viewBox with a
+// container whose width it does not know. A twelve-column chart is a flex row.
+const MONTHS = [
+  ['Apr', 41], ['May', 38], ['Jun', 27], ['Jul', 33], ['Aug', 46], ['Sep', 52],
+  ['Oct', 18], ['Nov', 0], ['Dec', 0], ['Jan', 0], ['Feb', 0], ['Mar', 0],
+];
+const monthChart = () => {
+  const max = Math.max(...MONTHS.map(m => m[1]));
+  return `
+        <figure class="chart">
+          <div class="cols">
+            ${MONTHS.map(([label, v]) => `
+            <div class="col">
+              <span class="col-bar${v === 0 ? ' is-zero' : ''}" style="height:${v === 0 ? 0 : ((v / max) * 100).toFixed(1)}%"></span>
+              <span class="col-t">${label}</span>
+            </div>`).join('')}
+          </div>
+          <figcaption class="chart-note">Raised per month, from <b>dateRaisedISO</b> — the only sortable date a record carries. Months with nothing in them keep their slot, so the axis never quietly shortens.</figcaption>
+        </figure>`;
+};
+
+// The status mix as one bar rather than four numbers.
+const STATUS_MIX = [['Open', 37, 'open'], ['Paused', 6, 'paused'], ['Resolved', 318, 'resolved'], ['Closed', 51, 'closed']];
+const statusChart = () => {
+  const total = STATUS_MIX.reduce((n, s) => n + s[1], 0);
+  return `
+        <figure class="chart">
+          <div class="mix-bar">
+            ${STATUS_MIX.map(([label, v, key]) =>
+              `<span class="mix-seg st-${key}" style="width:${((v / total) * 100).toFixed(2)}%"><span class="pv-sr">${label}: ${v}</span></span>`).join('')}
+          </div>
+          <div class="mix-key">
+            ${STATUS_MIX.map(([label, v, key]) =>
+              `<span class="mix-key-item"><span class="mix-dot st-${key}"></span>${label}<b>${v}</b></span>`).join('')}
+          </div>
+          <figcaption class="chart-note">The same <b>statuses</b> bucket the screen already counts, drawn instead of listed. The colours are the app's own <b>--st-*-fg</b> tokens, so the desk.css contrast fix reaches them for free.</figcaption>
+        </figure>`;
+};
+
+// Category mix as bars.
+const CATS = [['REMOTE SUPPORT', 224], ['GENERAL MAINTENANCE', 121], ['REPAIR', 58], ['CRASH', 9]];
+const categoryChart = () => {
+  const max = Math.max(...CATS.map(c => c[1]));
+  return `
+        <figure class="chart">
+          ${CATS.map(([label, v]) => `
+          <div class="bar-row">
+            <span class="bar-label">${label}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${((v / max) * 100).toFixed(1)}%"></span></span>
+            <span class="bar-n">${v}</span>
+          </div>`).join('')}
+          <figcaption class="chart-note">Rendered straight from <b>insightsSummary().categories</b> — the pure single-pass function the screen already calls, so charting adds rendering and nothing else.</figcaption>
+        </figure>`;
+};
+
+// ── the People card ──────────────────────────────────────────────────────────
+// Counting by ASSIGNEE, not by department. No IR carries a department; the only
+// membership list lives in an admin-only store whose own admin session reads back
+// empty. So the card is called People, because that is what it measures, and a
+// card headed "Departments" while counting something else would be worse than no
+// card. "Unassigned" is a row like any other — untriaged IRs have no assignee, and
+// without it the column would not add up to the total.
+const PEOPLE = [
+  ['Angad Kumbhar', 'AK', 46, 3],
+  ['Monish Raza', 'MR', 38, 1],
+  ['S. Iyer', 'SI', 27, 0],
+  ['Priya Nair', 'PN', 19, 2],
+  ['Kishor Salunkhe', 'KS', 12, 0],
+  [null, null, 23, 5],
+];
+const peopleCard = () => {
+  const max = Math.max(...PEOPLE.map(p => p[2]));
+  return `
+        <div class="people">
+          <div class="people-head">
+            <span class="people-h">People</span>
+            <span class="people-sub">who is carrying what</span>
+          </div>
+          ${PEOPLE.map(([name, init, open, late]) => `
+          <div class="person${name ? '' : ' is-unassigned'}">
+            <span class="person-face">${init || '?'}</span>
+            <span class="person-name">${name || 'Unassigned'}</span>
+            <span class="person-track"><span class="person-fill" style="width:${((open / max) * 100).toFixed(1)}%">${late ? `<span class="person-late" style="width:${((late / open) * 100).toFixed(1)}%"></span>` : ''}</span></span>
+            <span class="person-n">${open}</span>
+            ${late ? `<span class="badge badge-danger">${late} late</span>` : '<span class="person-clear"></span>'}
+          </div>`).join('')}
+          <p class="chart-note">Counted from the Triage <b>assignee</b>. Untriaged IRs have none, so they are the last row rather than missing from the sum. Initials, not photographs — the app already draws an initials avatar in its header, and initials need nothing vendored.</p>
+        </div>`;
+};
+
+// ── the spinners ─────────────────────────────────────────────────────────────
+// Tabler's .spinner-border is drawn in currentColor, so it takes the colour of
+// whatever it sits inside and needs no token of its own. The app already has
+// @keyframes spin and .legacy-spinner; this is the same idea in Tabler's measured
+// shape, not a third parallel loading system.
+const spinner = (size, label, tone) => `
+          <span class="spin-demo${tone ? ' spin-' + tone : ''}">
+            <span class="spinner-border${size === 'sm' ? ' spinner-border-sm' : ''}" role="status" aria-label="${label}"></span>
+            <span class="spin-label">${label}</span>
+          </span>`;
+
+// ── the toasts ───────────────────────────────────────────────────────────────
+// Left is what the app shows today, recreated from base.css so the comparison is
+// against the real thing rather than a memory of it. Right is Tabler's
+// arrangement: a header, a body and a tinted mark. It is a RESTYLE of the single
+// element the app already has, not a second toast system — the app's contract is
+// one message that replaces the last, and nothing here asks for a queue.
+const toastNew = (tone, title, body) => `
+          <div class="toast${tone ? ' toast-' + tone : ''}">
+            <div class="toast-header">
+              <span class="toast-dot"></span>
+              <strong class="toast-title">${title}</strong>
+              <span class="toast-x" aria-hidden="true">&#215;</span>
+            </div>
+            <div class="toast-body">${body}</div>
+          </div>`;
+
+// ── the board's chrome ───────────────────────────────────────────────────────
+const boardTop = (title, sub, here) => `
+  <div class="pv-top">
+    <h1>${esc(title)}</h1>
+    <p>${esc(sub)}</p>
+    <nav class="pv-tabs">
+      <a class="pv-tab" href="index.html">The four options</a>
+      <a class="pv-tab${here === 'parts' ? ' is-here' : ''}" href="parts.html">Parts</a>
+      <a class="pv-tab${here === 'empty' ? ' is-here' : ''}" href="empty.html">Empty states</a>
+    </nav>
+  </div>`;
+
+const boardJump = () => `
+  <nav class="pv-jump">
+    <a href="#steps">Steps and progress</a>
+    <a href="#charts">Charts and stats</a>
+    <a href="#people">People</a>
+    <a href="#feedback">Spinner and toast</a>
+  </nav>`;
+
+const boardBlock = (id, kicker, title, note, body) => `
+  <section class="pv-block" id="${id}">
+    <span class="pv-kicker">${kicker}</span>
+    <h2 class="pv-block-title">${title}</h2>
+    <p class="pv-block-note">${note}</p>
+    ${body}
+  </section>`;
+
+const demo = (label, hint, inner, cls) => `
+      <div class="pv-demo${cls ? ' ' + cls : ''}">
+        <div class="pv-demo-cap"><b>${label}</b>${hint ? `<span>${hint}</span>` : ''}</div>
+        <div class="pv-app is-demo">${inner}</div>
+      </div>`;
+
+const CAVEAT_STEPS = `
+      <div class="pv-caveat">
+        <b>Two things this strip cannot say.</b> <b>done[]</b> is monotonic — saving appends and nothing
+        removes — so a step reading done means <i>this section was saved</i>, never <i>this section is
+        filled</i>. A step can be solid over a section with three empty fields. And there is no per-step
+        timestamp on the record, so "when did each step complete?" is only answerable from the audit log,
+        which is a separate read. Neither is a reason not to build it; both are reasons not to word it
+        as "complete".
+      </div>`;
+
+const CAVEAT_CHARTS = `
+      <div class="pv-caveat">
+        <b>Never canvas.</b> The one canvas painting in the app hardcodes six hex values precisely
+        because a canvas cannot read a CSS custom property — which would freeze one palette and one
+        theme. These are HTML and SVG filled with the app's own tokens, so every palette and both themes
+        follow for nothing. And an <b>undated</b> bucket is shown rather than swallowed: dropping rows
+        with no parseable date would make a chart disagree with the total printed above it.
+      </div>`;
+
+const CAVEAT_TOAST = `
+      <div class="pv-caveat">
+        <b>The toast contract is not negotiable, and none of this changes it.</b> One element,
+        <b>#toast</b> holding <b>#toast-text</b>; the message is written into that span and never over it,
+        because <b>pointer-events: none</b> on the span is what lets a tap reach the pill that dismisses
+        it. One message replaces the last — the old busy latch is gone and documented as a bug, not a
+        design. <b>.show</b> stays the class toggle and the 2.5s clock stays. Only the paint changes,
+        which is why this can be adopted without touching logic that took a bug to get right.
+      </div>`;
+
+const partsBoard = () => boardJump() + `
+
+${boardBlock('steps', 'Component 1 of 4', 'Steps and progress',
+  'Three ways to draw the same six saved sections, plus the chip the app already has. All four read <b>ir.done[]</b> and <b>sectionProgress()</b> — nothing here needs a new field, a new endpoint or a backend change.',
+  demo('Tabler steps', 'dots and a line, with three states rather than two', stepsStrip(), 'pv-demo-pad')
++ demo('Compact steps', 'Tabler progress-steps: pill bars, no labels', compactSteps(), 'pv-demo-pad')
++ demo('Stacked bar', 'progress-stacked: one bar split into six segments', stackedBar(), 'pv-demo-pad')
++ demo('What the app has today', 'the 4/6 chip, copied from views.css', currentChip(), 'pv-demo-pad')
++ demo('Ticket, variant A', 'steps above, tabs kept — literally what you asked for', stepsStrip() + tabRow(false), 'pv-demo-ticket')
++ demo('Ticket, variant B', 'the tabs carry the state — one strip, not two', compactSteps() + tabRow(true), 'pv-demo-ticket')
++ CAVEAT_STEPS)}
+
+${boardBlock('charts', 'Component 2 of 4', 'Charts and stats',
+  'Insights already computes every number on the screen in one pure pass. These are drawings of that same output, not a second set of sums, so a chart can never disagree with the count printed above it.',
+  demo('Raised per month', 'columns — twelve slots, empty months kept', monthChart(), 'pv-demo-pad')
++ demo('Status mix', 'one bar instead of four numbers', statusChart(), 'pv-demo-pad')
++ demo('Category mix', 'bars straight from insightsSummary().categories', categoryChart(), 'pv-demo-pad')
++ demo('Stat tile with a sparkline', 'the count tile from option D, carrying a trend', `
+          <div class="segs-demo">
+            <span class="segment"><span class="segment-count">412</span>All</span>
+            <span class="segment active"><span class="segment-count">37</span>Open</span>
+            <span class="segment"><span class="segment-count">6</span>Paused</span>
+          </div>
+          <div class="spark-tile">
+            <span class="spark-k">Open, last 30 days</span>
+            <span class="spark-v">37<span class="spark-delta">&#43;4</span></span>
+            <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none" role="img" aria-label="Open IRs over the last 30 days"><polyline class="spark-line" points="0,22 9,19 18,21 27,14 36,16 45,9 54,12 63,6 72,10 81,4 90,7 100,3" /></svg>
+          </div>`, 'pv-demo-pad')
++ CAVEAT_CHARTS)}
+
+${boardBlock('people', 'Component 3 of 4', 'People',
+  'This is the answer to the department board — counting by <b>assignee</b> instead. No IR carries a department anywhere, so a card headed "Departments" would be counting something else.',
+  demo('Team load', 'initials, a bar, and an Unassigned row', peopleCard(), 'pv-demo-pad'))}
+
+${boardBlock('feedback', 'Component 4 of 4', 'Spinner and toast',
+  'The two pieces you would feel rather than look at. The spinner is Tabler’s, drawn in <b>currentColor</b> so it takes the colour of wherever it sits. The toast is a restyle of the single element the app already has — one message that replaces the last, never a queue.',
+  demo('Spinner, two sizes', 'the sign-in wait is the one that needs it most', `
+          ${spinner('lg', 'Signing you in…', 'accent')}
+          ${spinner('sm', 'Saving section D…', '')}`, 'pv-demo-pad')
++ demo('Spinner in a button', 'today the label swaps and nothing else moves', `
+          <div class="btn-demo">
+            <span class="btn is-busy"><span class="spinner-border spinner-border-sm" role="status" aria-label="Signing in"></span>Signing in…</span>
+            <span class="btn btn-secondary is-busy"><span class="spinner-border spinner-border-sm" role="status" aria-label="Saving"></span>Saving…</span>
+          </div>`, 'pv-demo-pad')
++ demo('Toast, today and proposed', 'left is base.css; right is the restyle', `
+          <div class="toast-pair">
+            <div class="toast-col">
+              <span class="toast-tag">Today</span>
+              <div class="toast-today">Section saved successfully!</div>
+            </div>
+            <div class="toast-col">
+              <span class="toast-tag">Proposed</span>
+              ${toastNew('', 'Saved', 'Section D saved. Analysis date stamped.')}
+              ${toastNew('danger', 'Could not save', 'Backend unreachable — kept on this device.')}
+              ${toastNew('success', 'Comment posted', 'Kishor was emailed automatically.')}
+            </div>
+          </div>`, 'pv-demo-pad')
++ CAVEAT_TOAST)}
+`;
+
+// The board's stylesheet. D's skin first, so every shared component arrives in
+// the approved language, then the rules for the pieces that do not exist yet.
+//
+// The geometry is Tabler 1.6.1's, read off its own stylesheet rather than
+// remembered: dot 0.5rem, connector 2px, items flex: 1 1 0 with overflow-x auto;
+// spinner 1.5rem on a 2px currentColor border; toast 350px max on a 1px border
+// with a tinted header. The MEASUREMENTS are Tabler's. The COLOURS are the app's
+// own tokens, because that is the only way a preview stays honest about what the
+// app can actually produce.
+const PARTS_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
+
+/* ── the board's own chrome ── */
+.pv-app.is-demo { display: block; min-height: 0; background: var(--surface-base); }
+.pv-jump { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.75rem; }
+.pv-jump a { padding: 0.35rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-sm); text-decoration: none; }
+.pv-jump a:hover { border-color: var(--accent-soft-line); background: var(--accent-soft); }
+.pv-block { margin-bottom: 2.75rem; }
+.pv-kicker { display: block; color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.06em; text-transform: uppercase; }
+.pv-block-title { margin: 0.2rem 0 0.4rem; font-size: var(--text-2xl); font-weight: var(--weight-semibold); }
+.pv-block-note { max-width: 68ch; color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-demo { margin-bottom: 1rem; overflow: hidden; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); box-shadow: var(--elevation-sm); }
+.pv-demo-cap { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-gray-1); }
+.pv-demo-cap b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-demo-cap span { color: var(--ink-gray-6); font-size: var(--text-xs); }
+.pv-demo-pad { padding: 0.9rem; }
+.pv-demo-ticket { padding: 0.9rem 0; }
+/* On the ticket demos the tab strip insets itself by 0.9rem, so the compact bar
+   above it has to inset to match — otherwise the two rows read as unrelated. The
+   extra .pv-app is load-bearing: without it this ties on specificity with the
+   .progress-steps rule below and loses, because that one comes later. */
+.pv-demo-ticket .pv-app .progress-steps { margin: 0 0.9rem 0.7rem; }
+.pv-caveat { margin: -0.25rem 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--outline-gray-2); border-left: 3px solid var(--accent); border-radius: var(--radius-3); background: var(--surface-gray-1); color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
+.pv-caveat b { color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+/* Visible to a screen reader only. The step letters are decoration; the section
+   name is the part worth announcing, and the bars carry no text at all. */
+.pv-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ── .steps — Tabler 1.6.1 geometry, three states instead of two ──
+   Tabler marks a POSITION: .step-item.active, and every item after it is greyed
+   by a sibling selector. That is correct for a linear wizard and wrong here,
+   because ir.done[] is a set with holes in it — section F can be saved while E
+   never was. So each dot carries its own state and nothing is inferred from what
+   precedes it. This is the one deliberate departure from Tabler on this page. */
+.pv-app .steps { display: flex; flex-wrap: nowrap; gap: 0; width: 100%; margin: 0; padding: 0; list-style: none; overflow-x: auto; overflow-y: hidden; }
+.pv-app .step-item { position: relative; flex: 1 1 0; min-width: 2.5rem; min-height: 1rem; padding: 1rem 0.2rem 0; text-align: center; }
+.pv-app .step-item::before { position: absolute; inset-inline-start: 50%; top: 0; z-index: 1; box-sizing: content-box; width: 0.5rem; height: 0.5rem; content: ""; transform: translateX(-50%); border-radius: 50%; background: var(--outline-gray-3); }
+.pv-app .step-item:not(:last-child)::after { position: absolute; inset-inline-start: 50%; top: 0.25rem; width: 100%; height: 2px; content: ""; transform: translateY(-50%); background: var(--outline-gray-2); }
+.pv-app .step-item.is-done::before { background: var(--accent); }
+.pv-app .step-item.is-done.is-linked::after { background: var(--accent); }
+.pv-app .step-n { display: block; color: var(--ink-gray-5); font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: 0.04em; }
+.pv-app .step-item.is-done .step-n { color: var(--accent); }
+.pv-app .step-short { display: block; margin-top: 0.1rem; color: var(--ink-gray-6); font-size: var(--text-2xs); }
+.pv-app .step-item.is-done .step-short { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+/* The long name is for a wide screen; on a phone the letters carry it. */
+.pv-app .step-full { display: none; }
+
+/* ── .progress-steps — Tabler's compact variant: pill bars, no dots ── */
+.pv-app .progress-steps { display: flex; flex-wrap: nowrap; gap: 0.25rem; width: 100%; margin: 0; padding: 0; list-style: none; }
+.pv-app .progress-steps-item { flex: 1 1 0; min-height: 0.25rem; border-radius: var(--radius-9); background: var(--outline-gray-2); }
+.pv-app .progress-steps-item.is-done { background: var(--accent); }
+
+/* ── .progress-stacked — one bar, one segment per section ── */
+.pv-app .progress-stacked { display: flex; gap: 2px; width: 100%; height: 0.5rem; }
+.pv-app .progress-stacked .progress { display: flex; flex: 1 1 0; min-width: 0; height: 100%; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
+.pv-app .progress-stacked .progress-bar { width: 100%; background: var(--surface-gray-3); }
+.pv-app .progress-stacked .progress-bar.is-done { background: var(--accent); }
+
+/* ── the app's existing chip, copied from views.css so the comparison is real ──
+   smoke-preview.mjs ties the fill width below back to views.css, so this copy
+   cannot drift into a comparison against something the app no longer draws. */
+.pv-app .ir-progress { display: inline-flex; align-items: center; gap: 5px; }
+.pv-app .ir-progress-bar { display: block; width: 30px; height: 4px; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
+.pv-app .ir-progress-bar::after { display: block; width: 66.666%; height: 100%; content: ""; border-radius: inherit; background: var(--ink-gray-6); }
+.pv-app .ir-progress-text { color: var(--ink-gray-5); font-size: var(--text-2xs); line-height: 1; font-variant-numeric: tabular-nums; }
+
+/* ── the tabs, once with the state carried on them ──
+   The strip already has a slot for exactly this. views.css puts an unsaved dot in
+   the tab's right padding via .tab.has-unsaved::after; a saved section shows a
+   mark in the same slot, so variant B costs no new control and no new row. */
+.pv-app .tabs-container { display: flex; gap: 0.25rem; overflow-x: auto; padding: 0 0.9rem; scrollbar-width: none; }
+.pv-app .tabs-container::-webkit-scrollbar { display: none; }
+.pv-app .tab { position: relative; flex: 0 0 auto; padding: 0.55rem 0.75rem; white-space: nowrap; border-bottom: 2px solid transparent; color: var(--ink-gray-5); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.pv-app .tab.active { border-bottom-color: var(--accent); color: var(--accent); }
+.pv-app .tab.is-saved { padding-right: 1.3rem; }
+.pv-app .tab.is-saved::after { position: absolute; top: 0.5rem; right: 0.45rem; width: 5px; height: 5px; content: ""; border-radius: 50%; background: var(--accent); }
+
+/* ── charts ── */
+.pv-app .chart { margin: 0; }
+.pv-app .chart-note { margin-top: 0.6rem; color: var(--ink-gray-6); font-size: var(--text-xs); line-height: var(--leading-body); }
+.pv-app .chart-note b { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+/* Twelve columns as a flex row rather than stretched SVG: a stretched viewBox
+   distorts its own rounded corners and any text inside it. */
+.pv-app .cols { display: flex; gap: 3px; align-items: flex-end; height: 108px; }
+.pv-app .col { display: flex; flex: 1 1 0; min-width: 0; flex-direction: column; justify-content: flex-end; align-items: center; gap: 0.35rem; height: 100%; }
+.pv-app .col-bar { width: 100%; max-width: 2.25rem; min-height: 2px; border-radius: var(--radius-3); background: var(--accent); }
+.pv-app .col-bar.is-zero { background: var(--surface-gray-3); }
+.pv-app .col-t { flex: 0 0 auto; color: var(--ink-gray-5); font-size: var(--text-2xs); }
+.pv-app .mix-bar { display: flex; gap: 2px; height: 0.75rem; }
+.pv-app .mix-seg { border-radius: var(--radius-9); }
+.pv-app .mix-key { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin-top: 0.6rem; }
+.pv-app .mix-key-item { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--ink-gray-7); font-size: var(--text-xs); }
+.pv-app .mix-key-item b { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.pv-app .mix-dot { width: 8px; height: 8px; border-radius: 50%; }
+.pv-app .st-open { background: var(--st-open-fg); }
+.pv-app .st-paused { background: var(--st-paused-fg); }
+.pv-app .st-resolved { background: var(--st-resolved-fg); }
+.pv-app .st-closed { background: var(--st-closed-fg); }
+.pv-app .bar-row { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.45rem; }
+.pv-app .bar-label { flex: 0 0 9.5rem; color: var(--ink-gray-7); font-size: var(--text-2xs); letter-spacing: 0.02em; text-transform: uppercase; }
+.pv-app .bar-track { flex: 1 1 auto; min-width: 0; height: 0.45rem; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
+.pv-app .bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.pv-app .bar-n { flex: 0 0 auto; color: var(--ink-gray-8); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.pv-app .segs-demo { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-bottom: 0.9rem; }
+.pv-app .spark-tile { display: flex; flex-direction: column; gap: 0.2rem; max-width: 24rem; padding: 0.7rem 0.85rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); }
+.pv-app .spark-k { color: var(--ink-gray-6); font-size: var(--text-2xs); letter-spacing: 0.02em; text-transform: uppercase; }
+.pv-app .spark-v { display: flex; align-items: baseline; gap: 0.4rem; color: var(--ink-gray-9); font-size: var(--text-3xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-3xl); font-variant-numeric: tabular-nums; }
+.pv-app .spark-delta { color: var(--ink-green-7); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.pv-app .spark { display: block; width: 100%; height: 28px; }
+/* non-scaling-stroke keeps the line 2px wide however far the viewBox is
+   stretched, so a sparkline in a wide tile does not go hairline. */
+.pv-app .spark-line { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+
+/* ── People ── */
+.pv-app .people { display: flex; flex-direction: column; gap: 0.1rem; }
+.pv-app .people-head { display: flex; align-items: baseline; gap: 0.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--outline-gray-2); }
+.pv-app .people-h { font-size: var(--text-3xl); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-3xl); }
+.pv-app .people-sub { color: var(--ink-gray-6); font-size: var(--text-2xs); letter-spacing: 0.04em; text-transform: uppercase; }
+.pv-app .person { display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .person:last-of-type { border-bottom: 0; }
+.pv-app .person-face { display: grid; place-items: center; flex: 0 0 auto; width: 26px; height: 26px; border: 1px solid var(--accent-soft-line); border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.pv-app .person.is-unassigned .person-face { border-color: var(--outline-gray-2); background: var(--surface-gray-3); color: var(--ink-gray-6); }
+.pv-app .person-name { flex: 0 0 8.5rem; min-width: 0; overflow: hidden; color: var(--ink-gray-8); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.pv-app .person-track { flex: 1 1 auto; min-width: 0; height: 0.4rem; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
+.pv-app .person-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+/* The overdue share is a red segment at the start of the bar, not a recoloured
+   whole bar. Recolouring the whole width said "this person has at least one late
+   IR" and nothing about how many — so a bar 46 long and a bar 12 long were the
+   same red, and the colour stopped tracking the number it sits next to. */
+.pv-app .person-late { display: block; height: 100%; border-radius: inherit; background: var(--st-danger-fg); }
+.pv-app .person-n { flex: 0 0 auto; color: var(--ink-gray-9); font-size: var(--text-xs); font-weight: var(--weight-medium); font-variant-numeric: tabular-nums; }
+.pv-app .person-clear { flex: 0 0 auto; width: 3.6rem; }
+
+/* ── spinner — Tabler's, in currentColor so it needs no colour of its own ── */
+@keyframes board-spin { to { transform: rotate(360deg); } }
+.pv-app .spinner-border { display: inline-block; flex-shrink: 0; width: 1.5rem; height: 1.5rem; vertical-align: -0.125em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: 0.75s linear infinite board-spin; }
+.pv-app .spinner-border-sm { width: 1rem; height: 1rem; border-width: 1px; }
+.pv-app .spin-demo { display: inline-flex; align-items: center; gap: 0.6rem; margin-right: 1.75rem; color: var(--ink-gray-7); }
+.pv-app .spin-accent { color: var(--accent); }
+.pv-app .spin-label { color: inherit; font-size: var(--text-sm); }
+.pv-app .btn-demo { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.pv-app .btn.is-busy { gap: 0.5rem; }
+.pv-app .btn .spinner-border, .pv-app .btn-secondary .spinner-border { width: 14px; height: 14px; border-width: 2px; }
+
+/* ── toast — Tabler's arrangement over the app's ONE element ──
+   The app has a single #toast holding a single #toast-text, and a newer message
+   replaces the older one. Nothing below adds a second toast or a queue; it is a
+   restyle of that element, which is why it can be adopted without touching the
+   logic that took a bug to get right. */
+.pv-app .toast-pair { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.pv-app .toast-col { display: flex; flex-direction: column; gap: 0.6rem; }
+.pv-app .toast-tag { color: var(--ink-gray-5); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; }
+/* What base.css draws today, kept faithful to its own values rather than tidied —
+   including its max-width. Without it the pill stretches to the column and looks
+   far worse than the thing it is supposed to be a fair comparison against. */
+.pv-app .toast-today { width: 100%; max-width: min(420px, 100%); padding: 9px 16px; border-radius: var(--radius-4); background: var(--surface-gray-10); color: var(--ink-base); font-size: var(--text-sm); font-weight: var(--weight-medium); text-align: center; box-shadow: var(--elevation-xl); }
+.pv-app .toast { width: 100%; max-width: 350px; overflow: hidden; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); box-shadow: var(--elevation-lg); }
+.pv-app .toast-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-gray-1); }
+.pv-app .toast-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-gray-5); }
+.pv-app .toast-title { flex: 1 1 auto; color: var(--ink-gray-8); font-size: var(--text-xs); font-weight: var(--weight-medium); }
+.pv-app .toast-x { color: var(--ink-gray-5); font-size: var(--text-sm); line-height: 1; }
+.pv-app .toast-body { padding: 0.75rem; color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-app .toast-danger .toast-dot { background: var(--st-danger-fg); }
+.pv-app .toast-success .toast-dot { background: var(--st-resolved-fg); }
+
+@media (max-width: 639px) {
+  .pv-app.is-demo { flex-direction: column; min-height: 0; }
+  .pv-app .person-name { flex: 0 0 6.5rem; }
+  .pv-app .bar-label { flex: 0 0 6.5rem; }
+  .pv-jump { gap: 0.3rem; }
+  /* Six equal cells in a 390px screen leave about 54px each, and "Investigation"
+     needs 84 — measured, not guessed: the labels ran over their neighbours and the
+     strip's own overflow-x hid the fact. So on a phone the letters carry it, the
+     same way the app's own tab strip already reads "B · Inward". The long name is
+     still there for a screen reader, and the connectors and dots still show where
+     the holes are. */
+  .pv-app .step-item { min-width: 0; padding-left: 0.1rem; padding-right: 0.1rem; }
+  .pv-app .step-short { display: none; }
+  .pv-app .step-n { font-size: var(--text-sm); }
+  /* The compact variant keeps its four labels on one line by letting the row
+     scroll, which is what Tabler's own .progress-steps does. */
+  .pv-app .bar-track { min-width: 3rem; }
+}
+`;
+
+// Every skin in this build — the four options plus the review boards. The token
+// check, the colour-kind check and the scoping check all run over THIS list, so a
+// board cannot reference a token the app does not define (which renders as
+// NOTHING, silently) any more than an option can. A board is a skin; it is held
+// to a skin's rules.
+const REVIEW_BOARDS = [{ file: 'preview/parts.html', skin: PARTS_SKIN }];
+const SKINS = [...OPTIONS.map(o => o.skin), ...REVIEW_BOARDS.map(b => b.skin)];
+
+const boardPage = (skin, title, sub, here, body) =>
+  pageHead({ skin }, title)
+  + boardTop(title, sub, here)
+  + body
+  + `
 </div>
 </body>
 </html>
@@ -1250,6 +1823,10 @@ const FILES = {
   'index.html': chooserPage(),
 };
 OPTIONS.forEach(o => { FILES[o.key + '.html'] = optionPage(o); });
+FILES['parts.html'] = boardPage(PARTS_SKIN,
+  'I-PASSBOOK \u2014 Tabler parts',
+  'Spinners, milestone steps, clean toasts, charts, a people board \u2014 the parts of Tabler worth having, one at a time, in option D\u2019s language.',
+  'parts', partsBoard());
 
 // ── self-check ───────────────────────────────────────────────────────────────
 // The same contract the polish preview keeps: a build that produces something
@@ -1262,11 +1839,11 @@ const problems = [];
 // the colour. Every custom property referenced anywhere in the generated output
 // must be defined in the app's own tokens/palette or by a skin.
 const defined = new Set(
-  [...(tokensCss + paletteCss + OPTIONS.map(o => o.skin).join('\n')).matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)]
+  [...(tokensCss + paletteCss + SKINS.join('\n')).matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)]
     .map(m => m[1])
 );
 const referenced = new Set(
-  [...(previewCss + OPTIONS.map(o => o.skin).join('\n')).matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)]
+  [...(previewCss + SKINS.join('\n')).matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)]
     .map(m => m[1])
 );
 const undefined_ = [...referenced].filter(t => !defined.has(t)).sort();
@@ -1287,7 +1864,7 @@ if (undefined_.length) problems.push(`tokens used but never defined (these rende
 const NOT_A_COLOUR = /^--(focus|elevation|shadow|text|leading|weight|radius|font|ease|safe|header-h|list-w|content-max|bottombar-h)/;
 const COLOUR_PROP = /^(background|background-color|color|border-color|border-(top|right|bottom|left)-color|outline-color|fill|stroke|text-decoration-color|caret-color)$/;
 const kindErrors = [];
-[...(stripComments(previewCss) + '\n' + OPTIONS.map(o => stripComments(o.skin)).join('\n')).matchAll(/([-a-z]+)\s*:\s*([^;{}]*)/g)].forEach(m => {
+[...(stripComments(previewCss) + '\n' + SKINS.map(stripComments).join('\n')).matchAll(/([-a-z]+)\s*:\s*([^;{}]*)/g)].forEach(m => {
   const [, prop, value] = m;
   if (!COLOUR_PROP.test(prop)) return;
   [...value.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)].forEach(v => {
@@ -1364,6 +1941,14 @@ OPTIONS.forEach(o => {
   if (bare.length) problems.push(`option ${o.key} has unscoped rules: ${bare.slice(0, 3).join(' | ')}`);
   if (!/^\.pv\b/m.test(o.skin)) problems.push(`option ${o.key} never scopes to .pv`);
 });
+// The review boards are skins too, and a board rule that escaped its own page
+// would restyle an option page and quietly change what the owner is comparing.
+// Same walk, same rule: every top-level selector must live in the .pv namespace.
+REVIEW_BOARDS.forEach(b => {
+  const bare = topLevelSelectors(b.skin).filter(s => !s.startsWith('@') && !/^\.pv\b/.test(s));
+  if (bare.length) problems.push(`${b.file} has unscoped rules: ${bare.slice(0, 3).join(' | ')}`);
+  if (!/^\.pv\b/m.test(b.skin)) problems.push(`${b.file} never scopes to .pv`);
+});
 if (problems.length) {
   console.error('\nBUILD REFUSED:');
   problems.forEach(p => console.error('  - ' + p));
@@ -1403,3 +1988,4 @@ console.log(`wrote preview/  (${nPages} pages + preview.css?v=${cssHash})`);
 console.log(`  ${(previewCss.length / 1024).toFixed(1)} KB shared css, tokens and palette verbatim from the app`);
 if (accentRatio) console.log(`  Option B accent ${yellow} on ${darkSurface}: ${accentRatio.toFixed(2)}:1  (AA needs 4.5, AAA needs 7)`);
 OPTIONS.forEach(o => console.log(`  preview/${o.key}.html  ${o.name}`));
+REVIEW_BOARDS.forEach(b => console.log(`  ${b.file}  the components, one at a time`));

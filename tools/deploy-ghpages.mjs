@@ -58,6 +58,7 @@ const SERVED = [
   'preview/b.html',
   'preview/c.html',
   'preview/d.html',
+  'preview/parts.html',
   'preview/preview.css',
   'assets/apple-touch-icon.png',
   'assets/icon-192.png',

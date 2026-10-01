@@ -43,6 +43,7 @@ const PAGE = {
 };
 const KEYS = Object.keys(PAGE);
 const chooser = read('../preview/index.html');
+const PARTS = read('../preview/parts.html');
 const css = read('../preview/preview.css');
 const tokens = read('../tokens.css');
 const palette = read('../palette.css');
@@ -102,7 +103,7 @@ r.ok('...so the skeleton really is only layout and the review chrome',
 
 // ── 4. It is inert and self-contained ───────────────────────────────────────
 r.head('the pages are inert: no script, no third party, no network');
-Object.entries({ ...PAGE, index: chooser }).forEach(([k, h]) => {
+Object.entries({ ...PAGE, index: chooser, parts: PARTS }).forEach(([k, h]) => {
   r.ok(`${k}: no script`, !/<script/i.test(h));
   const external = (h.match(/https?:\/\/[^\s"')]+/g) || []).filter(u => !u.startsWith('https://www.w3.org'));
   r.ok(`${k}: reaches no third party`, external.length === 0, external);
@@ -158,7 +159,8 @@ const sheetPhone = phoneBlockOf(css);
 r.ok('the shared sheet has a phone block worth protecting', !!sheetPhone);
 const phoneDecls = sheetPhone ? declsIn(sheetPhone.body) : new Map();
 r.ok('...and it really does carry phone rules', phoneDecls.size > 0, [...phoneDecls.keys()]);
-const skinOf = k => stripCssComments((PAGE[k].match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '');
+const SKIN_HTML = { ...PAGE, parts: PARTS };
+const skinOf = k => stripCssComments((SKIN_HTML[k].match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '');
 // The skin with its own phone block cut out: what it says at every width.
 const widePartOf = k => {
   const sheet = skinOf(k);
@@ -166,7 +168,10 @@ const widePartOf = k => {
   return b ? sheet.slice(0, b.at) + sheet.slice(b.end + 1) : sheet;
 };
 const collisions = [];
-KEYS.forEach(k => {
+// The parts board is a skin too — and a heavier one, because it inlines option
+// D's skin whole. That makes it the most likely place for a rule to slip out and
+// beat a phone rule nobody was looking at.
+[...KEYS, 'parts'].forEach(k => {
   const wide = widePartOf(k), own = phoneBlockOf(skinOf(k));
   const ownDecls = own ? declsIn(own.body) : new Map();
   const wideRules = declsIn(wide.replace(/@media[^{]*\{/g, ''));
@@ -180,9 +185,61 @@ KEYS.forEach(k => {
 r.ok('...so every skin that fights a phone rule re-states it in its own phone block',
   collisions.length === 0, collisions);
 
-// ── 7. The owner can reach it ───────────────────────────────────────────────
+// ── 7. The parts board ──────────────────────────────────────────────────────
+// The board is where the owner judges six components one at a time, and it is
+// built from the app's real numbers — the six section letters, the 4/6 chip, the
+// toast. Each of those is a copy of something the app owns, and a copy that has
+// drifted is worse than no board: it would have him approve a step strip drawn
+// over a section list the app no longer has.
+r.head('the parts board shows the app\'s own components, not a recollection of them');
+const dSkin = (PAGE.d.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+const partsSkin = (PARTS.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+// Inheriting D's skin verbatim is what makes the board's buttons, badges, cards
+// and tabs the approved direction's buttons, badges, cards and tabs. If the board
+// grew its own copy of them, two screens would be showing two designs.
+r.ok('parts: carries option D\'s skin verbatim, then its own layer on top',
+  partsSkin.startsWith(dSkin) && partsSkin.length > dSkin.length,
+  `d=${dSkin.length} parts=${partsSkin.length}`);
+r.ok('parts: links the SAME hashed stylesheet as the four options',
+  (PARTS.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1] === (PAGE.a.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1]);
+// It must not grow a fifth set of the four screens: the comparison is four-way
+// and stays four-way, which is the promise the chooser page makes.
+r.ok('parts: renders none of the four option screens',
+  !/class="pv-phone"/.test(PARTS) && !/class="pv-screens"/.test(PARTS));
+r.ok('parts: carries the four headed sections it promises',
+  ['steps', 'charts', 'people', 'feedback'].every(id => PARTS.includes(`id="${id}"`)));
+r.ok('parts: and a jump list that reaches all four',
+  ['#steps', '#charts', '#people', '#feedback'].every(h => PARTS.includes(`href="${h}"`)));
+// The board renders the six step letters from a literal list, because the builder
+// reads CSS and HTML as text and never evaluates app.js. So the literal is the one
+// thing here that can rot silently — and it is checked against the app's own
+// SECTION_IDS rather than against itself.
+const sectionIds = [...((read('../app.js').match(/const SECTION_IDS\s*=\s*\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([a-z-]+)'/g)].map(m => m[1]);
+// The strip is drawn on three demos, so the letters arrive in whole sixes; the
+// mod-6 check is what keeps a seventh step from being quietly ignored by the Set.
+const allLetters = [...PARTS.matchAll(/class="step-n">([A-Z])<\/span>/g)].map(m => m[1]);
+const boardLetters = [...new Set(allLetters)];
+const expectedLetters = sectionIds.map(id => id.replace(/^sec-/, '').toUpperCase()).join(',');
+r.ok('parts: the six steps are the app\'s six sections, in the app\'s order',
+  sectionIds.length === 6 && allLetters.length % 6 === 0 && boardLetters.join(',') === expectedLetters,
+  `app=${expectedLetters} board=${boardLetters.join(',')} (${allLetters.length / 6} strips)`);
+// The board shows the chip the app draws today beside the new ideas, and that
+// chip is a copy of views.css. smoke-list-intel.mjs already pins progressChip's
+// markup; this pins the other half — that the board's copy is of the real thing.
+const views = read('../views.css');
+const boardFill = (partsSkin.match(/\.ir-progress-bar::after\s*\{[^}]*width:\s*([0-9.]+%)/) || [])[1];
+r.ok('parts: the copied 4/6 chip still fills 66.666%, as views.css does',
+  boardFill === '66.666%' && views.includes('.ir-progress.p4 .ir-progress-bar::after { width: 66.666%; }'),
+  `board=${boardFill}`);
+// And the comparison against "what the app has today" has to be fair: the pill is
+// reproduced WITH base.css's max-width, because without it it stretches to the
+// column and looks far worse than the thing it is standing in for.
+r.ok('parts: the today-toast keeps a max-width, so the comparison is fair',
+  /\.toast-today\s*\{[^}]*max-width:/.test(partsSkin));
+
+// ── 8. The owner can reach it ───────────────────────────────────────────────
 r.head('every preview file is served, and none of it is in the app\'s shell');
-const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/preview.css'];
+const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/preview.css'];
 PREVIEW_FILES.forEach(f => r.ok(`deploy serves ${f}`, deployJs.includes(`'${f}'`)));
 // The negative half matters more: the shell is precached on every install, so a
 // mock page in there would be downloaded by every user who never opens it.

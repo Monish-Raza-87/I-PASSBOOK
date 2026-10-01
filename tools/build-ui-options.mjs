@@ -1632,8 +1632,17 @@ const PARTS_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 /* On the ticket demos the tab strip insets itself by 0.9rem, so the compact bar
    above it has to inset to match — otherwise the two rows read as unrelated. The
    extra .pv-app is load-bearing: without it this ties on specificity with the
-   .progress-steps rule below and loses, because that one comes later. */
-.pv-demo-ticket .pv-app .progress-steps { margin: 0 0.9rem 0.7rem; }
+   .progress-steps rule below and loses, because that one comes later.
+
+   The auto width is load-bearing too, and it is the whole reason this rule has a
+   width in it at all. The base rule sets width:100%, which resolves against the
+   containing block's CONTENT box — and a margin is added outside that. So "100%
+   wide, with 0.9rem each side" is 1.8rem wider than the space it has, and the bar
+   runs out past the right edge of the frame. A block with width:auto is sized to
+   fit its margins instead, which is what was meant. It showed up as a 14px spill
+   in a geometry probe at phone width and nowhere else: at desktop width the demo
+   frame is wide enough to absorb it. */
+.pv-demo-ticket .pv-app .progress-steps { width: auto; margin: 0 0.9rem 0.7rem; }
 .pv-caveat { margin: -0.25rem 0 1rem; padding: 0.75rem 0.9rem; border: 1px solid var(--outline-gray-2); border-left: 3px solid var(--accent); border-radius: var(--radius-3); background: var(--surface-gray-1); color: var(--ink-gray-7); font-size: var(--text-xs); line-height: var(--leading-body); }
 .pv-caveat b { color: var(--ink-gray-9); font-weight: var(--weight-medium); }
 /* Visible to a screen reader only. The step letters are decoration; the section

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>I-PASSBOOK — UI options</title>
+<link rel="stylesheet" href="preview.css?v=77f022a7" />
+<style>
+.pv { background: var(--surface-gray-1); color: var(--ink-gray-9); }
+.pv-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 3.5rem; }
+.pv-pick { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.pv-card { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.1rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); text-decoration: none; color: inherit; }
+.pv-card:hover { box-shadow: var(--elevation-lg); border-color: var(--outline-elevation-2); }
+.pv-card .k { font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-card h2 { font-size: var(--text-lg); font-weight: var(--weight-semibold); margin: 0; }
+.pv-card p { margin: 0; font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-card .go { margin-top: auto; font-size: var(--text-sm); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-swatches { display: flex; gap: 0.3rem; }
+.pv-swatches span { width: 22px; height: 22px; border: 1px solid var(--outline-gray-1); }
+.pv-card-note { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-1); font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-card-note h2 { font-size: var(--text-md); color: var(--ink-gray-9); }
+/* Swatch colours are the option's own surfaces and accent, so the card previews
+   the language rather than describing it. Light values here are literal because
+   the chooser page is not inside any option's theme. */
+.sw-a span:nth-child(1) { background: #ffffff; } .sw-a span:nth-child(2) { background: #f8f8f8; }
+.sw-a span:nth-child(3) { background: #e2e2e2; } .sw-a span:nth-child(4) { background: #383838; }
+.sw-b span:nth-child(1) { background: #171717; } .sw-b span:nth-child(2) { background: #383838; }
+.sw-b span:nth-child(3) { background: #ffc400; } .sw-b span:nth-child(4) { background: #f8f8f8; }
+.sw-c span:nth-child(1) { background: #ffffff; } .sw-c span:nth-child(2) { background: #f3f3f3; }
+.sw-c span:nth-child(3) { background: #ededed; } .sw-c span:nth-child(4) { background: #3b6fd4; }
+</style>
+</head>
+<body class="pv">
+<div class="pv-page">
+  <div class="pv-top" style="margin-bottom:1.25rem">
+    <h1 style="font-size:var(--text-xl);font-weight:var(--weight-semibold)">I-PASSBOOK — pick a design direction</h1>
+    <p style="color:var(--ink-gray-6);font-size:var(--text-sm);max-width:60ch">
+      Three options. Each one shows the SAME four screens — sign-in, IR list, ticket,
+      Insights — drawn from the app's real markup and its real colour tokens. The
+      layout is identical between them; only the design language changes. Open them
+      in any order; they link to each other.
+    </p>
+  </div>
+
+  <div class="pv-pick">
+    
+    <a class="pv-card" href="a.html">
+      <span class="k">Option A</span>
+      <h2>Desk, finished</h2>
+      <div class="pv-swatches sw-a"><span></span><span></span><span></span><span></span></div>
+      <p>Finish the ERPNext look you already approved — and apply it everywhere.</p>
+      <span class="go">Open option A →</span>
+    </a>
+    <a class="pv-card" href="b.html">
+      <span class="k">Option B</span>
+      <h2>Indrones Industrial</h2>
+      <div class="pv-swatches sw-b"><span></span><span></span><span></span><span></span></div>
+      <p>Dark instrument panel, industrial yellow, technical labels. Built to look like Indrones.</p>
+      <span class="go">Open option B →</span>
+    </a>
+    <a class="pv-card" href="c.html">
+      <span class="k">Option C</span>
+      <h2>Modern SaaS light</h2>
+      <div class="pv-swatches sw-c"><span></span><span></span><span></span><span></span></div>
+      <p>Soft canvas, white cards, generous spacing. The Linear / Stripe register.</p>
+      <span class="go">Open option C →</span>
+    </a>
+  </div>
+
+  <div class="pv-card-note">
+    <h2>Before you pick</h2>
+    <p>
+      The app currently runs <b>two</b> design languages at once: the ERPNext Desk look
+      on the sign-in screen and the IR list, and a softer accent-tinted look on the
+      ticket, Insights and every modal. That seam — not any single screen — is the
+      main reason it reads as unfinished. All three options collapse it to one
+      language; that is the actual fix, and the colours are the easy part.
+    </p>
+    <p>
+      If it looks out of date, add a <code>?1</code> to the address and reload: the
+      app's service worker caches what it serves, and every page here carries a
+      build hash so a fresh build is a fresh address.
+    </p>
+  </div>
+</div>
+</body>
+</html>

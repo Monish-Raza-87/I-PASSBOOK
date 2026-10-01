@@ -1,0 +1,495 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>UI option B — Indrones Industrial</title>
+<!-- The ?v= is a content hash, and it is load-bearing: the app's service worker
+     serves same-origin subresources stale-while-revalidate, so without it a
+     rebuilt preview.css would be answered from the cache once and the review
+     would be of the previous build. A new hash is a new URL. -->
+<link rel="stylesheet" href="preview.css?v=77f022a7" />
+<style>
+
+/* The only colour here that is not already in the app's token set. It is the
+   brand yellow from indrones.com's logo asset, and it is PROVISIONAL: adopting
+   Option B means adding a `yellow` preset to palette.css through the documented
+   three-file path (app.js PALETTES, the [data-palette] block, the index.html
+   pre-paint list), and tools/smoke-palette.mjs will then MEASURE it for WCAG AA
+   and refuse it if it fails. Measured at build time against the dark surface, and refused if it drops below AA. */
+.pv { --ind-yellow: #ffc400; --ind-ink-on-yellow: #171717;
+      background: var(--surface-gray-10); color: var(--ink-gray-1); }
+
+.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.pv-top { border-bottom: 1px solid var(--outline-gray-8); padding-bottom: 0.75rem; margin-bottom: 1.25rem; }
+.pv-top h1 { letter-spacing: 0.06em; text-transform: uppercase; font-size: var(--text-base); }
+.pv-top > p { color: var(--ink-gray-4); font-size: var(--text-sm); }
+.pv-tab { padding: 0.25rem 0.6rem; border: 1px solid var(--outline-gray-8); color: var(--ink-gray-4); font-size: var(--text-xs); font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.pv-tab.is-here { background: var(--ind-yellow); border-color: var(--ind-yellow); color: var(--ind-ink-on-yellow); }
+.pv-shot-cap b { color: var(--ind-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; }
+.pv-shot-cap span { color: var(--ink-gray-5); }
+.pv-phone { border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); }
+.pv-notes { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-8); }
+.pv-notes h2 { font-size: var(--text-base); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ind-yellow); }
+.pv-notes li { color: var(--ink-gray-3); font-size: var(--text-sm); }
+.pv-version { color: var(--ink-gray-6); font-size: var(--text-xs); font-family: var(--font-mono); }
+
+/* shell */
+.pv-app .sidebar { background: var(--surface-gray-10); border-right: 1px solid var(--outline-gray-9); }
+.pv-app .sidebar-brand { border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .brand-mark { background: var(--ind-yellow); }
+.pv-app .brand-text { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.16em; color: var(--ink-gray-2); }
+.pv-app .nav-item { color: var(--ink-gray-5); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.pv-app .nav-item:hover { color: var(--ink-gray-1); background: var(--surface-gray-9); }
+.pv-app .nav-item.active { color: var(--ind-yellow); background: var(--surface-gray-9); box-shadow: inset 2px 0 0 0 var(--ind-yellow); }
+.pv-app .nav-icon { border: 1px solid currentColor; }
+.pv-app .nav-item.active .nav-icon { background: var(--ind-yellow); }
+.pv-app .nav-count { font-variant-numeric: tabular-nums; color: var(--ink-gray-4); }
+.pv-app .topbar { background: var(--surface-gray-10); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .topbar-title { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-gray-1); }
+.pv-app .bell { border: 1px solid var(--outline-gray-7); }
+.pv-app .avatar { border: 1px solid var(--ind-yellow); color: var(--ind-yellow); font-family: var(--font-mono); }
+
+/* list — a readout, not a set of cards */
+.pv-app .list-toolbar { background: var(--surface-gray-10); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .list-title { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.16em; font-size: var(--text-sm); }
+.pv-app .list-title::before { content: "01 / "; color: var(--ind-yellow); }
+.pv-app .list-count { font-family: var(--font-mono); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .search-bar { padding: 0.4rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .search-bar::placeholder { color: var(--ink-gray-6); }
+.pv-app .segment { padding: 0.2rem 0.5rem; border: 1px solid var(--outline-gray-8); color: var(--ink-gray-4); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.pv-app .segment.active { border-color: var(--ind-yellow); color: var(--ind-yellow); background: var(--surface-gray-9); }
+.pv-app .segment-count { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-app .segment.active .segment-count { color: var(--ind-yellow); }
+.pv-app .sync-status { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-6); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .ir-card { padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--outline-gray-9); cursor: pointer; }
+.pv-app .ir-card:hover { background: var(--surface-gray-9); }
+.pv-app .ir-card.is-selected { background: var(--surface-gray-9); box-shadow: inset 2px 0 0 0 var(--ind-yellow); }
+.pv-app .ir-title { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .ir-assignee { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-4); }
+.pv-app .ir-meta { font-size: var(--text-2xs); color: var(--ink-gray-5); }
+.pv-app .ir-dot { color: var(--outline-gray-7); }
+.pv-app .ir-age.is-late { color: var(--st-danger-fg); }
+.pv-app .prio { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
+/* Status as an LED. A block, not a rounded pill — the corner is the language.
+   The colour comes from the app's own SEMANTIC status tokens (--st-*-fg), not
+   from the raw ramps, so if a status colour is ever retuned all three options
+   follow it. It is also why this is --st-*-fg and NOT --focus-*: the focus family
+   is a box-shadow, and background:var(--focus-blue) renders as nothing at all. */
+.pv-app .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.1rem 0.4rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-3); }
+.pv-app .badge::before { content: ""; width: 5px; height: 5px; background: var(--ink-gray-6); }
+.pv-app .badge-open::before { background: var(--st-open-fg); }
+.pv-app .badge-pending::before { background: var(--st-paused-fg); }
+.pv-app .badge-resolved::before { background: var(--st-resolved-fg); }
+.pv-app .badge-closed::before { background: var(--st-closed-fg); }
+.pv-app .badge-danger { border-color: var(--st-danger-bd); color: var(--st-danger-fg); }
+.pv-app .badge-danger::before { background: var(--st-danger-fg); }
+
+/* auth */
+.pv-app.is-auth { background: var(--surface-gray-10); }
+.pv-app .glass-card { padding: 1.5rem 1.25rem; background: var(--surface-gray-9); border: 1px solid var(--outline-gray-8); border-top: 2px solid var(--ind-yellow); }
+.pv-app .auth-logo { background: var(--ind-yellow); }
+.pv-app .auth-brand { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.24em; color: var(--ink-gray-1); }
+.pv-app .auth-full { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-4); }
+.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .form-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
+.pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ind-yellow); background: var(--ind-yellow); color: var(--ind-ink-on-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; font-weight: var(--weight-semibold); }
+.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-8); background: transparent; color: var(--ink-gray-2); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
+.pv-app .btn-ghost { border-color: var(--outline-gray-9); color: var(--ink-gray-4); }
+.pv-app .link-btn { border: 0; background: none; color: var(--ink-gray-5); font-size: var(--text-xs); text-decoration: underline; }
+.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.4rem; border: 1px solid var(--outline-gray-7); font-family: var(--font-mono); }
+.pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-9); }
+
+/* ticket */
+.pv-app #ir-banner { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-9); }
+.pv-app #ir-banner-title { font-family: var(--font-mono); font-size: var(--text-xl); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app #ir-banner-sub { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .overview-panel { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-10); }
+.pv-app .overview-title { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ind-yellow); }
+.pv-app .overview-k { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .overview-v { font-size: var(--text-sm); color: var(--ink-gray-1); }
+.pv-app .tabs-container { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-10); }
+.pv-app .tab { padding: 0.45rem 0.7rem; font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); border-bottom: 2px solid transparent; cursor: pointer; }
+.pv-app .tab.active { color: var(--ind-yellow); border-bottom-color: var(--ind-yellow); }
+.pv-app .section-content { background: var(--surface-gray-10); }
+.pv-app .section-title { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-gray-1); }
+
+/* insights */
+.pv-app .insights-body { background: var(--surface-gray-10); }
+.pv-app .insights-total { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .insights-total strong { color: var(--ind-yellow); font-size: var(--text-md); }
+.pv-app .insights-card { padding: 0.55rem 0.65rem; border: 1px solid var(--outline-gray-9); border-left: 2px solid var(--outline-gray-8); background: var(--surface-gray-9); cursor: pointer; }
+.pv-app .insights-card.active { border-left-color: var(--ind-yellow); }
+.pv-app .insights-card-n { font-family: var(--font-mono); font-size: var(--text-xl); color: var(--ink-gray-1); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .insights-h { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ind-yellow); margin-bottom: 0.5rem; }
+.pv-app .insights-subcat { padding: 0.25rem 0.5rem; border: 1px solid var(--outline-gray-9); background: var(--surface-gray-9); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--ink-gray-2); }
+.pv-app .insights-subcat.is-others { border-style: dashed; border-color: var(--outline-gray-7); color: var(--ink-gray-4); }
+.pv-app .insights-subcat-n { color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .insights-mix-row { font-size: var(--text-sm); }
+.pv-app .insights-mix-n { font-family: var(--font-mono); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+
+</style>
+</head>
+<body class="pv">
+<div class="pv-page">
+  <div class="pv-top">
+    <h1>I-PASSBOOK — UI option B: Indrones Industrial</h1>
+    <p>Dark instrument panel, industrial yellow, technical labels. Built to look like Indrones.</p>
+    <nav class="pv-tabs">
+      <a class="pv-tab" href="index.html">All three</a>
+      <a class="pv-tab" href="a.html">Option A — Desk, finished</a>
+      <a class="pv-tab is-here" href="b.html">Option B — Indrones Industrial</a>
+      <a class="pv-tab" href="c.html">Option C — Modern SaaS light</a>
+    </nav>
+  </div>
+  <div class="pv-screens">
+    
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>Sign-in</b><span>the first thing anyone sees</span></div>
+      <div class="pv-phone">
+    <div class="pv-app is-auth">
+      <div class="auth-wrap">
+        <div class="glass-card">
+          <div class="auth-head">
+            <span class="auth-logo" aria-hidden="true"></span>
+            <div class="auth-brand">I-PASSBOOK</div>
+            <p class="auth-full">Indrones Product After-Sales Summary Book</p>
+            <p class="auth-hint">Sign in with the credentials your admin gave you.</p>
+          </div>
+          <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
+          <div class="auth-or"><span>or use your email</span></div>
+          <input class="form-input" type="email" value="raza@indrones.com" readonly />
+          <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
+          <button type="button" class="btn">Sign in</button>
+          <button type="button" class="link-btn">Use password instead</button>
+        </div>
+        <p class="pv-version">v56</p>
+      </div>
+    </div></div>
+    </div>
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>IR list</b><span>412 rows, filtered by status and category</span></div>
+      <div class="pv-phone">
+    
+    <div class="pv-app">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><span class="brand-mark"></span><span class="brand-text">I-PASSBOOK</span></div>
+        <nav class="sidebar-nav">
+          
+      <div class="nav-item active" aria-current="page">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">IRs</span>
+        <span class="nav-count">412</span>
+      </div>
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Insights</span>
+        
+      </div>
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Log Analyser</span>
+        
+      </div>
+          <div class="nav-item"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label">Legacy Records</span></div>
+        </nav>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">I-PASSBOOK</div>
+          <div class="header-actions"><span class="bell"></span><span class="avatar">MR</span></div>
+        </header>
+        <div class="list-toolbar">
+          <div class="list-toolbar-top">
+            <span class="list-title">IRs</span>
+            <span class="list-count">412</span>
+          </div>
+          <input class="search-bar" type="text" placeholder="Search by IR number or drone ID…" readonly />
+          <div class="segments">
+            <span class="segment active">All<span class="segment-count">412</span></span>
+            <span class="segment">Open<span class="segment-count">37</span></span>
+            <span class="segment">Paused<span class="segment-count">6</span></span>
+            <span class="segment">Resolved<span class="segment-count">318</span></span>
+            <span class="segment">Closed<span class="segment-count">51</span></span>
+          </div>
+          <div class="segments">
+            <span class="segment">CRASH<span class="segment-count">9</span></span>
+            <span class="segment">REPAIR<span class="segment-count">58</span></span>
+            <span class="segment">GENERAL MAINTENANCE<span class="segment-count">121</span></span>
+            <span class="segment">REMOTE SUPPORT<span class="segment-count">224</span></span>
+          </div>
+        </div>
+        <div class="sync-status"><span class="sync-msg">Synced from the client sheet</span><span class="sync-meta">2m ago</span></div>
+        <div class="ir-list">
+          
+          <div class="ir-card">
+            <div class="ir-card-main">
+              <div class="ir-title-row">
+                <span class="ir-title">IR-412</span>
+                <span class="ir-assignee">A. Sharma</span>
+              </div>
+              <div class="ir-meta">
+                <span class="ir-sn">D25G-0114</span>
+                <span class="ir-dot">·</span><span class="ir-cat">CRASH</span>
+                
+                <span class="ir-dot">·</span><span class="ir-date">12-Sep-2026</span>
+                <span class="ir-dot">·</span><span class="ir-age">19d</span>
+              </div>
+            </div>
+            <div class="ir-card-side">
+              <span class="prio">Urgent</span>
+              <span class="badge badge-open">QC Investigation</span>
+              
+            </div>
+          </div>
+          <div class="ir-card is-selected">
+            <div class="ir-card-main">
+              <div class="ir-title-row">
+                <span class="ir-title">IR-409</span>
+                <span class="ir-assignee">R. Kumar</span>
+              </div>
+              <div class="ir-meta">
+                <span class="ir-sn">H25P-0032</span>
+                <span class="ir-dot">·</span><span class="ir-cat">REPAIR</span>
+                <span class="ir-dot">·</span><span class="ir-cat">BATTERY</span>
+                <span class="ir-dot">·</span><span class="ir-date">08-Sep-2026</span>
+                <span class="ir-dot">·</span><span class="ir-age is-late">23d</span>
+              </div>
+            </div>
+            <div class="ir-card-side">
+              <span class="prio">High</span>
+              <span class="badge badge-pending">Hold</span>
+              <span class="badge badge-danger">Overdue</span>
+            </div>
+          </div>
+          <div class="ir-card">
+            <div class="ir-card-main">
+              <div class="ir-title-row">
+                <span class="ir-title">IR-407</span>
+                <span class="ir-assignee">P. Nair</span>
+              </div>
+              <div class="ir-meta">
+                <span class="ir-sn">VTR-0007</span>
+                <span class="ir-dot">·</span><span class="ir-cat">GENERAL MAINTENANCE</span>
+                
+                <span class="ir-dot">·</span><span class="ir-date">02-Sep-2026</span>
+                <span class="ir-dot">·</span><span class="ir-age">29d</span>
+              </div>
+            </div>
+            <div class="ir-card-side">
+              <span class="prio">Medium</span>
+              <span class="badge badge-resolved">Delivered</span>
+              
+            </div>
+          </div>
+          <div class="ir-card">
+            <div class="ir-card-main">
+              <div class="ir-title-row">
+                <span class="ir-title">IR-401</span>
+                
+              </div>
+              <div class="ir-meta">
+                <span class="ir-sn">D10G-0221</span>
+                <span class="ir-dot">·</span><span class="ir-cat">REMOTE SUPPORT</span>
+                
+                <span class="ir-dot">·</span><span class="ir-date">21-Aug-2026</span>
+                <span class="ir-dot">·</span><span class="ir-age">41d</span>
+              </div>
+            </div>
+            <div class="ir-card-side">
+              <span class="prio">Low</span>
+              <span class="badge badge-closed">Close</span>
+              
+            </div>
+          </div>
+        </div>
+    
+      </div>
+    </div></div>
+    </div>
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>Ticket</b><span>banner, overview, tab strip, a section form</span></div>
+      <div class="pv-phone">
+    
+    <div class="pv-app">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><span class="brand-mark"></span><span class="brand-text">I-PASSBOOK</span></div>
+        <nav class="sidebar-nav">
+          
+      <div class="nav-item active" aria-current="page">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">IRs</span>
+        <span class="nav-count">412</span>
+      </div>
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Insights</span>
+        
+      </div>
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Log Analyser</span>
+        
+      </div>
+          <div class="nav-item"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label">Legacy Records</span></div>
+        </nav>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">I-PASSBOOK</div>
+          <div class="header-actions"><span class="bell"></span><span class="avatar">MR</span></div>
+        </header>
+        <div id="ir-banner">
+          <div class="banner-main">
+            <div id="ir-banner-title">IR-409</div>
+            <div id="ir-banner-sub">H25P-0032 · REPAIR · BATTERY · raised 08-Sep-2026</div>
+            <div class="banner-pills">
+              <span class="prio">High</span>
+              <span class="badge badge-pending">Hold</span>
+              <span class="badge badge-danger">Overdue</span>
+            </div>
+          </div>
+          <div class="banner-actions">
+            <button type="button" class="btn-ghost">Triage</button>
+            <button type="button" class="btn-ghost">Comments</button>
+            <button type="button" class="btn-ghost">History</button>
+          </div>
+        </div>
+        <div class="overview-panel">
+          <div class="overview-head"><h2 class="overview-title">Overview</h2></div>
+          <div class="overview-grid">
+            <div class="overview-cell"><span class="overview-k">Customer</span><span class="overview-v">Oil India Ltd</span></div>
+            <div class="overview-cell"><span class="overview-k">Drone</span><span class="overview-v">H25P-0032</span></div>
+            <div class="overview-cell"><span class="overview-k">Reported fault</span><span class="overview-v">Flight time dropped to 11 min</span></div>
+          </div>
+        </div>
+        <div class="tabs-container">
+          <span class="tab">Report</span>
+          <span class="tab active">B: Inward</span>
+          <span class="tab">C: IQC</span>
+          <span class="tab">D: Investigation</span>
+          <span class="tab">E: Production</span>
+          <span class="tab">F: Quality Test</span>
+          <span class="tab">G: PDI/Dispatch</span>
+        </div>
+        <div class="section-content">
+          <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
+          <div class="form-group">
+            <label class="form-label">Inward Date</label>
+            <input class="form-input" type="text" value="09-Sep-2026" readonly />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Inward By (Name)</label>
+            <input class="form-input" type="text" value="Store — S. Iyer" readonly />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Remarks</label>
+            <textarea class="form-input" rows="3" readonly>Battery pack swollen on cell 3. Received with charger and case. No visible impact damage to the airframe.</textarea>
+          </div>
+          <button type="button" class="btn">Save Section B</button>
+          <div class="sec-export-row">
+            <button type="button" class="btn btn-secondary">Download</button>
+            <button type="button" class="btn btn-secondary">Download and share</button>
+          </div>
+        </div>
+    
+      </div>
+    </div></div>
+    </div>
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>Insights</b><span>the screen that does not open today</span></div>
+      <div class="pv-phone">
+    
+    <div class="pv-app">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><span class="brand-mark"></span><span class="brand-text">I-PASSBOOK</span></div>
+        <nav class="sidebar-nav">
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">IRs</span>
+        <span class="nav-count">412</span>
+      </div>
+          
+      <div class="nav-item active" aria-current="page">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Insights</span>
+        
+      </div>
+          
+      <div class="nav-item">
+        <span class="nav-icon" aria-hidden="true"></span>
+        <span class="nav-label">Log Analyser</span>
+        
+      </div>
+          <div class="nav-item"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label">Legacy Records</span></div>
+        </nav>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">Insights</div>
+          <div class="header-actions"><span class="bell"></span><span class="avatar">MR</span></div>
+        </header>
+        <div class="list-toolbar">
+          <div class="list-toolbar-top"><span class="list-title">Insights</span></div>
+        </div>
+        <div class="insights-body">
+          <div class="insights-filters">
+            <label class="insights-filter"><span>Year</span><select class="form-input"><option>All years</option><option>FY 2026-27</option></select></label>
+            <label class="insights-filter"><span>Month</span><select class="form-input"><option>All months</option><option>September</option></select></label>
+            <label class="insights-filter"><span>Status</span><select class="form-input"><option>All statuses</option><option>Open</option></select></label>
+            <label class="insights-filter"><span>Category</span><select class="form-input"><option>All categories</option><option>REPAIR</option></select></label>
+          </div>
+          <p class="insights-total"><strong>412</strong> IRs match these filters</p>
+          <div class="insights-cards">
+            <span class="insights-card active"><span class="insights-card-n">9</span><span class="insights-card-label">CRASH</span></span>
+            <span class="insights-card"><span class="insights-card-n">58</span><span class="insights-card-label">REPAIR</span></span>
+            <span class="insights-card"><span class="insights-card-n">121</span><span class="insights-card-label">GENERAL MAINTENANCE</span></span>
+            <span class="insights-card"><span class="insights-card-n">224</span><span class="insights-card-label">REMOTE SUPPORT</span></span>
+          </div>
+          <div class="insights-block">
+            <h3 class="insights-h">REPAIR — by sub-category</h3>
+            <div class="insights-subcats">
+              <span class="insights-subcat">GPS<span class="insights-subcat-n">12</span></span>
+              <span class="insights-subcat">BATTERY<span class="insights-subcat-n">19</span></span>
+              <span class="insights-subcat">CAMERA/LENS<span class="insights-subcat-n">8</span></span>
+              <span class="insights-subcat">AIRFRAME<span class="insights-subcat-n">11</span></span>
+              <span class="insights-subcat is-others">OTHERS<span class="insights-subcat-n">8</span></span>
+            </div>
+          </div>
+          <div class="insights-block">
+            <h3 class="insights-h">Status mix</h3>
+            <div class="insights-mix">
+              <span class="insights-mix-row"><span class="badge badge-open">Open</span><span class="insights-mix-n">37</span></span>
+              <span class="insights-mix-row"><span class="badge badge-pending">Paused</span><span class="insights-mix-n">6</span></span>
+              <span class="insights-mix-row"><span class="badge badge-resolved">Resolved</span><span class="insights-mix-n">318</span></span>
+              <span class="insights-mix-row"><span class="badge badge-closed">Closed</span><span class="insights-mix-n">51</span></span>
+            </div>
+          </div>
+        </div>
+    
+      </div>
+    </div></div>
+    </div>
+  </div>
+  <div class="pv-notes">
+    <div><h2>What it is</h2><p>A dark graphite shell with the industrial yellow from Indrones’ own logo as the only accent. Keys and numbers are set in the monospace face, sections are numbered like a series index, corners are cut square, and status reads as a small LED rather than a soft pill. It is an instrument panel for drone telemetry, which is what this app actually is.</p></div>
+    <div><h2>Why you might pick it</h2><ul><li>Unmistakably Indrones — the dark canvas and yellow read as the same family as the website</li><li>Monospace numbers line up in columns, which is what you want in a 412-row list of IR keys</li><li>Dark is genuinely better on a phone in a hangar or an oil field, and for battery</li><li>The instrument framing makes a log analyser look like it belongs rather than like a bolt-on</li></ul></div>
+    <div><h2>What it costs you</h2><ul><li>A bigger change than the other two — the dark theme exists in the app, but this makes it the default</li><li>The yellow has to clear WCAG AA on dark. It does (about 11.2:1, measured at build time), but it may still get nudged for contrast rather than taste</li><li>Technical labelling can read as cold to someone who is not an engineer</li></ul></div>
+    <div><h2>The fine print</h2><ul>
+      <li>These four screens are drawn from the app's real markup, its real class names and its real colour tokens. The layout is shared between all three options — only the language changes.</li>
+      <li>They are static. Adopting one is a separate pass through the app; that pass is the expensive part, which is why you are choosing first.</li>
+      <li>Sample records are shown (IR-412 and friends). The statuses, categories and REPAIR sub-categories are the real ones.</li>
+    </ul></div>
+  </div>
+</div>
+</body>
+</html>

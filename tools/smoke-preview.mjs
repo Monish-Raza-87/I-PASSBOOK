@@ -44,6 +44,7 @@ const PAGE = {
 const KEYS = Object.keys(PAGE);
 const chooser = read('../preview/index.html');
 const PARTS = read('../preview/parts.html');
+const EMPTY = read('../preview/empty.html');
 const css = read('../preview/preview.css');
 const tokens = read('../tokens.css');
 const palette = read('../palette.css');
@@ -103,7 +104,7 @@ r.ok('...so the skeleton really is only layout and the review chrome',
 
 // ── 4. It is inert and self-contained ───────────────────────────────────────
 r.head('the pages are inert: no script, no third party, no network');
-Object.entries({ ...PAGE, index: chooser, parts: PARTS }).forEach(([k, h]) => {
+Object.entries({ ...PAGE, index: chooser, parts: PARTS, empty: EMPTY }).forEach(([k, h]) => {
   r.ok(`${k}: no script`, !/<script/i.test(h));
   const external = (h.match(/https?:\/\/[^\s"')]+/g) || []).filter(u => !u.startsWith('https://www.w3.org'));
   r.ok(`${k}: reaches no third party`, external.length === 0, external);
@@ -159,7 +160,7 @@ const sheetPhone = phoneBlockOf(css);
 r.ok('the shared sheet has a phone block worth protecting', !!sheetPhone);
 const phoneDecls = sheetPhone ? declsIn(sheetPhone.body) : new Map();
 r.ok('...and it really does carry phone rules', phoneDecls.size > 0, [...phoneDecls.keys()]);
-const SKIN_HTML = { ...PAGE, parts: PARTS };
+const SKIN_HTML = { ...PAGE, parts: PARTS, empty: EMPTY };
 const skinOf = k => stripCssComments((SKIN_HTML[k].match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '');
 // The skin with its own phone block cut out: what it says at every width.
 const widePartOf = k => {
@@ -171,7 +172,7 @@ const collisions = [];
 // The parts board is a skin too — and a heavier one, because it inlines option
 // D's skin whole. That makes it the most likely place for a rule to slip out and
 // beat a phone rule nobody was looking at.
-[...KEYS, 'parts'].forEach(k => {
+[...KEYS, 'parts', 'empty'].forEach(k => {
   const wide = widePartOf(k), own = phoneBlockOf(skinOf(k));
   const ownDecls = own ? declsIn(own.body) : new Map();
   const wideRules = declsIn(wide.replace(/@media[^{]*\{/g, ''));
@@ -237,9 +238,170 @@ r.ok('parts: the copied 4/6 chip still fills 66.666%, as views.css does',
 r.ok('parts: the today-toast keeps a max-width, so the comparison is fair',
   /\.toast-today\s*\{[^}]*max-width:/.test(partsSkin));
 
-// ── 8. The owner can reach it ───────────────────────────────────────────────
+// ── 8. The empty-state board ────────────────────────────────────────────────
+// This board is asked to recommend a picture, and a recommendation is only worth
+// anything if the thing being replaced is shown honestly and the candidates are
+// the real files. So the assertions here are about provenance, not taste: the
+// states must be the app's own, the frame must be the app's own, and the artwork
+// must be the artwork — unmodified in the vendored file and inert in the page.
+r.head('the empty-state board shows the app\'s real empty states, not invented ones');
+const emptySkin = (EMPTY.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+r.ok('empty: carries option D\'s skin verbatim, then its own layer on top',
+  emptySkin.startsWith(dSkin) && emptySkin.length > dSkin.length,
+  `d=${dSkin.length} empty=${emptySkin.length}`);
+r.ok('empty: links the SAME hashed stylesheet as the four options',
+  (EMPTY.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1] === (PAGE.a.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1]);
+r.ok('empty: renders none of the four option screens',
+  !/class="pv-phone"/.test(EMPTY) && !/class="pv-screens"/.test(EMPTY));
+r.ok('empty: carries the six headed sections it promises',
+  ['today', 'ours', 'doodles', 'palette', 'others', 'licences'].every(id => EMPTY.includes(`id="${id}"`)));
+r.ok('empty: and a jump list that reaches all six',
+  ['#today', '#ours', '#doodles', '#palette', '#others', '#licences'].every(h => EMPTY.includes(`href="${h}"`)));
+
+// The board may not invent an empty state. Every sentence it renders is read back
+// out of app.js and required to be there, WITH the emoji the app really renders —
+// a board that showed a friendlier wording, or a mark the app does not draw,
+// would have the owner approve a picture for a screen that does not exist.
+const appJs = read('../app.js');
+const realStates = [
+  ['No IRs match this filter.', '\u{1F50D}'],
+  ['No IRs found. Create one via the customer form.', '\u{1F4ED}'],
+  ['The flight-log reader did not load. Reload the app and try again.', null],
+];
+realStates.forEach(([text, mark]) => {
+  r.ok(`empty: "${text.slice(0, 34)}…" is the app's own wording`,
+    appJs.includes(text) && EMPTY.includes(text));
+  if (mark) {
+    r.ok(`...and the app really draws it with ${mark}, so the board shows the same`,
+      new RegExp(`<span>${mark}</span>`).test(appJs) && EMPTY.includes(mark));
+  } else {
+    r.ok('...and the third state really has no mark at all in the app', appJs.includes(`<div class="empty-state">${text}`));
+  }
+});
+
+// The frame the candidates are judged in is a COPY of components.css, and a copy
+// that drifted would flatter or damn the wrong candidate. Compared declaration by
+// declaration against the real file rather than eyeballed.
+const comps = read('../components.css');
+const emptyStateRule = (comps.match(/\.empty-state\s*\{([^}]*)\}/) || [])[1] || '';
+const decl = s => [...s.matchAll(/([-a-z]+)\s*:\s*([^;]+)/g)].map(m => `${m[1]}:${m[2].trim().replace(/\s+/g, ' ')}`);
+const realDecls = decl(emptyStateRule);
+r.ok('empty: the .empty-state frame is copied from components.css, declaration for declaration',
+  realDecls.length >= 4 && realDecls.every(d => emptySkin.includes(d.replace(/:/, ': ')) ||
+    emptySkin.includes(d.replace(/:\s*/, ': ')) || emptySkin.includes(d.split(':')[0] + ': ' + d.split(':').slice(1).join(':'))),
+  realDecls.join(' | '));
+r.ok('...and the 2.5rem mark it renders is the app\'s size too',
+  /\.empty-state span\s*\{[^}]*font-size:\s*2\.5rem/.test(comps) &&
+  /\.empty-state span\s*\{[^}]*font-size:\s*2\.5rem/.test(emptySkin));
+
+// The vendored files are third-party markup being pasted into a page. Whatever
+// the licence says about the artwork, the page must not inherit a script or a
+// fetch from them — and that is a property of the FILE, so it is checked there
+// rather than only in the built output.
+const vendored = ['open-doodles/unboxing', 'open-doodles/chilling', 'open-doodles/levitate', 'open-peeps/happy', 'humaaans/hero-1']
+  .map(n => [`vendor/illustrations/${n}.svg`, read(`../vendor/illustrations/${n}.svg`)]);
+vendored.forEach(([p, svg]) => {
+  r.ok(`${p.split('/').pop()}: no script, no inline style block, no image element`,
+    !/<script/i.test(svg) && !/<style/i.test(svg) && !/<image\b/i.test(svg));
+  // The generator credit is a URL that fetches nothing, so it is not a defect in
+  // the file — it is a reason the builder has to strip comments before inlining,
+  // which is what stops it tripping the no-third-party guard.
+  r.ok(`${p.split('/').pop()}: carries no fetching reference outside its comments`,
+    !/<[a-z][^>]*(href|src)="https?:/i.test(svg.replace(/<!--[\s\S]*?-->/g, '')));
+});
+// ...and the built page really is inert, which is the half that matters.
+r.ok('empty: the inlined artwork brought no script into the page', !/<script/i.test(EMPTY));
+r.ok('...and left no third-party URL behind, comments stripped or not',
+  (EMPTY.match(/https?:\/\/[^\s"')]+/g) || []).filter(u => !u.startsWith('https://www.w3.org')).length === 0,
+  (EMPTY.match(/https?:\/\/[^\s"')]+/g) || []).filter(u => !u.startsWith('https://www.w3.org')));
+
+// An inlined SVG inherits the PAGE's id space, so two files that share an id — or
+// a file that shares one with the page's own sections — would silently repoint a
+// clip-path at the wrong element. That shows up as a shape filling in wrong, not
+// as an error, which is exactly the class of bug a board is not allowed to have.
+const allIds = [...EMPTY.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]);
+const dupes = allIds.filter((id, i) => allIds.indexOf(id) !== i);
+r.ok('empty: no id in the page is used twice, artwork included',
+  dupes.length === 0, [...new Set(dupes)]);
+r.ok('...and the artwork\'s ids are namespaced, so a collision cannot happen by accident',
+  allIds.filter(id => id.startsWith('ill-')).length > 0 &&
+  vendored.some(([, svg]) => /\sid="/.test(svg)));
+
+// The claim the board makes is that the re-colour is two CSS rules over the SAME
+// artwork. If the two cards had different markup, the comparison would be
+// between two drawings and would prove nothing about re-colouring at all. The
+// instance prefix is stripped before comparing, because the builder gives each
+// inlined copy its own id space on purpose — that is what keeps six copies of one
+// file from putting the same id on the page six times.
+const svgInDemo = label => {
+  const i = EMPTY.indexOf(`<b>${label}</b>`);
+  const m = i < 0 ? null : EMPTY.slice(i).match(/<svg\b[\s\S]*?<\/svg>/);
+  return m && m[0];
+};
+const withoutInstanceIds = s => s.replace(/ill-[a-z-]+-\d+-/g, 'ill-');
+const shipped = svgInDemo('As shipped'), recoloured = svgInDemo('Re-coloured by two rules');
+r.ok('empty: the as-shipped and re-coloured cards carry the same artwork, byte for byte',
+  !!shipped && !!recoloured && withoutInstanceIds(shipped) === withoutInstanceIds(recoloured),
+  `shipped=${shipped ? shipped.length : 'MISSING'} recoloured=${recoloured ? recoloured.length : 'MISSING'}`);
+r.ok('...and the only difference between them is the class that re-colours it',
+  (() => {
+    // The class of the demo that ENCLOSES a caption. `lastIndexOf('<div class=
+    // "pv-demo')` is not good enough and quietly returns "pv-demo-cap" for both
+    // cards, because the caption's own wrapper also starts with those characters
+    // — an assertion that then compares the wrong two things and cannot fail for
+    // the reason it exists. The negative lookahead is what excludes it.
+    const tag = label => {
+      const i = EMPTY.indexOf(`<b>${label}</b>`);
+      if (i < 0) return null;
+      let last = null;
+      for (const m of EMPTY.slice(0, i).matchAll(/<div class="pv-demo(?!-)([^"]*)"/g)) last = m[1];
+      return last;
+    };
+    const a = tag('As shipped'), b = tag('Re-coloured by two rules');
+    // The classes must be identical apart from the one that does the work, and
+    // the one that does the work must be on the SECOND card only — an assertion
+    // that both carried it would pass while proving nothing.
+    return !!a && !!b && !/\bpv-tok\b/.test(a) && /\bpv-tok\b/.test(b) &&
+      b.replace(/\s*pv-tok/, '') === a;
+  })(), 'the two cards must differ only by pv-tok');
+// The selector is pinned EXACTLY, prefix and all, and that is not pedantry: the
+// first version of this rule was written `.pv-app .pv-tok [fill=…]`, which
+// matched nothing, because .pv-tok is the demo wrapper and the artwork is the
+// DESCENDANT — so the ancestor combinator ran the wrong way. The rule was valid
+// CSS, the build passed, the test passed, and both cards rendered pink. Only
+// reading the computed fill value in a browser showed it. A regex that accepted
+// any prefix would have gone on passing.
+r.ok('...which targets exactly the two fills Open Doodles actually uses, from the demo wrapper down',
+  /^\s*\.pv-tok \[fill="#FF5678"\]\s*\{\s*fill:\s*var\(--accent\)/m.test(emptySkin) &&
+  /^\s*\.pv-tok \[fill="#000000"\]\s*\{\s*fill:\s*var\(--ink-gray-9\)/m.test(emptySkin));
+vendored.filter(([p]) => /open-doodles/.test(p)).forEach(([p, svg]) => {
+  const fills = [...new Set([...svg.matchAll(/fill="(#[0-9A-Fa-f]{6})"/g)].map(m => m[1].toUpperCase()))].sort();
+  r.ok(`${p.split('/').pop()}: is two-tone, which is what makes the two rules sufficient`,
+    JSON.stringify(fills) === JSON.stringify(['#000000', '#FF5678']), fills.join(' '));
+});
+
+// The palette claim — "it follows all four presets" — is only true if the presets
+// are real, so the board's four tiles are checked against palette.css's own
+// selectors rather than against a list of names typed here.
+const paletteCss = read('../palette.css');
+r.ok('empty: all four accent tiles are rendered',
+  ['violet', 'teal', 'graphite'].every(p => EMPTY.includes(`data-palette="${p}"`)) && EMPTY.includes('<b>Blue</b>'));
+r.ok('...and every one of them is a preset palette.css really defines',
+  ['blue', 'violet', 'teal', 'graphite'].every(p => new RegExp(`\\[data-palette="${p}"\\]`).test(paletteCss)));
+
+// The vendored artwork is INLINED, which is the whole reason it can be reviewed
+// without a second request. If a file were also served, the page would be paying
+// for it twice and the deploy would be carrying a licence question it does not
+// need to carry.
+r.ok('empty: the artwork is inlined, so none of it is served as a separate file',
+  !/vendor\/illustrations/.test(deployJs) && !/vendor\/illustrations/.test(swJs));
+r.ok('...and the licence for it is in the repo, beside the files',
+  fs.existsSync(url('../vendor/illustrations/LICENSE.md')) &&
+  /CC0/.test(read('../vendor/illustrations/LICENSE.md')));
+
+// ── 9. The owner can reach it ───────────────────────────────────────────────
 r.head('every preview file is served, and none of it is in the app\'s shell');
-const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/preview.css'];
+const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/preview.css'];
 PREVIEW_FILES.forEach(f => r.ok(`deploy serves ${f}`, deployJs.includes(`'${f}'`)));
 // The negative half matters more: the shell is precached on every install, so a
 // mock page in there would be downloaded by every user who never opens it.

@@ -34,11 +34,11 @@ const TARGET = 'gh-pages'
 // The served set, enumerated rather than globbed on purpose: a glob over the repo
 // would ship backend.gs or docs/ to a public site the day someone adds a file.
 //
-// `preview/` is the UI review — four design directions and a chooser, built by
+// `preview/` is the UI review — four design directions, a chooser and two boards, built by
 // tools/build-ui-options.mjs. It is served because the owner reviews it on his
 // phone, and it is deliberately NOT in sw.js's SHELL: it is not part of the app,
 // and precaching five mock pages into every install would be a cost with no
-// benefit. It is five files plus one stylesheet, listed here one by one, which is
+// benefit. It is seven files plus one stylesheet, listed here one by one, which is
 // also what makes deleting the whole directory later a two-line change.
 const SERVED = [
   'app.js',
@@ -59,6 +59,7 @@ const SERVED = [
   'preview/c.html',
   'preview/d.html',
   'preview/parts.html',
+  'preview/empty.html',
   'preview/preview.css',
   'assets/apple-touch-icon.png',
   'assets/icon-192.png',

@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-PASSBOOK Inspector — Rule Book</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --line-strong: #b9bfcc;
+    --accent: #2440d8;
+    --accent-soft: #e8ebfb;
+    --warn: #9a4a00;
+    --warn-soft: #fdf0dd;
+    --warn-line: #e8c48a;
+    --ok: #1d6b45;
+    --ok-soft: #e2f3ea;
+    --stop: #a51f2c;
+    --stop-soft: #fbe8ea;
+    --stop-line: #e5aab1;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --surface-2: #1e2431;
+      --fg: #e7eaf1;
+      --fg-muted: #98a1b3;
+      --line: #2a3140;
+      --line-strong: #3b4354;
+      --accent: #8fa2ff;
+      --accent-soft: #1d2440;
+      --warn: #e8b06a;
+      --warn-soft: #2c2314;
+      --warn-line: #55411f;
+      --ok: #6fd3a0;
+      --ok-soft: #14291f;
+      --stop: #f08e97;
+      --stop-soft: #2e1519;
+      --stop-line: #5c2b32;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --surface-2: #1e2431;
+    --fg: #e7eaf1;
+    --fg-muted: #98a1b3;
+    --line: #2a3140;
+    --line-strong: #3b4354;
+    --accent: #8fa2ff;
+    --accent-soft: #1d2440;
+    --warn: #e8b06a;
+    --warn-soft: #2c2314;
+    --warn-line: #55411f;
+    --ok: #6fd3a0;
+    --ok-soft: #14291f;
+    --stop: #f08e97;
+    --stop-soft: #2e1519;
+    --stop-line: #5c2b32;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-block: 0 4rem;
+  }
+  .wrap { max-width: 74ch; margin: 0 auto; padding-inline: 16px; }
+
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    padding-block: 2.5rem 2rem;
+    margin-bottom: 2rem;
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fg-muted);
+    font-weight: 600;
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-size: clamp(1.65rem, 5vw, 2.3rem);
+    line-height: 1.15;
+    margin: 0 0 0.7rem;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 1.05rem;
+    color: var(--fg-muted);
+    margin: 0;
+    max-width: 62ch;
+  }
+  .meta {
+    margin-top: 1.3rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.4rem;
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .meta b { color: var(--fg); font-weight: 600; }
+
+  h2 {
+    font-size: 1.3rem;
+    line-height: 1.25;
+    margin: 0 0 0.35rem;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1rem;
+    margin: 1.8rem 0 0.5rem;
+    letter-spacing: -0.005em;
+  }
+  h4 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--fg-muted);
+    margin: 1.5rem 0 0.5rem;
+  }
+  p { margin: 0 0 0.9rem; }
+  a { color: var(--accent); }
+  code, .mono {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.08em 0.35em;
+  }
+  strong { font-weight: 650; }
+
+  section {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.4rem;
+    margin-bottom: 1.1rem;
+    border-left: 3px solid var(--line-strong);
+  }
+  section.is-urgent { border-left-color: var(--stop); }
+  section.is-phase { border-left-color: var(--accent); }
+  section.is-quiet { border-left-color: var(--line-strong); }
+  .sec-head { margin-bottom: 1rem; }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+    letter-spacing: 0.05em;
+    display: block;
+    margin-bottom: 0.3rem;
+  }
+  .sec-sub {
+    color: var(--fg-muted);
+    font-size: 0.95rem;
+    margin: 0.4rem 0 0;
+    max-width: 62ch;
+  }
+
+  .chip {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .chip-stop { background: var(--stop-soft); color: var(--stop); border-color: var(--stop-line); }
+  .chip-warn { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+  .chip-ok   { background: var(--ok-soft);   color: var(--ok);   border-color: var(--ok); }
+  .chip-do   { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+  .chip-plan { background: var(--surface-2); color: var(--fg-muted); border-color: var(--line-strong); }
+
+  .callout {
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    margin: 1rem 0;
+    border: 1px solid var(--line);
+    background: var(--surface-2);
+    font-size: 0.95rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout.stop { background: var(--stop-soft); border-color: var(--stop-line); }
+  .callout.warn { background: var(--warn-soft); border-color: var(--warn-line); }
+  .callout.ok   { background: var(--ok-soft);   border-color: var(--ok); }
+  .callout .ct {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .callout.stop .ct { color: var(--stop); }
+  .callout.warn .ct { color: var(--warn); }
+  .callout.ok .ct { color: var(--ok); }
+
+  nav.jump {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.6rem;
+  }
+  nav.jump a {
+    font-size: 0.82rem;
+    text-decoration: none;
+    color: var(--fg-muted);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+  }
+  nav.jump a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  ul, ol { margin: 0 0 0.9rem; padding-left: 1.25rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--fg-muted); }
+
+  /* No tables on this page on purpose: a table wide enough to be readable needs
+     sideways scrolling on a phone, and this page exists so nothing has to scroll. */
+
+  .grid2 { display: grid; gap: 0.9rem; }
+  @media (min-width: 620px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    background: var(--bg);
+  }
+  .card h4 { margin-top: 0; }
+  .card p:last-child { margin-bottom: 0; }
+
+  .phase-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.7rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.35rem;
+  }
+  .phase-row h2 { margin: 0; }
+
+  /* ---- rule rows (this page's own) ---- */
+  .rules { margin-top: 0.5rem; }
+  .rule {
+    border-top: 1px solid var(--line);
+    padding-top: 0.7rem;
+    margin-top: 0.7rem;
+  }
+  .rule:first-child { border-top: 0; padding-top: 0; margin-top: 0; }
+  .rule-head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.25rem;
+  }
+  .rid {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--fg-muted);
+    letter-spacing: 0.03em;
+  }
+  .rule p { margin: 0; font-size: 0.95rem; }
+  .rule p + p { margin-top: 0.35rem; }
+  .why { color: var(--fg-muted); font-size: 0.88rem; }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.9rem;
+    font-size: 0.85rem;
+    color: var(--fg-muted);
+    align-items: center;
+    margin: 0.9rem 0 0;
+  }
+  .legend span.lg { display: inline-flex; align-items: center; gap: 0.35rem; }
+
+  .qbox {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 8px;
+    background: var(--bg);
+    padding: 0.9rem 1rem;
+    margin: 0.9rem 0;
+  }
+  .qbox h3 { margin-top: 0; }
+  .qbox p:last-child { margin-bottom: 0; }
+
+  footer.end {
+    margin-top: 2rem;
+    padding-top: 1.4rem;
+    border-top: 1px solid var(--line);
+    color: var(--fg-muted);
+    font-size: 0.88rem;
+  }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">Indrones · I-PASSBOOK</p>
+    <h1>The Inspector's Rule Book</h1>
+    <p class="standfirst">
+      Every question I still owe you, one per line, each with the answer I recommend.
+      <strong>You only have to name what you want changed.</strong>
+    </p>
+    <div class="meta">
+      <span><b>Date</b> 1 October 2026</span>
+      <span><b>Open rules</b> 61</span>
+      <span><b>Open questions</b> 4</span>
+      <span><b>Status</b> for your tick</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="jump">
+    <a href="#s0">0 · How to answer</a>
+    <a href="#s1">1 · Already decided</a>
+    <a href="#s2">2 · Ten singles</a>
+    <a href="#s3">3 · Six families</a>
+    <a href="#s4">4 · Three table rules</a>
+    <a href="#s5">5 · Section B</a>
+    <a href="#s6">6 · Four questions</a>
+    <a href="#s7">7 · The build order</a>
+  </nav>
+
+  <section id="s0" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 0</span>
+      <div class="phase-row">
+        <h2>How to answer this</h2>
+        <span class="chip chip-do">Read me</span>
+      </div>
+      <p class="sec-sub">
+        You said you did not want to scroll. So nothing here is a blank you have to fill.
+      </p>
+    </div>
+
+    <p>
+      <strong>Every rule below already has my answer on it</strong> — a coloured severity chip and a reason.
+      If you agree with a rule, you do not have to say anything at all.
+    </p>
+
+    <p>
+      You only reply with the ones you want <em>different</em>. For example, if these were the only three you
+      disagreed with, this would be your whole reply:
+    </p>
+
+    <div class="callout">
+      <span class="ct">Your reply can look exactly like this</span>
+      <p class="mono" style="background:none;border:0;padding:0;font-size:0.92rem">
+        R-61 make it NOTE not FIR<br>
+        R-66 drop it<br>
+        English family — all yes, except R-84
+      </p>
+      <p style="margin-top:0.6rem">
+        Anything you do not mention, I take as agreed and build.
+      </p>
+    </div>
+
+    <p>The four severities, and what each one actually does when it fires:</p>
+
+    <div class="legend">
+      <span class="lg"><span class="chip chip-stop">Block</span> cannot close until fixed</span>
+      <span class="lg"><span class="chip chip-warn">FIR</span> report filed, nobody interrupted</span>
+      <span class="lg"><span class="chip chip-do">Ask</span> asks once, closes anyway, files FIR</span>
+      <span class="lg"><span class="chip chip-plan">Note</span> observation only</span>
+    </div>
+
+    <p style="margin-top:1rem">
+      Remember the rule we settled: <strong>saving is always free. Closing is the gate.</strong> So a
+      <em>Block</em> never stops anyone writing — it only stops the section being marked completed.
+    </p>
+  </section>
+
+  <section id="s1" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 1</span>
+      <div class="phase-row">
+        <h2>Already decided — you need not read this again</h2>
+        <span class="chip chip-ok">Settled</span>
+      </div>
+      <p class="sec-sub">Listed here only so you can see the whole picture in one place.</p>
+    </div>
+
+    <ul>
+      <li><strong>Two named bots.</strong> Notification emails come from <strong>I-PASSBOOK POSTMASTER</strong>;
+          flags come from <strong>I-PASSBOOK INSPECTOR</strong>.</li>
+      <li><strong>No client is ever emailed by this app.</strong> I checked the code: only three places send
+          mail — the sign-in code, a notice to you, and a comment mention — and every recipient is checked
+          against your company domain. So the rename is safe. <em>One honest limit:</em> the name shown on the
+          email changes; the address stays the Google account it runs as, unless you make a Workspace alias.</li>
+      <li><strong>Save is free, closing is the gate.</strong> A half-filled section can be saved all day; it
+          cannot be marked completed.</li>
+      <li><strong>Four severities:</strong> Block · FIR · Ask · Note. <em>Ask</em> was your idea and it is the
+          general answer for every "the proof is missing" case.</li>
+      <li><strong>Four FIR destinations:</strong> the person · CR · CR + Management · CR + the owners of the
+          still-open sections.</li>
+      <li><strong>NA is a control, not a word</strong> — but the Inspector still recognises it written NA,
+          N&nbsp;A or N/A. Three field settings: Mandatory · Mandatory, NA allowed · Skippable.</li>
+      <li><strong>Inward and IQC are a linked block</strong>, in your words: if no part came, there is nothing to
+          inspect. And Cross Check Particulars is derived from Inward.</li>
+      <li><strong>Closing sections out of order is allowed</strong> — with an FIR to CR and the open sections'
+          owners.</li>
+      <li><strong>One generic clock.</strong> Plain calendar days. No working days, no holidays, no leave data.
+          R-116 is 2 calendar days. Nothing about the app's existing clock changes.</li>
+      <li><strong>Language is English + Hinglish only</strong>, and the Inspector is also a writing helper
+          because your colleagues are weak in English. Hindi and Marathi are for helping people understand —
+          never learned by the bots.</li>
+      <li><strong>Maturity is approved to start now</strong>, reading the legacy IRs.</li>
+      <li><strong>Section E</strong> gains one new choice: "Rework not required — send for QC directly".</li>
+      <li><strong>The flight test rule</strong> (your own): if dispatch is more than 14 days after PDI, a flight
+          test report dated within those 14 days must be attached.</li>
+      <li><strong>Serial formats</strong> — SIGMA 25 <code>S25XXX</code> · SIGMA 25 PRO
+          <code>S25PXXX</code> · SIGMA 100 <code>S100-XXX</code> · SIGMA 75 <code>S75XXX</code> · anything
+          else, free writing. Malformed, or suspect, goes to CR.</li>
+      <li><strong>R-107 is deleted</strong> — I made it up. There is no percentage field anywhere in the app,
+          so a rule about percentages over 100 cannot exist. My mistake, corrected.</li>
+      <li><strong>R-124 is deleted</strong> too, and <strong>R-46 is replaced by R-47</strong> — both your
+          rulings.</li>
+      <li><strong>Three inward rows get fixed</strong> — Tripod/Bipod, Center Pole, and Toolkit-Box And
+          Accessories currently have no "DID NOT COME" option, so they need one.</li>
+    </ul>
+  </section>
+
+  <section id="s2" class="is-urgent">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 2</span>
+      <div class="phase-row">
+        <h2>The ten singles</h2>
+        <span class="chip chip-do">Tick or change</span>
+      </div>
+      <p class="sec-sub">
+        Ten rules that did not fit a family. R-72 is already yours; the other nine are mine.
+      </p>
+    </div>
+
+    <div class="rules">
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-57</span><span class="chip chip-warn">FIR</span></div>
+        <p>One single person filled <em>every</em> one of the six sections on an IR.</p>
+        <p class="why">You accepted single pairs like Inward + PDI by one person. This is the extreme of that:
+        no segregation anywhere on the record. If it is too strict, say so — I would rather it be a Note you
+        trust than an FIR you ignore.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-61</span><span class="chip chip-warn">FIR</span></div>
+        <p>A name typed into "Inward By" or "Inspected By" that matches no account and no known person.</p>
+        <p class="why">A name that belongs to nobody makes the record unanswerable a year later, which is the
+        whole point of keeping it.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-63</span><span class="chip chip-plan">Note</span></div>
+        <p>The same person typed two different ways — "M Raza" on one IR, "Monish Raza" on another.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-65</span><span class="chip chip-warn">FIR</span></div>
+        <p>The person who is supposed to fill a section has no edit rights to it.</p>
+        <p class="why">Goes to CR, because CR is the only one who can fix rights. Nothing is wrong with the
+        person — the access list is wrong.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-66</span><span class="chip chip-plan">Note</span></div>
+        <p>An attached photo has no caption.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-67</span><span class="chip chip-plan">Note</span></div>
+        <p>A file named like a camera default — <code>IMG_2043.jpg</code>, <code>Screenshot_2026…</code>.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-68</span><span class="chip chip-plan">Note</span></div>
+        <p>Fewer photos attached than there are inward rows claiming a part arrived.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-69</span><span class="chip chip-plan">Note</span></div>
+        <p>The same image file appears on two different IRs — same name, same size, same date.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-71</span><span class="chip chip-warn">FIR</span></div>
+        <p>An attachment that cannot be opened — zero bytes, or not an image or a PDF.</p>
+      </div>
+
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-72</span><span class="chip chip-warn">FIR</span>
+        <span class="chip chip-ok">Yours</span></div>
+        <p>The attachment is the wrong kind for the field — a photo where a signed report is expected.</p>
+        <p class="why">Already ruled by you. Recorded here so the whole rule list is in one place.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <section id="s3" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 3</span>
+      <div class="phase-row">
+        <h2>The six families</h2>
+        <span class="chip chip-do">Tick or change</span>
+      </div>
+      <p class="sec-sub">
+        Fifty rules grouped by kind. Every one of these is my recommendation — take the family whole, or name
+        the individual numbers you want changed.
+      </p>
+    </div>
+
+    <h3>A · English — R-73 to R-90</h3>
+    <p class="why" style="margin-bottom:0.8rem">
+      This is the writing helper, not a punishment. Everything here is a <strong>Note</strong>: it shows as a
+      gentle suggestion beside the field and never blocks anything. Your colleagues can accept it or ignore it.
+    </p>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-73</span><span class="chip chip-plan">Note</span></div><p>A word written twice — "the the", "we we".</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-74</span><span class="chip chip-plan">Note</span></div><p>No space after a full stop or a comma.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-75</span><span class="chip chip-plan">Note</span></div><p>A sentence that does not start with a capital letter.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-76</span><span class="chip chip-plan">Note</span></div><p>A lower-case "i" where the word "I" is meant.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-77</span><span class="chip chip-plan">Note</span></div><p>A spelling mistake, judged against the dictionary.</p><p class="why">Crucially: courier names, model codes, part numbers and any word the IRs themselves use often are <strong>never</strong> flagged — the Inspector learns your vocabulary first, then corrects against it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-78</span><span class="chip chip-plan">Note</span></div><p>A sentence with no verb in it — a fragment rather than a sentence.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-79</span><span class="chip chip-plan">Note</span></div><p>A whole paragraph in capitals.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-80</span><span class="chip chip-plan">Note</span></div><p>Repeated punctuation — "!!!", "???", "……".</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-81</span><span class="chip chip-plan">Note</span></div><p>Chat abbreviations — plz, thx, asap, rgds, u, ur.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-82</span><span class="chip chip-plan">Note</span></div><p>Spacing around brackets — no space before one, or one inside it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-83</span><span class="chip chip-plan">Note</span></div><p>The classic look-alikes: its/it's, your/you're, then/than, there/their.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-84</span><span class="chip chip-plan">Note</span></div><p>Empty filler that says nothing — "some problem", "not working properly".</p><p class="why">The suggestion is never "this is wrong" but "which part, and what did it do?" — a prompt, not a correction.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-85</span><span class="chip chip-plan">Note</span></div><p>A section closed with very few words, where a paragraph is clearly expected.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-86</span><span class="chip chip-plan">Note</span></div><p>The exact same sentence, pasted into two different IRs.</p><p class="why">You told me not to chase bluffing hard, and I agree — this is a Note, nothing more. It exists mainly so a genuine copy-paste habit becomes visible.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-87</span><span class="chip chip-plan">Note</span></div><p>A date written loosely — <code>5/10/26</code> — where <code>05 Oct 2026</code> is expected.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-88</span><span class="chip chip-plan">Note</span></div><p>A number written as a word ("two") where a figure belongs, or the reverse.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-89</span><span class="chip chip-plan">Note</span></div><p>A field that is only spaces — it looks filled and is not.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-90</span><span class="chip chip-plan">Note</span></div><p>A field that is only punctuation — "-", ".", or "NA." typed where the NA control exists.</p></div>
+    </div>
+
+    <h3>B · Hinglish — R-91 to R-102</h3>
+    <p class="why" style="margin-bottom:0.8rem">
+      Hinglish is <strong>welcomed, never punished</strong>. Nothing in this family is ever an error. These
+      rules only offer a better word when one exists — and stay quiet when it does not.
+    </p>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-91</span><span class="chip chip-plan">Note</span></div><p>Hinglish is detected in a field.</p><p class="why">Logged, never flagged as a problem. This is what teaches the Inspector how your team actually writes.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-92</span><span class="chip chip-plan">Note</span></div><p>A Roman-Hindi word that has a clear English equivalent, in a formal field.</p><p class="why">The suggestion shows both: what was written, and a plain English sentence that says the same thing. Never forced.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-93</span><span class="chip chip-plan">Note</span></div><p>Devanagari characters typed into an English field.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-94</span><span class="chip chip-plan">Note</span></div><p>A Hinglish word the Hinglish dictionary does not know.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-95</span><span class="chip chip-plan">Note</span></div><p>One Hinglish word written several ways across IRs — "theek" and "thik".</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-96</span><span class="chip chip-plan">Note</span></div><p>An English word dropped into a Hinglish sentence in the wrong form.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-97</span><span class="chip chip-plan">Note</span></div><p>A polite phrase that carries no information — "bas aise hi", "kuch nahi".</p><p class="why">Not corrected. It is folded into R-84's prompt: what actually happened?</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-98</span><span class="chip chip-plan">Note</span></div><p>Hinglish in a field that will be read by the customer.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-99</span><span class="chip chip-plan">Note</span></div><p>The same idea written once in English and once in Hinglish, on two IRs.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-100</span><span class="chip chip-plan">Note</span></div><p>A number written in Hinglish words where a figure belongs.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-101</span><span class="chip chip-plan">Note</span></div><p>A Hinglish sentence with no verb.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-102</span><span class="chip chip-plan">Note</span></div><p>A word typed by hand where the app already offers it as a dropdown choice.</p></div>
+    </div>
+
+    <h3>C · Numbers and serials — R-103 to R-109</h3>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-103</span><span class="chip chip-warn">FIR</span></div><p>A quantity of 0, or blank, on a row that claims a part arrived.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-104</span><span class="chip chip-warn">FIR</span></div><p>A cost row with a rate of 0 or a total of 0.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-105</span><span class="chip chip-warn">FIR</span></div><p>A date in the future on a record of something that has already happened.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-106</span><span class="chip chip-plan">Note</span></div><p>A date earlier than the IR itself, where a later date is expected.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-107</span><span class="chip chip-ok">Deleted</span></div><p>Was "a percentage above 100". <strong>I made this rule up.</strong> There is no percentage field in the app at all — the only two percentage signs in the code draw a progress bar. Deleted, and the lesson recorded.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-108</span><span class="chip chip-do">Ask → CR</span><span class="chip chip-ok">Yours</span></div><p>A drone serial that does not match one of the four formats, or looks like one but is malformed.</p><p class="why">Your ruling: ask CR. Never a block — a serial that is merely unusual must not stop work.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-109</span><span class="chip chip-warn">FIR</span></div><p>Two different serials inside one IR — the serial on the record and the serial in the inward table disagree.</p></div>
+    </div>
+
+    <h3>D · Workflow and time — R-110 to R-117</h3>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-110</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>A section closed before the section it depends on — allowed, never blocked.</p><p class="why">Your ruling: it is permitted, and an FIR goes to CR and to the owners of the sections left open.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-111</span><span class="chip chip-plan">Note</span></div><p>A section opened and closed on the same day.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-112</span><span class="chip chip-warn">FIR</span></div><p>An IR still sitting at Open after <strong>7 days</strong> with nothing saved into it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-113</span><span class="chip chip-plan">Note</span></div><p>Two different people closing two sections within minutes of each other.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-114</span><span class="chip chip-warn">FIR</span></div><p>A section reopened after it was closed.</p><p class="why">Not wrong in itself — rework happens. CR should just know, since the record was already counted as finished.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-115</span><span class="chip chip-stop">Block</span></div><p>The whole IR cannot be set to <strong>Close</strong> while any of its six sections is still open.</p><p class="why">This is the same gate you already chose, one level up. Closing the IR is the strongest statement the app can make, so it should mean all six are done.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-116</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>A section left open <strong>2 calendar days</strong> past where it should have been.</p><p class="why">Your clock: plain calendar days, no working-day maths, no holiday list.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-117</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>PDI and dispatch more than 14 days apart, with no flight test report attached.</p><p class="why">Your rule: the report must be dated within the 14 days <em>before</em> dispatch — it exists to confirm the drone is fit before it leaves. So the block names the missing report, and the person attaches it right there.</p></div>
+    </div>
+
+    <h3>E · Advisory — R-118 to R-123</h3>
+    <p class="why" style="margin-bottom:0.8rem">
+      Six things that are not errors, only habits worth noticing. All Notes. R-124 is deleted, by your ruling.
+    </p>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-118</span><span class="chip chip-plan">Note</span></div><p>A promise with no date in it — "I will update it tomorrow", "will do soon".</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-119</span><span class="chip chip-plan">Note</span></div><p>Blame or complaint about a colleague written into a record.</p><p class="why">The suggestion rewords it neutrally — same meaning, without naming a person as the fault.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-120</span><span class="chip chip-plan">Note</span></div><p>A customer's name or phone number written into an investigation field.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-121</span><span class="chip chip-plan">Note</span></div><p>An amount written with no currency.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-122</span><span class="chip chip-plan">Note</span></div><p>A part named by nickname, where the inward list has a proper name for it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-123</span><span class="chip chip-plan">Note</span></div><p>A sentence in the wrong section — a dispatch note sitting inside Investigation.</p></div>
+    </div>
+
+    <h3>F · New — R-125 to R-140, all from your own rulings</h3>
+    <p class="why" style="margin-bottom:0.8rem">
+      These are rules <strong>you</strong> wrote during our conversation, recorded here as I understood them.
+      If I have written any of them down wrongly, this is the place to catch it.
+    </p>
+    <div class="rules">
+      <div class="rule"><div class="rule-head"><span class="rid">R-125</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>Investigation is blank, but Root Cause is empty — <em>or</em> Investigation is filled and Root Cause says nothing.</p><p class="why">Your rule: if investigation is blank, Root Cause may simply say Not required. If investigation exists, Root Cause must be In-conclusive, Investigation on-going, or written text. One of those, or the section cannot close.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-126</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Root Cause is written, but both Corrective Action and Preventive Action are empty.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-127</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Root Cause is written, and exactly one of Corrective Action or Preventive Action is empty.</p><p class="why">Your refinement: one missing is possible and gets an FIR; both missing is rare but also an FIR. Both land in the same place, so one rule covers them.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-128</span><span class="chip chip-warn">FIR → CR + Mgmt</span><span class="chip chip-ok">Yours</span></div><p>Two or more IRs on the same drone serial within <strong>30 days</strong>, for the same kind of issue.</p><p class="why">Your rule, replacing what I had: same type of issue repeating on one UAS. It goes to CR <em>and</em> Management, because a repeat is a pattern, not a mistake.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-129</span><span class="chip chip-ok">Deleted</span></div><p>Was "Root Cause present but neither CA nor PA" — you first said that case is impossible, then reversed yourself. It is possible, and R-126/R-127 now cover it. This number is retired.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-130</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>A part named in Particulars For Repair with blank quantity or rate.</p><p class="why">Saveable at any time — it just cannot be marked completed in that state.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-131</span><span class="chip chip-warn">FIR → CR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed with nothing in it at all.</p><p class="why">Your specific ruling for Production: when Production is closed with nothing done, the FIR goes to <strong>Production and CR both</strong> — because they are the ones who did not do it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-132</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed while it is only partly filled.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-133</span><span class="chip chip-ok">New option</span><span class="chip chip-ok">Yours</span></div><p>Production gains one choice: <strong>"Rework not required — send for QC directly."</strong></p><p class="why">Your instruction: when rework is genuinely not needed, Production must be able to say so and pass the drone straight on, instead of the section sitting open forever.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-134</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>Dispatch recorded with no PDI report on the IR.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-135</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>A closed IR reopened.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-136</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>Three or more IRs raised on the same drone serial inside one month.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-137</span><span class="chip chip-stop">Block</span></div><p>Inward Photos are missing while Section B applies.</p><p class="why">This is what settled our one real conflict: photos are not mandatory everywhere — they are mandatory exactly when Inward is.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-138</span><span class="chip chip-do">Ask → CR</span><span class="chip chip-ok">Yours</span></div><p>Every row of the Inward checklist says DID NOT COME, and the section is being closed.</p><p class="why">Your words: it should <em>ask</em>, rather than let someone tick a column of NA. And if the answer is yes, it files to CR so CR can mark the whole section Not Applicable properly.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-139</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Inward and IQC are out of step — one is Not Applicable while the other is filled in.</p><p class="why">Your rule: these are a block. If no part came, there is nothing to inspect; if a part came, inspection cannot be Not Applicable.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-140</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Cross Check Particulars is filled in while the Inward checklist is Not Applicable.</p><p class="why">Cross Check Particulars is derived from Inward, so it cannot exist on its own.</p></div>
+    </div>
+  </section>
+
+  <section id="s4" class="is-urgent">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 4</span>
+      <div class="phase-row">
+        <h2>The three table rules</h2>
+        <span class="chip chip-do">Tick or change</span>
+      </div>
+      <p class="sec-sub">
+        You asked me to make these clear before you ruled. I had written them as two vague general rules; the
+        fault was mine, because <strong>the four tables are not the same shape</strong>. Three have their rows
+        already drawn. Only one lets you add a row. So it is three rules, not two — and one of the four tables
+        is not a rule at all.
+      </p>
+    </div>
+
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-05a</span><span class="chip chip-stop">Block</span></div>
+        <p><strong>Inward rows.</strong> The Inward checklist has eleven fixed rows. When you close Section B,
+        every row must carry an answer — either the part with its quantity, or "DID NOT COME".</p>
+        <p class="why">A row left untouched is the single most common way a checklist gets closed without
+        being done. Two honest notes: three rows (Tripod/Bipod, Center Pole, Toolkit-Box And Accessories) have
+        no DID NOT COME option today and will get one; and one row is a free-text field, so "any text" counts.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-05b</span><span class="chip chip-stop">Block</span></div>
+        <p><strong>IQC rows.</strong> The IQC table has fixed zones A–E. When you close Section C, every zone
+        must carry a result — PASS, FAIL or NA.</p>
+        <p class="why">The banner rows (the A/B/C/D/E headings themselves) and the optional add-on rows are
+        never required — they are labels and extras, not questions. Only the zone rows are.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-05c</span><span class="chip chip-stop">Block</span></div>
+        <p><strong>Repair table.</strong> The Particulars For Repair table is the one table you build row by
+        row. When you close that section, every row you have added must carry a part name, a quantity and a
+        rate.</p>
+        <p class="why">An empty table is fine — it means no repair costs. It is a half-written row that is the
+        problem. This is the same rule as R-130, seen from the table's side.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">R-05d</span><span class="chip chip-plan">Not a rule</span></div>
+        <p><strong>The dispatch checklist needs no rule.</strong> It is derived from Section B — the rows
+        appear because of what was recorded in Inward, not because someone typed them. Enforcing it twice
+        would only create a second way to fail.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="s5" class="is-quiet">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 5</span>
+      <div class="phase-row">
+        <h2>Section B — the six fields, for confirmation</h2>
+        <span class="chip chip-ok">Nearly settled</span>
+      </div>
+      <p class="sec-sub">
+        This was the one section we worked through field by field. Read the setting beside each field — it is
+        your decision, except where marked. If it is right, say nothing.
+      </p>
+    </div>
+
+    <div class="rules">
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Inward Date</span><span class="chip chip-stop">Mandatory</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Inward By</span><span class="chip chip-stop">Mandatory</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Stock Transfer (ST) No.</span><span class="chip chip-plan">Skippable</span><span class="chip chip-ok">Yours</span></div>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Particulars Received</span><span class="chip chip-warn">Mandatory, NA allowed</span></div>
+        <p class="why">The table itself — see R-05a above for how it is enforced.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Inward Photos</span><span class="chip chip-stop">Mandatory</span></div>
+        <p class="why">Mandatory exactly when Section B applies — this is what settled our one real conflict.</p>
+      </div>
+      <div class="rule">
+        <div class="rule-head"><span class="rid">Remarks</span><span class="chip chip-plan">Skippable</span></div>
+      </div>
+    </div>
+
+    <p class="why">
+      Two things follow from this table, and both are already in Section 1: the three inward rows with no
+      DID NOT COME option get one, and the Customer Relations person may mark a <em>whole section</em> Not
+      Applicable, case by case.
+    </p>
+  </section>
+
+  <section id="s6" class="is-urgent">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 6</span>
+      <div class="phase-row">
+        <h2>The four questions that are not rules</h2>
+        <span class="chip chip-do">Answer needed</span>
+      </div>
+      <p class="sec-sub">
+        These are not about right and wrong. They are decisions only you can make, and I have written my
+        recommendation under each one.
+      </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q1 · Who is allowed to mark a section Not Applicable?</h3>
+      <p>
+        <strong>My recommendation:</strong> the person working in that section may mark it Not Applicable —
+        but doing so files an FIR to CR, because it changes what the IR is about. CR may always do it
+        directly, without an FIR. Only CR can undo it.
+      </p>
+      <p class="why">
+        This is your own sentence, from the Inward/IQC discussion: <em>"it should ask instead to look into it
+        and rather make that section not applicable to CR Person via FIR."</em> I am asking only to confirm I
+        read it right.
+      </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q2 · What does the Inspector look like, and where does it live?</h3>
+      <p>
+        <strong>My proposal:</strong> a small round button that floats at the bottom-right of every screen.
+        It carries a small dot when it has something for you, so it is never shouting and never silent.
+        Tap it and it opens as a panel over the screen.
+      </p>
+      <p>
+        The "fancy activation" you asked for becomes a one-time moment: the first time anyone opens the app
+        after this ships, the button pulses once and the panel opens with a short introduction. After that it
+        never does it again — the same discipline as the intro video, which plays in full only once per
+        version.
+      </p>
+      <p class="why">
+        On the IR screen, the panel shows the live checklist for the section you are standing in — so what it
+        says is always about where your hands are.
+      </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q3 · How does it patrol when nobody is in the app?</h3>
+      <p>
+        <strong>The honest limit:</strong> a browser cannot watch anything when the app is closed. No amount
+        of clever code changes that — if nobody is there, nothing is running.
+      </p>
+      <p>
+        <strong>My proposal, in two halves.</strong> While someone is using the app, the Inspector patrols
+        live, and it gives priority to wherever the live user is — your words, and the right instinct.
+        When nobody is there, a scheduled job runs on the backend during off hours (you approved this). It
+        walks the IRs a slice at a time, so it can never be killed for running too long, and it leaves its
+        findings behind for whoever opens the app next. The dot on the button is how they find out.
+      </p>
+      <p class="why">
+        Your phrasing of the goal is the one I am building to: <em>"small progress everyday… without making
+        hoolahoo of anything to anyone."</em> So the night job reports; it does not email the whole company at
+        3am.
+      </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q4 · What exactly does "maturity" learn?</h3>
+      <p>
+        <strong>My proposal:</strong> it learns <em>vocabulary and phrasing</em>, and nothing else. Which
+        words your team uses, how they spell part names, what a normal investigation paragraph looks like,
+        which couriers and model codes are real. That is what stops it flagging "Bluedart" as a spelling
+        mistake.
+      </p>
+      <p>
+        <strong>It never learns what is acceptable.</strong> The rules stay yours, exactly as you trained
+        them. A bot that quietly relaxes its own standards is worse than no bot.
+      </p>
+      <p class="why">
+        You approved starting this now, reading the legacy IRs. That is the first thing I will build after
+        the close button.
+      </p>
+    </div>
+  </section>
+
+  <section id="s7" class="is-phase">
+    <div class="sec-head">
+      <span class="sec-num">SECTION 7</span>
+      <div class="phase-row">
+        <h2>The build order</h2>
+        <span class="chip chip-do">For your yes</span>
+      </div>
+      <p class="sec-sub">
+        Six chunks. Each one is finished and visible before the next begins, and nothing later can quietly
+        change something earlier.
+      </p>
+    </div>
+
+    <ol>
+      <li>
+        <strong>The close button.</strong> "Mark this section (activity and record) completed." Save stays
+        free; only this button closes. This comes first because every rule in this book needs a moment to
+        speak at — and it is also what makes the board move.
+      </li>
+      <li>
+        <strong>The rule engine, and the live checklist.</strong> The rule book above becomes real: the
+        severities, the block that shows its reason right on the field, and the panel that shows what is
+        still owed.
+      </li>
+      <li>
+        <strong>I-PASSBOOK POSTMASTER, and the FIR machinery.</strong> The four destinations, the emailed
+        FIR, and the rename of the three existing senders.
+      </li>
+      <li>
+        <strong>Maturity, trained on your legacy IRs.</strong> So the Inspector starts life already knowing
+        your vocabulary rather than learning it in front of your colleagues.
+      </li>
+      <li>
+        <strong>English and Hinglish.</strong> The writing helper — spelling, sentence structure, and a
+        better-word suggestion when one exists.
+      </li>
+      <li>
+        <strong>The Inspector's face.</strong> The button, the live presence, and the CR inbox where the FIRs
+        land.
+      </li>
+    </ol>
+
+    <p class="why">
+      Chunk 1 and chunk 4 are the two you have already authorised — the close button because it is the
+      foundation, and maturity because you said <em>"Yes you may start maturity as of now."</em> I will start
+      there as soon as the rules above are ticked.
+    </p>
+  </section>
+
+  <footer class="end">
+    <p>
+      <strong>Your reply can be three lines.</strong> Name only the numbers you want changed; everything you
+      do not mention, I take as agreed and build.
+    </p>
+    <p>
+      If it is easier, you can answer by section: <em>"Section 2 yes"</em>, <em>"Section 3 — English family
+      yes, Hinglish family yes but drop R-98, Numbers yes, Workflow yes except R-115, Advisory yes, New yes"</em>,
+      <em>"Section 4 yes"</em>, <em>"Section 5 yes"</em>, <em>"Section 6 — all four as recommended"</em>,
+      <em>"Section 7 yes."</em>
+    </p>
+    <p>I-PASSBOOK · Indrones · 1 October 2026</p>
+  </footer>
+
+</div>
+</body>
+</html>

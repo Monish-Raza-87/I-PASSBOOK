@@ -1,0 +1,1151 @@
+/* ============================================================
+   build-ui-options.mjs — assemble the three UI direction pages
+
+   Emits, for the owner to review on his phone:
+
+     preview/index.html   chooser — three cards, one per option
+     preview/a.html       "Desk, finished"
+     preview/b.html       "Indrones Industrial"
+     preview/c.html       "Modern SaaS light"
+     preview/preview.css  shared: tokens + skeleton (one file, hashed on link)
+
+   WHY THIS IS GENERATED RATHER THAN HAND-WRITTEN
+
+   The same reason tools/build-polish-preview.mjs is: a hand-copied mock drifts
+   from the app the moment anyone edits a token, and then the owner picks a design
+   that was never actually achievable. Here the COLOURS AND TYPE come out of
+   tokens.css and palette.css at build time — the real files, concatenated — so
+   every option can only use values the app already has. The classes in the
+   markup are the app's own class names (.ir-card, .list-toolbar, .nav-item,
+   .form-group, .insights-card …), and the assertions at the bottom of this file
+   check each one still exists in the app's stylesheets. A rename in the app
+   fails the build here rather than silently turning the preview into fiction.
+
+   WHAT IS *NOT* COPIED
+
+   The app's component stylesheets are deliberately NOT loaded. base.css,
+   components.css and views.css would each fight the option skins rule-for-rule,
+   and the point of the page is to show the SKIN. So:
+
+     preview.css  = tokens.css + palette.css + a colour-free SKELETON (layout,
+                    spacing and structure only — no colour, no radius, no shadow)
+     <option>.css = the skin, inlined in the page, scoped to .pv
+
+   One skeleton, three skins. That is also the honest shape of the real job: the
+   layout does not change between these options, the language does.
+
+   Usage:  node tools/build-ui-options.mjs
+           node tools/build-ui-options.mjs --check   (verifies preview/ is current)
+
+   These pages are COMMITTED and SERVED, unlike tools/.cache/polish-preview.html,
+   because the owner reviews them on his phone rather than on this machine. That
+   makes the output a build artifact in git, which is why `--check` exists and why
+   tools/smoke-preview.mjs runs it: edit tokens.css, forget to rebuild, and the
+   live review advertises colours the app no longer has.
+   ============================================================ */
+
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const read = p => fs.readFileSync(join(ROOT, p), 'utf8');
+
+const tokensCss  = read('tokens.css');
+const paletteCss = read('palette.css');
+const appCss     = ['base.css', 'components.css', 'views.css', 'desk.css'].map(read).join('\n');
+const appSource  = read('app.js') + '\n' + read('index.html');
+
+// The version the sign-in screen shows, read from the app rather than retyped.
+// A preview that says v55 while the app says v56 is a small thing that makes the
+// whole page feel untrustworthy, and it is exactly the kind of duplication that
+// rots silently — nothing would ever have failed to tell us.
+const APP_VERSION = (read('app.js').match(/const APP_VERSION\s*=\s*'([^']+)'/) || [])[1] || 'unknown';
+
+// ── the classes this page mocks must be the app's real ones ──────────────────
+// A preview built from invented class names would look like the app and share
+// nothing with it, and the owner would approve a design that had to be redone
+// from scratch. These are every class the SCREENS below put on an element.
+//
+// Checked against the app's STYLESHEETS **and its markup**, not stylesheets alone.
+// `.ir-cat` and `.ir-date` are a real, load-bearing pair of classes that the app
+// emits on every row and never writes a rule for — they simply inherit `.ir-meta`.
+// Requiring a rule would have meant either inventing styles the app does not have
+// or dropping the two classes the real rows carry, and both would make this page
+// less faithful than the thing it is supposed to preview.
+const REQUIRED = [
+  'nav-item', 'nav-icon', 'nav-label', 'nav-count', 'sidebar-brand', 'brand-text',
+  'list-toolbar', 'list-toolbar-top', 'list-title', 'list-count',
+  'search-bar', 'segments', 'segment', 'segment-count',
+  'ir-list', 'ir-card', 'ir-card-main', 'ir-title-row', 'ir-title', 'ir-assignee',
+  'ir-meta', 'ir-sn', 'ir-dot', 'ir-cat', 'ir-date', 'ir-age', 'ir-card-side',
+  'badge', 'prio',
+  'glass-card', 'auth-head', 'auth-brand', 'auth-full', 'auth-hint',
+  'form-input', 'btn', 'btn-ghost', 'btn-secondary', 'link-btn', 'auth-or',
+  'banner-main', 'banner-pills', 'banner-actions',
+  'tabs-container', 'tab', 'section-content', 'section-title',
+  'form-group', 'form-label', 'overview-panel', 'overview-head', 'overview-title',
+  'insights-filters', 'insights-filter', 'insights-total', 'insights-cards',
+  'insights-card', 'insights-card-n', 'insights-card-label',
+  'insights-block', 'insights-h', 'insights-subcats', 'insights-subcat',
+  'insights-subcat-n', 'insights-mix', 'insights-mix-row', 'insights-mix-n',
+];
+const hasClass = (c, src) => new RegExp('[\'"]' + c + '\\b|[\\s"]' + c + '(?![a-zA-Z0-9_-])').test(src);
+const missing = REQUIRED.filter(c => !hasClass(c, appCss) && !hasClass(c, appSource));
+
+// IDs are checked too, because two of the banner's three hooks are IDs in the
+// real app (`#ir-banner`, `#ir-banner-title`) and a preview that renamed them to
+// classes would be describing a screen the app does not have.
+const REQUIRED_IDS = ['ir-banner', 'ir-banner-title', 'ir-banner-sub'];
+const missingIds = REQUIRED_IDS.filter(id => !new RegExp('id="' + id + '"').test(appSource));
+
+// ── the sample IRs the list and the ticket show ──────────────────────────────
+// Real vocabulary throughout — the four real statuses, the four real categories,
+// the real REPAIR sub-categories — so the owner is judging the design against
+// rows that look like his rows, not against "Lorem Ipsum IR".
+const ROWS = [
+  { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',             sub: '',        date: '12-Sep-2026', age: '19d', who: 'A. Sharma', prio: 'Urgent', status: 'QC Investigation', badge: 'badge-open',     late: false },
+  { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR',            sub: 'BATTERY', date: '08-Sep-2026', age: '23d', who: 'R. Kumar',  prio: 'High',   status: 'Hold',             badge: 'badge-pending',  late: true  },
+  { no: 'IR-407', sn: 'VTR-0007',  cat: 'GENERAL MAINTENANCE', sub: '',      date: '02-Sep-2026', age: '29d', who: 'P. Nair',   prio: 'Medium', status: 'Delivered',        badge: 'badge-resolved', late: false },
+  { no: 'IR-401', sn: 'D10G-0221', cat: 'REMOTE SUPPORT',    sub: '',        date: '21-Aug-2026', age: '41d', who: '',          prio: 'Low',    status: 'Close',            badge: 'badge-closed',   late: false },
+];
+
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// ── SCREENS ──────────────────────────────────────────────────────────────────
+// Written ONCE. All four are rendered under every option, so the three pages
+// differ by their stylesheet alone — which is what makes the comparison mean
+// something. (Three hand-built mock-ups would differ in a dozen accidental ways
+// and the owner would be picking between those, not between designs.)
+
+const navItem = (id, label, count, active, glyph) => `
+      <div class="nav-item${active ? ' active' : ''}"${active ? ' aria-current="page"' : ''}>
+        <span class="nav-icon" aria-hidden="true">${glyph}</span>
+        <span class="nav-label">${label}</span>
+        ${count ? `<span class="nav-count">${count}</span>` : ''}
+      </div>`;
+
+// The nav bar. It is a phone screenshot, so the sidebar is the bottom bar — the
+// app turns #sidebar into one below 1024px and that is where the owner will see
+// it. Rendered as the desktop rail here and as the bottom bar by the page's own
+// media query, so one markup serves both.
+const chromeBefore = active => `
+    <div class="pv-app">
+      <aside class="sidebar">
+        <div class="sidebar-brand"><span class="brand-mark"></span><span class="brand-text">I-PASSBOOK</span></div>
+        <nav class="sidebar-nav">
+          ${navItem('tickets',  'IRs',           '412', active === 'tickets',  '')}
+          ${navItem('insights', 'Insights',      '',    active === 'insights', '')}
+          ${navItem('log',      'Log Analyser',  '',    active === 'log',      '')}
+          <div class="nav-item"><span class="nav-icon" aria-hidden="true"></span><span class="nav-label">Legacy Records</span></div>
+        </nav>
+      </aside>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="topbar-title">${active === 'insights' ? 'Insights' : active === 'log' ? 'Log Analyser' : 'I-PASSBOOK'}</div>
+          <div class="header-actions"><span class="bell"></span><span class="avatar">MR</span></div>
+        </header>`;
+
+const chromeAfter = `
+      </div>
+    </div>`;
+
+const screenSignIn = () => `
+    <div class="pv-app is-auth">
+      <div class="auth-wrap">
+        <div class="glass-card">
+          <div class="auth-head">
+            <span class="auth-logo" aria-hidden="true"></span>
+            <div class="auth-brand">I-PASSBOOK</div>
+            <p class="auth-full">Indrones Product After-Sales Summary Book</p>
+            <p class="auth-hint">Sign in with the credentials your admin gave you.</p>
+          </div>
+          <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
+          <div class="auth-or"><span>or use your email</span></div>
+          <input class="form-input" type="email" value="raza@indrones.com" readonly />
+          <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
+          <button type="button" class="btn">Sign in</button>
+          <button type="button" class="link-btn">Use password instead</button>
+        </div>
+        <p class="pv-version">${esc(APP_VERSION)}</p>
+      </div>
+    </div>`;
+
+const screenList = () => `
+    ${chromeBefore('tickets')}
+        <div class="list-toolbar">
+          <div class="list-toolbar-top">
+            <span class="list-title">IRs</span>
+            <span class="list-count">412</span>
+          </div>
+          <input class="search-bar" type="text" placeholder="Search by IR number or drone ID…" readonly />
+          <div class="segments">
+            <span class="segment active">All<span class="segment-count">412</span></span>
+            <span class="segment">Open<span class="segment-count">37</span></span>
+            <span class="segment">Paused<span class="segment-count">6</span></span>
+            <span class="segment">Resolved<span class="segment-count">318</span></span>
+            <span class="segment">Closed<span class="segment-count">51</span></span>
+          </div>
+          <div class="segments">
+            <span class="segment">CRASH<span class="segment-count">9</span></span>
+            <span class="segment">REPAIR<span class="segment-count">58</span></span>
+            <span class="segment">GENERAL MAINTENANCE<span class="segment-count">121</span></span>
+            <span class="segment">REMOTE SUPPORT<span class="segment-count">224</span></span>
+          </div>
+        </div>
+        <div class="sync-status"><span class="sync-msg">Synced from the client sheet</span><span class="sync-meta">2m ago</span></div>
+        <div class="ir-list">
+          ${ROWS.map(r => `
+          <div class="ir-card${r.no === 'IR-409' ? ' is-selected' : ''}">
+            <div class="ir-card-main">
+              <div class="ir-title-row">
+                <span class="ir-title">${r.no}</span>
+                ${r.who ? `<span class="ir-assignee">${r.who}</span>` : ''}
+              </div>
+              <div class="ir-meta">
+                <span class="ir-sn">${r.sn}</span>
+                <span class="ir-dot">·</span><span class="ir-cat">${r.cat}</span>
+                ${r.sub ? `<span class="ir-dot">·</span><span class="ir-cat">${r.sub}</span>` : ''}
+                <span class="ir-dot">·</span><span class="ir-date">${r.date}</span>
+                <span class="ir-dot">·</span><span class="ir-age${r.late ? ' is-late' : ''}">${r.age}</span>
+              </div>
+            </div>
+            <div class="ir-card-side">
+              <span class="prio">${r.prio}</span>
+              <span class="badge ${r.badge}">${r.status}</span>
+              ${r.late ? '<span class="badge badge-danger">Overdue</span>' : ''}
+            </div>
+          </div>`).join('')}
+        </div>
+    ${chromeAfter}`;
+
+const screenTicket = () => `
+    ${chromeBefore('tickets')}
+        <div id="ir-banner">
+          <div class="banner-main">
+            <div id="ir-banner-title">IR-409</div>
+            <div id="ir-banner-sub">H25P-0032 · REPAIR · BATTERY · raised 08-Sep-2026</div>
+            <div class="banner-pills">
+              <span class="prio">High</span>
+              <span class="badge badge-pending">Hold</span>
+              <span class="badge badge-danger">Overdue</span>
+            </div>
+          </div>
+          <div class="banner-actions">
+            <button type="button" class="btn-ghost">Triage</button>
+            <button type="button" class="btn-ghost">Comments</button>
+            <button type="button" class="btn-ghost">History</button>
+          </div>
+        </div>
+        <div class="overview-panel">
+          <div class="overview-head"><h2 class="overview-title">Overview</h2></div>
+          <div class="overview-grid">
+            <div class="overview-cell"><span class="overview-k">Customer</span><span class="overview-v">Oil India Ltd</span></div>
+            <div class="overview-cell"><span class="overview-k">Drone</span><span class="overview-v">H25P-0032</span></div>
+            <div class="overview-cell"><span class="overview-k">Reported fault</span><span class="overview-v">Flight time dropped to 11 min</span></div>
+          </div>
+        </div>
+        <div class="tabs-container">
+          <span class="tab">Report</span>
+          <span class="tab active">B: Inward</span>
+          <span class="tab">C: IQC</span>
+          <span class="tab">D: Investigation</span>
+          <span class="tab">E: Production</span>
+          <span class="tab">F: Quality Test</span>
+          <span class="tab">G: PDI/Dispatch</span>
+        </div>
+        <div class="section-content">
+          <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
+          <div class="form-group">
+            <label class="form-label">Inward Date</label>
+            <input class="form-input" type="text" value="09-Sep-2026" readonly />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Inward By (Name)</label>
+            <input class="form-input" type="text" value="Store — S. Iyer" readonly />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Remarks</label>
+            <textarea class="form-input" rows="3" readonly>Battery pack swollen on cell 3. Received with charger and case. No visible impact damage to the airframe.</textarea>
+          </div>
+          <button type="button" class="btn">Save Section B</button>
+          <div class="sec-export-row">
+            <button type="button" class="btn btn-secondary">Download</button>
+            <button type="button" class="btn btn-secondary">Download and share</button>
+          </div>
+        </div>
+    ${chromeAfter}`;
+
+const screenInsights = () => `
+    ${chromeBefore('insights')}
+        <div class="list-toolbar">
+          <div class="list-toolbar-top"><span class="list-title">Insights</span></div>
+        </div>
+        <div class="insights-body">
+          <div class="insights-filters">
+            <label class="insights-filter"><span>Year</span><select class="form-input"><option>All years</option><option>FY 2026-27</option></select></label>
+            <label class="insights-filter"><span>Month</span><select class="form-input"><option>All months</option><option>September</option></select></label>
+            <label class="insights-filter"><span>Status</span><select class="form-input"><option>All statuses</option><option>Open</option></select></label>
+            <label class="insights-filter"><span>Category</span><select class="form-input"><option>All categories</option><option>REPAIR</option></select></label>
+          </div>
+          <p class="insights-total"><strong>412</strong> IRs match these filters</p>
+          <div class="insights-cards">
+            <span class="insights-card active"><span class="insights-card-n">9</span><span class="insights-card-label">CRASH</span></span>
+            <span class="insights-card"><span class="insights-card-n">58</span><span class="insights-card-label">REPAIR</span></span>
+            <span class="insights-card"><span class="insights-card-n">121</span><span class="insights-card-label">GENERAL MAINTENANCE</span></span>
+            <span class="insights-card"><span class="insights-card-n">224</span><span class="insights-card-label">REMOTE SUPPORT</span></span>
+          </div>
+          <div class="insights-block">
+            <h3 class="insights-h">REPAIR — by sub-category</h3>
+            <div class="insights-subcats">
+              <span class="insights-subcat">GPS<span class="insights-subcat-n">12</span></span>
+              <span class="insights-subcat">BATTERY<span class="insights-subcat-n">19</span></span>
+              <span class="insights-subcat">CAMERA/LENS<span class="insights-subcat-n">8</span></span>
+              <span class="insights-subcat">AIRFRAME<span class="insights-subcat-n">11</span></span>
+              <span class="insights-subcat is-others">OTHERS<span class="insights-subcat-n">8</span></span>
+            </div>
+          </div>
+          <div class="insights-block">
+            <h3 class="insights-h">Status mix</h3>
+            <div class="insights-mix">
+              <span class="insights-mix-row"><span class="badge badge-open">Open</span><span class="insights-mix-n">37</span></span>
+              <span class="insights-mix-row"><span class="badge badge-pending">Paused</span><span class="insights-mix-n">6</span></span>
+              <span class="insights-mix-row"><span class="badge badge-resolved">Resolved</span><span class="insights-mix-n">318</span></span>
+              <span class="insights-mix-row"><span class="badge badge-closed">Closed</span><span class="insights-mix-n">51</span></span>
+            </div>
+          </div>
+        </div>
+    ${chromeAfter}`;
+
+const SCREENS = [
+  { id: 'signin',   label: 'Sign-in',   note: 'the first thing anyone sees',        html: screenSignIn },
+  { id: 'list',     label: 'IR list',   note: '412 rows, filtered by status and category', html: screenList },
+  { id: 'ticket',   label: 'Ticket',    note: 'banner, overview, tab strip, a section form', html: screenTicket },
+  { id: 'insights', label: 'Insights',  note: 'the screen that does not open today', html: screenInsights },
+];
+
+// ── SKELETON — layout only ───────────────────────────────────────────────────
+// Deliberately colour-free, radius-free and shadow-free: everything that makes
+// one option different from another lives in the skin below. If a rule here
+// needs a colour it is in the wrong block.
+const SKELETON = `
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+.pv { margin: 0; font-family: var(--font-sans); font-size: var(--text-base); line-height: var(--leading-body); }
+.pv h1, .pv h2, .pv h3, .pv p { margin: 0; }
+.pv button { font: inherit; cursor: pointer; }
+.pv input, .pv select, .pv textarea { font: inherit; }
+.pv .form-input { display: block; width: 100%; }
+.pv .btn, .pv .btn-ghost, .pv .btn-secondary, .pv .link-btn { display: inline-flex; align-items: center; justify-content: center; }
+
+/* ── the review chrome (this is the page, not the app) ── */
+.pv-top { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: baseline; }
+.pv-top h1 { font-size: var(--text-lg); }
+.pv-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-tab { display: inline-block; text-decoration: none; }
+.pv-screens { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-items: start; }
+.pv-shot { display: flex; flex-direction: column; gap: 0.5rem; }
+.pv-shot-cap { display: flex; gap: 0.5rem; align-items: baseline; }
+.pv-shot-cap b { font-size: var(--text-sm); }
+.pv-shot-cap span { font-size: var(--text-xs); }
+.pv-phone { position: relative; overflow: hidden; }
+.pv-notes { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.pv-notes ul { margin: 0.35rem 0 0; padding-left: 1.1rem; }
+.pv-notes li { margin-bottom: 0.2rem; }
+
+/* ── the app shell ── */
+.pv-app { display: flex; min-height: 620px; }
+.pv-app .sidebar { flex: 0 0 190px; display: flex; flex-direction: column; }
+.pv-app .sidebar-nav { display: flex; flex-direction: column; flex: 1; padding: 0.5rem; gap: 1px; }
+.pv-app .sidebar-brand { display: flex; align-items: center; gap: 0.5rem; padding: 0.85rem 0.75rem; }
+.pv-app .brand-mark { width: 20px; height: 20px; display: block; }
+.pv-app .nav-item { display: flex; align-items: center; gap: 0.6rem; padding: 0.45rem 0.6rem; }
+.pv-app .nav-icon { width: 16px; height: 16px; flex: 0 0 auto; }
+.pv-app .nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-app .workspace { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.pv-app .topbar { display: flex; align-items: center; gap: 0.75rem; padding: 0 0.9rem; min-height: 52px; }
+.pv-app .topbar-title { flex: 1 1 auto; min-width: 0; }
+.pv-app .header-actions { display: flex; align-items: center; gap: 0.6rem; }
+.pv-app .bell { width: 18px; height: 18px; }
+.pv-app .avatar { display: grid; place-items: center; width: 30px; height: 30px; font-size: var(--text-2xs); }
+.pv-app.is-auth { min-height: 0; }
+.pv-app .auth-wrap { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
+.pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
+.pv-app .auth-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
+.pv-app .auth-logo { width: 34px; height: 34px; }
+
+/* ── the IR list ── */
+.pv-app .list-toolbar { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.85rem 0.9rem 0.7rem; }
+.pv-app .list-toolbar-top { display: flex; align-items: baseline; gap: 0.5rem; }
+.pv-app .list-title { flex: 1 1 auto; }
+.pv-app .search-bar { width: 100%; }
+.pv-app .segments { display: flex; gap: 0.3rem; overflow-x: auto; scrollbar-width: none; }
+.pv-app .segments::-webkit-scrollbar { display: none; }
+.pv-app .segment { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.pv-app .sync-status { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.9rem; }
+.pv-app .sync-msg { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-app .ir-list { display: flex; flex-direction: column; flex: 1 1 auto; }
+.pv-app .ir-card { display: flex; align-items: flex-start; gap: 0.6rem; }
+.pv-app .ir-card-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
+.pv-app .ir-title-row { display: flex; align-items: baseline; gap: 0.5rem; }
+.pv-app .ir-title { flex: 0 0 auto; }
+.pv-app .ir-assignee { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-app .ir-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem; }
+.pv-app .ir-card-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 0.25rem; }
+
+/* ── the ticket ── */
+.pv-app .ir-banner { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; padding: 0.9rem; }
+.pv-app .banner-main { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.pv-app .banner-pills { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-app .banner-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-app .overview-panel { padding: 0.9rem; }
+.pv-app .overview-head { display: flex; align-items: baseline; gap: 0.5rem; margin-bottom: 0.6rem; }
+.pv-app .overview-grid { display: grid; gap: 0.5rem 1rem; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.pv-app .overview-cell { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.pv-app .tabs-container { display: flex; gap: 0.25rem; overflow-x: auto; padding: 0 0.9rem; scrollbar-width: none; }
+.pv-app .tabs-container::-webkit-scrollbar { display: none; }
+.pv-app .tab { flex: 0 0 auto; white-space: nowrap; }
+.pv-app .section-content { display: flex; flex-direction: column; gap: 0.7rem; padding: 0.9rem; }
+.pv-app .form-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.pv-app .sec-export-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+
+/* ── insights ── */
+.pv-app .insights-body { display: flex; flex-direction: column; gap: 0.9rem; padding: 0.9rem; }
+.pv-app .insights-filters { display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.pv-app .insights-filter { display: flex; flex-direction: column; gap: 0.2rem; }
+.pv-app .insights-cards { display: grid; gap: 0.5rem; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+.pv-app .insights-card { display: flex; flex-direction: column; gap: 0.15rem; text-align: left; }
+.pv-app .insights-subcats { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.pv-app .insights-subcat { display: inline-flex; align-items: baseline; gap: 0.4rem; }
+.pv-app .insights-mix { display: flex; flex-direction: column; gap: 0.3rem; }
+.pv-app .insights-mix-row { display: flex; align-items: center; gap: 0.6rem; }
+.pv-app .insights-mix-n { margin-left: auto; }
+
+/* The four screens are phone screenshots, so below the grid's own breakpoint the
+   shell becomes what the phone actually shows: nav bar at the BOTTOM, no rail.
+   base.css:855 does the same thing to #sidebar and this mirrors it, because a
+   design reviewed in a desktop shell is a design reviewed for the wrong screen. */
+@media (max-width: 639px) {
+  .pv-app { flex-direction: column-reverse; min-height: 0; }
+  .pv-app .sidebar { flex: 0 0 auto; }
+  .pv-app .sidebar-nav { flex-direction: row; overflow-x: auto; }
+  .pv-app .sidebar-brand { display: none; }
+  .pv-app .nav-item { flex: 1 1 0; flex-direction: column; gap: 0.1rem; text-align: center; }
+  .pv-app .nav-item .nav-count { display: none; }
+  .pv-app .ir-card-side { flex-direction: row; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+}
+`;
+
+// ── THE THREE OPTIONS ────────────────────────────────────────────────────────
+// Each `skin` is the whole of what changes. They are written as one stylesheet
+// each, scoped to .pv, because that is exactly how the winner would be adopted:
+// one file's worth of rules, replacing the two design languages that are live in
+// the app today (desk.css on three screens, the POLISH block everywhere else).
+
+const OPTIONS = [
+  {
+    key: 'a',
+    name: 'Desk, finished',
+    tagline: 'Finish the ERPNext look you already approved — and apply it everywhere.',
+    theme: 'light',
+    blurb: 'The sign-in screen and the IR list are already drawn in Frappe/ERPNext Desk. This option simply finishes the job: the same flat, neutral, hairline language on the ticket, Insights and every modal. Nothing floats, nothing glows, and the accent colour appears in exactly two places — the selected row and the primary button.',
+    wins: [
+      'One language on every screen, so the seam between the list and the ticket disappears',
+      'The densest of the three — the most IRs per phone screen, which matters at 400+ records',
+      'Cheapest to reach, because desk.css already exists and already covers three screens',
+      'Reads as a tool. Nothing to learn, nothing to get distracted by.',
+    ],
+    loses: [
+      'Plain. There is no brand colour anywhere except a thin selected-row rule.',
+      'Status is a word and a dot rather than a coloured pill, so scanning by colour is harder.',
+      'It looks like an ERP, because it is one.',
+    ],
+    skin: `
+.pv { background: var(--surface-base); color: var(--ink-gray-9); }
+
+/* review chrome */
+.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.pv-top { border-bottom: 1px solid var(--outline-gray-1); padding-bottom: 0.75rem; margin-bottom: 1.25rem; }
+.pv-tab { padding: 0.25rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-tab.is-here { background: var(--ink-gray-9); border-color: var(--ink-gray-9); color: var(--surface-base); }
+.pv-shot-cap b { color: var(--ink-gray-9); }
+.pv-shot-cap span { color: var(--ink-gray-6); }
+.pv-phone { border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); }
+.pv-notes { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-1); }
+.pv-notes h2 { font-size: var(--text-md); }
+.pv-notes li { color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-version { color: var(--ink-gray-5); font-size: var(--text-xs); }
+
+/* shell */
+.pv-app .sidebar { background: var(--surface-gray-1); border-right: 1px solid var(--outline-gray-1); }
+.pv-app .sidebar-brand { border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .brand-mark { background: var(--ink-gray-8); border-radius: var(--radius-1); }
+.pv-app .brand-text { font-size: var(--text-sm); font-weight: var(--weight-semibold); letter-spacing: 0.02em; }
+.pv-app .nav-item { border-radius: var(--radius-2); color: var(--ink-gray-7); font-size: var(--text-sm); cursor: pointer; }
+.pv-app .nav-item:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+.pv-app .nav-item.active { background: var(--surface-gray-3); color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+.pv-app .nav-icon { background: var(--surface-gray-5); border-radius: var(--radius-1); }
+.pv-app .nav-item.active .nav-icon { background: var(--ink-gray-7); }
+.pv-app .nav-count { font-size: var(--text-2xs); color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-app .topbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .topbar-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-app .bell { background: var(--surface-gray-4); border-radius: var(--radius-1); }
+.pv-app .avatar { background: var(--surface-gray-3); color: var(--ink-gray-8); border-radius: var(--radius-2); font-weight: var(--weight-medium); }
+
+/* list */
+.pv-app .list-toolbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .list-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-app .list-count { color: var(--ink-gray-7); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.pv-app .search-bar { padding: 0.4rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-sm); }
+.pv-app .search-bar::placeholder { color: var(--ink-gray-5); }
+.pv-app .segment { padding: 0.2rem 0.5rem; border: 1px solid transparent; border-radius: var(--radius-2); font-size: var(--text-xs); color: var(--ink-gray-7); cursor: pointer; }
+.pv-app .segment:hover { background: var(--surface-gray-2); }
+.pv-app .segment.active { background: var(--surface-gray-3); color: var(--ink-gray-9); border-color: var(--outline-gray-2); font-weight: var(--weight-medium); }
+.pv-app .segment-count { color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
+.pv-app .sync-status { font-size: var(--text-xs); color: var(--ink-gray-6); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .ir-card { padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--outline-gray-1); cursor: pointer; }
+.pv-app .ir-card:hover { background: var(--surface-gray-1); }
+.pv-app .ir-card.is-selected { background: var(--surface-gray-2); box-shadow: inset 3px 0 0 var(--ink-gray-9); }
+.pv-app .ir-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.pv-app .ir-assignee { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .ir-meta { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .ir-dot { color: var(--ink-gray-4); }
+.pv-app .ir-age.is-late { color: var(--st-danger-fg); }
+.pv-app .prio { font-size: var(--text-2xs); letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-gray-6); }
+/* Status as a dot and a word. It is what ERPNext does, and it is the whole of
+   this option's answer to colour. */
+.pv-app .badge { display: inline-flex; align-items: center; gap: 0.3rem; font-size: var(--text-xs); color: var(--ink-gray-8); }
+.pv-app .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-gray-5); }
+.pv-app .badge-open::before { background: var(--ink-blue-7); }
+.pv-app .badge-pending::before { background: var(--ink-amber-7); }
+.pv-app .badge-resolved::before { background: var(--ink-green-7); }
+.pv-app .badge-closed::before { background: var(--ink-gray-5); }
+.pv-app .badge-danger::before { background: var(--ink-red-7); }
+
+/* auth */
+.pv-app.is-auth { background: var(--surface-gray-1); }
+.pv-app .glass-card { padding: 1.5rem 1.25rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-3); }
+.pv-app .auth-logo { background: var(--ink-gray-8); border-radius: var(--radius-2); }
+.pv-app .auth-brand { font-size: var(--text-lg); font-weight: var(--weight-semibold); letter-spacing: 0.03em; }
+.pv-app .auth-full { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-sm); }
+.pv-app .form-label { font-size: var(--text-xs); color: var(--ink-gray-7); font-weight: var(--weight-medium); }
+.pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ink-gray-9); border-radius: var(--radius-2); background: var(--ink-gray-9); color: var(--surface-base); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
+.pv-app .btn-ghost { border-color: transparent; }
+.pv-app .link-btn { border: 0; background: none; color: var(--ink-gray-7); font-size: var(--text-xs); text-decoration: underline; }
+.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.4rem; border: 1px solid var(--outline-gray-3); border-radius: 50%; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); }
+.pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
+
+/* ticket */
+.pv-app #ir-banner { border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-base); }
+.pv-app #ir-banner-title { font-size: var(--text-xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.pv-app #ir-banner-sub { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .overview-panel { border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-gray-1); }
+.pv-app .overview-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-gray-7); }
+.pv-app .overview-k { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-gray-5); }
+.pv-app .overview-v { font-size: var(--text-sm); color: var(--ink-gray-9); }
+.pv-app .tabs-container { border-bottom: 1px solid var(--outline-gray-1); background: var(--surface-base); }
+.pv-app .tab { padding: 0.45rem 0.7rem; font-size: var(--text-sm); color: var(--ink-gray-6); border-bottom: 2px solid transparent; cursor: pointer; }
+.pv-app .tab.active { color: var(--ink-gray-9); border-bottom-color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+.pv-app .section-content { background: var(--surface-base); }
+.pv-app .section-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+
+/* insights */
+.pv-app .insights-body { background: var(--surface-base); }
+.pv-app .insights-total { font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-app .insights-total strong { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card { padding: 0.55rem 0.65rem; border: 1px solid var(--outline-gray-1); border-radius: var(--radius-3); background: var(--surface-gray-1); cursor: pointer; }
+.pv-app .insights-card.active { border-color: var(--ink-gray-8); background: var(--surface-gray-2); }
+.pv-app .insights-card-n { font-size: var(--text-xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-gray-6); }
+.pv-app .insights-h { font-size: var(--text-sm); font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-gray-7); margin-bottom: 0.5rem; }
+.pv-app .insights-subcat { padding: 0.25rem 0.5rem; border: 1px solid var(--outline-gray-1); border-radius: var(--radius-2); background: var(--surface-gray-1); font-size: var(--text-xs); color: var(--ink-gray-8); }
+.pv-app .insights-subcat.is-others { border-style: dashed; color: var(--ink-gray-6); }
+.pv-app .insights-subcat-n { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-app .insights-mix-row { font-size: var(--text-sm); }
+.pv-app .insights-mix-n { font-variant-numeric: tabular-nums; color: var(--ink-gray-8); }
+`,
+  },
+
+  {
+    key: 'b',
+    name: 'Indrones Industrial',
+    tagline: 'Dark instrument panel, industrial yellow, technical labels. Built to look like Indrones.',
+    theme: 'dark',
+    blurb: 'A dark graphite shell with the industrial yellow from Indrones’ own logo as the only accent. Keys and numbers are set in the monospace face, sections are numbered like a series index, corners are cut square, and status reads as a small LED rather than a soft pill. It is an instrument panel for drone telemetry, which is what this app actually is.',
+    wins: [
+      'Unmistakably Indrones — the dark canvas and yellow read as the same family as the website',
+      'Monospace numbers line up in columns, which is what you want in a 412-row list of IR keys',
+      'Dark is genuinely better on a phone in a hangar or an oil field, and for battery',
+      'The instrument framing makes a log analyser look like it belongs rather than like a bolt-on',
+    ],
+    loses: [
+      'A bigger change than the other two — the dark theme exists in the app, but this makes it the default',
+      'The yellow has to clear WCAG AA on dark. It does (about 11.2:1, measured at build time), but it may still get nudged for contrast rather than taste',
+      'Technical labelling can read as cold to someone who is not an engineer',
+    ],
+    skin: `
+/* The only colour here that is not already in the app's token set. It is the
+   brand yellow from indrones.com's logo asset, and it is PROVISIONAL: adopting
+   Option B means adding a \`yellow\` preset to palette.css through the documented
+   three-file path (app.js PALETTES, the [data-palette] block, the index.html
+   pre-paint list), and tools/smoke-palette.mjs will then MEASURE it for WCAG AA
+   and refuse it if it fails. Measured at build time against the dark surface, and refused if it drops below AA. */
+.pv { --ind-yellow: #ffc400; --ind-ink-on-yellow: #171717;
+      background: var(--surface-gray-10); color: var(--ink-gray-1); }
+
+.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+.pv-top { border-bottom: 1px solid var(--outline-gray-8); padding-bottom: 0.75rem; margin-bottom: 1.25rem; }
+.pv-top h1 { letter-spacing: 0.06em; text-transform: uppercase; font-size: var(--text-base); }
+.pv-top > p { color: var(--ink-gray-4); font-size: var(--text-sm); }
+.pv-tab { padding: 0.25rem 0.6rem; border: 1px solid var(--outline-gray-8); color: var(--ink-gray-4); font-size: var(--text-xs); font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.pv-tab.is-here { background: var(--ind-yellow); border-color: var(--ind-yellow); color: var(--ind-ink-on-yellow); }
+.pv-shot-cap b { color: var(--ind-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; }
+.pv-shot-cap span { color: var(--ink-gray-5); }
+.pv-phone { border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); }
+.pv-notes { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-8); }
+.pv-notes h2 { font-size: var(--text-base); text-transform: uppercase; letter-spacing: 0.06em; color: var(--ind-yellow); }
+.pv-notes li { color: var(--ink-gray-3); font-size: var(--text-sm); }
+.pv-version { color: var(--ink-gray-6); font-size: var(--text-xs); font-family: var(--font-mono); }
+
+/* shell */
+.pv-app .sidebar { background: var(--surface-gray-10); border-right: 1px solid var(--outline-gray-9); }
+.pv-app .sidebar-brand { border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .brand-mark { background: var(--ind-yellow); }
+.pv-app .brand-text { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.16em; color: var(--ink-gray-2); }
+.pv-app .nav-item { color: var(--ink-gray-5); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.pv-app .nav-item:hover { color: var(--ink-gray-1); background: var(--surface-gray-9); }
+.pv-app .nav-item.active { color: var(--ind-yellow); background: var(--surface-gray-9); box-shadow: inset 2px 0 0 0 var(--ind-yellow); }
+.pv-app .nav-icon { border: 1px solid currentColor; }
+.pv-app .nav-item.active .nav-icon { background: var(--ind-yellow); }
+.pv-app .nav-count { font-variant-numeric: tabular-nums; color: var(--ink-gray-4); }
+.pv-app .topbar { background: var(--surface-gray-10); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .topbar-title { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ink-gray-1); }
+.pv-app .bell { border: 1px solid var(--outline-gray-7); }
+.pv-app .avatar { border: 1px solid var(--ind-yellow); color: var(--ind-yellow); font-family: var(--font-mono); }
+
+/* list — a readout, not a set of cards */
+.pv-app .list-toolbar { background: var(--surface-gray-10); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .list-title { font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.16em; font-size: var(--text-sm); }
+.pv-app .list-title::before { content: "01 / "; color: var(--ind-yellow); }
+.pv-app .list-count { font-family: var(--font-mono); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .search-bar { padding: 0.4rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .search-bar::placeholder { color: var(--ink-gray-6); }
+.pv-app .segment { padding: 0.2rem 0.5rem; border: 1px solid var(--outline-gray-8); color: var(--ink-gray-4); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+.pv-app .segment.active { border-color: var(--ind-yellow); color: var(--ind-yellow); background: var(--surface-gray-9); }
+.pv-app .segment-count { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-app .segment.active .segment-count { color: var(--ind-yellow); }
+.pv-app .sync-status { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-6); border-bottom: 1px solid var(--outline-gray-9); }
+.pv-app .ir-card { padding: 0.5rem 0.9rem; border-bottom: 1px solid var(--outline-gray-9); cursor: pointer; }
+.pv-app .ir-card:hover { background: var(--surface-gray-9); }
+.pv-app .ir-card.is-selected { background: var(--surface-gray-9); box-shadow: inset 2px 0 0 0 var(--ind-yellow); }
+.pv-app .ir-title { font-family: var(--font-mono); font-size: var(--text-sm); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .ir-assignee { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-4); }
+.pv-app .ir-meta { font-size: var(--text-2xs); color: var(--ink-gray-5); }
+.pv-app .ir-dot { color: var(--outline-gray-7); }
+.pv-app .ir-age.is-late { color: var(--st-danger-fg); }
+.pv-app .prio { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
+/* Status as an LED. A block, not a rounded pill — the corner is the language.
+   The colour comes from the app's own SEMANTIC status tokens (--st-*-fg), not
+   from the raw ramps, so if a status colour is ever retuned all three options
+   follow it. It is also why this is --st-*-fg and NOT --focus-*: the focus family
+   is a box-shadow, and background:var(--focus-blue) renders as nothing at all. */
+.pv-app .badge { display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.1rem 0.4rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-9); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-3); }
+.pv-app .badge::before { content: ""; width: 5px; height: 5px; background: var(--ink-gray-6); }
+.pv-app .badge-open::before { background: var(--st-open-fg); }
+.pv-app .badge-pending::before { background: var(--st-paused-fg); }
+.pv-app .badge-resolved::before { background: var(--st-resolved-fg); }
+.pv-app .badge-closed::before { background: var(--st-closed-fg); }
+.pv-app .badge-danger { border-color: var(--st-danger-bd); color: var(--st-danger-fg); }
+.pv-app .badge-danger::before { background: var(--st-danger-fg); }
+
+/* auth */
+.pv-app.is-auth { background: var(--surface-gray-10); }
+.pv-app .glass-card { padding: 1.5rem 1.25rem; background: var(--surface-gray-9); border: 1px solid var(--outline-gray-8); border-top: 2px solid var(--ind-yellow); }
+.pv-app .auth-logo { background: var(--ind-yellow); }
+.pv-app .auth-brand { font-family: var(--font-mono); font-size: var(--text-md); letter-spacing: 0.24em; color: var(--ink-gray-1); }
+.pv-app .auth-full { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-4); }
+.pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); color: var(--ink-gray-1); font-size: var(--text-sm); }
+.pv-app .form-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
+.pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ind-yellow); background: var(--ind-yellow); color: var(--ind-ink-on-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; font-weight: var(--weight-semibold); }
+.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-8); background: transparent; color: var(--ink-gray-2); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
+.pv-app .btn-ghost { border-color: var(--outline-gray-9); color: var(--ink-gray-4); }
+.pv-app .link-btn { border: 0; background: none; color: var(--ink-gray-5); font-size: var(--text-xs); text-decoration: underline; }
+.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.4rem; border: 1px solid var(--outline-gray-7); font-family: var(--font-mono); }
+.pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-9); }
+
+/* ticket */
+.pv-app #ir-banner { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-9); }
+.pv-app #ir-banner-title { font-family: var(--font-mono); font-size: var(--text-xl); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app #ir-banner-sub { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .overview-panel { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-10); }
+.pv-app .overview-title { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ind-yellow); }
+.pv-app .overview-k { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
+.pv-app .overview-v { font-size: var(--text-sm); color: var(--ink-gray-1); }
+.pv-app .tabs-container { border-bottom: 1px solid var(--outline-gray-9); background: var(--surface-gray-10); }
+.pv-app .tab { padding: 0.45rem 0.7rem; font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); border-bottom: 2px solid transparent; cursor: pointer; }
+.pv-app .tab.active { color: var(--ind-yellow); border-bottom-color: var(--ind-yellow); }
+.pv-app .section-content { background: var(--surface-gray-10); }
+.pv-app .section-title { font-family: var(--font-mono); font-size: var(--text-sm); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-gray-1); }
+
+/* insights */
+.pv-app .insights-body { background: var(--surface-gray-10); }
+.pv-app .insights-total { font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .insights-total strong { color: var(--ind-yellow); font-size: var(--text-md); }
+.pv-app .insights-card { padding: 0.55rem 0.65rem; border: 1px solid var(--outline-gray-9); border-left: 2px solid var(--outline-gray-8); background: var(--surface-gray-9); cursor: pointer; }
+.pv-app .insights-card.active { border-left-color: var(--ind-yellow); }
+.pv-app .insights-card-n { font-family: var(--font-mono); font-size: var(--text-xl); color: var(--ink-gray-1); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-app .insights-h { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.16em; text-transform: uppercase; color: var(--ind-yellow); margin-bottom: 0.5rem; }
+.pv-app .insights-subcat { padding: 0.25rem 0.5rem; border: 1px solid var(--outline-gray-9); background: var(--surface-gray-9); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.06em; color: var(--ink-gray-2); }
+.pv-app .insights-subcat.is-others { border-style: dashed; border-color: var(--outline-gray-7); color: var(--ink-gray-4); }
+.pv-app .insights-subcat-n { color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+.pv-app .insights-mix-row { font-size: var(--text-sm); }
+.pv-app .insights-mix-n { font-family: var(--font-mono); color: var(--ind-yellow); font-variant-numeric: tabular-nums; }
+`,
+  },
+
+  {
+    key: 'c',
+    name: 'Modern SaaS light',
+    tagline: 'Soft canvas, white cards, generous spacing. The Linear / Stripe register.',
+    theme: 'light',
+    blurb: 'A light grey canvas with white cards floating on it, gentle shadows, wide corner radii and a tinted primary button. It is the visual language of every well-made product tool, which means nobody has to learn it — and it makes a form-heavy passbook feel lighter than it is.',
+    wins: [
+      'Instantly familiar. Nothing on screen asks to be learnt.',
+      'Cards separate the passbook sections clearly, which suits a nine-section form',
+      'The softest of the three on a small screen — big tap targets, nothing cramped',
+      'Ages well and looks deliberate rather than inherited',
+    ],
+    loses: [
+      'The least dense. Noticeably fewer IRs per phone screen, and this list is 412 rows.',
+      'The shadow-and-card look is everywhere, so it makes the app look like a product, not like Indrones',
+      'Two competing ideas meet here: a heavy data list wants density and a SaaS card wants air',
+    ],
+    skin: `
+.pv { background: var(--surface-gray-1); color: var(--ink-gray-9); }
+
+.pv-page { max-width: 1240px; margin: 0 auto; padding: 1.5rem 1rem 3.5rem; }
+.pv-top { padding-bottom: 0.9rem; margin-bottom: 1.5rem; border-bottom: 1px solid var(--outline-gray-1); }
+.pv-top h1 { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.pv-top > p { color: var(--ink-gray-6); font-size: var(--text-sm); }
+.pv-tab { padding: 0.3rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: 999px; background: var(--surface-base); color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-tab.is-here { background: var(--accent); border-color: var(--accent); color: var(--btn-solid-fg); }
+.pv-shot-cap b { color: var(--ink-gray-9); }
+.pv-shot-cap span { color: var(--ink-gray-5); }
+.pv-phone { border: 1px solid var(--outline-gray-1); border-radius: var(--radius-6); background: var(--surface-gray-1); box-shadow: var(--elevation-sm); }
+.pv-notes { margin-top: 1.75rem; padding-top: 1.5rem; border-top: 1px solid var(--outline-gray-1); }
+.pv-notes h2 { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-notes li { color: var(--ink-gray-7); font-size: var(--text-sm); }
+.pv-version { color: var(--ink-gray-5); font-size: var(--text-xs); }
+
+/* shell */
+.pv-app .sidebar { background: var(--surface-base); border-right: 1px solid var(--outline-gray-1); }
+.pv-app .sidebar-brand { border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .brand-mark { background: var(--accent); border-radius: var(--radius-2); }
+.pv-app .brand-text { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-app .nav-item { border-radius: var(--radius-4); color: var(--ink-gray-7); font-size: var(--text-sm); margin-bottom: 2px; cursor: pointer; }
+.pv-app .nav-item:hover { background: var(--surface-gray-1); color: var(--ink-gray-9); }
+.pv-app .nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-app .nav-icon { background: var(--surface-gray-4); border-radius: var(--radius-1); }
+.pv-app .nav-item.active .nav-icon { background: var(--accent); }
+.pv-app .nav-count { font-size: var(--text-2xs); color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
+.pv-app .topbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .topbar-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-app .bell { background: var(--surface-gray-3); border-radius: 999px; }
+.pv-app .avatar { background: var(--accent); color: var(--btn-solid-fg); border-radius: 999px; font-weight: var(--weight-medium); }
+
+/* list */
+.pv-app .list-toolbar { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .list-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+.pv-app .list-count { padding: 0.05rem 0.45rem; border-radius: 999px; background: var(--surface-gray-2); color: var(--ink-gray-7); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.pv-app .search-bar { padding: 0.5rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-gray-1); color: var(--ink-gray-9); font-size: var(--text-sm); }
+.pv-app .search-bar::placeholder { color: var(--ink-gray-5); }
+.pv-app .segment { padding: 0.25rem 0.65rem; border-radius: 999px; background: var(--surface-gray-2); color: var(--ink-gray-7); font-size: var(--text-xs); cursor: pointer; }
+.pv-app .segment.active { background: var(--accent); color: var(--btn-solid-fg); font-weight: var(--weight-medium); }
+.pv-app .segment-count { color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
+.pv-app .segment.active .segment-count { color: var(--btn-solid-fg); opacity: 0.75; }
+.pv-app .sync-status { font-size: var(--text-xs); color: var(--ink-gray-5); }
+.pv-app .ir-list { gap: 0.6rem; padding: 0.75rem 0.9rem; }
+.pv-app .ir-card { padding: 0.75rem 0.85rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); cursor: pointer; }
+.pv-app .ir-card:hover { box-shadow: var(--elevation-md); }
+.pv-app .ir-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pv-app .ir-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.pv-app .ir-assignee { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .ir-meta { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .ir-dot { color: var(--ink-gray-4); }
+.pv-app .ir-age.is-late { color: var(--ink-red-8); }
+.pv-app .prio { font-size: var(--text-2xs); letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-gray-5); }
+/* Pills, tinted from the app's semantic status tokens. Those are the layer the
+   app already maintains (tokens.css:1126-1148): bg/fg/bd per status, so a retuned
+   status colour moves all three options at once rather than just this one. */
+.pv-app .badge { display: inline-flex; align-items: center; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: var(--text-2xs); font-weight: var(--weight-medium); border: 1px solid transparent; }
+.pv-app .badge-open { background: var(--st-open-bg); color: var(--st-open-fg); border-color: var(--st-open-bd); }
+.pv-app .badge-pending { background: var(--st-paused-bg); color: var(--st-paused-fg); border-color: var(--st-paused-bd); }
+.pv-app .badge-resolved { background: var(--st-resolved-bg); color: var(--st-resolved-fg); border-color: var(--st-resolved-bd); }
+.pv-app .badge-closed { background: var(--st-closed-bg); color: var(--st-closed-fg); border-color: var(--st-closed-bd); }
+.pv-app .badge-danger { background: var(--st-danger-bg); color: var(--st-danger-fg); border-color: var(--st-danger-bd); }
+
+/* auth */
+.pv-app.is-auth { background: var(--surface-gray-1); }
+.pv-app .glass-card { padding: 1.75rem 1.5rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-6); box-shadow: var(--elevation-lg); }
+.pv-app .auth-logo { background: var(--accent); border-radius: var(--radius-3); }
+.pv-app .auth-brand { font-size: var(--text-lg); font-weight: var(--weight-semibold); }
+.pv-app .auth-full { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .auth-hint { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .form-input { padding: 0.55rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-sm); }
+.pv-app .form-label { font-size: var(--text-xs); color: var(--ink-gray-7); font-weight: var(--weight-medium); }
+.pv-app .btn { padding: 0.55rem 1rem; border: 1px solid var(--btn-solid-bg); border-radius: var(--radius-4); background: var(--btn-solid-bg); color: var(--btn-solid-fg); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
+.pv-app .btn-ghost { border-color: transparent; background: transparent; }
+.pv-app .link-btn { border: 0; background: none; color: var(--accent); font-size: var(--text-xs); }
+.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.45rem; border: 1px solid var(--outline-gray-3); border-radius: 50%; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
+.pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); }
+.pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
+
+/* ticket */
+.pv-app #ir-banner { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app #ir-banner-title { font-size: var(--text-xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.pv-app #ir-banner-sub { font-size: var(--text-xs); color: var(--ink-gray-6); }
+.pv-app .overview-panel { margin: 0.9rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); }
+.pv-app .overview-title { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.pv-app .overview-k { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-gray-5); }
+.pv-app .overview-v { font-size: var(--text-sm); color: var(--ink-gray-9); }
+.pv-app .tabs-container { background: var(--surface-base); border-bottom: 1px solid var(--outline-gray-1); }
+.pv-app .tab { padding: 0.45rem 0.75rem; border-radius: var(--radius-3); font-size: var(--text-sm); color: var(--ink-gray-6); cursor: pointer; }
+.pv-app .tab.active { background: var(--accent-soft); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-app .section-content { margin: 0.9rem; padding: 1rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); }
+.pv-app .section-title { font-size: var(--text-md); font-weight: var(--weight-semibold); }
+
+/* insights */
+.pv-app .insights-body { background: var(--surface-gray-1); }
+.pv-app .insights-total { font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-app .insights-total strong { color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card { padding: 0.75rem 0.85rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); cursor: pointer; }
+.pv-app .insights-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pv-app .insights-card-n { font-size: var(--text-2xl); font-weight: var(--weight-semibold); font-variant-numeric: tabular-nums; }
+.pv-app .insights-card-label { font-size: var(--text-2xs); color: var(--ink-gray-6); }
+.pv-app .insights-h { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-bottom: 0.6rem; }
+.pv-app .insights-subcat { padding: 0.25rem 0.6rem; border-radius: 999px; background: var(--surface-base); border: 1px solid var(--outline-gray-1); font-size: var(--text-xs); color: var(--ink-gray-8); }
+.pv-app .insights-subcat.is-others { border-style: dashed; color: var(--ink-gray-6); }
+.pv-app .insights-subcat-n { color: var(--ink-gray-5); font-variant-numeric: tabular-nums; }
+.pv-app .insights-mix-row { font-size: var(--text-sm); }
+.pv-app .insights-mix-n { font-variant-numeric: tabular-nums; color: var(--ink-gray-8); }
+`,
+  },
+];
+
+// ── emit ─────────────────────────────────────────────────────────────────────
+
+// Every scan below works on comment-free CSS. Both of the checks below describe
+// the mistakes they look for in their own comments, so scanning the raw text
+// makes each one match its own prose — a build that refuses over a bug that is
+// not in the file, which is worse than no check at all.
+const stripComments = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+const previewCss = `/* GENERATED by tools/build-ui-options.mjs — do not edit.
+   tokens.css + palette.css, verbatim, then a colour-free layout skeleton.
+   The three skins are inlined in their own pages. */\n\n`
+  + tokensCss + '\n\n' + paletteCss + '\n\n' + SKELETON;
+
+const cssHash = createHash('sha256').update(previewCss).digest('hex').slice(0, 8);
+
+const pageHead = (opt, title) => `<!doctype html>
+<html lang="en"${opt.theme === 'dark' ? ' data-theme="dark"' : ''}>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>${esc(title)}</title>
+<!-- The ?v= is a content hash, and it is load-bearing: the app's service worker
+     serves same-origin subresources stale-while-revalidate, so without it a
+     rebuilt preview.css would be answered from the cache once and the review
+     would be of the previous build. A new hash is a new URL. -->
+<link rel="stylesheet" href="preview.css?v=${cssHash}" />
+<style>\n${opt.skin}\n</style>
+</head>
+<body class="pv">
+<div class="pv-page">`;
+
+const switcher = here => `
+  <div class="pv-top">
+    <h1>I-PASSBOOK — UI option ${here.key.toUpperCase()}: ${esc(here.name)}</h1>
+    <p>${esc(here.tagline)}</p>
+    <nav class="pv-tabs">
+      <a class="pv-tab" href="index.html">All three</a>
+      ${OPTIONS.map(o => `<a class="pv-tab${o.key === here.key ? ' is-here' : ''}" href="${o.key}.html">Option ${o.key.toUpperCase()} — ${esc(o.name)}</a>`).join('\n      ')}
+    </nav>
+  </div>`;
+
+const notes = opt => `
+  <div class="pv-notes">
+    <div><h2>What it is</h2><p>${opt.blurb}</p></div>
+    <div><h2>Why you might pick it</h2><ul>${opt.wins.map(w => `<li>${w}</li>`).join('')}</ul></div>
+    <div><h2>What it costs you</h2><ul>${opt.loses.map(l => `<li>${l}</li>`).join('')}</ul></div>
+    <div><h2>The fine print</h2><ul>
+      <li>These four screens are drawn from the app's real markup, its real class names and its real colour tokens. The layout is shared between all three options — only the language changes.</li>
+      <li>They are static. Adopting one is a separate pass through the app; that pass is the expensive part, which is why you are choosing first.</li>
+      <li>Sample records are shown (IR-412 and friends). The statuses, categories and REPAIR sub-categories are the real ones.</li>
+    </ul></div>
+  </div>`;
+
+const optionPage = opt => pageHead(opt, `UI option ${opt.key.toUpperCase()} — ${opt.name}`)
+  + switcher(opt)
+  + `
+  <div class="pv-screens">
+    ${SCREENS.map(s => `
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>${esc(s.label)}</b><span>${esc(s.note)}</span></div>
+      <div class="pv-phone">${s.html()}</div>
+    </div>`).join('')}
+  </div>`
+  + notes(opt)
+  + `
+</div>
+</body>
+</html>
+`;
+
+const chooserPage = () => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>I-PASSBOOK — UI options</title>
+<link rel="stylesheet" href="preview.css?v=${cssHash}" />
+<style>
+.pv { background: var(--surface-gray-1); color: var(--ink-gray-9); }
+.pv-page { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 3.5rem; }
+.pv-pick { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.pv-card { display: flex; flex-direction: column; gap: 0.6rem; padding: 1.1rem; background: var(--surface-base); border: 1px solid var(--outline-gray-1); border-radius: var(--radius-5); box-shadow: var(--elevation-sm); text-decoration: none; color: inherit; }
+.pv-card:hover { box-shadow: var(--elevation-lg); border-color: var(--outline-elevation-2); }
+.pv-card .k { font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-5); }
+.pv-card h2 { font-size: var(--text-lg); font-weight: var(--weight-semibold); margin: 0; }
+.pv-card p { margin: 0; font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-card .go { margin-top: auto; font-size: var(--text-sm); color: var(--accent); font-weight: var(--weight-medium); }
+.pv-swatches { display: flex; gap: 0.3rem; }
+.pv-swatches span { width: 22px; height: 22px; border: 1px solid var(--outline-gray-1); }
+.pv-card-note { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--outline-gray-1); font-size: var(--text-sm); color: var(--ink-gray-7); }
+.pv-card-note h2 { font-size: var(--text-md); color: var(--ink-gray-9); }
+/* Swatch colours are the option's own surfaces and accent, so the card previews
+   the language rather than describing it. Light values here are literal because
+   the chooser page is not inside any option's theme. */
+.sw-a span:nth-child(1) { background: #ffffff; } .sw-a span:nth-child(2) { background: #f8f8f8; }
+.sw-a span:nth-child(3) { background: #e2e2e2; } .sw-a span:nth-child(4) { background: #383838; }
+.sw-b span:nth-child(1) { background: #171717; } .sw-b span:nth-child(2) { background: #383838; }
+.sw-b span:nth-child(3) { background: #ffc400; } .sw-b span:nth-child(4) { background: #f8f8f8; }
+.sw-c span:nth-child(1) { background: #ffffff; } .sw-c span:nth-child(2) { background: #f3f3f3; }
+.sw-c span:nth-child(3) { background: #ededed; } .sw-c span:nth-child(4) { background: #3b6fd4; }
+</style>
+</head>
+<body class="pv">
+<div class="pv-page">
+  <div class="pv-top" style="margin-bottom:1.25rem">
+    <h1 style="font-size:var(--text-xl);font-weight:var(--weight-semibold)">I-PASSBOOK — pick a design direction</h1>
+    <p style="color:var(--ink-gray-6);font-size:var(--text-sm);max-width:60ch">
+      Three options. Each one shows the SAME four screens — sign-in, IR list, ticket,
+      Insights — drawn from the app's real markup and its real colour tokens. The
+      layout is identical between them; only the design language changes. Open them
+      in any order; they link to each other.
+    </p>
+  </div>
+
+  <div class="pv-pick">
+    ${OPTIONS.map(o => `
+    <a class="pv-card" href="${o.key}.html">
+      <span class="k">Option ${o.key.toUpperCase()}</span>
+      <h2>${esc(o.name)}</h2>
+      <div class="pv-swatches sw-${o.key}"><span></span><span></span><span></span><span></span></div>
+      <p>${esc(o.tagline)}</p>
+      <span class="go">Open option ${o.key.toUpperCase()} →</span>
+    </a>`).join('')}
+  </div>
+
+  <div class="pv-card-note">
+    <h2>Before you pick</h2>
+    <p>
+      The app currently runs <b>two</b> design languages at once: the ERPNext Desk look
+      on the sign-in screen and the IR list, and a softer accent-tinted look on the
+      ticket, Insights and every modal. That seam — not any single screen — is the
+      main reason it reads as unfinished. All three options collapse it to one
+      language; that is the actual fix, and the colours are the easy part.
+    </p>
+    <p>
+      If it looks out of date, add a <code>?1</code> to the address and reload: the
+      app's service worker caches what it serves, and every page here carries a
+      build hash so a fresh build is a fresh address.
+    </p>
+  </div>
+</div>
+</body>
+</html>
+`;
+
+// ── what gets written ────────────────────────────────────────────────────────
+// Built in memory first, so the checks below can inspect the real bytes and so
+// `--check` can compare them against what is on disk without touching anything.
+const FILES = {
+  'preview.css': previewCss,
+  'index.html': chooserPage(),
+};
+OPTIONS.forEach(o => { FILES[o.key + '.html'] = optionPage(o); });
+
+// ── self-check ───────────────────────────────────────────────────────────────
+// The same contract the polish preview keeps: a build that produces something
+// subtly wrong should fail HERE, loudly, rather than in front of the owner.
+const problems = [];
+
+// The one that matters most. `var(--something-typo)` is not an error anywhere —
+// it silently renders as nothing, so a mistyped token produces a page that is
+// merely, invisibly wrong, and the owner would be reviewing a colour that is not
+// the colour. Every custom property referenced anywhere in the generated output
+// must be defined in the app's own tokens/palette or by a skin.
+const defined = new Set(
+  [...(tokensCss + paletteCss + OPTIONS.map(o => o.skin).join('\n')).matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)]
+    .map(m => m[1])
+);
+const referenced = new Set(
+  [...(previewCss + OPTIONS.map(o => o.skin).join('\n')).matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)]
+    .map(m => m[1])
+);
+const undefined_ = [...referenced].filter(t => !defined.has(t)).sort();
+if (undefined_.length) problems.push(`tokens used but never defined (these render as NOTHING): ${undefined_.join(', ')}`);
+
+// Existence is not enough — a token can exist and still be the WRONG KIND. The
+// app has families that are not colours: --focus-* and --elevation-* are
+// box-shadows, --text-* are font sizes, --radius-* are lengths, --weight-* are
+// numbers. Writing a shadow token into a colour property is not an error
+// anywhere; it produces an invalid declaration, which the browser drops, so the
+// element silently keeps whatever was behind it. Option B shipped four status
+// dots and one "overdue" date that way before this check existed, and no amount
+// of reading the token table would have revealed it.
+//
+// Comments are stripped FIRST. They have to be: this check's own explanation
+// names the bad pattern, and without stripping it matches the prose and refuses
+// every build — an error message about a bug that is not in the file.
+const NOT_A_COLOUR = /^--(focus|elevation|shadow|text|leading|weight|radius|font|ease|safe|header-h|list-w|content-max|bottombar-h)/;
+const COLOUR_PROP = /^(background|background-color|color|border-color|border-(top|right|bottom|left)-color|outline-color|fill|stroke|text-decoration-color|caret-color)$/;
+const kindErrors = [];
+[...(stripComments(previewCss) + '\n' + OPTIONS.map(o => stripComments(o.skin)).join('\n')).matchAll(/([-a-z]+)\s*:\s*([^;{}]*)/g)].forEach(m => {
+  const [, prop, value] = m;
+  if (!COLOUR_PROP.test(prop)) return;
+  [...value.matchAll(/var\(\s*(--[a-zA-Z0-9-]+)/g)].forEach(v => {
+    if (NOT_A_COLOUR.test(v[1])) kindErrors.push(`${prop}: var(${v[1]})`);
+  });
+});
+if (kindErrors.length) problems.push(`non-colour tokens used as colours: ${[...new Set(kindErrors)].join(', ')}`);
+
+// Option B's accent is the one colour in this whole build that is NOT already in
+// the app, so it is the one that can fail accessibility. The app measures its own
+// palettes in smoke-palette.mjs; nothing would measure this one, and "it looked
+// fine" is how a brand yellow ends up at 3:1 on dark. So measure it here, against
+// the app's real dark surface, and refuse it if it does not clear AA.
+//
+// Read from tokens.css rather than retyped: a hardcoded #171717 would keep
+// passing after someone retuned the dark theme, which is the failure this is
+// supposed to catch.
+const darkBlock = tokensCss.slice(tokensCss.indexOf('[data-theme="dark"]'));
+const darkSurface = (darkBlock.match(/--surface-gray-10:\s*(#[0-9a-fA-F]{3,8})/) || [])[1];
+if (!darkSurface) problems.push('could not read --surface-gray-10 out of the dark theme to measure Option B against');
+const yellow = (OPTIONS.find(o => o.key === 'b').skin.match(/--ind-yellow:\s*(#[0-9a-fA-F]{3,8})/) || [])[1];
+if (!yellow) problems.push('Option B declares no --ind-yellow to measure');
+
+const lum = hex => {
+  const h = hex.length === 4 ? hex.slice(1).split('').map(c => c + c).join('') : hex.slice(1, 7);
+  const [r, g, b] = [0, 2, 4].map(i => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const ratio = (a, b) => {
+  const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p);
+  return (x + 0.05) / (y + 0.05);
+};
+let accentRatio = 0;
+if (darkSurface && yellow) {
+  accentRatio = ratio(yellow, darkSurface);
+  if (accentRatio < 4.5) problems.push(`Option B's accent ${yellow} is only ${accentRatio.toFixed(2)}:1 on ${darkSurface} — below AA (4.5:1)`);
+}
+
+if (missing.length) problems.push(`class names the app does not use: ${missing.join(', ')}`);
+if (missingIds.length) problems.push(`ids the app does not use: ${missingIds.join(', ')}`);
+
+const written = Object.keys(FILES);
+written.filter(f => f.endsWith('.html')).forEach(f => {
+  const html = FILES[f];
+  if (!html.includes(`preview.css?v=${cssHash}`)) problems.push(`${f} does not link the hashed stylesheet`);
+  if (/<script/i.test(html)) problems.push(`${f} carries a script — these pages must stay inert`);
+  if (/https?:\/\//.test(html.replace(/https?:\/\/www\.w3\.org/g, ''))) problems.push(`${f} reaches out to a third party`);
+});
+// A skin that leaked into another option would make two of the three look alike
+// and the review worthless. So: walk each skin at brace depth 0 and require every
+// selector there to be scoped to .pv. A depth-0 walk rather than a line-by-line
+// regex, because a rule's declaration block legitimately spans several lines and
+// a regex looking for "a line that starts with a letter" trips over exactly that
+// (it flagged Option B's own `.pv {` continuation before this was written).
+function topLevelSelectors(css) {
+  const src = stripComments(css);
+  const out = [];
+  let sel = '', depth = 0;
+  for (const ch of src) {
+    if (ch === '{') { if (depth === 0) out.push(sel.trim()); depth++; sel = ''; }
+    else if (ch === '}') { depth = Math.max(0, depth - 1); sel = ''; }
+    else if (depth === 0) sel += ch;
+  }
+  return out.filter(Boolean);
+}
+// Every top-level selector must live in this page's own `pv` namespace — either
+// the option root (`.pv`, `.pv-app …`) or the review chrome (`.pv-page`, `.pv-tab`).
+// Anything else could escape into the app, or into another option's page.
+OPTIONS.forEach(o => {
+  const bare = topLevelSelectors(o.skin).filter(s => !s.startsWith('@') && !/^\.pv\b/.test(s));
+  if (bare.length) problems.push(`option ${o.key} has unscoped rules: ${bare.slice(0, 3).join(' | ')}`);
+  if (!/^\.pv\b/m.test(o.skin)) problems.push(`option ${o.key} never scopes to .pv`);
+});
+if (problems.length) {
+  console.error('\nBUILD REFUSED:');
+  problems.forEach(p => console.error('  - ' + p));
+  process.exit(1);
+}
+
+// ── write, or verify that what is committed is current ───────────────────────
+// `--check` exists because these pages are COMMITTED and SERVED: the deployed
+// copies are a build artifact in git, so editing tokens.css or palette.css and
+// forgetting to rebuild leaves a live preview advertising colours the app no
+// longer has — and the owner would be choosing a design against a stale board.
+// tools/smoke-preview.mjs runs this mode, so the drift fails the test suite
+// rather than waiting to be noticed.
+const OUT = join(ROOT, 'preview');
+const stale = [];
+if (process.argv.includes('--check')) {
+  for (const [name, content] of Object.entries(FILES)) {
+    let onDisk = null;
+    try { onDisk = fs.readFileSync(join(OUT, name), 'utf8'); } catch { /* missing counts as stale */ }
+    if (onDisk !== content) stale.push(name);
+  }
+  if (stale.length) {
+    console.error('\npreview/ IS STALE: ' + stale.join(', '));
+    console.error('The committed review pages no longer match what this builder produces.');
+    console.error('Run:  node tools/build-ui-options.mjs');
+    process.exit(1);
+  }
+  console.log(`preview/ is current with the app (tokens ${cssHash})`);
+  process.exit(0);
+}
+
+fs.mkdirSync(OUT, { recursive: true });
+for (const [name, content] of Object.entries(FILES)) fs.writeFileSync(join(OUT, name), content);
+
+const nPages = written.filter(f => f.endsWith('.html')).length;
+console.log(`wrote preview/  (${nPages} pages + preview.css?v=${cssHash})`);
+console.log(`  ${(previewCss.length / 1024).toFixed(1)} KB shared css, tokens and palette verbatim from the app`);
+if (accentRatio) console.log(`  Option B accent ${yellow} on ${darkSurface}: ${accentRatio.toFixed(2)}:1  (AA needs 4.5, AAA needs 7)`);
+OPTIONS.forEach(o => console.log(`  preview/${o.key}.html  ${o.name}`));

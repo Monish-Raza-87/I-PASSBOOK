@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v55';
+const APP_VERSION = 'v56';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -2824,35 +2824,53 @@ function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeSta
 // styles: applySectionAccessGating selects `.tab:not([style*="display: none"])`.
 //
 //   desktop (≥1024px) : list visible, detail/insights beside it when open
-//   mobile            : list and detail are separate full screens
+//   mobile            : the open pane is a full screen of its own
 //
 // The list fold is decided HERE rather than by a stylesheet rule, because an
 // inline `display` beats any rule and this function is the one place allowed to
 // write it. Folding the list must never strand the user on an empty index screen,
-// which is why the fold only ever applies while a detail pane is open.
+// which is why the fold only ever applies while a pane that OWNS the screen is
+// open — see `full` below.
 //
 // `detailView.style.display` is only ever WRITTEN here, never read back. The
 // sibling-pane arrangement is still required, for a different reason: tools/
 // smoke-ui.mjs and tools/smoke-boot.mjs pin #ir-activity inside #detail-view, so
 // that pane's display is a truthful "an IR is open" flag and nothing else may
 // live in it.
+//
+// It also marks which nav item is current, at the end. That is the same question
+// ("what is on screen?") and every view function already routes through here, so
+// it needs no second call site — which is what stopped the highlight drifting the
+// moment a new entry point was added.
 function renderLayout() {
   const desktop  = mqDesktop.matches;
   const detail   = currentView === 'detail';
   const insights = currentView === 'insights';
-  // On mobile the list and the detail are separate full screens, so an open
-  // detail always hides the list. On desktop they sit side by side, so the list
-  // hides only when the user asked for the room — and only while a detail is
-  // actually open.
-  const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
+  // A pane that OWNS the screen on a phone. Below lg, #panes is a COLUMN, so the
+  // list and the open pane are separate full screens and the open one hides the
+  // list. On desktop they sit side by side, so the list hides only when the user
+  // asked for the room.
+  //
+  // `insights` belongs in here, and leaving it out was a real bug: on a phone both
+  // panes are flex:1 with a zero basis, so the IR list took the TOP HALF of the
+  // screen — toolbar, search, both segment strips and #sync-status — with the
+  // dashboard squeezed into the strip underneath it. "Keep the list beside the
+  // dashboard" is true on a laptop and impossible in a column.
+  //
+  // Folding it is only safe because the SAME change gives Insights the back
+  // button below: that is what stops the fold stranding anyone, which is the
+  // worry the old comment here was trying to answer.
+  const full       = detail || insights;
+  const listHidden = full && (!desktop || storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
   // The Insights dashboard is a SIBLING pane, not a panel inside the detail one:
-  // it keeps the IR list beside it on desktop (the mobile back button is
-  // display:none there, so hiding the list would strand the user on a screen with
-  // no way back to an IR).
+  // that pane's display is the app's only "an IR is open" flag and nothing else
+  // may live in it.
   if (insightsView) insightsView.style.display = insights ? 'flex' : 'none';
-  backBtn.style.display    = (!desktop && detail) ? 'block' : 'none';
+  // The detail's back button goes to the list; the dashboard's does the same.
+  // Both are phone-only — on desktop the list never leaves the screen.
+  backBtn.style.display    = (!desktop && full) ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
   // Suppresses #detail-placeholder's "No IR selected" empty state, which shows
   // whenever body.view-detail is absent — including on the dashboard, where an
@@ -2865,6 +2883,30 @@ function renderLayout() {
       card.classList.toggle('is-selected', detail && card.dataset.id === currentIR?.irNumber);
     });
   }
+
+  // Which section the user is in. A ticket belongs to the IRs item — it is a row
+  // of that list, not a section of its own.
+  markActiveNav(insights ? 'insights' : 'tickets');
+}
+
+// The nav never showed which section you were in: `.nav-item.active` has a rule
+// in base.css and NOTHING ever applied it, so tapping Insights produced no
+// feedback anywhere on screen and read as a dead tap — which is half of "even
+// after clicking on insight tile it is not opening". Two items, because the two
+// other nav entries are not sections: Legacy Records opens a modal, and User
+// Access opens one too.
+//
+// `aria-current` rides along with the class: the highlight is colour, and colour
+// alone is not an announcement.
+function markActiveNav(name) {
+  [['nav-tickets', 'tickets'], ['nav-insights', 'insights']].forEach(([id, route]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const on = route === name;
+    el.classList.toggle('active', on);
+    if (on) el.setAttribute('aria-current', 'page');
+    else el.removeAttribute('aria-current');
+  });
 }
 
 (function watchDesktop() {

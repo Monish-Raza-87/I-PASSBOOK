@@ -405,12 +405,14 @@ r.ok('the detail pane is what governs the back button, not the fold',
   /backBtn\.style\.display\s*=/.test(appCode));
 
 r.head('the Insights pane is a third sibling, not a panel inside the detail');
-// Three claims. The dashboard must NOT be reached by opening the detail pane (the
+// Four claims. The dashboard must NOT be reached by opening the detail pane (the
 // pane's display is the app's only "an IR is open" flag, and #ir-activity is pinned
-// inside it), it must keep the IR list beside it on desktop — the mobile back
-// button is display:none there, so hiding the list would strand the user — and
-// "No IR selected" must not show over it, which it otherwise would because that
-// placeholder is keyed on body.view-detail being ABSENT.
+// inside it), it must keep the IR list beside it on DESKTOP, it must NOT keep it on
+// a phone (below lg #panes is a column, so "beside" is impossible: both panes were
+// flex:1 with a zero basis and the list took the top half of the screen with the
+// dashboard squeezed underneath — the owner's "there is a tile above it
+// permanently"), and "No IR selected" must not show over it, which it otherwise
+// would because that placeholder is keyed on body.view-detail being ABSENT.
 r.ok('the insights pane is visible at view = \'insights\', and the detail is not', (() => {
   T.view = 'insights';
   T.renderLayout();
@@ -429,7 +431,59 @@ r.ok('the IR list stays beside it on desktop', (() => {
   D.setFlag(D.LIST_KEY, false);
   D.view = 'insights';
   D.renderLayout();
-  return dById.get('index-view').style.display !== 'none';
+  const beside = dById.get('index-view').style.display !== 'none';
+  // Desktop has no back affordance at all — the list never leaves the screen, so
+  // there is nothing to go back to. (`#back-btn` is display:none !important there
+  // as well; this is the JS half of the same claim.)
+  const noBack = dById.get('back-btn').style.display === 'none';
+  return beside && noBack;
+})());
+r.ok('on a PHONE the dashboard takes the screen and the list gets out of the way', (() => {
+  // The default harness viewport is a phone. Both panes were flex:1 in a column,
+  // so without this the list is the top half of the screen — permanently, which is
+  // exactly what the owner reported.
+  T.view = 'insights';
+  T.renderLayout();
+  const listGone = byId.get('index-view').style.display === 'none';
+  const paneOn   = byId.get('insights-view').style.display === 'flex';
+  // ...and it is only safe to fold the list because the SAME change hands the
+  // dashboard a back button. Without this the fold strands the user, which is the
+  // worry the original comment here was trying to answer.
+  const back = byId.get('back-btn').style.display === 'block';
+  T.view = 'index';
+  T.renderLayout();
+  const listBack = byId.get('index-view').style.display !== 'none';
+  return listGone && paneOn && back && listBack;
+})());
+r.ok('...and the dashboard can be left again, on the phone', (() => {
+  // The back button is wired to goIndex(), so "shown" has to mean "goes somewhere".
+  return /backBtn\.addEventListener\('click'[\s\S]{0,80}goIndex\(\)/.test(appCode);
+})());
+r.ok('every view marks its nav item, so a tap is never a silent no-op', (() => {
+  // `.nav-item.active` had a rule in base.css and no code ever applied it: tapping
+  // Insights changed nothing visible anywhere, which reads as a dead tap.
+  const onInsights = (() => {
+    T.view = 'insights'; T.renderLayout();
+    const el = byId.get('nav-insights');
+    const other = byId.get('nav-tickets');
+    return el.classList.contains('active') &&
+           el.getAttribute('aria-current') === 'page' &&
+           !other.classList.contains('active') &&
+           other.getAttribute('aria-current') === null;
+  })();
+  const onIndex = (() => {
+    T.view = 'index'; T.renderLayout();
+    return byId.get('nav-tickets').classList.contains('active') &&
+           !byId.get('nav-insights').classList.contains('active');
+  })();
+  // A ticket is a row of the IR list, not a section of its own.
+  const onTicket = (() => {
+    T.view = 'detail'; T.renderLayout();
+    return byId.get('nav-tickets').classList.contains('active') &&
+           !byId.get('nav-insights').classList.contains('active');
+  })();
+  T.view = 'index'; T.renderLayout();
+  return onInsights && onIndex && onTicket;
 })());
 r.ok('the empty state is suppressed over it, in both directions', (() => {
   T.view = 'insights';
@@ -442,8 +496,13 @@ r.ok('the empty state is suppressed over it, in both directions', (() => {
   T.renderLayout();
   return suppressed && !T.bodyClasses.contains('view-insights');
 })());
-r.ok('the back button is still the detail pane\'s alone',
-  /backBtn\.style\.display\s*=\s*\(!desktop && detail\)/.test(appCode),
+r.ok('the back button answers to the pane that OWNS the screen, not the detail alone',
+  // It used to be `(!desktop && detail)`. That was right while the dashboard kept
+  // the list on a phone; once the list folds, a phone needs a way back off the
+  // dashboard too. Desktop is still excluded — `#back-btn` is display:none
+  // !important there, because the list never leaves the screen.
+  /backBtn\.style\.display\s*=\s*\(!desktop && full\)/.test(appCode) &&
+  /const full\s*=\s*detail \|\| insights;/.test(appCode),
   (appCode.match(/backBtn\.style\.display[^\n]*/) || [''])[0]);
 r.ok('the pane is marked in the static shell with a non-sec id and no section class',
   /<div id="insights-view">/.test(indexCode) && !/insights-view[\s\S]{0,200}section-content/.test(indexCode));

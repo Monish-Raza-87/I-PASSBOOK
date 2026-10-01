@@ -41,10 +41,10 @@ const TARGET = 'gh-pages'
 // benefit. It is eight files plus one stylesheet, listed here one by one, which is
 // also what makes deleting the whole directory later a two-line change.
 //
-// `plan.html` is the build plan itself — a document the owner reads on his phone,
-// not part of the app. It carries its own styles and loads nothing at all, so it
-// cannot drift when the app's tokens change, and like `preview/` it stays out of
-// sw.js's SHELL.
+// `plan.html` and `inspector.html` are documents the owner reads on his phone,
+// not part of the app — the build plan, and the Inspector's rule book he ticks
+// off. Each carries its own styles and loads nothing at all, so neither can drift
+// when the app's tokens change, and like `preview/` both stay out of sw.js's SHELL.
 const SERVED = [
   'app.js',
   'base.css',
@@ -52,6 +52,7 @@ const SERVED = [
   'dataflash.js',
   'desk.css',
   'index.html',
+  'inspector.html',
   'manifest.json',
   'palette.css',
   'plan.html',

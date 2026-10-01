@@ -45,6 +45,7 @@ const KEYS = Object.keys(PAGE);
 const chooser = read('../preview/index.html');
 const PARTS = read('../preview/parts.html');
 const EMPTY = read('../preview/empty.html');
+const BOARD = read('../preview/board.html');
 const css = read('../preview/preview.css');
 const tokens = read('../tokens.css');
 const palette = read('../palette.css');
@@ -104,7 +105,7 @@ r.ok('...so the skeleton really is only layout and the review chrome',
 
 // ── 4. It is inert and self-contained ───────────────────────────────────────
 r.head('the pages are inert: no script, no third party, no network');
-Object.entries({ ...PAGE, index: chooser, parts: PARTS, empty: EMPTY }).forEach(([k, h]) => {
+Object.entries({ ...PAGE, index: chooser, parts: PARTS, empty: EMPTY, board: BOARD }).forEach(([k, h]) => {
   r.ok(`${k}: no script`, !/<script/i.test(h));
   const external = (h.match(/https?:\/\/[^\s"')]+/g) || []).filter(u => !u.startsWith('https://www.w3.org'));
   r.ok(`${k}: reaches no third party`, external.length === 0, external);
@@ -160,7 +161,7 @@ const sheetPhone = phoneBlockOf(css);
 r.ok('the shared sheet has a phone block worth protecting', !!sheetPhone);
 const phoneDecls = sheetPhone ? declsIn(sheetPhone.body) : new Map();
 r.ok('...and it really does carry phone rules', phoneDecls.size > 0, [...phoneDecls.keys()]);
-const SKIN_HTML = { ...PAGE, parts: PARTS, empty: EMPTY };
+const SKIN_HTML = { ...PAGE, parts: PARTS, empty: EMPTY, board: BOARD };
 const skinOf = k => stripCssComments((SKIN_HTML[k].match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '');
 // The skin with its own phone block cut out: what it says at every width.
 const widePartOf = k => {
@@ -172,7 +173,7 @@ const collisions = [];
 // The parts board is a skin too — and a heavier one, because it inlines option
 // D's skin whole. That makes it the most likely place for a rule to slip out and
 // beat a phone rule nobody was looking at.
-[...KEYS, 'parts', 'empty'].forEach(k => {
+[...KEYS, 'parts', 'empty', 'board'].forEach(k => {
   const wide = widePartOf(k), own = phoneBlockOf(skinOf(k));
   const ownDecls = own ? declsIn(own.body) : new Map();
   const wideRules = declsIn(wide.replace(/@media[^{]*\{/g, ''));
@@ -399,9 +400,167 @@ r.ok('...and the licence for it is in the repo, beside the files',
   fs.existsSync(url('../vendor/illustrations/LICENSE.md')) &&
   /CC0/.test(read('../vendor/illustrations/LICENSE.md')));
 
-// ── 9. The owner can reach it ───────────────────────────────────────────────
+// ── 9. The board ────────────────────────────────────────────────────────────
+// This board is asked to recommend a WORKFLOW RULE, and the whole reason it can
+// is that the app already stores a workflow stage. That makes every status name,
+// every bucket and every count on the page a claim about the app rather than a
+// drawing of one — so the assertions here are provenance, not taste: the stages
+// must be the app's fourteen, the buckets its four, the section letters its six,
+// and the numbers must add up the way the page says they do.
+r.head('the board draws the app\'s real workflow, not an invented one');
+const boardSkin = (BOARD.match(/<style>([\s\S]*?)<\/style>/) || [])[1] || '';
+r.ok('board: carries option D\'s skin verbatim, then its own layer on top',
+  boardSkin.startsWith(dSkin) && boardSkin.length > dSkin.length,
+  `d=${dSkin.length} board=${boardSkin.length}`);
+r.ok('board: links the SAME hashed stylesheet as the four options',
+  (BOARD.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1] === (PAGE.a.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1]);
+r.ok('board: renders none of the four option screens',
+  !/class="pv-phone"/.test(BOARD) && !/class="pv-screens"/.test(BOARD));
+r.ok('board: carries the five headed sections it promises',
+  ['today', 'stages', 'moves', 'place', 'limits'].every(id => BOARD.includes(`id="${id}"`)));
+r.ok('board: and a jump list that reaches all five',
+  ['#today', '#stages', '#moves', '#place', '#limits'].every(h => BOARD.includes(`href="${h}"`)));
+
+// The fourteen stages. Read out of app.js rather than typed here, so a status
+// added to the app without a column to hold it fails the build instead of
+// rendering as a card in no column at all.
+const statusValues = [...((appJs.match(/const IR_STATUS_VALUES\s*=\s*\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([^']+)'/g)].map(m => m[1]);
+r.ok('board: the app really does store fourteen workflow stages', statusValues.length === 14, statusValues.join(' '));
+// The mapping table's first column, which is where every stage on the board is
+// named. Every cell is read back and required to be one of the app's own.
+const mappedStages = [...BOARD.matchAll(/<tr><td>([^<]+)<\/td>/g)].map(m => m[1]);
+r.ok('board: every stage in the mapping table is one of the app\'s own',
+  mappedStages.length === 14 && mappedStages.every(s => statusValues.includes(s)),
+  mappedStages.filter(s => !statusValues.includes(s)));
+// Set equality, not order: the board groups the mapping by column, which is a
+// different order from the app's own list. A status the app can store and the
+// board cannot place is exactly the silent hole this catches.
+r.ok('...and the board places all fourteen, so none can fall off it unnoticed',
+  mappedStages.length === statusValues.length &&
+  [...mappedStages].sort().join('|') === [...statusValues].sort().join('|'));
+
+// The four buckets, read from STATUS_CATEGORIES' own keys.
+const statusCats = (appJs.match(/const STATUS_CATEGORIES\s*=\s*\{([\s\S]*?)\n\};/) || [])[1] || '';
+const bucketKeys = [...statusCats.matchAll(/^\s*([a-z]+):\s*\[/gm)].map(m => m[1]);
+r.ok('board: the four columns are statusCategory\'s four buckets',
+  bucketKeys.join(',') === 'open,paused,resolved,closed', bucketKeys.join(','));
+r.ok('...and the card that claims to be in one really is a stage from that bucket',
+  bucketKeys.every(k => new RegExp(`<span class="pv-kb-col-title">${k[0].toUpperCase() + k.slice(1)}</span>`).test(BOARD)));
+
+// The count the board prints in a column head is not a decoration: the page says
+// the seven stage columns add up to the Open tile and no more. A board whose
+// totals drifted would have the owner approve a workflow against arithmetic that
+// is wrong, which is the one error nobody reading a board can see.
+const countIn = (html, title) => {
+  const m = html.match(new RegExp(`<span class="pv-kb-col-title">${title}</span><span class="pv-kb-col-count">(\\d+)</span>`));
+  return m ? Number(m[1]) : null;
+};
+const todayHtml = BOARD.slice(BOARD.indexOf('id="today"'), BOARD.indexOf('id="stages"'));
+const stagesHtml = BOARD.slice(BOARD.indexOf('id="stages"'), BOARD.indexOf('id="moves"'));
+const bucketCounts = ['Open', 'Paused', 'Resolved', 'Closed'].map(t => countIn(todayHtml, t));
+r.ok('board: the four buckets are all drawn with a count', bucketCounts.every(n => n !== null), bucketCounts.join(' '));
+// The totals the app's own segment strip prints on the list screen — the same
+// five numbers the preview shows there. Compared rather than trusted, because
+// "these are the counts from the list screen" is a claim the page makes in prose.
+const stripCounts = [...(PAGE.d.match(/<div class="segments">([\s\S]*?)<\/div>/) || [])[1].matchAll(/<span class="segment(?: active)?">[^<]*<span class="segment-count">(\d+)<\/span>/g)].map(m => Number(m[1]));
+r.ok('board: the bucket counts are the ones the list screen prints, not new ones',
+  bucketCounts.join(',') === stripCounts.slice(1).join(','),
+  `board=${bucketCounts.join(',')} strip=${stripCounts.join(',')}`);
+r.ok('...and they still add up to the total on the strip',
+  bucketCounts.reduce((a, b) => a + b, 0) === stripCounts[0],
+  `${bucketCounts.reduce((a, b) => a + b, 0)} vs ${stripCounts[0]}`);
+// The claim in CAVEAT_STAGES, made checkable: the stage board is a zoom into one
+// bucket. If these two numbers ever disagree the page is lying in a caveat, which
+// is worse than lying on a card.
+const stageCols = [...stagesHtml.matchAll(/<span class="pv-kb-col-count">(\d+)<\/span>/g)].map(m => Number(m[1]));
+r.ok('board: the stage columns are seven, and they sum to the Open bucket',
+  stageCols.length === 7 && stageCols.reduce((a, b) => a + b, 0) === bucketCounts[0],
+  `${stageCols.join('+')}=${stageCols.reduce((a, b) => a + b, 0)} vs Open=${bucketCounts[0]}`);
+
+// The six section letters and names, checked against SECTION_IDS / SECTION_SHORT
+// rather than against the literal list in the builder — that literal is the one
+// thing on this page that can rot silently, and this is what stops it.
+// SECTION_SHORT carries NINE keys, not six: A, H and I are still in the table,
+// named "Overview (formerly Section A)", "PDI (now part of G)" and "Dispatch (now
+// part of G)". They are retired tabs kept for old links, so a check that asked
+// for six would fail on the app being right — and one that asked the board to
+// print all nine would have it draw three sections the ticket has not had for
+// months. The six are SECTION_IDS, already read in section 7 above; the board is
+// held to those and only those.
+const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z])':\s*'([^']+)'/g)].map(m => [m[1].replace('sec-', '').toUpperCase(), m[2]]));
+const liveSections = sectionIds.map(id => id.replace('sec-', '').toUpperCase());
+r.ok('board: the app has nine tab names but only six are live sections',
+  Object.keys(shortNames).length === 9 && liveSections.length === 6,
+  `names=${Object.keys(shortNames).join(',')} live=${liveSections.join(',')}`);
+const mappedLetters = [...BOARD.matchAll(/<td><b>([A-G])<\/b> /g)].map(m => m[1]);
+r.ok('...and every section column on the board is one of the six',
+  mappedLetters.length > 0 && mappedLetters.every(l => liveSections.includes(l)), [...new Set(mappedLetters)].join(','));
+r.ok('...and every one of the six is reachable from a stage',
+  liveSections.every(l => mappedLetters.includes(l)), liveSections.join(','));
+// ...and nothing the app has RETIRED is drawn as if it were current.
+r.ok('...and no retired section is drawn as a live column',
+  !mappedLetters.some(l => !liveSections.includes(l)) && !/formerly Section A/.test(BOARD));
+r.ok('...and the board prints each section under the app\'s own name for it',
+  liveSections.every(l => shortNames[l] && BOARD.includes(shortNames[l])),
+  liveSections.filter(l => !shortNames[l] || !BOARD.includes(shortNames[l])));
+
+// The chip. A board draws every count there is, so it needs all six fills — the
+// parts board carries only .p4 because it only ever draws 4/6. Copied from
+// views.css:1786-1791, and compared against it declaration by declaration.
+const chipWid = n => (views.match(new RegExp(`\\.ir-progress\\.p${n} \\.ir-progress-bar::after\\s*\\{\\s*width:\\s*([0-9.]+%)`)) || [])[1];
+const boardWid = n => (boardSkin.match(new RegExp(`\\.pv-kb-card \\.ir-progress\\.p${n} \\.ir-progress-bar::after\\s*\\{\\s*width:\\s*([0-9.]+%)`)) || [])[1];
+r.ok('board: all six progress fills are copies of views.css, not recollections',
+  [1, 2, 3, 4, 5, 6].every(n => chipWid(n) && chipWid(n) === boardWid(n)),
+  [1, 2, 3, 4, 5, 6].map(n => `p${n}: views=${chipWid(n)} board=${boardWid(n)}`).join(' | '));
+// A card that draws a count the board cannot fill would render as an empty track
+// with a number beside it — a silent, plausible-looking wrong.
+const drawnCounts = [...BOARD.matchAll(/class="ir-progress p(\d)/g)].map(m => Number(m[1]));
+r.ok('...and no card draws a count outside 0-6',
+  drawnCounts.length > 0 && drawnCounts.every(n => n >= 0 && n <= 6), [...new Set(drawnCounts)].sort().join(','));
+// p0 is real and deliberate: progressChip() emits `p${done}` and done can be 0,
+// and NEITHER sheet defines a .p0 rule — so a 0/6 card draws an empty track with
+// "0/6" beside it, which is exactly the app's own behaviour. Asserting the
+// absence on both sides is what stops the board inventing a fill the app does not
+// have, and it is why the 0 the check above allows is not a hole in it.
+r.ok('...and p0 is left empty in both sheets, as the app leaves it',
+  !/\.ir-progress\.p0\b/.test(views) && !/\.ir-progress\.p0\b/.test(boardSkin) &&
+  drawnCounts.includes(0), `board draws p0: ${drawnCounts.includes(0)}`);
+// ...which only means an EMPTY bar if something sets the base width. views.css
+// does (:1776, `width: 0`); D's skin then overrides it with 66.666% inside
+// `.pv-app`, and a board card is not inside `.pv-app` — so without the base
+// copied here a 0/6 chip computes to `width: auto`, which in a 30px
+// overflow-hidden track is a FULL bar. Valid CSS, no error, every test green,
+// and the board would have shown "0/6" beside a bar that looked finished.
+const chipBase = sheet => (sheet.match(/\.ir-progress-bar::after\s*\{[^}]*?width:\s*([0-9.]+%?|0)\s*;/s) || [])[1];
+r.ok('board: the empty base the app relies on is copied, not inherited by luck',
+  chipBase(views) === '0' && chipBase(boardSkin) === '0',
+  `views=${chipBase(views)} board=${chipBase(boardSkin)}`);
+
+// A board is wide by nature, and the one rule that cannot bend is that the page
+// body never scrolls sideways. So the board must carry its own scroll frame —
+// and, because a scrollable region with no keyboard route in it is mouse-only,
+// an accessible name and a tab stop on that frame.
+r.ok('board: the board scrolls inside its own frame, never the page',
+  /\.pv-kb-board\s*\{[^}]*overflow-x:\s*auto/.test(boardSkin) &&
+  /\.pv-kb-board\s*\{[^}]*overscroll-behavior-x:\s*contain/.test(boardSkin));
+// The bug this catches was found by rendering, not by reading. Board A's columns
+// were written straight into a .pv-demo-pad with no scroll frame around them, so
+// they became BLOCK children of a block: four full-width columns stacked
+// vertically, each a "column" only in the source. The page still validated, every
+// assertion here passed, and the geometry probe is what showed it — one column
+// 449px wide in a board whose columns are 240px.
+r.ok('board: no column is a bare child of a demo pad — every one is inside a frame',
+  !/pv-demo-pad">\s*<div class="pv-kb-col/.test(BOARD) &&
+  (BOARD.match(/class="pv-kb-board"/g) || []).length === 5,
+  `${(BOARD.match(/class="pv-kb-board"/g) || []).length} frames`);
+r.ok('...and every board on the page is named and reachable by keyboard',
+  (BOARD.match(/class="pv-kb-board"/g) || []).length === (BOARD.match(/class="pv-kb-board"[^>]*tabindex="0"/g) || []).length &&
+  (BOARD.match(/class="pv-kb-board"[^>]*aria-label="[^"]+"/g) || []).length === (BOARD.match(/class="pv-kb-board"/g) || []).length,
+  `${(BOARD.match(/class="pv-kb-board"/g) || []).length} boards`);
+
+// ── 10. The owner can reach it ──────────────────────────────────────────────
 r.head('every preview file is served, and none of it is in the app\'s shell');
-const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/preview.css'];
+const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/board.html', 'preview/preview.css'];
 PREVIEW_FILES.forEach(f => r.ok(`deploy serves ${f}`, deployJs.includes(`'${f}'`)));
 // The negative half matters more: the shell is precached on every install, so a
 // mock page in there would be downloaded by every user who never opens it.

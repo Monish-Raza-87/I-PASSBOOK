@@ -20,11 +20,21 @@
 //     deliberate act — see the note on syncIRStateAfterSectionSave().
 
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
 const html = read('../index.html');
 const viewsCss = read('../views.css');
+
+// The language table, evaluated rather than regexed out of the source: its own
+// values contain escaped apostrophes, and a regex that has to know that is a test
+// that breaks the day someone writes one.
+const i18nCtx = { console: { warn() {} } };
+i18nCtx.window = i18nCtx;
+vm.createContext(i18nCtx);
+vm.runInContext(read('../i18n.js'), i18nCtx, { filename: 'i18n.js' });
+const i18nKeys = Object.keys(i18nCtx.I18N.STRINGS);
 
 let fails = 0;
 const ok = (name, cond, extra) => {
@@ -77,12 +87,15 @@ ok('...and the letter is prefixed, so the heading reads like the tab',
 
 // ── The two end columns exist because some stages name no section ────────────
 head('the stages that name no section still get a column each');
+// The headings come from the language table rather than from a literal here, so
+// the assertion checks the KEY the column reads and the stages it owns — the words
+// themselves are smoke-i18n.mjs's business, and only its business.
 ok('a start column holds the un-started stages',
-  /title:\s*'Not started'[^}]*stages:\s*\[\s*'Open'\s*,\s*'Remote Support'\s*\]/.test(boardCols));
+  /title:\s*t\('board\.notStarted'\)[^}]*stages:\s*\[\s*'Open'\s*,\s*'Remote Support'\s*\]/.test(boardCols));
 ok('a paused column holds Hold',
-  /title:\s*'Paused'[^}]*stages:\s*\[\s*'Hold'\s*\]/.test(boardCols));
+  /title:\s*t\('board\.paused'\)[^}]*stages:\s*\[\s*'Hold'\s*\]/.test(boardCols));
 ok('a finished column holds the closed stages, and is drawn quiet',
-  /title:\s*'Finished'[^}]*stages:\s*\[[^\]]*'Close'[^\]]*\][^}]*quiet:\s*true/.test(boardCols));
+  /title:\s*t\('board\.finished'\)[^}]*stages:\s*\[[^\]]*'Close'[^\]]*\][^}]*quiet:\s*true/.test(boardCols));
 
 // ── A column's count is the truth even when its drawing is capped ────────────
 head('a capped column still counts everything it holds');
@@ -92,7 +105,8 @@ ok('...and the header prints the FULL count, not the drawn one',
 ok('...and the capped cards are the ones actually drawn',
   /const shown = rows\.slice\(0, BOARD_CAP\)/.test(appJs) && /\$\{shown\.map\(boardCard\)/.test(appJs));
 ok('...and what was left behind is stated, with a way back to the list',
-  /more > 0 \? `<button type="button" class="kb-more">\+\$\{more\} more — see list<\/button>`/.test(appJs));
+  /more > 0 \? `<button type="button" class="kb-more">\$\{escHtml\(t\('board\.more', \{ n: more \}\)\)\}<\/button>`/.test(appJs),
+  (appJs.match(/[^\n]*kb-more[^\n]*/) || [''])[0]);
 
 // ── The switch re-draws the SAME rows, and is CSS-driven ─────────────────────
 head('List | Board is a switch over one filtered set of rows');
@@ -197,6 +211,23 @@ ok('the card reuses the shared completion chip, not a second renderer',
 ok('and it escapes every value it prints, as the list row does',
   /escHtml\(ir\.droneId/.test((appJs.match(/function boardCard\(ir\)[\s\S]*?\n\}/) || [''])[0]) &&
   /escJsAttr\(ir\.irNumber\)/.test((appJs.match(/function boardCard\(ir\)[\s\S]*?\n\}/) || [''])[0]));
+
+// ── Every word the board shows comes out of the language table ───────────────
+// The board was built with its wording written out. Moving that wording into
+// i18n.js is worth nothing if one heading is left behind as a literal — that one
+// heading is the screen a second language cannot translate, and it is invisible
+// until someone reads that language and finds a stray English word.
+head('the board\'s own words come from the language table');
+ok('none of the board\'s new strings is left as a bare literal',
+  !/'(Not started|Paused|Finished|Unassigned|IR board|List|Board)'/.test(boardCode),
+  (boardCode.match(/'(Not started|Paused|Finished|Unassigned|IR board|List|Board)'/) || []));
+const boardKeys = [...boardCode.matchAll(/\bt\('([^']+)'/g)].map(m => m[1]);
+ok('...and every one of them is a key the table really holds',
+  boardKeys.length >= 3 && boardKeys.every(k => i18nKeys.includes(k)), boardKeys);
+ok('the empty states are shared with the list, so the two views say the same words',
+  /allIRs\.length \? t\('list\.emptyFiltered'\) : t\('board\.emptyNone'\)/.test(appJs));
+ok('the move offer is a table string with its slots filled, not a concatenation',
+  /t\('move\.to', \{ column: next\.label \}\)/.test(appJs) && /t\('move\.hint', \{ stage: next\.stage \}\)/.test(appJs));
 
 // The board is placed ABOVE the polish block: nothing may be appended after it.
 ok('the board styles sit before the POLISH block, not after it',

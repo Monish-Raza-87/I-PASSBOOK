@@ -29,6 +29,7 @@
 
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import vm from 'node:vm';
 import { makeReporter } from './harness.mjs';
 
 const r = makeReporter();
@@ -260,18 +261,28 @@ r.ok('empty: and a jump list that reaches all six',
   ['#today', '#ours', '#doodles', '#palette', '#others', '#licences'].every(h => EMPTY.includes(`href="${h}"`)));
 
 // The board may not invent an empty state. Every sentence it renders is read back
-// out of app.js and required to be there, WITH the emoji the app really renders —
-// a board that showed a friendlier wording, or a mark the app does not draw,
-// would have the owner approve a picture for a screen that does not exist.
+// out of the APP — app.js plus the language table it now resolves its wording
+// through — and required to be there, WITH the emoji the app really renders. A
+// board that showed a friendlier wording, or a mark the app does not draw, would
+// have the owner approve a picture for a screen that does not exist.
 const appJs = read('../app.js');
+const i18nCtx = { console: { warn() {} } };
+i18nCtx.window = i18nCtx;
+vm.createContext(i18nCtx);
+vm.runInContext(read('../i18n.js'), i18nCtx, { filename: 'i18n.js' });
+const STRINGS = i18nCtx.I18N.STRINGS;
 const realStates = [
-  ['No IRs match this filter.', '\u{1F50D}'],
-  ['No IRs found. Create one via the customer form.', '\u{1F4ED}'],
-  ['The flight-log reader did not load. Reload the app and try again.', null],
+  [STRINGS['list.emptyFiltered'], '\u{1F50D}', 'list.emptyFiltered'],
+  [STRINGS['list.emptyNone'], '\u{1F4ED}', 'list.emptyNone'],
+  ['The flight-log reader did not load. Reload the app and try again.', null, null],
 ];
-realStates.forEach(([text, mark]) => {
+realStates.forEach(([text, mark, key]) => {
+  // The sentence must really be what a user reads, not merely present somewhere: a
+  // string in the table that no code asks for is a screen the app never shows, and
+  // a preview that copies it would be reviewing a screen that does not exist.
+  const asked = key ? new RegExp(`t\\('${key.replace('.', '\\.')}'\\)`).test(appJs) : appJs.includes(text);
   r.ok(`empty: "${text.slice(0, 34)}…" is the app's own wording`,
-    appJs.includes(text) && EMPTY.includes(text));
+    asked && EMPTY.includes(text), { asked, inEmpty: EMPTY.includes(text) });
   if (mark) {
     r.ok(`...and the app really draws it with ${mark}, so the board shows the same`,
       new RegExp(`<span>${mark}</span>`).test(appJs) && EMPTY.includes(mark));

@@ -32,6 +32,22 @@ function paintVersion() {
 // index.html already exist. No DOMContentLoaded wait, no boot order to get wrong.
 paintVersion();
 
+// ─── THE LANGUAGE LAYER ──────────────────────────────────────────────────────
+// i18n.js, loaded just before this file, owns the English strings; these are only
+// the local handles on it.
+//
+// The fallbacks are what make a missing i18n.js survivable rather than fatal: t()
+// then returns the KEY, which is visibly wrong rather than an empty control that
+// nobody can account for. That path is for the flaky-network case only — a missing
+// or orphaned string is a failing test in smoke-i18n.mjs, not something a user
+// should ever meet.
+//
+// Only English ships today, so every one of these returns exactly the words that
+// were here before. The point is that a second language is later a data file.
+const t          = (key, vars) => (window.I18N ? window.I18N.t(key, vars) : key);
+const tStatus    = v => (window.I18N ? window.I18N.status(v) : v);
+const tPriority  = v => (window.I18N ? window.I18N.priority(v) : v);
+
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
 const CONFIG = {
@@ -1386,6 +1402,12 @@ function markIntroDelivered() {
 }
 
 window.addEventListener('load', () => {
+  // The language layer paints the static chrome FIRST, above everything else in
+  // this handler. It only ever rewrites text that is already correct, so the order
+  // is not cosmetic: doing it here means no other code in this handler has to know
+  // the layer exists, and a screen that is never re-rendered later is still right.
+  if (window.I18N) window.I18N.applyStatic();
+
   // Check for local file protocol (login + backend calls won't work)
   if (window.location.protocol === 'file:') {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
@@ -3904,6 +3926,28 @@ function showIndex() {
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
+// ─── A SITE, ON A MAP, WITHOUT A MAP ─────────────────────────────────────────
+// The owner's decision on maps, in his words: "Text + a link out". So this builds
+// a URL and stops. No tiles, no API key, no billing, no vendor SDK — and, the part
+// that matters for a tool holding customer data, NOTHING about the site reaches
+// Google until a person actually taps the link. The value is never fetched from
+// here, only put into an href.
+//
+// Pure, and deliberately so: it reads a string, returns a URL, and touches no DOM,
+// no clock and no network. That is what lets a render call it safely, and what lets
+// the field it feeds stay live as someone types.
+//
+// ONE URL shape, because Google's Maps URLs API accepts both a place name and a
+// "lat,lng" pair through the same `query=`: "12.9716,77.5946" is a place, and so is
+// "Plot 4, Whitefield, Bengaluru". A blank value returns null rather than a link —
+// an empty `q=` opens Maps on the whole world, which reads as "we know where this
+// is" when we plainly do not.
+function mapsLink(value) {
+  const q = String(value == null ? '' : value).trim();
+  if (!q) return null;
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+}
+
 // ─── INSIGHTS ────────────────────────────────────────────────────────────────
 // Counts over the IR list, sliced by the variables the desk actually asks about.
 // Everything here is client-side over `allIRs` + `irState`, both of which are
@@ -5068,8 +5112,8 @@ function renderIRList(records) {
   renderCategorySegments();
   if (!records || records.length === 0) {
     irList.innerHTML = allIRs.length
-      ? '<div class="empty-state"><span>🔍</span>No IRs match this filter.</div>'
-      : '<div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div>';
+      ? '<div class="empty-state"><span>🔍</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
+      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>';
     updateListCounts(0);
     return;
   }
@@ -5180,15 +5224,15 @@ function wantProgress(ir, prog) {
 // The headings are the app's OWN short names (SECTION_SHORT), so the column a card
 // sits in and the tab it lives on say the same words.
 const BOARD_COLUMNS = [
-  { key: 'start', title: 'Not started',                 stages: ['Open', 'Remote Support'] },
-  { key: 'hold',  title: 'Paused',                      stages: ['Hold'] },
+  { key: 'start', title: t('board.notStarted'),         stages: ['Open', 'Remote Support'] },
+  { key: 'hold',  title: t('board.paused'),             stages: ['Hold'] },
   { key: 'B', title: 'B · ' + SECTION_SHORT['sec-b'],   stages: ['Inward'] },
   { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Visual Inspection'] },
   { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['QC Investigation'] },
   { key: 'E', title: 'E · ' + SECTION_SHORT['sec-e'],   stages: ['Production'] },
   { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['QC', 'Flight Test'] },
   { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI', 'Approval'] },
-  { key: 'done', title: 'Finished',                     stages: ['Delivered', 'Close', 'Other'], quiet: true },
+  { key: 'done', title: t('board.finished'),            stages: ['Delivered', 'Close', 'Other'], quiet: true },
 ];
 
 // Which column a status belongs in. Pure: same input, same answer, no DOM, no
@@ -5262,8 +5306,8 @@ function paintBoardMoveOffer(irNumber) {
       btn.dataset.section = secId;
       holder.appendChild(btn);
     }
-    btn.innerHTML = `Move to ${escHtml(next.label)} →`;
-    btn.title = `Sets the status to ${next.stage} and starts its clock`;
+    btn.innerHTML = escHtml(t('move.to', { column: next.label }));
+    btn.title = t('move.hint', { stage: next.stage });
     btn.onclick = () => moveOnByHand(irNumber, next.stage);
   });
 }
@@ -5315,7 +5359,7 @@ function boardCard(ir) {
         ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
       </div>
       <div class="kb-card-foot">
-        <span class="ir-assignee${owner ? '' : ' is-unassigned'}">${escHtml(owner || 'Unassigned')}</span>
+        <span class="ir-assignee${owner ? '' : ' is-unassigned'}">${escHtml(owner || t('common.unassigned'))}</span>
         ${showProg ? progressChip(prog) : ''}
       </div>
     </div>`;
@@ -5331,7 +5375,7 @@ function renderBoard(records) {
     // Deliberately no glyph and no emoji: the app has one icon source, and a
     // literal emoji here would be a second one nothing can restyle.
     irBoard.innerHTML = '<div class="empty-state">' +
-      (allIRs.length ? 'No IRs match this filter.' : 'No IRs found.') +
+      (allIRs.length ? t('list.emptyFiltered') : t('board.emptyNone')) +
       '</div>';
     updateListCounts(0);
     return;
@@ -5353,7 +5397,7 @@ function renderBoard(records) {
       <div class="kb-col-sub">${escHtml(col.stages.join(' · '))}</div>
       <div class="kb-col-body">
         ${shown.map(boardCard).join('')}
-        ${more > 0 ? `<button type="button" class="kb-more">+${more} more — see list</button>` : ''}
+        ${more > 0 ? `<button type="button" class="kb-more">${escHtml(t('board.more', { n: more }))}</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -6127,16 +6171,16 @@ function renderBannerMeta() {
   const age  = irAge(ir);
   const late = irOverdue(ir);
   bannerPills.innerHTML =
-    `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
-    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
+    `<span class="${getBadgeClass(ir.status)}">${escHtml(tStatus(ir.status) || 'Open')}</span>` +
+    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(tPriority(ir.priority))}</span>` : '') +
     (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
     (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
     (age ? `<span class="meta-pill${late ? ' meta-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '') +
-    (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : '') +
+    (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">${escHtml(t('common.overdue'))}</span>` : '') +
     (wantProgress(ir, prog) ? progressChip(prog) : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
-      : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
+      : `<span class="meta-pill meta-unassigned">${escHtml(t('common.unassigned'))}</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
   // The move offer lives in a section's close row, not in this banner, but it is
@@ -8235,13 +8279,13 @@ function setAutosaveNote(unitId, state) {
   if (!el) return;
   el.dataset.state = state;
   if (state === 'saved') {
-    el.innerHTML = iconSvg('check-circle') + '<span>Saved</span>';
+    el.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(t('common.saved')) + '</span>';
   } else if (state === 'saving') {
-    el.textContent = 'Saving…';
+    el.textContent = t('common.saving');
   } else if (state === 'failed') {
-    el.textContent = 'Not saved — press again';
+    el.textContent = t('common.notSaved');
   } else {
-    el.textContent = 'Not saved — retrying';
+    el.textContent = t('common.retrying');
   }
 }
 
@@ -8300,7 +8344,7 @@ async function closeSection(sectionId, irNumber) {
 // looks finished everywhere it is visible.
 function markSectionClosed(sectionId) {
   const btn = document.getElementById('close-' + sectionId);
-  if (btn) { btn.classList.add('is-closed'); btn.innerHTML = iconSvg('check-circle') + '<span>Section closed</span>'; }
+  if (btn) { btn.classList.add('is-closed'); btn.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(t('section.closed')) + '</span>'; }
   const tab = document.querySelector(`.tab[data-section="${sectionId}"]`);
   if (tab) tab.classList.add('is-closed');
 }
@@ -8311,7 +8355,7 @@ function markSectionReopened(sectionId) {
   if (tab) tab.classList.remove('is-closed');
 }
 function closeLabel(sectionId) {
-  return `Mark Section ${sectionId.replace('sec-', '').toUpperCase()} completed`;
+  return t('section.close', { letter: sectionId.replace('sec-', '').toUpperCase() });
 }
 // Which sections this IR has already closed, painted from app-owned state. Called
 // wherever the IR's state is applied so the button is right on open, not only

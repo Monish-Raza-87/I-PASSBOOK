@@ -33,6 +33,7 @@ const SHELL = [
   './desk.css',      // the ERPNext Desk prototype; must load LAST
   './vendor/pdf-lib.min.js',
   './dataflash.js',   // the flight-log reader; load order must match index.html
+  './i18n.js',        // the English language layer; must be in place before app.js
   './app.js',
   './manifest.json',
   './assets/icon-192.png',

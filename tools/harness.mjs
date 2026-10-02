@@ -167,6 +167,13 @@ export function loadApp(bindings = '', opts = {}) {
   // library here gives the app one built from the sandbox's own intrinsics, which is
   // what a browser has. Used by smoke-export.mjs for the vendored pdf-lib.
   if (opts.preload) runInContext(opts.preload, ctx, { filename: 'preload.js' });
+  // The language layer, evaluated in the same order index.html loads it: BEFORE
+  // app.js, which reads window.t as it evaluates its own top-level constants —
+  // BOARD_COLUMNS' headings among them. Without this, every suite that renders
+  // would assert against raw keys like 'board.notStarted', which is a test of the
+  // harness rather than of the app. Evaluated rather than handed in through
+  // `globals` for the same realm reason as `preload` above.
+  runInContext(fs.readFileSync(new URL('../i18n.js', import.meta.url), 'utf8'), ctx, { filename: 'i18n.js' });
   runInContext(src, ctx, { filename: 'app.js' });
   return opts.capture ? { T: ctx.__T, byId } : ctx.__T;
 }

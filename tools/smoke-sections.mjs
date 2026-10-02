@@ -20,12 +20,22 @@
 // loop rather than by a spot check that happens to name the wrong example.
 
 import fs from 'node:fs';
+import vm from 'node:vm';
 import { loadApp, makeReporter } from './harness.mjs';
 
 const r = makeReporter();
 const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html  = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const css   = fs.readFileSync(new URL('../views.css', import.meta.url), 'utf8');
+
+// The language table, evaluated the way the browser and the harness evaluate it,
+// so an assertion about wording asks the same question the app asks.
+const i18nJs = fs.readFileSync(new URL('../i18n.js', import.meta.url), 'utf8');
+const i18nCtx = { console: { warn() {} } };
+i18nCtx.window = i18nCtx;
+vm.createContext(i18nCtx);
+vm.runInContext(i18nJs, i18nCtx, { filename: 'i18n.js' });
+const STRINGS = i18nCtx.I18N.STRINGS;
 
 const T = loadApp(`
   SECTION_IDS, SECTION_LABELS, SECTION_SHORT, SECTIONS, FIELD_SECTION_INDEX,
@@ -274,9 +284,17 @@ r.ok('a save landing while another is in flight re-arms instead of giving up',
 
 // Closing is a deliberate act, so nothing retries it — which means a failed close
 // must not borrow the word "retrying".
+//
+// The wording itself moved into the language table, so it is resolved from there
+// rather than pattern-matched out of app.js. That is a STRONGER check than the
+// literal one it replaces: it now proves the code asks the table for the failed
+// wording AND that the table answers with words that do not say "retrying".
 r.ok('a failed close has its own wording, not the save-retry wording',
   /setAutosaveNote\(sectionId, 'failed'\)/.test(appJs) &&
-  /Not saved — press again/.test(appJs) &&
+  /t\('common\.notSaved'\)/.test(appJs) &&
+  /Not saved — press again/.test(i18nJs) &&
+  !/retry|retrying/i.test(STRINGS['common.notSaved']) &&
+  /retrying/i.test(STRINGS['common.retrying']) &&
   /\.autosave-note\[data-state="failed"\]/.test(css),
   (appJs.match(/[^\n]*'failed'[^\n]*/) || [''])[0]);
 

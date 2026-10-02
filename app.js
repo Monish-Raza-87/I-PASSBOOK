@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v57';
+const APP_VERSION = 'v58';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1074,7 +1074,14 @@ async function loadIRState() {
   });
   irStateSyncedAt = new Date();
   applyIRStateToAllIRs();
-  if (currentView === 'detail' && currentIR) renderBannerMeta();
+  if (currentView === 'detail' && currentIR) {
+    renderBannerMeta();
+    // `done` lives in this store, and it arrives on its own slower read — so a
+    // section can already be on screen (built by buildSectionForms) before the
+    // closed state is known. Painting here too is what stops a closed section
+    // from looking open on a cold open.
+    paintClosedSections(currentIR.irNumber);
+  }
   // Re-render only once the list has actually arrived. This runs alongside the
   // first fetchIRs(), and rendering an empty list here would replace the boot
   // skeletons with "0 total" for a frame.
@@ -5501,8 +5508,12 @@ async function openPassbook(irNumber) {
   const legacyBtn = document.getElementById('ir-legacy-btn');
   if (legacy && legacyBtn) {
     legacyBtn.style.display = '';
+    // The legacy workbook is restricted, so there is no embed to open any more —
+    // see openLegacyRestrictedNotice. The button stays because the record still
+    // exists and is still reachable; what changed is that it is no longer shown
+    // inside this app.
     const hasNewData = currentSectionData && Object.keys(currentSectionData).length > 0;
-    if (!hasNewData) openLegacyModal(legacy.embedUrl, legacy.label, legacy.openUrl);
+    if (!hasNewData) openLegacyRestrictedNotice(legacy.label || irNumber, CONFIG.LEGACY_SHEET_ID);
   } else if (legacyBtn) {
     legacyBtn.style.display = 'none';
   }
@@ -6176,10 +6187,60 @@ function closeLegacyModal() {
 // link-shared, so this needs NO Google sign-in, NO token, NO backend call and
 // therefore NO sign-in pop-ups. A fallback link opens it directly in Sheets.
 function openLegacyWorkbook() {
-  const id = CONFIG.LEGACY_SHEET_ID;
-  const embedUrl = `https://docs.google.com/spreadsheets/d/${id}/preview?rm=minimal`;
-  const openUrl  = `https://docs.google.com/spreadsheets/d/${id}/edit`;
-  openLegacyModal(embedUrl, 'All pre-app records · switch tabs at the bottom', openUrl);
+  openLegacyRestrictedNotice('All pre-app records', CONFIG.LEGACY_SHEET_ID);
+}
+
+// The legacy workbook was RESTRICTED on 2 October 2026, at the owner's instruction.
+//
+// It had been link-shared because this button embedded it live — and link-sharing
+// is per FILE, not per tab, so every tab in that workbook was readable by anyone
+// holding the address, and the address is written in app.js, which lives in a
+// public repository. Restricting it was the only way to close that, and the cost
+// the owner accepted is exactly this: the embedded view goes dark until Phase 0
+// renders the legacy records from the app's own backend.
+//
+// So this says what happened rather than showing a Google sign-in wall inside a
+// frame and letting people conclude the app is broken. The direct link still works
+// for anyone whose Google account has been granted access to the file.
+function openLegacyRestrictedNotice(label, sheetId) {
+  const openUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
+
+  const existing = document.getElementById('legacy-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'legacy-modal';
+  modal.innerHTML = `
+    <div class="legacy-card legacy-card-notice">
+      <div class="legacy-head">
+        <div>
+          <div class="legacy-title">Legacy I-PASSBOOK</div>
+          <div class="legacy-sub">${escHtml(label || '')} · no longer embedded</div>
+        </div>
+        <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
+      </div>
+      <div class="legacy-notice">
+        <p><strong>This view was switched off on 2 October 2026, on purpose.</strong></p>
+        <p>
+          The workbook used to be embedded right here, and to make that work it had to stay
+          link-shared — which meant every tab in it could be read by anyone who had the
+          address, without signing in. It is now restricted, and only people who have been
+          granted access to the file can open it.
+        </p>
+        <p>
+          The records are not lost and nothing has been deleted. They will come back inside
+          this app, read-only, as part of the same work that removes the app's last
+          dependency on the Sheet.
+        </p>
+        <a href="${openUrl}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>
+        <p class="legacy-notice-note">
+          That link only opens for a Google account that has been given access to the file.
+        </p>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
 }
 
 // Back button (mobile only — the desktop split pane keeps the list on screen).
@@ -6224,7 +6285,7 @@ if (irHistoryBtn) irHistoryBtn.addEventListener('click', () => openHistoryModal(
 const irLegacyBtn = document.getElementById('ir-legacy-btn');
 if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
   const l = legacyMap[currentIR?.irNumber];
-  if (l) openLegacyModal(l.embedUrl, l.label, l.openUrl);
+  if (l) openLegacyRestrictedNotice(l.label || currentIR?.irNumber, CONFIG.LEGACY_SHEET_ID);
 });
 // Home-screen "Legacy I-PASSBOOK" button — opens the whole old workbook read-only
 const legacyWorkbookBtn = document.getElementById('legacy-workbook-btn');
@@ -6255,6 +6316,34 @@ document.getElementById('sections-wrapper').addEventListener('change', e => {
   const sec = e.target.closest('.section-content');
   if (sec) { markSectionDirty(sec.id); saveDraft(sec.id); }
 });
+
+// ─── FLUSH POINTS ─────────────────────────────────────────────────────────────
+// The moments a change would otherwise be lost, and the reason auto-save is safe
+// on a phone: leaving a field, the tab going to the background, and the page being
+// hidden or closed all push immediately instead of waiting out the 1500 ms pause.
+//
+// `focusout` rather than `blur` because blur does not bubble out of the wrapper,
+// and the listener is on the wrapper rather than on every field because the fields
+// are rebuilt from scratch on every IR open.
+//
+// None of this is awaited or awaited-on-exit: a page being torn down cannot wait
+// for a fetch. The localStorage draft is the guarantee that survives that; these
+// are only about getting the entry to the server sooner.
+document.getElementById('sections-wrapper').addEventListener('focusout', e => {
+  const sec = e.target.closest('.section-content');
+  if (sec && _dirtySections.has(sec.id)) {
+    // Replace the pending pause with an immediate push. Clearing the timer first
+    // would otherwise let it fire a second, identical save a second later — which
+    // the snapshot check would skip, but only after a pointless DOM read.
+    clearTimeout(_autosaveTimers[sec.id]);
+    delete _autosaveTimers[sec.id];
+    autoSaveUnit(sec.id);
+  }
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') flushDirtyUnits();
+});
+window.addEventListener('pagehide', flushDirtyUnits);
 
 // The Overview is outside #sections-wrapper (index.html explains why), so it needs
 // its own listeners. It has no draft by design, which is exactly why it must feed
@@ -6428,11 +6517,25 @@ function buildSectionForms(irNumber) {
     });
   });
 
-  // Wire save buttons
+  // Wire the one remaining button per section. There is no Save button any more:
+  // the auto-save scheduler runs from markSectionDirty(), which the input listener
+  // already calls on every keystroke, so nothing needs wiring for it.
+  //
+  // The Close button carries the section id as its ARGUMENT rather than reading it
+  // back out of the DOM, because `close-sec-b` is the one place the id appears and
+  // deriving it from the element id would silently break the day a section is
+  // renamed.
   Object.keys(SECTIONS).forEach(secId => {
-    const btn = document.getElementById('save-' + secId);
-    if (btn) btn.onclick = () => saveSection(secId, irNumber);
+    const btn = document.getElementById('close-' + secId);
+    if (btn) btn.onclick = () => closeSection(secId, irNumber);
+    // A freshly built form holds exactly what is stored, so the honest starting
+    // state of the indicator is "Saved" — and if this IR has already closed the
+    // section, the button says so before any click in this session.
+    setAutosaveNote(secId, 'saved');
+    delete _autosaveSnapshots[secId];
+    delete _autosaveFailed[secId];
   });
+  paintClosedSections(irNumber);
 
   // Wire the per-section export buttons. Exporting is a READ, so these are wired
   // for every user and exempted from the view-only disable below.
@@ -6502,15 +6605,17 @@ function applySectionAccessGating() {
       if (firstVisible) { firstVisible.classList.add('active'); const fp = document.getElementById(firstVisible.dataset.section); if (fp) fp.classList.add('active'); }
     }
 
-    // Save buttons (top + bottom) + D PDF download
-    ['save-' + secId, 'save-' + secId + '-top'].forEach(bid => {
-      const b = document.getElementById(bid);
-      if (!b) return;
-      b.disabled = !edit;
-      b.style.opacity = edit ? '' : '0.5';
-      b.style.cursor = edit ? '' : 'not-allowed';
-      b.title = edit ? '' : 'You have view-only access to this section';
-    });
+    // The Close button is now the ONLY write control in a section, so it is what
+    // the per-section edit grant has to gate. It used to be Save; the grant did not
+    // change, the control that carries it did — and a view-only user must not be
+    // able to close a section any more than they could save one.
+    const closeBtn = document.getElementById('close-' + secId);
+    if (closeBtn) {
+      closeBtn.disabled = !edit;
+      closeBtn.style.opacity = edit ? '' : '0.5';
+      closeBtn.style.cursor = edit ? '' : 'not-allowed';
+      closeBtn.title = edit ? '' : 'You have view-only access to this section';
+    }
 
     // View-only → disable every editable control in the pane (locked intake
     // fields are already readonly; this catches the editable ones).
@@ -7771,6 +7876,216 @@ function discardAllDrafts() {
   showToast('Drafts discarded — saved data restored');
 }
 
+// ─── AUTO-SAVE ────────────────────────────────────────────────────────────────
+// The Save button is gone. Every change is recorded as it is made, and the only
+// remaining button is the one that CLOSES a section.
+//
+// Two timers, deliberately different lengths, because the two writes cost
+// different things:
+//
+//   400ms  → the localStorage draft (existing, unchanged). Free, local, and the
+//            reason a locked phone or a killed tab cannot lose a sentence.
+//   1500ms → a real backend save. Longer, because the Drive store costs per
+//            OPERATION rather than per byte ([[store-round-trip-cost]]), and
+//            short enough that the app is normally already saved by the time you
+//            reach for the next field.
+//
+// The snapshot check is what keeps this cheap AND keeps the audit trail honest.
+// A save that would write exactly what is already stored is not sent at all, so
+// it produces no request and no audit row.
+//
+// WHAT AUTO-SAVE DELIBERATELY DOES NOT DO: mark the section done. `done[]` used to
+// be appended by every save, which quietly made "done" mean "somebody touched
+// this". It is now written only by closeSection, which is the one moment a section
+// is actually finished — and that is what finally makes the 4/6 chip on the list
+// card mean something.
+const AUTOSAVE_PAUSE_MS = 1500;
+const AUTOSAVE_RETRY_MS = 10000;   // after a failure, and it keeps retrying
+const _autosaveTimers    = Object.create(null);
+const _autosaveSnapshots = Object.create(null);   // sectionId → JSON of last saved fields
+const _autosaveFailed    = Object.create(null);   // sectionId → true while unsaved
+
+function scheduleAutoSave(unitId) {
+  if (!isTrackedUnit(unitId)) return;
+  // The Overview keeps its own Save button in this pass. It is a two-field ticket
+  // header rather than a section, it is gated on Triage rather than on a section
+  // grant, and auto-saving it is a separate, smaller change. Returning here leaves
+  // it exactly as it was rather than half-converted.
+  if (unitId === OVERVIEW_KEY) return;
+  clearTimeout(_autosaveTimers[unitId]);
+  _autosaveTimers[unitId] = setTimeout(() => {
+    delete _autosaveTimers[unitId];
+    autoSaveUnit(unitId);
+  }, AUTOSAVE_PAUSE_MS);
+}
+
+// A flush happens at the moments a change would otherwise be lost: the field
+// losing focus, the tab going to the background, and the page being hidden or
+// closed. It is deliberately NOT awaited anywhere — the localStorage draft is the
+// guarantee, and these are only about getting the entry to the server sooner.
+function flushDirtyUnits() {
+  Object.keys(_autosaveTimers).forEach(id => {
+    clearTimeout(_autosaveTimers[id]);
+    delete _autosaveTimers[id];
+  });
+  Array.from(_dirtySections).forEach(id => autoSaveUnit(id));
+}
+
+async function autoSaveUnit(unitId) {
+  const irNumber = currentIR?.irNumber;
+  if (!irNumber) return;
+  // A save is already on its way. Anything typed AFTER that request was built is
+  // not in it, so the timer is re-armed instead of dropped — returning outright
+  // would leave the newest keystrokes unsent until the next one happened to come.
+  if (_savesInFlight.has(unitId)) { scheduleAutoSave(unitId); return; }
+  if (!_dirtySections.has(unitId)) return;   // nothing changed since it last saved
+
+  // A keystroke that put the SAME value back is not a change. The dirty flag is set
+  // by any input event, including one that modifies nothing, so without this check
+  // every cursor visit to a field would post a body identical to what is already
+  // stored — and the backend writes a "saved" marker row per human save, which
+  // would turn the audit trail into a keystroke log.
+  const collected = collectSectionValues(unitId);
+  const snapshot  = JSON.stringify(collected.fieldValues);
+  if (_autosaveSnapshots[unitId] === snapshot && !_autosaveFailed[unitId]) {
+    clearDraft(unitId);
+    refreshDraftBanner();
+    _dirtySections.delete(unitId);
+    updateDirtyIndicators();
+    setAutosaveNote(unitId, 'saved');
+    return;
+  }
+
+  setAutosaveNote(unitId, 'saving');
+  _savesInFlight.add(unitId);
+  try {
+    const saved = await postSectionSave(unitId, irNumber, { withFiles: true, collected });
+    _autosaveSnapshots[unitId] = JSON.stringify(saved || {});
+    delete _autosaveFailed[unitId];
+    clearDraft(unitId);
+    refreshDraftBanner();
+    _dirtySections.delete(unitId);
+    updateDirtyIndicators();
+    setAutosaveNote(unitId, 'saved');
+    if (unitId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
+    refreshEvidenceLinksAfterSave(unitId, irNumber);
+    loadActivityLog(irNumber);
+  } catch (err) {
+    // NOT silent, and NOT final. The entry is still in the draft and the section
+    // is still marked dirty, so the retry below has something to send.
+    _autosaveFailed[unitId] = true;
+    setAutosaveNote(unitId, 'error');
+    clearTimeout(_autosaveTimers[unitId]);
+    _autosaveTimers[unitId] = setTimeout(() => {
+      delete _autosaveTimers[unitId];
+      autoSaveUnit(unitId);
+    }, AUTOSAVE_RETRY_MS);
+  } finally {
+    _savesInFlight.delete(unitId);
+  }
+}
+
+// The one place that decides whether the section's change has reached the server.
+// It never says "Saved" when the last attempt failed — a false Saved loses work
+// and destroys trust in every other indicator in the app.
+//
+// The glyph is the app's own inline SVG rather than a literal tick, for the same
+// reason every other glyph in this app is: there is ONE icon source, and a literal
+// emoji in a string is a second one that no theme can restyle. The wording carries
+// the meaning on its own if the icon ever fails to load.
+function setAutosaveNote(unitId, state) {
+  const el = document.getElementById('autosave-' + unitId);
+  if (!el) return;
+  el.dataset.state = state;
+  if (state === 'saved') {
+    el.innerHTML = iconSvg('check-circle') + '<span>Saved</span>';
+  } else if (state === 'saving') {
+    el.textContent = 'Saving…';
+  } else if (state === 'failed') {
+    el.textContent = 'Not saved — press again';
+  } else {
+    el.textContent = 'Not saved — retrying';
+  }
+}
+
+// ─── CLOSING A SECTION ────────────────────────────────────────────────────────
+// The one remaining button, and the only thing in the app that appends to
+// `done[]`. Closing is the gate the Inspector speaks at: it is the moment a
+// section is declared finished, which is why it is the only moment worth
+// auditing as an event and the only moment the trackers move.
+async function closeSection(sectionId, irNumber) {
+  const section = SECTIONS[sectionId];
+  if (!section || !irNumber) return;
+  // A close posted while the section's auto-save is still in flight would race it:
+  // two writes, and the close's diff computed against whatever the first one had
+  // already stored. The user is told rather than left wondering why the tap did
+  // nothing.
+  if (_savesInFlight.has(sectionId)) { showToast('Still saving — try again in a moment.'); return; }
+  _savesInFlight.add(sectionId);
+
+  setAutosaveNote(sectionId, 'saving');
+  try {
+    // ALWAYS posts, even when nothing is dirty. Closing is a deliberate act and it
+    // is the only moment worth recording as an event, so the backend is asked to
+    // write its marker row here — which is what puts "closed at 14:20 by X" on the
+    // timeline. Skipping the post on a clean section would make the close
+    // invisible, which is the opposite of the point.
+    //
+    // Sending the current values at the same time is not redundant: closing a
+    // section that still holds unsent typing would otherwise record the close
+    // against a stale body.
+    const saved = await postSectionSave(sectionId, irNumber, { withFiles: true, mode: 'close' });
+    _autosaveSnapshots[sectionId] = JSON.stringify(saved || {});
+    delete _autosaveFailed[sectionId];
+    clearDraft(sectionId);
+    refreshDraftBanner();
+    _dirtySections.delete(sectionId);
+    updateDirtyIndicators();
+    if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
+    refreshEvidenceLinksAfterSave(sectionId, irNumber);
+    setAutosaveNote(sectionId, 'saved');
+    await syncIRStateAfterSectionSave(sectionId, irNumber);
+    markSectionClosed(sectionId);
+    loadActivityLog(irNumber);
+    showToast(`Section ${sectionId.replace('sec-', '').toUpperCase()} closed.`);
+  } catch (err) {
+    // NOT 'error', which reads "retrying" — nothing retries a close, because closing
+    // is a deliberate act and the app will not declare a section finished on the
+    // user's behalf. So it says what actually happened and what to do about it.
+    setAutosaveNote(sectionId, 'failed');
+    showToast('Could not close the section: ' + err.message + ' — your entries are kept as a draft.');
+  } finally {
+    _savesInFlight.delete(sectionId);
+  }
+}
+
+// Paint the closed state on the button and the tab, so a section that is finished
+// looks finished everywhere it is visible.
+function markSectionClosed(sectionId) {
+  const btn = document.getElementById('close-' + sectionId);
+  if (btn) { btn.classList.add('is-closed'); btn.innerHTML = iconSvg('check-circle') + '<span>Section closed</span>'; }
+  const tab = document.querySelector(`.tab[data-section="${sectionId}"]`);
+  if (tab) tab.classList.add('is-closed');
+}
+function markSectionReopened(sectionId) {
+  const btn = document.getElementById('close-' + sectionId);
+  if (btn) { btn.classList.remove('is-closed'); btn.textContent = closeLabel(sectionId); }
+  const tab = document.querySelector(`.tab[data-section="${sectionId}"]`);
+  if (tab) tab.classList.remove('is-closed');
+}
+function closeLabel(sectionId) {
+  return `Mark Section ${sectionId.replace('sec-', '').toUpperCase()} completed`;
+}
+// Which sections this IR has already closed, painted from app-owned state. Called
+// wherever the IR's state is applied so the button is right on open, not only
+// after a click in this session.
+function paintClosedSections(irNumber) {
+  const row = irState[irNumber] || {};
+  const done = Array.isArray(row.done) ? row.done : [];
+  SECTION_IDS.forEach(secId => { done.includes(secId) ? markSectionClosed(secId) : markSectionReopened(secId); });
+}
+
+
 // ─── UNSAVED-CHANGE TRACKING ─────────────────────────────────────────────────
 // Which sections hold typing that has not been saved yet.
 //
@@ -7796,6 +8111,11 @@ function isTrackedUnit(unitId) {
 
 function markSectionDirty(unitId) {
   if (!isTrackedUnit(unitId)) return;      // the read-only 📋 Report tab has no save
+  // Scheduled BEFORE the early return below, and that placement is the point: the
+  // return fires on every keystroke after the first, so a schedule placed after it
+  // would never be pushed out by continued typing and the save would land in the
+  // middle of a sentence.
+  scheduleAutoSave(unitId);
   if (_dirtySections.has(unitId)) return;
   _dirtySections.add(unitId);
   updateDirtyIndicators();
@@ -7835,7 +8155,7 @@ function confirmLeaveIR() {
   return confirm(
     'You have unsaved changes in ' + what + '.\n\n' +
     'Nothing you typed is lost — it is kept as a draft on this device and put back ' +
-    'when you open this IR again. But it is not recorded until you press Save.\n\n' +
+    'when you open this IR again. It has not reached the server yet.\n\n' +
     'Leave anyway?'
   );
 }
@@ -7845,111 +8165,138 @@ function confirmLeaveIR() {
 // and the unit the button belongs to.
 const _savesInFlight = new Set();
 
-async function saveSection(sectionId, irNumber) {
-  const btn = document.getElementById('save-' + sectionId);
-  const btnTop = document.getElementById('save-' + sectionId + '-top');
-  const section = SECTIONS[sectionId];
-  if (!section) return;
+// The POST itself, with no user interface attached to it at all. Both the auto-save
+// and the Close button go through here, which is why neither of them can drift from
+// the other: there is one payload shape, one endpoint and one error path.
+//
+// It returns the values it sent, so the caller can remember exactly what the server
+// now holds. That snapshot is what lets a later save be skipped as a no-op instead
+// of posting an identical body and writing a pointless row into the audit trail.
+async function postSectionSave(sectionId, irNumber, opts) {
+  // `withFiles: false` is for a caller that knows it holds no new files. Every
+  // current caller sends files — auto-save and Close both include whatever has
+  // been picked but not yet uploaded, since a picked file IS an unsent change.
+  const withFiles = !(opts && opts.withFiles === false);
 
-  // A second click while the first request is in flight would post the same section
-  // twice: two writes, two audit batches, and the second one's diff computed against
-  // whatever the first had already stored. The buttons go DEAD for the duration, and
-  // this guard closes the other half — the Save button inside a modal, and a
-  // keyboard submit, both reach here without touching those two elements.
-  if (_savesInFlight.has(sectionId)) return;
-  _savesInFlight.add(sectionId);
-
-  const btnLabel = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
-  btn.textContent = 'Saving…';
-  btn.className = 'btn saving';
-  btn.disabled = true;
-  if (btnTop) { btnTop.textContent = 'Saving…'; btnTop.className = 'btn saving'; btnTop.disabled = true; }
-
-  // Collect field values
   const formData = new FormData();
   formData.append('action', 'saveSection');
   formData.append('irNumber', irNumber);
   formData.append('sectionId', sectionId);
   formData.append('savedBy', currentUser?.email || 'unknown');
 
-  const { fieldValues, fileFields } = collectSectionValues(sectionId);
+  // A caller that has already read the DOM to decide whether this save is even
+  // worth making passes its result in, rather than making this function read the
+  // whole section a second time — which on the tables is not free.
+  const { fieldValues, fileFields } = (opts && opts.collected) || collectSectionValues(sectionId);
   formData.append('fields', JSON.stringify(fieldValues));
+  // 'auto' or 'close'. The backend writes a "saved" marker row per human save, and
+  // that marker is what the timeline shows as an event. An auto-save is not an
+  // event — it is a keystroke landing — so it must not write one, or the trail
+  // becomes a keystroke log and the closes are buried in it. The FIELD-level rows
+  // still record every real edit; only the contentless marker is suppressed.
+  formData.append('mode', (opts && opts.mode) || 'auto');
 
-  // Convert files to base64
   const filePayload = [];
-  await Promise.all(fileFields.map(async ff => {
-    const files = Array.from(ff.files);
-    const b64s = await Promise.all(files.map(f => fileToBase64(f)));
-    b64s.forEach((b64, idx) => {
-      filePayload.push({
-        fieldId: ff.id,
-        name: files[idx].name,
-        mimeType: resolveFileMime(files[idx]),
-        base64: b64,
+  if (withFiles) {
+    await Promise.all(fileFields.map(async ff => {
+      const files = Array.from(ff.files);
+      const b64s = await Promise.all(files.map(f => fileToBase64(f)));
+      b64s.forEach((b64, idx) => {
+        filePayload.push({
+          fieldId: ff.id,
+          name: files[idx].name,
+          mimeType: resolveFileMime(files[idx]),
+          base64: b64,
+        });
       });
-    });
-  }));
-
+    }));
+  }
   formData.append('files', JSON.stringify(filePayload));
 
+  const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: formData });
+  const data = await res.json();
+  if (data.status !== 'ok') throw new Error(data.message || 'Backend error');
+  return fieldValues;
+}
+
+// The explicit save, kept for the one caller that is a deliberate act rather than a
+// keystroke: pushing a Log Analyser report into Section D (see the analyser's
+// "Push to IR"). It gives button feedback because that caller has a button in front
+// of the user; it does NOT close the section, because writing a report into D is
+// not the same statement as declaring D finished.
+async function saveSection(sectionId, irNumber) {
+  const btn = document.getElementById('save-' + sectionId);
+  const section = SECTIONS[sectionId];
+  if (!section) return;
+
+  // A second click while the first request is in flight would post the same section
+  // twice: two writes, two audit batches, and the second one's diff computed against
+  // whatever the first had already stored.
+  if (_savesInFlight.has(sectionId)) return;
+  _savesInFlight.add(sectionId);
+
+  const btnLabel = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
+  if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; btn.disabled = true; }
+  setAutosaveNote(sectionId, 'saving');
+
   try {
-    const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.status === 'ok') {
-      btn.textContent = '✓ Saved!';
-      btn.className = 'btn saved';
-      if (btnTop) { btnTop.textContent = '✓ Saved!'; btnTop.className = 'btn saved'; }
-      clearDraft(sectionId);
-      refreshDraftBanner();
-      // Marked clean BEFORE the toast, so the header-title guard reads the truth
-      // from the moment the save lands — not 3 seconds later when the button
-      // resets, which is when a click on the title would still see "unsaved".
-      _dirtySections.delete(sectionId);
-      updateDirtyIndicators();
-      showToast('Section saved successfully!');
-      // For sections with image evidence, pull the freshly-uploaded Drive URLs
-      // back into the in-memory state so captions stay paired with images.
-      refreshEvidenceLinksAfterSave(sectionId, irNumber);
-      // Saving Section B changes the goods Section H verifies against — refresh
-      // the dispatch checklist so it lists exactly what was received.
-      if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
-      // Record this save in the app-owned workflow state — every section save
-      // marks that section done for this IR, and the save is now on the timeline.
-      syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues);
-      loadActivityLog(irNumber);
-    } else {
-      throw new Error(data.message || 'Backend error');
-    }
+    const saved = await postSectionSave(sectionId, irNumber, { withFiles: true });
+    _autosaveSnapshots[sectionId] = JSON.stringify(saved || {});
+    delete _autosaveFailed[sectionId];
+    if (btn) { btn.textContent = '✓ Saved!'; btn.className = 'btn saved'; }
+    setAutosaveNote(sectionId, 'saved');
+    clearDraft(sectionId);
+    refreshDraftBanner();
+    // Marked clean BEFORE the toast, so the header-title guard reads the truth
+    // from the moment the save lands — not 3 seconds later when the button
+    // resets, which is when a click on the title would still see "unsaved".
+    _dirtySections.delete(sectionId);
+    updateDirtyIndicators();
+    showToast('Section saved successfully!');
+    // For sections with image evidence, pull the freshly-uploaded Drive URLs
+    // back into the in-memory state so captions stay paired with images.
+    refreshEvidenceLinksAfterSave(sectionId, irNumber);
+    // Saving Section B changes the goods Section H verifies against — refresh
+    // the dispatch checklist so it lists exactly what was received.
+    if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
+    loadActivityLog(irNumber);
   } catch (err) {
-    btn.textContent = '⚠ Retry Save';
-    btn.className = 'btn error';
-    if (btnTop) { btnTop.textContent = '⚠ Retry Save'; btnTop.className = 'btn error'; }
+    if (btn) { btn.textContent = '⚠ Retry Save'; btn.className = 'btn error'; }
+    setAutosaveNote(sectionId, 'error');
     showToast('❌ Save failed: ' + err.message + ' — your entries are kept as a draft.');
   }
 
   setTimeout(() => {
     _savesInFlight.delete(sectionId);
-    btn.textContent = btnLabel;
-    btn.className = 'btn';
+    if (btn) {
+      btn.textContent = btnLabel;
+      btn.className = 'btn';
+    }
     // Re-enabled through the ACCESS sweep, never with a bare `disabled = false`.
     // A blind re-enable would hand Save back to a view-only user whose access
     // payload arrived while this request was in flight — which is precisely the
     // silent failure applySectionAccessGating exists to prevent, and it is the
-    // reason smoke-access.mjs asserts that every write control agrees with Save.
+    // reason smoke-access.mjs asserts that every write control agrees with the
+    // Close button.
     if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
-    else { btn.disabled = false; if (btnTop) btnTop.disabled = false; }
+    else if (btn) btn.disabled = false;
   }, 3000);
 }
 
-// A section save is the one place that knows an IR was actually touched, so it
+// CLOSING a section is the one place that knows an IR was actually finished, so it
 // is where the app takes ownership of that IR's workflow state.
-function syncIRStateAfterSectionSave(sectionId, irNumber, fieldValues) {
+//
+// This used to run on every save, which is exactly the bug the auto-save change
+// fixes: `done[]` grew on any touch, so the 4/6 chip counted sections somebody had
+// typed in rather than sections somebody had declared finished. It is now called
+// from closeSection and from nowhere else.
+function syncIRStateAfterSectionSave(sectionId, irNumber) {
   // Status is no longer mirrored from a section form. The IR Status dropdown lived
   // in Section A, which is gone; status is now written only by the Triage modal
   // (see applyTriage), which owns `status`/`statusOwned`/`statusAt` itself. A
   // section save that happens to post a status key must not be able to move the
   // workflow clock.
-  patchIRState(irNumber, { done: markSectionDone(irNumber, sectionId) });
+  return patchIRState(irNumber, { done: markSectionDone(irNumber, sectionId) });
 }
 
 function fileToBase64(file) {

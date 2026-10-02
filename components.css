@@ -856,6 +856,16 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 }
 .legacy-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
 .legacy-sub { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 1px; }
+/* The notice shown in place of the embed. The workbook was restricted on
+   2 October 2026, so `.legacy-frame` is no longer reached — the card sizes to its
+   content instead of holding 92vh open for a frame that will not load. */
+.legacy-card-notice { height: auto; max-width: 560px; }
+.legacy-notice { padding: 1rem 1.1rem 1.2rem; overflow-y: auto; }
+.legacy-notice p { margin: 0 0 0.75rem; font-size: var(--text-sm); color: var(--ink-gray-7); line-height: var(--leading-body); }
+.legacy-notice p:last-child { margin-bottom: 0; }
+.legacy-notice strong { color: var(--ink-gray-9); font-weight: var(--weight-semibold); }
+.legacy-notice .url-open-btn { display: inline-block; margin: 0.25rem 0 0.9rem; }
+.legacy-notice-note { font-size: var(--text-xs); color: var(--ink-gray-5); }
 .legacy-frame-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
 .legacy-frame { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
 .legacy-fallback {

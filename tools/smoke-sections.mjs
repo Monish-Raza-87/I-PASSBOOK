@@ -25,6 +25,7 @@ import { loadApp, makeReporter } from './harness.mjs';
 const r = makeReporter();
 const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html  = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+const css   = fs.readFileSync(new URL('../views.css', import.meta.url), 'utf8');
 
 const T = loadApp(`
   SECTION_IDS, SECTION_LABELS, SECTION_SHORT, SECTIONS, FIELD_SECTION_INDEX,
@@ -212,6 +213,96 @@ r.ok('saveDraft(\'sec-a\') does not throw', threw === null, threw);
 r.ok('saveDraft(\'sec-h\') does not throw', (() => { try { T.saveDraft('sec-h'); return true; } catch (e) { return false; } })());
 r.ok('saveDraft(\'sec-intake\') does not throw', (() => { try { T.saveDraft('sec-intake'); return true; } catch (e) { return false; } })());
 T.currentIR = null;
+
+// ── Auto-save, and the one thing that closes a section ────────────────────────
+// The Save button is gone. Two consequences are silent if they ever regress, and
+// both of them are the whole point of the change:
+//
+//   1. `done[]` must be appended ONLY by closeSection. It used to be appended by
+//      every save, which quietly redefined "done" as "somebody touched this" and
+//      made the 4/6 chip on the list card meaningless. One extra call site
+//      anywhere puts that back.
+//   2. A failed save must never read as a success. The indicator is now the only
+//      thing on screen that distinguishes "on the server" from "still in this
+//      browser", so a false "Saved" is how work gets lost.
+r.head('the Save button is gone, and `done[]` is written only by closing a section');
+
+r.ok('the only caller of syncIRStateAfterSectionSave is closeSection',
+  (appJs.match(/syncIRStateAfterSectionSave\(/g) || []).length === 2 &&
+  /function syncIRStateAfterSectionSave\(/.test(appJs),
+  (appJs.match(/[^\n]*syncIRStateAfterSectionSave\([^\n]*/g) || []));
+
+r.ok('and that call sits inside closeSection, not inside an auto-save',
+  (() => {
+    const start = appJs.indexOf('async function closeSection(');
+    const body  = appJs.slice(start, appJs.indexOf('function markSectionClosed(', start));
+    return start > -1 && body.includes('syncIRStateAfterSectionSave(');
+  })(), (appJs.match(/[^\n]*syncIRStateAfterSectionSave\([^\n]*/g) || []));
+
+r.ok('autoSaveUnit never touches done or the app-owned state',
+  (() => {
+    const start = appJs.indexOf('async function autoSaveUnit(');
+    const body  = appJs.slice(start, appJs.indexOf('function setAutosaveNote(', start));
+    return start > -1 && !/done|syncIRStateAfterSectionSave|patchIRState/.test(body);
+  })(), (appJs.match(/[^\n]*patchIRState\([^\n]*/g) || []));
+
+// The two writes are told apart on the wire, and the backend suppresses its
+// contentless "saved" marker for the automatic one — a marker row every couple of
+// seconds of typing would bury the closes, which is what the trail exists to show.
+r.ok('a close asks the backend to record it as an event',
+  /postSectionSave\(sectionId, irNumber, \{[^}]*mode: 'close'/.test(appJs),
+  (appJs.match(/[^\n]*mode: 'close'[^\n]*/) || [''])[0]);
+r.ok('and an auto-save is marked auto by DEFAULT, so a forgotten caller is safe',
+  /formData\.append\('mode', \(opts && opts\.mode\) \|\| 'auto'\)/.test(appJs),
+  (appJs.match(/[^\n]*append\('mode'[^\n]*/) || [''])[0]);
+
+// ── The indicator tells the truth ─────────────────────────────────────────────
+r.ok('"Saved" is written in one branch only, the one that means it',
+  (() => {
+    const start = appJs.indexOf('function setAutosaveNote(');
+    const body  = appJs.slice(start, appJs.indexOf('\n}', start));
+    const i = body.indexOf("state === 'saved'");
+    return i > -1 && body.slice(i).includes('Saved') && !body.slice(0, i).includes('Saved');
+  })(), (appJs.match(/[^\n]*'Saved'[^\n]*/g) || []));
+
+// A save that is still in flight is not a save that was dropped. The first version
+// returned outright, which left everything typed during the request unsent until
+// the next keystroke happened to come along.
+r.ok('a save landing while another is in flight re-arms instead of giving up',
+  /if \(_savesInFlight\.has\(unitId\)\) \{ scheduleAutoSave\(unitId\); return; \}/.test(appJs),
+  (appJs.match(/[^\n]*_savesInFlight\.has\(unitId\)[^\n]*/) || [''])[0]);
+
+// Closing is a deliberate act, so nothing retries it — which means a failed close
+// must not borrow the word "retrying".
+r.ok('a failed close has its own wording, not the save-retry wording',
+  /setAutosaveNote\(sectionId, 'failed'\)/.test(appJs) &&
+  /Not saved — press again/.test(appJs) &&
+  /\.autosave-note\[data-state="failed"\]/.test(css),
+  (appJs.match(/[^\n]*'failed'[^\n]*/) || [''])[0]);
+
+// The guard is only worth anything if something SETS it. It was checked in both new
+// paths before anything added to it, so two quick taps on Close both posted.
+r.ok('both new paths set the in-flight guard, not merely test it',
+  (appJs.match(/_savesInFlight\.add\(unitId\)/g) || []).length === 1 &&
+  (appJs.match(/_savesInFlight\.add\(sectionId\)/g) || []).length === 2 &&
+  (appJs.match(/_savesInFlight\.delete\(unitId\)/g) || []).length === 1,
+  (appJs.match(/[^\n]*_savesInFlight\.(add|delete)\([^\n]*/g) || []));
+
+// ── The markup agrees with the code ───────────────────────────────────────────
+r.head('the section footer is a Close button, and the old Save buttons are gone');
+r.ok('every section has exactly one close button and no save button',
+  T.SECTION_IDS.every(id => html.includes(`id="close-${id}"`) && !html.includes(`id="save-${id}"`)) &&
+  (html.match(/class="btn btn-close-section"/g) || []).length === 6,
+  (html.match(/id="(save|close)-sec-[a-z]"/g) || []));
+r.ok('each close button has its own indicator slot for the code to write into',
+  T.SECTION_IDS.every(id => html.includes(`id="autosave-${id}"`)) &&
+  T.SECTION_IDS.every(id => html.includes(`autosave-note`)),
+  (html.match(/id="autosave-sec-[a-z]"/g) || []));
+// The closed state is painted wherever the IR's app-owned state is applied, so a
+// section closed in an earlier session does not look open on a cold open.
+r.ok('the closed state is painted on build AND when irState lands',
+  (appJs.match(/paintClosedSections\(/g) || []).length === 3,
+  (appJs.match(/[^\n]*paintClosedSections\([^\n]*/g) || []));
 
 // ── Triage is not a section ───────────────────────────────────────────────────
 r.head('Triage is a separate axis, not a seventh section');

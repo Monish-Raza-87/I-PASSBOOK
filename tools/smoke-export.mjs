@@ -572,9 +572,9 @@ r.ok('and every section has a Download-and-share button',
   EXPORTABLE.filter(x => !new RegExp('id="share-sec-' + x + '"').test(indexSrc)));
 r.ok('that is six of each, not a vacuous match', dlHits.length === 6 && shHits.length === 6,
   [dlHits.length, shHits.length]);
-r.ok('both sit under the Save button, in an export row',
-  EXPORTABLE.every(x => new RegExp('save-sec-' + x + '[\\s\\S]{0,200}?class="sec-export-row"').test(indexSrc)),
-  EXPORTABLE.filter(x => !new RegExp('save-sec-' + x + '[\\s\\S]{0,200}?class="sec-export-row"').test(indexSrc)));
+r.ok('both sit under the section\'s own button row, in an export row',
+  EXPORTABLE.every(x => new RegExp('close-sec-' + x + '[\\s\\S]{0,400}?class="sec-export-row"').test(indexSrc)),
+  EXPORTABLE.filter(x => !new RegExp('close-sec-' + x + '[\\s\\S]{0,400}?class="sec-export-row"').test(indexSrc)));
 r.ok('the Download buttons say Download', dlHits.every(s => /Download</.test(s)), dlHits);
 r.ok('the share buttons say Download and share',
   shHits.every(s => /Download and share</.test(s)), shHits);
@@ -596,12 +596,12 @@ r.ok('and the view-only disable skips exactly that class',
 r.ok('the wiring runs for every section, from SECTIONS rather than a hand-kept list',
   /Object\.keys\(SECTIONS\)\.forEach\(secId[\s\S]{0,400}?download-/.test(appSrc),
   (appSrc.match(/Object\.keys\(SECTIONS\)\.forEach\(secId[\s\S]{0,140}/) || [''])[0]);
-r.ok('the Save button is NOT exempt — writing is still gated', (() => {
+r.ok('the Close button is NOT exempt — writing is still gated', (() => {
   const at = appSrc.indexOf("querySelectorAll('input, textarea, select, button')");
   if (at === -1) return false;
   const body = appSrc.slice(at, at + 900);
   const guard = body.split("classList.contains('sec-export-btn')")[0] || '';
-  return /classList\.contains\('sec-export-btn'\)/.test(body) && !/save-/.test(guard);
+  return /classList\.contains\('sec-export-btn'\)/.test(body) && !/close-/.test(guard);
 })());
 
 // ── 11. Nothing signs a section any more ──────────────────────────────────────

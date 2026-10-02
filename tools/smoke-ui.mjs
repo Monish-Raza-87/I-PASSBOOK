@@ -734,7 +734,7 @@ r.ok('and the prompt says WHICH section is at risk, not just "changes"', (() => 
   return asked.length === 1 && asked[0].indexOf('sec-c') !== -1;
 })(), asked);
 r.ok('the wording promises what actually happens — the draft keeps the typing',
-  (() => { asked.length = 0; U.confirmLeaveIR(); return /draft/i.test(asked[0]) && /not recorded until you press Save/i.test(asked[0]); })(),
+  (() => { asked.length = 0; U.confirmLeaveIR(); return /draft/i.test(asked[0]) && /has not reached the server yet/i.test(asked[0]); })(),
   asked);
 r.ok('saying No keeps the user where they are', (() => {
   answersYes = false;

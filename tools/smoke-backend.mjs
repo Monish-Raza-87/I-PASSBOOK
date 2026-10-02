@@ -1133,9 +1133,10 @@ r.ok('buildAuditLines is PURE — it reads nothing and writes nothing',
   (bal.match(/[^\n]*(writeJson|setContent|getBlob|readJson)[^\n]*/g) || ['none — correct']));
 r.ok('so the caller can hold one lock across read → build → write → append',
   /the caller can hold the lock/i.test(src));
-r.ok('it takes the uploads as a 6th parameter',
+r.ok('it takes the uploads as a 6th parameter, and the auto-save flag as a 7th',
   /function buildAuditLines\(([^)]*)\)/.test(code) &&
-  ((code.match(/function buildAuditLines\(([^)]*)\)/) || [])[1] || '').split(',').length === 6,
+  ((code.match(/function buildAuditLines\(([^)]*)\)/) || [])[1] || '').split(',').length === 7 &&
+  /function buildAuditLines\([^)]*uploads,\s*isAutoSave\s*\)/.test(code),
   (code.match(/function buildAuditLines\([^)]*\)/) || [''])[0]);
 r.ok('an upload writes an "uploaded" event', /'uploaded'/.test(bal));
 r.ok('the uploaded line names the SOURCE field, never the derived _links key',
@@ -1147,9 +1148,24 @@ r.ok('the derived link keys are still skipped in both diff loops',
 r.ok('done is suppressed — completion is implied by the save line',
   (bal.match(/k === 'done'\) return/g) || []).length === 2,
   (bal.match(/[^\n]*'done'[^\n]*/g) || []));
-r.ok('the bare "saved" marker is written only for non-sentinel writes',
-  /if \(!isSentinel\) lines\.push\(line\('saved'/.test(bal),
+// `mode: 'auto'` means the app wrote this while the user was typing, which is a real
+// save but NOT an event: a marker row every couple of seconds of typing would bury the
+// closes, which is the thing the trail exists to show. A sentinel was suppressed for
+// exactly this reason already, so the marker now carries both guards.
+r.ok('the bare "saved" marker is written only for a human, non-sentinel write',
+  /if \(!isSentinel && !isAutoSave\) lines\.push\(line\('saved'/.test(bal),
   (bal.match(/[^\n]*'saved'[^\n]*/) || [''])[0]);
+r.ok('saveSection reads the mode off the request, defaulting to a human save',
+  /var mode\s*=\s*String\(params\.mode/.test(code) &&
+  /String\(mode \|\| ''\) === 'auto'/.test(sv) &&
+  /var isAutoSave\s*=/.test(sv),
+  (sv.match(/[^\n]*isAutoSave\s*=.*/) || [''])[0]);
+r.ok('and passes it into the audit build',
+  /buildAuditLines\([^)]*uploads,\s*isAutoSave\)/.test(sv),
+  (sv.match(/[^\n]*buildAuditLines\([^\n]*/) || [''])[0]);
+r.ok('the field-level diff lines are NOT suppressed — real edits stay audited',
+  !/isAutoSave[\s\S]{0,80}return;\s*\/\//.test(bal) && /lines\.push\(line\('changed'/.test(bal),
+  (bal.match(/[^\n]*lines\.push\(line\('changed'[^\n]*/) || [''])[0]);
 r.ok('the audit timestamp stays the DISPLAY string the timeline prints verbatim',
   /'dd-MMM-yyyy HH:mm:ss'/.test(bal), (bal.match(/[^\n]*formatDate[^\n]*/) || [''])[0]);
 
@@ -1188,7 +1204,7 @@ r.ok('the guard reads as a guard, not an inverted condition',
 r.ok('the uploads are collected during the upload loop, before the audit build',
   sv.indexOf('uploads.push(') < audCall, { collect: sv.indexOf('uploads.push('), call: audCall });
 r.ok('and passed into the same build, so they share the save timestamp',
-  /buildAuditLines\([^)]*uploads\)/.test(sv),
+  /buildAuditLines\([^)]*uploads[,)]/.test(sv),
   (sv.match(/[^\n]*buildAuditLines\([^\n]*/) || [''])[0]);
 
 r.head('the audit subject is the TICKET, not the store name');

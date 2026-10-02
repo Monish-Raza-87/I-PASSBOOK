@@ -254,7 +254,8 @@ D.document.getElementById = id => {
              classList: { contains: () => false, add() {}, remove() {} },
              querySelectorAll: () => sweepEls, querySelector: () => null };
   }
-  if (id === 'save-' + VSEC) return fakeSave;
+  if (id === 'close-' + VSEC) return fakeSave;
+  if (id === 'autosave-' + VSEC) return null;
   return null;                      // every other pane: the `if (!pane) return` guard
 };
 
@@ -288,11 +289,11 @@ r.ok('"📷 Capture photo" is disabled too — same act, same gate',
 // THE regression assertion. The silent click came from these two disagreeing:
 // the button live, the input it clicks dead. Whatever the rule is, a write button
 // and the Save button must answer it the same way.
-r.ok('every write button agrees with Save, which is what makes the click silent-proof',
+r.ok('every write button agrees with Close, which is what makes the click silent-proof',
   vo.add.disabled === vo.save.disabled && vo.cap.disabled === vo.save.disabled &&
   vo.addRow.disabled === vo.save.disabled,
   { add: vo.add.disabled, save: vo.save.disabled, addRow: vo.addRow.disabled });
-r.ok('...and it says WHY, like Save does, instead of hovering like a live button',
+r.ok('...and it says WHY, like Close does, instead of hovering like a live button',
   /view-only/.test(vo.add.title) && /view-only/.test(vo.cap.title), vo.add.title);
 r.ok('the disabled button is styled disabled, not merely inert',
   vo.add.style.opacity === '0.5' && vo.add.style.cursor === 'not-allowed', vo.add.style);

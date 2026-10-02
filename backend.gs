@@ -2553,8 +2553,13 @@ function doPost(e) {
       saveSection: function () {
         var fields = JSON.parse(params.fields || '{}');
         var files  = JSON.parse(params.files  || '[]');
+        // 'auto' when the app is saving on its own as the user types, 'close' when
+        // a person is deliberately finishing a section. Anything else — an older
+        // client, the Log Analyser push, the Overview — is treated as a human save,
+        // so the timeline marker behaves exactly as it always did for them.
+        var mode   = String(params.mode || '');
         // savedBy is the VERIFIED email from the credential — never a client value.
-        return saveSection(params.irNumber, params.sectionId, fields, files, email);
+        return saveSection(params.irNumber, params.sectionId, fields, files, email, mode);
       },
       sendNudgeEmail:    function () { return sendNudgeEmail(params, email); },
 
@@ -3397,8 +3402,14 @@ function resolveMime(declared, name) {
 // ACTION: saveSection
 // Saves form fields + uploads files to Google Drive under IR/Section folder
 // ──────────────────────────────────────────────────────────────────────────────
-function saveSection(irNumber, sectionId, fields, files, savedBy) {
+function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
   if (!irNumber || !sectionId) throw new Error('irNumber and sectionId are required.');
+  // 'auto' means the app wrote this while the user was typing. It is a real save
+  // and it is durably stored — what it is NOT is an event, so it must not leave the
+  // "saved" marker row that buildAuditLines writes per human save. Without this the
+  // trail would carry one contentless row every couple of seconds of typing, and
+  // the closes — the rows that actually matter — would be buried among them.
+  var isAutoSave = String(mode || '') === 'auto';
 
   var access = getEffectiveAccess(savedBy);
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__
@@ -3573,7 +3584,7 @@ function saveSection(irNumber, sectionId, fields, files, savedBy) {
     // Diff the STORED record against the object actually being written — never the
     // merged object against itself, which would diff to nothing and lose the very
     // two fields this save is about.
-    lines = buildAuditLines(irNumber, sectionId, savedBy, existingFields, next, uploads);
+    lines = buildAuditLines(irNumber, sectionId, savedBy, existingFields, next, uploads, isAutoSave);
 
     data[sectionId] = next;
     writeIR(irNumber, data, ir.fileId);
@@ -3999,7 +4010,7 @@ function snapValue(v) {
 // write the data → append the lines" as one critical section. It used to write to
 // the sheet itself, and it was called BEFORE the data write, so a save that then
 // failed left an audit entry for a save that never happened.
-function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields, uploads) {
+function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields, uploads, isAutoSave) {
   var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
   var lines = [];
   var isSentinel = String(irNumber).indexOf('__') === 0;
@@ -4009,10 +4020,17 @@ function buildAuditLines(irNumber, sectionId, savedBy, existingFields, newFields
   // of them contentless. Workflow changes are still recorded — as the field lines
   // below, which the timeline reads by field id (`status`/`assignee`/`priority`/
   // `category`/`subCategory`), not by anything hardcoded here.
+  //
+  // An AUTO-save is skipped for the same reason a sentinel is: it is not an event.
+  // The app now saves as the user types, so a marker here would be one row every
+  // couple of seconds, all of them saying nothing, with the closes — the rows that
+  // matter — buried among them. The field-level lines below are NOT suppressed:
+  // every real edit is still recorded, with its own timestamp, which is the part
+  // of the trail anyone actually reads.
   function line(ev, fid, oldV, newV) {
     return { t: ts, ir: irNumber, sec: sectionId, by: savedBy, ev: ev, fid: fid, old: oldV, nw: newV };
   }
-  if (!isSentinel) lines.push(line('saved', '', '', ''));
+  if (!isSentinel && !isAutoSave) lines.push(line('saved', '', '', ''));
   var ex = existingFields || {};
   var nw = newFields || {};
   Object.keys(nw).forEach(function(k) {

@@ -5211,6 +5211,84 @@ function boardColumnOwns(key) {
 // grids. A second copy here would be a literal that smoke-preview.mjs's
 // SECTION_SHORT scan picks up and mistakes for a section's display name.
 
+// ─── MOVING A CARD ON, BY HAND ────────────────────────────────────────────────
+// The board is read-only, and that is the whole design: a section save must never
+// move the workflow clock (see syncIRStateAfterSectionSave — someone tried the
+// automatic version and removed it). But when a section IS closed and the IR is
+// still sitting on that section's status, the honest next step is one press away —
+// and it is the PRESS, not the close, that stamps `statusAt`.
+//
+// The offer is made only where the answer is unambiguous, which is why it hangs off
+// boardColumnOwns(). The two end columns own several statuses between them, so there
+// is no single "next" there and none is offered; Triage still covers them, unchanged,
+// and Triage covers everything else too — so an offer that never appears costs
+// nothing. It is never the only way to move a card.
+function boardNextColumn(key) {
+  const i = BOARD_COLUMNS.findIndex(c => c.key === key);
+  if (i < 0 || i >= BOARD_COLUMNS.length - 1) return null;
+  const next = BOARD_COLUMNS[i + 1];
+  // A section column is named by its letter, because that is how the tab is named.
+  // The two end columns have no letter, so they are named by their heading.
+  const isSection = SECTION_IDS.some(id => SECTION_LABELS[id] === next.key);
+  return { label: isSection ? next.key : next.title, stage: next.stages[0] };
+}
+
+// Paint — or clear — the offer in every section's close row. It is rebuilt on each
+// paint rather than toggled in place, because the target moves with the status:
+// after one press this section's button goes and the next section's appears.
+function paintBoardMoveOffer(irNumber) {
+  const row     = irState[irNumber] || {};
+  const colKey  = boardColumnOf(String(row.status || 'Open'));
+  const done    = Array.isArray(row.done) ? row.done : [];
+  // The section whose own stage the IR is sitting on. null for Not started, Paused
+  // and Finished, which are not sections.
+  const owner   = SECTION_IDS.find(id => SECTION_LABELS[id] === colKey) || null;
+  const next    = owner ? boardNextColumn(colKey) : null;
+
+  SECTION_IDS.forEach(secId => {
+    const holder = document.querySelector('#' + secId + ' .sec-close-row');
+    if (!holder) return;
+    let btn = holder.querySelector('.btn-move-on');
+    // Only the section that owns the current stage is offered, and only once its own
+    // work is actually closed — an offer to move on from a section nobody finished
+    // would be the app volunteering a claim about work that has not happened.
+    if (secId !== owner || !next || !done.includes(secId)) { if (btn) btn.remove(); return; }
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      // A ghost, deliberately: this is an offer, not the next step of the form, and
+      // it must not compete with the Close button beside it.
+      btn.className = 'btn btn-ghost btn-move-on';
+      btn.dataset.section = secId;
+      holder.appendChild(btn);
+    }
+    btn.innerHTML = `Move to ${escHtml(next.label)} →`;
+    btn.title = `Sets the status to ${next.stage} and starts its clock`;
+    btn.onclick = () => moveOnByHand(irNumber, next.stage);
+  });
+}
+
+// The one place a section press writes the workflow status, and the only thing in
+// this file outside Triage that stamps `statusAt` — which is what "in status 3d" and
+// every overdue limit are measured from, so it is never done on the user's behalf.
+//
+// NO success toast on purpose. patchIRState already says so when the write did not
+// reach the backend, and the toast contract is that one message REPLACES another —
+// so a cheerful "Moved to E" here would wipe the one warning the user must not miss.
+// The evidence is on screen anyway: the status pill changes as the patch lands, and
+// the movement is on the timeline.
+async function moveOnByHand(irNumber, stage) {
+  const cur = String((irState[irNumber] || {}).status || 'Open');
+  if (!stage || cur === stage) return;      // never re-stamp a clock for no movement
+  await patchIRState(irNumber, {
+    status: stage,
+    statusOwned: true,
+    statusAt: Date.now(),
+    statusBy: myEmail() || 'unknown',
+  });
+  loadActivityLog(irNumber);
+}
+
 // How many cards a column draws before it stops and says how many it left behind.
 // `Finished` holds most of the archive — every delivered IR ever — and drawing
 // those as cards would make the board slower than the list it is a second view of.
@@ -6061,6 +6139,11 @@ function renderBannerMeta() {
       : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
+  // The move offer lives in a section's close row, not in this banner, but it is
+  // built from the status this banner has just painted — so it is refreshed here.
+  // patchIRState() re-renders the banner on every status write, which is what makes
+  // the offer disappear the moment it has been taken.
+  paintBoardMoveOffer(ir.irNumber);
 }
 
 // ─── TRIAGE MODAL (status / assignee / priority / category) ──────────────────
@@ -8237,6 +8320,10 @@ function paintClosedSections(irNumber) {
   const row = irState[irNumber] || {};
   const done = Array.isArray(row.done) ? row.done : [];
   SECTION_IDS.forEach(secId => { done.includes(secId) ? markSectionClosed(secId) : markSectionReopened(secId); });
+  // The two answers are painted together because they read the same row and disagree
+  // if they are ever painted apart: "this section is closed" and "the IR is standing
+  // on this section's stage" are exactly the two facts the move offer is built from.
+  paintBoardMoveOffer(irNumber);
 }
 
 

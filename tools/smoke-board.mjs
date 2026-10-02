@@ -143,6 +143,41 @@ ok('boardColumnOf is pure: no DOM, no clock, no fetch',
 ok('an unrecognised status falls to the first column rather than vanishing',
   /return col \? col\.key : 'start';/.test(appJs));
 
+// ── The offer to move a card on, by hand ────────────────────────────────────
+// The board is read-only by design, so this one conditional button is the whole of
+// the board's write surface and it deserves to be pinned down precisely: who it is
+// offered to, what it writes, and what it must never say.
+head('moving a card on is a press, and it says so honestly');
+
+const closeBody = (appJs.match(/async function closeSection\(sectionId, irNumber\)[\s\S]*?\nfunction markSectionClosed/) || [''])[0];
+const moveBody  = (appJs.match(/async function moveOnByHand\(irNumber, stage\)[\s\S]*?\n\}/) || [''])[0];
+ok('closing a section still writes no workflow status',
+  closeBody.length > 0 && !/patch\.status|statusAt|'status'/.test(closeBody), closeBody.length);
+ok('...and the offer is the only section-side writer of the workflow clock',
+  /statusAt: Date\.now\(\)/.test(moveBody) && /status: stage/.test(moveBody) &&
+  /statusOwned: true/.test(moveBody));
+
+ok('the offer is raised only for the section that owns the IR\'s current stage',
+  /SECTION_IDS\.find\(id => SECTION_LABELS\[id\] === colKey\)/.test(appJs));
+ok('...and only once that section is closed, never before the work is done',
+  /secId !== owner \|\| !next \|\| !done\.includes\(secId\)/.test(appJs));
+ok('...and the two end columns offer nothing, because they own several stages',
+  /if \(i < 0 \|\| i >= BOARD_COLUMNS\.length - 1\) return null;/.test(appJs));
+ok('...and it never re-stamps the clock for a press that moves nothing',
+  /if \(!stage \|\| cur === stage\) return;/.test(moveBody));
+ok('it is a ghost, so it never competes with the Close button beside it',
+  /btn\.className = 'btn btn-ghost btn-move-on'/.test(appJs));
+// One toast replaces another, so a cheerful confirmation here would erase the one
+// warning the user must not miss. The pill and the timeline are the confirmation.
+ok('it claims no success it cannot guarantee',
+  moveBody.length > 0 && !/showToast/.test(moveBody));
+ok('the offer is repainted wherever the facts behind it change',
+  /paintBoardMoveOffer\(irNumber\)/.test((appJs.match(/function paintClosedSections[\s\S]*?\n\}/) || [''])[0]) &&
+  /paintBoardMoveOffer\(ir\.irNumber\)/.test((appJs.match(/function renderBannerMeta[\s\S]*?\n\}/) || [''])[0]));
+ok('every section has a close row for it to appear in',
+  (html.match(/class="sec-close-row"/g) || []).length === 6 &&
+  (html.match(/id="close-sec-[a-g]"/g) || []).length === 6);
+
 // ── House rules the new UI has to obey ──────────────────────────────────────
 head('the new UI obeys the app\'s own rules');
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;

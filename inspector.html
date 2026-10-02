@@ -330,13 +330,14 @@
     <p class="eyebrow">Indrones · I-PASSBOOK</p>
     <h1>The Inspector's Rule Book</h1>
     <p class="standfirst">
-      Every question I still owe you, one per line, each with the answer I recommend.
+      Your first pass is recorded — and it changed three of your own rules, which are corrected below.
+      Everything still open is here, one per line, each with the answer I recommend.
       <strong>You only have to name what you want changed.</strong>
     </p>
     <div class="meta">
-      <span><b>Date</b> 1 October 2026</span>
-      <span><b>Open rules</b> 61</span>
-      <span><b>Open questions</b> 4</span>
+      <span><b>Date</b> 2 October 2026</span>
+      <span><b>Your first pass</b> recorded</span>
+      <span><b>Still open</b> 6 questions</span>
       <span><b>Status</b> for your tick</span>
     </div>
   </div>
@@ -351,7 +352,7 @@
     <a href="#s3">3 · Six families</a>
     <a href="#s4">4 · Three table rules</a>
     <a href="#s5">5 · Section B</a>
-    <a href="#s6">6 · Four questions</a>
+    <a href="#s6">6 · Six questions</a>
     <a href="#s7">7 · The build order</a>
   </nav>
 
@@ -421,8 +422,13 @@
           mail — the sign-in code, a notice to you, and a comment mention — and every recipient is checked
           against your company domain. So the rename is safe. <em>One honest limit:</em> the name shown on the
           email changes; the address stays the Google account it runs as, unless you make a Workspace alias.</li>
-      <li><strong>Save is free, closing is the gate.</strong> A half-filled section can be saved all day; it
-          cannot be marked completed.</li>
+      <li><strong>There is no Save button — the app saves as you type.</strong> Your idea, and it is the
+          right one: two buttons where one is enough is exactly the confusion you described. What remains is
+          the <strong>Close</strong> button, which marks the section completed and moves the trackers.
+          Half-filled is a perfectly good state to be in all day; it just cannot be closed.</li>
+      <li><strong>Customer Relations includes Management.</strong> Your correction: Ravi Singh is CR
+          <em>and</em> Management. So every "FIR to CR" in this book also reaches management-capable
+          people — it does not need a separate destination to do so.</li>
       <li><strong>Four severities:</strong> Block · FIR · Ask · Note. <em>Ask</em> was your idea and it is the
           general answer for every "the proof is missing" case.</li>
       <li><strong>Four FIR destinations:</strong> the person · CR · CR + Management · CR + the owners of the
@@ -631,13 +637,13 @@
       If I have written any of them down wrongly, this is the place to catch it.
     </p>
     <div class="rules">
-      <div class="rule"><div class="rule-head"><span class="rid">R-125</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>Investigation is blank, but Root Cause is empty — <em>or</em> Investigation is filled and Root Cause says nothing.</p><p class="why">Your rule: if investigation is blank, Root Cause may simply say Not required. If investigation exists, Root Cause must be In-conclusive, Investigation on-going, or written text. One of those, or the section cannot close.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-126</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Root Cause is written, but both Corrective Action and Preventive Action are empty.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-127</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>Root Cause is written, and exactly one of Corrective Action or Preventive Action is empty.</p><p class="why">Your refinement: one missing is possible and gets an FIR; both missing is rare but also an FIR. Both land in the same place, so one rule covers them.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-125</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Confirmed</span></div><p>Investigation is blank, but Root Cause says nothing.</p><p class="why">Your wording, applied exactly: when investigation is blank, Root Cause must be <em>selected</em> as <strong>Not required</strong> or <strong>Not applicable</strong> — picked from the control, not left empty. When investigation exists, Root Cause must be In-conclusive, Investigation on-going, or written text. Any of those, or the section cannot close.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-126</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Confirmed</span></div><p>Root Cause is written, but <strong>neither</strong> Corrective Action nor Preventive Action is there.</p><p class="why">You asked: "if RC is there and neither CA nor PA then this is a case of FIR, right?" <strong>Yes.</strong> A root cause with nothing done about it is exactly what should be reported. One thing I want to get right, so I am asking rather than assuming: this fires whether the two fields are left empty, <em>or</em> both are deliberately marked Not applicable — because a root cause with no action at all is the same fact either way. If you would let "both marked Not applicable" through, say so and I will split it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-127</span><span class="chip chip-ok">Allowed</span><span class="chip chip-ok">Changed by you</span></div><p>Root Cause is written, one of Corrective Action or Preventive Action is filled, and the other is <strong>selected Not applicable</strong>.</p><p class="why"><strong>This rule reversed.</strong> I had it as an FIR; you said it is allowed, and you are right — sometimes the fix is only corrective, sometimes only preventive. So it passes. The one condition: the missing one must be <em>selected</em> Not applicable, not simply left empty. A blank unanswered field is not the same as a considered "not applicable", and my recommendation is that a blank one blocks the close — the same standard as R-125. Tell me if you would rather that be an FIR than a block.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-128</span><span class="chip chip-warn">FIR → CR + Mgmt</span><span class="chip chip-ok">Yours</span></div><p>Two or more IRs on the same drone serial within <strong>30 days</strong>, for the same kind of issue.</p><p class="why">Your rule, replacing what I had: same type of issue repeating on one UAS. It goes to CR <em>and</em> Management, because a repeat is a pattern, not a mistake.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-129</span><span class="chip chip-ok">Deleted</span></div><p>Was "Root Cause present but neither CA nor PA" — you first said that case is impossible, then reversed yourself. It is possible, and R-126/R-127 now cover it. This number is retired.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-129</span><span class="chip chip-ok">Deleted</span></div><p>Was "Root Cause present but neither CA nor PA" — you first said that case was impossible, then reversed yourself. It is possible, and R-126 now covers it. This number is retired.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-130</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>A part named in Particulars For Repair with blank quantity or rate.</p><p class="why">Saveable at any time — it just cannot be marked completed in that state.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-131</span><span class="chip chip-warn">FIR → CR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed with nothing in it at all.</p><p class="why">Your specific ruling for Production: when Production is closed with nothing done, the FIR goes to <strong>Production and CR both</strong> — because they are the ones who did not do it.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-131</span><span class="chip chip-warn">FIR → Production + CR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed with nothing in it at all.</p><p class="why">Your ruling — and <strong>my page had this labelled wrongly</strong>, which is why it read as a contradiction: the chip said "FIR → CR" while the sentence under it said Production and CR. The chip is now correct. When Production in particular is closed with nothing done, the FIR goes to <strong>Production and CR both</strong> — they are the ones who did not do it.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-132</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed while it is only partly filled.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-133</span><span class="chip chip-ok">New option</span><span class="chip chip-ok">Yours</span></div><p>Production gains one choice: <strong>"Rework not required — send for QC directly."</strong></p><p class="why">Your instruction: when rework is genuinely not needed, Production must be able to say so and pass the drone straight on, instead of the section sitting open forever.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-134</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>Dispatch recorded with no PDI report on the IR.</p></div>
@@ -745,50 +751,73 @@
     <div class="sec-head">
       <span class="sec-num">SECTION 6</span>
       <div class="phase-row">
-        <h2>The four questions that are not rules</h2>
-        <span class="chip chip-do">Answer needed</span>
+        <h2>The six questions that are not rules</h2>
+        <span class="chip chip-do">Two decided, four open</span>
       </div>
       <p class="sec-sub">
         These are not about right and wrong. They are decisions only you can make, and I have written my
-        recommendation under each one.
+        recommendation under each one. Q1, Q2 and Q3 are now confirmed — the parts still needing you are the
+        icon in Q2, the two choices in Q4, and a yes to Q5 and Q6.
       </p>
     </div>
 
     <div class="qbox">
-      <h3>Q1 · Who is allowed to mark a section Not Applicable?</h3>
+      <h3>Q1 · Who may mark a section Not Applicable? <span class="chip chip-ok">Confirmed</span></h3>
       <p>
-        <strong>My recommendation:</strong> the person working in that section may mark it Not Applicable —
-        but doing so files an FIR to CR, because it changes what the IR is about. CR may always do it
-        directly, without an FIR. Only CR can undo it.
+        <strong>Confirmed.</strong> The person working in a section may mark it Not Applicable, and doing so
+        files an FIR to CR. CR may do it directly, with no FIR. Only CR can undo it.
       </p>
-      <p class="why">
-        This is your own sentence, from the Inward/IQC discussion: <em>"it should ask instead to look into it
-        and rather make that section not applicable to CR Person via FIR."</em> I am asking only to confirm I
-        read it right.
+      <p>
+        <strong>Your correction is now applied everywhere in this book:</strong> Customer Relations includes
+        Management — Ravi Singh is both. So "FIR to CR" already reaches management-capable people; there is no
+        need for a separate Management destination to cover him.
       </p>
     </div>
 
     <div class="qbox">
-      <h3>Q2 · What does the Inspector look like, and where does it live?</h3>
+      <h3>Q2 · The Inspector's button <span class="chip chip-ok">Confirmed</span></h3>
       <p>
-        <strong>My proposal:</strong> a small round button that floats at the bottom-right of every screen.
-        It carries a small dot when it has something for you, so it is never shouting and never silent.
-        Tap it and it opens as a panel over the screen.
+        <strong>Confirmed:</strong> a small round button floating at the bottom-right of every screen, with a
+        small dot when it has something for you, opening as a panel over the screen.
       </p>
       <p>
-        The "fancy activation" you asked for becomes a one-time moment: the first time anyone opens the app
-        after this ships, the button pulses once and the panel opens with a short introduction. After that it
-        never does it again — the same discipline as the intro video, which plays in full only once per
-        version.
+        <strong>And it will be movable</strong> — your condition, and a good one. Drag it anywhere; it snaps
+        to the nearest edge, and each device remembers where you left it. So it can never end up sitting on
+        top of the thing you are trying to read.
+      </p>
+      <p>
+        <strong>The one-time activation</strong> stays as proposed: the first time anyone opens the app after
+        this ships, the button pulses once and the panel opens with a short introduction, then never again —
+        the same discipline as the intro video, which plays in full only once per version.
       </p>
       <p class="why">
-        On the IR screen, the panel shows the live checklist for the section you are standing in — so what it
+        On the IR screen the panel shows the live checklist for the section you are standing in, so what it
         says is always about where your hands are.
       </p>
+
+      <h4>Which icon — this one is yours to pick</h4>
+      <p>
+        You suggested a police cap, and I think the instinct is right: it is the one shape that says
+        <em>patrol</em> without saying <em>police state</em>, and it matches the word you use for it yourself.
+        Three candidates:
+      </p>
+      <ul>
+        <li><strong>1 · The peaked cap</strong> — a simple side-on cap with a badge line across the front.
+            Reads as "on duty", friendly, and stays recognisable at 24 pixels. <strong>My recommendation.</strong></li>
+        <li><strong>2 · A shield with a tick</strong> — protection rather than authority. Calmer, but it is a
+            very common shape and says less about patrolling.</li>
+        <li><strong>3 · A magnifier over a page</strong> — "I am reading your record". Most literal, least
+            friendly, and it can read as suspicion, which is the opposite of a writing helper.</li>
+      </ul>
+      <p class="why">
+        Whichever you choose, it is drawn as inline SVG in the app's single existing icon source, in
+        <code>currentColor</code> — so it takes the theme, the accent and all four palettes for free, and adds
+        no file at all.
+      </p>
     </div>
 
     <div class="qbox">
-      <h3>Q3 · How does it patrol when nobody is in the app?</h3>
+      <h3>Q3 · How does it patrol when nobody is in the app? <span class="chip chip-ok">Confirmed</span></h3>
       <p>
         <strong>The honest limit:</strong> a browser cannot watch anything when the app is closed. No amount
         of clever code changes that — if nobody is there, nothing is running.
@@ -808,21 +837,89 @@
     </div>
 
     <div class="qbox">
-      <h3>Q4 · What exactly does "maturity" learn?</h3>
+      <h3>Q4 · How far should maturity go?</h3>
       <p>
-        <strong>My proposal:</strong> it learns <em>vocabulary and phrasing</em>, and nothing else. Which
-        words your team uses, how they spell part names, what a normal investigation paragraph looks like,
-        which couriers and model codes are real. That is what stops it flagging "Bluedart" as a spelling
-        mistake.
+        <strong>You asked the right question, and my first answer was too timid.</strong> You asked why it
+        should not learn technical things, learn investigations, and become another arm of CR and QC. It
+        should. The line is not about how much it learns — it is about who decides.
       </p>
       <p>
-        <strong>It never learns what is acceptable.</strong> The rules stay yours, exactly as you trained
-        them. A bot that quietly relaxes its own standards is worse than no bot.
+        <strong>What it learns:</strong> your vocabulary and phrasing · model codes, part names, couriers ·
+        what a normal investigation paragraph looks like · and the technical associations in your own history
+        — which symptom has led to which root cause, on which model. Over time that is a genuine knowledge
+        base of how Indrones drones actually fail. It is built only from your own IRs.
+      </p>
+      <p>
+        <strong>What it does with it:</strong> it suggests. "On three earlier S25P IRs this symptom traced to
+        the ESC — here is the IR number." A Note with a source, never a verdict. That is a real second arm for
+        QC, because it points at the record that already answers the question; and a real second arm for CR,
+        because it can see the pattern before a customer does.
+      </p>
+      <p>
+        <strong>The line:</strong> it never changes a rule by itself. When it comes to believe something
+        should be a rule, it proposes it to <em>you</em> — and an unticked rule is not a rule. A helper that
+        quietly relaxes its own standards would be worse than having none.
       </p>
       <p class="why">
-        You approved starting this now, reading the legacy IRs. That is the first thing I will build after
-        the close button.
+        <strong>The one decision this raises, and it is a real one.</strong> Learning from your own IRs is
+        free, runs offline, and nothing leaves Indrones. But there is a far more capable option: letting the
+        backend send a field to an outside AI service and get real reasoning back. It is genuinely better at
+        understanding free text — and it means <em>sensitive IR data leaving the company</em>, with a cost per
+        use. You told me the IR data is sensitive, so I will not choose this for you. <strong>My
+        recommendation:</strong> build the offline knowledge base first, see what it can actually do, and
+        decide about an outside service afterwards with real evidence in front of you.
       </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q5 · Auto-save — my conditions, for your yes</h3>
+      <p>
+        <strong>You are right, and I would build it.</strong> Two buttons where one is enough is exactly the
+        confusion you describe, and closing is the only moment the app truly changes state — so auto-save is
+        the better design. Four conditions I will hold to, because without them it is worse than a button:
+      </p>
+      <ul>
+        <li><strong>"Saved" must mean saved.</strong> If the phone is offline or the session has expired, the
+            indicator says so and keeps retrying. A false "Saved" loses work <em>and</em> destroys trust in
+            every other indicator in the app.</li>
+        <li><strong>Flush before it can be lost.</strong> Save on a short pause in typing, then again when the
+            field loses focus, when the tab is hidden, or when you leave the section. A phone locking
+            mid-sentence must not lose the sentence.</li>
+        <li><strong>Not one write per keystroke.</strong> The Drive store costs per operation, not per byte,
+            so saving on every letter would multiply what the app costs to run. A short debounce, plus the
+            flush points above.</li>
+        <li><strong>It must tell you what happened.</strong> A small, quiet "Saved just now" that appears and
+            fades — the same discipline as the toast, which replaces rather than queues.</li>
+      </ul>
+      <p class="why">
+        Confirming this also settles something quietly. Today the app records a section as "done" the moment
+        it is saved. With auto-save that becomes meaningless — which is exactly what we want, because "done"
+        finally gets to mean what it says.
+      </p>
+    </div>
+
+    <div class="qbox">
+      <h3>Q6 · The Postmaster will not spam anyone</h3>
+      <p>
+        <strong>Your fear is the correct design constraint</strong>, and I would rather build to it than
+        discover it. An alerting system that emails on every event gets filtered by its own users inside a
+        week — and then the one message that mattered is never read. So the rule is:
+        <em>the Postmaster is a daily postman, not a doorbell.</em>
+      </p>
+      <ul>
+        <li><strong>One email a day per person, at most.</strong> Everything found for you since yesterday
+            arrives collected into a single message.</li>
+        <li><strong>Blocks and Asks are never emailed.</strong> They appear on screen, on the field, while the
+            person is standing there — which is where they are useful. An email about a block you already
+            fixed is pure noise.</li>
+        <li><strong>FIRs go to the person and CR, collected.</strong> Management gets a weekly summary rather
+            than one email per report — Ravi Singh already sees everything as CR, so this costs nothing.</li>
+        <li><strong>The night job never emails.</strong> It works quietly and leaves its findings for the
+            panel. Nothing arrives at 3am.</li>
+        <li><strong>Nothing to report means no email at all.</strong> Not "no issues today" — silence.</li>
+        <li><strong>Anyone can turn their own email off</strong>, per category, and the panel keeps working
+            exactly as before.</li>
+      </ul>
     </div>
   </section>
 
@@ -841,9 +938,11 @@
 
     <ol>
       <li>
-        <strong>The close button.</strong> "Mark this section (activity and record) completed." Save stays
-        free; only this button closes. This comes first because every rule in this book needs a moment to
-        speak at — and it is also what makes the board move.
+        <strong>Auto-save, then the close button.</strong> The Save button goes; every change is recorded as
+        you make it, with a quiet and honest "Saved" indicator. What remains is one button — "Mark this
+        section (activity and record) completed" — the only thing that closes a section and moves the
+        trackers. This comes first because every rule in this book needs a moment to speak at, and because it
+        is what makes the board move.
       </li>
       <li>
         <strong>The rule engine, and the live checklist.</strong> The rule book above becomes real: the
@@ -851,12 +950,14 @@
         still owed.
       </li>
       <li>
-        <strong>I-PASSBOOK POSTMASTER, and the FIR machinery.</strong> The four destinations, the emailed
-        FIR, and the rename of the three existing senders.
+        <strong>I-PASSBOOK POSTMASTER, and the FIR machinery.</strong> The four destinations, the collected
+        daily email, and the rename of the three existing senders — built to the anti-spam rules in Q6 from
+        the first line of code, not bolted on afterwards.
       </li>
       <li>
-        <strong>Maturity, trained on your legacy IRs.</strong> So the Inspector starts life already knowing
-        your vocabulary rather than learning it in front of your colleagues.
+        <strong>Maturity, trained on your legacy IRs.</strong> Vocabulary first, then the technical
+        associations — which symptom has meant which root cause on which model. The Inspector should start
+        life already knowing your history, rather than learning it in front of your colleagues.
       </li>
       <li>
         <strong>English and Hinglish.</strong> The writing helper — spelling, sentence structure, and a
@@ -871,22 +972,30 @@
     <p class="why">
       Chunk 1 and chunk 4 are the two you have already authorised — the close button because it is the
       foundation, and maturity because you said <em>"Yes you may start maturity as of now."</em> I will start
-      there as soon as the rules above are ticked.
+      there as soon as the answers above are in.
     </p>
   </section>
 
   <footer class="end">
     <p>
-      <strong>Your reply can be three lines.</strong> Name only the numbers you want changed; everything you
-      do not mention, I take as agreed and build.
+      <strong>Your first pass is in the book.</strong> What is left is small enough to answer in five short
+      lines, and they are all in Section 6:
     </p>
+    <ol>
+      <li><strong>The icon</strong> — 1 (the cap), 2 (the shield) or 3 (the magnifier).</li>
+      <li><strong>R-126's edge</strong> — when a root cause has no action at all and <em>both</em> fields are
+          marked Not applicable, does the FIR still fire? My recommendation: yes.</li>
+      <li><strong>R-127's blank</strong> — a CA or PA left completely empty instead of selected Not
+          applicable: block it, or just report it? My recommendation: block, the same standard as R-125.</li>
+      <li><strong>Q4</strong> — build the offline knowledge base only, or plan for an outside AI service
+          too? My recommendation: offline first, decide the rest later.</li>
+      <li><strong>Q5 and Q6</strong> — a yes to auto-save under my four conditions, and a yes to the
+          no-spam rule for the Postmaster.</li>
+    </ol>
     <p>
-      If it is easier, you can answer by section: <em>"Section 2 yes"</em>, <em>"Section 3 — English family
-      yes, Hinglish family yes but drop R-98, Numbers yes, Workflow yes except R-115, Advisory yes, New yes"</em>,
-      <em>"Section 4 yes"</em>, <em>"Section 5 yes"</em>, <em>"Section 6 — all four as recommended"</em>,
-      <em>"Section 7 yes."</em>
+      Everything you do not mention, I take as agreed and build.
     </p>
-    <p>I-PASSBOOK · Indrones · 1 October 2026</p>
+    <p>I-PASSBOOK · Indrones · 2 October 2026</p>
   </footer>
 
 </div>

@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-PASSBOOK Help &amp; FAQ</title>
+<link rel="icon" href="assets/icon-192.png">
+<style>
+  /* Its own token set, in the shape the app's tokens.css uses, so this page reads
+     as the same product without loading a stylesheet — and without touching the
+     six-file cascade that smoke-shell.mjs pins. Every token is defined on bare
+     :root FIRST; the two dark blocks only re-point them. A colour whose only
+     definition sat inside one of those blocks would be invisible to a viewer
+     whose system theme is the other one. */
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --line-strong: #b9bfcc;
+    --accent: #2440d8;
+    --accent-soft: #e8ebfb;
+    --warn: #9a4a00;
+    --warn-soft: #fdf0dd;
+    --warn-line: #e8c48a;
+    --ok: #1d6b45;
+    --ok-soft: #e2f3ea;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --surface-2: #1e2431;
+      --fg: #e7eaf1;
+      --fg-muted: #98a1b3;
+      --line: #2a3140;
+      --line-strong: #3b4354;
+      --accent: #8fa2ff;
+      --accent-soft: #1d2440;
+      --warn: #e8b06a;
+      --warn-soft: #2c2314;
+      --warn-line: #55411f;
+      --ok: #6fd3a0;
+      --ok-soft: #14291f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --surface-2: #1e2431;
+    --fg: #e7eaf1;
+    --fg-muted: #98a1b3;
+    --line: #2a3140;
+    --line-strong: #3b4354;
+    --accent: #8fa2ff;
+    --accent-soft: #1d2440;
+    --warn: #e8b06a;
+    --warn-soft: #2c2314;
+    --warn-line: #55411f;
+    --ok: #6fd3a0;
+    --ok-soft: #14291f;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    padding-block: 0 4rem;
+  }
+  .wrap { max-width: 74ch; margin: 0 auto; padding-inline: 16px; }
+
+  header.masthead {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+    padding-block: 2.5rem 2rem;
+    margin-bottom: 1.6rem;
+  }
+  .eyebrow {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--fg-muted);
+    font-weight: 600;
+    margin: 0 0 0.6rem;
+  }
+  h1 {
+    font-size: clamp(1.65rem, 5vw, 2.3rem);
+    line-height: 1.15;
+    margin: 0 0 0.7rem;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+  .standfirst { font-size: 1.05rem; color: var(--fg-muted); margin: 0; max-width: 62ch; }
+
+  h2 {
+    font-size: 1.25rem;
+    line-height: 1.25;
+    margin: 0 0 0.9rem;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  h3 {
+    font-size: 1rem;
+    margin: 1.4rem 0 0.35rem;
+    letter-spacing: -0.005em;
+    text-wrap: balance;
+  }
+  h3:first-of-type { margin-top: 0; }
+  p { margin: 0 0 0.85rem; }
+  p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); }
+  strong { font-weight: 650; }
+  code {
+    font-family: var(--mono);
+    font-size: 0.87em;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 0.08em 0.35em;
+  }
+
+  section {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: 1.4rem 1.3rem;
+    margin-bottom: 1rem;
+  }
+  section.is-now { border-left-color: var(--accent); }
+  section.is-ask { border-left-color: var(--warn); }
+
+  nav.jump { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }
+  nav.jump a {
+    font-size: 0.82rem;
+    text-decoration: none;
+    color: var(--fg-muted);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    border-radius: 999px;
+    padding: 0.3rem 0.7rem;
+  }
+  nav.jump a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+  ul { margin: 0 0 0.85rem; padding-left: 1.2rem; }
+  li { margin-bottom: 0.4rem; }
+  li::marker { color: var(--fg-muted); }
+  ul:last-child { margin-bottom: 0; }
+
+  .callout {
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    margin: 0.9rem 0;
+    border: 1px solid var(--warn-line);
+    background: var(--warn-soft);
+    color: var(--fg);
+    font-size: 0.95rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .ct {
+    display: block;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--warn);
+  }
+  .callout.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .callout.ok .ct { color: var(--ok); }
+
+  /* No tables on this page on purpose — a table wide enough to be readable needs
+     sideways scrolling on a phone, which is the one thing this page must not do. */
+
+  footer.end {
+    margin-top: 1.6rem;
+    padding-top: 1.2rem;
+    border-top: 1px solid var(--line);
+    color: var(--fg-muted);
+    font-size: 0.88rem;
+  }
+  footer.end a { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">I-PASSBOOK</p>
+    <h1>Help &amp; FAQ</h1>
+    <p class="standfirst">
+      Everything on this page describes what the app actually does — nothing here is a
+      plan, a policy or a promise about the future. If an answer here disagrees with
+      what you see on screen, the screen is right and the page is out of date: tell the
+      service desk.
+    </p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <nav class="jump" aria-label="Jump to a section">
+    <a href="#getting-in">Getting in</a>
+    <a href="#passwords">Codes &amp; passwords</a>
+    <a href="#finding">Finding an IR</a>
+    <a href="#ticket">Working a ticket</a>
+    <a href="#charts">Reading the charts</a>
+    <a href="#permissions">Who can edit what</a>
+    <a href="#logs">The Log Analyser</a>
+    <a href="#customer">Reporting a problem</a>
+    <a href="#data">Your data and your device</a>
+    <a href="#trouble">When something looks wrong</a>
+  </nav>
+
+  <section id="getting-in" class="is-now">
+    <h2>Getting in</h2>
+
+    <h3>How do I get an account?</h3>
+    <p>
+      An administrator creates it for you. There is no sign-up screen and no way to
+      request one from inside the app — an account is made, and its details are handed
+      to you.
+    </p>
+
+    <h3>It is my first time. What will I see?</h3>
+    <p>
+      You sign in with the temporary password you were given, and the app asks you to
+      set a password of your own before it lets you any further. Until you do, the
+      app is presentation only — it holds no session for you and there is nothing
+      behind that screen to reach.
+    </p>
+
+    <h3>Do I type a password every morning?</h3>
+    <p>
+      No. Day to day you give your email address, the app emails you a six-digit code,
+      and you type that. The password door is still there if you would rather use it.
+    </p>
+
+    <h3>Can I unlock faster than that?</h3>
+    <p>
+      On a device you have already signed in on, yes — with your fingerprint, or with a
+      pattern. This is a local unlock on that device and it is set up from inside the
+      app once you are already signed in.
+    </p>
+
+    <h3>Can I stay signed in on my laptop and my phone at once?</h3>
+    <p>
+      No, and this is deliberate. One device stays signed in per account: signing in on
+      your phone signs the earlier device out. If you have been signed out somewhere
+      you did not expect, this is almost always why.
+    </p>
+  </section>
+
+  <section id="passwords" class="is-now">
+    <h2>Codes &amp; passwords</h2>
+
+    <h3>How long does the emailed code last?</h3>
+    <p>
+      Eight and a half hours from the moment it is emailed — a working day. The clock
+      starts when the mail is sent, so a code requested at 2pm is good until 10:30pm.
+      Within that window the <strong>same</strong> code works for every sign-in; you do
+      not need a fresh one each time.
+    </p>
+
+    <h3>Someone asked me for my code. Should I give it?</h3>
+    <div class="callout">
+      <span class="ct">Never share it</span>
+      <p>
+        A sign-in code is the same thing as your signature. Nobody at the service desk
+        needs it, and nobody should ever ask for it. If you get such a request, report
+        it.
+      </p>
+    </div>
+
+    <h3>I typed the code wrong a few times.</h3>
+    <p>
+      The code burns itself out after five wrong attempts, whatever time is left on it.
+      Request a new one. Repeated wrong attempts also lock that email's door for
+      fifteen minutes — if you are certain the code is right and it still refuses, wait
+      a quarter of an hour rather than trying again and again.
+    </p>
+
+    <h3>I have forgotten my password.</h3>
+    <p>
+      Use the reset link on the sign-in screen. If you normally sign in with a code
+      instead, you can simply keep doing that — the password is an optional door, not
+      the front one.
+    </p>
+
+    <h3>I did not try to sign in, but I got a code.</h3>
+    <p>
+      Then someone else is trying to get in with your email. Tell an administrator
+      straight away. Do not forward the code to anyone, including the person who asked.
+    </p>
+  </section>
+
+  <section id="finding">
+    <h2>Finding an IR</h2>
+
+    <h3>How do I find one ticket?</h3>
+    <p>
+      Type into the search box on the IR list — it matches the IR number and the drone
+      ID. The filters narrow the same list by year, month, status, category and
+      customer.
+    </p>
+
+    <h3>What is the board view?</h3>
+    <p>
+      The IR list has a <strong>List / Board</strong> switch. The board shows the same
+      tickets as cards in columns, one column per stage of the job. It is the same list
+      seen sideways, so the search box and every filter apply to both — switch between
+      them without losing what you had typed.
+    </p>
+
+    <h3>What is Legacy Records?</h3>
+    <p>
+      The old workbook, shown read-only in a frame. It is there so you can still reach
+      work that predates the app, and it stays current alongside it. Nothing you do in
+      that frame changes the app.
+    </p>
+
+    <h3>Where is the site?</h3>
+    <p>
+      On the ticket, the site location is written out as text with a link beside it.
+      Tapping the link opens that place in Google Maps. Nothing is loaded from Google —
+      and no location leaves your device — until you tap it.
+    </p>
+  </section>
+
+  <section id="ticket">
+    <h2>Working a ticket</h2>
+
+    <h3>What do the sections mean?</h3>
+    <p>
+      A ticket has an Overview and six numbered sections — B inward checklist, C IQC
+      visual inspection, D investigation, E production/rework, F quality test, G PDI and
+      dispatch. Each section is a form with its own Save.
+    </p>
+
+    <h3>"3 of 6 sections saved" — does that mean the ticket is finished?</h3>
+    <p>
+      No, and the wording is careful about it. The count records that a section's
+      <strong>Save button was pressed</strong>, not that the section was filled in
+      fully. A section saved once stays counted, so treat the number as progress, never
+      as a completion certificate.
+    </p>
+
+    <h3>What moves a ticket forward?</h3>
+    <p>
+      A person does, deliberately. Saving a section never moves the workflow on by
+      itself — no status changes behind your back, and no clock starts on its own. The
+      status changes when someone sets it in Triage, or presses the move button that
+      appears on a card on the board.
+    </p>
+
+    <h3>What does the status mean?</h3>
+    <p>
+      The status is the stage of the job, from Open and Remote Support through Inward,
+      Visual Inspection, QC Investigation, Production, QC and Flight Test to PDI,
+      Approval, Delivered and Close. Hold and Other are outside that run. On the board
+      these are grouped into columns, so "Not started" covers Open and Remote Support
+      and "Finished" covers Delivered, Close and Other.
+    </p>
+
+    <h3>When is a ticket counted as late?</h3>
+    <p>
+      It depends on priority, counted from the last time its status changed:
+    </p>
+    <ul>
+      <li><strong>Urgent</strong> — more than 1 day</li>
+      <li><strong>High</strong> — more than 3 days</li>
+      <li><strong>Medium</strong> — more than 7 days</li>
+      <li><strong>Low</strong> — more than 14 days</li>
+    </ul>
+    <p>
+      A ticket with no priority is treated as 14 days. Only tickets that are actually
+      still open can be late — a Delivered or Closed ticket is never flagged, however
+      long it sat there.
+    </p>
+
+    <h3>What does the number beside an assignee mean?</h3>
+    <p>
+      Who the ticket is with. The IR list shows it next to the IR number. "Unassigned"
+      means nobody has been given it yet, and it is a real state, not a gap to ignore.
+    </p>
+  </section>
+
+  <section id="charts">
+    <h2>Reading the charts</h2>
+
+    <h3>What is on the Insights screen?</h3>
+    <p>
+      Three headline figures — raised, open now, and late now — then how many were
+      raised in each of the last twelve months, the spread of statuses, how REPAIR
+      tickets break down by sub-category, and a card per person with how many they have
+      open and how many are late.
+    </p>
+
+    <h3>The chart total does not match the list. Which is wrong?</h3>
+    <p>
+      Neither, usually — they are answering different questions. The charts read every
+      ticket; the list reads what your filters and search have left. Clear the filters
+      and the two agree.
+    </p>
+
+    <h3>Why is there a "No date" bar?</h3>
+    <p>
+      Because some tickets genuinely have no date on them. Leaving them out would make
+      the bars add up to less than the total printed above them, and a chart that
+      silently disagrees with its own headline is worse than one that admits the gap.
+    </p>
+
+    <h3>Why is there an "Unassigned" row under People?</h3>
+    <p>
+      For the same reason. It is shown even when it is zero, so the numbers in that card
+      always add up to the total rather than quietly leaving out whoever nobody has
+      picked up yet.
+    </p>
+
+    <h3>Does it show departments?</h3>
+    <p>
+      No. An IR does not carry a department, so a department chart would be inventing
+      one. It counts assignees, because that is what the data actually has.
+    </p>
+  </section>
+
+  <section id="permissions">
+    <h2>Who can edit what</h2>
+
+    <h3>Can I see everything?</h3>
+    <p>
+      Everyone signed in can read and comment on every ticket and its six sections, and
+      the Overview. That is the same for all accounts.
+    </p>
+
+    <h3>Then what is restricted?</h3>
+    <p>
+      Editing. Whether you can change a section is set per account, per department, and
+      a section can be given to more than one department so that more than one team can
+      work on it.
+    </p>
+
+    <h3>I can read a section but the Save button will not work.</h3>
+    <p>
+      Then that section has not been granted to a department you belong to. It is yours
+      to read and comment on, not to change. Ask an administrator if you should have it.
+    </p>
+
+    <h3>Who can set the status and priority?</h3>
+    <p>
+      Triage — Customer Relations and Management. It is a separate permission from
+      section editing: a person can be able to work a section without being able to
+      change the stage the ticket is at.
+    </p>
+  </section>
+
+  <section id="logs">
+    <h2>The Log Analyser</h2>
+
+    <h3>What does it do?</h3>
+    <p>
+      It reads an ArduPilot flight log from a drone's removable card and reports what is
+      in it — the flight, the vibration and GPS quality, and any errors the flight
+      controller recorded.
+    </p>
+
+    <h3>Does the log file get uploaded anywhere?</h3>
+    <div class="callout ok">
+      <span class="ct">No</span>
+      <p>
+        The file is opened and read entirely inside your browser, on your own device.
+        The log never leaves the machine you opened it on, and nothing about it is sent
+        to the service desk or anyone else.
+      </p>
+    </div>
+
+    <h3>Can I keep the result with the ticket?</h3>
+    <p>
+      Yes. You can push the report onto the investigation section of an IR so the
+      finding sits with the ticket rather than in a file on one laptop.
+    </p>
+
+    <h3>The numbers it quotes — where do they come from?</h3>
+    <p>
+      The thresholds are ArduPilot's own published guidance, not this app's opinion.
+      The analyser reads the log and applies those numbers; it is a reader, not a judge,
+      and it will not tell you a flight was fine.
+    </p>
+  </section>
+
+  <section id="customer" class="is-ask">
+    <h2>Reporting a problem</h2>
+
+    <h3>I do not have an account. Can I report a fault?</h3>
+    <p>
+      Yes. On the sign-in screen there is a <strong>Report a problem</strong> entry that
+      needs no account at all. It opens the problem-reporting form the service desk
+      already uses, and the form can also be opened in a new tab if the window gives you
+      any trouble.
+    </p>
+
+    <h3>What can I see from there?</h3>
+    <p>
+      The form, and this page. Nothing else. That entry reads no ticket, no customer
+      name and no IR number — it is a way in, not a window. Everything else in the app
+      is behind a sign-in.
+    </p>
+
+    <h3>Who receives what I send?</h3>
+    <p>
+      It goes to the service desk exactly as it does today, through the same form. The
+      form is hosted by Google; nothing is loaded from Google until you open that window.
+    </p>
+  </section>
+
+  <section id="data">
+    <h2>Your data and your device</h2>
+
+    <h3>Where does the app keep the records?</h3>
+    <p>
+      In a store in the organisation's own Google Drive, reached through the service
+      desk's own backend. It is not a hosted product and no third-party service holds
+      your tickets.
+    </p>
+
+    <h3>What leaves my device?</h3>
+    <p>
+      Only what the app needs to do its job: your sign-in, and the saves you press.
+      Flight logs stay on your device. Nothing is sent to Google for a map until you tap
+      the map link, and nothing is loaded from the problem-reporting form until you open
+      it.
+    </p>
+
+    <h3>Is the app watching me?</h3>
+    <p>
+      No. There is no analytics, no tracking and no advertising in it. It asks for a
+      camera or a location only where a feature genuinely needs one, and it tells you
+      when it does.
+    </p>
+
+    <h3>I am on a phone with a poor signal.</h3>
+    <p>
+      The app is built to keep working from what it last loaded. What it cannot promise
+      is fresh data: a save needs the connection to reach the store, and a screen you
+      left open can show an older copy than the one on the server.
+    </p>
+  </section>
+
+  <section id="trouble">
+    <h2>When something looks wrong</h2>
+
+    <h3>The first sign-in of the day took half a minute.</h3>
+    <p>
+      That is the backend waking up, not you being slow or the app being broken. It
+      sleeps after a few minutes of quiet and takes a good while to come back the first
+      time; after that it answers in a second or two. It is kept awake during working
+      hours to make this rarer, but it can still happen.
+    </p>
+
+    <h3>A save said "Not saved — press again".</h3>
+    <p>
+      The write did not reach the store, and the app is telling you rather than
+      pretending. Press Save again. If it keeps happening, the connection is the
+      problem — check it before you re-type anything.
+    </p>
+
+    <h3>Someone else's change is missing from my screen.</h3>
+    <p>
+      Then your screen is showing what it loaded earlier. Reload the page: a page that
+      is already open does not quietly pull in a newer copy of itself.
+    </p>
+
+    <h3>A banner said there is a new version. What do I do?</h3>
+    <p>
+      Tap it, or reload. The app tells you when a newer build exists rather than
+      swapping itself out under your hands mid-form. One refresh moves you onto it, and
+      after that the app's own updates are automatic.
+    </p>
+
+    <h3>I have set the app up on my phone. Does it open full screen?</h3>
+    <p>
+      Yes — it can be installed to your home screen and opens without browser furniture,
+      like an app rather than a web page.
+    </p>
+
+    <h3>None of this helped.</h3>
+    <p>
+      Tell the service desk. Say which ticket you were on, which section, and what you
+      expected instead — that is enough for them to find it.
+    </p>
+  </section>
+
+  <footer class="end">
+    <p>
+      <a href="index.html">Back to I-PASSBOOK</a>
+    </p>
+    <p>
+      This page is static: it runs no scripts, sends nothing and records nothing about
+      who read it.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

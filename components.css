@@ -854,6 +854,104 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .inward-options-foot .btn { width: auto; }
 .opt-group .opt-textarea { min-height: 84px; resize: vertical; font-size: var(--text-sm); }
 
+/* The two entries on the sign-in card. `space-between` would strand them at the
+   card's corners on a wide screen; centred and wrapped keeps them reading as one
+   quiet line under the form, which is what they are. */
+.auth-doors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem 1.25rem;
+  margin: 0.9rem 0 0;
+}
+
+/* ── The customer door (open access, sign-in screen only) ──
+   The app's one unauthenticated surface. The overlay reuses the shared modal
+   shape — it is a sibling of .inward-options-modal and relies on the same fixed
+   positioning, so it is appended to <body> for the same reason.
+   The card is sized by the FRAME, not by prose: the form is tall, and a card that
+   shrank to its content would either crop the form or grow past the viewport.
+   `height` on the body (not min-height) is what makes the iframe fill the card —
+   a percentage height inside an auto-height flex parent resolves to zero. */
+.customer-door {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgb(0 0 0 / 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.15s ease;
+}
+[data-theme="dark"] .customer-door { background: rgb(0 0 0 / 0.65); }
+
+.customer-door-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 720px;
+  height: 88vh;
+  background: var(--surface-elevation-2);
+  border: 1px solid var(--outline-elevation-2);
+  border-radius: var(--radius-6);
+  box-shadow: var(--elevation-2xl);
+  overflow: hidden;
+}
+.customer-door-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-bottom: 1px solid var(--outline-gray-2);
+  flex: 0 0 auto;
+}
+.customer-door-head h2 { font-size: var(--text-lg); color: var(--ink-gray-9); margin: 0; }
+/* The escape hatch, pushed to the right so it is beside the close button and never
+   hidden behind the form. A frame must never be the only way to the form: an
+   in-app browser with third-party frames blocked, or a Google account signed out
+   of on this device, both show a blank panel where the form should be. */
+.customer-door-tab {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: underline;
+  white-space: nowrap;
+}
+.customer-door-close {
+  background: none;
+  border: none;
+  color: var(--ink-gray-5);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: var(--radius-2);
+  font-family: inherit;
+  flex: 0 0 auto;
+}
+.customer-door-close:hover { color: var(--ink-gray-9); background: var(--surface-gray-2); }
+.customer-door-body { flex: 1 1 auto; min-height: 0; background: var(--surface-base); }
+.customer-door-body iframe { display: block; width: 100%; height: 100%; border: 0; }
+.customer-door-note {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0.55rem 0.9rem;
+  border-top: 1px solid var(--outline-gray-2);
+  font-size: var(--text-xs);
+  color: var(--ink-gray-5);
+}
+/* A phone gets the full screen: the form's own fields are already fighting for
+   room, and every pixel the overlay's padding takes is a pixel off the answer box.
+   `padding: 0` on the OVERLAY, not a negative margin on the card — the card's
+   `height: 100%` then resolves against the whole viewport instead of a box 2rem
+   shorter, which is what makes this actually full height rather than nearly. */
+@media (max-width: 640px) {
+  .customer-door { padding: 0; }
+  .customer-door-card { height: 100%; max-width: none; border-radius: 0; }
+}
+
 /* ── Triage modal (status / assignee / priority / type) ──
    Stacked label-above-control rows so it stays readable at phone width, which
    is where warehouse staff will actually use it. */

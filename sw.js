@@ -20,7 +20,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v58';
+const CACHE_NAME = 'ipassbook-v59';
 const SHELL = [
   './',
   './index.html',
@@ -36,6 +36,13 @@ const SHELL = [
   './i18n.js',        // the English language layer; must be in place before app.js
   './app.js',
   './manifest.json',
+  // The FAQ is in the SHELL because it is linked from the sign-in screen, so it is
+  // part of the app's own surface — and because it is the page someone opens when
+  // something is already wrong, which is exactly when the signal is bad. The other
+  // static pages (plan.html, inspector.html) are review pages, not app screens, and
+  // deliberately stay OUT of the shell: they would be paid for on every device's
+  // first visit and read by almost nobody.
+  './faq.html',
   './assets/icon-192.png',
   './assets/icon-mark.png',   // the borderless mark the app itself shows
 ];

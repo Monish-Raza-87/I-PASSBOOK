@@ -50,6 +50,11 @@
     'nav.logAnalyser':     'Log Analyser',
     'nav.legacyRecords':   'Legacy Records',
     'nav.userAccess':      'User Access',
+    // Named separately from the sign-in door's own label, even though the English
+    // is the same string. A translator shortening a sidebar label would not want
+    // to shorten the link on the sign-in card with it, and a shared key would make
+    // that impossible — which is the whole reason this table exists.
+    'nav.help':            'Help & FAQ',
 
     // ── The IR list, and the board it draws the same rows as ─────────────────
     'list.title':          'IRs',
@@ -148,6 +153,17 @@
     'common.unassigned':   'Unassigned',
     'common.overdue':      'Overdue',
     'common.openInMaps':   'Open in Maps →',
+
+    // ── The customer door, and the FAQ behind it ─────────────────────────────
+    // The app's second open door. These five strings are read on the sign-in
+    // screen, before anyone has an account — so they are the only words in this
+    // table a member of the public ever sees, and they carry no internal name, no
+    // IR number and nothing about how the desk works inside.
+    'door.report':      'Report a problem',
+    'door.faq':         'Help & FAQ',
+    'door.newTab':      'Open in a new tab',
+    'door.close':       'Close',
+    'door.note':        'This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you open this window.',
 
     // ── The Insights dashboard ───────────────────────────────────────────────
     // Only the strings the dashboard's NEW blocks add. The filter labels and the

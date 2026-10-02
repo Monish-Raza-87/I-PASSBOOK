@@ -238,6 +238,21 @@
         <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
       </form>
       <p id="auth-error" class="auth-error" style="display:none"></p>
+
+      <!-- THE CUSTOMER DOOR, and the app's second open one.
+           Everything else here is token-gated; this line is not, and it is the
+           only thing on this screen a customer ever needs. Both halves are the
+           same promise: a way to reach the desk without an account.
+
+           The Report button stays hidden until CUSTOMER_FORM_URL is set in app.js
+           — an entry that opens an empty frame is worse than no entry. The FAQ is
+           always available: it is a static page, and it answers the questions the
+           form's own existence raises. -->
+      <p class="auth-doors">
+        <button type="button" class="link-btn" id="customer-door-open" style="display:none" data-i18n="door.report">Report a problem</button>
+        <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
+      </p>
+
       <!-- The credit sits on the sign-in card, not only inside the app: it is the
            one screen everybody sees on every device, every day. -->
       <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
@@ -322,6 +337,17 @@
           <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label" data-i18n="nav.legacyRecords">Legacy Records</span>
         </button>
+
+        <!-- The FAQ, from inside the app. A plain link, like the three above it —
+             no JS binding, and a NEW TAB so leaving for a question never costs
+             whatever form was half-filled behind it. It is a real <a>, never a
+             script-opened window: phones block window.open from a tap that has to
+             travel anywhere, and the sign-in screen needs the same page anyway. -->
+        <a class="nav-item" id="nav-faq" href="faq.html" target="_blank" rel="noopener"
+           title="Help &amp; FAQ" data-i18n-title="nav.help">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label" data-i18n="nav.help">Help &amp; FAQ</span>
+        </a>
 
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none" data-i18n="nav.administration">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">
@@ -682,6 +708,43 @@
        that was lost. The inner span is separate so `pointer-events` can be `auto`
        on the pill and `none` on its text — otherwise the text node swallows taps. -->
   <div id="toast" role="status" aria-live="polite" title="Tap to dismiss"><span id="toast-text"></span></div>
+
+  <!-- ========== THE CUSTOMER DOOR ==========
+       A modal, appended to <body> like every other one (see the MODALS note in
+       components.css), because it is reachable from the sign-in screen where
+       nothing inside #app-container exists yet.
+
+       It is OPEN ACCESS and it stays that way: this frame is a Google Form that
+       only ACCEPTS input, so it reveals nothing about any IR. Compare the rest of
+       the app, where every read is paid for with a session token.
+
+       The src is deliberately EMPTY here and is set by app.js only when someone
+       opens the door. An iframe with a src loads on page load, so leaving one in
+       the markup would mean every visitor — including the ones who only ever sign
+       in to the app — made a request to Google's form endpoint from inside a tool
+       holding customer data. Nothing about this dialog touches the network until a
+       person asks for it. -->
+  <div class="customer-door" id="customer-door" style="display:none">
+    <div class="customer-door-card" role="dialog" aria-modal="true" aria-labelledby="customer-door-title">
+      <div class="customer-door-head">
+        <h2 class="customer-door-title" id="customer-door-title" data-i18n="door.report">Report a problem</h2>
+        <!-- Always visible, and not a fallback that appears on failure: some
+             phones refuse to render a cross-origin frame at all, and a person who
+             needs to report a fault must never be left with a blank rectangle and
+             no way forward. The link is the guaranteed path; the frame is the
+             convenience. -->
+        <a class="customer-door-tab" id="customer-door-tab" href="#" target="_blank" rel="noopener noreferrer"
+           data-i18n="door.newTab">Open in a new tab</a>
+        <button type="button" class="customer-door-close" id="customer-door-close"
+                aria-label="Close" data-i18n-aria="door.close">&times;</button>
+      </div>
+      <div class="customer-door-body">
+        <iframe class="customer-door-frame" id="customer-door-frame"
+                title="Report a problem" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
+      <p class="customer-door-note" data-i18n="door.note">This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you open this window.</p>
+    </div>
+  </div>
 
   <!-- PDF export library. A plain script, deliberately: app.js stays a plain
        end-of-body script with no module system, and this only has to expose

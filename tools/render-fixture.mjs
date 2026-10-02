@@ -85,6 +85,26 @@ const list = byId.get('ir-list').innerHTML;
 const css = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css', 'desk.css']
   .map(f => `<link rel="stylesheet" href="${pathToFileURL(path.join(ROOT, f)).href}">`).join('\n');
 
+// ── The customer door, forced open ───────────────────────────────────────────
+// Extracted from index.html by DEPTH, not by a lazy regex: the modal contains
+// nested divs, and a non-greedy match would stop at the first `</div>` and
+// measure a third of the card. This is the app's own markup and the app's own
+// cascade — the only kind of render check worth having.
+const doorBlock = (() => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const start = html.indexOf('<div class="customer-door" id="customer-door"');
+  if (start === -1) throw new Error('the customer door is not in index.html');
+  let depth = 0, i = start;
+  while (i < html.length) {
+    if (html.startsWith('<div', i)) { depth++; i += 4; continue; }
+    if (html.startsWith('</div>', i)) { depth--; i += 6; if (!depth) break; continue; }
+    i++;
+  }
+  if (depth) throw new Error('unbalanced <div> in the customer door block');
+  // `display:none` is the shipped state; `flex` is what the open door sets.
+  return html.slice(start, i).replace('style="display:none"', 'style="display:flex"');
+})();
+
 fs.writeFileSync(outFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>app fixture</title>
@@ -100,5 +120,20 @@ ${css}
 </div>
 </body></html>`);
 
+// A second page: the same six stylesheets, and the door standing open. It is a
+// separate file because the door is a FIXED overlay — on the page above it would
+// sit over everything and every element underneath would be "past the edge" of
+// its frame, which measures nothing.
+const doorFile = path.join(outDir, 'door.html');
+fs.writeFileSync(doorFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>customer door</title>
+${css}
+</head><body>
+${doorBlock}
+</body></html>`);
+
 console.log(outFile);
 console.log(`  insights ${insights.length} bytes · banner ${banner.length} · list ${list.length}`);
+console.log(doorFile);
+console.log(`  door ${doorBlock.length} bytes`);

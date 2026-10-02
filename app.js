@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v58';
+const APP_VERSION = 'v59';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1407,6 +1407,12 @@ window.addEventListener('load', () => {
   // is not cosmetic: doing it here means no other code in this handler has to know
   // the layer exists, and a screen that is never re-rendered later is still right.
   if (window.I18N) window.I18N.applyStatic();
+
+  // The customer door is wired HERE, and not inside showAuth(), because the entry
+  // lives on the sign-in screen but the modal itself is not part of that screen: a
+  // signed-in device that signs out must find the entry already alive. Wiring it
+  // costs two listeners and, with no URL configured, returns on the second line.
+  wireCustomerDoor();
 
   // Check for local file protocol (login + backend calls won't work)
   if (window.location.protocol === 'file:') {
@@ -3924,6 +3930,76 @@ function showIndex() {
   currentView = 'index';
   renderLayout();
   headerTitle.textContent = 'I-PASSBOOK';
+}
+
+// ─── THE CUSTOMER DOOR ────────────────────────────────────────────────────────
+// The app's SECOND open door, and the only one a customer ever needs.
+//
+// ── Paste the form's URL here ────────────────────────────────────────────────
+// Empty, the entry on the sign-in screen does not render at all. That is the
+// honest default: a button that opens a blank frame is worse than no button, and
+// the app cannot know someone else's form URL.
+//
+// It is the SHARE link (`https://docs.google.com/forms/d/e/…/viewform`), not the
+// editor link. `?embedded=true` is appended below rather than stored, so the same
+// constant can also be handed to a person to open directly.
+//
+// ── Why this is safe to put on an unauthenticated screen ─────────────────────
+// A Google Form only ACCEPTS input. It reads nothing, it is hosted by Google, and
+// it knows nothing about this app or its IRs — responses land wherever that form
+// already puts them, which is where they landed before this existed. Every OTHER
+// byte the app shows is behind a session token; this is a front door, not a hole.
+//
+// ── Why the frame gets its src only when the door opens ──────────────────────
+// An <iframe src> fetches on page load. Left in index.html, that would mean every
+// visitor — including the ones who only ever sign in — sent a request to Google's
+// form endpoint from inside a tool holding customer data. Setting the src on open
+// means the network is touched only by someone who asked for the form, and the
+// app's own sign-in screen stays free of third-party requests.
+const CUSTOMER_FORM_URL = '';
+
+function wireCustomerDoor() {
+  const open   = document.getElementById('customer-door-open');
+  const door   = document.getElementById('customer-door');
+  const frame  = document.getElementById('customer-door-frame');
+  const tab    = document.getElementById('customer-door-tab');
+  const close  = document.getElementById('customer-door-close');
+  if (!open || !door || !frame) return;
+
+  // No URL configured: the entry does not exist, and neither does the modal. The
+  // FAQ link beside it is markup and stays.
+  if (!CUSTOMER_FORM_URL) return;
+
+  const embed = CUSTOMER_FORM_URL + (CUSTOMER_FORM_URL.includes('?') ? '&' : '?') + 'embedded=true';
+  open.style.display = '';
+  tab.href = CUSTOMER_FORM_URL;
+
+  let prevFocus = null;
+  const show = () => {
+    // Set on FIRST open only. Re-assigning the same src would reload the form and
+    // throw away a half-typed report.
+    if (!frame.getAttribute('src')) frame.setAttribute('src', embed);
+    prevFocus = document.activeElement;
+    door.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    // Focus moves into the dialog, or a keyboard user is still tabbing around the
+    // sign-in form behind it.
+    if (close) close.focus();
+  };
+  const hide = () => {
+    door.style.display = 'none';
+    document.body.style.overflow = '';
+    if (prevFocus && prevFocus.focus) prevFocus.focus();
+  };
+
+  open.addEventListener('click', show);
+  if (close) close.addEventListener('click', hide);
+  // A tap on the dimmed ground closes it; a tap INSIDE the card must not, which is
+  // why this tests the target rather than listening on the card.
+  door.addEventListener('click', e => { if (e.target === door) hide(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && door.style.display !== 'none') hide();
+  });
 }
 
 // ─── A SITE, ON A MAP, WITHOUT A MAP ─────────────────────────────────────────
@@ -10611,6 +10687,9 @@ const ICON_PATHS = {
   list:           '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3.5 6h.01"/><path d="M3.5 12h.01"/><path d="M3.5 18h.01"/>',
   ir:             '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1.5a2.5 2.5 0 0 0 0 5V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1.5a2.5 2.5 0 0 0 0-5z"/><path d="M12 7v10" stroke-dasharray="2 2.5"/>',
   legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
+  // Help. A question mark in a ring — the one glyph that reads as "an answer lives
+  // here" with no label beside it, which is what a nav icon has to do.
+  help:           '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.7-2.5 2.1-2.5 3.6"/><path d="M12 17.2h.01"/>',
   users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
   moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
   // Password reveal. Two glyphs, not one: `eye` shows, `eye-off` hides, and the
@@ -10657,6 +10736,7 @@ function initIcons() {
     ['#nav-insights .nav-icon',              'chart'],
     ['#nav-log .nav-icon',                   'pulse'],
     ['#legacy-workbook-btn .nav-icon',       'legacy'],
+    ['#nav-faq .nav-icon',                   'help'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
     ['#list-toggle .list-toggle-icon',       'list'],

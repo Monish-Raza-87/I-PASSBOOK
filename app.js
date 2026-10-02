@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v59';
+const APP_VERSION = 'v60';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3937,12 +3937,11 @@ function showIndex() {
 //
 // ── Paste the form's URL here ────────────────────────────────────────────────
 // Empty, the entry on the sign-in screen does not render at all. That is the
-// honest default: a button that opens a blank frame is worse than no button, and
-// the app cannot know someone else's form URL.
+// honest default: a button that opens nothing is worse than no button, and the
+// app cannot know someone else's form URL.
 //
 // It is the SHARE link (`https://docs.google.com/forms/d/e/…/viewform`), not the
-// editor link. `?embedded=true` is appended below rather than stored, so the same
-// constant can also be handed to a person to open directly.
+// editor link, which does not open for anyone but its owner.
 //
 // ── Why this is safe to put on an unauthenticated screen ─────────────────────
 // A Google Form only ACCEPTS input. It reads nothing, it is hosted by Google, and
@@ -3950,41 +3949,51 @@ function showIndex() {
 // already puts them, which is where they landed before this existed. Every OTHER
 // byte the app shows is behind a session token; this is a front door, not a hole.
 //
-// ── Why the frame gets its src only when the door opens ──────────────────────
-// An <iframe src> fetches on page load. Left in index.html, that would mean every
-// visitor — including the ones who only ever sign in — sent a request to Google's
-// form endpoint from inside a tool holding customer data. Setting the src on open
-// means the network is touched only by someone who asked for the form, and the
-// app's own sign-in screen stays free of third-party requests.
+// ── Why there is no iframe, and this is the whole design ─────────────────────
+// The form records the sender's email address, so Google requires a sign-in
+// before it renders. Inside an iframe that sign-in CANNOT be completed:
+// accounts.google.com sends `X-Frame-Options: DENY`, so the "Sign in" button
+// Google draws in the frame does nothing at all — measured, not assumed. A device
+// already signed in to Google saw the form and everything looked fine; for
+// everyone else the frame was a wall, and a cross-origin frame reports nothing
+// back, so the app could not tell the two cases apart or say which one you were in.
+//
+// So the door links OUT. It explains, in the modal, that Google will ask for a
+// sign-in, and hands over one button that opens the real form in a new tab, where
+// the sign-in works because a tab is not a frame.
+//
+// The side effect is worth naming: no iframe exists anywhere in the app, so
+// opening this door makes NO request to Google. The only request is the one the
+// person makes by pressing the button. The privacy claim stops being "nothing
+// until you open the dialog" and becomes "nothing at all, ever, unless you ask".
 const CUSTOMER_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
 
 function wireCustomerDoor() {
-  const open   = document.getElementById('customer-door-open');
-  const door   = document.getElementById('customer-door');
-  const frame  = document.getElementById('customer-door-frame');
-  const tab    = document.getElementById('customer-door-tab');
-  const close  = document.getElementById('customer-door-close');
-  if (!open || !door || !frame) return;
+  const open  = document.getElementById('customer-door-open');
+  const door  = document.getElementById('customer-door');
+  const go    = document.getElementById('customer-door-go');
+  const close = document.getElementById('customer-door-close');
+  if (!open || !door || !go) return;
 
   // No URL configured: the entry does not exist, and neither does the modal. The
   // FAQ link beside it is markup and stays.
   if (!CUSTOMER_FORM_URL) return;
 
-  const embed = CUSTOMER_FORM_URL + (CUSTOMER_FORM_URL.includes('?') ? '&' : '?') + 'embedded=true';
+  // The href comes from the ONE constant, never a second copy in the markup. A
+  // link is a NAVIGATION: it costs nothing until it is tapped, which is why it can
+  // sit here unguarded where a frame could not.
   open.style.display = '';
-  tab.href = CUSTOMER_FORM_URL;
+  go.href = CUSTOMER_FORM_URL;
 
   let prevFocus = null;
   const show = () => {
-    // Set on FIRST open only. Re-assigning the same src would reload the form and
-    // throw away a half-typed report.
-    if (!frame.getAttribute('src')) frame.setAttribute('src', embed);
     prevFocus = document.activeElement;
     door.style.display = 'flex';
     document.body.style.overflow = 'hidden';
     // Focus moves into the dialog, or a keyboard user is still tabbing around the
-    // sign-in form behind it.
-    if (close) close.focus();
+    // sign-in form behind it. The button, not the close cross: the action is what
+    // a person opened this for.
+    go.focus();
   };
   const hide = () => {
     door.style.display = 'none';

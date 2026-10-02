@@ -155,15 +155,23 @@
     'common.openInMaps':   'Open in Maps →',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
-    // The app's second open door. These five strings are read on the sign-in
-    // screen, before anyone has an account — so they are the only words in this
-    // table a member of the public ever sees, and they carry no internal name, no
-    // IR number and nothing about how the desk works inside.
+    // The app's second open door. These strings are read on the sign-in screen,
+    // before anyone has an account — so they are the only words in this table a
+    // member of the public ever sees, and they carry no internal name, no IR number
+    // and nothing about how the desk works inside.
+    //
+    // door.signInHint is the load-bearing one. A customer is told they need no
+    // account; Google's form then asks them to sign in, because it records the
+    // sender's address. Saying so BEFORE they press anything is the difference
+    // between a form and a trap, so do not shorten it away.
     'door.report':      'Report a problem',
     'door.faq':         'Help & FAQ',
-    'door.newTab':      'Open in a new tab',
     'door.close':       'Close',
-    'door.note':        'This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you open this window.',
+    'door.lede':        'Tell the service desk what went wrong. You do not need an account here, and nothing on this screen asks who you are.',
+    'door.signInHint':  'The form is made with Google Forms. If this device is not already signed in to a Google account, Google will ask you to sign in before it shows you the form — that is Google asking, not this app.',
+    'door.openForm':    'Open the report form',
+    'door.escape':      'It opens in a new tab, so this page is still here when you come back.',
+    'door.note':        'This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you press the button — and if you never press it, nothing is.',
 
     // ── The Insights dashboard ───────────────────────────────────────────────
     // Only the strings the dashboard's NEW blocks add. The filter labels and the

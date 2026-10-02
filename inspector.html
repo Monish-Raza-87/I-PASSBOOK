@@ -330,15 +330,15 @@
     <p class="eyebrow">Indrones · I-PASSBOOK</p>
     <h1>The Inspector's Rule Book</h1>
     <p class="standfirst">
-      Your first pass is recorded — and it changed three of your own rules, which are corrected below.
-      Everything still open is here, one per line, each with the answer I recommend.
-      <strong>You only have to name what you want changed.</strong>
+      Your two passes are recorded. All six questions are answered, the icon is chosen, auto-save is
+      confirmed and the Postmaster has a cadence.
+      <strong>One list is left for you: which rules count as "real risk".</strong>
     </p>
     <div class="meta">
       <span><b>Date</b> 2 October 2026</span>
-      <span><b>Your first pass</b> recorded</span>
-      <span><b>Still open</b> 3 questions</span>
-      <span><b>Status</b> for your tick</span>
+      <span><b>Your passes</b> both recorded</span>
+      <span><b>Decided</b> all 6 questions</span>
+      <span><b>Left for you</b> 1 list</span>
     </div>
   </div>
 </header>
@@ -747,18 +747,18 @@
     </p>
   </section>
 
-  <section id="s6" class="is-urgent">
+  <section id="s6" class="is-quiet">
     <div class="sec-head">
       <span class="sec-num">SECTION 6</span>
       <div class="phase-row">
         <h2>The six questions that are not rules</h2>
-        <span class="chip chip-do">Three confirmed, three open</span>
+        <span class="chip chip-ok">All six answered</span>
       </div>
       <p class="sec-sub">
         These are not about right and wrong. They are decisions only you can make, and I have written my
-        recommendation under each one. Q1, Q2 and Q3 are confirmed, and Q4 is decided — nothing that sends
-        your data out of the company. Still needing you: the icon in Q2, a yes to Q5, and the discussion in
-        Q6.
+        recommendation under each one. Q1, Q2 and Q3 are confirmed, Q4 is decided — nothing that sends your
+        data out of the company — the icon is chosen, auto-save is confirmed, and the Postmaster now has a
+        cadence. <strong>The one thing left is the "real risk" list inside Q6.</strong>
       </p>
     </div>
 
@@ -796,24 +796,15 @@
         says is always about where your hands are.
       </p>
 
-      <h4>Which icon — this one is yours to pick</h4>
+      <h4>The icon — chosen: the peaked cap <span class="chip chip-ok">Option 1</span></h4>
       <p>
-        You suggested a police cap, and I think the instinct is right: it is the one shape that says
-        <em>patrol</em> without saying <em>police state</em>, and it matches the word you use for it yourself.
-        Three candidates:
+        Your pick, and the one I recommended. A simple side-on cap with a badge line across the front. It says
+        <em>patrol</em> without saying <em>police state</em>, it matches the word you use for it yourself, and
+        it stays recognisable at 24 pixels.
       </p>
-      <ul>
-        <li><strong>1 · The peaked cap</strong> — a simple side-on cap with a badge line across the front.
-            Reads as "on duty", friendly, and stays recognisable at 24 pixels. <strong>My recommendation.</strong></li>
-        <li><strong>2 · A shield with a tick</strong> — protection rather than authority. Calmer, but it is a
-            very common shape and says less about patrolling.</li>
-        <li><strong>3 · A magnifier over a page</strong> — "I am reading your record". Most literal, least
-            friendly, and it can read as suspicion, which is the opposite of a writing helper.</li>
-      </ul>
       <p class="why">
-        Whichever you choose, it is drawn as inline SVG in the app's single existing icon source, in
-        <code>currentColor</code> — so it takes the theme, the accent and all four palettes for free, and adds
-        no file at all.
+        Drawn as inline SVG in the app's single existing icon source, in <code>currentColor</code> — so it
+        takes the theme, the accent and all four palettes for free, and adds no new file at all.
       </p>
     </div>
 
@@ -889,11 +880,12 @@
     </div>
 
     <div class="qbox">
-      <h3>Q5 · Auto-save — my conditions, for your yes</h3>
+      <h3>Q5 · Auto-save — <span class="chip chip-ok">Confirmed</span></h3>
       <p>
-        <strong>You are right, and I would build it.</strong> Two buttons where one is enough is exactly the
-        confusion you describe, and closing is the only moment the app truly changes state — so auto-save is
-        the better design. Four conditions I will hold to, because without them it is worse than a button:
+        <strong>Agreed, and this is what gets built first.</strong> The Save button goes; every change is
+        recorded as you make it. Two buttons where one is enough is exactly the confusion you describe, and
+        closing is the only moment the app truly changes state. Four conditions I will hold to, because
+        without them it is worse than a button:
       </p>
       <ul>
         <li><strong>"Saved" must mean saved.</strong> If the phone is offline or the session has expired, the
@@ -916,47 +908,57 @@
     </div>
 
     <div class="qbox">
-      <h3>Q6 · The Postmaster — a discussion, not a decision yet</h3>
+      <h3>Q6 · The Postmaster — <span class="chip chip-ok">Decided</span></h3>
       <p>
-        <strong>You are right that this needs discussing before it is fixed.</strong> It is the one part of
-        the Inspector that can annoy people who have done nothing wrong, and once it annoys them it is very
-        hard to win back. So here is the argument behind my earlier answer, laid out so you can pull it apart.
+        <strong>Your ruling: every 2 hours, one collected email. Real risk goes immediately.</strong> That is
+        what gets built. This is the one part of the Inspector that can annoy people who have done nothing
+        wrong, so the shape below is where the anti-spam promise actually lives.
       </p>
       <p>
-        <strong>The first thing I would change about my own answer:</strong> the app <em>already</em> has a
-        notification system — <code>nudges</code>, an unread badge, a bell, a panel, and one email per
-        assignment. The Inspector should feed <em>that</em> rather than build a second email channel beside
-        it. One place decides who hears what, and one place to calm down if it turns out too loud.
+        The app <em>already</em> has a notification system — <code>nudges</code>, an unread badge, a bell, a
+        panel, and one email per assignment. The Postmaster feeds <em>that</em> rather than building a second
+        channel beside it. One place decides who hears what, and one place to calm down if it turns out too
+        loud.
       </p>
 
-      <h4>The real question: how fast does an FIR need to reach CR?</h4>
+      <h4>How it sends</h4>
       <ul>
-        <li><strong>Collected, once a day.</strong> Calm, nothing at night, and an FIR that is one day old is
-            almost always still perfectly actionable. <strong>My recommendation.</strong></li>
-        <li><strong>Immediately, for every FIR.</strong> Fastest — and this is the one that becomes spam. A
-            bad week in Production is twenty emails to the same two people, and by Thursday they are filtering
-            them.</li>
-        <li><strong>Immediately only for the few carrying real risk.</strong> A section closed empty, a
-            dispatch with no PDI report, a serial that is wrong — those go at once; everything else is
-            collected. Slower to build, because it needs <em>you</em> to mark which rules are urgent.</li>
+        <li><strong>Every 2 hours, everything collected into one email.</strong> One message, not one per
+            finding — so a bad morning is still one email, not nine.</li>
+        <li><strong>Nothing to report means no email at all.</strong> The clock only sends when there is
+            something new in it. Quiet days stay quiet, which is what keeps the loud ones read.</li>
+        <li><strong>Blocks and Asks are never emailed, ever.</strong> They are instructions to the person
+            standing in front of the field. An email about a block that was fixed an hour ago is pure noise.</li>
       </ul>
 
-      <h4>Three smaller ones I would like your view on</h4>
+      <h4>The "real risk" list — this is the one thing I need from you</h4>
+      <p>
+        Immediate sending is only as good as the list of what counts as urgent. <strong>My proposed list,
+        for you to cut or add to:</strong>
+      </p>
       <ul>
-        <li><strong>Does the person who caused it get an email?</strong> They have already seen it on their
-            own IR. Emailing someone a report about themselves reads as being told off, and that is the
-            fastest way to make people dislike the Inspector. My recommendation: <strong>no email to that
-            person</strong> — the in-app dot is their notification, and the email goes to CR.</li>
-        <li><strong>Is silence right when there is nothing to report?</strong> I think yes. A daily "no issues
-            today" trains people to delete without reading, and then the one that mattered is lost too.</li>
-        <li><strong>Who can turn it off?</strong> I think anyone, per category. If CR turns theirs off, the
-            panel still holds everything — nothing is lost, it is simply not pushed at them.</li>
+        <li><strong>R-131 / R-132</strong> — a section marked complete that is empty, or half filled.</li>
+        <li><strong>R-134</strong> — a dispatch with no PDI report attached.</li>
+        <li><strong>R-103 / R-104</strong> — a zero quantity or a zero cost on a real part.</li>
+        <li><strong>R-105</strong> — a future date on something that has already happened.</li>
+        <li><strong>R-109</strong> — two different serials inside one IR.</li>
+        <li><strong>R-135</strong> — a closed IR reopened.</li>
       </ul>
       <p class="why">
-        And the rule I would keep under all of it, whichever way you decide the rest:
-        <strong>Blocks and Asks are never emailed at all.</strong> They are instructions to the person
-        standing in front of the field, and an email about a block that was fixed an hour ago is pure noise.
+        Six rules, all of them a record that cannot be trusted rather than a person who forgot something.
+        Everything else waits for the 2-hour collected email. If you want a rule moved on or off this list,
+        name it and it moves — the list is a setting, not a rewrite.
       </p>
+
+      <h4>What I am taking as agreed, since you did not say otherwise</h4>
+      <ul>
+        <li><strong>The person who caused an FIR is not emailed.</strong> They already see it on their own IR,
+            and the in-app dot is their notification. The email goes to CR.</li>
+        <li><strong>Silence when there is nothing to report.</strong> A "no issues" email trains people to
+            delete without reading, and then the one that mattered is lost too.</li>
+        <li><strong>Anyone can turn theirs off, per category.</strong> If CR turns theirs off the panel still
+            holds everything — nothing is lost, it is simply not pushed at them.</li>
+      </ul>
     </div>
   </section>
 
@@ -1008,22 +1010,22 @@
 
     <p class="why">
       Chunk 1 and chunk 4 are the two you have already authorised — the close button because it is the
-      foundation, and maturity because you said <em>"Yes you may start maturity as of now."</em> I will start
-      there as soon as the answers above are in.
+      foundation, and maturity because you said <em>"Yes you may start maturity as of now."</em> Both answers
+      are now in, so building starts on chunk 1.
     </p>
   </section>
 
   <footer class="end">
     <p>
-      <strong>Your first two passes are in the book.</strong> Three things are left, all in Section 6:
+      <strong>Your three passes are in the book.</strong> The icon is the cap, auto-save is confirmed, and the
+      Postmaster sends one collected email every 2 hours with real risk going immediately.
     </p>
-    <ol>
-      <li><strong>The icon</strong> — 1 (the cap, my recommendation), 2 (the shield) or 3 (the magnifier).</li>
-      <li><strong>Q5, auto-save</strong> — a yes or no, under the four conditions listed.</li>
-      <li><strong>Q6, the Postmaster</strong> — the discussion. The one that matters most is how fast an FIR
-          must reach CR: collected once a day, immediately every time, or immediately only for the few that
-          carry real risk.</li>
-    </ol>
+    <p>
+      <strong>One thing is left, and it is in Q6:</strong> the list of which rules count as "real risk" and
+      therefore skip the queue. Six are proposed — a section closed empty or half filled, a dispatch with no
+      PDI report, a zero quantity or cost, a future date on a past event, two serials in one IR, and a closed
+      IR reopened. Name any you want moved on or off and the list changes.
+    </p>
     <p>
       Everything you do not mention, I take as agreed and build.
     </p>

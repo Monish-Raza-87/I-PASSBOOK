@@ -1314,6 +1314,8 @@ const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
+const irBoard       = document.getElementById('ir-board');
+const listViewSwitch = document.getElementById('list-view-switch');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
 const listToggle    = document.getElementById('list-toggle');
@@ -1324,6 +1326,7 @@ const listToggle    = document.getElementById('list-toggle');
 let currentView = 'index';     // 'index' | 'detail' | 'insights' | 'log'
 let activeSegment = 'all';     // IR-list filter segment
 let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
+let listMode = 'list';         // 'list' | 'board' — the same filtered rows, two drawings
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -5160,6 +5163,154 @@ function wantProgress(ir, prog) {
   return !(ir && ir.isLegacyOnly && prog.done === 0);
 }
 
+// ─── THE IR BOARD ────────────────────────────────────────────────────────────
+// The list's rows, drawn as columns. The board adds NO field and needs NO
+// migration: an IR already carries a 14-value workflow `status`, written by Triage
+// and by nothing else — which is exactly why the columns can be the app's own
+// stages rather than a second vocabulary that would drift from the ticket.
+//
+// NINE columns, not six. The six section columns are the sections a person works
+// in; the two at the start and the one at the end hold the statuses that name no
+// section at all. Without them those IRs would be in no column — the one failure a
+// reader could never see, because a card that is simply nowhere looks like a card
+// that does not exist. The union of every `stages` array below is IR_STATUS_VALUES
+// exactly, each value once; `smoke-board.mjs` asserts that against app.js so a
+// status the app can store and the board cannot place is a failing test.
+//
+// The headings are the app's OWN short names (SECTION_SHORT), so the column a card
+// sits in and the tab it lives on say the same words.
+const BOARD_COLUMNS = [
+  { key: 'start', title: 'Not started',                 stages: ['Open', 'Remote Support'] },
+  { key: 'hold',  title: 'Paused',                      stages: ['Hold'] },
+  { key: 'B', title: 'B · ' + SECTION_SHORT['sec-b'],   stages: ['Inward'] },
+  { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Visual Inspection'] },
+  { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['QC Investigation'] },
+  { key: 'E', title: 'E · ' + SECTION_SHORT['sec-e'],   stages: ['Production'] },
+  { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['QC', 'Flight Test'] },
+  { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI', 'Approval'] },
+  { key: 'done', title: 'Finished',                     stages: ['Delivered', 'Close', 'Other'], quiet: true },
+];
+
+// Which column a status belongs in. Pure: same input, same answer, no DOM, no
+// clock. An unrecognised value lands in 'start' rather than disappearing — the
+// board may never lose an IR, not even one hand-edited in the store.
+function boardColumnOf(status) {
+  const s = String(status || 'Open').trim().toLowerCase();
+  const col = BOARD_COLUMNS.find(c => c.stages.some(v => v.toLowerCase() === s));
+  return col ? col.key : 'start';
+}
+
+// A section column (B–G) owns exactly one app status, and that single fact is what
+// the "move it on?" offer after a close compares against. Returns null for the two
+// end-of-line columns, which own several statuses and so have no single next step.
+function boardColumnOwns(key) {
+  const col = BOARD_COLUMNS.find(c => c.key === key);
+  return col && col.stages.length === 1 ? col.stages[0] : null;
+}
+// The section→letter map already exists as SECTION_LABELS, defined with the access
+// grids. A second copy here would be a literal that smoke-preview.mjs's
+// SECTION_SHORT scan picks up and mistakes for a section's display name.
+
+// How many cards a column draws before it stops and says how many it left behind.
+// `Finished` holds most of the archive — every delivered IR ever — and drawing
+// those as cards would make the board slower than the list it is a second view of.
+// The header counts are the FULL counts, so the column itself never lies about
+// what it is holding; only the drawing is capped.
+const BOARD_CAP = 25;
+
+function boardCard(ir) {
+  const owner = ir.assigneeName || ir.assignee || '';
+  const prog  = sectionProgress(ir.done);
+  const age   = irAge(ir);
+  const late  = irOverdue(ir);
+  const showProg = wantProgress(ir, prog);
+  // Same field discipline as the list row, and for the same reason: `droneId` is
+  // written by the public customer form, so every value here is escaped.
+  return `
+    <div class="kb-card${late ? ' is-late' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
+      <div class="kb-card-top">
+        <span class="ir-title">${escHtml(ir.irNumber)}</span>
+        ${age ? `<span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
+      </div>
+      <div class="ir-meta">
+        <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
+        ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
+      </div>
+      <div class="kb-card-foot">
+        <span class="ir-assignee${owner ? '' : ' is-unassigned'}">${escHtml(owner || 'Unassigned')}</span>
+        ${showProg ? progressChip(prog) : ''}
+      </div>
+    </div>`;
+}
+
+function renderBoard(records) {
+  if (!irBoard) return;
+  // The two filter strips are drawn here too, exactly as renderIRList draws them:
+  // the switch changes the drawing of the rows, never the controls above them.
+  renderSegments();
+  renderCategorySegments();
+  if (!records || records.length === 0) {
+    // Deliberately no glyph and no emoji: the app has one icon source, and a
+    // literal emoji here would be a second one nothing can restyle.
+    irBoard.innerHTML = '<div class="empty-state">' +
+      (allIRs.length ? 'No IRs match this filter.' : 'No IRs found.') +
+      '</div>';
+    updateListCounts(0);
+    return;
+  }
+  const byCol = {};
+  BOARD_COLUMNS.forEach(c => { byCol[c.key] = []; });
+  records.forEach(ir => { byCol[boardColumnOf(ir.status)].push(ir); });
+
+  irBoard.innerHTML = BOARD_COLUMNS.map(col => {
+    const rows  = byCol[col.key];
+    const shown = rows.slice(0, BOARD_CAP);
+    const more  = rows.length - shown.length;
+    return `
+    <div class="kb-col${col.quiet ? ' kb-col-quiet' : ''}">
+      <div class="kb-col-head">
+        <span class="kb-col-title">${escHtml(col.title)}</span>
+        <span class="kb-col-count">${rows.length}</span>
+      </div>
+      <div class="kb-col-sub">${escHtml(col.stages.join(' · '))}</div>
+      <div class="kb-col-body">
+        ${shown.map(boardCard).join('')}
+        ${more > 0 ? `<button type="button" class="kb-more">+${more} more — see list</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  updateListCounts(records.length);
+}
+
+// The switch's one setter, so the class on the pane, the buttons and the repaint
+// can never disagree about which view is showing.
+function setListView(mode) {
+  listMode = mode === 'board' ? 'board' : 'list';
+  const pane = document.getElementById('index-view');
+  if (pane) pane.classList.toggle('is-board', listMode === 'board');
+  if (listViewSwitch) {
+    listViewSwitch.querySelectorAll('.view-switch-btn').forEach(b => {
+      const on = b.dataset.view === listMode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+  }
+  applyListFilters();
+}
+if (listViewSwitch) {
+  listViewSwitch.addEventListener('click', e => {
+    const btn = e.target.closest('.view-switch-btn');
+    if (btn) setListView(btn.dataset.view);
+  });
+}
+if (irBoard) {
+  // "+N more" is a way back to the list, not a dead end: the board caps a column's
+  // drawing for speed, and the honest answer to "where is the rest?" is the list.
+  irBoard.addEventListener('click', e => {
+    if (e.target.closest('.kb-more')) setListView('list');
+  });
+}
+
 // `initialsOf()` and the `.assignee-avatar` circle it fed were removed with the
 // 2026-09-21 list-row fix. The circle was a 26px chip in the row's side column,
 // and on IR470 — the row carrying the most chips — it was the chip that tipped
@@ -5400,7 +5551,10 @@ function applyListFilters() {
       ir.droneId?.toLowerCase().includes(q)
     );
   }
-  renderIRList(rows);
+  // One filter, two drawings. The board reads the SAME `rows` the list would, so
+  // the switch can never show a different set of IRs from the one above it.
+  if (listMode === 'board') renderBoard(rows);
+  else renderIRList(rows);
 }
 
 // Search / segment filter

@@ -391,6 +391,14 @@
           <div class="list-toolbar">
             <div class="list-toolbar-top">
               <span class="list-title">IRs</span>
+              <!-- List | Board. A SWITCH, not a seventh nav tab: the board is another
+                   drawing of the SAME rows, so it must obey the same search box and the
+                   same two filter strips that sit directly below it. A separate tab
+                   would mean filtering twice and reading two different numbers. -->
+              <span class="view-switch" id="list-view-switch" role="tablist" aria-label="List or board">
+                <button type="button" class="view-switch-btn active" data-view="list" role="tab" aria-selected="true">List</button>
+                <button type="button" class="view-switch-btn" data-view="board" role="tab" aria-selected="false">Board</button>
+              </span>
               <span class="list-count" id="list-count"></span>
             </div>
 
@@ -407,6 +415,11 @@
             <div class="ir-skeleton"></div>
             <div class="ir-skeleton"></div>
           </div>
+          <!-- The board: the same filtered rows, drawn as nine columns. Rendered by
+               renderBoard() and hidden by CSS unless #index-view carries .is-board,
+               so the switch never has to touch two elements to stay consistent.
+               tabindex makes the sideways scroll reachable from a keyboard. -->
+          <div id="ir-board" class="ir-board" role="region" aria-label="IR board" tabindex="0"></div>
         </div>
 
         <!-- ====== PASSBOOK DETAIL VIEW ====== -->

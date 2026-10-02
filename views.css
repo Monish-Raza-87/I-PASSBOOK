@@ -1875,6 +1875,179 @@
 }
 
 /* ══════════════════════════════════════════════════════════
+   THE IR BOARD — the list's rows, drawn as columns
+
+   A second VIEW of the list, not a second list: it is rendered from the same
+   filtered `rows` and it sits under the same search box and the same two filter
+   strips. Its columns are the app's own workflow stages, so nothing here needed a
+   new field or a migration.
+
+   Two structural facts, both load-bearing:
+
+   1. The switch is CSS-driven. `#index-view.is-board` is the ONLY thing that
+      decides which of the two is drawn, so the buttons, the pane class and the
+      repaint order cannot disagree about which view is showing.
+   2. The board scrolls SIDEWAYS inside its own frame and never the page. Nine
+      columns are wider than a phone by nature; `overscroll-behavior-x: contain`
+      keeps that scroll from chaining out to the browser's back-navigation swipe.
+      It is why the counts live in the column HEADERS — they are what you read
+      without scrolling.
+
+   It is placed here, above the POLISH block, on purpose: nothing may be appended
+   after POLISH or smoke-polish.mjs fails, and a board is not a polish level.
+   ══════════════════════════════════════════════════════════ */
+
+/* The List | Board switch. Sized to the .segment strip it sits beside rather than
+   to a fixed tap target: it is the app's own dense filter-control scale, and the
+   two controls are read as one toolbar. */
+.view-switch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-4);
+  background: var(--surface-gray-2);
+}
+.view-switch-btn {
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-6);
+  padding: 4px 10px;
+  border-radius: var(--radius-3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.view-switch-btn:hover { color: var(--ink-gray-9); }
+.view-switch-btn.active {
+  background: var(--surface-base);
+  color: var(--ink-gray-9);
+  box-shadow: var(--elevation-sm);
+}
+
+#index-view .ir-board { display: none; }
+#index-view.is-board .ir-list { display: none; }
+#index-view.is-board .ir-board {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem 1rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.kb-col {
+  flex: 0 0 15rem;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface-gray-1);
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-4);
+}
+.kb-col-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0.55rem 0.7rem 0.2rem;
+}
+.kb-col-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-8);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-2xs);
+}
+.kb-col-count {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-7);
+  font-variant-numeric: tabular-nums;
+}
+.kb-col-sub {
+  padding: 0 0.7rem 0.5rem;
+  border-bottom: 1px solid var(--outline-gray-1);
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-5);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-2xs);
+}
+.kb-col-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+}
+/* `Finished` holds the whole archive. It is drawn narrower and quieter on purpose:
+   369 delivered IRs do not deserve the same screen as the six a person is working. */
+.kb-col-quiet { flex-basis: 12rem; }
+.kb-col-quiet .kb-col-body { opacity: 0.8; }
+
+.kb-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.5rem 0.6rem;
+  background: var(--surface-base);
+  border: 1px solid var(--outline-gray-1);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-3);
+  cursor: pointer;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
+}
+.kb-card:hover { background: var(--surface-gray-2); border-color: var(--outline-gray-2); }
+.kb-card.is-late { border-left-color: var(--st-danger-fg); }
+.kb-card-top { display: flex; align-items: baseline; gap: 0.4rem; }
+.kb-card-top .ir-title { font-weight: var(--weight-semibold); }
+.kb-card-top .ir-age { margin-left: auto; font-size: var(--text-2xs); }
+.kb-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.15rem;
+}
+.kb-card-foot .ir-assignee {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-2xs);
+}
+.kb-card-foot .ir-assignee.is-unassigned { font-style: italic; opacity: 0.7; }
+
+/* The one way out of a capped column, and it is honest about what it is: a way
+   back to the list, where every IR in the column can be reached. */
+.kb-more {
+  margin-top: 0.25rem;
+  padding: 0.4rem;
+  border: 1px dashed var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-2xs);
+  cursor: pointer;
+}
+.kb-more:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+
+/* One column at a time on a phone, which is the honest cost of a board at 390px.
+   Narrower columns mean the next one is visible at the edge, so the sideways
+   scroll is discoverable rather than a secret. */
+@media (max-width: 639px) {
+  .kb-col { flex-basis: 13.25rem; }
+  .kb-col-quiet { flex-basis: 11rem; }
+}
+
+/* ══════════════════════════════════════════════════════════
    POLISH — level: NOTICEABLE
 
    The owner reviewed all three levels and chose this one. The levels are

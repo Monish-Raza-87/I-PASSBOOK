@@ -337,7 +337,7 @@
     <div class="meta">
       <span><b>Date</b> 2 October 2026</span>
       <span><b>Your first pass</b> recorded</span>
-      <span><b>Still open</b> 6 questions</span>
+      <span><b>Still open</b> 3 questions</span>
       <span><b>Status</b> for your tick</span>
     </div>
   </div>
@@ -638,13 +638,13 @@
     </p>
     <div class="rules">
       <div class="rule"><div class="rule-head"><span class="rid">R-125</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Confirmed</span></div><p>Investigation is blank, but Root Cause says nothing.</p><p class="why">Your wording, applied exactly: when investigation is blank, Root Cause must be <em>selected</em> as <strong>Not required</strong> or <strong>Not applicable</strong> — picked from the control, not left empty. When investigation exists, Root Cause must be In-conclusive, Investigation on-going, or written text. Any of those, or the section cannot close.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-126</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Confirmed</span></div><p>Root Cause is written, but <strong>neither</strong> Corrective Action nor Preventive Action is there.</p><p class="why">You asked: "if RC is there and neither CA nor PA then this is a case of FIR, right?" <strong>Yes.</strong> A root cause with nothing done about it is exactly what should be reported. One thing I want to get right, so I am asking rather than assuming: this fires whether the two fields are left empty, <em>or</em> both are deliberately marked Not applicable — because a root cause with no action at all is the same fact either way. If you would let "both marked Not applicable" through, say so and I will split it.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-127</span><span class="chip chip-ok">Allowed</span><span class="chip chip-ok">Changed by you</span></div><p>Root Cause is written, one of Corrective Action or Preventive Action is filled, and the other is <strong>selected Not applicable</strong>.</p><p class="why"><strong>This rule reversed.</strong> I had it as an FIR; you said it is allowed, and you are right — sometimes the fix is only corrective, sometimes only preventive. So it passes. The one condition: the missing one must be <em>selected</em> Not applicable, not simply left empty. A blank unanswered field is not the same as a considered "not applicable", and my recommendation is that a blank one blocks the close — the same standard as R-125. Tell me if you would rather that be an FIR than a block.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-126</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Confirmed</span></div><p>Root Cause is written, but <strong>neither</strong> Corrective Action nor Preventive Action is there.</p><p class="why">You asked: "if RC is there and neither CA nor PA then this is a case of FIR, right?" <strong>Yes.</strong> This now settles the edge I had left open as well: because R-127 reports even a properly selected "Not applicable", two of them report as well. A root cause with no action is the same fact however the fields got that way.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-127</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Final</span></div><p>Root Cause is written, one of Corrective Action or Preventive Action is filled, and the other is selected <strong>Not applicable</strong>.</p><p class="why"><strong>I moved this rule twice, and the second correction is the one that stands.</strong> I first had it as an FIR; you said it is allowed, so I changed it to Allowed; you then said <em>"no this is FIR only"</em>. Recorded as you ruled: it is <strong>reported, not blocked</strong>. And since a considered "Not applicable" is reported, a field left simply blank is reported too — so <strong>nothing in the Corrective/Preventive family blocks anything. It only reports.</strong></p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-128</span><span class="chip chip-warn">FIR → CR + Mgmt</span><span class="chip chip-ok">Yours</span></div><p>Two or more IRs on the same drone serial within <strong>30 days</strong>, for the same kind of issue.</p><p class="why">Your rule, replacing what I had: same type of issue repeating on one UAS. It goes to CR <em>and</em> Management, because a repeat is a pattern, not a mistake.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-129</span><span class="chip chip-ok">Deleted</span></div><p>Was "Root Cause present but neither CA nor PA" — you first said that case was impossible, then reversed yourself. It is possible, and R-126 now covers it. This number is retired.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-130</span><span class="chip chip-stop">Block</span><span class="chip chip-ok">Yours</span></div><p>A part named in Particulars For Repair with blank quantity or rate.</p><p class="why">Saveable at any time — it just cannot be marked completed in that state.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-131</span><span class="chip chip-warn">FIR → Production + CR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed with nothing in it at all.</p><p class="why">Your ruling — and <strong>my page had this labelled wrongly</strong>, which is why it read as a contradiction: the chip said "FIR → CR" while the sentence under it said Production and CR. The chip is now correct. When Production in particular is closed with nothing done, the FIR goes to <strong>Production and CR both</strong> — they are the ones who did not do it.</p></div>
-      <div class="rule"><div class="rule-head"><span class="rid">R-132</span><span class="chip chip-warn">FIR</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed while it is only partly filled.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-131</span><span class="chip chip-warn">FIR → CR + the department</span><span class="chip chip-ok">Yours</span></div><p><strong>Any</strong> section marked completed with nothing in it at all.</p><p class="why">Your ruling, and it is wider than I had written it: <em>"if you are saying about any section then it has to go to CR and the department whose section is not done."</em> So this is not a Production rule — Production was only the example. It goes to <strong>CR and the department that owns that section</strong>, whichever section it is. My earlier chip read "FIR → CR" against a sentence saying Production and CR, which is exactly why it looked like nonsense; that is fixed, and the rule is now general. It also sets the routing for the whole family below: an FIR about a section goes to CR <em>and</em> the people responsible for that section.</p></div>
+      <div class="rule"><div class="rule-head"><span class="rid">R-132</span><span class="chip chip-warn">FIR → CR + the department</span><span class="chip chip-ok">Yours</span></div><p>A section marked completed while it is only partly filled.</p><p class="why">Same routing as R-131: CR and the department that owns the section.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-133</span><span class="chip chip-ok">New option</span><span class="chip chip-ok">Yours</span></div><p>Production gains one choice: <strong>"Rework not required — send for QC directly."</strong></p><p class="why">Your instruction: when rework is genuinely not needed, Production must be able to say so and pass the drone straight on, instead of the section sitting open forever.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-134</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>Dispatch recorded with no PDI report on the IR.</p></div>
       <div class="rule"><div class="rule-head"><span class="rid">R-135</span><span class="chip chip-warn">FIR → CR + Mgmt</span></div><p>A closed IR reopened.</p></div>
@@ -752,12 +752,13 @@
       <span class="sec-num">SECTION 6</span>
       <div class="phase-row">
         <h2>The six questions that are not rules</h2>
-        <span class="chip chip-do">Two decided, four open</span>
+        <span class="chip chip-do">Three confirmed, three open</span>
       </div>
       <p class="sec-sub">
         These are not about right and wrong. They are decisions only you can make, and I have written my
-        recommendation under each one. Q1, Q2 and Q3 are now confirmed — the parts still needing you are the
-        icon in Q2, the two choices in Q4, and a yes to Q5 and Q6.
+        recommendation under each one. Q1, Q2 and Q3 are confirmed, and Q4 is decided — nothing that sends
+        your data out of the company. Still needing you: the icon in Q2, a yes to Q5, and the discussion in
+        Q6.
       </p>
     </div>
 
@@ -861,13 +862,29 @@
         quietly relaxes its own standards would be worse than having none.
       </p>
       <p class="why">
-        <strong>The one decision this raises, and it is a real one.</strong> Learning from your own IRs is
-        free, runs offline, and nothing leaves Indrones. But there is a far more capable option: letting the
-        backend send a field to an outside AI service and get real reasoning back. It is genuinely better at
-        understanding free text — and it means <em>sensitive IR data leaving the company</em>, with a cost per
-        use. You told me the IR data is sensitive, so I will not choose this for you. <strong>My
-        recommendation:</strong> build the offline knowledge base first, see what it can actually do, and
-        decide about an outside service afterwards with real evidence in front of you.
+        <strong>Decided — no outsourced model.</strong> Your rule: <em>"data privacy is must… not an
+        outsourced model which sends my data out."</em> So nothing about an IR ever leaves Indrones. What that
+        leaves is worth being exact about, because "a model inside my app" can mean three different things:
+      </p>
+      <ul>
+        <li><strong>Retrieval — buildable now, and it is most of the value.</strong> Every past IR indexed by
+            model, symptom and root cause, so the Inspector can answer <em>"three earlier S25P IRs had this
+            symptom and they traced to the ESC — here are the numbers."</em> No model, no data leaving, and it
+            is a genuine second arm for QC.</li>
+        <li><strong>A small model running inside the browser — possible in principle, not on your
+            phones.</strong> A language model small enough to run on the device is still tens to hundreds of
+            megabytes and slow on a modest Android, and this app has a strict size discipline and no build
+            step. I would not put that in front of your colleagues today.</li>
+        <li><strong>A model on Indrones' own server — honest about the gap.</strong> This would satisfy your
+            privacy rule completely and give real reasoning. But this app has no server of its own; Apps
+            Script cannot host a model. It would mean new infrastructure, which is the one thing the whole
+            design exists to avoid. It is a real option — and it is your call, not something I can quietly
+            fold in.</li>
+      </ul>
+      <p class="why">
+        <strong>So what I will build is the first one:</strong> retrieval and templates, with the source IR
+        numbers attached. It will say something true and traceable rather than something confident and
+        unverifiable — which for a compliance record is the only kind of answer worth having.
       </p>
     </div>
 
@@ -899,27 +916,47 @@
     </div>
 
     <div class="qbox">
-      <h3>Q6 · The Postmaster will not spam anyone</h3>
+      <h3>Q6 · The Postmaster — a discussion, not a decision yet</h3>
       <p>
-        <strong>Your fear is the correct design constraint</strong>, and I would rather build to it than
-        discover it. An alerting system that emails on every event gets filtered by its own users inside a
-        week — and then the one message that mattered is never read. So the rule is:
-        <em>the Postmaster is a daily postman, not a doorbell.</em>
+        <strong>You are right that this needs discussing before it is fixed.</strong> It is the one part of
+        the Inspector that can annoy people who have done nothing wrong, and once it annoys them it is very
+        hard to win back. So here is the argument behind my earlier answer, laid out so you can pull it apart.
       </p>
+      <p>
+        <strong>The first thing I would change about my own answer:</strong> the app <em>already</em> has a
+        notification system — <code>nudges</code>, an unread badge, a bell, a panel, and one email per
+        assignment. The Inspector should feed <em>that</em> rather than build a second email channel beside
+        it. One place decides who hears what, and one place to calm down if it turns out too loud.
+      </p>
+
+      <h4>The real question: how fast does an FIR need to reach CR?</h4>
       <ul>
-        <li><strong>One email a day per person, at most.</strong> Everything found for you since yesterday
-            arrives collected into a single message.</li>
-        <li><strong>Blocks and Asks are never emailed.</strong> They appear on screen, on the field, while the
-            person is standing there — which is where they are useful. An email about a block you already
-            fixed is pure noise.</li>
-        <li><strong>FIRs go to the person and CR, collected.</strong> Management gets a weekly summary rather
-            than one email per report — Ravi Singh already sees everything as CR, so this costs nothing.</li>
-        <li><strong>The night job never emails.</strong> It works quietly and leaves its findings for the
-            panel. Nothing arrives at 3am.</li>
-        <li><strong>Nothing to report means no email at all.</strong> Not "no issues today" — silence.</li>
-        <li><strong>Anyone can turn their own email off</strong>, per category, and the panel keeps working
-            exactly as before.</li>
+        <li><strong>Collected, once a day.</strong> Calm, nothing at night, and an FIR that is one day old is
+            almost always still perfectly actionable. <strong>My recommendation.</strong></li>
+        <li><strong>Immediately, for every FIR.</strong> Fastest — and this is the one that becomes spam. A
+            bad week in Production is twenty emails to the same two people, and by Thursday they are filtering
+            them.</li>
+        <li><strong>Immediately only for the few carrying real risk.</strong> A section closed empty, a
+            dispatch with no PDI report, a serial that is wrong — those go at once; everything else is
+            collected. Slower to build, because it needs <em>you</em> to mark which rules are urgent.</li>
       </ul>
+
+      <h4>Three smaller ones I would like your view on</h4>
+      <ul>
+        <li><strong>Does the person who caused it get an email?</strong> They have already seen it on their
+            own IR. Emailing someone a report about themselves reads as being told off, and that is the
+            fastest way to make people dislike the Inspector. My recommendation: <strong>no email to that
+            person</strong> — the in-app dot is their notification, and the email goes to CR.</li>
+        <li><strong>Is silence right when there is nothing to report?</strong> I think yes. A daily "no issues
+            today" trains people to delete without reading, and then the one that mattered is lost too.</li>
+        <li><strong>Who can turn it off?</strong> I think anyone, per category. If CR turns theirs off, the
+            panel still holds everything — nothing is lost, it is simply not pushed at them.</li>
+      </ul>
+      <p class="why">
+        And the rule I would keep under all of it, whichever way you decide the rest:
+        <strong>Blocks and Asks are never emailed at all.</strong> They are instructions to the person
+        standing in front of the field, and an email about a block that was fixed an hour ago is pure noise.
+      </p>
     </div>
   </section>
 
@@ -978,19 +1015,14 @@
 
   <footer class="end">
     <p>
-      <strong>Your first pass is in the book.</strong> What is left is small enough to answer in five short
-      lines, and they are all in Section 6:
+      <strong>Your first two passes are in the book.</strong> Three things are left, all in Section 6:
     </p>
     <ol>
-      <li><strong>The icon</strong> — 1 (the cap), 2 (the shield) or 3 (the magnifier).</li>
-      <li><strong>R-126's edge</strong> — when a root cause has no action at all and <em>both</em> fields are
-          marked Not applicable, does the FIR still fire? My recommendation: yes.</li>
-      <li><strong>R-127's blank</strong> — a CA or PA left completely empty instead of selected Not
-          applicable: block it, or just report it? My recommendation: block, the same standard as R-125.</li>
-      <li><strong>Q4</strong> — build the offline knowledge base only, or plan for an outside AI service
-          too? My recommendation: offline first, decide the rest later.</li>
-      <li><strong>Q5 and Q6</strong> — a yes to auto-save under my four conditions, and a yes to the
-          no-spam rule for the Postmaster.</li>
+      <li><strong>The icon</strong> — 1 (the cap, my recommendation), 2 (the shield) or 3 (the magnifier).</li>
+      <li><strong>Q5, auto-save</strong> — a yes or no, under the four conditions listed.</li>
+      <li><strong>Q6, the Postmaster</strong> — the discussion. The one that matters most is how fast an FIR
+          must reach CR: collected once a day, immediately every time, or immediately only for the few that
+          carry real risk.</li>
     </ol>
     <p>
       Everything you do not mention, I take as agreed and build.

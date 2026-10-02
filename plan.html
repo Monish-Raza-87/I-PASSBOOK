@@ -296,10 +296,10 @@
       The safety machinery is built <em>before</em> the risky change, never after.
     </p>
     <div class="meta">
-      <span><b>Date</b> 1 October 2026</span>
+      <span><b>Date</b> 2 October 2026</span>
       <span><b>App at</b> v57</span>
       <span><b>Phases</b> 6</span>
-      <span><b>Status</b> for your review</span>
+      <span><b>Status</b> Section 0 now measured</span>
     </div>
   </div>
 </header>
@@ -321,16 +321,17 @@
     <a href="#s11">11 · What I need</a>
   </nav>
 
-  <section id="s0" class="is-urgent">
+  <section id="s0" class="is-quiet">
     <div class="sec-head">
       <span class="sec-num">SECTION 0</span>
       <div class="phase-row">
-        <h2>Read this first: the IR list is fetched without a login</h2>
-        <span class="chip chip-stop">Fix first</span>
+        <h2>Read this first: the IR list, and whether it is exposed</h2>
+        <span class="chip chip-ok">Now measured</span>
       </div>
       <p class="sec-sub">
-        You said the IR data is sensitive. Before anything else in this plan, here is the one finding
-        that changes the order of work — read in your code today, not remembered.
+        You said the IR data is sensitive, so this was the one finding that could change the order of the
+        whole plan. It is no longer a hypothesis — I tested it on 2 October 2026. It resolved in the safe
+        direction, with one real exception.
       </p>
     </div>
 
@@ -342,21 +343,78 @@
     </p>
 
     <p>
-      <strong>How serious that is depends entirely on one sharing setting</strong>, and you have told me the
-      sheet is restricted to your company: view for everyone at Indrones, edit for a few. If that is right,
-      the no-login fetch has been failing quietly all along and the protected backend has been serving the
-      list. We can find out in five seconds, because the app's own status line says which path answered:
+      <strong>How serious that is depends entirely on one sharing setting</strong> — so rather than ask you
+      to read a status line, I fetched the exact URL the app uses with no credentials at all. The result is
+      below, and it is the answer to the question this section was written to raise.
     </p>
 
-    <div class="callout">
-      <span class="ct">The five-second test</span>
+    <div class="callout ok">
+      <span class="ct">Measured, 2 October 2026 — the good news</span>
       <p>
-        Open the app and watch the sync line above the list.<br>
-        &nbsp;&nbsp;<code>✓ N IRs loaded from the Sheet</code> — the no-login fetch worked. The data is reachable
-        without signing in.<br>
-        &nbsp;&nbsp;<code>✓ N IRs loaded</code> — two words shorter. The fetch failed and the protected backend
-        served it.<br>
-        The difference is the whole question, and it is not a difference anyone would notice by accident.
+        I stopped guessing and tested it. The exact URL the app uses to read the IR sheet, fetched with no
+        login at all, returns <strong>HTTP 401</strong> — a sign-in page, not data. The Drive root folder
+        returns <strong>HTTP 401</strong> as well.
+      </p>
+      <p>
+        <strong>So the no-login path has been dead all along, exactly as you said, and the protected backend
+        has been serving the list.</strong> Your data is not exposed through either of those two doors. This
+        was the one finding that changed the whole order of the plan, and it has resolved in the safe
+        direction. The first item on the list is no longer an emergency.
+      </p>
+    </div>
+
+    <div class="callout stop">
+      <span class="ct">But one door is open — the legacy workbook</span>
+      <p>
+        The <strong>legacy workbook</strong> is readable without any login. I fetched its first sheet with no
+        credentials and got a <code>200</code> and real content back. That means the <em>file</em> is
+        link-shared, and link-sharing is per file, not per tab — so every tab in it is readable by anyone who
+        has the file's address.
+      </p>
+      <p>
+        <strong>Why that matters more than it looks:</strong> the file's address is written in the app's own
+        source code, and <strong>the source code is in a public repository.</strong> So the address is not a
+        secret. Anyone who reads the repo has everything they need to open the legacy data.
+      </p>
+      <p>
+        <strong>The fix is one setting</strong> — <em>Share → General access → Restricted</em> in the legacy
+        workbook — <strong>but it has a cost, and I am not going to pretend otherwise.</strong> The workbook
+        is link-shared <em>precisely because</em> the 🏛 Legacy button embeds it live. Restrict it today, and
+        that button stops working.
+      </p>
+      <p>
+        So it is a choice, and it is yours:
+      </p>
+      <ul>
+        <li><strong>Restrict it now</strong> — the leak closes today, and the Legacy button goes dark until
+            Phase 0 finishes. The legacy data is still in the workbook and still safe; it is simply not
+            visible inside the app for a while.</li>
+        <li><strong>Do Phase 0 first</strong> — render the legacy view from backend data, as the plan already
+            says, and then restrict the workbook with nothing lost. Slower to close the door.</li>
+      </ul>
+      <p>
+        My recommendation is the first one, because <em>how long the data has been reachable matters more
+        than whether one button works this week.</em> But it is a real trade and you should make it knowingly.
+      </p>
+    </div>
+
+    <div class="callout warn">
+      <span class="ct">Also in the public repository, and worth knowing</span>
+      <p>
+        Beyond that one workbook, the public repo also contains the app's backend address and the internal
+        addresses of the IR sheet and the Drive root folder. Those two are <strong>not</strong> open today —
+        I tested them — so nothing is leaking through them right now. But publishing the addresses means that
+        if the sharing on either is ever changed by accident, <strong>the data becomes readable instantly, by
+        anyone who has read the repo, with no further warning and no sign on screen.</strong>
+      </p>
+      <p>
+        I checked the obvious thing too: there are <strong>no passwords, API keys or private keys</strong>
+        committed anywhere in the repository.
+      </p>
+      <p>
+        <strong>Phase 0 removes this as a side effect.</strong> Once the list comes through the backend
+        instead of the browser reading the sheet directly, the app no longer needs the sheet's address at all
+        — so it comes out of the source, and the public repo stops naming your internal documents.
       </p>
     </div>
 

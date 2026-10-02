@@ -865,6 +865,13 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   gap: 0.25rem 1.25rem;
   margin: 0.9rem 0 0;
 }
+/* The two doors side by side, not stacked. `.link-btn` is `width: 100%` (every
+   OTHER secondary action on the card is a full-width bar), so without this the
+   two flex children each claimed a whole row and the pair never sat on the one
+   line this rule was always written for. `flex-wrap` still applies: at phone
+   width, if they ever stop fitting, they wrap and stay centred rather than
+   squeezing each other. */
+.auth-doors .link-btn { width: auto; }
 
 /* ── The customer door (open access, sign-in screen only) ──
    The app's one unauthenticated surface. The overlay reuses the shared modal

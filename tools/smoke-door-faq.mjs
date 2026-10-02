@@ -40,6 +40,7 @@ const appJs = read('../app.js');
 const indexHtml = read('../index.html');
 const faqHtml = read('../faq.html');
 const componentsCss = read('../components.css');
+const baseCss = read('../base.css');
 const i18nJs = read('../i18n.js');
 const swJs = read('../sw.js');
 const deploy = read('./deploy-ghpages.mjs');
@@ -224,6 +225,43 @@ ok('no CSS is left over from the frame — no .customer-door-tab, no body iframe
   !/\.customer-door-tab/.test(css) && !/\.customer-door-body\s+iframe/.test(css), 'orphan rules');
 ok('...and no markup is left over either',
   !/customer-door-tab|door\.newTab/.test(indexCode + i18nJs), 'orphan markup/keys');
+
+// ── The two doors on one line, and everything secondary is a button ──────────
+//
+// This section exists because of a bug that SHIPPED and that no test caught. It
+// was not found by reading the CSS — it was found by looking at the screen, which
+// is why `render-it-in-a-browser-before-judging-css` is a rule and not a
+// preference. `.link-btn` is `width: 100%` (correct: every other secondary action
+// on the card is a full-width bar), so when the two public doors were placed in
+// the flex row below, each child claimed an entire row and the pair stacked
+// instead of sitting on the line it was written for. `.link-btn` is an `<a>` in
+// one place and a `<button>` in the other, and an `<a>` inherits the document's
+// LEFT alignment while a `<button>` centres itself — so the two entrances also
+// disagreed about where their text went.
+//
+// Both load-bearing rules are asserted here so the layout cannot silently go back.
+head('the doors sit side by side, and the secondary actions are buttons');
+
+const baseRule = (sel) => {
+  const re = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}');
+  return (baseCss.match(re) || [])[1] || '';
+};
+
+const linkBtn = baseRule('.link-btn');
+ok('.link-btn is a filled button, not underlined text — so "Use pattern", "Back to sign in" and the rest are things you can hit',
+  /text-decoration:\s*none/.test(linkBtn) && /background:/.test(linkBtn) && /border:/.test(linkBtn),
+  linkBtn.replace(/\s+/g, ' ').slice(0, 120));
+ok('...and it centres its own label, which is the half an <a> gets wrong on its own',
+  /justify-content:\s*center/.test(linkBtn), linkBtn.replace(/\s+/g, ' ').slice(0, 120));
+ok('...and it clears the touch minimum an underlined word never did',
+  parseInt(linkBtn.match(/min-height:\s*(\d+)px/)?.[1], 10) >= 40,
+  linkBtn.match(/min-height:[^;]*/) || 'no min-height');
+ok('...and the two public doors override its full width, or each one takes a whole row',
+  /width:\s*auto/.test(rule('.auth-doors .link-btn')), rule('.auth-doors .link-btn') || 'rule missing');
+ok('...and the row they override it in is a centred, wrapping flex line',
+  /display:\s*flex/.test(rule('.auth-doors')) &&
+  /justify-content:\s*center/.test(rule('.auth-doors')) &&
+  /flex-wrap:\s*wrap/.test(rule('.auth-doors')), rule('.auth-doors'));
 
 // ── The FAQ page ─────────────────────────────────────────────────────────────
 head('faq.html is inert');

@@ -553,6 +553,26 @@ ok('the credit is on the sign-in card, not only behind the sign-in',
 // …filled by one writer, so there is one place to look when the number is wrong.
 ok('app.js fills every slot through the shared .app-version class',
   /querySelectorAll\('\.app-version'\)/.test(appJs));
+// On the SIGN-IN CARD the number gets its own line (the owner's ask, 2026-10-02):
+// it is the fact a person is asked to read back when they report a problem, and
+// inline after a middot it read as part of the sentence. Scoped to #auth-container
+// on purpose — the sidebar copy is a footer in a flex column, where a second line
+// is the thing that would look wrong. Pinned, because a cascade that puts it back
+// inline is invisible until someone stares at the card.
+ok('the version sits on its own line on the sign-in card',
+  /#auth-container \.app-version\s*\{[^}]*display:\s*block/.test(baseCss),
+  (baseCss.match(/#auth-container \.app-version[^}]*\}/) || [''])[0]);
+ok('...and that rule is scoped, so the sidebar footer keeps its single line',
+  (() => {
+    // Every rule that sets display:block on .app-version must be the scoped one.
+    // Written as a scan of the real rule bodies rather than a lookahead, because a
+    // lookahead here matches the scoped rule too and would pass for the wrong reason.
+    const rules = [...baseCss.matchAll(/([^{}]*?)\.app-version\s*\{([^}]*)\}/g)];
+    const blocking = rules.filter(m => /display:\s*block/.test(m[2]));
+    return blocking.length === 1 && /#auth-container/.test(blocking[0][1]);
+  })(), [...baseCss.matchAll(/([^{}]*?)\.app-version\s*\{([^}]*)\}/g)].map(m => m[1].trim()));
+ok('...and the middot that joined the two halves is gone with it, so nothing dangles',
+  /#auth-container \.credit-dot\s*\{[^}]*display:\s*none/.test(baseCss), 'orphan mid dot');
 // And the sign-in flow must not raise the toast that covered the code box: the
 // note under the field already states both cases in full, so the toast was a
 // duplicate that sat over the very controls the user was reaching for.

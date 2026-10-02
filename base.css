@@ -380,18 +380,45 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   background: var(--outline-gray-2);
 }
 
+/* The sign-in card's SECONDARY actions: "Forgot password?", "Use email code
+   instead", "Resend code", "Back to sign in", and the two public doors.
+   These were underlined text links. They are BUTTONS now, and the reason is not
+   decoration — on a touch screen an underlined word is a ~16px-tall target, and
+   every one of these is what a person reaches for when the main path has ALREADY
+   failed them. The worst possible moment to ask for a steady fingertip is the one
+   where they are already stuck.
+   The fill and border are the quiet pair .btn-ghost uses, so the card has ONE
+   secondary voice. Two rules are load-bearing and neither is cosmetic:
+     · `justify-content: center` — an <a> inherits the document's LEFT alignment
+       while a <button> centres its own text, which is exactly how the two public
+       doors used to disagree with each other on the same line;
+     · `min-height: 40px` — the tap target, from the same 40px rule the app's tabs
+       and .btn-ghost already follow.
+   The class keeps its old name. Renaming it would churn six call sites plus the
+   preview mocks for no gain a person could see. */
 .link-btn {
-  background: none;
-  border: none;
-  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 0.75rem;
+  background: var(--surface-alpha-gray-2);
+  border: 1px solid var(--outline-alpha-gray-2);
+  border-radius: var(--radius-4);
+  color: var(--ink-gray-8);
   font-family: inherit;
   font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
   cursor: pointer;
-  width: 100%;
-  padding: 0.4rem 0;
-  margin-top: 0.6rem;
+  transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
 }
-.link-btn:hover { text-decoration: underline; }
+.link-btn:hover {
+  background: var(--surface-alpha-gray-3);
+  border-color: var(--outline-alpha-gray-4);
+  text-decoration: none;
+}
 
 /* ── Show/hide a password ────────────────────────────────────
    The toggle is a SIBLING of the input inside .pw-wrap, never a child of a
@@ -850,6 +877,15 @@ header {
 .credit-heart { color: var(--accent); }
 .credit-dot { margin: 0 0.45em; opacity: 0.55; }
 .app-version { font-variant-numeric: tabular-nums; opacity: 0.85; }
+/* On the SIGN-IN CARD the version gets a line of its own. It is the one fact a
+   person is asked to read back when they report a problem, and inline after a
+   middot it read as part of the sentence rather than as the thing to quote. The
+   sidebar's copy is deliberately untouched: `.sidebar-credit` is a footer inside a
+   flex column, where the extra line is what would look wrong. */
+#auth-container .app-version { display: block; margin-top: 0.15rem; }
+/* ...and the middot that joined the two halves goes with it, or it dangles at the
+   end of the credit line with nothing after it. */
+#auth-container .credit-dot { display: none; }
 
 /* In the sidebar the same line is a footer: the sidebar is a flex column and
    .sidebar-nav takes the free space, so this lands at the bottom on its own and

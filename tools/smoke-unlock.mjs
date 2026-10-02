@@ -168,19 +168,20 @@ let c5 = { calls: 0 };
 const R = drive(Object.assign({}, FP_ONLY, { patternHash: hashOf([1, 2, 3, 4]) }), c5);
 R.T.setAuthMode('pattern');
 await R.T.submitUnlock('pattern', [1, 2, 3, 4]);
+// Real FormData API: `entries()` is a METHOD returning the pairs.
 const fieldOf = (form, key) => {
-  const hit = (form && form.entries || []).find(e => e[0] === key);
+  const hit = (form && form.entries() || []).find(e => e[0] === key);
   return hit ? hit[1] : null;
 };
 r.ok('the device token is sent to the unlock door', c5.calls === 1 && !!c5.last, c5.calls);
 r.ok('...with the method named, so the audit line can say which door was used',
   fieldOf(c5.last, 'action') === 'deviceUnlock' && fieldOf(c5.last, 'method') === 'pattern',
-  c5.last && c5.last.entries);
+  c5.last && c5.last.entries());
 r.ok('...and the email the record was enrolled for',
   fieldOf(c5.last, 'email') === 'monish.raza@indrones.com', fieldOf(c5.last, 'email'));
 r.ok('...and the token, not a pattern or a hash of one',
   fieldOf(c5.last, 'deviceToken') === 'a'.repeat(32) &&
-  !JSON.stringify(c5.last.entries).includes(hashOf([1, 2, 3, 4])),
+  !JSON.stringify(c5.last.entries()).includes(hashOf([1, 2, 3, 4])),
   fieldOf(c5.last, 'deviceToken'));
 
 // ── 5. No door is drawn that cannot open ─────────────────────────────────────

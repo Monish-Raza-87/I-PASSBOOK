@@ -5969,14 +5969,42 @@ function renderOverviewEditable() {
     `<button type="button" class="field-hist-btn" data-field-id="${escJsAttr(fid)}" title="History of this field" onclick="openFieldHistory('${escJsAttr(fid)}')">${iconSvg('clock')}</button>`;
   el.innerHTML =
     `<div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager${hist('a_crmOwner')}</label>
-       <input class="form-input" type="text" id="a_crmOwner" placeholder="Name of CRM person" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
+       <label class="overview-edit-label" for="a_crmOwner">${escHtml(t('overview.crmOwner'))}${hist('a_crmOwner')}</label>
+       <input class="form-input" type="text" id="a_crmOwner" placeholder="${escHtml(t('overview.crmOwnerHint'))}" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
      </div>
      <div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_contactPhone">Customer Phone${hist('a_contactPhone')}</label>
-       <input class="form-input" type="tel" id="a_contactPhone" placeholder="+91 XXXXX XXXXX" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+       <label class="overview-edit-label" for="a_contactPhone">${escHtml(t('overview.contactPhone'))}${hist('a_contactPhone')}</label>
+       <input class="form-input" type="tel" id="a_contactPhone" placeholder="${escHtml(t('overview.phoneHint'))}" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+     </div>
+     <div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_siteLocation">${escHtml(t('overview.siteLocation'))}${hist('a_siteLocation')}</label>
+       <div class="overview-site-cell">
+         <input class="form-input" type="text" id="a_siteLocation" placeholder="${escHtml(t('overview.siteHint'))}" value="${escHtml(val('a_siteLocation'))}"${ro} />
+         <a class="overview-site-link" id="a_site-link" target="_blank" rel="noopener noreferrer" hidden>${escHtml(t('common.openInMaps'))}</a>
+       </div>
      </div>` +
-    (canWrite ? '' : `<p class="overview-note">Only Customer Relations and Management can edit these. Everyone can read them.</p>`);
+    (canWrite ? '' : `<p class="overview-note">${escHtml(t('overview.readOnlyNote'))}</p>`);
+
+  // ── The Maps link, kept live ───────────────────────────────────────────────
+  // Held in step with what is TYPED rather than with what is stored, because it is
+  // the one readout on this panel that costs nothing to keep current — and a link
+  // that lagged the text box by one save would point at the PREVIOUS site, which is
+  // worse than showing no link at all: it looks right and takes you somewhere else.
+  //
+  // Nothing reaches Google until someone taps it. This builds a URL and puts it in
+  // an href; it fetches nothing, and the stored value is never sent anywhere by the
+  // app. A blank box clears the href as well as hiding the link, so a stale target
+  // is not sitting there to be activated by a stray tap.
+  const site     = document.getElementById('a_siteLocation');
+  const siteLink = document.getElementById('a_site-link');
+  const paintSiteLink = () => {
+    if (!siteLink) return;
+    const href = mapsLink(site && site.value);
+    if (href) { siteLink.href = href; siteLink.hidden = false; }
+    else { siteLink.removeAttribute('href'); siteLink.hidden = true; }
+  };
+  if (site) site.addEventListener('input', paintSiteLink);
+  paintSiteLink();
 }
 
 // The hand-typed activity log, read-only. It is shown exactly as it was typed,
@@ -6113,10 +6141,16 @@ async function saveOverview() {
   _savesInFlight.add(OVERVIEW_KEY);
   if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; btn.disabled = true; }
 
-  const fields = {
-    a_crmOwner:     document.getElementById('a_crmOwner')?.value || '',
-    a_contactPhone: document.getElementById('a_contactPhone')?.value || '',
-  };
+  // Through the shared reader, not a second literal of the same ids.
+  //
+  // The literal had a hole worth naming, because the Save button is a SIBLING of
+  // the panel (index.html) and not inside it: if #ir-overview-editable ever failed
+  // to render, renderOverviewEditable returned early, the button stayed live, and
+  // the literal posted a_crmOwner: '' and a_contactPhone: '' — and the backend
+  // MERGES the Overview, so pressing Save on a button that said "Saved!" would have
+  // wiped both stored values. A reader that reports only the fields actually on
+  // screen sends nothing in that case and the merge leaves the row alone.
+  const fields = collectOverviewValues();
 
   const formData = new FormData();
   formData.append('action', 'saveSection');
@@ -7949,9 +7983,37 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   }
 }
 
+// The Overview's stored values, read from its own panel.
+//
+// BY ID, NOT FROM A LIST. The panel is hand-rendered, so there is no field
+// declaration to walk — and a hand-written list of ids is exactly what drifts. It
+// already had to be written twice (once in the markup, once in the Save button's
+// own payload), and a third field added to the markup but not to that literal would
+// have looked completely normal on screen while never being saved.
+//
+// The backend MERGES the Overview rather than replacing it (backend.gs, saveSection:
+// the Overview is the one section whose payload is a subset of its record), so what
+// comes back from here is added over the stored row, never written in place of it.
+// That is what keeps a_activityLog, which no panel field carries.
+function collectOverviewValues() {
+  const values = {};
+  const root = document.getElementById('ir-overview-editable');
+  if (!root) return values;
+  root.querySelectorAll('input[id], select[id], textarea[id]').forEach(el => {
+    values[el.id] = el.value;
+  });
+  return values;
+}
+
 // Collect all field values for a section from the DOM + evidenceState.
 // Shared by saveSection and the draft auto-persist. Returns { fieldValues, fileFields }.
 function collectSectionValues(sectionId) {
+  // The Overview is hand-rendered rather than built from a field list, so it has no
+  // SECTIONS entry to walk — and it used to fall straight through this function
+  // returning NOTHING, which is how the flush path above managed to post an empty
+  // payload for a panel with two filled-in boxes on screen.
+  if (sectionId === OVERVIEW_KEY) return { fieldValues: collectOverviewValues(), fileFields: [] };
+
   const section = SECTIONS[sectionId];
   const fieldValues = {};
   const fileFields = [];
@@ -8187,12 +8249,7 @@ const _autosaveSnapshots = Object.create(null);   // sectionId → JSON of last 
 const _autosaveFailed    = Object.create(null);   // sectionId → true while unsaved
 
 function scheduleAutoSave(unitId) {
-  if (!isTrackedUnit(unitId)) return;
-  // The Overview keeps its own Save button in this pass. It is a two-field ticket
-  // header rather than a section, it is gated on Triage rather than on a section
-  // grant, and auto-saving it is a separate, smaller change. Returning here leaves
-  // it exactly as it was rather than half-converted.
-  if (unitId === OVERVIEW_KEY) return;
+  if (!isTrackedUnit(unitId) || !unitAutoSaves(unitId)) return;
   clearTimeout(_autosaveTimers[unitId]);
   _autosaveTimers[unitId] = setTimeout(() => {
     delete _autosaveTimers[unitId];
@@ -8204,17 +8261,42 @@ function scheduleAutoSave(unitId) {
 // losing focus, the tab going to the background, and the page being hidden or
 // closed. It is deliberately NOT awaited anywhere — the localStorage draft is the
 // guarantee, and these are only about getting the entry to the server sooner.
+//
+// The filter is not a tidy-up. A flush must only send units that have something
+// that can send them, because a flush that "succeeds" calls clearDraft() and
+// deletes the dirty flag — so flushing a unit with no auto-save does not save it,
+// it DISCARDS it while reporting success. See unitAutoSaves below for the one this
+// used to happen to.
 function flushDirtyUnits() {
   Object.keys(_autosaveTimers).forEach(id => {
     clearTimeout(_autosaveTimers[id]);
     delete _autosaveTimers[id];
   });
-  Array.from(_dirtySections).forEach(id => autoSaveUnit(id));
+  Array.from(_dirtySections).filter(unitAutoSaves).forEach(id => autoSaveUnit(id));
+}
+
+// Which units the app auto-saves. The Overview keeps its own Save button in this
+// pass: it is a ticket header rather than a section, it is gated on Triage rather
+// than on a section grant, and converting it is a separate, smaller change.
+//
+// ONE function, read by BOTH ends, and that is the whole point. The timer and the
+// flush used to answer this question separately and they disagreed: the timer
+// refused the Overview while flushDirtyUnits auto-saved it anyway. collectSectionValues
+// then knew no fields for the Overview, so such a flush posted an empty payload and,
+// on its success, cleared the dirty flag and deleted the draft. Typing a CRM name
+// and then switching apps sent nothing, showed the saved note anyway, and left the
+// leave guard silent — the edit was gone with no warning at all.
+function unitAutoSaves(unitId) {
+  return unitId !== OVERVIEW_KEY;
 }
 
 async function autoSaveUnit(unitId) {
   const irNumber = currentIR?.irNumber;
   if (!irNumber) return;
+  // The writer is the last word on this, not the callers: every path that reaches
+  // here has already been filtered, and this is what makes that filter an
+  // optimisation rather than the only thing standing between a unit and a wrong save.
+  if (!unitAutoSaves(unitId)) return;
   // A save is already on its way. Anything typed AFTER that request was built is
   // not in it, so the timer is re-armed instead of dropped — returning outright
   // would leave the newest keystrokes unsent until the next one happened to come.
@@ -10146,15 +10228,16 @@ function parseAuditTimestamp(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// The two Overview fields the Triage panel hand-renders. They are real stored IR
+// The Overview fields the Triage panel hand-renders. They are real stored IR
 // data — they live under the `sec-a` key like everything else the Overview writes —
-// but they are NOT in SECTIONS, because that panel builds its own two inputs rather
+// but they are NOT in SECTIONS, because that panel builds its own inputs rather
 // than going through buildField. The lookup above therefore finds nothing for them,
 // and without this table every reader of this helper shows the raw storage key:
 // "a_crmOwner" on a history row is a leak of the schema into the UI.
 const OVERVIEW_FIELD_LABELS = {
-  a_crmOwner:     'Customer Relations Manager',
-  a_contactPhone: 'Customer Phone',
+  a_crmOwner:      'Customer Relations Manager',
+  a_contactPhone:  'Customer Phone',
+  a_siteLocation:  'Site Location',
 };
 
 // Human name for a field id, from the forms. Falls back to the raw id for a field
@@ -10177,9 +10260,11 @@ function fieldLabelFor(fieldId) {
 function fieldSectionFor(fieldId) {
   if (!fieldId) return '';
   if (FIELD_SECTION_INDEX[fieldId]) return FIELD_SECTION_INDEX[fieldId];
-  // The Overview's two hand-rendered fields are stored under OVERVIEW_KEY, and the
+  // The Overview's hand-rendered fields are stored under OVERVIEW_KEY, and the
   // Overview's own gate is Triage — the same pairing the backend's canEdit() makes,
-  // because getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY].
+  // because getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY]. Membership
+  // of the label table IS the test, so a field added to that table needs no second
+  // edit here — which is the whole reason the label table is what this reads.
   if (OVERVIEW_FIELD_LABELS[fieldId]) return OVERVIEW_KEY;
   return '';
 }

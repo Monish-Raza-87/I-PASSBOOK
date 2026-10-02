@@ -853,7 +853,7 @@ const SESSION_REPLY = {
   access: { role: 'user', permissions: {}, departments: [], triage: false },
 };
 const gexchangePost = () => gPosts.find(p => p.body &&
-  p.body.entries.some(e => e[0] === 'action' && e[1] === 'googleExchange'));
+  p.body.entries().some(e => e[0] === 'action' && e[1] === 'googleExchange'));
 
 r.head('the Google door is inert until a second deployment is named');
 const G = loadApp(`
@@ -996,16 +996,16 @@ r.ok('the code is exchanged for a session, on the MAIN backend, carrying no stal
   (() => {
     const p = gexchangePost();
     if (!p) return false;
-    const keys = p.body.entries.map(e => e[0]);
+    const keys = p.body.entries().map(e => e[0]);
     return p.url === G2.T.CONFIG.GAS_URL &&
-           p.body.entries.some(e => e[0] === 'code' && e[1] === HANDOFF_CODE) &&
+           p.body.entries().some(e => e[0] === 'code' && e[1] === HANDOFF_CODE) &&
            keys.indexOf('sessionToken') === -1;
   })(), gPosts.map(p => p.url));
 r.ok('the device label travels, so the audit line can say where it was opened',
   (() => {
     const p = gexchangePost();
-    return !!p && p.body.entries.some(e => e[0] === 'device' && String(e[1]).length > 0);
-  })(), gexchangePost() && gexchangePost().body.entries);
+    return !!p && p.body.entries().some(e => e[0] === 'device' && String(e[1]).length > 0);
+  })(), gexchangePost() && gexchangePost().body.entries());
 r.ok('a yes signs the user in — the password door\'s own finishAuth, unchanged',
   G2.T.currentUser && G2.T.currentUser.sessionToken === 'tok-google-1' &&
   G2.T.currentUser.email === 'sreenivas.pai@indrones.com',

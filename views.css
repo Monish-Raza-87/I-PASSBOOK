@@ -1340,6 +1340,42 @@
 .overview-note,
 .overview-sub-note { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0.35rem 0 0; }
 
+/* Site Location carries a second thing in its cell: the Maps link, which only
+   exists when there is a location to open. It wraps under the input rather than
+   sitting beside it, because a real site name ("Plot 12, KIADB Industrial Area,
+   Devanahalli") is long and a link squeezed alongside it would push the input to a
+   useless width. The input keeps its own width from .form-input; the wrapper's
+   min-width: 0 is what stops a long value from widening the whole grid column. */
+.overview-site-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  min-width: 0;
+}
+.overview-site-cell .form-input { flex: 1 1 11rem; min-width: 0; }
+/* A link out, so it reads as one: accent ink and no button chrome, because nothing
+   about opening a map is a form action. 40px min-height keeps it a real tap target
+   on a phone — the same floor the tab strip and .btn-ghost use. The arrow in the
+   label carries the "this leaves the app" meaning; there is no icon-font or mask
+   system in this app (icons are inline SVG built by iconSvg in app.js), and one
+   arrow is not worth introducing one. */
+.overview-site-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 0.35rem;
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.overview-site-link:hover { text-decoration: underline; }
+/* A `display` on the rule above OUTRANKS the browser's own [hidden] style, so the
+   attribute would stop hiding anything and the link would sit there on every IR
+   with no site in it. This is the rule that makes `siteLink.hidden = true` real. */
+.overview-site-link[hidden] { display: none; }
+
 /* Sub-blocks (the timeline, the legacy log) inside the panel. */
 .overview-sub-head {
   display: flex;

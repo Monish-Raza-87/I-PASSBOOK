@@ -141,8 +141,32 @@ export function loadApp(bindings = '', opts = {}) {
   // Only when a suite supplies its own transport. app.js posts with FormData, so
   // a suite that drives the real login path needs the constructor to exist; it is
   // left undefined otherwise so no existing suite changes behaviour.
+  //
+  // `entries()` is a METHOD, as it is in the real API — not an array parked under
+  // that name. app.js WRAPS window.fetch and rebuilds the body with
+  // `for (const [k, v] of origBody.entries())`, so an array here threw a TypeError
+  // inside that wrapper on every single save. The throw was caught by the caller's
+  // own error branch, which made it look like "the backend is unreachable": no
+  // suite could drive a real POST, and none of them said so. A double that is
+  // wrong about the shape of an API is worse than no double, because the tests
+  // that lean on it pass for a reason that has nothing to do with the app.
   if (opts.fetch) {
-    ctx.FormData = class { constructor() { this.entries = []; } append(k, v) { this.entries.push([k, v]); } };
+    ctx.FormData = class {
+      constructor() { this._pairs = []; }
+      append(k, v) { this._pairs.push([String(k), String(v)]); }
+      set(k, v) {
+        const i = this._pairs.findIndex(p => p[0] === String(k));
+        if (i < 0) this.append(k, v); else this._pairs[i] = [String(k), String(v)];
+      }
+      get(k) { const p = this._pairs.find(p => p[0] === String(k)); return p ? p[1] : null; }
+      has(k) { return this._pairs.some(p => p[0] === String(k)); }
+      delete(k) { this._pairs = this._pairs.filter(p => p[0] !== String(k)); }
+      entries() { return this._pairs.slice(); }
+      keys() { return this._pairs.map(p => p[0]); }
+      values() { return this._pairs.map(p => p[1]); }
+      forEach(fn) { this._pairs.forEach(([k, v]) => fn(v, k, this)); }
+      get size() { return this._pairs.length; }
+    };
   }
   // `desktop: true` reports a ≥1024px viewport, which is the ONLY way to exercise
   // the desktop half of renderLayout — the two halves put the list and the detail

@@ -119,6 +119,23 @@
     'auth.usePattern':     'Use pattern',
     'auth.signOut':        'Sign Out',
 
+    // ── The Overview panel's own fields ──────────────────────────────────────
+    // The three the Triage panel hand-renders. Their LABELS live here; their
+    // storage keys live on OVERVIEW_FIELD_LABELS in app.js, which is a different
+    // job — that one names a field in the edit history and must not be re-worded
+    // when a screen's copy changes.
+    'overview.crmOwner':        'Customer Relations Manager',
+    'overview.contactPhone':    'Customer Phone',
+    'overview.siteLocation':    'Site Location',
+    'overview.readOnlyNote':    'Only Customer Relations and Management can edit these. Everyone can read them.',
+    // Placeholders. The site one says BOTH things it accepts, because Google's Maps
+    // URL API takes a place name and a coordinate pair through the same query — and
+    // a CR who does not know that would leave the box empty thinking coordinates
+    // were required.
+    'overview.crmOwnerHint':    'Name of CRM person',
+    'overview.phoneHint':       '+91 XXXXX XXXXX',
+    'overview.siteHint':        'Area, city — or latitude, longitude',
+
     // ── Words the app uses everywhere ────────────────────────────────────────
     'common.saved':        'Saved',
     'common.saving':       'Saving…',
@@ -126,6 +143,7 @@
     'common.retrying':     'Not saved — retrying',
     'common.unassigned':   'Unassigned',
     'common.overdue':      'Overdue',
+    'common.openInMaps':   'Open in Maps →',
   };
 
   // The workflow status words, keyed the way the app stores them. app.js already

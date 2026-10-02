@@ -322,15 +322,16 @@ const D = loadApp('deviceLabel, loginBackend, navigator, window', {
     return Promise.resolve({ text: () => Promise.resolve(JSON.stringify({ status: 'error', message: 'nope' })) });
   },
 });
+// Real FormData API: `entries()` is a METHOD returning the pairs.
 const fieldOf = (form, key) => {
-  const hit = (form && form.entries || []).find(e => e[0] === key);
+  const hit = (form && form.entries() || []).find(e => e[0] === key);
   return hit ? hit[1] : null;
 };
 
 D.navigator.userAgent = 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/119.0 Mobile Safari/537.36';
 await D.loginBackend('someone@indrones.com', 'a-password');
 r.ok('the login request carries a device field',
-  fieldOf(signinForm, 'device') !== null, (signinForm && signinForm.entries));
+  fieldOf(signinForm, 'device') !== null, (signinForm && signinForm.entries()));
 r.ok('an Android phone reports as Android · Chrome, not as Safari',
   fieldOf(signinForm, 'device') === 'Android · Chrome', fieldOf(signinForm, 'device'));
 

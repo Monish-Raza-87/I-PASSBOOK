@@ -320,13 +320,25 @@ r.ok('a title can never wrap the row taller than its neighbours',
 // IR470 … we may write down Adhik Nair in small on the right of IR470". The circle
 // cost a 26px chip plus a gap in the side column, on exactly the row that could
 // least afford one, and the empty space he pointed at really is empty.
+//
+// The guard is scoped to the ROW, not to the helper by name. `initialsOf()` came
+// back for the Insights People card — a full-width card, one row per assignee, no
+// chips on the line and no 400px budget — and banning the name outright would
+// fail on work that does not touch the row he complained about. What he asked to
+// be gone is asserted where it lived: inside `renderIRList`.
+//
+// `\r?\n` on both sides of the closing brace, because app.js is CRLF. The first
+// draft of this used a bare `\n}\n`, which matches nothing at all in a CRLF file —
+// so the body came back empty and the assertion below would have passed on an
+// empty string, testing nothing.
+const rowBody = (appCode.match(/function renderIRList\(records\)[\s\S]*?\r?\n\}\r?\n/) || [''])[0];
 r.ok('the assignee is a NAME beside the IR number, not an initials chip',
   /<div class="ir-title-row">[\s\S]{0,200}?<span class="ir-assignee"/.test(appCode),
   (appCode.match(/class="ir-title-row"[\s\S]{0,160}/) || [''])[0]);
 r.ok('...and the initials circle is gone from the renderer and the stylesheet',
   !/assignee-avatar/.test(appCode) && !/assignee-avatar/.test(viewsCode) &&
-  !/initialsOf/.test(appCode));
-r.ok('the name is allowed to shrink, and carries the full name for when it does',
+  rowBody.length > 1000 && !/initialsOf/.test(rowBody) && !/person-avatar/.test(rowBody),
+  { rowBodyChars: rowBody.length, initialsInRow: /initialsOf/.test(rowBody) });r.ok('the name is allowed to shrink, and carries the full name for when it does',
   /\.ir-assignee \{[\s\S]*?flex: 0 1 auto;/.test(viewsCode) &&
   /\.ir-assignee \{[\s\S]*?text-overflow: ellipsis;/.test(viewsCode) &&
   /<span class="ir-assignee" title="Assigned to /.test(appCode));

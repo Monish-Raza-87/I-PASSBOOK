@@ -135,6 +135,10 @@
     'overview.crmOwnerHint':    'Name of CRM person',
     'overview.phoneHint':       '+91 XXXXX XXXXX',
     'overview.siteHint':        'Area, city — or latitude, longitude',
+    // The banner's section progress. "saved", never "complete": `done[]` records
+    // that a section's Save was pressed, and it is monotonic, so "complete" would
+    // claim a job is finished because an empty form was saved once.
+    'overview.sectionsSaved':   '{n} of {m} sections saved',
 
     // ── Words the app uses everywhere ────────────────────────────────────────
     'common.saved':        'Saved',
@@ -144,6 +148,28 @@
     'common.unassigned':   'Unassigned',
     'common.overdue':      'Overdue',
     'common.openInMaps':   'Open in Maps →',
+
+    // ── The Insights dashboard ───────────────────────────────────────────────
+    // Only the strings the dashboard's NEW blocks add. The filter labels and the
+    // two headings that were already there ("Status mix", "REPAIR — by
+    // sub-category") are keyed here too, because they sit in the same template and
+    // leaving two of nine headings in a bare literal is the drift this layer
+    // exists to prevent. The rest of that older markup — the dropdowns' "All
+    // years" / "All customers" options — is a separate sweep and is still English
+    // inline.
+    'insights.raised':         'Raised',
+    'insights.openNow':        'Open now',
+    'insights.lateNow':        'Late now',
+    'insights.perMonth':       'Last 12 months',
+    'insights.raisedPerMonth': 'Raised per month',
+    'insights.undatedBucket':  'No date',
+    'insights.statusMix':      'Status mix',
+    'insights.repairBySub':    'REPAIR — by sub-category',
+    'insights.noCategory':     'No category',
+    'insights.people':         'People',
+    'insights.unassigned':     'Unassigned',
+    'insights.colOpen':        'Open',
+    'insights.colLate':        'Late',
   };
 
   // The workflow status words, keyed the way the app stores them. app.js already

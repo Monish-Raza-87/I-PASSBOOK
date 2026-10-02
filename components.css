@@ -45,6 +45,35 @@
 .btn.saved  { background: var(--surface-green-7); color: var(--ink-base); pointer-events: none; }
 .btn.error  { background: var(--surface-red-7);   color: var(--ink-base); }
 
+/* A busy button turns a ring beside its OWN label, and never replaces it.
+   `.btn` is already `inline-flex` with a 7px gap (components.css:14), so the ring
+   drops into space that already exists: the button's width and the position of the
+   word on it are identical before and during the wait. That is the whole reason
+   the sign-in button no longer swaps its text — a 5–30s cold start where the label
+   changes and nothing moves is indistinguishable from a button that did nothing.
+
+   ONE rule for both busy class names, because there are two eras of them: `.saving`
+   is what app.js's section and Overview saves have set by hand for a long time,
+   and `.is-busy` is what setBusy() adds now. They must look the same or the app
+   would have two different-looking spinners for the same wait.
+
+   A ::before rather than an element: it cannot be forgotten in a restore path, it
+   cannot end up doubled by a second toggle, and nothing has to clean it up. It is
+   decorative — the label beside it says "Saving…" — so it carries no role and
+   nothing for a screen reader to announce. The reduced-motion guard in
+   base.css:101 collapses the animation for anyone who has asked for that. */
+.btn.saving::before,
+.btn.is-busy::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
 .btn-secondary {
   background: var(--surface-base);
   color: var(--ink-gray-8);
@@ -975,4 +1004,74 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
     inset: 0 -9px;
   }
   .field-hist-btn::after { inset: 0 -4px 0 -9px; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   SPINNER — one ring, drawn on the button itself
+   The app's sign-in button used to change its label to "Signing in…" and
+   otherwise sit perfectly still across a cold start that has been measured at
+   66.6 seconds. A label swap is not a loading state: nothing moves, so a person
+   cannot tell a slow answer from a dead button.
+
+   The ring is the `.btn.saving::before` / `.btn.is-busy::before` rule above,
+   and deliberately NOT a `<span class="spinner-border">` inserted by script.
+   There is no element to insert, so there is nothing to forget to remove on a
+   restore path, nothing a second toggle can double, and nothing left behind in
+   the button's innerHTML when the wait ends. There is no standalone
+   `.spinner-border` class either — nothing in the app renders one, and an unused
+   rule is a second definition of the same ring waiting to drift from this one.
+
+   DRAWN IN currentColor, which is the one choice that makes it work everywhere
+   without a variant per context: white inside the accent-filled primary button,
+   grey in a ghost button, whatever the section header is otherwise.
+
+   Reuses base.css's @keyframes spin rather than declaring a second identical
+   one; the global reduced-motion guard in base.css collapses it to 0.01ms with
+   one iteration, which parks the ring — acceptable here, because the label beside
+   it carries the meaning and a static ring still reads as "working".
+   ══════════════════════════════════════════════════════════ */
+/* A busy button is not simply a disabled one: it must also swallow the tap that
+   would submit the form a second time. `pointer-events` is what stops that, and
+   it is why `disabled` alone is not the whole answer — a disabled control on a
+   slow request also leaves the tab order mid-submit. */
+.btn.is-busy { pointer-events: none; }
+
+/* ══════════════════════════════════════════════════════════
+   TOAST — a restyle, and only a restyle
+   The pill in base.css is a dark slab with a 24px float. This gives it Desk's
+   card instead: the page's own surface, a hairline, the component radius, and a
+   lift that is enough to detach it from the row it covers without competing with
+   the modal or the comments panel.
+
+   WHAT THIS DELIBERATELY DOES NOT DO. The app has exactly ONE toast, holding ONE
+   #toast-text, and a newer message REPLACES the older one — never a queue. That
+   arrangement took a real bug to get right (a throw between two messages could
+   leave the last one up for good), and it is asserted. So this adds no header, no
+   close button, no tone variants and no second element: every property below is
+   a property of the element that is already there.
+
+   The dot is a ::before, not a child — it is the one thing the restyle adds, and
+   it earns its place by giving the pill a fixed left edge to read against. Its
+   colour is the text's, so it needs no tone class the API does not have. */
+#toast {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-4);
+  background: var(--surface-base);
+  color: var(--ink-gray-8);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  box-shadow: var(--elevation-lg);
+}
+#toast::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-gray-5);
 }

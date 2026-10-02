@@ -2449,12 +2449,12 @@ function wireAuthForm() {
   const submitLogin = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email.'); return; }
-    signInBtn.disabled = true; signInBtn.textContent = 'Sending…';
+    setBusy(signInBtn, 'Sending…');
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, '').then(d => {
-      signInBtn.disabled = false; signInBtn.textContent = 'Send me a code';
+      setIdle(signInBtn, 'Send me a code');
       if (d && d.status === 'ok' && d.otpRequired) {
         _otpEmail = email;
         _otpPassword = '';
@@ -2475,12 +2475,12 @@ function wireAuthForm() {
     const email = emailOf();
     const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
-    signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
+    setBusy(signInBtn, 'Signing in…');
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, password).then(d => {
-      signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
+      setIdle(signInBtn, 'Sign in');
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
@@ -2527,10 +2527,10 @@ function wireAuthForm() {
     const code = ((otpIn && otpIn.value) || '').trim();
     if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
     if (!_otpEmail) { showError('Enter your email first.'); setAuthMode('email'); return; }
-    otpBtn.disabled = true; otpBtn.textContent = 'Verifying…';
+    setBusy(otpBtn, 'Verifying…');
     showError('');
     loginBackend(_otpEmail, _otpPassword || '', code).then(d => {
-      otpBtn.disabled = false; otpBtn.textContent = 'Verify code';
+      setIdle(otpBtn, 'Verify code');
       if (d && d.status === 'ok' && d.sessionToken) {
         _otpPassword = null;
         finishAuth(_otpEmail, d);
@@ -2545,10 +2545,10 @@ function wireAuthForm() {
   const submitForgot = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email first.'); return; }
-    forgotBtn.disabled = true; forgotBtn.textContent = 'Sending…';
+    setBusy(forgotBtn, 'Sending…');
     showError('');
     forgotPasswordBackend(email).then(d => {
-      forgotBtn.disabled = false; forgotBtn.textContent = 'Email me a code';
+      setIdle(forgotBtn, 'Email me a code');
       // The backend answers identically whether or not the account exists, so the
       // UI must not imply otherwise — always move on to the code step.
       _resetEmail = email;
@@ -2565,10 +2565,10 @@ function wireAuthForm() {
     const pw    = (newIn && newIn.value) || '';
     if (!code) { showError('Enter the 6-digit code from your email.'); return; }
     if (pw.length < 8) { showError('New password must be at least 8 characters.'); return; }
-    resetBtn.disabled = true; resetBtn.textContent = 'Setting…';
+    setBusy(resetBtn, 'Setting…');
     showError('');
     resetPasswordBackend(email, code, pw).then(d => {
-      resetBtn.disabled = false; resetBtn.textContent = 'Set new password';
+      setIdle(resetBtn, 'Set new password');
       if (d && d.status === 'ok') {
         // No token is returned on purpose: signing in with the new password is
         // what proves it was typed the way the user meant.
@@ -4028,21 +4028,9 @@ function insightsFacets(irs) {
 function insightsSummary(irs, filters) {
   const all = Array.isArray(irs) ? irs : [];
   const f = filters || {};
-  const rows = all.filter(ir => {
-    // String() on both sides: a select hands back a string, and a Set-derived
-    // option list holds numbers. Comparing them raw would match nothing at all,
-    // silently, for FY and Month only.
-    if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
-    if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
-    if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
-    if (f.category !== INSIGHTS_ALL) {
-      if (f.category === UNCATEGORISED) { if (ir.category) return false; }
-      else if (ir.category !== f.category) return false;
-    }
-    if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
-    if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
-    return true;
-  });
+  // Through the shared predicate, never a second copy of the six comparisons —
+  // see insightsMatches for why the charts made that a correctness matter.
+  const rows = all.filter(ir => insightsMatches(ir, f));
 
   const categories = {};
   IR_CATEGORIES.forEach(k => { categories[k] = 0; });
@@ -4084,6 +4072,136 @@ function insightsOpt(v, sel, label) {
   return `<option value="${escHtml(value)}"${value === String(sel) ? ' selected' : ''}>${escHtml(label == null ? value : label)}</option>`;
 }
 
+// ─── THE ONE FILTER PREDICATE ────────────────────────────────────────────────
+// Every number on the dashboard is counted from the rows this returns. It is a
+// named function rather than a filter inline in insightsSummary() for one reason:
+// the charts below were added later, and a second copy of these six comparisons
+// is a second chance to get one of them wrong — at which point the bar chart
+// disagrees with the total printed directly above it, and neither looks broken.
+function insightsMatches(ir, filters) {
+  const f = filters || {};
+  if (!ir) return false;
+  // String() on both sides: a select hands back a string, and a Set-derived
+  // option list holds numbers. Comparing them raw would match nothing at all,
+  // silently, for FY and Month only.
+  if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
+  if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
+  if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
+  if (f.category !== INSIGHTS_ALL) {
+    if (f.category === UNCATEGORISED) { if (ir.category) return false; }
+    else if (ir.category !== f.category) return false;
+  }
+  if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
+  if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
+  return true;
+}
+
+// ─── WHAT THE CHARTS COUNT (Stage 3) ─────────────────────────────────────────
+
+// PURE, and the same contract as insightsSummary(): rows in, counts out, no DOM,
+// no clock, no fetch.
+//
+// `undated` is returned rather than folded into a month. A row whose date the app
+// cannot read has to go SOMEWHERE or the bars quietly total less than the number
+// printed above them; a thirteenth bucket that says so is the honest place, and
+// the renderer always draws it.
+function monthCounts(irs, filters) {
+  const months = new Array(12).fill(0);
+  let undated = 0;
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    if (!insightsMatches(ir, filters)) return;
+    const m = irMonthNumber(ir.dateRaisedISO);
+    if (m === null) undated++; else months[m - 1]++;
+  });
+  return { months, undated, total: months.reduce((a, b) => a + b, 0) + undated };
+}
+
+// The point list for one SVG polyline over `values`, inside a w x h box. Pure
+// geometry — no canvas, no DOM, no CSS variable read.
+//
+// The y axis is scaled to the LARGEST value in the series rather than to a fixed
+// maximum: a series of 3s and 4s drawn against a notional 400 is a flat line on
+// the floor, which is technically true and tells a reader nothing. Fewer than two
+// points returns an empty string, because a "line" through one point is not a
+// line and a polyline with no points draws nothing anyway.
+function sparkPoints(values, w, h) {
+  const v = (Array.isArray(values) ? values : []).map(n => (Number.isFinite(n) ? n : 0));
+  if (v.length < 2) return '';
+  const max = Math.max(1, ...v);
+  const stepX = w / (v.length - 1);
+  return v.map((n, i) =>
+    (i * stepX).toFixed(2) + ',' + (h - (n / max) * h).toFixed(2)).join(' ');
+}
+
+// Who is holding work, and how much of it is late.
+//
+// TWO THINGS HERE ARE NOT OPTIONAL.
+//
+// First, it counts from the SAME filtered rows as everything else on the page, so
+// the column of open counts can never sum to something other than the total above.
+//
+// Second, the Unassigned bucket is always present — the caller renders it whether
+// or not it has rows, and the helper puts it in the list before it counts anything.
+// A named person with no work is a fine row to omit, because the reader knows who
+// they are and can see they hold nothing. The bucket that says "nobody owns these
+// N" is not: it is the one line whose absence turns a gap in the data into a gap in
+// the picture, and a reader who adds up the card gets a smaller number than the
+// page prints and concludes the dashboard is broken.
+const UNASSIGNED_KEY = '__unassigned__';
+
+function assigneeCounts(irs, filters, now) {
+  const map = new Map();
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    if (!insightsMatches(ir, filters)) return;
+    const name = String(ir.assigneeName || ir.assignee || '').trim();
+    const key = name || UNASSIGNED_KEY;
+    if (!map.has(key)) map.set(key, { key, name, total: 0, open: 0, late: 0 });
+    const row = map.get(key);
+    row.total++;
+    const cat = statusCategory(ir.status);
+    if (cat === 'open' || cat === 'paused') row.open++;
+    if (irOverdue(ir, now)) row.late++;
+  });
+  // The Unassigned bucket is created HERE, before anything is counted, so it is
+  // present with zero rows as well as with four hundred. Its absence is the one
+  // that goes unnoticed: when every IR has a name the row would be empty anyway,
+  // and when it is NOT empty its absence is a set of tickets that belong to
+  // nobody and appear on no line of the card.
+  if (!map.has(UNASSIGNED_KEY)) {
+    map.set(UNASSIGNED_KEY, { key: UNASSIGNED_KEY, name: '', total: 0, open: 0, late: 0 });
+  }
+  const rows = [...map.values()].sort((a, b) =>
+    (b.open - a.open) || (b.total - a.total) || a.name.localeCompare(b.name));
+  // Pinned last, and that is a reading decision rather than a sorting one: a
+  // bucket of names is a list of people, and a row that is not a person belongs at
+  // the end of it rather than in the middle of the alphabet.
+  const ui = rows.findIndex(r => r.key === UNASSIGNED_KEY);
+  if (ui > -1) rows.push(rows.splice(ui, 1)[0]);
+  return rows;
+}
+
+// Two letters for an avatar. Deliberately not a name-splitter: a single word
+// gives its first two letters, and anything longer gives the first letter of the
+// first and last words, which is what a two-initial avatar means everywhere else.
+//
+// A non-string returns nothing rather than `String(name)`. Everything that reaches
+// here should already be text, but "should" is not a contract: `String(42)` is a
+// perfectly good two-character string, and an avatar reading "42" is a bug that
+// nobody would look for.
+function initialsOf(name) {
+  if (typeof name !== 'string') return '';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// The month axis in three letters. MONTH_LABELS above is the long form the filter
+// dropdown uses, where there is room for it; a chart column at 24px has room for
+// three characters and no more.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 // SYNCHRONOUS, IDEMPOTENT and safe with an empty list. Those three properties are
 // what let four different callers use it with no sequence token: setAllIRs() (every
 // fetch path, including the demo fallback and an in-page re-login), loadIRState()
@@ -4109,6 +4227,21 @@ function renderInsights() {
 
   const sum = insightsSummary(allIRs, f);
   const filtered = sum.matched !== sum.total;
+
+  // Everything the charts draw comes from these, so they are computed ONCE per
+  // render and shared. `now` is read once here rather than inside each helper,
+  // because two calls a millisecond apart could otherwise disagree about whether
+  // a ticket is on its limit — and a dashboard whose late count differs from its
+  // own late row is a dashboard nobody trusts twice.
+  const now      = Date.now();
+  const mc       = monthCounts(allIRs, f);
+  const people   = assigneeCounts(allIRs, f, now);
+  const openNow  = people.reduce((a, r) => a + r.open, 0);
+  const lateNow  = people.reduce((a, r) => a + r.late, 0);
+  const maxMonth = Math.max(1, ...mc.months, mc.undated);
+  const maxCat   = Math.max(1, ...IR_CATEGORIES.map(k => sum.categories[k]), sum.uncategorised);
+  const mixTotal = SEGMENT_LABELS.filter(([k]) => k !== 'all')
+    .reduce((a, [k]) => a + (sum.statuses[k] || 0), 0) || 1;
 
   const filterRow = (id, label, options) => `
     <label class="insights-filter"><span>${escHtml(label)}</span>
@@ -4149,22 +4282,65 @@ function renderInsights() {
       ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
     </p>
 
+    <!-- The stat row. Four tiles of the same size, and the last one is a
+         SPARKLINE rather than a number, which is the one shape on this page that
+         answers "which way is this going" instead of "how many".
+         The polyline is a single inline SVG path computed by sparkPoints() — a
+         real SVG element, not a canvas. That is not a preference: the app's one
+         canvas painting hardcodes six hex values, because a canvas cannot read a
+         CSS variable, so it is the one drawing surface in the app that would
+         ignore all four palettes and both themes. -->
+    <div class="insights-stats">
+      <div class="insights-stat">
+        <span class="insights-stat-n">${sum.matched}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.raised'))}</span>
+      </div>
+      <div class="insights-stat">
+        <span class="insights-stat-n">${openNow}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.openNow'))}</span>
+      </div>
+      <div class="insights-stat${lateNow ? ' is-late' : ''}">
+        <span class="insights-stat-n">${lateNow}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.lateNow'))}</span>
+      </div>
+      <div class="insights-stat insights-stat-spark">
+        <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none"
+             role="img" aria-label="${escHtml(t('insights.perMonth'))}">
+          <polyline points="${escHtml(sparkPoints(mc.months, 100, 28))}"
+                    fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linejoin="round" stroke-linecap="round" />
+        </svg>
+        <span class="insights-stat-label">${escHtml(t('insights.perMonth'))}</span>
+      </div>
+    </div>
+
     <div class="insights-cards">
       ${IR_CATEGORIES.map(k => `
         <button type="button" class="insights-card${f.category === k ? ' active' : ''}" data-cat="${escHtml(k)}">
           <span class="insights-card-n">${sum.categories[k]}</span>
           <span class="insights-card-label">${escHtml(k)}</span>
+          <!-- The bar is scaled to the LARGEST category, not to the total: these
+               four are alternatives, so the question a reader has is which of them
+               dominates, and a share-of-total bar would leave all four short and
+               hard to tell apart. It is decorative — the number beside it is the
+               fact — so it is aria-hidden. -->
+          <span class="insights-card-bar" aria-hidden="true">
+            <span class="insights-card-bar-fill" style="width:${Math.round((sum.categories[k] / maxCat) * 100)}%"></span>
+          </span>
         </button>`).join('')}
       ${sum.uncategorised ? `
         <button type="button" class="insights-card is-muted${f.category === UNCATEGORISED ? ' active' : ''}" data-cat="${escHtml(UNCATEGORISED)}">
           <span class="insights-card-n">${sum.uncategorised}</span>
-          <span class="insights-card-label">No category</span>
+          <span class="insights-card-label">${escHtml(t('insights.noCategory'))}</span>
+          <span class="insights-card-bar" aria-hidden="true">
+            <span class="insights-card-bar-fill" style="width:${Math.round((sum.uncategorised / maxCat) * 100)}%"></span>
+          </span>
         </button>` : ''}
     </div>
 
     ${sum.categories.REPAIR ? `
       <div class="insights-block">
-        <h3 class="insights-h">REPAIR — by sub-category</h3>
+        <h3 class="insights-h">${escHtml(t('insights.repairBySub'))}</h3>
         <div class="insights-subcats">
           ${REPAIR_SUBCATEGORIES.map(k => `
             <span class="insights-subcat${k === REPAIR_OTHERS ? ' is-others' : ''}">
@@ -4181,13 +4357,69 @@ function renderInsights() {
       </div>` : ''}
 
     <div class="insights-block">
-      <h3 class="insights-h">Status mix</h3>
+      <h3 class="insights-h">${escHtml(t('insights.raisedPerMonth'))}</h3>
+      <!-- One column per calendar month, plus the undated bucket, which is drawn
+           ALWAYS — even at zero, even when every row is dated. It is the one bar
+           whose absence would make the chart silently disagree with the total
+           printed at the top of the page, and a chart that does not add up is
+           worse than a chart with an empty column in it. -->
+      <div class="chart-bars">
+        ${mc.months.map((n, i) => `
+          <div class="chart-bar-col${n ? '' : ' is-zero'}" title="${escHtml(MONTH_LABELS[i] + ': ' + n)}">
+            <span class="chart-bar-n">${n}</span>
+            <span class="chart-bar-track"><span class="chart-bar" style="height:${Math.round((n / maxMonth) * 100)}%"></span></span>
+            <span class="chart-bar-x">${escHtml(MONTH_ABBR[i])}</span>
+          </div>`).join('')}
+        <div class="chart-bar-col is-undated${mc.undated ? '' : ' is-zero'}" title="${escHtml(t('insights.undatedBucket') + ': ' + mc.undated)}">
+          <span class="chart-bar-n">${mc.undated}</span>
+          <span class="chart-bar-track"><span class="chart-bar" style="height:${Math.round((mc.undated / maxMonth) * 100)}%"></span></span>
+          <!-- A dash, not the words. The axis is thirteen columns wide on a phone
+               and the words "No date" do not fit one of them — but the column has
+               to be HERE, in the axis, because that is what makes the bars add up
+               to the total above them. The caption under the chart says what the
+               dash means. -->
+          <span class="chart-bar-x">—</span>
+        </div>
+      </div>
+      <p class="chart-note">— = ${escHtml(t('insights.undatedBucket'))}</p>
+    </div>
+
+    <div class="insights-block">
+      <h3 class="insights-h">${escHtml(t('insights.statusMix'))}</h3>
+      <!-- One bar, four segments. The list of rows below it stays: the bar answers
+           "what is the shape of this" and the rows answer "how many exactly", and
+           a stacked bar alone makes a reader estimate a number the data knows. -->
+      <div class="mix-bar" role="img"
+           aria-label="${escHtml(SEGMENT_LABELS.filter(([k]) => k !== 'all')
+             .map(([k, label]) => label + ' ' + (sum.statuses[k] || 0)).join(', '))}">
+        ${SEGMENT_LABELS.filter(([k]) => k !== 'all' && sum.statuses[k]).map(([k, label]) => `
+          <span class="mix-seg mix-${k}" style="width:${(sum.statuses[k] / mixTotal * 100).toFixed(2)}%"
+                title="${escHtml(label + ': ' + sum.statuses[k])}"></span>`).join('')}
+      </div>
       <div class="insights-mix">
         ${SEGMENT_LABELS.filter(([k]) => k !== 'all').map(([k, label]) => `
           <span class="insights-mix-row">
             <span class="${CATEGORY_BADGE[k]}">${escHtml(label)}</span>
             <span class="insights-mix-n">${sum.statuses[k] || 0}</span>
           </span>`).join('')}
+      </div>
+    </div>
+
+    <div class="insights-block">
+      <h3 class="insights-h">${escHtml(t('insights.people'))}</h3>
+      <div class="people-head">
+        <span class="people-head-name">${escHtml(t('insights.people'))}</span>
+        <span class="people-head-n">${escHtml(t('insights.colOpen'))}</span>
+        <span class="people-head-n">${escHtml(t('insights.colLate'))}</span>
+      </div>
+      <div class="people-list">
+        ${people.map(p => `
+          <div class="person-row${p.key === UNASSIGNED_KEY ? ' is-unassigned' : ''}">
+            <span class="person-avatar" aria-hidden="true">${escHtml(initialsOf(p.name) || '?')}</span>
+            <span class="person-name">${escHtml(p.name || t('insights.unassigned'))}</span>
+            <span class="person-n">${p.open}</span>
+            <span class="person-n${p.late ? ' is-late' : ''}">${p.late}</span>
+          </div>`).join('')}
       </div>
     </div>`;
 }
@@ -5207,6 +5439,25 @@ function wantProgress(ir, prog) {
   return !(ir && ir.isLegacyOnly && prog.done === 0);
 }
 
+// The banner's version of that count: ONE SEGMENT PER SECTION rather than a
+// filled bar, because the question in this banner is not "how much" but "which" —
+// the six segments are exactly the six tabs directly below, and a person reading
+// this is deciding which one to open next.
+//
+// NEVER the word "complete", on the segments or in the tooltip. `done[]` means a
+// section has been SAVED, not filled in, and it is monotonic — a section stays
+// saved once saved, even if it is later emptied. Calling that "complete" would
+// tell someone a job is finished on the strength of an empty form they once
+// pressed Save on. The chip on the list row keeps its own shape; this is the
+// banner's.
+function progressSteps(ir, prog) {
+  const doneIds = Array.isArray(ir && ir.done) ? ir.done : [];
+  const label = t('overview.sectionsSaved', { n: prog.done, m: prog.total });
+  return `<span class="progress-steps" title="${escHtml(label)}" role="img" aria-label="${escHtml(label)}">` +
+    SECTION_IDS.map(id => `<span class="progress-step${doneIds.includes(id) ? ' is-done' : ''}"></span>`).join('') +
+    `</span><span class="progress-steps-text">${escHtml(label)}</span>`;
+}
+
 // ─── THE IR BOARD ────────────────────────────────────────────────────────────
 // The list's rows, drawn as columns. The board adds NO field and needs NO
 // migration: an IR already carries a 14-value workflow `status`, written by Triage
@@ -5433,14 +5684,20 @@ if (irBoard) {
   });
 }
 
-// `initialsOf()` and the `.assignee-avatar` circle it fed were removed with the
-// 2026-09-21 list-row fix. The circle was a 26px chip in the row's side column,
-// and on IR470 — the row carrying the most chips — it was the chip that tipped
-// the column past the 400px list pane's budget, so the browser squeezed the
-// column and sliced the `Open` pill off at its left edge. The owner's read of
-// that was "AN … overlapping above 'open' status", and his fix was the right
-// one: the initial is not worth a chip, and his full name belongs in the empty
-// space to the right of the IR number. See `renderIRList` and `.ir-title-row`.
+// The `.assignee-avatar` circle was removed from the LIST ROW with the 2026-09-21
+// fix, and it stays removed. It was a 26px chip in the row's side column, and on
+// IR470 — the row carrying the most chips — it was the chip that tipped the column
+// past the 400px list pane's budget, so the browser squeezed the column and sliced
+// the `Open` pill off at its left edge. The owner's read of that was "AN …
+// overlapping above 'open' status", and his fix was the right one: the initial is
+// not worth a chip, and his full name belongs in the empty space to the right of
+// the IR number. See `renderIRList` and `.ir-title-row`.
+//
+// The Insights People card draws initials again, and that is a different thing in
+// a different place: it is a full-width card, one row per assignee, with no chips
+// competing for the line and no 400px budget. `initialsOf()` exists for it alone —
+// smoke-ui.mjs pins both halves, so the row cannot get its circle back and the
+// helper cannot quietly spread onto a row.
 
 function updateListCounts(shown) {
   if (navCountEl)  navCountEl.textContent = allIRs.length;
@@ -6211,7 +6468,7 @@ function renderBannerMeta() {
     (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
     (age ? `<span class="meta-pill${late ? ' meta-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '') +
     (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">${escHtml(t('common.overdue'))}</span>` : '') +
-    (wantProgress(ir, prog) ? progressChip(prog) : '') +
+    (wantProgress(ir, prog) ? progressSteps(ir, prog) : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">${escHtml(t('common.unassigned'))}</span>`);
@@ -9483,6 +9740,32 @@ async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
       allEvFields.forEach(f => mergeEvidenceLinks(f.id, secFields[f.id + '_links']));
     }
   } catch {}
+}
+
+// ─── THE BUSY BUTTON ──────────────────────────────────────────────────────────
+// ONE way to say "this button is working", so the app cannot grow a second.
+//
+// The ring itself is CSS (`.btn.is-busy::before`, components.css) and NOT an
+// element inserted here. That matters more than it looks: an inserted spinner has
+// to be removed on every restore path, including the failure and the throw, and a
+// button restored by `textContent = 'Sign in'` would leave a stale ring behind
+// while one restored by `innerHTML` would not. A ::before cannot be orphaned and
+// cannot be doubled by two toggles racing a slow reply.
+//
+// The label is passed in rather than remembered, because every call site already
+// knew its own idle wording — it wrote it by hand before this existed — and a
+// helper that guessed would make the helper a second place the copy lives.
+function setBusy(btn, label) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('is-busy');
+  if (label != null) btn.textContent = label;
+}
+function setIdle(btn, label) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.remove('is-busy');
+  if (label != null) btn.textContent = label;
 }
 
 // ─── TOAST ────────────────────────────────────────────────────────────────────

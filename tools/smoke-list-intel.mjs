@@ -278,10 +278,23 @@ T.renderBannerMeta();
 const banner = byId.get('ir-banner-pills').innerHTML;
 r.ok('the header shows the same age, flagged late',
   /In status 9d/.test(banner) && /meta-pill meta-late/.test(banner), banner);
-r.ok('the header flags overdue and shows the completion chip',
-  /badge-danger/.test(banner) && /ir-progress p3/.test(banner), banner);
+// The banner carries a six-segment steps bar, not the list row's chip: the row
+// has ~371px and a card is one line, while the banner is the ticket's own header
+// and can afford to say "3 of 6 sections saved" in words. Same `done[]`, same
+// count — the two must never disagree, which is what the second assertion pins.
+const bannerSteps = (banner.match(/<span class="progress-step(?: is-done)?"><\/span>/g) || []);
+r.ok('the header flags overdue and shows a six-segment steps bar',
+  /badge-danger/.test(banner) && bannerSteps.length === 6 &&
+  (banner.match(/progress-step is-done/g) || []).length === 3, banner);
+r.ok('...and it words it "saved", never "complete"',
+  /3 of 6 sections saved/.test(banner) && !/complete/i.test(banner), banner);
 r.ok('the header and the card agree on the count for the same ticket',
-  /3\/6/.test(banner) && T.sectionProgress(T.currentIR.done).done === 3);
+  (() => {
+    T.renderIRList([T.currentIR]);
+    const card = byId.get('ir-list').innerHTML;
+    return /3 of 6 sections saved/.test(banner) && /ir-progress p3/.test(card) &&
+      />3\/6</.test(card) && T.sectionProgress(T.currentIR.done).done === 3;
+  })(), banner + ' | ' + byId.get('ir-list').innerHTML);
 
 // ── The legacy-only merge ─────────────────────────────────────────────────────
 // Legacy stubs are appended to allIRs AFTER setAllIRs() has merged app-owned

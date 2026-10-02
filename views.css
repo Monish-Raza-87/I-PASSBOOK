@@ -333,6 +333,35 @@
 .banner-pills { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 5px; }
 .banner-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end; }
 
+/* ── Section progress, one segment per section ──────────────────────────────
+   The list row carries the .ir-progress bar (a filled track and a 4/6). The
+   banner carries this instead: six discrete segments, so the readout names WHICH
+   sections are saved rather than only how many. Both come from the same
+   sectionProgress() count and the same ir.done[] list, so they cannot disagree.
+
+   It is a bar 0.25rem tall — a hairline with notches, not a widget. Anything
+   taller starts competing with the pills above it, and the six tabs it mirrors
+   are one line below. */
+.progress-steps {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.progress-step {
+  display: block;
+  width: 12px;
+  height: 0.25rem;
+  border-radius: 2px;
+  background: var(--surface-gray-3);
+}
+.progress-step.is-done { background: var(--accent); }
+.progress-steps-text {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+  white-space: nowrap;
+}
+
 /* Unsaved-draft notice */
 .draft-banner {
   display: flex;
@@ -1768,6 +1797,215 @@
   color: var(--ink-gray-8);
   font-variant-numeric: tabular-nums;
 }
+
+/* ══════════════════════════════════════════════════════════
+   INSIGHTS — the charts, the bars and the People list
+   Everything below draws from markup that is already plain HTML. There is no
+   canvas and no charting library anywhere in this file, and that is a decision
+   with a reason behind it rather than a preference: the app's one canvas
+   painting (the unlock pattern) hardcodes six hex values, because a canvas
+   cannot read a CSS variable — so it is the single surface in the app that
+   ignores all four palettes and both themes. Bars built from divs inherit the
+   accent and follow the theme for free.
+   ══════════════════════════════════════════════════════════ */
+
+/* ── The stat row ─────────────────────────────────────────────────────────── */
+.insights-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 0.55rem;
+  margin-top: 0.9rem;
+}
+.insights-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-4);
+  background: var(--surface-base);
+}
+.insights-stat-n {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+/* Overdue answers in the danger colour, like every other late figure in the app. */
+.insights-stat.is-late .insights-stat-n { color: var(--st-danger-fg); }
+.insights-stat-label {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+/* The sparkline tile holds a drawing where its three neighbours hold a number, so
+   it needs a floor of its own or it collapses to the label's height in a grid row
+   whose other cells are taller. */
+.insights-stat-spark { justify-content: space-between; min-height: 4.6rem; }
+.spark { display: block; width: 100%; height: 30px; color: var(--accent); }
+
+/* ── The category bars ────────────────────────────────────────────────────── */
+/* A track and a fill rather than a width on the bar itself: the track is what
+   makes a short bar read as "a little of the whole" instead of as a floating
+   fragment, and it gives every card the same baseline to sit on. */
+.insights-card-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--surface-gray-3);
+  overflow: hidden;
+}
+.insights-card-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* ── Raised per month ─────────────────────────────────────────────────────── */
+/* Thirteen columns, so at 320px each is about 20px. Everything inside a column
+   is therefore 2xs and nowrap, and the numbers are allowed to be tight: two
+   digits fit, and a three-digit month would have to be a list of 100+ tickets
+   raised in one month to exist at all. */
+.chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 0.4rem;
+}
+.chart-bar-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.chart-bar-n {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-7);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.chart-bar-track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 72px;
+}
+.chart-bar {
+  width: 100%;
+  /* A zero month still gets a hairline: an empty track with nothing in it reads
+     as a column that failed to draw, and the reader cannot tell that from a
+     month with no tickets. */
+  min-height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+.chart-bar-col.is-zero .chart-bar { background: var(--surface-gray-3); }
+.chart-bar-x {
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+  line-height: 1;
+  white-space: nowrap;
+}
+.chart-bar-col.is-undated .chart-bar { background: var(--ink-gray-5); }
+.chart-bar-col.is-undated .chart-bar-n { color: var(--ink-gray-9); }
+.chart-note {
+  margin: 0.35rem 0 0;
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+}
+
+/* ── Status mix ───────────────────────────────────────────────────────────── */
+/* The bar is drawn in the --st-*-fg inks rather than their tints. It is a solid
+   shape a reader compares by size, not text on a ground, so it wants the
+   saturated end of each pair — and those five values are already the AA-safe
+   steps this app fixed the pills to, so the bar and the pills beside it cannot
+   drift apart. */
+.mix-bar {
+  display: flex;
+  height: 10px;
+  margin: 0.4rem 0 0.55rem;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--surface-gray-2);
+}
+.mix-seg { display: block; height: 100%; }
+.mix-seg.mix-open     { background: var(--st-open-fg); }
+.mix-seg.mix-paused   { background: var(--st-paused-fg); }
+.mix-seg.mix-resolved { background: var(--st-resolved-fg); }
+.mix-seg.mix-closed   { background: var(--st-closed-fg); }
+
+/* ── People ───────────────────────────────────────────────────────────────── */
+/* Four tracks, and the two counts are fixed width so the numbers form a column
+   a reader can scan down. The name is the only flexible track, and it is the
+   only one that can be long. */
+.people-head,
+.person-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.people-head {
+  padding: 0 0.1rem 0.3rem;
+  border-bottom: 1px solid var(--outline-gray-2);
+}
+.people-head-name { flex: 1 1 auto; min-width: 0; }
+.people-head-n {
+  flex: 0 0 2.6rem;
+  text-align: right;
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.person-row {
+  padding: 0.45rem 0.1rem;
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.person-avatar {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-gray-3);
+  color: var(--ink-gray-8);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.02em;
+}
+.person-name {
+  flex: 1 1 auto;
+  /* The one track that can outgrow the row. A long name wraps inside it rather
+     than pushing the two counts off the right edge. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-9);
+}
+.person-n {
+  flex: 0 0 2.6rem;
+  text-align: right;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-8);
+  font-variant-numeric: tabular-nums;
+}
+.person-n.is-late { color: var(--st-danger-fg); font-weight: var(--weight-semibold); }
+/* Unassigned is not a person, so it does not get a person's avatar: the dashed
+   ring says "this row is a gap in the data" at a glance, before the word does. */
+.person-row.is-unassigned .person-avatar {
+  background: transparent;
+  border: 1px dashed var(--outline-gray-3);
+  color: var(--ink-gray-6);
+}
+.person-row.is-unassigned .person-name { color: var(--ink-gray-7); }
+
 
 /* ══════════════════════════════════════════════════════════
    BELOW lg — the sidebar is a fixed bottom bar, so scroll

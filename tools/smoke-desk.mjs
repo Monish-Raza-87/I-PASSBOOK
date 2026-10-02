@@ -1,20 +1,21 @@
-// Smoke test for desk.css — the ERPNext Desk prototype on the sign-in screen
-// and the IR list.
+// Smoke test for desk.css — the ERPNext Desk look, which the owner approved as
+// the app's direction.
 //
 //   node tools/smoke-desk.mjs
 //
-// This file is a PROTOTYPE the owner has not yet approved, and that is the whole
-// reason it needs a suite of its own: it loads last, so it overrides the
-// `POLISH — level: NOTICEABLE` block, and nothing about a stylesheet stops a
-// later rule from escaping its scope. Two things must stay true while it is on
-// trial, and neither is visible by looking at the screens:
+// It began as a prototype covering two screens and is now the look for six, so
+// the suite's job changed with it. It still has the same two, and neither is
+// visible by looking at the screens:
 //
-//   1. IT CANNOT LEAK. Every rule is scoped to one of the three selectors the
-//      prototype owns, or it is in the one sanctioned global block (the measured
-//      status/priority colour steps). If a rule escapes, a screen the owner has
-//      not reviewed changes under him and he reviews the prototype by accident.
+//   1. IT CANNOT LEAK. Every rule is scoped to one of the six roots the look
+//      owns, or it is in the one sanctioned global block (the measured
+//      status/priority colour steps). If a rule escapes, a screen nobody has
+//      looked at changes under it — and the root list is now six, so the surface
+//      this guard is protecting is larger, not smaller.
 //   2. IT IS REMOVABLE. That is the same property stated the other way: delete
-//      the file and its one <link>, and the app is exactly what it was.
+//      the file and its one <link>, and the app is exactly what it was. That is
+//      why the whole look lives in one file, and why every rule restyles a class
+//      that already exists rather than needing markup to go with it.
 //
 // The colour assertions pin MEASUREMENTS, not preferences. Five of six status
 // pills failed WCAG AA in both themes before this file; the specific step chosen
@@ -69,8 +70,14 @@ r.ok('the cache name was bumped past the version that predates it',
   !!cache && parseInt(cache[1], 10) >= 54, cache && cache[1]);
 
 // ── 2. It cannot leak ────────────────────────────────────────────────────────
-r.head('no rule escapes the two screens it is allowed to change');
-const SCOPES = /^(#auth-container|#password-change|#index-view)\b/;
+r.head('no rule escapes the six roots it is allowed to change');
+// The six roots are the app's own view containers, not a list of screens that
+// happened to be reviewed. #index-view carries the IR list AND the board switch;
+// #detail-view is one IR; #insights-view and #log-view are the two read-only
+// panes. Widening this list is the whole cost of applying the look to another
+// screen — and the reason it is a list at all is that a rule escaping it changes
+// a screen nobody has looked at.
+const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view)\b/;
 // The one sanctioned global block: the status and priority colour steps, and the
 // pill's dot. Deliberately NOT scoped — a pill nobody can read is a defect on
 // every screen, and fixing it on two of six would leave the app disagreeing with
@@ -195,5 +202,75 @@ r.ok('desk.css does not declare a polish level of its own',
 r.ok('the polish accent chip and gradient still exist to be overridden',
   /\.segment\.active\s*\{\s*background:\s*var\(--accent-soft\)/.test(views) &&
   /\.list-toolbar\s*\{[\s\S]{0,200}?linear-gradient/.test(views));
+
+// ── 8. The structural moves, pinned ──────────────────────────────────────────
+// §5–§8 of desk.css are structure rather than colour, which makes them easier to
+// undo by accident: none of them is a value anyone would think to protect, and
+// deleting one leaves a screen that still LOOKS fine while having quietly gone
+// back to the thing it was changed away from. So each move gets an assertion.
+
+r.head('the count tiles are tiles');
+// The shape is the whole idea: number first and larger, label under it, out of
+// the existing markup. `flex-direction: column` + `order: -1` on the count is
+// that, and nothing else in the file does it.
+// There are TWO `#index-view .segment` rules in this file — §4's chip and §5's
+// tile — and the tile wins by source order. So the assertion is on the rule that
+// carries the column direction, not on whichever one the regex reaches first.
+const segRule = (css.match(/#index-view \.segment\s*\{[^}]*flex-direction:[^}]*\}/) || [''])[0];
+r.ok('a segment lays its contents out in a column', /flex-direction:\s*column/.test(segRule), segRule);
+r.ok('...and the count is lifted above the label',
+  /#index-view \.segment-count\s*\{[^}]*order:\s*-1/.test(css),
+  (css.match(/#index-view \.segment-count\s*\{[^}]*\}/) || [''])[0]);
+r.ok('...at the size Desk prints a count, above the label\'s',
+  /#index-view \.segment-count\s*\{[^}]*font-size:\s*var\(--text-md\)/.test(css));
+
+// The strip wraps instead of scrolling sideways. This is the assertion that
+// matters most on a phone: `overflow-x: auto` is still in views.css and would
+// come straight back if this rule were dropped, hiding half the statuses off the
+// right edge — the exact defect the tiles exist to remove.
+const segsRule = (css.match(/#index-view \.segments\s*\{[^}]*\}/) || [''])[0];
+r.ok('the strip wraps rather than scrolling sideways',
+  /flex-wrap:\s*wrap/.test(segsRule) && /overflow:\s*visible/.test(segsRule), segsRule);
+
+// A tile is a card, so "you are here" comes back as a border — the one place the
+// prototype gave the accent up and this puts it back.
+r.ok('the active tile is marked by an accent border, not a colour block',
+  /#index-view \.segment\.active\s*\{[^}]*border-color:\s*var\(--accent\)/.test(css),
+  (css.match(/#index-view \.segment\.active\s*\{[^}]*\}/) || [''])[0]);
+
+r.head('the look reaches the other four roots');
+// Not "the rule exists" but "the rule names these roots": a scoped rule that
+// forgot one of them is invisible on that screen and nothing else would say so.
+r.ok('the insights and log toolbars sit on the panel, not the wash',
+  css.includes('#insights-view .list-toolbar') && css.includes('#log-view .list-toolbar'));
+r.ok('both read-only panes get the page ground',
+  /#insights-view,\s*\n#log-view\s*\{\s*background:\s*var\(--desk-ground\)/.test(css));
+r.ok('the detail pane gets the page ground',
+  css.includes('#detail-view { background: var(--desk-ground)'));
+r.ok('...and its banner stops being the gradient',
+  css.includes('#detail-view #ir-banner'));
+r.ok('...and its Overview panel becomes a flat Desk panel',
+  css.includes('#detail-view .overview-panel'));
+
+r.head('the datagrid is re-mapped onto markup that exists');
+// Option D drew `.overview-grid`. The app has never had that class, and a rule
+// for it would be dead CSS that reads as a working style — the failure mode this
+// assertion exists to prevent is someone "restoring" the re-map by pasting D.
+r.ok('nothing styles .overview-grid, which no markup carries',
+  !/\.overview-grid\b/.test(css) && !/overview-grid/.test(read('../index.html')));
+r.ok('the re-map targets the real container',
+  /#detail-view \.overview-facts\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(15rem/.test(css),
+  (css.match(/#detail-view \.overview-facts\s*\{[^}]*\}/) || [''])[0]);
+r.ok('...and the grey block and its padding are gone',
+  /#detail-view \.overview-facts\s*\{[^}]*padding:\s*0/.test(css) &&
+  /#detail-view \.overview-facts\s*\{[^}]*background:\s*transparent/.test(css));
+r.ok('...and each cell carries the hairline that makes it a grid',
+  /#detail-view \.overview-fact\s*\{[^}]*border-bottom:\s*1px solid var\(--desk-row-line\)/.test(css));
+
+// The label pair in the datagrid moves to the measured step, like every other
+// secondary grey in this file.
+r.ok('the fact label is at the AA step, not --ink-gray-5',
+  /#detail-view \.overview-fact-label\s*\{\s*color:\s*var\(--desk-muted\)/.test(css),
+  (css.match(/#detail-view \.overview-fact-label\s*\{[^}]*\}/) || [''])[0]);
 
 r.finish();

@@ -1,24 +1,31 @@
 /* ══════════════════════════════════════════════════════════════════════════
-   desk.css — the ERPNext Desk look, on TWO screens.
+   desk.css — the app's look. ERPNext Desk, adopted as the direction.
 
    WHAT THIS IS
-   The owner asked for the mobile UI to look like ERPNext. Rather than convert
-   every screen blind, this file converts the two he asked to see first — the
-   sign-in screen and the IR list — so he can open them on his phone and decide
-   before the rest of the app moves. Every rule below is scoped to
-   `#auth-container`, `#password-change` or `#index-view`.
+   The owner asked for the mobile UI to look like ERPNext Desk. It started as a
+   two-screen prototype — the sign-in screen and the IR list — so he could see it
+   on his phone before anything else moved. He has since approved it as the
+   DIRECTION, so this is no longer a prototype on trial: it is the look, and it
+   now covers the app's six real roots —
 
-   If he approves it, this becomes the new polish level and the remaining
-   screens are converted into it. If he does not, deleting this file and its one
-   <link> in index.html undoes the whole thing — that is why it is a separate
-   stylesheet and not edits scattered through the other five.
+       #auth-container · #password-change   the two doors
+       #index-view                          the IR list (and the board)
+       #detail-view                         one IR
+       #insights-view · #log-view           the two read-only panes
+
+   Every rule below is scoped to one of those six. What is NOT scoped is the one
+   block in §2, and that is deliberate — see its own comment.
+
+   IT IS STILL ONE FILE, AND STILL LAST. Deleting this file and its single <link>
+   in index.html still returns the app to what it was — that property is what
+   makes a whole-look change reviewable, and it is why none of this is scattered
+   through the other five stylesheets.
 
    WHY IT LOADS LAST
    index.html links it after views.css, which is where the `POLISH — level:
    NOTICEABLE` block lives. That block is last-in-the-last-file on purpose and
-   wins by cascade order alone. This file therefore OVERRIDES it on these two
-   screens and leaves it governing every other one. It is a layer in front of
-   that block, not a replacement for it — yet.
+   wins by cascade order alone. This file therefore OVERRIDES it wherever the two
+   disagree and leaves it governing everything not listed above.
 
    WHY SO LITTLE OF THIS IS COLOUR
    The app already sits on Frappe's design tokens, which are the same grey family
@@ -130,7 +137,7 @@
 .prio-urgent { color: var(--ink-red-7);   /* 6.69 / 6.87  — unchanged, already AA */ }
 
 /* ══════════════════════════════════════════════════════════════
-   3 · SCREEN ONE — SIGN IN
+   3 · THE DOORS — SIGN IN AND PASSWORD CHANGE
    The single visible change: the card stops floating. Desk is a page with a
    panel on it, not a panel in space — so the heavy elevation, the 12px radius
    and the 1.75rem padding all come down, and the ground behind it separates
@@ -189,7 +196,7 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
-   4 · SCREEN TWO — THE IR LIST
+   4 · THE IR LIST
    Scoped to #index-view, which wraps the toolbar, the sync line and the list —
    and nothing else (the detail banner at #ir-banner is a sibling pane, so the
    polish gradient stays on it). Not behind a media query: this is ONE component
@@ -270,3 +277,179 @@
    a coloured word is right. --st-danger-fg is re-pointed above, so this needs
    no rule of its own — only the note that it moved with the pills. */
 #index-view .ir-age.is-late { color: var(--st-danger-fg); }
+
+/* ══════════════════════════════════════════════════════════════
+   5 · THE CHROME — the header band and the count tiles
+   The structural half of Desk, and the half that moves the other three roots.
+   Desk is a page GROUND with controls sitting directly on it, and results in a
+   card below. The app's polish block does the opposite: it paints a gradient
+   wash behind the toolbar, so the controls look like they are on a card too.
+   These rules undo that wash wherever the app has a toolbar, and give the
+   counts the shape Desk gives a count.
+
+   WHY THIS IS NOT A NEW WIDGET
+   Every rule below restyles a class that already exists in the markup. That is
+   deliberate: a look change that needs markup changes cannot be reviewed by
+   deleting one file, and cannot be reverted by re-adding it.
+   ══════════════════════════════════════════════════════════════ */
+
+/* The three list-shaped roots (index, insights, log — the detail pane has no
+   toolbar of its own) each put their controls on the page ground. #index-view's
+   rule is above in §4, where it was written when it was the only one. */
+#insights-view .list-toolbar,
+#log-view .list-toolbar {
+  background: var(--desk-panel);
+  border-bottom: 1px solid var(--desk-row-line);
+  padding-bottom: 0.5rem;
+}
+#insights-view .list-title,
+#log-view .list-title { letter-spacing: 0.01em; }
+
+/* THE COUNT TILES. Desk prints a count as a small card — the NUMBER first and
+   larger, the word under it — rather than as a chip with a number beside it.
+   `flex-direction: column` and `order: -1` on the count get that shape out of
+   the existing markup with no new elements.
+
+   The strip stops scrolling sideways and wraps instead. That is the point, and
+   it is also the trade: six statuses are now two short rows of tiles rather
+   than one strip that hid half of them off the right edge. The owner has
+   objected to sideways scrolling on a phone more than once; a wrapped grid is
+   the fixed-height answer to it, not the taller one. */
+#index-view .segments {
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+/* The reset above outranks `.segments-cat`'s own separator rule (an id beats a
+   class), so the divider between the status tiles and the category tiles is
+   restated here rather than left to depend on the cascade. It is a bit roomier
+   than the base 0.4rem: two grids of cards need more air between them than two
+   rows of chips did, or they read as one wrapped block. */
+#index-view .segments-cat {
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--desk-row-line);
+}
+#index-view .segment {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 4.25rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid var(--desk-row-line);
+  background: var(--desk-panel);
+}
+#index-view .segment:hover {
+  background: var(--surface-gray-1);
+  border-color: var(--desk-panel-line);
+  color: var(--ink-gray-9);
+}
+/* The active tile keeps the accent — as a BORDER, not a fill. §4's chip gave
+   "you are here" up entirely, which was defensible for a chip that sat in a row
+   of chips; a tile is a card, and an unmarked card among five marked ones reads
+   as broken rather than as neutral. The border is 1px of accent, so the four
+   palettes still say where you are without the tile turning into a colour block
+   with unreadable text on it. */
+#index-view .segment.active {
+  background: var(--desk-panel);
+  border-color: var(--accent);
+  color: var(--ink-gray-9);
+}
+/* The number leads, at the size Desk prints a count, and it is the only thing on
+   the tile allowed to be dark — the word underneath is a label, and Desk's
+   labels are muted. */
+#index-view .segment-count {
+  order: -1;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: 1.1;
+  color: var(--ink-gray-9);
+}
+#index-view .segment.active .segment-count { color: var(--ink-gray-9); }
+/* A tile is a 44px-class target on a phone, not a 28px one: this is the strip
+   that changes what the list shows, and it is the first thing a thumb reaches. */
+@media (max-width: 639px) {
+  #index-view .segment { padding: 0.4rem 0.6rem; min-height: 44px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   6 · ONE IR — the detail pane
+   The pane holds four things: the identity banner, the Overview panel, the
+   section tabs and the section body. Desk's shapes for those are a flat band, a
+   panel with a hairline and a 1px lift, underline tabs, and a ground behind all
+   of it. The tabs already are underline tabs (views.css draws a 2px transparent
+   bottom border that .active colours), so they need nothing.
+   ══════════════════════════════════════════════════════════════ */
+#detail-view { background: var(--desk-ground); }
+
+/* The banner stops being a gradient wash and becomes the page-header band: on
+   the page, separated by a hairline, with no shadow. Same move as the toolbar. */
+#detail-view #ir-banner { background: var(--desk-panel); }
+
+/* The Overview panel becomes a Desk panel: the flat card with a hairline and
+   Desk's own 1px shadow. This is the polish block's --elevation-sm undone — an
+   in-page panel on a page ground does not need to float, and on this screen in
+   particular the only things allowed to float are the modal, the comments panel
+   and the user menu, which all sit above it. */
+#detail-view .overview-panel {
+  background: var(--desk-panel);
+  border: 1px solid var(--desk-panel-line);
+  box-shadow: var(--desk-shadow);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   7 · THE DATAGRID — the Overview's facts
+   The one place in this file that is not a restyle, so it gets its own section.
+   Option D drew an `.overview-grid`; the app has no such class. The real markup
+   is `.overview-facts` holding `.overview-fact` cells that each contain a
+   label and a value (app.js, renderOverviewFacts), and it was already a grid —
+   `repeat(auto-fit, minmax(150px, 1fr))` on a grey block.
+
+   So this is a RE-MAP, not a rebuild: the same element, laid out the way Desk
+   lays out a document's fields — wider tracks, no grey block, and one hairline
+   under each cell so the columns read as a grid rather than as a wall of text.
+   No markup changes, and nothing invented.
+
+   15rem is Desk's own minmax for a two-column field grid and it is chosen
+   against this panel, not copied blindly: at the narrowest desktop pane
+   (1024 − 232 − 400 = 392px, measured) 15rem still yields one column, and two
+   columns only appear once the pane passes ~500px. So a phone and a split pane
+   both get a single readable column, and a wide window gets the grid.
+   ══════════════════════════════════════════════════════════════ */
+#detail-view .overview-facts {
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+#detail-view .overview-fact {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--desk-row-line);
+}
+/* The label is the muted half of the pair, at the measured AA step rather than
+   the --ink-gray-5 the base rule uses (4.18:1 on the panel ground). */
+#detail-view .overview-fact-label { color: var(--desk-muted); }
+
+/* ══════════════════════════════════════════════════════════════
+   8 · THE TWO READ-ONLY PANES
+   Insights and the Log Analyser. Both are a toolbar over a body of results, so
+   both take the ground, and their result cards take the panel treatment. The
+   log's own frame and the reader's output are left alone — that pane's shapes
+   are the analyser's, not a list's, and nothing here should reach into them.
+   ══════════════════════════════════════════════════════════════ */
+#insights-view,
+#log-view { background: var(--desk-ground); }
+
+#insights-view .insights-card {
+  background: var(--desk-panel);
+  border: 1px solid var(--desk-panel-line);
+  border-radius: var(--desk-radius);
+  box-shadow: var(--desk-shadow);
+}
+/* The label on a stat card, and the small print under the dashboard, at the same
+   measured step the list uses — they were --ink-gray-5 (4.18:1 on the card). */
+#insights-view .insights-card-label,
+#insights-view .insights-note { color: var(--desk-muted); }
+

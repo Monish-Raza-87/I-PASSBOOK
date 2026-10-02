@@ -870,10 +870,12 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
    The app's one unauthenticated surface. The overlay reuses the shared modal
    shape — it is a sibling of .inward-options-modal and relies on the same fixed
    positioning, so it is appended to <body> for the same reason.
-   The card is sized by the FRAME, not by prose: the form is tall, and a card that
-   shrank to its content would either crop the form or grow past the viewport.
-   `height` on the body (not min-height) is what makes the iframe fill the card —
-   a percentage height inside an auto-height flex parent resolves to zero. */
+
+   It was a 720×88vh card wrapping a form frame. It is now a short panel that
+   LINKS OUT, because the frame could not get anyone past Google's sign-in (see
+   the note above the modal in index.html). So the card sizes itself by its own
+   few lines of prose and nothing else: no height, no percentage, no flex child
+   left over from a frame that used to need a box to fill. */
 .customer-door {
   position: fixed;
   inset: 0;
@@ -891,8 +893,7 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 720px;
-  height: 88vh;
+  max-width: 32rem;
   background: var(--surface-elevation-2);
   border: 1px solid var(--outline-elevation-2);
   border-radius: var(--radius-6);
@@ -908,18 +909,8 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   flex: 0 0 auto;
 }
 .customer-door-head h2 { font-size: var(--text-lg); color: var(--ink-gray-9); margin: 0; }
-/* The escape hatch, pushed to the right so it is beside the close button and never
-   hidden behind the form. A frame must never be the only way to the form: an
-   in-app browser with third-party frames blocked, or a Google account signed out
-   of on this device, both show a blank panel where the form should be. */
-.customer-door-tab {
-  margin-left: auto;
-  font-size: var(--text-sm);
-  color: var(--accent);
-  text-decoration: underline;
-  white-space: nowrap;
-}
 .customer-door-close {
+  margin-left: auto;
   background: none;
   border: none;
   color: var(--ink-gray-5);
@@ -932,8 +923,21 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   flex: 0 0 auto;
 }
 .customer-door-close:hover { color: var(--ink-gray-9); background: var(--surface-gray-2); }
-.customer-door-body { flex: 1 1 auto; min-height: 0; background: var(--surface-base); }
-.customer-door-body iframe { display: block; width: 100%; height: 100%; border: 0; }
+.customer-door-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1.1rem;
+  background: var(--surface-base);
+}
+.customer-door-lede { margin: 0; font-size: var(--text-base); line-height: 1.5; color: var(--ink-gray-9); }
+/* The one sentence that stops the app looking like it lied. A customer was told
+   they need no account; Google then asks them for one, and this says so first. */
+.customer-door-hint { margin: 0; font-size: var(--text-sm); line-height: 1.5; color: var(--ink-gray-7); }
+/* The single action, and the only thing in this dialog worth aiming at. 44px: it
+   is the primary tap on a phone, and the .btn default of 32px is a desktop size. */
+.customer-door-go { height: 44px; font-size: var(--text-lg); }
+.customer-door-escape { margin: 0; font-size: var(--text-xs); line-height: 1.45; color: var(--ink-gray-5); text-align: center; }
 .customer-door-note {
   flex: 0 0 auto;
   margin: 0;
@@ -942,15 +946,10 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   font-size: var(--text-xs);
   color: var(--ink-gray-5);
 }
-/* A phone gets the full screen: the form's own fields are already fighting for
-   room, and every pixel the overlay's padding takes is a pixel off the answer box.
-   `padding: 0` on the OVERLAY, not a negative margin on the card — the card's
-   `height: 100%` then resolves against the whole viewport instead of a box 2rem
-   shorter, which is what makes this actually full height rather than nearly. */
-@media (max-width: 640px) {
-  .customer-door { padding: 0; }
-  .customer-door-card { height: 100%; max-width: none; border-radius: 0; }
-}
+/* No phone override is needed any more, and its absence is the point: the old one
+   existed to give the form frame the whole screen. A five-line panel already fits
+   a 320px viewport inside the overlay's own 1rem padding, so it stays a card with
+   margins rather than becoming a full-bleed sheet for no reason. */
 
 /* ── Triage modal (status / assignee / priority / type) ──
    Stacked label-above-control rows so it stays readable at phone width, which

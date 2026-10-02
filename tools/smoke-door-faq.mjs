@@ -5,19 +5,27 @@
 // These are the only two things in the product a member of the PUBLIC can reach:
 // the Report-a-problem entry on the sign-in screen, and faq.html. Everything else
 // is behind a session token, so this suite exists to hold the line on the two
-// properties that make them safe to leave open, plus the one that makes them
-// useful:
+// properties that make them safe to leave open, plus the two that make them
+// truthful.
 //
-//   1. THE DOOR READS NOTHING. The modal must contain a form and nothing else —
+//   1. THE DOOR READS NOTHING. The modal must explain itself and nothing else —
 //      no ticket, no IR number, no customer name. It is a way in, not a window.
-//   2. THE DOOR DOES NOT PHONE HOME. An <iframe src> fetches on page load, so a
-//      src sitting in index.html would mean every app user — including the ones
-//      who never open the form — sent a request to Google from inside a tool
-//      holding customer data. The src is therefore set on OPEN, and this suite
-//      fails if one ever appears in the markup.
-//   3. THE FRAME IS NEVER THE ONLY WAY. Some phones refuse a cross-origin frame
-//      outright, so the "Open in a new tab" link has to be present and always
-//      visible, not a fallback that appears after a failure it cannot detect.
+//   2. THE DOOR DOES NOT PHONE HOME — AND NOW IT CANNOT. This used to be "the
+//      iframe's src is set on OPEN, never in the markup". The frame is gone
+//      entirely (see 3), so the rule is stronger and simpler: there is no iframe,
+//      no src, no form, nothing fetched, anywhere in the app's own front door.
+//      Opening the dialog contacts nobody. That is asserted here, not promised in
+//      a comment.
+//   3. THE DOOR HANDS OVER TO GOOGLE'S SIGN-IN, RATHER THAN GETTING STUCK IN IT.
+//      The form records the sender's email, so Google demands a sign-in, and a
+//      frame cannot complete one (accounts.google.com sends X-Frame-Options:
+//      DENY). So the action is a real <a target="_blank"> to the form — a
+//      navigation, which costs nothing until it is tapped, and which works in a
+//      tab where a frame did not.
+//   4. THE DOOR SAYS SO BEFORE THE BUTTON. A customer is told they need no
+//      account and then meets Google's sign-in screen. The sentence that prevents
+//      that reading as a lie must exist, and must come BEFORE the action in the
+//      markup, or it is read too late to help.
 //
 // And for the FAQ: it must be INERT. A static page that ships a script is one
 // request away from being a tracking surface, and this page's whole job is to be
@@ -32,6 +40,7 @@ const appJs = read('../app.js');
 const indexHtml = read('../index.html');
 const faqHtml = read('../faq.html');
 const componentsCss = read('../components.css');
+const i18nJs = read('../i18n.js');
 const swJs = read('../sw.js');
 const deploy = read('./deploy-ghpages.mjs');
 
@@ -43,12 +52,12 @@ const ok = (name, cond, extra) => {
 const head = t => console.log('\n— ' + t + ' —');
 
 // Strip CSS and JS comments before any structural count. This file's own header
-// names the very things it counts (`<iframe src>`, `script`), and a suite that
-// counts its own prose is a suite that passes for the wrong reason.
+// names the very things it counts (`<iframe>`, `src`), and a suite that counts its
+// own prose is a suite that passes for the wrong reason.
 const stripCss = s => s.replace(/\/\*[\s\S]*?\*\//g, '');
 const stripJs = s => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 // HTML comments, for the same reason: index.html's own comment above the modal
-// explains that the frame carries no src, and says the word.
+// explains why there is no frame, and says the word.
 const stripHtml = s => s.replace(/<!--[\s\S]*?-->/g, '');
 
 const appCode = stripJs(appJs);
@@ -63,15 +72,14 @@ const urlConst = (appCode.match(/const CUSTOMER_FORM_URL\s*=\s*'([^']*)'/) || []
 ok('CUSTOMER_FORM_URL is a plain top-level constant',
   /^const CUSTOMER_FORM_URL\s*=\s*'[^']*';/m.test(appCode), urlConst);
 // Empty is the honest default — the app cannot know someone else's form URL — but a
-// FILLED one has to be the right KIND of URL. The editor link
-// (`/forms/d/<id>/edit`) and the pre-publish link both fail to embed, and the
-// failure is a blank frame inside a modal, which is the one outcome worse than no
-// entry at all. So: empty, or a real published share link. Nothing else.
+// FILLED one has to be the right KIND of URL. The editor link (`/forms/d/<id>/edit`)
+// opens for nobody but its owner, and a link that 404s is worse than no entry at
+// all. So: empty, or a real published share link. Nothing else.
 ok('CUSTOMER_FORM_URL is empty or a published Google Forms share link',
   urlConst === '' ||
   /^https:\/\/docs\.google\.com\/forms\/d\/e\/[A-Za-z0-9_-]+\/viewform$/.test(urlConst),
   urlConst);
-ok('...and it is a SHARE link, not an editor link, which would never embed',
+ok('...and it is a SHARE link, not an editor link, which opens for nobody else',
   urlConst === '' || (/\/d\/e\//.test(urlConst) && !/\/(edit|copy|prefill)\b/.test(urlConst)),
   urlConst);
 
@@ -84,49 +92,67 @@ ok('...and it is called from the load handler, not from showAuth()',
   /window\.I18N\.applyStatic\(\);[\s\S]{0,400}wireCustomerDoor\(\);/.test(appCode),
   (appCode.match(/wireCustomerDoor\(\);/g) || []).length);
 
-// The one rule that keeps this from becoming a tracking beacon. Order matters:
-// the display flip must come AFTER the guard, or a device with no URL configured
-// gets a visible button that opens nothing.
+// The one rule that keeps this from becoming a visible button that opens nothing.
+// Order matters: the display flip must come AFTER the guard, or a device with no
+// URL configured gets an entry that leads nowhere.
 ok('the entry is only revealed after the URL guard',
   wire.indexOf('if (!CUSTOMER_FORM_URL) return;') < wire.indexOf("open.style.display = ''"),
   wire.indexOf('if (!CUSTOMER_FORM_URL) return;') + ' / ' + wire.indexOf("open.style.display = ''"));
 
-// ── The src, and where it is allowed to be set ───────────────────────────────
-head('the frame, and the one request it must not make');
+// ── The frame is GONE, and that is the design ────────────────────────────────
+head('there is no frame, and nothing to phone home with');
 
-ok('the src is set by script, and only inside show()',
-  /frame\.setAttribute\('src', embed\)/.test(wire) &&
-  (wire.match(/setAttribute\('src'/g) || []).length === 1,
-  (wire.match(/setAttribute\('src'/g) || []).length);
-ok('...and only when it is not already set, so reopening keeps a half-typed form',
-  /if \(!frame\.getAttribute\('src'\)\)/.test(wire), 'reopen guard');
-ok('...and `embedded=true` is appended to the stored URL, never stored in it',
-  /'embedded=true'/.test(wire) && !/embedded=true/.test(urlConst),
-  { appended: (wire.match(/'embedded=true'/g) || []).length, inConstant: /embedded=true/.test(urlConst) });
-ok('...and the query is joined with the right separator when the URL has one already',
-  /includes\('\?'\)/.test(wire), 'separator guard');
-
-const frameTag = (indexCode.match(/<iframe[^>]*id="customer-door-frame"[^>]*>/) || [''])[0];
-ok('the iframe in index.html carries NO src attribute',
-  frameTag.length > 40 && !/\ssrc\s*=/.test(frameTag), frameTag);
-ok('...and no src anywhere else in the markup points at Google',
-  !/src\s*=\s*"https?:\/\/(docs\.google|forms\.gle)/.test(indexCode), 'scanned index.html');
-ok('...and it is lazy, so opening the door is what triggers the load',
-  /loading="lazy"/.test(frameTag), frameTag);
-
-// ── The frame is never the only path ─────────────────────────────────────────
-head('the escape hatch beside the frame');
-
-ok('the "Open in a new tab" link is real markup, not built on failure',
-  /id="customer-door-tab"[^>]*target="_blank"/.test(indexCode), 'anchor check');
-ok('...and it is not hidden by default',
-  !/id="customer-door-tab"[^>]*style="display:none"/.test(indexCode), 'display check');
-ok('...and it points somewhere real — the script sets its href from the same constant',
-  /tab\.href = CUSTOMER_FORM_URL;/.test(wire), 'href assignment');
-ok('...and it is a plain link, never window.open (which phones block)',
+// The old suite's central assertion was "the src is set on OPEN, never in the
+// markup". The stronger statement is now available: there is no frame at all, so
+// the question of when a src loads has stopped existing. If a future edit puts one
+// back, this section is what should stop it — the failure mode it prevented was
+// real (a request to Google on every app user's page load), and the reason the
+// frame was removed covers the rest (its sign-in button is inert).
+ok('index.html contains no iframe anywhere',
+  !/<iframe/i.test(indexCode), (indexCode.match(/<iframe[^>]*>/gi) || []));
+ok('...and nothing in the app still refers to the removed frame',
+  !/customer-door-frame/.test(indexCode + appCode), 'stale id');
+ok('...and the script sets no element src, and appends no embed parameter',
+  !/setAttribute\('src'/.test(wire) && !/embedded=true/.test(appCode), 'src setting');
+ok('...and it never opens a window by script, which phones block',
   !/window\.open\(/.test(wire), (wire.match(/window\.open\(/g) || []).length);
-ok('...and it opens with noopener, so the form cannot reach back into the app',
-  /rel="noopener noreferrer"/.test(indexCode), 'rel check');
+ok('...and opening the dialog itself touches no URL at all',
+  !/fetch\(|XMLHttpRequest|\.src\s*=/.test(wire), 'network call in wireCustomerDoor');
+ok('the modal markup fetches nothing either — no src, no href to Google',
+  !/\ssrc\s*=/.test(indexCode) || !/src\s*=\s*"https?:\/\//.test(indexCode),
+  (indexCode.match(/src\s*=\s*"https?:\/\/[^"]*"/gi) || []));
+
+// ── The one action, and it is a plain link ───────────────────────────────────
+head('the one action, and it is a navigation');
+
+const goTag = (indexCode.match(/<a[^>]*id="customer-door-go"[^>]*>/) || [''])[0];
+ok('the action is an <a>, so it is a real link and not a script', goTag.length > 40, goTag);
+ok('...and it opens in a new tab with noopener, so the form cannot reach back in',
+  /target="_blank"/.test(goTag) && /rel="noopener noreferrer"/.test(goTag), goTag);
+ok('...and its href comes from the ONE constant, never a second copy of the URL',
+  /go\.href = CUSTOMER_FORM_URL;/.test(wire) && !/https:\/\/docs\.google\.com/.test(indexCode),
+  'single source');
+ok('...and the constant is the only place in the app that form URL is written',
+  (appCode.match(/https:\/\/docs\.google\.com\/forms\/d\/e\//g) || []).length === 1,
+  (appCode.match(/https:\/\/docs\.google\.com\/forms\/d\/e\//g) || []).length);
+ok('...and it is not hidden or styled out of reach',
+  !/id="customer-door-go"[^>]*style="display:none"/.test(indexCode), 'visibility');
+
+// ── Saying it before doing it ────────────────────────────────────────────────
+head('the door warns about Google\'s sign-in, before the button');
+
+const hintAt = indexCode.indexOf('customer-door-hint');
+const goAt = indexCode.indexOf('customer-door-go');
+ok('the sign-in warning is in the markup, and BEFORE the action',
+  hintAt > -1 && goAt > -1 && hintAt < goAt, { hintAt, goAt });
+ok('...and it says Google will ask for a sign-in',
+  /Google will ask you to sign in/.test(indexCode), 'warning text');
+ok('...and it says whose request that is, so the app is not blamed for it',
+  /Google asking, not this app/i.test(indexCode), 'attribution');
+ok('...and the string exists in the i18n table too, so a translation cannot lose it',
+  /'door\.signInHint':\s*'[^']*Google will ask you to sign in/.test(i18nJs), 'i18n key');
+ok('...and the sentence is not filed as decoration — it sits in the flow, not a tooltip',
+  !/customer-door-hint[^>]*title="/.test(indexCode), 'not a title attribute');
 
 // ── The door reads nothing ───────────────────────────────────────────────────
 // The strongest assertion here: the modal's own markup must not mention a ticket.
@@ -134,12 +160,16 @@ ok('...and it opens with noopener, so the form cannot reach back into the app',
 // it is a decision, not an accident, and it should need a deliberate edit here.
 const doorHtml = (indexCode.match(/<div class="customer-door" id="customer-door"[\s\S]*?\n  <\/div>/) || [''])[0];
 ok('the door modal exists in index.html', doorHtml.length > 400, doorHtml.length);
-ok('...and the modal contains a form frame, nothing else',
-  /<iframe/.test(doorHtml) && /customer-door-note/.test(doorHtml), 'shape');
+ok('...and the modal offers exactly one thing to press, plus the close cross',
+  (doorHtml.match(/<a\b/g) || []).length === 1 &&
+  (doorHtml.match(/<button\b/g) || []).length === 1,
+  { links: (doorHtml.match(/<a\b/g) || []).length, buttons: (doorHtml.match(/<button\b/g) || []).length });
 ok('...and it names no IR, no customer and no ticket anywhere inside it',
   !/IR-|irNumber|ir-number|ticket #/i.test(doorHtml), doorHtml.slice(0, 160));
-ok('...and the note says where the form is hosted and when it loads',
-  /hosted by Google/.test(doorHtml) && /until you open/i.test(doorHtml), 'note text');
+ok('...and it carries no form, so it cannot collect anything',
+  !/<form|<input|<textarea/i.test(doorHtml), 'input scan');
+ok('...and the note says where the form is hosted and when it is contacted',
+  /hosted by Google/.test(doorHtml) && /until you press the button/i.test(doorHtml), 'note text');
 
 // ── Escaping it, four ways ───────────────────────────────────────────────────
 head('closing the door');
@@ -156,6 +186,8 @@ ok('the page behind is frozen while it is open, and released on close',
 ok('focus goes into the dialog, and back to where it came from',
   /prevFocus/.test(wire) && /\.focus\(\)/.test(wire) &&
   (wire.match(/prevFocus/g) || []).length >= 3, (wire.match(/prevFocus/g) || []).length);
+ok('...and it lands on the ACTION, not the close cross — the reason the door was opened',
+  /go\.focus\(\)/.test(wire) && !/close\.focus\(\)/.test(wire), 'focus target');
 ok('the card is a dialog with a label, so a screen reader announces it',
   /role="dialog"/.test(indexHtml) && /aria-modal="true"/.test(indexHtml) &&
   /aria-labelledby="customer-door-title"/.test(indexHtml), 'aria check');
@@ -174,14 +206,24 @@ ok('...and it is dimmed in both themes, from a token-free literal (an overlay is
   /background:\s*rgb\(0 0 0/.test(overlay) &&
   /\[data-theme="dark"\]\s*\.customer-door\s*\{[^}]*rgb\(0 0 0/.test(css), 'dark override');
 const card = rule('.customer-door-card');
-ok('the card is sized by HEIGHT, so the frame has something to fill',
-  /height:\s*88vh/.test(card) && !/(^|;)\s*min-height/.test(card), card);
-ok('...and the iframe fills it rather than collapsing to zero',
-  /height:\s*100%/.test(rule('.customer-door-body iframe')), rule('.customer-door-body iframe'));
-ok('...and a phone gets the full height with no rounding',
-  /@media \(max-width: 640px\)[\s\S]{0,200}height:\s*100%/.test(css), 'mobile rule');
+ok('the card is sized by its own few lines of prose, not by a frame',
+  !/(^|;)\s*height\s*:/.test(card) && /max-width:\s*32rem/.test(card), card);
+ok('...and the old full-height phone override is gone with the frame it existed for',
+  !/@media \(max-width: 640px\)[\s\S]{0,200}\.customer-door-card/.test(css), 'mobile override');
+ok('...and the primary action is a real tap target, not the 32px desktop default',
+  parseInt(rule('.customer-door-go').match(/height:\s*(\d+)px/)?.[1], 10) >= 40,
+  rule('.customer-door-go'));
+ok('...and the warning reads as secondary, so the eye still finds the button',
+  /--ink-gray-7|--ink-gray-6/.test(rule('.customer-door-hint')) &&
+  /--ink-gray-9/.test(rule('.customer-door-lede')), 'hierarchy');
 ok('every colour in it comes from a token, never a one-theme literal',
   !/#[0-9a-fA-F]{3,8}\b/.test(overlay + card), (overlay + card).match(/#[0-9a-fA-F]{3,8}/g));
+// Orphan sweep: a rule for a class that no longer exists is how this file would
+// quietly rot after the frame was removed. Both of these named the old shape.
+ok('no CSS is left over from the frame — no .customer-door-tab, no body iframe',
+  !/\.customer-door-tab/.test(css) && !/\.customer-door-body\s+iframe/.test(css), 'orphan rules');
+ok('...and no markup is left over either',
+  !/customer-door-tab|door\.newTab/.test(indexCode + i18nJs), 'orphan markup/keys');
 
 // ── The FAQ page ─────────────────────────────────────────────────────────────
 head('faq.html is inert');
@@ -280,6 +322,17 @@ ok('the log analyser claim is the one the code makes — read locally, never upl
 ok('it promises no privacy policy and no analytics, which is what the app is',
   !/privacy policy/i.test(faqCode) && /no analytics, no tracking/i.test(faqCode), 'scope claim');
 
+// The FAQ and the door are the same promise told twice. A customer reads one, then
+// meets the other; if the FAQ said "no account needed, full stop" while Google
+// demanded a sign-in, the app would have lied to the person least able to complain.
+ok('the FAQ warns about Google\'s sign-in, in the same terms as the door',
+  /Google asks you\s+to sign in to a Google account/.test(faqCode), 'faq warning');
+ok('...and it says a signed-in device sees the form with no prompt, which is the truth',
+  /already signed in to Google goes\s+straight to the form/i.test(faqCode), 'faq no-prompt case');
+ok('...and it no longer describes a frame that does not exist',
+  !/if the window gives you/i.test(faqCode) && !/opens the problem-reporting form/i.test(faqCode),
+  'stale frame language');
+
 // ── Where the page is reachable from ─────────────────────────────────────────
 head('the FAQ is reachable, and it ships');
 
@@ -306,7 +359,7 @@ ok('...and its glyph comes from the ONE icon set, not a literal <svg> in the mar
   /#nav-faq \.nav-icon/.test(appCode) && /\n  help:\s+'<circle/.test(appCode) &&
   !/id="nav-faq"[\s\S]{0,200}<svg/.test(indexCode), 'icon wiring');
 ok('...and its label is its own key, not shared with the sign-in card',
-  /'nav\.help':/.test(read('../i18n.js')) && /'door\.faq':/.test(read('../i18n.js')),
+  /'nav\.help':/.test(i18nJs) && /'door\.faq':/.test(i18nJs),
   'separate keys');
 
 console.log(fails ? `\n${fails} FAILED` : '\nall good');

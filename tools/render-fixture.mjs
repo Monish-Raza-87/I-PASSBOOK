@@ -102,7 +102,15 @@ const doorBlock = (() => {
   }
   if (depth) throw new Error('unbalanced <div> in the customer door block');
   // `display:none` is the shipped state; `flex` is what the open door sets.
-  return html.slice(start, i).replace('style="display:none"', 'style="display:flex"');
+  // The button's href is set by app.js from CUSTOMER_FORM_URL, which never runs in
+  // a static fixture, so it is pasted in here. It costs nothing to measure — the
+  // URL is not drawn — but a screenshot of a primary button pointing at "#" would
+  // be a picture of a state the app never shows.
+  const formUrl = (fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8')
+    .match(/^const CUSTOMER_FORM_URL = '([^']*)';/m) || [])[1] || '#';
+  return html.slice(start, i)
+    .replace('style="display:none"', 'style="display:flex"')
+    .replace('href="#"', `href="${formUrl}"`);
 })();
 
 fs.writeFileSync(outFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">

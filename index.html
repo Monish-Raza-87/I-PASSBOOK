@@ -714,35 +714,45 @@
        components.css), because it is reachable from the sign-in screen where
        nothing inside #app-container exists yet.
 
-       It is OPEN ACCESS and it stays that way: this frame is a Google Form that
-       only ACCEPTS input, so it reveals nothing about any IR. Compare the rest of
-       the app, where every read is paid for with a session token.
+       It is OPEN ACCESS and it stays that way: it leads to a Google Form that only
+       ACCEPTS input, so it reveals nothing about any IR. Compare the rest of the
+       app, where every read is paid for with a session token.
 
-       The src is deliberately EMPTY here and is set by app.js only when someone
-       opens the door. An iframe with a src loads on page load, so leaving one in
-       the markup would mean every visitor — including the ones who only ever sign
-       in to the app — made a request to Google's form endpoint from inside a tool
-       holding customer data. Nothing about this dialog touches the network until a
-       person asks for it. -->
+       ── WHY THIS IS A LINK AND NOT AN EMBEDDED FORM ──────────────────────────
+       It used to hold the form in an <iframe>. Measured, that frame was a dead end
+       for most people. The form records the sender's email address, so Google
+       requires a sign-in before it will render — and inside a frame Google's own
+       sign-in page cannot be used, because accounts.google.com sends
+       `X-Frame-Options: DENY`. A click on the "Sign in" button drawn inside the
+       frame does nothing whatsoever. A device already signed in to Google happened
+       to see the form; everybody else met a wall they could not pass, and our code
+       cannot tell the two apart, because a cross-origin frame reports nothing back.
+
+       So the door states its case and hands over ONE button that opens the real
+       form in a new tab — where the sign-in works, because a tab is not a frame.
+       The sentence about Google asking for a sign-in is not filler: a customer who
+       was promised no account and then met Google's sign-in screen would rightly
+       think the app had lied to them.
+
+       This also makes the privacy claim unconditional instead of conditional. There
+       is no iframe anywhere in this file, so opening the door contacts Google not at
+       all. The only request to Google is the one a person makes by pressing the
+       button. -->
   <div class="customer-door" id="customer-door" style="display:none">
     <div class="customer-door-card" role="dialog" aria-modal="true" aria-labelledby="customer-door-title">
       <div class="customer-door-head">
         <h2 class="customer-door-title" id="customer-door-title" data-i18n="door.report">Report a problem</h2>
-        <!-- Always visible, and not a fallback that appears on failure: some
-             phones refuse to render a cross-origin frame at all, and a person who
-             needs to report a fault must never be left with a blank rectangle and
-             no way forward. The link is the guaranteed path; the frame is the
-             convenience. -->
-        <a class="customer-door-tab" id="customer-door-tab" href="#" target="_blank" rel="noopener noreferrer"
-           data-i18n="door.newTab">Open in a new tab</a>
         <button type="button" class="customer-door-close" id="customer-door-close"
                 aria-label="Close" data-i18n-aria="door.close">&times;</button>
       </div>
       <div class="customer-door-body">
-        <iframe class="customer-door-frame" id="customer-door-frame"
-                title="Report a problem" loading="lazy" referrerpolicy="no-referrer"></iframe>
+        <p class="customer-door-lede" data-i18n="door.lede">Tell the service desk what went wrong. You do not need an account here, and nothing on this screen asks who you are.</p>
+        <p class="customer-door-hint" data-i18n="door.signInHint">The form is made with Google Forms. If this device is not already signed in to a Google account, Google will ask you to sign in before it shows you the form — that is Google asking, not this app.</p>
+        <a class="btn btn-primary customer-door-go" id="customer-door-go" href="#"
+           target="_blank" rel="noopener noreferrer" data-i18n="door.openForm">Open the report form</a>
+        <p class="customer-door-escape" data-i18n="door.escape">It opens in a new tab, so this page is still here when you come back.</p>
       </div>
-      <p class="customer-door-note" data-i18n="door.note">This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you open this window.</p>
+      <p class="customer-door-note" data-i18n="door.note">This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you press the button — and if you never press it, nothing is.</p>
     </div>
   </div>
 

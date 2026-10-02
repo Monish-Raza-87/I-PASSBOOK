@@ -159,9 +159,9 @@
              baked-in light background of the OS icon reads as a tile sitting on
              the page. Same artwork, background keyed out (tools/make-icons.ps1). -->
         <img class="auth-logo" src="assets/icon-mark.png" alt="" />
-        <div class="auth-brand">I-PASSBOOK</div>
-        <p class="auth-full">Indrones Product After-Sales Summary Book</p>
-        <p class="auth-hint" id="auth-hint-text">Sign in with the credentials your admin gave you.</p>
+        <div class="auth-brand" data-i18n="app.name">I-PASSBOOK</div>
+        <p class="auth-full" data-i18n="app.fullName">Indrones Product After-Sales Summary Book</p>
+        <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">Sign in with the credentials your admin gave you.</p>
       </div>
       <form id="auth-form" autocomplete="on">
         <!-- QUICK UNLOCK: shown only when this device holds a registered token
@@ -170,8 +170,8 @@
              instead" is always one tap away — a quick unlock that cannot be
              left is a lock nobody signs around. -->
         <div id="auth-quick" style="display:none">
-          <button type="button" class="btn btn-quick" id="auth-unlock-btn">Unlock with fingerprint</button>
-          <button type="button" id="auth-pattern-link" class="btn btn-ghost">Use pattern</button>
+          <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
+          <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
           <button type="button" id="auth-quick-out" class="link-btn">Use email code instead</button>
         </div>
 
@@ -194,10 +194,10 @@
           <span class="google-mark" aria-hidden="true"></span>Sign in with Google
         </button>
         <div class="auth-or" id="auth-or" style="display:none"><span>or use your email</span></div>
-        <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required />
+        <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required data-i18n-placeholder="auth.email" />
         <div class="pw-wrap">
-          <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required />
-          <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+          <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required data-i18n-placeholder="auth.password" />
+          <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
             <span class="pw-toggle-icon" aria-hidden="true"></span>
           </button>
         </div>
@@ -226,8 +226,8 @@
           <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
                  placeholder="6-digit code" autocomplete="one-time-code" />
           <div class="pw-wrap">
-            <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" />
-            <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" aria-pressed="false" tabindex="-1">
+            <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" data-i18n-placeholder="auth.newPassword" />
+            <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
               <span class="pw-toggle-icon" aria-hidden="true"></span>
             </button>
           </div>
@@ -238,6 +238,21 @@
         <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
       </form>
       <p id="auth-error" class="auth-error" style="display:none"></p>
+
+      <!-- THE CUSTOMER DOOR, and the app's second open one.
+           Everything else here is token-gated; this line is not, and it is the
+           only thing on this screen a customer ever needs. Both halves are the
+           same promise: a way to reach the desk without an account.
+
+           The Report button stays hidden until CUSTOMER_FORM_URL is set in app.js
+           — an entry that opens an empty frame is worse than no entry. The FAQ is
+           always available: it is a static page, and it answers the questions the
+           form's own existence raises. -->
+      <p class="auth-doors">
+        <button type="button" class="link-btn" id="customer-door-open" style="display:none" data-i18n="door.report">Report a problem</button>
+        <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
+      </p>
+
       <!-- The credit sits on the sign-in card, not only inside the app: it is the
            one screen everybody sees on every device, every day. -->
       <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
@@ -252,27 +267,27 @@
   <div id="password-change">
     <div class="glass-card animate-slide-up">
       <div class="auth-head">
-        <div class="auth-brand">I-PASSBOOK</div>
+        <div class="auth-brand" data-i18n="app.name">I-PASSBOOK</div>
         <p class="auth-hint" id="pc-sub">Set your own password to finish setting up your account — you only do this once.</p>
       </div>
       <div id="pc-email" class="access-email-line"></div>
       <form id="pc-form" autocomplete="off">
         <div class="pw-wrap">
-          <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" />
-          <button type="button" class="pw-toggle" id="eye-pc-new" aria-label="Show password" aria-pressed="false" tabindex="-1">
+          <input class="form-input" type="password" id="pc-new" placeholder="New password (at least 8 characters)" autocomplete="new-password" data-i18n-placeholder="auth.newPasswordLong" />
+          <button type="button" class="pw-toggle" id="eye-pc-new" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
             <span class="pw-toggle-icon" aria-hidden="true"></span>
           </button>
         </div>
         <div class="pw-wrap">
-          <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" />
-          <button type="button" class="pw-toggle" id="eye-pc-confirm" aria-label="Show password" aria-pressed="false" tabindex="-1">
+          <input class="form-input" type="password" id="pc-confirm" placeholder="Repeat the new password" autocomplete="new-password" data-i18n-placeholder="auth.repeatPassword" />
+          <button type="button" class="pw-toggle" id="eye-pc-confirm" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
             <span class="pw-toggle-icon" aria-hidden="true"></span>
           </button>
         </div>
         <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
       </form>
       <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>
-      <button class="btn btn-secondary" id="pc-signout">Sign Out</button>
+      <button class="btn btn-secondary" id="pc-signout" data-i18n="auth.signOut">Sign Out</button>
       <p id="pc-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
@@ -290,29 +305,29 @@
       </div>
 
       <div class="sidebar-nav">
-        <div class="sidebar-section-label">Service Desk</div>
+        <div class="sidebar-section-label" data-i18n="nav.serviceDesk">Service Desk</div>
 
-        <a class="nav-item" id="nav-tickets" href="#/tickets" title="IRs">
+        <a class="nav-item" id="nav-tickets" href="#/tickets" title="IRs" data-i18n-title="nav.irs">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label">IRs</span>
+          <span class="nav-label" data-i18n="nav.irs">IRs</span>
           <span class="nav-count" id="nav-count">—</span>
         </a>
 
         <!-- Counts over the same IRs, sliced by FY / month / status / category /
              customer / drone. A plain hash link with NO JS binding, exactly like
              #nav-tickets above: the hashchange listener is the whole mechanism. -->
-        <a class="nav-item" id="nav-insights" href="#/insights" title="Insights">
+        <a class="nav-item" id="nav-insights" href="#/insights" title="Insights" data-i18n-title="nav.insights">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label">Insights</span>
+          <span class="nav-label" data-i18n="nav.insights">Insights</span>
         </a>
 
         <!-- Reads an ArduPilot flight log (.bin) entirely in the browser and
              reports what went wrong with it. A plain hash link with no JS
              binding, exactly like the two above: the hashchange listener is the
              whole mechanism. -->
-        <a class="nav-item" id="nav-log" href="#/log" title="Log Analyser">
+        <a class="nav-item" id="nav-log" href="#/log" title="Log Analyser" data-i18n-title="nav.logAnalyser">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label">Log Analyser</span>
+          <span class="nav-label" data-i18n="nav.logAnalyser">Log Analyser</span>
         </a>
 
         <!-- Opens the read-only legacy workbook. The id is load-bearing:
@@ -320,13 +335,24 @@
         <button type="button" class="nav-item" id="legacy-workbook-btn"
                 title="Old I-PASSBOOK records (kept until app go-live)">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label">Legacy Records</span>
+          <span class="nav-label" data-i18n="nav.legacyRecords">Legacy Records</span>
         </button>
 
-        <div class="sidebar-section-label" id="nav-admin-label" style="display:none">Administration</div>
+        <!-- The FAQ, from inside the app. A plain link, like the three above it —
+             no JS binding, and a NEW TAB so leaving for a question never costs
+             whatever form was half-filled behind it. It is a real <a>, never a
+             script-opened window: phones block window.open from a tap that has to
+             travel anywhere, and the sign-in screen needs the same page anyway. -->
+        <a class="nav-item" id="nav-faq" href="faq.html" target="_blank" rel="noopener"
+           title="Help &amp; FAQ" data-i18n-title="nav.help">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label" data-i18n="nav.help">Help &amp; FAQ</span>
+        </a>
+
+        <div class="sidebar-section-label" id="nav-admin-label" style="display:none" data-i18n="nav.administration">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label">User Access</span>
+          <span class="nav-label" data-i18n="nav.userAccess">User Access</span>
         </button>
       </div>
 
@@ -390,11 +416,19 @@
         <div id="index-view">
           <div class="list-toolbar">
             <div class="list-toolbar-top">
-              <span class="list-title">IRs</span>
+              <span class="list-title" data-i18n="list.title">IRs</span>
+              <!-- List | Board. A SWITCH, not a seventh nav tab: the board is another
+                   drawing of the SAME rows, so it must obey the same search box and the
+                   same two filter strips that sit directly below it. A separate tab
+                   would mean filtering twice and reading two different numbers. -->
+              <span class="view-switch" id="list-view-switch" role="tablist" aria-label="List or board" data-i18n-aria="list.viewBoard">
+                <button type="button" class="view-switch-btn active" data-view="list" role="tab" aria-selected="true" data-i18n="list.viewList">List</button>
+                <button type="button" class="view-switch-btn" data-view="board" role="tab" aria-selected="false" data-i18n="list.viewBoardBtn">Board</button>
+              </span>
               <span class="list-count" id="list-count"></span>
             </div>
 
-            <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" />
+            <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" data-i18n-placeholder="list.search" />
             <div class="segments" id="list-segments" role="tablist"></div>
             <!-- The Category strip. A SECOND .segments row rather than a new widget,
                  so it inherits the strip's own CSS and its counts read exactly like
@@ -407,6 +441,11 @@
             <div class="ir-skeleton"></div>
             <div class="ir-skeleton"></div>
           </div>
+          <!-- The board: the same filtered rows, drawn as nine columns. Rendered by
+               renderBoard() and hidden by CSS unless #index-view carries .is-board,
+               so the switch never has to touch two elements to stay consistent.
+               tabindex makes the sideways scroll reachable from a keyboard. -->
+          <div id="ir-board" class="ir-board" role="region" aria-label="IR board" tabindex="0" data-i18n-aria="board.label"></div>
         </div>
 
         <!-- ====== PASSBOOK DETAIL VIEW ====== -->
@@ -455,7 +494,7 @@
           <div id="ir-overview" class="overview-panel">
             <div class="overview-head">
               <div class="overview-head-left">
-                <h2 class="overview-title">Overview</h2>
+                <h2 class="overview-title" data-i18n="section.overview">Overview</h2>
                 <!-- Text-labelled on purpose: the house rule is that only icons
                      which earn their place get one. The chevron is a disclosure
                      affordance, drawn in CSS — no icon font, no SVG asset. -->
@@ -491,17 +530,17 @@
             <!-- Client's original report. Not a SECTIONS entry: it is rendered
                  by renderIntake(), never saved, never gated and never drafted. -->
             <div id="sec-intake" class="section-content">
-              <h2 class="section-title">Client's Original Report</h2>
+              <h2 class="section-title" data-i18n="section.clientReport">Client's Original Report</h2>
               <div id="sec-intake-body"></div>
             </div>
 
             <!-- Section B: Inward Checklist -->
             <div id="sec-b" class="section-content active">
-              <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
+              <h2 class="section-title" data-i18n="section.b">Section B — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-b"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-b">Mark Section B completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-b" data-i18n="section.close" data-i18n-var-letter="B">Mark Section B completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-b">⬇ Download</button>
@@ -511,11 +550,11 @@
 
             <!-- Section C: IQC Inspection -->
             <div id="sec-c" class="section-content">
-              <h2 class="section-title">Section C — IQC Visual Inspection</h2>
+              <h2 class="section-title" data-i18n="section.c">Section C — IQC Visual Inspection</h2>
               <div id="sec-c-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-c"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-c">Mark Section C completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-c" data-i18n="section.close" data-i18n-var-letter="C">Mark Section C completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-c">⬇ Download</button>
@@ -525,11 +564,11 @@
 
             <!-- Section D: Investigation -->
             <div id="sec-d" class="section-content">
-              <h2 class="section-title">Section D — Investigation</h2>
+              <h2 class="section-title" data-i18n="section.d">Section D — Investigation</h2>
               <div id="sec-d-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-d"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-d">Mark Section D completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-d" data-i18n="section.close" data-i18n-var-letter="D">Mark Section D completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-d">⬇ Download</button>
@@ -539,11 +578,11 @@
 
             <!-- Section E: Production -->
             <div id="sec-e" class="section-content">
-              <h2 class="section-title">Section E — Production (Rework)</h2>
+              <h2 class="section-title" data-i18n="section.e">Section E — Production (Rework)</h2>
               <div id="sec-e-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-e"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-e">Mark Section E completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-e" data-i18n="section.close" data-i18n-var-letter="E">Mark Section E completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-e">⬇ Download</button>
@@ -553,11 +592,11 @@
 
             <!-- Section F: Quality Test Report (QC + Flight Test) -->
             <div id="sec-f" class="section-content">
-              <h2 class="section-title">Section F — Quality Test Report</h2>
+              <h2 class="section-title" data-i18n="section.f">Section F — Quality Test Report</h2>
               <div id="sec-f-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-f"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-f">Mark Section F completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-f" data-i18n="section.close" data-i18n-var-letter="F">Mark Section F completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-f">⬇ Download</button>
@@ -567,11 +606,11 @@
 
             <!-- Section G: PDI Report/Dispatch Record (PDI + Dispatch) -->
             <div id="sec-g" class="section-content">
-              <h2 class="section-title">Section G — PDI Report/Dispatch Record</h2>
+              <h2 class="section-title" data-i18n="section.g">Section G — PDI Report/Dispatch Record</h2>
               <div id="sec-g-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-g"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-g">Mark Section G completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-g" data-i18n="section.close" data-i18n-var-letter="G">Mark Section G completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-g">⬇ Download</button>
@@ -670,6 +709,43 @@
        on the pill and `none` on its text — otherwise the text node swallows taps. -->
   <div id="toast" role="status" aria-live="polite" title="Tap to dismiss"><span id="toast-text"></span></div>
 
+  <!-- ========== THE CUSTOMER DOOR ==========
+       A modal, appended to <body> like every other one (see the MODALS note in
+       components.css), because it is reachable from the sign-in screen where
+       nothing inside #app-container exists yet.
+
+       It is OPEN ACCESS and it stays that way: this frame is a Google Form that
+       only ACCEPTS input, so it reveals nothing about any IR. Compare the rest of
+       the app, where every read is paid for with a session token.
+
+       The src is deliberately EMPTY here and is set by app.js only when someone
+       opens the door. An iframe with a src loads on page load, so leaving one in
+       the markup would mean every visitor — including the ones who only ever sign
+       in to the app — made a request to Google's form endpoint from inside a tool
+       holding customer data. Nothing about this dialog touches the network until a
+       person asks for it. -->
+  <div class="customer-door" id="customer-door" style="display:none">
+    <div class="customer-door-card" role="dialog" aria-modal="true" aria-labelledby="customer-door-title">
+      <div class="customer-door-head">
+        <h2 class="customer-door-title" id="customer-door-title" data-i18n="door.report">Report a problem</h2>
+        <!-- Always visible, and not a fallback that appears on failure: some
+             phones refuse to render a cross-origin frame at all, and a person who
+             needs to report a fault must never be left with a blank rectangle and
+             no way forward. The link is the guaranteed path; the frame is the
+             convenience. -->
+        <a class="customer-door-tab" id="customer-door-tab" href="#" target="_blank" rel="noopener noreferrer"
+           data-i18n="door.newTab">Open in a new tab</a>
+        <button type="button" class="customer-door-close" id="customer-door-close"
+                aria-label="Close" data-i18n-aria="door.close">&times;</button>
+      </div>
+      <div class="customer-door-body">
+        <iframe class="customer-door-frame" id="customer-door-frame"
+                title="Report a problem" loading="lazy" referrerpolicy="no-referrer"></iframe>
+      </div>
+      <p class="customer-door-note" data-i18n="door.note">This form is hosted by Google and your answers go straight to the service desk. Nothing is loaded from Google until you open this window.</p>
+    </div>
+  </div>
+
   <!-- PDF export library. A plain script, deliberately: app.js stays a plain
        end-of-body script with no module system, and this only has to expose
        window.PDFLib before app.js runs. Vendored, not CDN — the app has to work
@@ -680,6 +756,16 @@
        than vendored because the obvious library is GPL-3.0 and this repo is
        public. It only has to expose window.DataFlash before app.js runs. -->
   <script src="dataflash.js"></script>
+  <!-- The English language layer: window.t, window.I18N. A plain script for the
+       same reason as the two above, and it MUST come before app.js, which reads
+       window.t as it loads. It is not a stylesheet — the six-file cascade
+       documented at the top of this file is pinned by smoke-shell.mjs, and a
+       language table has no business in a cascade.
+
+       Every data-i18n attribute it fills is paired with the real English text
+       already inside the element, so this file failing to load leaves the app
+       reading exactly as it does today rather than showing a screen of keys. -->
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on

@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v58';
+const APP_VERSION = 'v59';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -31,6 +31,22 @@ function paintVersion() {
 // app.js is the second-to-last script in the body, so the slots below it in
 // index.html already exist. No DOMContentLoaded wait, no boot order to get wrong.
 paintVersion();
+
+// ─── THE LANGUAGE LAYER ──────────────────────────────────────────────────────
+// i18n.js, loaded just before this file, owns the English strings; these are only
+// the local handles on it.
+//
+// The fallbacks are what make a missing i18n.js survivable rather than fatal: t()
+// then returns the KEY, which is visibly wrong rather than an empty control that
+// nobody can account for. That path is for the flaky-network case only — a missing
+// or orphaned string is a failing test in smoke-i18n.mjs, not something a user
+// should ever meet.
+//
+// Only English ships today, so every one of these returns exactly the words that
+// were here before. The point is that a second language is later a data file.
+const t          = (key, vars) => (window.I18N ? window.I18N.t(key, vars) : key);
+const tStatus    = v => (window.I18N ? window.I18N.status(v) : v);
+const tPriority  = v => (window.I18N ? window.I18N.priority(v) : v);
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
@@ -1314,6 +1330,8 @@ const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
+const irBoard       = document.getElementById('ir-board');
+const listViewSwitch = document.getElementById('list-view-switch');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
 const listToggle    = document.getElementById('list-toggle');
@@ -1324,6 +1342,7 @@ const listToggle    = document.getElementById('list-toggle');
 let currentView = 'index';     // 'index' | 'detail' | 'insights' | 'log'
 let activeSegment = 'all';     // IR-list filter segment
 let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
+let listMode = 'list';         // 'list' | 'board' — the same filtered rows, two drawings
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -1383,6 +1402,18 @@ function markIntroDelivered() {
 }
 
 window.addEventListener('load', () => {
+  // The language layer paints the static chrome FIRST, above everything else in
+  // this handler. It only ever rewrites text that is already correct, so the order
+  // is not cosmetic: doing it here means no other code in this handler has to know
+  // the layer exists, and a screen that is never re-rendered later is still right.
+  if (window.I18N) window.I18N.applyStatic();
+
+  // The customer door is wired HERE, and not inside showAuth(), because the entry
+  // lives on the sign-in screen but the modal itself is not part of that screen: a
+  // signed-in device that signs out must find the entry already alive. Wiring it
+  // costs two listeners and, with no URL configured, returns on the second line.
+  wireCustomerDoor();
+
   // Check for local file protocol (login + backend calls won't work)
   if (window.location.protocol === 'file:') {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
@@ -2424,12 +2455,12 @@ function wireAuthForm() {
   const submitLogin = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email.'); return; }
-    signInBtn.disabled = true; signInBtn.textContent = 'Sending…';
+    setBusy(signInBtn, 'Sending…');
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, '').then(d => {
-      signInBtn.disabled = false; signInBtn.textContent = 'Send me a code';
+      setIdle(signInBtn, 'Send me a code');
       if (d && d.status === 'ok' && d.otpRequired) {
         _otpEmail = email;
         _otpPassword = '';
@@ -2450,12 +2481,12 @@ function wireAuthForm() {
     const email = emailOf();
     const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
-    signInBtn.disabled = true; signInBtn.textContent = 'Signing in…';
+    setBusy(signInBtn, 'Signing in…');
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, password).then(d => {
-      signInBtn.disabled = false; signInBtn.textContent = 'Sign in';
+      setIdle(signInBtn, 'Sign in');
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
@@ -2502,10 +2533,10 @@ function wireAuthForm() {
     const code = ((otpIn && otpIn.value) || '').trim();
     if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
     if (!_otpEmail) { showError('Enter your email first.'); setAuthMode('email'); return; }
-    otpBtn.disabled = true; otpBtn.textContent = 'Verifying…';
+    setBusy(otpBtn, 'Verifying…');
     showError('');
     loginBackend(_otpEmail, _otpPassword || '', code).then(d => {
-      otpBtn.disabled = false; otpBtn.textContent = 'Verify code';
+      setIdle(otpBtn, 'Verify code');
       if (d && d.status === 'ok' && d.sessionToken) {
         _otpPassword = null;
         finishAuth(_otpEmail, d);
@@ -2520,10 +2551,10 @@ function wireAuthForm() {
   const submitForgot = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email first.'); return; }
-    forgotBtn.disabled = true; forgotBtn.textContent = 'Sending…';
+    setBusy(forgotBtn, 'Sending…');
     showError('');
     forgotPasswordBackend(email).then(d => {
-      forgotBtn.disabled = false; forgotBtn.textContent = 'Email me a code';
+      setIdle(forgotBtn, 'Email me a code');
       // The backend answers identically whether or not the account exists, so the
       // UI must not imply otherwise — always move on to the code step.
       _resetEmail = email;
@@ -2540,10 +2571,10 @@ function wireAuthForm() {
     const pw    = (newIn && newIn.value) || '';
     if (!code) { showError('Enter the 6-digit code from your email.'); return; }
     if (pw.length < 8) { showError('New password must be at least 8 characters.'); return; }
-    resetBtn.disabled = true; resetBtn.textContent = 'Setting…';
+    setBusy(resetBtn, 'Setting…');
     showError('');
     resetPasswordBackend(email, code, pw).then(d => {
-      resetBtn.disabled = false; resetBtn.textContent = 'Set new password';
+      setIdle(resetBtn, 'Set new password');
       if (d && d.status === 'ok') {
         // No token is returned on purpose: signing in with the new password is
         // what proves it was typed the way the user meant.
@@ -3901,6 +3932,98 @@ function showIndex() {
   headerTitle.textContent = 'I-PASSBOOK';
 }
 
+// ─── THE CUSTOMER DOOR ────────────────────────────────────────────────────────
+// The app's SECOND open door, and the only one a customer ever needs.
+//
+// ── Paste the form's URL here ────────────────────────────────────────────────
+// Empty, the entry on the sign-in screen does not render at all. That is the
+// honest default: a button that opens a blank frame is worse than no button, and
+// the app cannot know someone else's form URL.
+//
+// It is the SHARE link (`https://docs.google.com/forms/d/e/…/viewform`), not the
+// editor link. `?embedded=true` is appended below rather than stored, so the same
+// constant can also be handed to a person to open directly.
+//
+// ── Why this is safe to put on an unauthenticated screen ─────────────────────
+// A Google Form only ACCEPTS input. It reads nothing, it is hosted by Google, and
+// it knows nothing about this app or its IRs — responses land wherever that form
+// already puts them, which is where they landed before this existed. Every OTHER
+// byte the app shows is behind a session token; this is a front door, not a hole.
+//
+// ── Why the frame gets its src only when the door opens ──────────────────────
+// An <iframe src> fetches on page load. Left in index.html, that would mean every
+// visitor — including the ones who only ever sign in — sent a request to Google's
+// form endpoint from inside a tool holding customer data. Setting the src on open
+// means the network is touched only by someone who asked for the form, and the
+// app's own sign-in screen stays free of third-party requests.
+const CUSTOMER_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
+
+function wireCustomerDoor() {
+  const open   = document.getElementById('customer-door-open');
+  const door   = document.getElementById('customer-door');
+  const frame  = document.getElementById('customer-door-frame');
+  const tab    = document.getElementById('customer-door-tab');
+  const close  = document.getElementById('customer-door-close');
+  if (!open || !door || !frame) return;
+
+  // No URL configured: the entry does not exist, and neither does the modal. The
+  // FAQ link beside it is markup and stays.
+  if (!CUSTOMER_FORM_URL) return;
+
+  const embed = CUSTOMER_FORM_URL + (CUSTOMER_FORM_URL.includes('?') ? '&' : '?') + 'embedded=true';
+  open.style.display = '';
+  tab.href = CUSTOMER_FORM_URL;
+
+  let prevFocus = null;
+  const show = () => {
+    // Set on FIRST open only. Re-assigning the same src would reload the form and
+    // throw away a half-typed report.
+    if (!frame.getAttribute('src')) frame.setAttribute('src', embed);
+    prevFocus = document.activeElement;
+    door.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    // Focus moves into the dialog, or a keyboard user is still tabbing around the
+    // sign-in form behind it.
+    if (close) close.focus();
+  };
+  const hide = () => {
+    door.style.display = 'none';
+    document.body.style.overflow = '';
+    if (prevFocus && prevFocus.focus) prevFocus.focus();
+  };
+
+  open.addEventListener('click', show);
+  if (close) close.addEventListener('click', hide);
+  // A tap on the dimmed ground closes it; a tap INSIDE the card must not, which is
+  // why this tests the target rather than listening on the card.
+  door.addEventListener('click', e => { if (e.target === door) hide(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && door.style.display !== 'none') hide();
+  });
+}
+
+// ─── A SITE, ON A MAP, WITHOUT A MAP ─────────────────────────────────────────
+// The owner's decision on maps, in his words: "Text + a link out". So this builds
+// a URL and stops. No tiles, no API key, no billing, no vendor SDK — and, the part
+// that matters for a tool holding customer data, NOTHING about the site reaches
+// Google until a person actually taps the link. The value is never fetched from
+// here, only put into an href.
+//
+// Pure, and deliberately so: it reads a string, returns a URL, and touches no DOM,
+// no clock and no network. That is what lets a render call it safely, and what lets
+// the field it feeds stay live as someone types.
+//
+// ONE URL shape, because Google's Maps URLs API accepts both a place name and a
+// "lat,lng" pair through the same `query=`: "12.9716,77.5946" is a place, and so is
+// "Plot 4, Whitefield, Bengaluru". A blank value returns null rather than a link —
+// an empty `q=` opens Maps on the whole world, which reads as "we know where this
+// is" when we plainly do not.
+function mapsLink(value) {
+  const q = String(value == null ? '' : value).trim();
+  if (!q) return null;
+  return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+}
+
 // ─── INSIGHTS ────────────────────────────────────────────────────────────────
 // Counts over the IR list, sliced by the variables the desk actually asks about.
 // Everything here is client-side over `allIRs` + `irState`, both of which are
@@ -3981,21 +4104,9 @@ function insightsFacets(irs) {
 function insightsSummary(irs, filters) {
   const all = Array.isArray(irs) ? irs : [];
   const f = filters || {};
-  const rows = all.filter(ir => {
-    // String() on both sides: a select hands back a string, and a Set-derived
-    // option list holds numbers. Comparing them raw would match nothing at all,
-    // silently, for FY and Month only.
-    if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
-    if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
-    if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
-    if (f.category !== INSIGHTS_ALL) {
-      if (f.category === UNCATEGORISED) { if (ir.category) return false; }
-      else if (ir.category !== f.category) return false;
-    }
-    if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
-    if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
-    return true;
-  });
+  // Through the shared predicate, never a second copy of the six comparisons —
+  // see insightsMatches for why the charts made that a correctness matter.
+  const rows = all.filter(ir => insightsMatches(ir, f));
 
   const categories = {};
   IR_CATEGORIES.forEach(k => { categories[k] = 0; });
@@ -4037,6 +4148,136 @@ function insightsOpt(v, sel, label) {
   return `<option value="${escHtml(value)}"${value === String(sel) ? ' selected' : ''}>${escHtml(label == null ? value : label)}</option>`;
 }
 
+// ─── THE ONE FILTER PREDICATE ────────────────────────────────────────────────
+// Every number on the dashboard is counted from the rows this returns. It is a
+// named function rather than a filter inline in insightsSummary() for one reason:
+// the charts below were added later, and a second copy of these six comparisons
+// is a second chance to get one of them wrong — at which point the bar chart
+// disagrees with the total printed directly above it, and neither looks broken.
+function insightsMatches(ir, filters) {
+  const f = filters || {};
+  if (!ir) return false;
+  // String() on both sides: a select hands back a string, and a Set-derived
+  // option list holds numbers. Comparing them raw would match nothing at all,
+  // silently, for FY and Month only.
+  if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
+  if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
+  if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
+  if (f.category !== INSIGHTS_ALL) {
+    if (f.category === UNCATEGORISED) { if (ir.category) return false; }
+    else if (ir.category !== f.category) return false;
+  }
+  if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
+  if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
+  return true;
+}
+
+// ─── WHAT THE CHARTS COUNT (Stage 3) ─────────────────────────────────────────
+
+// PURE, and the same contract as insightsSummary(): rows in, counts out, no DOM,
+// no clock, no fetch.
+//
+// `undated` is returned rather than folded into a month. A row whose date the app
+// cannot read has to go SOMEWHERE or the bars quietly total less than the number
+// printed above them; a thirteenth bucket that says so is the honest place, and
+// the renderer always draws it.
+function monthCounts(irs, filters) {
+  const months = new Array(12).fill(0);
+  let undated = 0;
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    if (!insightsMatches(ir, filters)) return;
+    const m = irMonthNumber(ir.dateRaisedISO);
+    if (m === null) undated++; else months[m - 1]++;
+  });
+  return { months, undated, total: months.reduce((a, b) => a + b, 0) + undated };
+}
+
+// The point list for one SVG polyline over `values`, inside a w x h box. Pure
+// geometry — no canvas, no DOM, no CSS variable read.
+//
+// The y axis is scaled to the LARGEST value in the series rather than to a fixed
+// maximum: a series of 3s and 4s drawn against a notional 400 is a flat line on
+// the floor, which is technically true and tells a reader nothing. Fewer than two
+// points returns an empty string, because a "line" through one point is not a
+// line and a polyline with no points draws nothing anyway.
+function sparkPoints(values, w, h) {
+  const v = (Array.isArray(values) ? values : []).map(n => (Number.isFinite(n) ? n : 0));
+  if (v.length < 2) return '';
+  const max = Math.max(1, ...v);
+  const stepX = w / (v.length - 1);
+  return v.map((n, i) =>
+    (i * stepX).toFixed(2) + ',' + (h - (n / max) * h).toFixed(2)).join(' ');
+}
+
+// Who is holding work, and how much of it is late.
+//
+// TWO THINGS HERE ARE NOT OPTIONAL.
+//
+// First, it counts from the SAME filtered rows as everything else on the page, so
+// the column of open counts can never sum to something other than the total above.
+//
+// Second, the Unassigned bucket is always present — the caller renders it whether
+// or not it has rows, and the helper puts it in the list before it counts anything.
+// A named person with no work is a fine row to omit, because the reader knows who
+// they are and can see they hold nothing. The bucket that says "nobody owns these
+// N" is not: it is the one line whose absence turns a gap in the data into a gap in
+// the picture, and a reader who adds up the card gets a smaller number than the
+// page prints and concludes the dashboard is broken.
+const UNASSIGNED_KEY = '__unassigned__';
+
+function assigneeCounts(irs, filters, now) {
+  const map = new Map();
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    if (!insightsMatches(ir, filters)) return;
+    const name = String(ir.assigneeName || ir.assignee || '').trim();
+    const key = name || UNASSIGNED_KEY;
+    if (!map.has(key)) map.set(key, { key, name, total: 0, open: 0, late: 0 });
+    const row = map.get(key);
+    row.total++;
+    const cat = statusCategory(ir.status);
+    if (cat === 'open' || cat === 'paused') row.open++;
+    if (irOverdue(ir, now)) row.late++;
+  });
+  // The Unassigned bucket is created HERE, before anything is counted, so it is
+  // present with zero rows as well as with four hundred. Its absence is the one
+  // that goes unnoticed: when every IR has a name the row would be empty anyway,
+  // and when it is NOT empty its absence is a set of tickets that belong to
+  // nobody and appear on no line of the card.
+  if (!map.has(UNASSIGNED_KEY)) {
+    map.set(UNASSIGNED_KEY, { key: UNASSIGNED_KEY, name: '', total: 0, open: 0, late: 0 });
+  }
+  const rows = [...map.values()].sort((a, b) =>
+    (b.open - a.open) || (b.total - a.total) || a.name.localeCompare(b.name));
+  // Pinned last, and that is a reading decision rather than a sorting one: a
+  // bucket of names is a list of people, and a row that is not a person belongs at
+  // the end of it rather than in the middle of the alphabet.
+  const ui = rows.findIndex(r => r.key === UNASSIGNED_KEY);
+  if (ui > -1) rows.push(rows.splice(ui, 1)[0]);
+  return rows;
+}
+
+// Two letters for an avatar. Deliberately not a name-splitter: a single word
+// gives its first two letters, and anything longer gives the first letter of the
+// first and last words, which is what a two-initial avatar means everywhere else.
+//
+// A non-string returns nothing rather than `String(name)`. Everything that reaches
+// here should already be text, but "should" is not a contract: `String(42)` is a
+// perfectly good two-character string, and an avatar reading "42" is a bug that
+// nobody would look for.
+function initialsOf(name) {
+  if (typeof name !== 'string') return '';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
+// The month axis in three letters. MONTH_LABELS above is the long form the filter
+// dropdown uses, where there is room for it; a chart column at 24px has room for
+// three characters and no more.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
 // SYNCHRONOUS, IDEMPOTENT and safe with an empty list. Those three properties are
 // what let four different callers use it with no sequence token: setAllIRs() (every
 // fetch path, including the demo fallback and an in-page re-login), loadIRState()
@@ -4062,6 +4303,21 @@ function renderInsights() {
 
   const sum = insightsSummary(allIRs, f);
   const filtered = sum.matched !== sum.total;
+
+  // Everything the charts draw comes from these, so they are computed ONCE per
+  // render and shared. `now` is read once here rather than inside each helper,
+  // because two calls a millisecond apart could otherwise disagree about whether
+  // a ticket is on its limit — and a dashboard whose late count differs from its
+  // own late row is a dashboard nobody trusts twice.
+  const now      = Date.now();
+  const mc       = monthCounts(allIRs, f);
+  const people   = assigneeCounts(allIRs, f, now);
+  const openNow  = people.reduce((a, r) => a + r.open, 0);
+  const lateNow  = people.reduce((a, r) => a + r.late, 0);
+  const maxMonth = Math.max(1, ...mc.months, mc.undated);
+  const maxCat   = Math.max(1, ...IR_CATEGORIES.map(k => sum.categories[k]), sum.uncategorised);
+  const mixTotal = SEGMENT_LABELS.filter(([k]) => k !== 'all')
+    .reduce((a, [k]) => a + (sum.statuses[k] || 0), 0) || 1;
 
   const filterRow = (id, label, options) => `
     <label class="insights-filter"><span>${escHtml(label)}</span>
@@ -4102,22 +4358,65 @@ function renderInsights() {
       ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
     </p>
 
+    <!-- The stat row. Four tiles of the same size, and the last one is a
+         SPARKLINE rather than a number, which is the one shape on this page that
+         answers "which way is this going" instead of "how many".
+         The polyline is a single inline SVG path computed by sparkPoints() — a
+         real SVG element, not a canvas. That is not a preference: the app's one
+         canvas painting hardcodes six hex values, because a canvas cannot read a
+         CSS variable, so it is the one drawing surface in the app that would
+         ignore all four palettes and both themes. -->
+    <div class="insights-stats">
+      <div class="insights-stat">
+        <span class="insights-stat-n">${sum.matched}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.raised'))}</span>
+      </div>
+      <div class="insights-stat">
+        <span class="insights-stat-n">${openNow}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.openNow'))}</span>
+      </div>
+      <div class="insights-stat${lateNow ? ' is-late' : ''}">
+        <span class="insights-stat-n">${lateNow}</span>
+        <span class="insights-stat-label">${escHtml(t('insights.lateNow'))}</span>
+      </div>
+      <div class="insights-stat insights-stat-spark">
+        <svg class="spark" viewBox="0 0 100 28" preserveAspectRatio="none"
+             role="img" aria-label="${escHtml(t('insights.perMonth'))}">
+          <polyline points="${escHtml(sparkPoints(mc.months, 100, 28))}"
+                    fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linejoin="round" stroke-linecap="round" />
+        </svg>
+        <span class="insights-stat-label">${escHtml(t('insights.perMonth'))}</span>
+      </div>
+    </div>
+
     <div class="insights-cards">
       ${IR_CATEGORIES.map(k => `
         <button type="button" class="insights-card${f.category === k ? ' active' : ''}" data-cat="${escHtml(k)}">
           <span class="insights-card-n">${sum.categories[k]}</span>
           <span class="insights-card-label">${escHtml(k)}</span>
+          <!-- The bar is scaled to the LARGEST category, not to the total: these
+               four are alternatives, so the question a reader has is which of them
+               dominates, and a share-of-total bar would leave all four short and
+               hard to tell apart. It is decorative — the number beside it is the
+               fact — so it is aria-hidden. -->
+          <span class="insights-card-bar" aria-hidden="true">
+            <span class="insights-card-bar-fill" style="width:${Math.round((sum.categories[k] / maxCat) * 100)}%"></span>
+          </span>
         </button>`).join('')}
       ${sum.uncategorised ? `
         <button type="button" class="insights-card is-muted${f.category === UNCATEGORISED ? ' active' : ''}" data-cat="${escHtml(UNCATEGORISED)}">
           <span class="insights-card-n">${sum.uncategorised}</span>
-          <span class="insights-card-label">No category</span>
+          <span class="insights-card-label">${escHtml(t('insights.noCategory'))}</span>
+          <span class="insights-card-bar" aria-hidden="true">
+            <span class="insights-card-bar-fill" style="width:${Math.round((sum.uncategorised / maxCat) * 100)}%"></span>
+          </span>
         </button>` : ''}
     </div>
 
     ${sum.categories.REPAIR ? `
       <div class="insights-block">
-        <h3 class="insights-h">REPAIR — by sub-category</h3>
+        <h3 class="insights-h">${escHtml(t('insights.repairBySub'))}</h3>
         <div class="insights-subcats">
           ${REPAIR_SUBCATEGORIES.map(k => `
             <span class="insights-subcat${k === REPAIR_OTHERS ? ' is-others' : ''}">
@@ -4134,13 +4433,69 @@ function renderInsights() {
       </div>` : ''}
 
     <div class="insights-block">
-      <h3 class="insights-h">Status mix</h3>
+      <h3 class="insights-h">${escHtml(t('insights.raisedPerMonth'))}</h3>
+      <!-- One column per calendar month, plus the undated bucket, which is drawn
+           ALWAYS — even at zero, even when every row is dated. It is the one bar
+           whose absence would make the chart silently disagree with the total
+           printed at the top of the page, and a chart that does not add up is
+           worse than a chart with an empty column in it. -->
+      <div class="chart-bars">
+        ${mc.months.map((n, i) => `
+          <div class="chart-bar-col${n ? '' : ' is-zero'}" title="${escHtml(MONTH_LABELS[i] + ': ' + n)}">
+            <span class="chart-bar-n">${n}</span>
+            <span class="chart-bar-track"><span class="chart-bar" style="height:${Math.round((n / maxMonth) * 100)}%"></span></span>
+            <span class="chart-bar-x">${escHtml(MONTH_ABBR[i])}</span>
+          </div>`).join('')}
+        <div class="chart-bar-col is-undated${mc.undated ? '' : ' is-zero'}" title="${escHtml(t('insights.undatedBucket') + ': ' + mc.undated)}">
+          <span class="chart-bar-n">${mc.undated}</span>
+          <span class="chart-bar-track"><span class="chart-bar" style="height:${Math.round((mc.undated / maxMonth) * 100)}%"></span></span>
+          <!-- A dash, not the words. The axis is thirteen columns wide on a phone
+               and the words "No date" do not fit one of them — but the column has
+               to be HERE, in the axis, because that is what makes the bars add up
+               to the total above them. The caption under the chart says what the
+               dash means. -->
+          <span class="chart-bar-x">—</span>
+        </div>
+      </div>
+      <p class="chart-note">— = ${escHtml(t('insights.undatedBucket'))}</p>
+    </div>
+
+    <div class="insights-block">
+      <h3 class="insights-h">${escHtml(t('insights.statusMix'))}</h3>
+      <!-- One bar, four segments. The list of rows below it stays: the bar answers
+           "what is the shape of this" and the rows answer "how many exactly", and
+           a stacked bar alone makes a reader estimate a number the data knows. -->
+      <div class="mix-bar" role="img"
+           aria-label="${escHtml(SEGMENT_LABELS.filter(([k]) => k !== 'all')
+             .map(([k, label]) => label + ' ' + (sum.statuses[k] || 0)).join(', '))}">
+        ${SEGMENT_LABELS.filter(([k]) => k !== 'all' && sum.statuses[k]).map(([k, label]) => `
+          <span class="mix-seg mix-${k}" style="width:${(sum.statuses[k] / mixTotal * 100).toFixed(2)}%"
+                title="${escHtml(label + ': ' + sum.statuses[k])}"></span>`).join('')}
+      </div>
       <div class="insights-mix">
         ${SEGMENT_LABELS.filter(([k]) => k !== 'all').map(([k, label]) => `
           <span class="insights-mix-row">
             <span class="${CATEGORY_BADGE[k]}">${escHtml(label)}</span>
             <span class="insights-mix-n">${sum.statuses[k] || 0}</span>
           </span>`).join('')}
+      </div>
+    </div>
+
+    <div class="insights-block">
+      <h3 class="insights-h">${escHtml(t('insights.people'))}</h3>
+      <div class="people-head">
+        <span class="people-head-name">${escHtml(t('insights.people'))}</span>
+        <span class="people-head-n">${escHtml(t('insights.colOpen'))}</span>
+        <span class="people-head-n">${escHtml(t('insights.colLate'))}</span>
+      </div>
+      <div class="people-list">
+        ${people.map(p => `
+          <div class="person-row${p.key === UNASSIGNED_KEY ? ' is-unassigned' : ''}">
+            <span class="person-avatar" aria-hidden="true">${escHtml(initialsOf(p.name) || '?')}</span>
+            <span class="person-name">${escHtml(p.name || t('insights.unassigned'))}</span>
+            <span class="person-n">${p.open}</span>
+            <span class="person-n${p.late ? ' is-late' : ''}">${p.late}</span>
+          </div>`).join('')}
       </div>
     </div>`;
 }
@@ -5065,8 +5420,8 @@ function renderIRList(records) {
   renderCategorySegments();
   if (!records || records.length === 0) {
     irList.innerHTML = allIRs.length
-      ? '<div class="empty-state"><span>🔍</span>No IRs match this filter.</div>'
-      : '<div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div>';
+      ? '<div class="empty-state"><span>🔍</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
+      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>';
     updateListCounts(0);
     return;
   }
@@ -5160,14 +5515,265 @@ function wantProgress(ir, prog) {
   return !(ir && ir.isLegacyOnly && prog.done === 0);
 }
 
-// `initialsOf()` and the `.assignee-avatar` circle it fed were removed with the
-// 2026-09-21 list-row fix. The circle was a 26px chip in the row's side column,
-// and on IR470 — the row carrying the most chips — it was the chip that tipped
-// the column past the 400px list pane's budget, so the browser squeezed the
-// column and sliced the `Open` pill off at its left edge. The owner's read of
-// that was "AN … overlapping above 'open' status", and his fix was the right
-// one: the initial is not worth a chip, and his full name belongs in the empty
-// space to the right of the IR number. See `renderIRList` and `.ir-title-row`.
+// The banner's version of that count: ONE SEGMENT PER SECTION rather than a
+// filled bar, because the question in this banner is not "how much" but "which" —
+// the six segments are exactly the six tabs directly below, and a person reading
+// this is deciding which one to open next.
+//
+// NEVER the word "complete", on the segments or in the tooltip. `done[]` means a
+// section has been SAVED, not filled in, and it is monotonic — a section stays
+// saved once saved, even if it is later emptied. Calling that "complete" would
+// tell someone a job is finished on the strength of an empty form they once
+// pressed Save on. The chip on the list row keeps its own shape; this is the
+// banner's.
+function progressSteps(ir, prog) {
+  const doneIds = Array.isArray(ir && ir.done) ? ir.done : [];
+  const label = t('overview.sectionsSaved', { n: prog.done, m: prog.total });
+  return `<span class="progress-steps" title="${escHtml(label)}" role="img" aria-label="${escHtml(label)}">` +
+    SECTION_IDS.map(id => `<span class="progress-step${doneIds.includes(id) ? ' is-done' : ''}"></span>`).join('') +
+    `</span><span class="progress-steps-text">${escHtml(label)}</span>`;
+}
+
+// ─── THE IR BOARD ────────────────────────────────────────────────────────────
+// The list's rows, drawn as columns. The board adds NO field and needs NO
+// migration: an IR already carries a 14-value workflow `status`, written by Triage
+// and by nothing else — which is exactly why the columns can be the app's own
+// stages rather than a second vocabulary that would drift from the ticket.
+//
+// NINE columns, not six. The six section columns are the sections a person works
+// in; the two at the start and the one at the end hold the statuses that name no
+// section at all. Without them those IRs would be in no column — the one failure a
+// reader could never see, because a card that is simply nowhere looks like a card
+// that does not exist. The union of every `stages` array below is IR_STATUS_VALUES
+// exactly, each value once; `smoke-board.mjs` asserts that against app.js so a
+// status the app can store and the board cannot place is a failing test.
+//
+// The headings are the app's OWN short names (SECTION_SHORT), so the column a card
+// sits in and the tab it lives on say the same words.
+const BOARD_COLUMNS = [
+  { key: 'start', title: t('board.notStarted'),         stages: ['Open', 'Remote Support'] },
+  { key: 'hold',  title: t('board.paused'),             stages: ['Hold'] },
+  { key: 'B', title: 'B · ' + SECTION_SHORT['sec-b'],   stages: ['Inward'] },
+  { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Visual Inspection'] },
+  { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['QC Investigation'] },
+  { key: 'E', title: 'E · ' + SECTION_SHORT['sec-e'],   stages: ['Production'] },
+  { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['QC', 'Flight Test'] },
+  { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI', 'Approval'] },
+  { key: 'done', title: t('board.finished'),            stages: ['Delivered', 'Close', 'Other'], quiet: true },
+];
+
+// Which column a status belongs in. Pure: same input, same answer, no DOM, no
+// clock. An unrecognised value lands in 'start' rather than disappearing — the
+// board may never lose an IR, not even one hand-edited in the store.
+function boardColumnOf(status) {
+  const s = String(status || 'Open').trim().toLowerCase();
+  const col = BOARD_COLUMNS.find(c => c.stages.some(v => v.toLowerCase() === s));
+  return col ? col.key : 'start';
+}
+
+// A section column (B–G) owns exactly one app status, and that single fact is what
+// the "move it on?" offer after a close compares against. Returns null for the two
+// end-of-line columns, which own several statuses and so have no single next step.
+function boardColumnOwns(key) {
+  const col = BOARD_COLUMNS.find(c => c.key === key);
+  return col && col.stages.length === 1 ? col.stages[0] : null;
+}
+// The section→letter map already exists as SECTION_LABELS, defined with the access
+// grids. A second copy here would be a literal that smoke-preview.mjs's
+// SECTION_SHORT scan picks up and mistakes for a section's display name.
+
+// ─── MOVING A CARD ON, BY HAND ────────────────────────────────────────────────
+// The board is read-only, and that is the whole design: a section save must never
+// move the workflow clock (see syncIRStateAfterSectionSave — someone tried the
+// automatic version and removed it). But when a section IS closed and the IR is
+// still sitting on that section's status, the honest next step is one press away —
+// and it is the PRESS, not the close, that stamps `statusAt`.
+//
+// The offer is made only where the answer is unambiguous, which is why it hangs off
+// boardColumnOwns(). The two end columns own several statuses between them, so there
+// is no single "next" there and none is offered; Triage still covers them, unchanged,
+// and Triage covers everything else too — so an offer that never appears costs
+// nothing. It is never the only way to move a card.
+function boardNextColumn(key) {
+  const i = BOARD_COLUMNS.findIndex(c => c.key === key);
+  if (i < 0 || i >= BOARD_COLUMNS.length - 1) return null;
+  const next = BOARD_COLUMNS[i + 1];
+  // A section column is named by its letter, because that is how the tab is named.
+  // The two end columns have no letter, so they are named by their heading.
+  const isSection = SECTION_IDS.some(id => SECTION_LABELS[id] === next.key);
+  return { label: isSection ? next.key : next.title, stage: next.stages[0] };
+}
+
+// Paint — or clear — the offer in every section's close row. It is rebuilt on each
+// paint rather than toggled in place, because the target moves with the status:
+// after one press this section's button goes and the next section's appears.
+function paintBoardMoveOffer(irNumber) {
+  const row     = irState[irNumber] || {};
+  const colKey  = boardColumnOf(String(row.status || 'Open'));
+  const done    = Array.isArray(row.done) ? row.done : [];
+  // The section whose own stage the IR is sitting on. null for Not started, Paused
+  // and Finished, which are not sections.
+  const owner   = SECTION_IDS.find(id => SECTION_LABELS[id] === colKey) || null;
+  const next    = owner ? boardNextColumn(colKey) : null;
+
+  SECTION_IDS.forEach(secId => {
+    const holder = document.querySelector('#' + secId + ' .sec-close-row');
+    if (!holder) return;
+    let btn = holder.querySelector('.btn-move-on');
+    // Only the section that owns the current stage is offered, and only once its own
+    // work is actually closed — an offer to move on from a section nobody finished
+    // would be the app volunteering a claim about work that has not happened.
+    if (secId !== owner || !next || !done.includes(secId)) { if (btn) btn.remove(); return; }
+    if (!btn) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      // A ghost, deliberately: this is an offer, not the next step of the form, and
+      // it must not compete with the Close button beside it.
+      btn.className = 'btn btn-ghost btn-move-on';
+      btn.dataset.section = secId;
+      holder.appendChild(btn);
+    }
+    btn.innerHTML = escHtml(t('move.to', { column: next.label }));
+    btn.title = t('move.hint', { stage: next.stage });
+    btn.onclick = () => moveOnByHand(irNumber, next.stage);
+  });
+}
+
+// The one place a section press writes the workflow status, and the only thing in
+// this file outside Triage that stamps `statusAt` — which is what "in status 3d" and
+// every overdue limit are measured from, so it is never done on the user's behalf.
+//
+// NO success toast on purpose. patchIRState already says so when the write did not
+// reach the backend, and the toast contract is that one message REPLACES another —
+// so a cheerful "Moved to E" here would wipe the one warning the user must not miss.
+// The evidence is on screen anyway: the status pill changes as the patch lands, and
+// the movement is on the timeline.
+async function moveOnByHand(irNumber, stage) {
+  const cur = String((irState[irNumber] || {}).status || 'Open');
+  if (!stage || cur === stage) return;      // never re-stamp a clock for no movement
+  await patchIRState(irNumber, {
+    status: stage,
+    statusOwned: true,
+    statusAt: Date.now(),
+    statusBy: myEmail() || 'unknown',
+  });
+  loadActivityLog(irNumber);
+}
+
+// How many cards a column draws before it stops and says how many it left behind.
+// `Finished` holds most of the archive — every delivered IR ever — and drawing
+// those as cards would make the board slower than the list it is a second view of.
+// The header counts are the FULL counts, so the column itself never lies about
+// what it is holding; only the drawing is capped.
+const BOARD_CAP = 25;
+
+function boardCard(ir) {
+  const owner = ir.assigneeName || ir.assignee || '';
+  const prog  = sectionProgress(ir.done);
+  const age   = irAge(ir);
+  const late  = irOverdue(ir);
+  const showProg = wantProgress(ir, prog);
+  // Same field discipline as the list row, and for the same reason: `droneId` is
+  // written by the public customer form, so every value here is escaped.
+  return `
+    <div class="kb-card${late ? ' is-late' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
+      <div class="kb-card-top">
+        <span class="ir-title">${escHtml(ir.irNumber)}</span>
+        ${age ? `<span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
+      </div>
+      <div class="ir-meta">
+        <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
+        ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
+      </div>
+      <div class="kb-card-foot">
+        <span class="ir-assignee${owner ? '' : ' is-unassigned'}">${escHtml(owner || t('common.unassigned'))}</span>
+        ${showProg ? progressChip(prog) : ''}
+      </div>
+    </div>`;
+}
+
+function renderBoard(records) {
+  if (!irBoard) return;
+  // The two filter strips are drawn here too, exactly as renderIRList draws them:
+  // the switch changes the drawing of the rows, never the controls above them.
+  renderSegments();
+  renderCategorySegments();
+  if (!records || records.length === 0) {
+    // Deliberately no glyph and no emoji: the app has one icon source, and a
+    // literal emoji here would be a second one nothing can restyle.
+    irBoard.innerHTML = '<div class="empty-state">' +
+      (allIRs.length ? t('list.emptyFiltered') : t('board.emptyNone')) +
+      '</div>';
+    updateListCounts(0);
+    return;
+  }
+  const byCol = {};
+  BOARD_COLUMNS.forEach(c => { byCol[c.key] = []; });
+  records.forEach(ir => { byCol[boardColumnOf(ir.status)].push(ir); });
+
+  irBoard.innerHTML = BOARD_COLUMNS.map(col => {
+    const rows  = byCol[col.key];
+    const shown = rows.slice(0, BOARD_CAP);
+    const more  = rows.length - shown.length;
+    return `
+    <div class="kb-col${col.quiet ? ' kb-col-quiet' : ''}">
+      <div class="kb-col-head">
+        <span class="kb-col-title">${escHtml(col.title)}</span>
+        <span class="kb-col-count">${rows.length}</span>
+      </div>
+      <div class="kb-col-sub">${escHtml(col.stages.join(' · '))}</div>
+      <div class="kb-col-body">
+        ${shown.map(boardCard).join('')}
+        ${more > 0 ? `<button type="button" class="kb-more">${escHtml(t('board.more', { n: more }))}</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  updateListCounts(records.length);
+}
+
+// The switch's one setter, so the class on the pane, the buttons and the repaint
+// can never disagree about which view is showing.
+function setListView(mode) {
+  listMode = mode === 'board' ? 'board' : 'list';
+  const pane = document.getElementById('index-view');
+  if (pane) pane.classList.toggle('is-board', listMode === 'board');
+  if (listViewSwitch) {
+    listViewSwitch.querySelectorAll('.view-switch-btn').forEach(b => {
+      const on = b.dataset.view === listMode;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', String(on));
+    });
+  }
+  applyListFilters();
+}
+if (listViewSwitch) {
+  listViewSwitch.addEventListener('click', e => {
+    const btn = e.target.closest('.view-switch-btn');
+    if (btn) setListView(btn.dataset.view);
+  });
+}
+if (irBoard) {
+  // "+N more" is a way back to the list, not a dead end: the board caps a column's
+  // drawing for speed, and the honest answer to "where is the rest?" is the list.
+  irBoard.addEventListener('click', e => {
+    if (e.target.closest('.kb-more')) setListView('list');
+  });
+}
+
+// The `.assignee-avatar` circle was removed from the LIST ROW with the 2026-09-21
+// fix, and it stays removed. It was a 26px chip in the row's side column, and on
+// IR470 — the row carrying the most chips — it was the chip that tipped the column
+// past the 400px list pane's budget, so the browser squeezed the column and sliced
+// the `Open` pill off at its left edge. The owner's read of that was "AN …
+// overlapping above 'open' status", and his fix was the right one: the initial is
+// not worth a chip, and his full name belongs in the empty space to the right of
+// the IR number. See `renderIRList` and `.ir-title-row`.
+//
+// The Insights People card draws initials again, and that is a different thing in
+// a different place: it is a full-width card, one row per assignee, with no chips
+// competing for the line and no 400px budget. `initialsOf()` exists for it alone —
+// smoke-ui.mjs pins both halves, so the row cannot get its circle back and the
+// helper cannot quietly spread onto a row.
 
 function updateListCounts(shown) {
   if (navCountEl)  navCountEl.textContent = allIRs.length;
@@ -5400,7 +6006,10 @@ function applyListFilters() {
       ir.droneId?.toLowerCase().includes(q)
     );
   }
-  renderIRList(rows);
+  // One filter, two drawings. The board reads the SAME `rows` the list would, so
+  // the switch can never show a different set of IRs from the one above it.
+  if (listMode === 'board') renderBoard(rows);
+  else renderIRList(rows);
 }
 
 // Search / segment filter
@@ -5693,14 +6302,42 @@ function renderOverviewEditable() {
     `<button type="button" class="field-hist-btn" data-field-id="${escJsAttr(fid)}" title="History of this field" onclick="openFieldHistory('${escJsAttr(fid)}')">${iconSvg('clock')}</button>`;
   el.innerHTML =
     `<div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_crmOwner">Customer Relations Manager${hist('a_crmOwner')}</label>
-       <input class="form-input" type="text" id="a_crmOwner" placeholder="Name of CRM person" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
+       <label class="overview-edit-label" for="a_crmOwner">${escHtml(t('overview.crmOwner'))}${hist('a_crmOwner')}</label>
+       <input class="form-input" type="text" id="a_crmOwner" placeholder="${escHtml(t('overview.crmOwnerHint'))}" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
      </div>
      <div class="overview-edit-row">
-       <label class="overview-edit-label" for="a_contactPhone">Customer Phone${hist('a_contactPhone')}</label>
-       <input class="form-input" type="tel" id="a_contactPhone" placeholder="+91 XXXXX XXXXX" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+       <label class="overview-edit-label" for="a_contactPhone">${escHtml(t('overview.contactPhone'))}${hist('a_contactPhone')}</label>
+       <input class="form-input" type="tel" id="a_contactPhone" placeholder="${escHtml(t('overview.phoneHint'))}" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
+     </div>
+     <div class="overview-edit-row">
+       <label class="overview-edit-label" for="a_siteLocation">${escHtml(t('overview.siteLocation'))}${hist('a_siteLocation')}</label>
+       <div class="overview-site-cell">
+         <input class="form-input" type="text" id="a_siteLocation" placeholder="${escHtml(t('overview.siteHint'))}" value="${escHtml(val('a_siteLocation'))}"${ro} />
+         <a class="overview-site-link" id="a_site-link" target="_blank" rel="noopener noreferrer" hidden>${escHtml(t('common.openInMaps'))}</a>
+       </div>
      </div>` +
-    (canWrite ? '' : `<p class="overview-note">Only Customer Relations and Management can edit these. Everyone can read them.</p>`);
+    (canWrite ? '' : `<p class="overview-note">${escHtml(t('overview.readOnlyNote'))}</p>`);
+
+  // ── The Maps link, kept live ───────────────────────────────────────────────
+  // Held in step with what is TYPED rather than with what is stored, because it is
+  // the one readout on this panel that costs nothing to keep current — and a link
+  // that lagged the text box by one save would point at the PREVIOUS site, which is
+  // worse than showing no link at all: it looks right and takes you somewhere else.
+  //
+  // Nothing reaches Google until someone taps it. This builds a URL and puts it in
+  // an href; it fetches nothing, and the stored value is never sent anywhere by the
+  // app. A blank box clears the href as well as hiding the link, so a stale target
+  // is not sitting there to be activated by a stray tap.
+  const site     = document.getElementById('a_siteLocation');
+  const siteLink = document.getElementById('a_site-link');
+  const paintSiteLink = () => {
+    if (!siteLink) return;
+    const href = mapsLink(site && site.value);
+    if (href) { siteLink.href = href; siteLink.hidden = false; }
+    else { siteLink.removeAttribute('href'); siteLink.hidden = true; }
+  };
+  if (site) site.addEventListener('input', paintSiteLink);
+  paintSiteLink();
 }
 
 // The hand-typed activity log, read-only. It is shown exactly as it was typed,
@@ -5837,10 +6474,16 @@ async function saveOverview() {
   _savesInFlight.add(OVERVIEW_KEY);
   if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; btn.disabled = true; }
 
-  const fields = {
-    a_crmOwner:     document.getElementById('a_crmOwner')?.value || '',
-    a_contactPhone: document.getElementById('a_contactPhone')?.value || '',
-  };
+  // Through the shared reader, not a second literal of the same ids.
+  //
+  // The literal had a hole worth naming, because the Save button is a SIBLING of
+  // the panel (index.html) and not inside it: if #ir-overview-editable ever failed
+  // to render, renderOverviewEditable returned early, the button stayed live, and
+  // the literal posted a_crmOwner: '' and a_contactPhone: '' — and the backend
+  // MERGES the Overview, so pressing Save on a button that said "Saved!" would have
+  // wiped both stored values. A reader that reports only the fields actually on
+  // screen sends nothing in that case and the merge leaves the row alone.
+  const fields = collectOverviewValues();
 
   const formData = new FormData();
   formData.append('action', 'saveSection');
@@ -5895,18 +6538,23 @@ function renderBannerMeta() {
   const age  = irAge(ir);
   const late = irOverdue(ir);
   bannerPills.innerHTML =
-    `<span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>` +
-    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(ir.priority)}</span>` : '') +
+    `<span class="${getBadgeClass(ir.status)}">${escHtml(tStatus(ir.status) || 'Open')}</span>` +
+    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(tPriority(ir.priority))}</span>` : '') +
     (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
     (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
     (age ? `<span class="meta-pill${late ? ' meta-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '') +
-    (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : '') +
-    (wantProgress(ir, prog) ? progressChip(prog) : '') +
+    (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">${escHtml(t('common.overdue'))}</span>` : '') +
+    (wantProgress(ir, prog) ? progressSteps(ir, prog) : '') +
     (owner
       ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
-      : `<span class="meta-pill meta-unassigned">Unassigned</span>`);
+      : `<span class="meta-pill meta-unassigned">${escHtml(t('common.unassigned'))}</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
+  // The move offer lives in a section's close row, not in this banner, but it is
+  // built from the status this banner has just painted — so it is refreshed here.
+  // patchIRState() re-renders the banner on every status write, which is what makes
+  // the offer disappear the moment it has been taken.
+  paintBoardMoveOffer(ir.irNumber);
 }
 
 // ─── TRIAGE MODAL (status / assignee / priority / category) ──────────────────
@@ -7668,9 +8316,37 @@ function populateFieldValue(sectionId, fieldId, value, isDraft = false) {
   }
 }
 
+// The Overview's stored values, read from its own panel.
+//
+// BY ID, NOT FROM A LIST. The panel is hand-rendered, so there is no field
+// declaration to walk — and a hand-written list of ids is exactly what drifts. It
+// already had to be written twice (once in the markup, once in the Save button's
+// own payload), and a third field added to the markup but not to that literal would
+// have looked completely normal on screen while never being saved.
+//
+// The backend MERGES the Overview rather than replacing it (backend.gs, saveSection:
+// the Overview is the one section whose payload is a subset of its record), so what
+// comes back from here is added over the stored row, never written in place of it.
+// That is what keeps a_activityLog, which no panel field carries.
+function collectOverviewValues() {
+  const values = {};
+  const root = document.getElementById('ir-overview-editable');
+  if (!root) return values;
+  root.querySelectorAll('input[id], select[id], textarea[id]').forEach(el => {
+    values[el.id] = el.value;
+  });
+  return values;
+}
+
 // Collect all field values for a section from the DOM + evidenceState.
 // Shared by saveSection and the draft auto-persist. Returns { fieldValues, fileFields }.
 function collectSectionValues(sectionId) {
+  // The Overview is hand-rendered rather than built from a field list, so it has no
+  // SECTIONS entry to walk — and it used to fall straight through this function
+  // returning NOTHING, which is how the flush path above managed to post an empty
+  // payload for a panel with two filled-in boxes on screen.
+  if (sectionId === OVERVIEW_KEY) return { fieldValues: collectOverviewValues(), fileFields: [] };
+
   const section = SECTIONS[sectionId];
   const fieldValues = {};
   const fileFields = [];
@@ -7906,12 +8582,7 @@ const _autosaveSnapshots = Object.create(null);   // sectionId → JSON of last 
 const _autosaveFailed    = Object.create(null);   // sectionId → true while unsaved
 
 function scheduleAutoSave(unitId) {
-  if (!isTrackedUnit(unitId)) return;
-  // The Overview keeps its own Save button in this pass. It is a two-field ticket
-  // header rather than a section, it is gated on Triage rather than on a section
-  // grant, and auto-saving it is a separate, smaller change. Returning here leaves
-  // it exactly as it was rather than half-converted.
-  if (unitId === OVERVIEW_KEY) return;
+  if (!isTrackedUnit(unitId) || !unitAutoSaves(unitId)) return;
   clearTimeout(_autosaveTimers[unitId]);
   _autosaveTimers[unitId] = setTimeout(() => {
     delete _autosaveTimers[unitId];
@@ -7923,17 +8594,42 @@ function scheduleAutoSave(unitId) {
 // losing focus, the tab going to the background, and the page being hidden or
 // closed. It is deliberately NOT awaited anywhere — the localStorage draft is the
 // guarantee, and these are only about getting the entry to the server sooner.
+//
+// The filter is not a tidy-up. A flush must only send units that have something
+// that can send them, because a flush that "succeeds" calls clearDraft() and
+// deletes the dirty flag — so flushing a unit with no auto-save does not save it,
+// it DISCARDS it while reporting success. See unitAutoSaves below for the one this
+// used to happen to.
 function flushDirtyUnits() {
   Object.keys(_autosaveTimers).forEach(id => {
     clearTimeout(_autosaveTimers[id]);
     delete _autosaveTimers[id];
   });
-  Array.from(_dirtySections).forEach(id => autoSaveUnit(id));
+  Array.from(_dirtySections).filter(unitAutoSaves).forEach(id => autoSaveUnit(id));
+}
+
+// Which units the app auto-saves. The Overview keeps its own Save button in this
+// pass: it is a ticket header rather than a section, it is gated on Triage rather
+// than on a section grant, and converting it is a separate, smaller change.
+//
+// ONE function, read by BOTH ends, and that is the whole point. The timer and the
+// flush used to answer this question separately and they disagreed: the timer
+// refused the Overview while flushDirtyUnits auto-saved it anyway. collectSectionValues
+// then knew no fields for the Overview, so such a flush posted an empty payload and,
+// on its success, cleared the dirty flag and deleted the draft. Typing a CRM name
+// and then switching apps sent nothing, showed the saved note anyway, and left the
+// leave guard silent — the edit was gone with no warning at all.
+function unitAutoSaves(unitId) {
+  return unitId !== OVERVIEW_KEY;
 }
 
 async function autoSaveUnit(unitId) {
   const irNumber = currentIR?.irNumber;
   if (!irNumber) return;
+  // The writer is the last word on this, not the callers: every path that reaches
+  // here has already been filtered, and this is what makes that filter an
+  // optimisation rather than the only thing standing between a unit and a wrong save.
+  if (!unitAutoSaves(unitId)) return;
   // A save is already on its way. Anything typed AFTER that request was built is
   // not in it, so the timer is re-armed instead of dropped — returning outright
   // would leave the newest keystrokes unsent until the next one happened to come.
@@ -7998,13 +8694,13 @@ function setAutosaveNote(unitId, state) {
   if (!el) return;
   el.dataset.state = state;
   if (state === 'saved') {
-    el.innerHTML = iconSvg('check-circle') + '<span>Saved</span>';
+    el.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(t('common.saved')) + '</span>';
   } else if (state === 'saving') {
-    el.textContent = 'Saving…';
+    el.textContent = t('common.saving');
   } else if (state === 'failed') {
-    el.textContent = 'Not saved — press again';
+    el.textContent = t('common.notSaved');
   } else {
-    el.textContent = 'Not saved — retrying';
+    el.textContent = t('common.retrying');
   }
 }
 
@@ -8063,7 +8759,7 @@ async function closeSection(sectionId, irNumber) {
 // looks finished everywhere it is visible.
 function markSectionClosed(sectionId) {
   const btn = document.getElementById('close-' + sectionId);
-  if (btn) { btn.classList.add('is-closed'); btn.innerHTML = iconSvg('check-circle') + '<span>Section closed</span>'; }
+  if (btn) { btn.classList.add('is-closed'); btn.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(t('section.closed')) + '</span>'; }
   const tab = document.querySelector(`.tab[data-section="${sectionId}"]`);
   if (tab) tab.classList.add('is-closed');
 }
@@ -8074,7 +8770,7 @@ function markSectionReopened(sectionId) {
   if (tab) tab.classList.remove('is-closed');
 }
 function closeLabel(sectionId) {
-  return `Mark Section ${sectionId.replace('sec-', '').toUpperCase()} completed`;
+  return t('section.close', { letter: sectionId.replace('sec-', '').toUpperCase() });
 }
 // Which sections this IR has already closed, painted from app-owned state. Called
 // wherever the IR's state is applied so the button is right on open, not only
@@ -8083,6 +8779,10 @@ function paintClosedSections(irNumber) {
   const row = irState[irNumber] || {};
   const done = Array.isArray(row.done) ? row.done : [];
   SECTION_IDS.forEach(secId => { done.includes(secId) ? markSectionClosed(secId) : markSectionReopened(secId); });
+  // The two answers are painted together because they read the same row and disagree
+  // if they are ever painted apart: "this section is closed" and "the IR is standing
+  // on this section's stage" are exactly the two facts the move offer is built from.
+  paintBoardMoveOffer(irNumber);
 }
 
 
@@ -9118,6 +9818,32 @@ async function refreshEvidenceLinksAfterSave(sectionId, irNumber) {
   } catch {}
 }
 
+// ─── THE BUSY BUTTON ──────────────────────────────────────────────────────────
+// ONE way to say "this button is working", so the app cannot grow a second.
+//
+// The ring itself is CSS (`.btn.is-busy::before`, components.css) and NOT an
+// element inserted here. That matters more than it looks: an inserted spinner has
+// to be removed on every restore path, including the failure and the throw, and a
+// button restored by `textContent = 'Sign in'` would leave a stale ring behind
+// while one restored by `innerHTML` would not. A ::before cannot be orphaned and
+// cannot be doubled by two toggles racing a slow reply.
+//
+// The label is passed in rather than remembered, because every call site already
+// knew its own idle wording — it wrote it by hand before this existed — and a
+// helper that guessed would make the helper a second place the copy lives.
+function setBusy(btn, label) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.add('is-busy');
+  if (label != null) btn.textContent = label;
+}
+function setIdle(btn, label) {
+  if (!btn) return;
+  btn.disabled = false;
+  btn.classList.remove('is-busy');
+  if (label != null) btn.textContent = label;
+}
+
 // ─── TOAST ────────────────────────────────────────────────────────────────────
 // ONE message at a time, and it REPLACES rather than queues.
 //
@@ -9861,15 +10587,16 @@ function parseAuditTimestamp(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-// The two Overview fields the Triage panel hand-renders. They are real stored IR
+// The Overview fields the Triage panel hand-renders. They are real stored IR
 // data — they live under the `sec-a` key like everything else the Overview writes —
-// but they are NOT in SECTIONS, because that panel builds its own two inputs rather
+// but they are NOT in SECTIONS, because that panel builds its own inputs rather
 // than going through buildField. The lookup above therefore finds nothing for them,
 // and without this table every reader of this helper shows the raw storage key:
 // "a_crmOwner" on a history row is a leak of the schema into the UI.
 const OVERVIEW_FIELD_LABELS = {
-  a_crmOwner:     'Customer Relations Manager',
-  a_contactPhone: 'Customer Phone',
+  a_crmOwner:      'Customer Relations Manager',
+  a_contactPhone:  'Customer Phone',
+  a_siteLocation:  'Site Location',
 };
 
 // Human name for a field id, from the forms. Falls back to the raw id for a field
@@ -9892,9 +10619,11 @@ function fieldLabelFor(fieldId) {
 function fieldSectionFor(fieldId) {
   if (!fieldId) return '';
   if (FIELD_SECTION_INDEX[fieldId]) return FIELD_SECTION_INDEX[fieldId];
-  // The Overview's two hand-rendered fields are stored under OVERVIEW_KEY, and the
+  // The Overview's hand-rendered fields are stored under OVERVIEW_KEY, and the
   // Overview's own gate is Triage — the same pairing the backend's canEdit() makes,
-  // because getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY].
+  // because getEffectiveAccess folds Triage into permissions[OVERVIEW_KEY]. Membership
+  // of the label table IS the test, so a field added to that table needs no second
+  // edit here — which is the whole reason the label table is what this reads.
   if (OVERVIEW_FIELD_LABELS[fieldId]) return OVERVIEW_KEY;
   return '';
 }
@@ -9958,6 +10687,9 @@ const ICON_PATHS = {
   list:           '<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3.5 6h.01"/><path d="M3.5 12h.01"/><path d="M3.5 18h.01"/>',
   ir:             '<path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v1.5a2.5 2.5 0 0 0 0 5V16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1.5a2.5 2.5 0 0 0 0-5z"/><path d="M12 7v10" stroke-dasharray="2 2.5"/>',
   legacy:         '<path d="M3 9.5L12 4l9 5.5"/><path d="M5 10v9"/><path d="M9.5 10v9"/><path d="M14.5 10v9"/><path d="M19 10v9"/><path d="M3 19.5h18"/>',
+  // Help. A question mark in a ring — the one glyph that reads as "an answer lives
+  // here" with no label beside it, which is what a nav icon has to do.
+  help:           '<circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.9.7c0 1.7-2.5 2.1-2.5 3.6"/><path d="M12 17.2h.01"/>',
   users:          '<circle cx="9" cy="8.5" r="3.2"/><path d="M3 19.5a6 6 0 0 1 12 0"/><path d="M16.2 6.2a3.2 3.2 0 0 1 0 6.1"/><path d="M17.5 14.4A6 6 0 0 1 21 19.5"/>',
   moon:           '<path d="M20.5 14.3A8.5 8.5 0 0 1 9.7 3.5a8.5 8.5 0 1 0 10.8 10.8z"/>',
   // Password reveal. Two glyphs, not one: `eye` shows, `eye-off` hides, and the
@@ -10004,6 +10736,7 @@ function initIcons() {
     ['#nav-insights .nav-icon',              'chart'],
     ['#nav-log .nav-icon',                   'pulse'],
     ['#legacy-workbook-btn .nav-icon',       'legacy'],
+    ['#nav-faq .nav-icon',                   'help'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
     ['#list-toggle .list-toggle-icon',       'list'],

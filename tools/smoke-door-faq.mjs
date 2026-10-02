@@ -62,10 +62,18 @@ head('the customer door, in app.js');
 const urlConst = (appCode.match(/const CUSTOMER_FORM_URL\s*=\s*'([^']*)'/) || [])[1];
 ok('CUSTOMER_FORM_URL is a plain top-level constant',
   /^const CUSTOMER_FORM_URL\s*=\s*'[^']*';/m.test(appCode), urlConst);
-// Empty is the only honest default: the app cannot know someone else's form URL,
-// and a button that opens a blank frame is worse than no button at all.
-ok('and it ships EMPTY, so the entry is hidden until a URL is pasted in',
-  urlConst === '', JSON.stringify(urlConst));
+// Empty is the honest default — the app cannot know someone else's form URL — but a
+// FILLED one has to be the right KIND of URL. The editor link
+// (`/forms/d/<id>/edit`) and the pre-publish link both fail to embed, and the
+// failure is a blank frame inside a modal, which is the one outcome worse than no
+// entry at all. So: empty, or a real published share link. Nothing else.
+ok('CUSTOMER_FORM_URL is empty or a published Google Forms share link',
+  urlConst === '' ||
+  /^https:\/\/docs\.google\.com\/forms\/d\/e\/[A-Za-z0-9_-]+\/viewform$/.test(urlConst),
+  urlConst);
+ok('...and it is a SHARE link, not an editor link, which would never embed',
+  urlConst === '' || (/\/d\/e\//.test(urlConst) && !/\/(edit|copy|prefill)\b/.test(urlConst)),
+  urlConst);
 
 const wire = (appCode.match(/function wireCustomerDoor\(\)\s*\{[\s\S]*?\r?\n\}\r?\n/) || [''])[0];
 ok('wireCustomerDoor() exists and is a real function', wire.length > 700, wire.length);
@@ -186,9 +194,25 @@ ok('it runs NO script at all',
   !/<script/i.test(faqCode) && !/\son[a-z]+\s*=\s*"/i.test(faqCode),
   { script: /<script/i.test(faqCode), inline: (faqCode.match(/\son[a-z]+\s*=\s*"/gi) || []).length });
 ok('...and no javascript: link', !/javascript:/i.test(faqCode), 'js href scan');
-ok('...and it loads nothing from any third party',
-  !/(src|href)\s*=\s*"https?:\/\//i.test(faqCode),
-  (faqCode.match(/(src|href)\s*=\s*"https?:\/\/[^"]*"/gi) || []));
+// A plain <a href> is a NAVIGATION, not a load: it makes no request until someone
+// taps it, and on this page it is the point — a person who landed on the FAQ and
+// nothing else still needs a way to report a fault. What must not appear is
+// anything the page FETCHES by itself: a script, a stylesheet, an image, a frame.
+const fetched = (faqCode.match(/<(script|link|img|iframe|source|video|audio)\b[^>]*/gi) || [])
+  .flatMap(tag => (tag.match(/(?:src|href)\s*=\s*"([^"]*)"/gi) || []))
+  .filter(a => /=\s*"https?:\/\//i.test(a));
+ok('...and it FETCHES nothing from any third party',
+  fetched.length === 0, fetched);
+ok('...and the only outside link on it is the form itself, as a plain navigation',
+  (() => {
+    const ext = (faqCode.match(/href="(https?:\/\/[^"]+)"/g) || []).map(s => s.slice(6, -1));
+    return urlConst === '' ? ext.length === 0 : (ext.length === 1 && ext[0] === urlConst);
+  })(), (faqCode.match(/href="(https?:\/\/[^"]+)"/g) || []));
+ok('...and that link opens in a new tab, so the FAQ is never navigated away from',
+  urlConst === '' ||
+  new RegExp('<a href="' + urlConst.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+    '"[\\s\\S]{0,80}?target="_blank"').test(faqHtml),
+  (faqHtml.match(/<a href="https:\/\/docs\.google\.com[\s\S]{0,200}?>/) || [''])[0].slice(0, 200));
 ok('...and it carries no form, so it cannot collect anything',
   !/<form|<input|<textarea/i.test(faqCode), 'input scan');
 ok('...and its footer says so, in words',

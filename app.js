@@ -3956,7 +3956,7 @@ function showIndex() {
 // form endpoint from inside a tool holding customer data. Setting the src on open
 // means the network is touched only by someone who asked for the form, and the
 // app's own sign-in screen stays free of third-party requests.
-const CUSTOMER_FORM_URL = '';
+const CUSTOMER_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
 
 function wireCustomerDoor() {
   const open   = document.getElementById('customer-door-open');

@@ -20,13 +20,14 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v61';
+const CACHE_NAME = 'ipassbook-v62';
 const SHELL = [
   './',
   './index.html',
   // Design system, in cascade order (see index.html).
   './tokens.css',
   './palette.css',   // re-points the accent role; must load right after tokens.css
+  './theme.css',     // the light/cream/dark MODE layer; token-only
   './base.css',
   './components.css',
   './views.css',

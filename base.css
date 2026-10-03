@@ -583,7 +583,10 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   transition: background 0.12s var(--ease), color 0.12s var(--ease);
 }
 .nav-item:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); text-decoration: none; }
-.nav-item.active { background: var(--surface-gray-3); color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+/* The current nav item carries the accent. It was --surface-gray-3 (a neutral
+   step); the accent wash is what makes "you are here" legible at a glance and is
+   one of the four places the accent is allowed to appear — see desk.css's header. */
+.nav-item.active { background: var(--accent-soft); color: var(--ink-gray-9); font-weight: var(--weight-medium); }
 .nav-icon { font-size: var(--text-md); line-height: 1; flex: 0 0 auto; width: 18px; text-align: center; }
 .nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nav-count {
@@ -791,6 +794,19 @@ header {
   flex-direction: column;
 }
 
+/* The rail that stands in for the list once it is folded. Hidden everywhere by
+   default — the only rule that shows it is the collapsed-desktop one below, and
+   a phone never folds the list in the first place (renderLayout only adds
+   `list-collapsed` above lg). Without this the markup would render as a bare
+   div above the toolbar at every width. */
+#list-rail { display: none; }
+
+/* The width handles are a desktop-only nicety and have NO rule of their own below
+   lg — so without this they would be plain empty divs in normal flow, landing as
+   stray flex children of the phone bottom bar and of the IR list. Hidden here and
+   turned on inside the ≥1024px block, which is the only place they exist. */
+#sidebar-resize, #list-resize { display: none; }
+
 #detail-view {
   display: none;
   flex: 1;
@@ -980,6 +996,106 @@ header {
     flex: 0 0 var(--list-w);
     width: var(--list-w);
     border-right: 1px solid var(--outline-gray-1);
+  }
+
+  /* ── Widths the user sets, by dragging an edge ──────────
+     A handle on the sidebar's right edge and one on the list's. Neither one
+     writes a width itself: the drag sets `--sidebar-w` / `--list-w` as an inline
+     custom property on <html>, so the columns keep ONE source of width and the
+     existing `var(--sidebar-w)` rules — including the ≥1440px `--list-w` bump —
+     all follow without being told. Clearing the property is the reset, and the
+     stylesheet's own value comes straight back.
+     `position: relative` is what these two need to hang a child off an edge;
+     both are static at this width, and the phone block resets the sidebar's own
+     positioning, so nothing below lg is affected. */
+  #sidebar, #index-view { position: relative; }
+
+  #sidebar-resize, #list-resize { display: block; }
+  .pane-resize {
+    position: absolute;
+    top: 0; bottom: 0; right: 0;
+    width: 7px;
+    cursor: col-resize;
+    z-index: 1;
+    /* A hit area wider than the line it draws: the hairline appears on hover so
+       the edge is visible before it is grabbed, but the grabbable strip is
+       already there and does not need a steady hand. */
+    background: transparent;
+    transition: background 0.12s var(--ease);
+  }
+  .pane-resize:hover { background: var(--accent); opacity: 0.55; }
+  /* While dragging, the pointer keeps col-resize and nothing underneath reacts:
+     no hover states fire, no text is selected, and the two column transitions are
+     off so the drag is 1:1 with the pointer instead of easing behind it. */
+  html.pane-resizing { cursor: col-resize; user-select: none; }
+  html.pane-resizing #sidebar,
+  html.pane-resizing #index-view { transition: none; }
+  html.pane-resizing .pane-resize { background: var(--accent); opacity: 0.75; }
+  /* A handle is meaningless on a column that is not there: the rail has no width
+     to set, and the full-screen board has given its width away on purpose. */
+  html.list-collapsed #list-resize,
+  html.board-full #list-resize,
+  html.rail-collapsed #sidebar-resize { display: none; }
+
+  /* ── The board takes the workspace ──────────────────────
+     Nine columns of cards need the room, so choosing Board gives it the whole
+     row: the sidebar and the "No IR selected" placeholder step out and this pane
+     stops being a fixed 400px column. The fold control goes with them — on the
+     board there is no list to fold, and its rail would cover the board up. */
+  html.board-full #sidebar { display: none; }
+  html.board-full #index-view { flex: 1 1 auto; width: auto; }
+  html.board-full #detail-placeholder { display: none; }
+  /* Both fold controls go: the list has no left to give up, and the sidebar's own
+     toggle would sit there switching a sidebar that is not on screen. */
+  html.board-full #list-toggle,
+  html.board-full #sidebar-toggle { display: none; }
+
+  /* ── The IR list's fold: to a rail, never to nothing ──────
+     The service-desk sidebar folds to a 56px rail and keeps a way back; the IR
+     list now does the same. The old rule only let the list leave the screen
+     when a full pane had taken it, so on the index screen the toggle flipped
+     its own tooltip and did nothing else — which is why the owner read it as
+     broken. Folding gives the column's width to whatever is beside it and
+     leaves a rail that still says how many IRs there are.
+
+     Every child but the rail is hidden through `#index-view`, not by bare
+     class: `.list-toolbar` is used by the Insights and Log screens too, and
+     `#index-view.is-board .ir-board` is an id-plus-two-classes rule that a
+     plain `html.list-collapsed .ir-board` would lose to. */
+  #index-view { transition: width 0.18s var(--ease), flex-basis 0.18s var(--ease); }
+
+  html.list-collapsed #index-view {
+    flex: 0 0 var(--rail-w);
+    width: var(--rail-w);
+  }
+  html.list-collapsed #index-view .list-toolbar,
+  html.list-collapsed #index-view .ir-list,
+  html.list-collapsed #index-view .ir-board,
+  html.list-collapsed #index-view > #sync-status { display: none; }
+
+  html.list-collapsed #list-rail {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.75rem 0.3rem;
+  }
+  /* The rail's one control is the only way back, so it gets a full-size tap
+     target rather than .icon-btn's 30px. */
+  html.list-collapsed #list-rail-restore { width: 40px; height: 40px; }
+  html.list-collapsed .list-rail-count {
+    font-size: var(--text-sm);
+    font-weight: var(--weight-semibold);
+    color: var(--ink-gray-8);
+    font-variant-numeric: tabular-nums;
+  }
+  html.list-collapsed .list-rail-label {
+    font-size: var(--text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-gray-5);
   }
 
   #detail-view { display: none; }

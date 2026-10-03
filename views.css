@@ -504,10 +504,13 @@
   color: var(--ink-gray-9);
   margin-bottom: 1rem;
   padding-bottom: 0.6rem;
-  border-bottom: 1px solid var(--outline-gray-1);
+  border-bottom: 1px solid var(--accent-soft-line);
   letter-spacing: var(--tracking-lg);
 }
 
+/* A section heading band. The wash and the 3px edge are the accent, and the text
+   stays an ink step: this is one of the four places the accent is allowed, and it
+   is deliberately a BAND rather than coloured words, so a long form stays calm. */
 .section-divider {
   grid-column: 1 / -1;
   margin: 1.2rem 0 0.7rem;
@@ -517,8 +520,9 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--ink-gray-7);
-  background: var(--surface-gray-2);
-  border: 1px solid var(--outline-gray-1);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-soft-line);
+  border-left: 3px solid var(--accent-bar);
   border-radius: var(--radius-3);
 }
 

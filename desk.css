@@ -27,15 +27,23 @@
    wins by cascade order alone. This file therefore OVERRIDES it wherever the two
    disagree and leaves it governing everything not listed above.
 
-   WHY SO LITTLE OF THIS IS COLOUR
+   WHY SO LITTLE OF THIS IS COLOUR — AND WHAT CHANGED
    The app already sits on Frappe's design tokens, which are the same grey family
    ERPNext Desk uses, and its controls are already Desk-shaped: --radius-4 (8px)
    is Frappe's own component radius, .form-input is a 32px grey-100 field with a
    grey-200 hairline, and .btn's default is the dark neutral Desk uses for its
    primary action. So "make it look like Desk" is not a repaint. It is three
    moves: a flat panel with a hairline border and a 1px shadow instead of a
-   lifted glass card, a page ground behind it, and NEUTRAL active states instead
-   of accent-tinted ones. Everything else here is a legibility fix.
+   lifted glass card, a page ground behind it, and — originally — NEUTRAL active
+   states instead of accent-tinted ones.
+
+   That last move bought less than it cost. Applied app-wide on top of a neutral
+   ramp at ZERO chroma (theme.css corrects the luminance half of that), it left
+   the owner reading the app as "dull/plain/ just white or black". So the active
+   states are accent-tinted again as of 2026-10-03, and the accent appears only
+   where it MEANS something — the active chip, the selected row, the current nav
+   item, a section divider. Still nowhere else: not body text, not the pills
+   (whose colours are measured, below), not the danger colour, not behind a page.
 
    THE PART THAT IS NOT A MATTER OF TASTE
    Measured against the real oklch values in tokens.css, on the pill's own
@@ -204,6 +212,12 @@
    changed character at a breakpoint would be two lists.
    ══════════════════════════════════════════════════════════════ */
 
+/* The page ground. Every OTHER root in this file sets one; the IR list was the
+   single screen where the page and the rows were both --surface-base, so a row
+   could be told from the page only by the hairline between them — the same
+   omission, in the same place, as the 1.00:1 elevation problem in light mode. */
+#index-view { background: var(--desk-ground); }
+
 /* The toolbar stops being a gradient wash. This is the polish block's
    #ir-banner/.list-toolbar rule, undone for the list only. */
 #index-view .list-toolbar { background: var(--desk-panel); }
@@ -211,10 +225,12 @@
 #index-view #sync-status { color: var(--desk-muted); }
 #index-view #sync-status .sync-meta { color: var(--desk-muted); }
 
-/* Filters: Desk's chips are NEUTRAL. The accent-tinted active chip is the
-   polish block's most visible single rule, and it is the one the owner will
-   notice either way — the palette then says "you are here" nowhere on this
-   screen. That is the trade Desk makes, and it is the point of the prototype.
+/* Filters: Desk's chips are a rounded rect, and the ACTIVE one is accent-tinted.
+   That reverses this file's original call. Desk was adopted with neutral active
+   states deliberately, and on 2026-10-03 the owner said what that cost — the app
+   read as "dull/plain/ just white or black", with the palette announcing "you are
+   here" nowhere on this screen. A wash of --accent-soft under the existing ink is
+   the smallest change that puts the accent back without making the bar loud.
 
    The radius is Frappe's 8px component radius, not the full-round one the
    badges use: Desk draws an indicator PILL round and a filter chip as a rounded
@@ -227,7 +243,7 @@
   font-size: var(--text-xs);
 }
 #index-view .segment:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
-#index-view .segment.active { background: var(--surface-gray-3); color: var(--ink-gray-9); }
+#index-view .segment.active { background: var(--accent-soft); color: var(--ink-gray-9); }
 #index-view .segment-count { color: var(--desk-muted); }
 #index-view .segment.active .segment-count { color: var(--ink-gray-7); }
 
@@ -260,9 +276,10 @@
 }
 
 /* Selected row: the accent bar stays — it is a "you are here" state and the
-   four palettes exist for exactly that — but the fill is neutral, as Desk's
-   selected list row is. */
-#index-view .ir-card.is-selected { background: var(--surface-gray-2); }
+   four palettes exist for exactly that — and the fill is now the accent wash, to
+   match the chips above it. It was neutral; see the note on `.segment.active`.
+   The `:hover` rule above it cannot win here: equal specificity, later wins. */
+#index-view .ir-card.is-selected { background: var(--accent-soft); }
 
 /* Row text. The title is the identifier and already reads at grey-900, so it
    needs no rule of its own — only everything secondary moves to the measured
@@ -340,6 +357,13 @@
   padding: 0.3rem 0.55rem;
   border: 1px solid var(--desk-row-line);
   background: var(--desk-panel);
+  /* The tiles take up the slack on the row they land on, so a strip never ends
+     in a rag of dead space — the owner's "category tabs left-aligned". Basis is
+     `auto`, not `0`, so a tile is never narrower than its own label; the cap is
+     only reached by a LONE tile on a last row, which would otherwise be drawn
+     as a full-width slab. A full row always ends flush with the two above it. */
+  flex: 1 1 auto;
+  max-width: 12rem;
 }
 #index-view .segment:hover {
   background: var(--surface-gray-1);

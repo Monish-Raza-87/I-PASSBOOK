@@ -787,6 +787,49 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .nudge-suggest-email { font-size: var(--text-xs); color: var(--ink-gray-5); }
 .nudge-suggest-empty { padding: 7px 9px; font-size: var(--text-xs); color: var(--ink-gray-5); }
 
+/* ── A type-to-search picker (Allot CAPS → Assigned to) ─────────────────────
+   The same shape as .nudge-suggest above, which is the app's one existing
+   type-ahead — deliberately, so the two suggest lists cannot drift apart. The
+   difference is placement: the nudge list sits in normal flow inside a composer,
+   this one FLOATS over the rows below it, because it opens inside a form where
+   pushing the rest of the fields down on every keystroke would make the modal
+   jump. `.combo` is the positioning context; hidden by default so it is never a
+   bare block on a page that somehow renders it without scripting. */
+.combo { position: relative; }
+.combo-list {
+  display: none;
+  position: absolute;
+  left: 0; right: 0; top: calc(100% + 4px);
+  z-index: 6;
+  max-height: 15rem;
+  overflow: auto;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-4);
+  background: var(--surface-elevation-2);
+  box-shadow: var(--elevation-lg);
+}
+.combo-list[data-open="1"] { display: block; }
+.combo-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-gray-8);
+  font-family: inherit;
+  text-align: left;
+}
+.combo-item + .combo-item { border-top: 1px solid var(--outline-gray-1); }
+.combo-item:hover { background: var(--surface-gray-2); }
+.combo-item.combo-item-active,
+.combo-item.combo-item-active:hover { background: var(--surface-gray-3); }
+.combo-item-name { font-size: var(--text-sm); }
+.combo-item-mail { font-size: var(--text-xs); color: var(--ink-gray-5); }
+.combo-empty { padding: 8px 10px; font-size: var(--text-xs); color: var(--ink-gray-5); }
+
 .nudge-edit-wrap { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
 .nudge-edit-input {
   width: 100%;

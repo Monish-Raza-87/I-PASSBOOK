@@ -26,8 +26,22 @@ const APP_JS = new URL('../app.js', import.meta.url);
 function el() {
   const classes = new Set();
   const attrs = new Map();
+  // `style` is real for the same reason classList is, plus one of its own: the
+  // app writes custom properties onto <html> (`--list-w`, `--sidebar-w`) and, as
+  // an inline declaration, that is the ONE thing that outranks the stylesheet's
+  // own value — so a stub that only held plain properties could not tell a
+  // working drag from a broken one. These are the three members the real
+  // CSSStyleDeclaration is used for here, and only those.
+  const listeners = new Map();
+  const props = new Map();
+  const style = {
+    setProperty(name, value) { props.set(String(name), String(value)); },
+    getPropertyValue(name) { return props.has(String(name)) ? props.get(String(name)) : ''; },
+    removeProperty(name) { const had = props.has(String(name)); props.delete(String(name)); return had ? '' : ''; },
+    get _props() { return props; },
+  };
   return {
-    style: {}, dataset: {}, value: '', textContent: '', innerHTML: '',
+    style, dataset: {}, value: '', textContent: '', innerHTML: '',
     classList: {
       add(...names) { names.forEach(n => classes.add(n)); },
       remove(...names) { names.forEach(n => classes.delete(n)); },
@@ -40,7 +54,27 @@ function el() {
       get length() { return classes.size; },
     },
     _classes: classes,
-    addEventListener() {}, removeEventListener() {}, appendChild() {}, remove() {},
+    // Listeners are RECORDED, not swallowed, and `dispatch` fires them. Swallowing
+    // them would make every "this control does X" assertion vacuous: the handler
+    // could be missing entirely and the test would still pass. `dispatch(type, ev)`
+    // is the harness's own driver (the DOM has `dispatchEvent`, which needs a real
+    // Event object); the shape it passes is what a handler actually reads.
+    addEventListener(type, fn) {
+      if (typeof fn !== 'function') return;
+      if (!listeners.has(type)) listeners.set(type, []);
+      listeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const a = listeners.get(type);
+      if (a) listeners.set(type, a.filter(f => f !== fn));
+    },
+    dispatch(type, ev) {
+      const base = { type, preventDefault() {}, stopPropagation() {}, button: 0, pointerId: 1, clientX: 0, clientY: 0 };
+      (listeners.get(type) || []).slice().forEach(f => f(Object.assign({}, base, ev)));
+      return (listeners.get(type) || []).length;
+    },
+    _listeners: listeners,
+    appendChild() {}, remove() {},
     querySelector() { return null; }, querySelectorAll() { return []; },
     focus() {}, blur() {},
     setAttribute(n, v) { attrs.set(n, String(v)); },

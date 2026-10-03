@@ -24,5 +24,11 @@ node_modules/
 # tools/gen-tokens.mjs reads, so only this build output is ignored.
 tools/.cache/polish-preview.html
 
+# Screenshots tools/render-themes.mjs writes. They are EVIDENCE of a render, not
+# an input to one: every shot is regenerated from the current source in a few
+# seconds, and a checked-in PNG of a page that has since changed is worse than
+# none, because it looks like the app.
+tools/.cache/theme-shots/
+
 # Build artifacts
 dist/

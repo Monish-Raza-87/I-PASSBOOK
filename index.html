@@ -14,9 +14,14 @@
   <!-- Design system, in cascade order. Plain CSS, no build step.
        palette.css must sit directly after tokens.css: it re-points the accent
        role onto one of the colour families tokens.css defines, and every rule
-       in base/components/views that uses var(--accent) resolves against it. -->
+       in base/components/views that uses var(--accent) resolves against it.
+       theme.css follows palette.css and carries the three MODES — light, cream
+       and dark — as token overrides. It is token-only, so it changes no
+       component rule, and reverting it is deleting the file. Its header records
+       the measured reason light and dark were re-tuned. -->
   <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="palette.css" />
+  <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="base.css" />
   <link rel="stylesheet" href="components.css" />
   <link rel="stylesheet" href="views.css" />
@@ -43,10 +48,25 @@
        stale localStorage value can never leave the accent undefined. -->
   <script>
     (function () {
+      // Three modes, not two. Cream is an explicit choice exactly like light and
+      // dark; only 'system' — or a stale value — consults the operating system.
+      // This list must stay in step with THEME_VALUES in app.js: a value known to
+      // one and not the other is a bug, and smoke-theme.mjs asserts they agree.
       try {
+        var THEMES = ['light', 'cream', 'dark'];
+        var CHROME = { light: '#fdfdfd', cream: '#fdf9ef', dark: '#1a1713' };
         var p = localStorage.getItem('theme') || 'system';
-        var dark = p === 'dark' || (p !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
-        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        var t = THEMES.indexOf(p) >= 0 ? p
+              : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        if (t !== 'light') document.documentElement.setAttribute('data-theme', t);
+        // The two media-keyed theme-color metas above cover the no-JS first paint.
+        // This one is appended LAST, so it outranks them and is the only way an
+        // explicit cream or dark choice reaches the browser chrome on a device
+        // whose operating system is set the other way.
+        var m = document.createElement('meta');
+        m.setAttribute('name', 'theme-color');
+        m.setAttribute('content', CHROME[t] || CHROME.light);
+        document.head.appendChild(m);
       } catch (e) { /* storage blocked — fall back to light */ }
       try {
         var PALETTES = ['blue', 'violet', 'teal', 'graphite'];
@@ -361,6 +381,15 @@
            meant scrolling to the bottom of the sidebar. The .sidebar-foot rules
            went with it. -->
       <p class="app-credit sidebar-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
+
+      <!-- The drag handle that sets this column's width. It is the LAST child so
+           it can sit on the column's right edge without joining the nav's flow,
+           and it is `display: none` below lg — on a phone the sidebar is the
+           bottom bar and there is nothing to drag. aria-hidden plus a tabindex
+           would promise a keyboard affordance a 6px strip cannot honour, so this
+           is a pointer-only nicety and every width it can reach is also reachable
+           by simply not using it. Double-click restores the built-in width. -->
+      <div class="pane-resize" id="sidebar-resize" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
     </nav>
 
     <!-- ====== WORKSPACE ====== -->
@@ -414,6 +443,27 @@
 
         <!-- ====== MASTER INDEX VIEW ====== -->
         <div id="index-view">
+          <!-- The RAIL. What #index-view becomes when it is folded on a desktop: a
+               56px column that keeps the one fact the list was on screen for — how
+               many IRs are here — and the way back to it.
+
+               Before this existed the fold was governed by a rule that only ever
+               let the list hide while some OTHER pane owned the screen, so on the
+               index screen the button flipped its own tooltip and did nothing,
+               which reads as broken. Folding now gives the list's width to the
+               board or the open ticket and never leaves an empty screen behind.
+
+               Its display is CSS-owned (html.list-collapsed), deliberately NOT
+               inline: a pane's inline display has exactly one writer, and that is
+               renderLayout(). The glyph is an empty span for the same reason every
+               other glyph is — initIcons() fills it from the one icon source. -->
+          <div id="list-rail">
+            <button type="button" class="icon-btn" id="list-rail-restore" title="Show the IR list" aria-controls="index-view">
+              <span class="list-rail-icon" aria-hidden="true"></span>
+            </button>
+            <span class="list-rail-count" id="list-rail-count"></span>
+            <span class="list-rail-label" data-i18n="list.title">IRs</span>
+          </div>
           <div class="list-toolbar">
             <div class="list-toolbar-top">
               <span class="list-title" data-i18n="list.title">IRs</span>
@@ -446,6 +496,13 @@
                so the switch never has to touch two elements to stay consistent.
                tabindex makes the sideways scroll reachable from a keyboard. -->
           <div id="ir-board" class="ir-board" role="region" aria-label="IR board" tabindex="0" data-i18n-aria="board.label"></div>
+
+          <!-- The IR list's own width handle, the twin of the sidebar's. It rides
+               #index-view's right edge, which is the SAME edge the list's fold
+               gives away — so the two controls never fight: when the list is a
+               rail, this one is hidden with the rest of the column. Desktop only;
+               see #sidebar-resize for why it carries no keyboard affordance. -->
+          <div class="pane-resize" id="list-resize" title="Drag to resize · double-click to reset" aria-hidden="true"></div>
         </div>
 
         <!-- ====== PASSBOOK DETAIL VIEW ====== -->
@@ -459,7 +516,7 @@
               <div class="banner-pills" id="ir-banner-pills"></div>
             </div>
             <div class="banner-actions">
-              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Triage</button>
+              <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Allot CAPS</button>
               <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
               <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>
               <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy Record</button>

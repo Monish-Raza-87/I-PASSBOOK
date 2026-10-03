@@ -59,6 +59,7 @@ const SERVED = [
   'palette.css',
   'plan.html',
   'sw.js',
+  'theme.css',
   'tokens.css',
   'views.css',
   'vendor/pdf-lib.min.js',

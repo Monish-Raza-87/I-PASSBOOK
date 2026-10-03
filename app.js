@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v61';
+const APP_VERSION = 'v62';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1241,6 +1241,39 @@ const REPAIR_SUBCATEGORIES =
   ['GPS', 'TRIPOD/BIPOD', 'TOPSHELL', 'CAMERA/LENS', 'BATTERY', 'CHARGER', 'RC', 'AIRFRAME', 'OTHERS'];
 const REPAIR_OTHERS = 'OTHERS';
 
+// ─── One house style for the stored keys ─────────────────────────────────────
+// The category and sub-category keys are ALL CAPS because they ARE keys: they are
+// written by the customer Google Form and compared exactly, so the keys are data
+// and are never renamed here. Only what a READER sees is decided in this block.
+// The owner saw "All Categories" sitting directly beside "GENERAL MAINTENANCE" —
+// two styles inside one row — so every label now comes from one place.
+//
+// The maps are explicit rather than a "lower-case it, then capitalise the first
+// letter" rule, because that rule eats acronyms: GPS and RC are upper case on
+// purpose. An unknown value — a legacy row, a hand-typed category — passes
+// through untouched rather than being guessed at, and every FILTER still compares
+// the raw key, so a label can never change what a tab finds.
+const CATEGORY_LABELS = {
+  'CRASH':               'Crash',
+  'GENERAL MAINTENANCE': 'General maintenance',
+  'REMOTE SUPPORT':      'Remote support',
+  'REPAIR':              'Repair',
+};
+const SUBCATEGORY_LABELS = {
+  'GPS': 'GPS', 'TRIPOD/BIPOD': 'Tripod/bipod', 'TOPSHELL': 'Topshell',
+  'CAMERA/LENS': 'Camera/lens', 'BATTERY': 'Battery', 'CHARGER': 'Charger',
+  'RC': 'RC', 'AIRFRAME': 'Airframe', 'OTHERS': 'Others',
+};
+// Case and inner whitespace are flattened before the lookup, so a legacy
+// "general maintenance" or "General  Maintenance" still finds its label.
+const labelFrom = (map, value) => {
+  if (!value) return '';
+  const key = String(value).toUpperCase().replace(/\s+/g, ' ').trim();
+  return map[key] || String(value);
+};
+const categoryLabel    = v => labelFrom(CATEGORY_LABELS, v);
+const subCategoryLabel = v => labelFrom(SUBCATEGORY_LABELS, v);
+
 // Triage priorities. `priority` is read from the Sheet's "Priority" column when
 // one exists (fetchIRsFromSheet) and from here when the app sets it.
 const TICKET_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
@@ -1302,6 +1335,7 @@ let iqcResultOptions = [...IQC_RESULT_OPTIONS_DEFAULTS];
 const splash      = document.getElementById('splash-screen');
 const authCont    = document.getElementById('auth-container');
 const appCont     = document.getElementById('app-container');
+const sidebarEl   = document.getElementById('sidebar');
 const indexView   = document.getElementById('index-view');
 const detailView  = document.getElementById('detail-view');
 const insightsView = document.getElementById('insights-view');
@@ -1335,6 +1369,11 @@ const listViewSwitch = document.getElementById('list-view-switch');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
 const listToggle    = document.getElementById('list-toggle');
+const listRailEl    = document.getElementById('list-rail');
+const listRailCountEl = document.getElementById('list-rail-count');
+const listRailRestore = document.getElementById('list-rail-restore');
+const sidebarResize = document.getElementById('sidebar-resize');
+const listResize    = document.getElementById('list-resize');
 
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
@@ -2642,21 +2681,38 @@ function wireAuthForm() {
 // ─── THEME ───────────────────────────────────────────────────────────────────
 // Preference is 'light' | 'dark' | 'system' under localStorage 'theme'.
 // 'system' is the default and honours the OS setting live; the Appearance menu
-// switches to an explicit light/dark. The <head> script applies the stored
-// value before first paint so there is no flash.
+// switches to an explicit light/cream/dark. The <head> script applies the stored
+// value before first paint so there is no flash, and it carries the same three
+// names — a value known to one and not the other is a bug, which is why
+// smoke-theme.mjs asserts the two lists agree.
 const THEME_KEY = 'theme';
+
+// The three modes, in the order the Appearance menu shows them. `system` is
+// deliberately NOT in this list: it is a rule, not a mode, and resolvedTheme()
+// below is what turns it into one.
+const THEME_VALUES = ['light', 'cream', 'dark'];
 
 function storedTheme() {
   try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; }
 }
 function prefersDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
-function isDarkTheme() {
+
+// Resolves the stored PREFERENCE to the mode actually painted. 'system' is the
+// only value that consults the OS, and it resolves to light or dark only: cream
+// is taste, not an operating-system condition, so it is never chosen for you.
+// An unknown or stale stored value falls back to the OS for the same reason.
+function resolvedTheme() {
   const p = storedTheme();
-  return p === 'dark' || (p !== 'light' && prefersDark());
+  if (THEME_VALUES.indexOf(p) >= 0) return p;
+  return prefersDark() ? 'dark' : 'light';
 }
+// Kept as a boolean for its one non-CSS caller — the canvas painter, which cannot
+// read a CSS variable and so has to choose its own hex values.
+function isDarkTheme() { return resolvedTheme() === 'dark'; }
 
 const THEME_CHOICES = [
   { value: 'light',  label: 'Light' },
+  { value: 'cream',  label: 'Cream' },
   { value: 'dark',   label: 'Dark' },
   { value: 'system', label: 'System' },
 ];
@@ -2667,8 +2723,13 @@ function setTheme(value) {
   syncAppearanceMenu();
 }
 
+// The browser-chrome colour, matched to theme.css. Appended last so it outranks
+// the two media-keyed metas in <head>; that is what lets an explicit cream or
+// dark choice reach the browser chrome on a device whose OS is set the other way.
+const THEME_CHROME = { light: '#fdfdfd', cream: '#fdf9ef', dark: '#1a1713' };
+
 function applyTheme(animate) {
-  const dark = isDarkTheme();
+  const t = resolvedTheme();
   const root = document.documentElement;
   if (animate) {
     // Suppress transitions for the two frames around the swap, otherwise every
@@ -2676,8 +2737,16 @@ function applyTheme(animate) {
     root.classList.add('no-transition');
     requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('no-transition')));
   }
-  if (dark) root.setAttribute('data-theme', 'dark');
-  else root.removeAttribute('data-theme');
+  // Light is the ABSENCE of the attribute, because :root IS the light palette.
+  // Cream and dark are stamped. That is also why the pre-paint script mirrors
+  // this rather than setting a value in every case.
+  if (t === 'light') root.removeAttribute('data-theme');
+  else root.setAttribute('data-theme', t);
+  paintThemeChrome(t);
+}
+function paintThemeChrome(t) {
+  const meta = document.querySelector('meta[name="theme-color"]:not([media])');
+  if (meta) meta.setAttribute('content', THEME_CHROME[t] || THEME_CHROME.light);
 }
 
 // ─── PALETTE ─────────────────────────────────────────────────────────────────
@@ -2770,9 +2839,9 @@ function loadPaletteConfig() {
 }
 
 // ─── APPEARANCE MENU ─────────────────────────────────────────────────────────
-// The light/dark/palette controls live in the user menu (top right). They used to
-// be a single nav button at the bottom of the sidebar, which meant scrolling a
-// whole column to reach a control that belongs to the account, not to the IR list.
+// The light/cream/dark and palette controls live in the user menu (top right). They
+// used to be a single nav button at the bottom of the sidebar, which meant scrolling
+// a whole column to reach a control that belongs to the account, not to the IR list.
 //
 // Rendered as two labelled groups of rows, never icon-only: a swatch plus a word
 // for each palette, and a word for each theme. Selection is carried by
@@ -2780,7 +2849,11 @@ function loadPaletteConfig() {
 function syncAppearanceMenu() {
   const menu = document.getElementById('user-menu');
   if (!menu) return;
-  const theme = storedTheme();
+  // A stored value that is neither one of the modes nor 'system' is stale. Showing
+  // it as "System" is the honest reading, because falling back to the OS is exactly
+  // what resolvedTheme() does with it — otherwise no row would be ticked at all.
+  const raw = storedTheme();
+  const theme = (THEME_VALUES.indexOf(raw) >= 0 || raw === 'system') ? raw : 'system';
   menu.querySelectorAll('.appearance-row').forEach(row => {
     const [group, value] = row.dataset.opt.split(':');
     const on = group === 'theme' ? value === theme : value === resolvePalette();
@@ -2835,6 +2908,86 @@ function setFlag(key, on) {
   try { on ? localStorage.setItem(key, '1') : localStorage.removeItem(key); } catch { /* non-fatal */ }
 }
 
+// ─── WIDTHS THE USER DRAGS ───────────────────────────────────────────────────
+// The two columns on a desktop are the only fixed widths in the app a person has
+// a real opinion about, so each gets a handle on its right edge. A drag does NOT
+// write a width anywhere of its own: it sets `--sidebar-w` / `--list-w` as an
+// inline custom property on <html>, which is the one thing that outranks the
+// stylesheet — including the ≥1440px `--list-w` bump — so every existing rule
+// that reads the token follows without being told, and clearing the property is
+// the whole of the reset.
+//
+// Both numbers are clamped on READ as well as on drag, because the window can be
+// narrower than it was when the width was saved, and a 680px list on a 1024px
+// screen would starve the pane beside it.
+const SIDEBAR_W_KEY = 'sidebar-w';
+const LIST_W_KEY    = 'list-w';
+const WIDTH_LIMITS  = { 'sidebar-w': [184, 360], 'list-w': [280, 680] };
+
+// A column may never take more than half the window, whatever was saved. This is
+// the guard that keeps a widened list from squeezing the open ticket to nothing.
+function clampWidth(px, key) {
+  const [min, max] = WIDTH_LIMITS[key] || [0, Infinity];
+  const half = Math.round((window.innerWidth || 1024) / 2);
+  return Math.max(min, Math.min(max, half, Math.round(px)));
+}
+function storedWidth(key) {
+  let n = 0;
+  try { n = parseInt(localStorage.getItem(key), 10); } catch { return 0; }
+  return Number.isFinite(n) && n > 0 ? clampWidth(n, key) : 0;
+}
+function applyStoredWidths() {
+  [[SIDEBAR_W_KEY, '--sidebar-w'], [LIST_W_KEY, '--list-w']].forEach(([key, cssVar]) => {
+    const px = storedWidth(key);
+    if (px) document.documentElement.style.setProperty(cssVar, px + 'px');
+  });
+}
+
+// One wiring for both handles. Pointer events (not mouse events) so the drag works
+// on a touchscreen laptop and on a stylus, and `setPointerCapture` so the drag
+// keeps tracking after the pointer leaves the 7px strip — without it the column
+// stops following the moment the pointer crosses onto the pane.
+function wirePaneResize(handle, cssVar, key, pane) {
+  if (!handle || !pane) return;
+  let startX = 0, startW = 0, last = 0, dragging = false;
+
+  const onPointerDown = e => {
+    if (e.button !== undefined && e.button !== 0) return;
+    dragging = true;
+    startX = e.clientX;
+    startW = last = clampWidth(pane.getBoundingClientRect().width, key);
+    document.documentElement.classList.add('pane-resizing');
+    // Capture is what keeps the drag alive once the pointer leaves the 7px strip,
+    // and it is the one call here that can legitimately throw — a pointer that is
+    // no longer active (a synthetic event, or a drag whose pointerdown was
+    // cancelled) makes setPointerCapture raise InvalidStateError. A drag that
+    // cannot capture is still a drag, so the class and the drag continue either way.
+    if (handle.setPointerCapture) { try { handle.setPointerCapture(e.pointerId); } catch { /* not capturable */ } }
+    e.preventDefault();
+  };
+  const onPointerMove = e => {
+    if (!dragging) return;
+    last = clampWidth(startW + (e.clientX - startX), key);
+    document.documentElement.style.setProperty(cssVar, last + 'px');
+  };
+  const onPointerUp = e => {
+    if (!dragging) return;
+    dragging = false;
+    document.documentElement.classList.remove('pane-resizing');
+    if (handle.releasePointerCapture) { try { handle.releasePointerCapture(e.pointerId); } catch { /* already released */ } }
+    try { localStorage.setItem(key, String(last)); } catch { /* non-fatal */ }
+  };
+  handle.addEventListener('pointerdown', onPointerDown);
+  handle.addEventListener('pointermove', onPointerMove);
+  handle.addEventListener('pointerup', onPointerUp);
+  handle.addEventListener('pointercancel', onPointerUp);
+  // The way back to the built-in width, and the only undo the handle advertises.
+  handle.addEventListener('dblclick', () => {
+    document.documentElement.style.removeProperty(cssVar);
+    try { localStorage.removeItem(key); } catch { /* non-fatal */ }
+  });
+}
+
 // ─── COLLAPSIBLE CHROME ──────────────────────────────────────────────────────
 // The sidebar fold is a class on <html> and the elements it targets are static, so
 // there is nothing per-IR to re-apply — it is set once from showApp(). A reload
@@ -2867,9 +3020,10 @@ function toggleList() { setFlag(LIST_KEY, !storedFlag(LIST_KEY)); applyChromeSta
 //
 // The list fold is decided HERE rather than by a stylesheet rule, because an
 // inline `display` beats any rule and this function is the one place allowed to
-// write it. Folding the list must never strand the user on an empty index screen,
-// which is why the fold only ever applies while a pane that OWNS the screen is
-// open — see `full` below.
+// write it. Folding the list must never strand the user on an empty index screen:
+// on desktop the fold narrows the pane to a rail that still carries the count, and
+// on a phone the fold only ever happens while a pane that OWNS the screen is open,
+// so there is always something to go back to — see `full` and `listHidden` below.
 //
 // `detailView.style.display` is only ever WRITTEN here, never read back. The
 // sibling-pane arrangement is still required, for a different reason: tools/
@@ -2902,7 +3056,26 @@ function renderLayout() {
   // button below: that is what stops the fold stranding anyone, which is the
   // worry the old comment here was trying to answer.
   const full       = detail || insights || log;
-  const listHidden = full && (!desktop || storedFlag(LIST_KEY));
+  // The fold, and the two different things it means.
+  //
+  // DESKTOP: the list is a COLUMN beside the other panes, so folding it NARROWS
+  // it to the rail rather than removing it. The count stays on screen, the width
+  // goes to the board or the open ticket, and the index screen is never emptied —
+  // which is the rule this fold has always been judged by. It is a class on <html>
+  // (html.list-collapsed) and not an inline display, because a pane's inline
+  // display has exactly ONE writer and that writer is this function.
+  //
+  // PHONE: the list IS a full screen, so an open pane has to replace it rather
+  // than sit beside it. This is the only place the fold removes anything, and the
+  // back button below is what stops it stranding anyone.
+  const listHidden = full && !desktop;
+  // The board owns the whole row, so there is nothing left to fold into a rail —
+  // and folding it there WOULD strand the user, because the rail would replace the
+  // board and the detail pane behind it has no ticket in it. So on the board the
+  // fold is suppressed (and its control is hidden); the preference is untouched
+  // and comes straight back when List is chosen again.
+  const boardFull  = desktop && listMode === 'board';
+  document.documentElement.classList.toggle('list-collapsed', desktop && !boardFull && storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
   // The Insights dashboard is a SIBLING pane, not a panel inside the detail one:
@@ -3149,6 +3322,15 @@ function showApp() {
   if (navAccess) navAccess.addEventListener('click', openAccessModal);
   if (railToggle) railToggle.addEventListener('click', toggleRail);
   if (listToggle) listToggle.addEventListener('click', toggleList);
+  // The rail's own way back. Wired to the same toggle rather than to setFlag, so
+  // the two controls cannot disagree about whether the list is folded.
+  if (listRailRestore) listRailRestore.addEventListener('click', toggleList);
+  // The stored widths go on before the resize handles are wired: the handles read
+  // the column's own measured width when a drag starts, so they must be looking at
+  // the width the device actually remembered, not the stylesheet default.
+  applyStoredWidths();
+  wirePaneResize(sidebarResize, '--sidebar-w', SIDEBAR_W_KEY, sidebarEl);
+  wirePaneResize(listResize, '--list-w', LIST_W_KEY, indexView);
 
   startAppData();
 
@@ -3199,7 +3381,7 @@ const SECTION_SHORT = {
 // future `Object.keys(SECTION_SHORT)`/`SECTION_LABELS` walk can mistake it for a
 // section. It shares the grant grid's rendering, not its identity.
 const TRIAGE_LABEL = 'TR';
-const TRIAGE_SHORT = 'Triage (header, status & Overview)';
+const TRIAGE_SHORT = 'Allot CAPS (header, status & Overview)';
 
 let accessCache = { users: [], departments: [], apiVersion: 0 };
 let accessTab = 'people';
@@ -4347,7 +4529,7 @@ function renderInsights() {
       ${filterRow('ins-status', 'Status', statusOpts)}
       ${filterRow('ins-category', 'Category',
         insightsOpt(INSIGHTS_ALL, f.category, 'All categories') +
-        IR_CATEGORIES.map(k => insightsOpt(k, f.category)).join('') +
+        IR_CATEGORIES.map(k => insightsOpt(k, f.category, categoryLabel(k))).join('') +
         (sum.uncategorised || f.category === UNCATEGORISED
           ? insightsOpt(UNCATEGORISED, f.category, 'No category') : ''))}
       ${filterRow('ins-customer', 'Customer',
@@ -4403,7 +4585,7 @@ function renderInsights() {
       ${IR_CATEGORIES.map(k => `
         <button type="button" class="insights-card${f.category === k ? ' active' : ''}" data-cat="${escHtml(k)}">
           <span class="insights-card-n">${sum.categories[k]}</span>
-          <span class="insights-card-label">${escHtml(k)}</span>
+          <span class="insights-card-label">${escHtml(categoryLabel(k))}</span>
           <!-- The bar is scaled to the LARGEST category, not to the total: these
                four are alternatives, so the question a reader has is which of them
                dominates, and a share-of-total bar would leave all four short and
@@ -4429,7 +4611,7 @@ function renderInsights() {
         <div class="insights-subcats">
           ${REPAIR_SUBCATEGORIES.map(k => `
             <span class="insights-subcat${k === REPAIR_OTHERS ? ' is-others' : ''}">
-              ${escHtml(k)}<span class="insights-subcat-n">${sum.subcategories[k]}</span>
+              ${escHtml(subCategoryLabel(k))}<span class="insights-subcat-n">${sum.subcategories[k]}</span>
             </span>`).join('')}
           ${sum.repairUnset ? `<span class="insights-subcat is-muted">Not set<span class="insights-subcat-n">${sum.repairUnset}</span></span>` : ''}
         </div>
@@ -5462,9 +5644,10 @@ function renderIRList(records) {
     const hoverBits = [
       owner ? `Assigned to ${escHtml(owner)}` : '',
       isLegacy ? 'Legacy record' : '',
+      ir.priority ? escHtml(priorityLabel(ir.priority)) : '',
       ir.droneId ? escHtml(ir.droneId) : '',
-      ir.category ? escHtml(ir.category) : '',
-      ir.subCategory ? escHtml(ir.subCategory) : '',
+      ir.category ? escHtml(categoryLabel(ir.category)) : '',
+      ir.subCategory ? escHtml(subCategoryLabel(ir.subCategory)) : '',
       ir.dateRaised ? escHtml(ir.dateRaised) : '',
       age ? escHtml(ageLabel(age)) + (late ? ' · overdue' : '') : '',
     ].filter(Boolean).join(' · ');
@@ -5477,8 +5660,8 @@ function renderIRList(records) {
         </div>
         <div class="ir-meta">
           <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
-          ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
-          ${ir.subCategory ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.subCategory)}</span>` : ''}
+          ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(categoryLabel(ir.category))}</span>` : ''}
+          ${ir.subCategory ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(subCategoryLabel(ir.subCategory))}</span>` : ''}
           ${ir.dateRaised ? `<span class="ir-dot">·</span><span class="ir-date">${escHtml(ir.dateRaised)}</span>` : ''}
           ${age ? `<span class="ir-dot">·</span><span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
         </div>
@@ -5488,7 +5671,7 @@ function renderIRList(records) {
         </div>
       </div>
       <div class="ir-card-side">
-        ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(ir.priority)}</span>` : ''}
+        ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(priorityLabel(ir.priority))}</span>` : ''}
         <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
         ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
         ${showProg ? progressChip(prog) : ''}
@@ -5692,7 +5875,7 @@ function boardCard(ir) {
       </div>
       <div class="ir-meta">
         <span class="ir-sn">${escHtml(ir.droneId || '')}</span>
-        ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(ir.category)}</span>` : ''}
+        ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(categoryLabel(ir.category))}</span>` : ''}
       </div>
       <div class="kb-card-foot">
         <span class="ir-assignee${owner ? '' : ' is-unassigned'}">${escHtml(owner || t('common.unassigned'))}</span>
@@ -5746,6 +5929,12 @@ function setListView(mode) {
   listMode = mode === 'board' ? 'board' : 'list';
   const pane = document.getElementById('index-view');
   if (pane) pane.classList.toggle('is-board', listMode === 'board');
+  // The board draws the same rows across nine columns and needs the width, so
+  // choosing it gives it the workspace: `html.board-full` hides the sidebar and
+  // the "No IR selected" placeholder and lets this pane take the whole row. The
+  // class is inert below lg — every rule behind it is desktop-scoped — because on
+  // a phone the board is already a full screen.
+  document.documentElement.classList.toggle('board-full', listMode === 'board');
   if (listViewSwitch) {
     listViewSwitch.querySelectorAll('.view-switch-btn').forEach(b => {
       const on = b.dataset.view === listMode;
@@ -5754,6 +5943,7 @@ function setListView(mode) {
     });
   }
   applyListFilters();
+  renderLayout();   // the board's full-screen class is a side of the fold rule
 }
 if (listViewSwitch) {
   listViewSwitch.addEventListener('click', e => {
@@ -5790,6 +5980,13 @@ function updateListCounts(shown) {
     listCountEl.textContent = shown === allIRs.length
       ? `${allIRs.length} total`
       : `${shown} of ${allIRs.length}`;
+  }
+  // The rail's own count, and it deliberately reads differently from the header's:
+  // in a 56px column "5 total" is three lines of noise, and when a filter is on,
+  // "3/5" says both numbers at a glance. The rail is only on screen while the
+  // filter strips are folded away, so this is the only count a folded list shows.
+  if (listRailCountEl) {
+    listRailCountEl.textContent = shown === allIRs.length ? String(shown) : `${shown}/${allIRs.length}`;
   }
 }
 
@@ -5887,16 +6084,52 @@ function irAge(ir, now = Date.now()) {
 const IR_OVERDUE_DAYS = { Urgent: 1, High: 3, Medium: 7, Low: 14 };
 const IR_OVERDUE_DEFAULT_DAYS = 14;
 
-function irOverdueLimit(priority) {
+// The map key a stored priority belongs to, or '' when it belongs to none.
+// `irOverdueLimit` deliberately answers with the loosest limit for anything
+// unrecognised, because a clock has to pick SOME number; a LABEL cannot use
+// that answer, or an unprioritised ticket would wear "0–14 days" as if someone
+// had chosen it. So the lookup is shared and the two callers take what they
+// each need — the number, or nothing at all.
+function irOverdueKey(priority) {
   // Matched case-insensitively rather than by direct key lookup: a stored
   // 'high' would otherwise miss the map and silently take the loosest limit,
   // which is the one wrong answer that looks like it worked.
   const p = String(priority || '').trim().toLowerCase();
   for (const key of Object.keys(IR_OVERDUE_DAYS)) {
-    if (key.toLowerCase() === p) return IR_OVERDUE_DAYS[key];
+    if (key.toLowerCase() === p) return key;
   }
-  return IR_OVERDUE_DEFAULT_DAYS;
+  return '';
 }
+
+function irOverdueLimit(priority) {
+  const key = irOverdueKey(priority);
+  return key ? IR_OVERDUE_DAYS[key] : IR_OVERDUE_DEFAULT_DAYS;
+}
+
+// The window a priority is answered within, spoken: "0–1 day", "0–3 days".
+//
+// Read from IR_OVERDUE_DAYS rather than written out again, so the words on the
+// label and the clock that paints a ticket late are the SAME number — the map is
+// already the one place to change them, and a second copy is a second answer
+// waiting to disagree. Day 0 is included because that is what the clock means:
+// `irOverdue` flags a ticket once its age REACHES the limit, so a High ticket is
+// inside its window on days 0–3 and late on day 3's edge, not on day 4.
+function priorityWindow(value) {
+  const key = irOverdueKey(value);
+  if (!key) return '';
+  const days = IR_OVERDUE_DAYS[key];
+  return `0–${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+// What every surface prints for a priority: the translated word, and — when the
+// stored value is one of the four — the window it is measured against. One
+// function, so the dropdown CR picks from and the pill the ticket wears cannot
+// word the same priority differently.
+const priorityLabel = v => {
+  const word = tPriority(v);
+  const win  = priorityWindow(v);
+  return win ? `${word} (${win})` : word;
+};
 
 // Only a ticket still IN THE PIPELINE can be overdue: a paused or finished one
 // is not running a clock, whatever its age. Returns null rather than false when
@@ -5990,7 +6223,7 @@ function renderCategorySegments() {
   listCategories.innerHTML = keys.map(key => {
     const label = key === CATEGORY_ALL ? 'All categories'
                 : key === UNCATEGORISED ? 'No category'
-                : key;
+                : categoryLabel(key);
     return `
     <button type="button" class="segment${activeCategory === key ? ' active' : ''}"
             data-cat="${escHtml(key)}" role="tab" aria-selected="${activeCategory === key}">
@@ -6388,7 +6621,7 @@ function applyOverviewGating() {
   btn.disabled = !canWrite;
   btn.style.opacity = canWrite ? '' : '0.5';
   btn.style.cursor = canWrite ? '' : 'not-allowed';
-  btn.title = canWrite ? '' : 'You need Triage access to edit the Overview';
+  btn.title = canWrite ? '' : 'You need Allot CAPS access to edit the Overview';
 }
 
 // Cached audit rows for the open IR. Comments live in a different store that the
@@ -6473,7 +6706,7 @@ function renderOverview() {
 async function saveOverview() {
   const irNumber = currentIR?.irNumber;
   if (!irNumber) return;
-  if (!canTriage()) { showToast('You need Triage access to edit the Overview'); return; }
+  if (!canTriage()) { showToast('You need Allot CAPS access to edit the Overview'); return; }
   const btn = document.getElementById('save-overview');
   const label = btn ? btn.textContent : '';
   // Same double-post guard as saveSection, and for the same reason: the Overview
@@ -6548,9 +6781,9 @@ function renderBannerMeta() {
   const late = irOverdue(ir);
   bannerPills.innerHTML =
     `<span class="${getBadgeClass(ir.status)}">${escHtml(tStatus(ir.status) || 'Open')}</span>` +
-    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(tPriority(ir.priority))}</span>` : '') +
-    (ir.category ? `<span class="meta-pill">${escHtml(ir.category)}</span>` : '') +
-    (ir.subCategory ? `<span class="meta-pill">${escHtml(ir.subCategory)}</span>` : '') +
+    (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(priorityLabel(ir.priority))}</span>` : '') +
+    (ir.category ? `<span class="meta-pill">${escHtml(categoryLabel(ir.category))}</span>` : '') +
+    (ir.subCategory ? `<span class="meta-pill">${escHtml(subCategoryLabel(ir.subCategory))}</span>` : '') +
     (age ? `<span class="meta-pill${late ? ' meta-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '') +
     (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">${escHtml(t('common.overdue'))}</span>` : '') +
     (wantProgress(ir, prog) ? progressSteps(ir, prog) : '') +
@@ -6566,26 +6799,32 @@ function renderBannerMeta() {
   paintBoardMoveOffer(ir.irNumber);
 }
 
-// ─── TRIAGE MODAL (status / assignee / priority / category) ──────────────────
+// ─── ALLOT CAPS MODAL (status / assignee / priority / category) ──────────────
+// The panel the owner renamed "Allot CAPS" — the word Triage was his least
+// favourite in the app. It is a DISPLAY rename only: the permission key stays
+// `triage` everywhere it is stored (see ACCESS_TRIAGE_KEY's neighbours in
+// _store/access.json, the `triage` field on a profile, canTriage()), because a
+// rename that reached the store would silently un-grant CR and Management.
+//
 // Writes to `__IRS__` — the app's own record — and never touches the client's
 // Sheet, which keeps the customer's original report intact. Reuses the
 // full-screen modal pattern of the team-directory editor so it works at phone
 // width without a new layout.
 function openTriageModal() {
   if (!currentIR) return;
-  if (!canTriage()) { showToast('You do not have Triage access — ask an admin to grant it'); return; }
+  if (!canTriage()) { showToast('You do not have Allot CAPS access — ask an admin to grant it'); return; }
   if (document.getElementById('triage-modal')) return;
   const ir     = currentIR;
-  const owners = teamDirectory.slice().sort((a, b) => String(a.name || a.email).localeCompare(String(b.name || b.email)));
-  const cur    = String(ir.assignee || '').toLowerCase();
-  const opt    = (v, sel) => `<option value="${escHtml(v)}"${v === sel ? ' selected' : ''}>${escHtml(v)}</option>`;
+  // The label is a separate argument because the VALUE is a stored key and must
+  // stay exactly as the Sheet wrote it — only the text between the tags is ours.
+  const opt    = (v, sel, label) => `<option value="${escHtml(v)}"${v === sel ? ' selected' : ''}>${escHtml(label == null ? v : label)}</option>`;
   const modal  = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'triage-modal';
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
-        <h3>Triage ${escHtml(ir.irNumber)}</h3>
+        <h3>Allot CAPS ${escHtml(ir.irNumber)}</h3>
         <button type="button" class="inward-options-close" onclick="closeTriageModal()">&times;</button>
       </div>
       <p class="inward-options-hint">Recorded here in the passbook, not in the client's Google Sheet — the Sheet keeps the customer's original report untouched. Assigning someone sends them a notification.</p>
@@ -6594,19 +6833,35 @@ function openTriageModal() {
           <select class="form-input" id="triage-status">${IR_STATUS_VALUES.map(v => opt(v, ir.status || 'Open')).join('')}</select>
         </label>
         <label class="triage-row"><span>Assigned to</span>
-          <select class="form-input" id="triage-assignee">
-            <option value="">— Unassigned —</option>
-            ${owners.map(d => `<option value="${escHtml(d.email)}"${String(d.email).toLowerCase() === cur ? ' selected' : ''}>${escHtml(d.name || d.email)}</option>`).join('')}
-          </select>
+          <!-- A type-to-search picker rather than a <select>: the team directory is
+               long enough that scrolling a native dropdown for one name is the
+               friction the owner asked to remove, and a phone's native picker is
+               worse still. The control's REAL value lives in the hidden input —
+               the visible box holds a NAME, which is what a person reads and
+               types, while the store must keep the EMAIL, which is the key every
+               notification and permission lookup is done by. -->
+          <div class="combo" id="triage-assignee-combo">
+            <input type="text" class="form-input" id="triage-assignee" autocomplete="off"
+                   spellcheck="false" role="combobox" aria-expanded="false"
+                   aria-controls="triage-assignee-list" aria-label="Assigned to"
+                   placeholder="Type a name to search…"
+                   value="${escHtml(assigneeDisplayName(ir.assignee))}"
+                   oninput="renderAssigneeOptions(this.value)"
+                   onfocus="renderAssigneeOptions(this.value)"
+                   onkeydown="onAssigneeKeydown(event)"
+                   onblur="commitAssigneeInput()" />
+            <input type="hidden" id="triage-assignee-email" value="${escHtml(ir.assignee || '')}" />
+            <div class="combo-list" id="triage-assignee-list" role="listbox" aria-label="Team members"></div>
+          </div>
         </label>
         <label class="triage-row"><span>Priority</span>
           <select class="form-input" id="triage-priority">
-            <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '')).join('')}
+            <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '', priorityLabel(v))).join('')}
           </select>
         </label>
         <label class="triage-row"><span>Category</span>
           <select class="form-input" id="triage-category">
-            <option value="">— Choose —</option>${IR_CATEGORIES.map(v => opt(v, ir.category || '')).join('')}
+            <option value="">— Choose —</option>${IR_CATEGORIES.map(v => opt(v, ir.category || '', categoryLabel(v))).join('')}
           </select>
         </label>
         <!-- Sub-category exists ONLY under REPAIR. Both rows stay in the DOM and are
@@ -6615,7 +6870,7 @@ function openTriageModal() {
         <label class="triage-row" id="triage-subcat-row"${ir.category === 'REPAIR' ? '' : ' style="display:none"'}>
           <span>Sub-category</span>
           <select class="form-input" id="triage-subcategory">
-            <option value="">— Choose —</option>${REPAIR_SUBCATEGORIES.map(v => opt(v, ir.subCategory || '')).join('')}
+            <option value="">— Choose —</option>${REPAIR_SUBCATEGORIES.map(v => opt(v, ir.subCategory || '', subCategoryLabel(v))).join('')}
           </select>
         </label>
         <label class="triage-row" id="triage-subcat-note-row"${ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS ? '' : ' style="display:none"'}>
@@ -6661,13 +6916,184 @@ function wireTriageCategoryRows() {
   subSel.addEventListener('change', sync);
   sync();
 }
+
+// ─── The "Assigned to" searchable picker ─────────────────────────────────────
+// Three pure functions and three thin DOM handlers. The split is deliberate: the
+// parts that decide anything — who matches a query, what the list reads, what a
+// typed name resolves to — take their input as an ARGUMENT and touch no element,
+// so a test can pin them without a browser. The handlers only move those answers
+// in and out of the DOM.
+//
+// The team directory is stored with `email` as its key, so every comparison here
+// is lower-cased and every value handed back is the email. Nothing else in the
+// app may be given a name where an email belongs — the assignment notification
+// and the permission lookup both key on it.
+
+// Directory rows, name-sorted, the way the old <select> was ordered — the order
+// people already have in their heads. Sorted on a COPY so the stored array is
+// never re-ordered by a render.
+function assigneeRows() {
+  return teamDirectory.slice().sort((a, b) =>
+    String(a.name || a.email || '').localeCompare(String(b.name || b.email || '')));
+}
+
+// The rows a query matches. Empty (or a bare "@", left over from the mention
+// habit) matches everyone, so focusing the box shows the whole team and typing
+// only narrows it.
+function assigneeMatches(query) {
+  const q = String(query || '').replace(/^@/, '').trim().toLowerCase();
+  const rows = assigneeRows();
+  if (!q) return rows;
+  return rows.filter(d =>
+    String(d.name || '').toLowerCase().includes(q) ||
+    String(d.email || '').toLowerCase().includes(q));
+}
+
+// The name to put IN the box for a stored email — '' for none, which is exactly
+// the "Unassigned" state and what the placeholder then speaks for.
+function assigneeDisplayName(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return '';
+  const hit = teamDirectory.find(d => String(d.email || '').toLowerCase() === e);
+  return hit ? (hit.name || hit.email) : email;
+}
+
+// The markup of the option list, as a STRING. Building it here rather than in the
+// render handler is what lets a test assert the list's content — above all that
+// the Unassigned row is ALWAYS present, because a picker you cannot type your way
+// back to "nobody" in is a picker that can only ever add assignees.
+function assigneeOptionHtml(query) {
+  const rows = assigneeMatches(query);
+  const row  = (email, name, sub) => `
+    <button type="button" class="combo-item" role="option" data-email="${escJsAttr(email)}"
+            onmousedown="event.preventDefault()"
+            onclick="pickTriageAssignee('${escJsAttr(email)}')">
+      <span class="combo-item-name">${escHtml(name)}</span>
+      ${sub ? `<span class="combo-item-mail">${escHtml(sub)}</span>` : ''}
+    </button>`;
+  const unassigned = row('', t('common.unassigned'), '');
+  if (!rows.length) {
+    return unassigned + `<div class="combo-empty">No one matches “${escHtml(String(query || '').trim())}”.</div>`;
+  }
+  return unassigned + rows.map(d => row(d.email, d.name || d.email, d.name ? d.email : '')).join('');
+}
+
+// Index of the row the arrow keys are on, or -1. Module state rather than a
+// data attribute, because the list is rebuilt on every keystroke and a index
+// parked in the DOM would be wiped by the rebuild.
+let assigneeSuggestIndex = -1;
+
+function renderAssigneeOptions(query) {
+  const list = document.getElementById('triage-assignee-list');
+  const box  = document.getElementById('triage-assignee');
+  if (!list) return;
+  assigneeSuggestIndex = -1;
+  list.innerHTML = assigneeOptionHtml(query);
+  list.dataset.open = '1';
+  list.style.display = 'block';
+  if (box) box.setAttribute('aria-expanded', 'true');
+}
+
+function closeAssigneeOptions() {
+  const list = document.getElementById('triage-assignee-list');
+  const box  = document.getElementById('triage-assignee');
+  assigneeSuggestIndex = -1;
+  if (!list) return;
+  list.dataset.open = '0';
+  list.style.display = 'none';
+  if (box) box.setAttribute('aria-expanded', 'false');
+}
+
+function assigneeOptionButtons() {
+  const list = document.getElementById('triage-assignee-list');
+  if (!list || typeof list.querySelectorAll !== 'function') return [];
+  return Array.from(list.querySelectorAll('.combo-item'));
+}
+
+function highlightAssigneeOptions(items) {
+  items.forEach((it, i) => it.classList.toggle('combo-item-active', i === assigneeSuggestIndex));
+  const active = items[assigneeSuggestIndex];
+  if (active && typeof active.scrollIntoView === 'function') active.scrollIntoView({ block: 'nearest' });
+}
+
+// ↑/↓ move, Enter takes, Escape closes. Enter is only swallowed when a row is
+// actually highlighted: otherwise the key must reach the form, where it is the
+// ordinary "submit" a person expects from a text field.
+function onAssigneeKeydown(e) {
+  if (!e) return;
+  const items = assigneeOptionButtons();
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!items.length) return;
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    const n = items.length;
+    assigneeSuggestIndex = e.key === 'ArrowDown'
+      ? (assigneeSuggestIndex + 1) % n
+      : (assigneeSuggestIndex - 1 + n) % n;
+    highlightAssigneeOptions(items);
+  } else if (e.key === 'Enter') {
+    if (assigneeSuggestIndex >= 0 && items[assigneeSuggestIndex]) {
+      if (typeof e.preventDefault === 'function') e.preventDefault();
+      pickTriageAssignee(items[assigneeSuggestIndex].dataset.email || '');
+    }
+  } else if (e.key === 'Escape') {
+    closeAssigneeOptions();
+  }
+}
+
+function pickTriageAssignee(email) {
+  const e = String(email || '').trim();
+  const hidden = document.getElementById('triage-assignee-email');
+  const box    = document.getElementById('triage-assignee');
+  if (hidden) hidden.value = e;
+  if (box) box.value = e ? assigneeDisplayName(e) : '';
+  closeAssigneeOptions();
+}
+
+// What a typed box resolves to, or null when it resolves to nothing. Null is the
+// important half: it is what stops a half-typed name from saving as an
+// assignment. A bare name that is not in the directory is NOT accepted — the
+// assignment notification is addressed by email, and a name would be mailed
+// nowhere while the ticket claimed an owner.
+function resolveTriageAssignee(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return { email: '', name: '' };
+  const q = raw.toLowerCase();
+  if (q === String(t('common.unassigned')).toLowerCase() || q === 'unassigned') return { email: '', name: '' };
+  const hit = teamDirectory.find(d =>
+    String(d.email || '').toLowerCase() === q ||
+    String(d.name || '').toLowerCase() === q ||
+    `${d.name || ''} <${d.email || ''}>`.toLowerCase() === q);
+  return hit ? { email: hit.email, name: hit.name || hit.email } : null;
+}
+
+// Blur is the moment a typed box has to become honest again. Anything that
+// resolves is committed; anything that does not is REVERTED to whatever the
+// hidden input already holds, so the box can never display a name the save would
+// not honour — the one failure that would look like it worked.
+function commitAssigneeInput() {
+  const box    = document.getElementById('triage-assignee');
+  const hidden = document.getElementById('triage-assignee-email');
+  if (!box) return;
+  const r = resolveTriageAssignee(box.value);
+  if (r) {
+    if (hidden) hidden.value = r.email;
+    box.value = r.email ? assigneeDisplayName(r.email) : '';
+  } else {
+    box.value = assigneeDisplayName(hidden ? hidden.value : '');
+  }
+  closeAssigneeOptions();
+}
+
 function closeTriageModal() { document.getElementById('triage-modal')?.remove(); }
 
 async function applyTriage() {
   if (!currentIR) return;
   const irNumber = currentIR.irNumber;
   const status   = document.getElementById('triage-status')?.value     || '';
-  const email    = document.getElementById('triage-assignee')?.value   || '';
+  // The assignee's key is the HIDDEN input, not the box a person types in: the
+  // box holds a name to read and the store holds an email to mail and gate by,
+  // and applyTriage must never be handed the former.
+  const email    = document.getElementById('triage-assignee-email')?.value || '';
   const priority = document.getElementById('triage-priority')?.value   || '';
   const category = document.getElementById('triage-category')?.value   || '';
   const prev     = String(currentIR.assignee || '').toLowerCase();
@@ -6678,7 +7104,7 @@ async function applyTriage() {
   // — an "uncategorised" hole no report could explain. The sub-category is required
   // too, but only where it exists (REPAIR); the note only under OTHERS.
   if (!category) {
-    showToast('Choose a Category before saving Triage');
+    showToast('Choose a Category before saving Allot CAPS');
     return;
   }
   const isRepair = category === 'REPAIR';
@@ -6713,7 +7139,7 @@ async function applyTriage() {
   }
   closeTriageModal();
   await patchIRState(irNumber, patch);
-  showToast('Triage saved');
+  showToast('Allot CAPS saved');
   loadActivityLog(irNumber);
 
   // Assignment notifies through the comment machinery already in place — the
@@ -10749,6 +11175,9 @@ function initIcons() {
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
     ['#list-toggle .list-toggle-icon',       'list'],
+    // The same glyph the toolbar's own fold control wears, so the rail's button
+    // reads as "that button, again" rather than as the sidebar's panel toggle.
+    ['#list-rail-restore .list-rail-icon',   'list'],
     ['#detail-placeholder .ph-icon',         'ir'],
     ['#ir-triage-btn .btn-icon',             'target'],
     ['#ir-nudge-btn .btn-icon',              'comment'],

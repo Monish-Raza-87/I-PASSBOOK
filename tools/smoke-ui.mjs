@@ -144,6 +144,8 @@ const { T, byId } = loadApp(`
   // one stable stub, so this is the real thing renderLayout toggles rather than a
   // copy of it.
   bodyClasses: document.body.classList,
+  // The list fold is an adjective class on <html>, like the sidebar's rail.
+  get htmlEl() { return document.documentElement; },
   set logCache(v) { activityLogCache = v; },
   setEntries: (irNumber, entries) => { activityLogCache = { irNumber: irNumber, entries: entries }; },
   refreshActivityLog,
@@ -378,43 +380,231 @@ r.ok('the list can never be hidden while the user is on the index', (() => {
   T.setFlag(T.LIST_KEY, false);
   return !hidden;
 })(), byId.get('index-view').style.display);
-r.ok('an open IR still shows the list when nobody asked to fold it', (() => {
+
+// The fold is a 56px RAIL now, not `display: none` — the sidebar's own treatment.
+// Two things follow, and both are asserted below: folding never removes the pane
+// from the layout (so nothing is ever stranded), and it does something on the
+// index screen too, which is precisely what the owner found broken.
+r.ok('an open IR keeps the list beside it, and folding gives the width away as a rail', (() => {
   // The default harness viewport is a PHONE, where an open detail legitimately hides
   // the list. The claim being tested is the DESKTOP rule, so it needs a desktop.
-  const { T: D, byId: dById } = loadApp(`
+  const { T: D } = loadApp(`
     renderLayout, setFlag, LIST_KEY,
     get view() { return currentView; },
     set view(v) { currentView = v; },
     set ir(v) { currentIR = v; },
+    get htmlEl() { return document.documentElement; },
   `, { capture: true, desktop: true });
   D.view = 'detail';
   D.ir = { irNumber: 'IR409' };
   D.setFlag(D.LIST_KEY, false);
   D.renderLayout();
-  const besideIt = dById.get('index-view').style.display !== 'none';
+  const besideIt = !D.htmlEl.classList.contains('list-collapsed');
   D.setFlag(D.LIST_KEY, true);
   D.renderLayout();
-  const folded = dById.get('index-view').style.display === 'none';
+  const folded = D.htmlEl.classList.contains('list-collapsed');
+  D.setFlag(D.LIST_KEY, false);
+  return besideIt && folded;
+})(), 'desktop: beside the detail; folded it is a rail, still on screen');
+
+r.ok('the fold changes the layout with no IR open — the defect that read as a dead button', (() => {
+  const { T: D } = loadApp(`
+    renderLayout, setFlag, LIST_KEY,
+    get view() { return currentView; },
+    set view(v) { currentView = v; },
+    get htmlEl() { return document.documentElement; },
+  `, { capture: true, desktop: true });
   D.view = 'index';
+  D.setFlag(D.LIST_KEY, false);
   D.renderLayout();
-  const backOnIndex = dById.get('index-view').style.display !== 'none';
-  return besideIt && folded && backOnIndex;
-})(), 'desktop: list beside the detail, foldable, never hidden on the index');
-r.ok('and folding it is genuinely possible while an IR is open', (() => {
-  T.view = 'detail';
-  T.ir = { irNumber: 'IR409' };
+  const open = !D.htmlEl.classList.contains('list-collapsed');
+  D.setFlag(D.LIST_KEY, true);
+  D.renderLayout();
+  const folded = D.htmlEl.classList.contains('list-collapsed');
+  D.setFlag(D.LIST_KEY, false);
+  return open && folded;
+})(), 'the index screen folds too, not just the tooltip');
+
+r.ok('a phone never folds the list, because there the list IS the screen', (() => {
+  T.view = 'index';
   T.setFlag(T.LIST_KEY, true);
   T.renderLayout();
-  const folded = byId.get('index-view').style.display === 'none';
+  const folded = T.htmlEl.classList.contains('list-collapsed');
   T.setFlag(T.LIST_KEY, false);
   T.renderLayout();
-  T.view = 'index';
-  T.ir = null;
-  T.renderLayout();
-  return folded;
-})());
+  return !folded;
+})(), 'below lg the fold is inert, and the rail never appears');
+
+r.ok('the rail carries the count and its own way back', (() => {
+  const rail = indexCode.slice(indexCode.indexOf('id="list-rail"'));
+  return /id="list-rail"[\s\S]{0,400}?id="list-rail-restore"/.test(indexCode) &&
+    /id="list-rail-count"/.test(indexCode) &&
+    /class="list-rail-icon"/.test(rail) &&
+    /listRailRestore\.addEventListener\('click',\s*toggleList\)/.test(appCode) &&
+    /listRailCountEl\.textContent\s*=/.test(appCode) &&
+    /\['#list-rail-restore \.list-rail-icon',\s*'list'\]/.test(appCode);
+})(), 'a restore button, a live count, and an icon that is actually filled');
+
+r.ok('the rail is CSS-owned: one class on <html>, no second writer of a pane display', (() => {
+  // Read as code, not as prose — the block above is explained in a comment that
+  // names these selectors, and a comment must never satisfy a source assertion.
+  const css = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+  return /#list-rail \{ display: none; \}/.test(css) &&
+    /html\.list-collapsed #index-view \{/.test(css) &&
+    /html\.list-collapsed #index-view \.list-toolbar,[\s\S]{0,200}?html\.list-collapsed #index-view \.ir-board,/.test(css) &&
+    /html\.list-collapsed #index-view > #sync-status \{ display: none; \}/.test(css) &&
+    /html\.list-collapsed #list-rail \{/.test(css) &&
+    /classList\.toggle\('list-collapsed', desktop && !boardFull && storedFlag\(LIST_KEY\)\)/.test(appCode) &&
+    // The board exception is the whole reason the fold is not simply
+    // `storedFlag(LIST_KEY)`, so it is pinned rather than left to the comment.
+    /const boardFull\s*=\s*desktop && listMode === 'board'/.test(appCode);
+})(), 'the rules live in base.css above lg and nowhere write display inline');
 r.ok('the detail pane is what governs the back button, not the fold',
   /backBtn\.style\.display\s*=/.test(appCode));
+
+// ── The two columns the user can drag ─────────────────────────────────────────
+r.head('the sidebar and the IR list are as wide as the user leaves them');
+
+r.ok('both columns carry a drag handle, and it says how to undo the drag', (() => {
+  const s = indexCode.slice(indexCode.indexOf('id="sidebar-resize"') - 200, indexCode.indexOf('id="sidebar-resize"') + 200);
+  const l = indexCode.slice(indexCode.indexOf('id="list-resize"') - 200, indexCode.indexOf('id="list-resize"') + 200);
+  return /class="pane-resize" id="sidebar-resize"/.test(s) && /double-click to reset/.test(s) &&
+         /class="pane-resize" id="list-resize"/.test(l) && /double-click to reset/.test(l);
+})(), 'a handle on each column edge, with the reset named in the tooltip');
+
+r.ok('a handle exists only above lg — and is hidden by a rule, not by having none', (() => {
+  const css = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+  // Below lg the handle has no rule of its own, so a missing base `display: none`
+  // would leave it as an empty flex child of the phone bottom bar. That is a real
+  // bug this pins: "the rule exists" is not "the rule applies".
+  if (!/#sidebar-resize, #list-resize \{ display: none; \}/.test(css)) return false;
+  if (!/#sidebar-resize, #list-resize \{ display: block; \}/.test(css)) return false;
+  const at = css.indexOf('@media (min-width: 1024px) {');
+  return css.indexOf('#sidebar-resize, #list-resize { display: block; }') > at &&
+    css.indexOf('.pane-resize {') > at &&
+    css.indexOf('html.pane-resizing') > at;
+})(), 'off by default, on inside the desktop block');
+
+r.ok('a handle is a pointer nicety, not a keyboard affordance it cannot honour',
+  /id="sidebar-resize" title="[^"]*" aria-hidden="true"/.test(indexCode) &&
+  /id="list-resize" title="[^"]*" aria-hidden="true"/.test(indexCode) &&
+  !/id="(sidebar|list)-resize"[^>]*tabindex/.test(indexCode));
+
+r.ok('the drag sets a custom property on <html> — never a width on the pane', (() => {
+  const fn = appCode.slice(appCode.indexOf('function wirePaneResize'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  return /documentElement\.style\.setProperty\(cssVar, last \+ 'px'\)/.test(body) &&
+    !/\.style\.width/.test(body) && !/\.style\.flexBasis/.test(body);
+})(), 'one source of width, so every var(--sidebar-w) rule follows for free');
+
+r.ok('the reset clears the property AND the stored number',
+  /handle\.addEventListener\('dblclick',[\s\S]{0,200}?style\.removeProperty\(cssVar\)/.test(appCode) &&
+  /handle\.addEventListener\('dblclick',[\s\S]{0,300}?localStorage\.removeItem\(key\)/.test(appCode));
+
+r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() => {
+  const fn = appCode.slice(appCode.indexOf('function wirePaneResize'));
+  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  return /handle\.setPointerCapture\(e\.pointerId\)/.test(body) &&
+    /handle\.releasePointerCapture\(e\.pointerId\)/.test(body) &&
+    /addEventListener\('pointerup', onPointerUp\)/.test(body) &&
+    // pointercancel as well as pointerup: a system gesture on a touchscreen ends
+    // the drag without ever sending pointerup, and without this the app would sit
+    // in `pane-resizing` with the transition still disabled.
+    /addEventListener\('pointercancel', onPointerUp\)/.test(body);
+})(), 'capture on down, released on both endings');
+
+{ // Clamping, storage round-trip and the reset, measured rather than restated.
+  const { T: W } = loadApp(`
+    clampWidth, storedWidth, applyStoredWidths, SIDEBAR_W_KEY, LIST_W_KEY,
+  `, { capture: true });
+  r.ok('a width below the minimum is raised to it, and one above the maximum is cut',
+    W.clampWidth(10, W.LIST_W_KEY) === W.clampWidth(280 - 1000, W.LIST_W_KEY) &&
+    W.clampWidth(10, W.LIST_W_KEY) > 10 &&
+    W.clampWidth(9999, W.LIST_W_KEY) < 9999,
+    [W.clampWidth(10, W.LIST_W_KEY), W.clampWidth(9999, W.LIST_W_KEY)]);
+  r.ok('...and the sidebar has its own, narrower pair of limits',
+    W.clampWidth(5000, W.SIDEBAR_W_KEY) <= 360 &&
+    W.clampWidth(5000, W.SIDEBAR_W_KEY) < W.clampWidth(5000, W.LIST_W_KEY),
+    [W.clampWidth(5000, W.SIDEBAR_W_KEY), W.clampWidth(5000, W.LIST_W_KEY)]);
+  // The window guard. The harness reports no innerWidth, so the fallback 1024 is
+  // what every clamp above is measured against — which is the point: no column may
+  // exceed half the window even when the stored number says it may.
+  r.ok('no column may take more than half the window, whatever was saved',
+    W.clampWidth(9999, W.LIST_W_KEY) <= 512, W.clampWidth(9999, W.LIST_W_KEY));
+  r.ok('a stored width is clamped on the way IN as well as on the way out',
+    /function storedWidth\(key\)[\s\S]{0,300}?clampWidth\(n, key\)/.test(appCode));
+  r.ok('garbage in storage is refused rather than applied',
+    /Number\.isFinite\(n\) && n > 0 \? clampWidth\(n, key\) : 0/.test(appCode) &&
+    W.storedWidth('not-a-number') === 0);
+}
+
+{ // The end-to-end drag, driven through the real handlers.
+  const { T: D, byId: d } = loadApp(`
+    wirePaneResize, applyStoredWidths, storedWidth, LIST_W_KEY,
+    get htmlEl() { return document.documentElement; },
+  `, { capture: true, desktop: true });
+  const handle = d.get('list-resize');
+  const pane = d.get('index-view');
+  const root = D.htmlEl;
+  let fakeWidth = 400;
+  pane.getBoundingClientRect = () => ({ width: fakeWidth });
+  D.wirePaneResize(handle, '--list-w', D.LIST_W_KEY, pane);
+
+  handle.dispatch('pointerdown', { clientX: 400 });
+  const busy = root.classList.contains('pane-resizing');
+  handle.dispatch('pointermove', { clientX: 460 });
+  const moved = root.style.getPropertyValue('--list-w');
+  handle.dispatch('pointermove', { clientX: 9000 });
+  const capped = root.style.getPropertyValue('--list-w');
+  handle.dispatch('pointerup', { clientX: 9000 });
+  const idle = !root.classList.contains('pane-resizing');
+
+  r.ok('a drag writes the width onto <html> as it moves',
+    busy && moved === '460px', [busy, moved]);
+  r.ok('...and the clamp holds it at the limit, not past it', capped === '512px', capped);
+  r.ok('...and the class that disables the transition is gone when the drag ends', idle);
+}
+
+{ // The board giving up its column, and the fold standing down while it does.
+  const { T: B } = loadApp(`
+    setListView, renderLayout, setFlag, LIST_KEY, applyListFilters,
+    get htmlEl() { return document.documentElement; },
+    get listMode() { return listMode; },
+    get view() { return currentView; },
+    set view(v) { currentView = v; },
+    renderBoard() {}, renderIRList() {},
+  `, { capture: true, desktop: true });
+  B.view = 'index';
+  B.setFlag(B.LIST_KEY, true);          // the list is folded…
+  B.setListView('board');
+  const hiddenSidebar = /html\.board-full #sidebar \{ display: none; \}/.test(baseSrc);
+  const full = B.htmlEl.classList.contains('board-full');
+  const unfolded = !B.htmlEl.classList.contains('list-collapsed');
+  const mode = B.listMode;
+  B.setListView('list');
+  const backToNormal = !B.htmlEl.classList.contains('board-full') &&
+                       B.htmlEl.classList.contains('list-collapsed');
+  B.setFlag(B.LIST_KEY, false);
+  r.ok('choosing Board gives it the workspace', full && mode === 'board');
+  r.ok('...and the stylesheet steps the sidebar, the placeholder and the fold aside',
+    hiddenSidebar &&
+    /html\.board-full #index-view \{ flex: 1 1 auto; width: auto; \}/.test(baseSrc) &&
+    /html\.board-full #detail-placeholder \{ display: none; \}/.test(baseSrc) &&
+    // Both fold controls go with them — a toggle for a column that is not on
+    // screen is a dead control, which is how this one read in the browser.
+    /html\.board-full #list-toggle,\s*\n\s*html\.board-full #sidebar-toggle \{ display: none; \}/.test(baseSrc));
+  r.ok('...and the fold stands down, because a rail over the board is a stranding',
+    unfolded);
+  r.ok('...and going back to List restores both the fold and the sidebar',
+    backToNormal);
+  r.ok('the board class is inert below lg, so the phone board is untouched',
+    (() => {
+      const css = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
+      const at = css.indexOf('@media (min-width: 1024px) {');
+      const board = css.indexOf('html.board-full #sidebar');
+      return at >= 0 && board > at;
+    })());
+}
 
 r.head('the Insights pane is a third sibling, not a panel inside the detail');
 // Four claims. The dashboard must NOT be reached by opening the detail pane (the

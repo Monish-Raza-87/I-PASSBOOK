@@ -43,7 +43,7 @@ const { T, byId } = loadApp(`
   IR_OVERDUE_DAYS, IR_OVERDUE_DEFAULT_DAYS, DAY_MS,
   ageLabel, ageTitle, overdueTitle, progressChip, wantProgress,
   renderIRList, renderBannerMeta, mergeLegacyOnlyIRs, applyIRStateToAllIRs,
-  SECTION_IDS, statusCategory, SEGMENT_LABELS,
+  SECTION_IDS, statusCategory, SEGMENT_LABELS, categoryLabel,
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
   get irState() { return irState; }, set irState(v) { irState = v; },
   get legacyMap() { return legacyMap; }, set legacyMap(v) { legacyMap = v; },
@@ -309,7 +309,11 @@ T.mergeLegacyOnlyIRs();
 T.renderIRList(T.allIRs);
 const legacyCard = byId.get('ir-list').innerHTML;
 r.ok('the stub exists and is marked legacy', T.allIRs.length === 1 && T.allIRs[0].isLegacyOnly === true);
-r.ok('its app-owned CATEGORY survives into the list', /REPAIR/.test(legacyCard), legacyCard.slice(0, 300));
+// The claim is that the app-owned CATEGORY survives the merge, not that the raw
+// key is printed — the row shows the house label for it, from one helper.
+r.ok('its app-owned CATEGORY survives into the list',
+  legacyCard.includes('ir-cat">' + T.categoryLabel('REPAIR') + '<') &&
+  !legacyCard.includes('ir-cat">REPAIR<'), legacyCard.slice(0, 300));
 r.ok('its app-owned STATUS survives, not the stub\'s "Open"',
   /Production/.test(legacyCard) && !/>Open</.test(legacyCard), legacyCard.slice(0, 300));
 r.ok('its saved section is counted — not 0/6',

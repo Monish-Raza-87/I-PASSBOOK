@@ -123,7 +123,12 @@ ok('saveDraft ignores non-SECTIONS panes',
 // over the `POLISH — level:` block at the end of views.css by cascade order
 // alone, and it is scoped to the sign-in screen and the IR list. Listing it here
 // is what fails if someone reorders the links.
-const cascade = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css', 'desk.css']
+//
+// theme.css is a seventh, and it sits between palette.css and base.css. It is
+// token-only, so it has no position-dependent rule of its own — it is listed at
+// all because a theme file that loads after base.css would leave the first paint
+// on the wrong mode's values, which is the flash it exists to prevent.
+const cascade = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'desk.css']
   .map(f => html.indexOf(`href="${f}"`));
 ok('the stylesheet cascade order is unchanged',
   cascade.every((v, i) => v >= 0 && (i === 0 || v > cascade[i - 1])), cascade);

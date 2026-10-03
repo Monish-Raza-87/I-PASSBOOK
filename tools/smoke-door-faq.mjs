@@ -328,7 +328,7 @@ ok('...and the two dark blocks re-point the SAME tokens, so neither theme shows 
 ok('...and the two dark blocks cover the same tokens, so the toggle and the OS agree',
   (() => {
     const setOf = s => new Set((s.match(/--[\w-]+(?=\s*:)/g) || []));
-    const media = (faqHtml.match(/:root:not\(\[data-theme="light"\]\)\s*\{([^}]*)\}/) || [])[1] || '';
+    const media = (faqHtml.match(/:root:not\(\[data-theme\]\)\s*\{([^}]*)\}/) || [])[1] || '';
     const attr = (faqHtml.match(/:root\[data-theme="dark"\]\s*\{([^}]*)\}/) || [])[1] || '';
     const a = setOf(media), b = setOf(attr);
     return a.size >= 10 && a.size === b.size && [...a].every(n => b.has(n));

@@ -27,6 +27,7 @@ const read = p => fs.readFileSync(join(ROOT, p), 'utf8');
 
 const tokensCss = read('tokens.css');
 const paletteCss = read('palette.css');
+const themeCss = read('theme.css');
 const baseCss = read('base.css');
 const componentsCss = read('components.css');
 const viewsCss = read('views.css');
@@ -62,14 +63,25 @@ function blocks(css) {
 // wins over a light OS) and once behind the media query, guarded with :not() so
 // an explicit light choice still beats a dark OS.
 const DARK_SEL = /\[data-theme="dark"\]/g;
-const LIGHT_GUARD = ':root:not([data-theme="light"])';
+// The guard for the media-query half. It must test for the ABSENCE of the
+// attribute, not for "not light": light is now the absence of `data-theme`, so
+// `:not([data-theme="light"])` is also true when the viewer chose CREAM, and a
+// cream reader on a dark OS would have their warm surfaces overwritten by dark
+// ones. `:not([data-theme])` means "the viewer expressed no preference", which is
+// the only case the OS setting is entitled to decide.
+const LIGHT_GUARD = ':root:not([data-theme])';
 
 function emit(list) {
   let normal = '', dark = '';
   for (const b of list) {
     if (DARK_SEL.test(b.sel)) {
       DARK_SEL.lastIndex = 0;
-      dark += `${b.sel} {${b.body}}\n`;
+      // The explicit stamp goes to `normal` — a viewer who picks Dark while their
+      // OS is light must still get the dark palette. Only the OS-driven copy is
+      // media-gated. (Both copies used to land in `dark`, which put the stamp
+      // itself inside the media query and made the Dark button inert on a
+      // light-OS machine.)
+      normal += `${b.sel} {${b.body}}\n`;
       dark += `${b.sel.replace(DARK_SEL, LIGHT_GUARD)} {${b.body}}\n`;
       continue;
     }
@@ -524,6 +536,7 @@ const html = `<title>I-PASSBOOK Polish Review</title>
 <style>
 ${themed(tokensCss)}
 ${paletteCss}
+${themed(themeCss)}
 ${componentCss}
 ${POLISH}
 ${CHROME}
@@ -539,6 +552,7 @@ ${CHROME}
     </div>
     <div class="pv-ctl" role="group" aria-label="Theme">
       <button data-theme="light" aria-pressed="false">Light</button>
+      <button data-theme="cream" aria-pressed="false">Cream</button>
       <button data-theme="dark" aria-pressed="false">Dark</button>
       <button data-theme="system" aria-pressed="true">System</button>
     </div>

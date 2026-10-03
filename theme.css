@@ -1,0 +1,147 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   theme.css — the MODE layer: Light · Cream · Dark
+
+   Loaded from index.html between palette.css and base.css. It is
+   HAND-WRITTEN and TOKEN-ONLY: this file declares custom properties and
+   nothing else, so it cannot drift into being a second base.css.
+
+   WHY IT EXISTS. Light and dark were both built on a neutral ramp of
+   `oklch(L 0 0)` — every grey at ZERO chroma — and light set --surface-base
+   and --surface-elevation-1/2/3 all to the same #ffffff, so a card lying on
+   a page had a contrast of 1.00:1: there was nothing to see it against. The
+   one border that draws nearly every edge in the app was a 1.17:1 hairline.
+   That is the measured reason the app read as flat — not taste, luminance.
+   This file fixes the luminance, adds the missing warm mode, and keeps light
+   deliberately NEUTRAL so that it can never blur into cream.
+
+   THE THREE MODES
+     :root               Light — de-glared. The page ground becomes a real
+                         off-white while cards stay white, so a card finally
+                         sits ABOVE the page instead of merging with it.
+     [data-theme=cream]  Cream — a warm ground under a lighter warm panel
+                         with warm ink. Soothing like dark, with light's
+                         structure. These are NEW values, not aliases:
+                         Frappe ships no warm neutral ramp. Its amber-1 is
+                         near a cream panel, but the next step jumps both
+                         lighter and yellower (the wrong direction), and its
+                         dark ambers are saturated brown, not ink.
+     [data-theme=dark]   Dark — the same surfaces, warmed, and the two
+                         outline tokens moved hard. Because every
+                         `1px solid var(--outline-gray-1)` in the app moves
+                         with that one value, it is the single biggest
+                         structural win available in dark mode.
+
+   THE ORDERING RULE — and the trap that comes with it. `:root` matches the
+   html element in ALL THREE modes, and `:root` and `[data-theme="dark"]` have
+   EQUAL specificity, so source order decides: this file is loaded after
+   tokens.css, so a plain `:root` declaration here BEATS tokens.css's own dark
+   one. A token this file sets on :root must therefore be restated by every
+   mode it should differ in — including dark — or a light literal leaks onto a
+   dark screen. (This is not hypothetical: an earlier draft overrode
+   --surface-sidebar on :root while dark sets it to `transparent`, which would
+   have painted the dark sidebar a near-white slab. tools/smoke-theme.mjs now
+   asserts the rule rather than trusting it.)
+
+   THE ACCENT IS NOT HERE. The accent role belongs to palette.css. The one
+   exception is the four cream compounds at the foot of this file, and they
+   exist for a measured reason: the default blue is under AA on the cream
+   panel, so on cream the accent moves one step darker per palette.
+
+   EVERY NUMBER BELOW IS MEASURED, NOT FELT, and tools/smoke-theme.mjs re-derives
+   all of it from this file rather than restating it. If you change a value here,
+   that suite is what tells you whether you have broken a claim.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Light — de-glared ──────────────────────────────────────────────────────
+   Only luminance changes; light stays at chroma 0 on purpose, which is what
+   keeps it distinct from cream. Cards keep white as their own value
+   (--surface-elevation-*), which is what makes them sit above the ground
+   rather than flush with it.
+
+   --surface-gray-2 has to move with the ground. Frappe's light gray-2 is
+   #f3f3f3, a hair OFF the ground this file introduces (#f2f2f2) — a hover row
+   on the page would have been invisible. The whole neutral run is therefore
+   restated in one pass so the ramp stays monotonic: ground, then two steps
+   darker, then the two outlines.
+
+   --surface-sidebar is deliberately NOT touched. Frappe's light value is a
+   near-neutral already, and dark sets it to `transparent` — overriding it here
+   is what created the leak described above. */
+:root {
+  --surface-base:    #fdfdfd;  /* the panel; was #ffffff */
+  --surface-gray-1:  #f2f2f2;  /* the page ground — --desk-ground in light */
+  --surface-gray-2:  #e9e9e9;  /* hover / stripe; was #f3f3f3, invisible on the new ground */
+  --surface-gray-3:  #e2e2e2;
+  --outline-gray-1:  #d0d0d0;  /* 1.38:1 vs the ground, 1.52:1 vs the panel; was 1.17:1 */
+  --outline-gray-2:  #c4c4c4;
+}
+
+/* ── Cream — the warm mode ──────────────────────────────────────────────────
+   Hue is anchored near Frappe's amber family but at a fraction of its chroma,
+   which is what keeps this a cream rather than a banana. The warmth is
+   structural, not decorative: the red channel leads the blue in every value
+   here, by 14 on the panel and 25 on the ground.
+
+   Cream restates the whole light set (it IS a light mode — cream without a
+   restated ground would be a warm panel on a cold grey page), then adds the
+   two things light leaves to Frappe: elevation, which must stay warm or a
+   popover lands white on a cream page; and the ink ramp, which must be warm
+   or the text reads as grey print on cream paper. */
+[data-theme="cream"] {
+  color-scheme: light;      /* base.css only handles the dark UA case */
+
+  --surface-base:        #fdf9ef;  /* the panel — warm, and the LIGHTER of the two grounds */
+  --surface-gray-1:      #f5eddc;  /* the page ground — visibly tan, not an off-white */
+  --surface-gray-2:      #ece0cc;
+  --surface-gray-3:      #e3d4bb;
+  --surface-sidebar:     #f9f3e6;
+  --surface-elevation-1: #fffbf4;
+  --surface-elevation-2: #fffcf6;
+  --surface-elevation-3: #fffdf9;
+  --outline-gray-1:      #d9c8ac;  /* 1.41:1 vs the ground, 1.56:1 vs the panel */
+  --outline-gray-2:      #cdb896;
+  --ink-gray-5:          #7e6f5c;  /* 4.63:1 on the panel — AA, unlike the grey step */
+  --ink-gray-6:          #665847;
+  --ink-gray-7:          #524536;
+  --ink-gray-8:          #362c1f;
+  --ink-gray-9:          #251c13;
+
+  /* Cream is a warm page, so the accent family starts one step darker than the
+     palettes below choose. The four compounds under this block move it again per
+     palette; this line is the fallback for a document carrying no data-palette. */
+  --accent: var(--ink-blue-8);
+}
+
+/* ── Dark — warmed, with lines you can see ───────────────────────────────────
+   Only surfaces and outlines move. The dark INK steps (gray-5…9) are left exactly
+   where they are: they are the steps the status-pill and priority tables in
+   desk.css were measured against, and re-tinting them would falsify those
+   comments for a gain nobody would see at chroma this low.
+
+   Outlines are the point of this block. Every `1px solid var(--outline-gray-1)`
+   in the app moves with the two values below — 65-odd uses — which is why this
+   is the largest single win in dark mode. */
+[data-theme="dark"] {
+  --surface-base:        #1a1713;
+  --surface-gray-1:      #262119;  /* 1.12:1 from the panel */
+  --surface-gray-2:      #2f2a22;
+  --surface-gray-3:      #3a342b;
+  --surface-elevation-1: #262119;
+  --surface-elevation-2: #2d2821;
+  --surface-elevation-3: #3a342b;
+  --outline-gray-1:      #3b3630;  /* 1.34:1 vs the ground, 1.49:1 vs the panel; was 1.155:1 */
+  --outline-gray-2:      #4a443c;
+}
+
+/* ── The cream accent step ───────────────────────────────────────────────────
+   Only the text/border/bar role moves. --accent-soft, --accent-bar and the
+   --btn-solid-* family stay on the ramp palette.css already chose, so a solid
+   button looks the same in cream as it does in light, and the palette tests keep
+   meaning what they meant. Each of the four is AA or better on #fdf9ef, which the
+   default blue step is not — that, and not taste, is the reason this block exists.
+   (The blue row restates the fallback in the block above rather than differing
+   from it; it is there so the four read as one list.) */
+[data-theme="cream"][data-palette="blue"]     { --accent: var(--ink-blue-8); }
+[data-theme="cream"][data-palette="violet"]   { --accent: var(--ink-violet-8); }
+[data-theme="cream"][data-palette="teal"]     { --accent: var(--ink-teal-8); }
+[data-theme="cream"][data-palette="graphite"] { --accent: var(--ink-gray-8); }

@@ -33,7 +33,7 @@ const { T, byId } = loadApp(`
   insightsFacets, insightsSummary, INSIGHTS_SKELETON, renderInsights,
   categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter,
   IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS, UNCATEGORISED, CATEGORY_ALL,
-  INSIGHTS_ALL, SEGMENT_LABELS,
+  INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel,
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
   get insightsFilters() { return insightsFilters; }, set insightsFilters(v) { insightsFilters = v; },
   get activeCategory() { return activeCategory; },
@@ -233,9 +233,30 @@ T.searchInput.value = '';
 T.setCategoryFilter(T.CATEGORY_ALL);
 r.ok('back to All shows everything again',
   ['IR1', 'IR2', 'IR3', 'IR4'].every(n => listHtml().includes(n)), listHtml().slice(0, 200));
-r.ok('the category strip labels are the categories themselves',
-  /data-cat="GENERAL MAINTENANCE"/.test(byId.get('list-categories').innerHTML),
-  byId.get('list-categories').innerHTML.slice(0, 300));
+// The tab CARRIES the stored key and SHOWS the house label. Both halves matter:
+// the key is what a click filters on and what the store compares, and the label is
+// the only thing a reader meets — the row that used to read "All Categories" beside
+// "GENERAL MAINTENANCE".
+{
+  const strip = byId.get('list-categories').innerHTML;
+  r.ok('each category tab carries the stored key',
+    /data-cat="GENERAL MAINTENANCE"/.test(strip), strip.slice(0, 300));
+  // The label sits immediately before the count span, whatever the indentation.
+  r.ok('...and shows the label, so one row is one style',
+    strip.includes(T.categoryLabel('GENERAL MAINTENANCE') + '<span class="segment-count"') &&
+    !strip.includes('GENERAL MAINTENANCE<span'), strip.slice(0, 300));
+  r.ok('...with the special two tabs in that same style',
+    strip.includes('All categories<span') && strip.includes('No category<span'));
+}
+r.ok('the label maps are tables, not a lower-case rule — an unknown key passes through',
+  T.categoryLabel('CRASH') === 'Crash' &&
+  T.categoryLabel('REMOTE SUPPORT') === 'Remote support' &&
+  T.subCategoryLabel('TRIPOD/BIPOD') === 'Tripod/bipod' &&
+  T.subCategoryLabel('TOPSHELL') === 'Topshell' &&
+  // Not in either table: unchanged, rather than guessed at or mangled. The retired
+  // WING still shows on the old rows that carry it.
+  T.categoryLabel('WING') === 'WING' && T.subCategoryLabel('WING') === 'WING' &&
+  T.categoryLabel('') === '' && T.subCategoryLabel(null) === '');
 r.ok('and "No category" is offered only when something is in it',
   /data-cat="__none__"/.test(byId.get('list-categories').innerHTML));
 T.allIRs = T.allIRs.map(ir => Object.assign({}, ir, { category: ir.category || 'REPAIR' }));
@@ -267,8 +288,24 @@ r.ok('the match line reports the real numbers', /<strong>7<\/strong> of 7/.test(
   (painted.match(/insights-total[\s\S]{0,180}/) || [''])[0]);
 r.ok('the undated rows are disclosed rather than silently excluded',
   /carry no readable date/.test(painted), (painted.match(/insights-note[^<]*/) || [''])[0]);
-r.ok('the REPAIR breakout lists all nine sub-categories',
-  T.REPAIR_SUBCATEGORIES.every(k => painted.includes(k)));
+r.ok('the REPAIR breakout lists all nine sub-categories, each in the house style',
+  T.REPAIR_SUBCATEGORIES.every(k => painted.includes(T.subCategoryLabel(k))));
+// The keys are ALL CAPS because they are keys, and the chips beside them are the
+// only place a reader meets one. A raw key leaking in is the exact defect the
+// owner saw as "All Categories" sitting next to "GENERAL MAINTENANCE".
+r.ok('...and not one of them is printed as the raw stored key',
+  !/TOPSHELL|AIRFRAME|TRIPOD\/BIPOD|CAMERA\/LENS/.test(painted),
+  (painted.match(/insights-subcats[\s\S]{0,400}/) || [''])[0]);
+// The card's visible text is the label; the raw key must still travel in
+// `data-cat`, because that is what the click handler filters on and what the
+// store compares. So this looks for the key between the TAGS, not anywhere.
+r.ok('the category cards wear the house style too, not the stored key',
+  painted.includes('>' + T.categoryLabel('GENERAL MAINTENANCE') + '<') &&
+  !painted.includes('>GENERAL MAINTENANCE<') &&
+  painted.includes('data-cat="GENERAL MAINTENANCE"'));
+// The acronyms are the reason the labels are a map and not a lower-case rule.
+r.ok('...while an acronym keeps its capitals',
+  T.subCategoryLabel('GPS') === 'GPS' && T.subCategoryLabel('RC') === 'RC');
 r.ok('the OTHERS note is shown verbatim — that is the field\'s whole purpose',
   painted.includes('Cracked canopy'), painted.slice(painted.indexOf('insights-others'), painted.indexOf('insights-others') + 220));
 r.ok('the retired sub-category adds a "Not set" chip rather than a tenth component',

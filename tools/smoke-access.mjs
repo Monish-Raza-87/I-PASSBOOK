@@ -158,8 +158,13 @@ r.ok('but the Overview is readable by everyone, Triage or not',
 // write path is gated on canTriage() itself, so a payload that forgot to raise the
 // key cannot open the ticket header. Asserted over the source because the gate is
 // inside a click handler the vm harness does not invoke.
+//
+// The message is now worded "Allot CAPS" — the panel's DISPLAY name since the
+// owner renamed it — while the permission it names is still `triage` and still
+// asked for through canTriage(). Both halves are pinned here so a later rename
+// cannot quietly swap the GATE for a message change.
 r.ok('the Overview save is gated on canTriage(), not on the permission map',
-  /if \(!canTriage\(\)\) \{ showToast\('You need Triage access/.test(appJs),
+  /if \(!canTriage\(\)\) \{ showToast\('You need Allot CAPS access/.test(appJs),
   (appJs.match(/[^\n]*canTriage\(\)[^\n]*/) || []).slice(0, 4));
 T.setUser({
   email: 'adhik.nair@indrones.com', sessionToken: 't',

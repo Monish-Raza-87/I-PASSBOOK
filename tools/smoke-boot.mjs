@@ -563,7 +563,7 @@ head('every icon slot in the rendered page is actually filled');
 // after showApp() ran means a call site asked for a name the map does not have, and
 // in a browser that is a blank button, not a failing test.
 const iconSlots = [...domNoComments.matchAll(
-  /<(span|div)[^>]*class="([^"]*\b(?:nav-icon|ph-icon|btn-icon|activity-caret|tab-icon|sidebar-toggle-icon|list-toggle-icon|nudge-bell-icon)\b[^"]*)"[^>]*>([\s\S]{0,400}?)<\/\1>/g)];
+  /<(span|div)[^>]*class="([^"]*\b(?:nav-icon|ph-icon|btn-icon|activity-caret|tab-icon|sidebar-toggle-icon|list-toggle-icon|list-rail-icon|nudge-bell-icon)\b[^"]*)"[^>]*>([\s\S]{0,400}?)<\/\1>/g)];
 const emptySlots = iconSlots.filter(m => !/<svg/.test(m[3]));
 ok('there are icon slots on the page at all', iconSlots.length >= 8, iconSlots.length);
 ok('none of them is left empty', emptySlots.length === 0,

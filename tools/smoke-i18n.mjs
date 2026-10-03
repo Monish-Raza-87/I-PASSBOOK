@@ -63,15 +63,19 @@ ok('...and it loads BEFORE app.js, which reads window.t as it evaluates',
   [html.indexOf('<script src="i18n.js">'), html.indexOf('<script src="app.js">')]);
 ok('...and it is not a module, which app.js could not wait for',
   !/type="module"/.test(html));
-// The six-file cascade is the app's own contract (smoke-shell.mjs pins the order).
-// A language table added to it would be a seventh stylesheet by the back door.
-// The app's rule is SIX local sheets in one pinned cascade (smoke-shell.mjs).
-// The Google Fonts link is not part of it — it is the one third-party stylesheet,
+// The app's rule is ONE pinned cascade of local sheets (smoke-shell.mjs pins the
+// ORDER). This assertion is about the SET: a language table added to it would be a
+// new local stylesheet by the back door. It names the sheets rather than counting
+// them, because a bare count says "seven" without saying which seven — and on
+// 2026-10-03 theme.css legitimately took the list from six to seven.
+// The Google Fonts link is not part of it — that is the one third-party stylesheet,
 // and it is loaded from a CDN, not from this repo.
+const CASCADE = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'desk.css'];
 const localSheets = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]*>/g)]
   .map(m => m[0]).filter(tag => !/^https?:/i.test((tag.match(/href="([^"]+)"/) || [])[1] || ''));
-ok('it adds no local stylesheet — the six-file cascade is untouched',
-  localSheets.length === 6, localSheets);
+ok('it adds no local stylesheet — i18n brings words, not another sheet',
+  localSheets.map(tag => (tag.match(/href="([^"]+)"/) || [])[1] || '').join('|') === CASCADE.join('|'),
+  localSheets.map(tag => (tag.match(/href="([^"]+)"/) || [])[1] || ''));
 ok('sw.js precaches it, so an offline phone still has its words',
   /'\.\/i18n\.js'/.test(swJs));
 ok('...and the cache name still moves with the version, as that pin requires',

@@ -82,7 +82,7 @@ const banner = byId.get('ir-banner-pills').innerHTML;
 T.renderIRList(FIXTURE);
 const list = byId.get('ir-list').innerHTML;
 
-const css = ['tokens.css', 'palette.css', 'base.css', 'components.css', 'views.css', 'desk.css']
+const css = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'desk.css']
   .map(f => `<link rel="stylesheet" href="${pathToFileURL(path.join(ROOT, f)).href}">`).join('\n');
 
 // ── The customer door, forced open ───────────────────────────────────────────

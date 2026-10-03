@@ -87,21 +87,21 @@
     'section.close':        'Mark Section {letter} completed',
     'section.closed':       'Section closed',
 
-    // ── The workflow status words (IR_STATUS_VALUES) ──────────────────────────
-    'status.open':             'Open',
-    'status.remoteSupport':    'Remote Support',
-    'status.hold':             'Hold',
-    'status.inward':           'Inward',
-    'status.visualInspection': 'Visual Inspection',
-    'status.qcInvestigation':  'QC Investigation',
-    'status.production':       'Production',
-    'status.qc':               'QC',
-    'status.flightTest':       'Flight Test',
-    'status.pdi':              'PDI',
-    'status.approval':         'Approval',
-    'status.delivered':        'Delivered',
-    'status.close':            'Close',
-    'status.other':            'Other',
+    // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
+    'status.open':          'Open',
+    'status.inward':        'Inward',
+    'status.inspection':    'Inspection',
+    'status.investigation': 'Investigation',
+    'status.production':    'Production',
+    'status.qualityTest':   'Quality Test',
+    'status.pdiDispatch':   'PDI/Dispatch',
+    'status.delivered':     'Delivered',
+    'status.onHold':        'On Hold',
+    'status.remoteSupport': 'Remote Support',
+    // The one retired word that is not a stage. The escape hatch has no home among
+    // the ten, old tickets still hold it, and it must keep reading as a word rather
+    // than as a blank pill.
+    'status.other':         'Other',
 
     // ── Priority ─────────────────────────────────────────────────────────────
     // Read through priority() below, never off the stored value: the store keeps
@@ -196,20 +196,35 @@
     'insights.colLate':        'Late',
   };
 
-  // The workflow status words, keyed the way the app stores them. app.js already
-  // has ONE list of what a status may be (IR_STATUS_VALUES); this maps those same
-  // values to their keys, so translating a status never means transliterating it.
-  // Built by name rather than hand-written so a status added there and forgotten
-  // here is caught by smoke-i18n.mjs rather than silently shown in English.
+  // The workflow stages, keyed the way the app stores them. app.js already has ONE
+  // list of what a stage may be (IR_STATUS_VALUES); this maps those same values to
+  // their keys, so translating a status never means transliterating it — and
+  // smoke-i18n.mjs checks the two lists against each other so a stage added there
+  // and forgotten here is caught rather than silently shown in English.
+  //
+  // It carries TWO arms. The first is the ten. The second is the retired Sheet
+  // vocabulary, each word pointed at the key of the stage it means today — so a
+  // stored 'QC Investigation' reads as 'Investigation' and a stored 'Close' reads as
+  // 'Delivered'. Two keys sharing one string is the point: this is the display half
+  // of the single fold STATUS_LEGACY/canonicalStage() does in app.js, and keeping
+  // the old words readable is exactly what "shorten what is offered, keep old
+  // values readable" asked for. It is also why `t()`'s fallback below can stay a
+  // plain echo: every word the store can hold is already in here.
   const STATUS_KEYS = {
-    'Open': 'status.open', 'Remote Support': 'status.remoteSupport',
-    'Hold': 'status.hold', 'Inward': 'status.inward',
-    'Visual Inspection': 'status.visualInspection',
-    'QC Investigation': 'status.qcInvestigation',
-    'Production': 'status.production', 'QC': 'status.qc',
-    'Flight Test': 'status.flightTest', 'PDI': 'status.pdi',
-    'Approval': 'status.approval', 'Delivered': 'status.delivered',
-    'Close': 'status.close', 'Other': 'status.other',
+    // The ten the app offers.
+    'Open': 'status.open', 'Inward': 'status.inward',
+    'Inspection': 'status.inspection', 'Investigation': 'status.investigation',
+    'Production': 'status.production', 'Quality Test': 'status.qualityTest',
+    'PDI/Dispatch': 'status.pdiDispatch', 'Delivered': 'status.delivered',
+    'On Hold': 'status.onHold', 'Remote Support': 'status.remoteSupport',
+    // The retired words.
+    'Hold': 'status.onHold',
+    'Visual Inspection': 'status.inspection',
+    'QC Investigation': 'status.investigation',
+    'QC': 'status.qualityTest', 'Flight Test': 'status.qualityTest',
+    'PDI': 'status.pdiDispatch', 'Approval': 'status.pdiDispatch',
+    'Close': 'status.delivered',
+    'Other': 'status.other',
   };
 
   // The same, for priority. Lower-cased keys because the stored word is capitalised

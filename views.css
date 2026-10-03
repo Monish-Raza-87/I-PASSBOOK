@@ -469,6 +469,21 @@
 .tab:hover { color: var(--ink-gray-8); }
 .tab.active { color: var(--ink-gray-9); border-bottom-color: var(--surface-gray-10); font-weight: var(--weight-semibold); }
 
+/* A section this ticket's CATEGORY makes meaningless — a Remote Support job has no
+   unloading, inspection, rework or dispatch. Struck through and drained of colour
+   so it reads as "not this job" rather than as "you may not", which is what a
+   greyed-out control usually means in this app. It stays in the row with its label
+   legible: the words Inward / Production / PDI are what tell a person WHY it is off,
+   and hiding the tab would leave them with no explanation at all. */
+.tab.tab-inapplicable {
+  color: var(--ink-gray-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+  cursor: not-allowed;
+}
+.tab.tab-inapplicable:hover { color: var(--ink-gray-3); }
+.tab.tab-inapplicable.active { border-bottom-color: transparent; }
+
 /* A section holding typing that has not been saved yet. The dot lives in the tab's
    right padding, so it never pushes the label around or changes the strip's height,
    and it is the ONLY standing sign of unsaved work — without it the leave prompt
@@ -497,6 +512,24 @@
 
 .section-content { display: none; animation: fadeIn 0.18s ease-out; }
 .section-content.active { display: block; }
+
+/* A section switched off by the ticket's CATEGORY (see applyCategoryApplicability).
+   The tab refuses to open it, so arriving here means a deep link, an
+   already-restored view or the category changing while the pane was open — and in
+   all three the honest thing is to say WHY the form below cannot be saved. A
+   decoration rather than a rendered element on purpose: it cannot then be left
+   behind by a render that forgot to remove it, and it covers every route in. */
+.section-content.is-inapplicable::before {
+  content: 'Not part of a Remote Support job — this section is switched off for this ticket.';
+  display: block;
+  margin: 0 0 0.85rem;
+  padding: 0.6rem 0.85rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-gray-2);
+  color: var(--ink-gray-8);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
 
 .section-title {
   font-size: var(--text-lg);

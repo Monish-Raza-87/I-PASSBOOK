@@ -514,8 +514,10 @@ is left is small.
    dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
    `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
    `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
-   shell for a load. The last publish was `a9731cc` (2026-09-21, cache v47) — nine
-   deploys on from the `3286ff0` / v35 this line used to name.
+   shell for a load. The last publish is `762927d` (2026-10-03, cache v66), carrying
+   Phase 1's backup-health line. **Its backend half is still owed** — the live
+   deployment answers `apiVersion 4`, so the bundled export and `API_VERSION: 5` have
+   not been pasted yet (see the Phase 1 note under Known Issues).
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
    safe date; they are the only record of the old hand-assigned grants, which is the

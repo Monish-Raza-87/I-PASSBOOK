@@ -60,8 +60,12 @@ function enclosingFn(at) {
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 r.head('the owner\'s security decisions');
-r.ok('API_VERSION is 4 — v4 adds the passwordless login and the quick-unlock devices',
-  /API_VERSION:\s*4\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v5 = Phase 1's safety net (the change journal, the nightly export, getBackupHealth)
+// plus Phase 0's grid-shaped listIRs and the new getLegacyIR. Bumped because the
+// action set changed — `ping` reports this, so a deployment that was not re-pasted
+// after a backend change can be told apart from one that was.
+r.ok('API_VERSION is 5 — Phase 1\'s safety net and Phase 0\'s new actions',
+  /API_VERSION:\s*5\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -947,14 +951,21 @@ r.head('the positional column layout is really gone, not adapted');
 });
 // SpreadsheetApp is still needed — but ONLY for the read-only inputs, which are not
 // stores: the IR Repository (listIRs) and the legacy workbook (listLegacyIRs for the
-// index, getLegacyIR for one record). Anything else reaching for it is the app
-// writing to a sheet again.
+// index, getLegacyIR for one record).
+//
+// ONE exception, added by Phase 1, and it is an exception in one direction only: the
+// nightly backup's own Sheet. The app CREATES it, writes a snapshot into it, and
+// never reads it back — it is an OUTPUT, in the backup folder, rotated away like
+// everything else in there. "No spreadsheet holds app data" is still true; that
+// sentence is about the app's STORE, and this is a dated copy of it. Anything else
+// reaching for SpreadsheetApp is the app writing to a sheet again.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly three times', ssSites.length === 3, ssSites.length);
+r.ok('SpreadsheetApp is used exactly four times', ssSites.length === 4, ssSites.length);
+const ssAllowed = ['listIRs', 'listLegacyIRs', 'getLegacyIR', 'exportStoreToFolder'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
-  r.ok('SpreadsheetApp site ' + (i + 1) + ' is a read-only input (' + (owner ? owner.name : 'top level') + ')',
-    !!owner && ['listIRs', 'listLegacyIRs', 'getLegacyIR'].indexOf(owner.name) > -1,
+  r.ok('SpreadsheetApp site ' + (i + 1) + ' is a named site (' + (owner ? owner.name : 'top level') + ')',
+    !!owner && ssAllowed.indexOf(owner.name) > -1,
     { site: i + 1, fn: owner && owner.name });
 });
 r.ok('and none of them writes: both sheets are INPUTS, never stores',
@@ -962,6 +973,13 @@ r.ok('and none of them writes: both sheets are INPUTS, never stores',
   !/setValue|appendRow/.test(fnBody('listLegacyIRs')) &&
   !/setValue|appendRow/.test(fnBody('getLegacyIR')),
   (code.match(/[^\n]*(appendRow|\.setValue)[^\n]*/g) || ['']));
+r.ok('the backup sheet is CREATED and never opened back — an output, not a store',
+  /SpreadsheetApp\.create\(/.test(fnBody('exportStoreToFolder')) &&
+  !/SpreadsheetApp\.openById/.test(fnBody('exportStoreToFolder')) &&
+  !/SpreadsheetApp/.test(fnBody('collectStoreForBackup')),
+  (fnBody('exportStoreToFolder').match(/[^\n]*SpreadsheetApp[^\n]*/g) || ['none']));
+r.ok('...and it is MOVED into the dated backup folder, not left in My Drive',
+  /moveTo\(day\)/.test(fnBody('exportStoreToFolder')));
 
 r.head('the legacy record read is one tab at a time, as the sheet displays it');
 r.ok('getLegacyIR exists and is routed behind the token gate',
@@ -1604,9 +1622,23 @@ r.ok('it stays manual — no trigger is wired to the audit prune',
 r.head('nothing in the backend erases anything');
 // The pinned global assertion, restated here because the restore path is a new
 // place where "just clear it" would be a tempting implementation.
-r.ok('no setTrashed / removeFile / deleteFile anywhere',
-  !/setTrashed|removeFile\(|deleteFile\(/.test(code),
-  (code.match(/[^\n]*(setTrashed|removeFile|deleteFile)[^\n]*/g) || ['none — correct']));
+//
+// ONE exception, added by Phase 1, and it is exactly one: the backup ROTATION
+// trashes dated folders it is entitled to throw away (14 daily, 8 weekly, 12
+// monthly, one per year forever — see pruneBackups). It reaches into the backup
+// root and nowhere else, and only a folder whose NAME matched a date. So the
+// assertion is not weakened to "deleting is fine now" — it is NARROWED to one
+// function, and a setTrashed anywhere else still fails this line.
+const trashSites = [...code.matchAll(/setTrashed|removeFile\(|deleteFile\(/g)];
+r.ok('no setTrashed / removeFile / deleteFile anywhere except the backup rotation',
+  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && o.name === 'pruneBackups'; }),
+  trashSites.map(m => { const o = enclosingFn(m.index); return (o && o.name) || 'top level'; }));
+r.ok('...and there it can only reach the BACKUP root, never the live store',
+  /getBackupRootFolder\(false\)/.test(fnBody('pruneBackups')) &&
+  !/storeFolderFor|findStoreFile|getStoreFolder|getStoreSubfolder|sections\/|audit\//.test(fnBody('pruneBackups')),
+  'the id cache depends on nothing in _store/ ever being trashed, moved or renamed');
+r.ok('...and a folder it cannot match to a date is skipped before any delete',
+  /if \(!m\) return;/.test(fnBody('parseFoldersByDate')));
 r.ok('and the audit is append-only — the new path only appends lines',
   /appendAuditLinesLocked/.test(rf) && !/setContent/.test(rf),
   (rf.match(/[^\n]*setContent[^\n]*/g) || ['none — correct']));
@@ -1999,8 +2031,9 @@ r.ok('getOrCreateSectionFolder no longer looks the IR folder up in the root',
 r.ok('the resolver searches the archive but NEVER creates it as a side effect',
   /var archive = getArchiveFolder\(false\)/.test(fnBody('findIRFolder')),
   'an ordinary upload must not bring Archive IRs/ into existence');
-r.ok('nothing in the backend erases a folder or a file',
-  !/setTrashed|removeFile\(|\bdeleteFile\(/.test(code));
+r.ok('nothing in the backend erases a folder or a file — bar the dated backup rotation',
+  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && o.name === 'pruneBackups'; }),
+  trashSites.map(m => { const o = enclosingFn(m.index); return (o && o.name) || 'top level'; }));
 
 r.head('an upload with no MIME type still lands, and a broken one is never dropped quietly');
 // The owner's report: on two Android phones the photo showed a thumbnail before
@@ -2298,5 +2331,149 @@ r.ok('no UrlFetchApp anywhere — still true after adding this door',
   !/UrlFetchApp/.test(code), (code.match(/[^\n]*UrlFetchApp[^\n]*/) || ['none']));
 r.ok('it needs no OAuth scope of its own — Session is core',
   !/ScriptApp\.getOAuthToken|OAuth2/.test(code));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PHASE 1 — THE SAFETY NET (the change journal, the nightly export, the rotation)
+// ══════════════════════════════════════════════════════════════════════════════
+r.head('the change journal is written inside the save lock, not beside it');
+
+// The journal's whole value is that it cannot disagree with the write it describes.
+// A journal call OUTSIDE withRowLockOrThrow would be a second write racing the
+// first, and the failure mode is the worst one available: a journal that lists a
+// write that was rolled back, or misses one that landed. So the placement is the
+// assertion — the call must sit between the lock's open and its close.
+const ssSave = fnBody('saveSection');
+const lockStart = ssSave.indexOf('withRowLockOrThrow(');
+const journalAt = ssSave.indexOf('journalLocked(');
+r.ok('journalLocked is called from inside saveSection',
+  journalAt > -1, journalAt);
+r.ok('...AFTER the lock is taken, never before it',
+  lockStart > -1 && journalAt > lockStart,
+  { lockAt: lockStart, journalAt: journalAt });
+r.ok('...and it is called on BOTH branches — the sentinel store AND a real IR file',
+  (ssSave.match(/journalLocked\(/g) || []).length === 2,
+  (ssSave.match(/journalLocked\(/g) || []).length);
+r.ok('the audit still goes first, inside the same lock — order unchanged',
+  (ssSave.match(/appendAuditLinesLocked\(/g) || []).length === 2 &&
+  ssSave.indexOf('appendAuditLinesLocked(') < ssSave.indexOf('journalLocked('));
+r.ok('a put-back is journalled as `restoreField`, not buried as a save',
+  /journalLocked\(\{[^}]*action:\s*'restoreField'/.test(fnBody('restoreField')),
+  (fnBody('restoreField').match(/[^\n]*journalLocked[^\n]*/) || ['none']));
+
+// The entry is an INDEX, not a copy of the data. Duplicating field VALUES here would
+// double what the busiest path in the backend writes, to record something the
+// ticket's own audit file already holds.
+const jl = fnBody('journalLocked');
+r.ok('the entry records WHERE and WHO, never the values themselves',
+  /sec:/.test(jl) && /by:/.test(jl) && /keys/.test(jl) &&
+  !/\bfields\b|\bvalues\b|\bnext\b\s*\)/.test(jl),
+  (jl.match(/[^\n]*(fields|values)[^\n]*/g) || ['none']));
+r.ok('it appends rather than rewriting: the existing text is read and extended',
+  /getBlob\(\)\.getDataAsString\(\)/.test(jl) && /setContent\(existing/.test(jl));
+
+r.head('the journal is one file per DAY, so a restore has a time window');
+r.ok('the file is named for the date, not the ticket',
+  /function journalFileName\(dateStr\)/.test(code) && /\.jsonl/.test(fnBody('journalFileName')),
+  (code.match(/function journalFileName[^\n]*/) || [''])[0]);
+r.ok('dates are IST, always — a backup named for the wrong day is worse than none',
+  /Asia\/Kolkata/.test(fnBody('journalToday')) && /Asia\/Kolkata/.test(fnBody('backupStamp')));
+r.ok('there is an editor lever to read one back, like reportRecentSignins',
+  /function reportJournal\(/.test(code) && /return report\(/.test(fnBody('reportJournal')));
+
+r.head('the export writes raw/ FIRST, because raw/ is what a restore rebuilds from');
+const ex = fnBody('exportStoreToFolder');
+r.ok('raw/ is created and filled before csv/ and before the Sheet',
+  ex.indexOf("createFolder('raw')") > -1 &&
+  ex.indexOf("createFolder('raw')") < ex.indexOf("createFolder('csv')") &&
+  ex.indexOf("createFolder('csv')") < ex.indexOf('SpreadsheetApp.create'),
+  { raw: ex.indexOf("createFolder('raw')"), csv: ex.indexOf("createFolder('csv')"),
+    sheet: ex.indexOf('SpreadsheetApp.create') });
+r.ok('it reads the store rather than naming files — a named list goes stale silently',
+  /walk\(getStoreFolder\(\), ''\)/.test(fnBody('collectStoreForBackup')) &&
+  /getFolders\(\)/.test(fnBody('collectStoreForBackup')),
+  (fnBody('collectStoreForBackup').match(/[^\n]*getFiles\(\)[^\n]*/g) || ['']));
+r.ok('the OLD backups/ folder is skipped — a backup of a backup grows every night',
+  /name === STORE_BACKUP_DIR\) continue/.test(fnBody('collectStoreForBackup')));
+r.ok('every file is written as PLAIN_TEXT, so a .jsonl cannot fail the whole export',
+  !/MimeType\.JSON/.test(ex),
+  (ex.match(/[^\n]*MimeType\.JSON[^\n]*/g) || ['none']));
+r.ok('unequal-length rows are padded — Sheets throws on a ragged range',
+  /padded/.test(ex) && /while \(copy\.length < width\)/.test(ex));
+// raw/ is BUNDLED, and the file count must not grow with the number of IRs. The
+// first real run — 19 IRs — took 89 seconds while creating one Drive file per store
+// file; at 450 IRs that is ~900 files and three times over the export's budget. See
+// the BULK block in exportStoreToFolder.
+r.ok('raw/ bundles the parts that grow with IR count — one file per record type',
+  /var BULK = \{ 'sections\/': 'sections\.json', 'audit\/': 'audit\.json', 'journal\/': 'journal\.json' \}/.test(ex) &&
+  /raw\.createFile\(name, JSON\.stringify\(bundles\[name\]/.test(ex),
+  'a file per IR is a file count that grows with the company');
+r.ok('...and the store PATH stays the KEY, so a restore never has to guess',
+  /bundles\[b\]\[f\.path\] = f\.text/.test(ex),
+  'IR409.json belongs in sections/ and IR409.jsonl belongs in audit/ — the path IS the information');
+r.ok('...and it does NOT read the sections a second time to build the CSV',
+  /sectionRows\(bundles\['sections\.json'\] \|\| \{\}\)/.test(ex) &&
+  !/sectionRows\(\)/.test(ex),
+  'one Drive read per IR, paid twice, was the largest cost in the export');
+r.ok('a manifest records what the store held, so a restore can say what is missing',
+  /_manifest\.json/.test(ex) && /manifest\.bundled\[name\] = \{ count: paths\.length, paths: paths \}/.test(ex) &&
+  /storeFiles: files\.length/.test(ex));
+
+r.head('the backup records its own health, so a silent failure is impossible');
+r.ok('health lives in the PRIVATE store, not in the backup folder it describes',
+  /var BACKUP_HEALTH_FILE = 'backup\.json'/.test(code) &&
+  /writeJson\(BACKUP_HEALTH_FILE/.test(fnBody('writeBackupHealth')),
+  (code.match(/var BACKUP_HEALTH_FILE[^\n]*/) || [''])[0]);
+r.ok('the nightly run records success AND failure — the catch writes health too',
+  (fnBody('runNightlyBackup').match(/writeBackupHealth\(/g) || []).length === 2,
+  (fnBody('runNightlyBackup').match(/writeBackupHealth\(/g) || []).length);
+r.ok('...and emails the admin on failure only, through the existing notice path',
+  /sendAdminNotice\(/.test(fnBody('runNightlyBackup')) &&
+  /BACKUP FAILED/.test(fnBody('runNightlyBackup')));
+r.ok('a run over its budget is reported as a FAILURE even though it finished',
+  /BACKUP_BUDGET_MS/.test(fnBody('runNightlyBackup')) &&
+  /overran/.test(fnBody('runNightlyBackup')),
+  'a slow backup is the shape of the one that fails tomorrow');
+r.ok('the whole run is inside one try — a timed trigger that throws records NOTHING',
+  /^function runNightlyBackup\(\) \{\r?\n\s+var started[\s\S]{0,200}?try \{/.test(
+    code.slice(code.indexOf('function runNightlyBackup()'))));
+
+r.head('the admin screen is told, in words, when the last backup was');
+const bh = fnBody('getBackupHealth');
+r.ok('admins only, re-checked inside the function, not just at the router',
+  /isAdminEmail\(email\)/.test(bh), (bh.match(/[^\n]*isAdminEmail[^\n]*/) || [''])[0]);
+r.ok('"never" is a state it says out loud, not an empty timestamp',
+  /never:\s*true/.test(bh) && /No backup has run yet/.test(bh));
+r.ok('...and it carries a plain "how long ago", not a bare date to do arithmetic on',
+  /backupAgeLabel/.test(bh) && /min ago/.test(fnBody('backupAgeLabel')));
+r.ok('it is routed on the read side (doGet), since it changes nothing',
+  /getBackupHealth: function \(\) \{ return getBackupHealth\(email\); \}/.test(code),
+  (code.match(/[^\n]*getBackupHealth:[^\n]*/) || [''])[0]);
+
+r.head('the rotation is grandfather–father–son, and it never decays into a fortnight');
+const pr = fnBody('pruneBackups');
+r.ok('14 daily, 8 weekly, 12 monthly, one a year forever',
+  /BACKUP_KEEP_DAILY/.test(pr) && /BACKUP_KEEP_WEEKLY/.test(pr) && /BACKUP_KEEP_MONTHLY/.test(pr) &&
+  /byYear/.test(pr),
+  (code.match(/BACKUP_KEEP_[A-Z]+: \d+/g) || []).join(', '));
+r.ok('weekly is an ISO WEEK, not "every 7th folder" — a month with 20 backups still gives one',
+  /isoWeekKey/.test(pr) && /function isoWeekKey\(/.test(code) &&
+  /used < quota/.test(pr));
+r.ok('a folder not named for a day is LEFT ALONE, never deleted',
+  /if \(!m\) return;/.test(fnBody('parseFoldersByDate')) &&
+  /anything not named for a day is left alone/.test(src));
+r.ok('it reports what it deleted instead of a count nobody can check',
+  /deleted: deleted/.test(pr) && /kept: Object\.keys\(kept\)/.test(pr));
+
+r.head('the nightly trigger is installed by hand, and installing twice leaves one');
+const ibt = fnBody('installBackupTrigger');
+r.ok('it deletes an existing backup trigger before creating one',
+  /getProjectTriggers\(\)/.test(ibt) && /deleteTrigger/.test(ibt) &&
+  /'runNightlyBackup'/.test(ibt),
+  'two triggers would run the export twice and rotate the first one out early');
+r.ok('it runs at 23:40, so "last night" and the folder name agree',
+  /atHour\(23\)/.test(ibt) && /nearMinute\(40\)/.test(ibt) &&
+  /everyDays\(1\)/.test(ibt));
+r.ok('and it tells the operator to run the export once by hand to prove it',
+  /runNightlyBackup\(\) once NOW/.test(ibt));
 
 r.finish();

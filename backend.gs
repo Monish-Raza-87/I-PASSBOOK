@@ -68,6 +68,37 @@ var CONFIG = {
   // syncs off Drive; nothing here erases anything yet. See archiveClosedIRs().
   ARCHIVE_FOLDER_NAME: 'Archive IRs',
 
+  // ── THE BACKUPS ──────────────────────────────────────────────────────────────
+  // Where the nightly export writes, as a SIBLING of `_store/` and of the live
+  // per-IR folders — beside `Archive IRs`, never inside `_store/`.
+  //
+  // WHY IT IS NOT INSIDE `_store/`. Two reasons, and the second is the one that
+  // matters. `_store/` is PRIVATE because it holds password hashes and session
+  // tokens (see initializeStore), and a backup folder nobody can open by hand is
+  // not a backup. And this is the folder the owner points their server-side sync
+  // at, so it has to be somewhere they would think to look, next to the data it
+  // copies — not buried in a folder named after the program's internals.
+  //
+  // ⚠️ It must NOT be pointed at the LIVE folders. Mirroring the working data in
+  // realtime would copy an accident within seconds, which is the opposite of what
+  // a backup is for. See runNightlyBackup().
+  BACKUP_FOLDER_NAME: 'I-PASSBOOK backups',
+
+  // How long the nightly export is allowed to run before it gives up and records a
+  // failure. Apps Script kills a script at six minutes, and a kill produces NO
+  // record anywhere — the job simply never appears to have run, which is the one
+  // failure shape that a "last backup" line cannot report. Checking the clock
+  // ourselves turns a silent kill into a reported failure.
+  BACKUP_BUDGET_MS: 240000,
+
+  // The rotation: 14 daily, 8 weekly, 12 monthly, one per year forever. Roughly
+  // 625 MB steady and FLAT forever, against about 55 GB over ten years if every
+  // night were kept — which would have filled the whole Google account. See
+  // pruneBackups().
+  BACKUP_KEEP_DAILY: 14,
+  BACKUP_KEEP_WEEKLY: 8,
+  BACKUP_KEEP_MONTHLY: 12,
+
   ALLOWED_DOMAIN: 'indrones.com',
 
   // Bump this whenever the action set or a response shape changes. `ping` reports
@@ -82,7 +113,12 @@ var CONFIG = {
   // v4 = the passwordless login (email → emailed code, no password at all) and
   // the quick-unlock devices (devices.json, deviceRegister / deviceUnlock), plus
   // one active session per account minted everywhere sessions are minted.
-  API_VERSION: 4,
+  //
+  // v5 = Phase 1, the safety net: the change journal (journal/YYYY-MM-DD.jsonl,
+  // written inside the same lock as the save), the nightly export with its
+  // rotation, and the new admin action getBackupHealth. `listIRs` also hands over a
+  // GRID rather than finished records, and `getLegacyIR` is new — both from Phase 0.
+  API_VERSION: 5,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -657,6 +693,563 @@ function snapshotStore(label, paths) {
   var folder = getStoreSubfolder(STORE_BACKUP_DIR, true);
   folder.createFile(name, JSON.stringify(payload), MimeType.PLAIN_TEXT);
   return name;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PHASE 1 — THE SAFETY NET
+// ──────────────────────────────────────────────────────────────────────────────
+// Three things, and they answer three different questions. It is worth keeping
+// them apart, because each one alone leaves a hole the other two do not cover:
+//
+//   THE CHANGE JOURNAL ("what happened in the last few minutes?")
+//     An append-only line per write, in `_store/journal/YYYY-MM-DD.jsonl`. It is
+//     written INSIDE the same lock as the write it describes, which is what makes
+//     it cost nothing extra and makes it impossible to record a write that did not
+//     happen. What it buys is the size of a loss: the store is a whole-file
+//     replace, so without a journal a crash at 4pm leaves you asking "what did we
+//     change since last night?" — a question with no answer. With it, the answer
+//     is a list of writes, and the work since the last backup is MINUTES.
+//
+//   THE NIGHTLY EXPORT ("what did everything look like last night?")
+//     A dated folder holding the raw store, CSVs, and a Google Sheet with a tab
+//     per record type — readable on a phone, in Excel, by a person. This is the
+//     restore source. It runs on a trigger, so it does not depend on anybody
+//     remembering to press anything.
+//
+//   BACKUP HEALTH ("is the thing that saves us actually running?")
+//     A backup nobody can see the state of is a backup nobody knows is broken. The
+//     export records its own outcome, and the admin screen reads it back. A silent
+//     backup failure is the worst outcome in this whole plan, so it is the one the
+//     design spends the most effort making visible.
+//
+// WHAT IS DELIBERATELY NOT HERE. The export is a readable copy, not an encrypted
+// one. That is a decision and not a shortcut: the requirement is a copy the owner
+// can open in Excel tomorrow morning, and a file only a program can open cannot be
+// that. The protection is therefore the FOLDER's permissions and the owner's own
+// account, which is worth knowing out loud rather than discovering later.
+
+var STORE_JOURNAL_DIR = 'journal';
+
+// ── THE CHANGE JOURNAL ────────────────────────────────────────────────────────
+
+// One file per DAY, not per ticket. The per-ticket audit answers "what happened to
+// IR409"; this answers "what happened this afternoon", which is the question a
+// restore actually asks. Daily also bounds the file: a day's writes are small, and
+// nothing has to be rewritten as a ticket's history grows.
+function journalFileName(dateStr) { return String(dateStr) + '.jsonl'; }
+
+function journalToday() {
+  return Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+
+// Append ONE line, inside the caller's lock.
+//
+// The entry is deliberately an INDEX and not a copy. The values are already in the
+// ticket's own audit file, written by the same save — duplicating them here would
+// double what the busiest path in the backend writes, to record something already
+// recorded. What the journal adds is order, coverage and a cheap way to bound a
+// loss: which store, which key, by whom, when, and how big the payload was.
+function journalLocked(entry) {
+  var day = journalToday();
+  var file = findOrCreateStoreFile(STORE_JOURNAL_DIR + '/' + journalFileName(day));
+  var existing = file.getBlob().getDataAsString();
+  if (existing && existing.charAt(existing.length - 1) !== '\n') existing += '\n';
+  var line = { t: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+               ms: Date.now(),
+               by: String((entry && entry.by) || ''),
+               a: String((entry && entry.action) || ''),
+               ir: String((entry && entry.ir) || ''),
+               sec: String((entry && entry.sec) || ''),
+               n: Number((entry && entry.keys && entry.keys.length) ||
+                         (entry && entry.count) || 0),
+               keys: (entry && entry.keys) || [],
+               auto: !!(entry && entry.auto) };
+  file.setContent(existing + JSON.stringify(line) + '\n');
+  return line;
+}
+
+// Reading is the operator's lever, run from the editor — exactly like
+// reportRecentSignins, and for the same reason: this is consulted when something
+// has gone wrong, which is not the moment to be building a screen.
+function readJournal(dateStr) {
+  var day = String(dateStr || journalToday());
+  var file = findStoreFile(STORE_JOURNAL_DIR + '/' + journalFileName(day), false);
+  if (!file) return [];
+  var out = [];
+  file.getBlob().getDataAsString().split('\n').forEach(function (line) {
+    var t = line.trim();
+    if (!t) return;
+    try { out.push(JSON.parse(t)); } catch (e) { /* one bad line must not hide the rest */ }
+  });
+  return out;
+}
+
+function reportJournal(dateStr) {
+  var lines = readJournal(dateStr);
+  if (!lines.length) return report('No journalled writes for ' + String(dateStr || journalToday()) + '.');
+  var writers = {};
+  lines.forEach(function (l) { writers[l.by] = (writers[l.by] || 0) + 1; });
+  report(String(lines.length) + ' journalled write(s) on ' + String(dateStr || journalToday()) + ':');
+  Object.keys(writers).sort().forEach(function (w) {
+    report('  ' + w + ' — ' + writers[w]);
+  });
+  return report('Last write: ' + (lines[lines.length - 1].t || '') + '  ' +
+                (lines[lines.length - 1].ir || '') + ' / ' + (lines[lines.length - 1].sec || ''));
+}
+
+// ── THE NIGHTLY EXPORT ────────────────────────────────────────────────────────
+
+// Health lives in `_store/backup.json` — INSIDE the private store, not in the
+// export folder. A record of whether the backup worked must not be destroyed by
+// the backup rotation, and it must not be writable by anyone who can see the
+// backups.
+var BACKUP_HEALTH_FILE = 'backup.json';
+
+function readBackupHealth() {
+  try { return readJson(BACKUP_HEALTH_FILE) || {}; } catch (e) { return {}; }
+}
+
+function writeBackupHealth(obj) {
+  writeJson(BACKUP_HEALTH_FILE, obj);
+  return obj;
+}
+
+// The backup root, created on demand. NOT created by a read path, and not created
+// by initializeStore either — the export is the only thing that makes it, so its
+// absence means "the export has never run", which is exactly what the health line
+// should say.
+function getBackupRootFolder(create) {
+  var it = getRootFolder().getFoldersByName(CONFIG.BACKUP_FOLDER_NAME);
+  if (it.hasNext()) return it.next();
+  if (!create) return null;
+  var folder = getRootFolder().createFolder(CONFIG.BACKUP_FOLDER_NAME);
+  // Link-shared on purpose, and only this one: the owner has to be able to open it
+  // from their own phone, and their servers have to be able to fetch it. It holds a
+  // copy of everything, so the address matters — but it is a read-only snapshot
+  // nobody is handed, and `_store/` (which holds the credentials) stays private.
+  try { folder.setSharing(DriveApp.Access.DOMAIN_WITH_LINK, DriveApp.Permission.VIEW); }
+  catch (e) { /* sharing is best-effort; the owner can set it by hand */ }
+  return folder;
+}
+
+// Every file that belongs in a backup, as { path, name, text }.
+//
+// It WALKS the store rather than naming the files, because a named list is a list
+// that goes stale: the first time somebody adds a store file, the list is wrong and
+// the backup is silently incomplete — the worst possible failure for a backup,
+// because it looks fine. Walking means anything under `_store/` is copied by
+// construction, including files added after this was written.
+function collectStoreForBackup() {
+  var out = [];
+  function walk(folder, prefix) {
+    var files = folder.getFiles();
+    while (files.hasNext()) {
+      var f = files.next();
+      out.push({ path: prefix + f.getName(), name: f.getName(), text: f.getBlob().getDataAsString() });
+    }
+    var subs = folder.getFolders();
+    while (subs.hasNext()) {
+      var sub = subs.next();
+      var name = sub.getName();
+      // `backups/` is the OLD snapshotStore output — a backup of a backup, growing
+      // every time. It is skipped: copying it would double the export nightly for
+      // no restore value at all.
+      if (name === STORE_BACKUP_DIR) continue;
+      walk(sub, prefix + name + '/');
+    }
+  }
+  walk(getStoreFolder(), '');
+  return out;
+}
+
+// One cell, quoted only when it has to be. Excel and Sheets both read this, and
+// both are perfectly happy with an unquoted cell that needs no quoting — so
+// quoting everything would make the file correct and unreadable at the same time.
+function csvCell(v) {
+  var s = (v === null || v === undefined) ? '' : String(v);
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function csvFromRows(rows) {
+  return (rows || []).map(function (r) { return (r || []).map(csvCell).join(','); }).join('\n') + '\n';
+}
+
+// A store of `{ key: fieldsObject }` (irs.json, comments.json) as a table.
+function csvFromKeyedStore(store, keyHeader) {
+  var rows = [[keyHeader, 'field', 'value']];
+  Object.keys(store || {}).sort().forEach(function (k) {
+    var fields = store[k];
+    if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+      Object.keys(fields).sort().forEach(function (f) {
+        rows.push([k, f, fields[f]]);
+      });
+    } else {
+      rows.push([k, '', fields]);
+    }
+  });
+  return rows;
+}
+
+// The dated folder name. IST, always — the deployment and the desk are both there,
+// and a backup named for the wrong day is worse than no name.
+function backupStamp(date) {
+  return Utilities.formatDate(date || new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+}
+
+// Sections live one file per IR, so their rows are assembled rather than read.
+// `bundle` is `{ "<path>": "<file text>" }` — the section files ALREADY READ by the
+// raw/ pass above. It is passed in rather than re-read from Drive, because reading
+// them twice was the single largest cost in the export: one Drive read per IR, paid
+// again for no new information.
+function sectionRows(bundle) {
+  var rows = [['IR', 'section', 'field', 'value']];
+  Object.keys(bundle || {}).sort().forEach(function (path) {
+    var ir = String(path).replace(/^sections\//, '').replace(/\.json$/, '');
+    var data;
+    try { data = JSON.parse(bundle[path]); } catch (e) { return; }
+    Object.keys(data || {}).sort().forEach(function (sec) {
+      var fields = data[sec];
+      if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+        Object.keys(fields).sort().forEach(function (f) { rows.push([ir, sec, f, fields[f]]); });
+      } else {
+        rows.push([ir, sec, '', fields]);
+      }
+    });
+  });
+  return rows;
+}
+
+// ── THE ROTATION ──────────────────────────────────────────────────────────────
+// Grandfather–father–son, which is the oldest idea in backup design and still the
+// right one: keep every night for a fortnight, then one night a week, then one
+// night a month, then one night a year forever. The point is not that it saves
+// space — it is that it saves space WITHOUT the retention getting worse over time,
+// so "how far back can we go?" has an answer that does not decay into "a fortnight".
+//
+// It keeps a folder that is EITHER the newest of its day (the last 14), OR the
+// newest of its week, OR the newest of its month, OR the newest of its year.
+// DriveApp hands back an ITERATOR, not an array — `getFolders()` on a folder with
+// 400 dated children is a FolderIterator, and calling `.forEach` on one is a
+// TypeError that reads like a code bug and is really an API shape. Draining it
+// first is not a stylistic choice.
+function listAll(iterator) {
+  var out = [];
+  while (iterator.hasNext()) out.push(iterator.next());
+  return out;
+}
+
+function parseFoldersByDate(folders) {
+  var out = [];
+  listAll(folders).forEach(function (f) {
+    var m = String(f.getName()).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return;   // anything not named for a day is left alone, never deleted
+    out.push({ folder: f, y: Number(m[1]), mo: Number(m[2]), d: Number(m[3]),
+               key: m[0] });
+  });
+  out.sort(function (a, b) { return a.key < b.key ? -1 : (a.key > b.key ? 1 : 0); });
+  return out;
+}
+
+function isoWeekKey(y, mo, d) {
+  var dt = new Date(Date.UTC(y, mo - 1, d));
+  var day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  var yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  var week = Math.ceil((((dt - yearStart) / 86400000) + 1) / 7);
+  return dt.getUTCFullYear() + '-W' + (week < 10 ? '0' + week : week);
+}
+
+// Returns { kept: [names], deleted: [names] } so the caller can SAY what it did
+// instead of reporting a count nobody can check.
+function pruneBackups(now) {
+  var root = getBackupRootFolder(false);
+  if (!root) return { kept: [], deleted: [] };
+  var entries = parseFoldersByDate(root.getFolders());
+  if (!entries.length) return { kept: [], deleted: [] };
+  var kept = {};
+  var n = entries.length;
+
+  // Newest N by day.
+  entries.slice(Math.max(0, n - CONFIG.BACKUP_KEEP_DAILY)).forEach(function (e) { kept[e.key] = 'daily'; });
+
+  // Newest of each of the newest 8 weeks, and the newest of each of the newest 12
+  // months. Both walk from the NEWEST end and stop counting once the quota is met,
+  // so a month with 20 backups contributes one, not twenty.
+  function keepNewestPer(groupFn, quota) {
+    var seen = {};
+    var used = 0;
+    for (var i = n - 1; i >= 0 && used < quota; i--) {
+      var g = groupFn(entries[i]);
+      if (seen[g]) continue;
+      seen[g] = true;
+      if (!kept[entries[i].key]) kept[entries[i].key] = 'period';
+      used++;
+    }
+  }
+  keepNewestPer(function (e) { return isoWeekKey(e.y, e.mo, e.d); }, CONFIG.BACKUP_KEEP_WEEKLY);
+  keepNewestPer(function (e) { return e.y + '-' + e.mo; }, CONFIG.BACKUP_KEEP_MONTHLY);
+
+  // One per year, forever.
+  var byYear = {};
+  entries.forEach(function (e) { byYear[e.y] = e.key; });   // ascending, so last wins
+  Object.keys(byYear).forEach(function (y) { if (!kept[byYear[y]]) kept[byYear[y]] = 'yearly'; });
+
+  var deleted = [];
+  entries.forEach(function (e) {
+    if (kept[e.key]) return;
+    try { e.folder.setTrashed(true); deleted.push(e.key); }
+    catch (err) { /* a folder we cannot delete is reported by its absence from `deleted` */ }
+  });
+  return { kept: Object.keys(kept), deleted: deleted };
+}
+
+// ── THE EXPORT ITSELF ─────────────────────────────────────────────────────────
+
+// Write the whole store into a dated folder: raw/, csv/, and one Sheet.
+//
+// ORDER MATTERS AND IT IS THE POINT: raw/ is written FIRST, because raw/ is what a
+// restore rebuilds from. If the run dies half-way — a six-minute kill, a Drive
+// hiccup, a quota — the folder that exists holds the thing that matters, and the
+// readable extras (csv/, the Sheet) are the part that is missing. Getting that
+// backwards would mean a folder full of pretty spreadsheets that cannot restore
+// anything.
+function exportStoreToFolder(root, stamp) {
+  var started = Date.now();
+  var day = root.createFolder(stamp);
+  var raw = day.createFolder('raw');
+  var csv = day.createFolder('csv');
+
+  var files = collectStoreForBackup();
+
+  // ── raw/: ONE FILE PER RECORD TYPE, NOT ONE PER RECORD ──────────────────────
+  //
+  // ⚠️ THIS IS THE DIFFERENCE BETWEEN A BACKUP THAT WORKS AND ONE THAT STOPS
+  // WORKING AS THEY GROW, and it was measured rather than guessed. The first real
+  // run — 19 IRs — took **89 seconds**, and one Drive file was created per store
+  // file. At 450 IRs that is ~900 files to read and ~900 to create, at roughly
+  // 0.37s a Drive operation, which is three times over the four-minute budget this
+  // export is allowed. It would not have failed loudly either: Apps Script kills a
+  // six-minute script with NO record anywhere, so the symptom would have been a
+  // backup that just quietly stopped appearing as the company grew.
+  //
+  // So the parts that grow with the number of IRs — sections/, audit/ and journal/
+  // — are written as ONE bundled file each, keyed by their store path. The file
+  // count is now constant (~12) no matter how many tickets exist, and the data is
+  // identical: the bundle is the same bytes, with their paths kept as keys.
+  //
+  // The paths are NOT flattened away, which was the older version's mistake to
+  // avoid for a different reason: `IR409.json` belongs in `sections/` and
+  // `IR409.jsonl` belongs in `audit/`, and a restore that has to guess which is
+  // which is not a restore. Bundling keeps the path as the key, so nothing is
+  // guessed, and `_manifest.json` lists what each bundle holds.
+  var BULK = { 'sections/': 'sections.json', 'audit/': 'audit.json', 'journal/': 'journal.json' };
+  var bundles = {};      // filename -> { "<path>": "<file text>" }
+  var singles = [];
+  files.forEach(function (f) {
+    var dir = Object.keys(BULK).filter(function (d) { return f.path.indexOf(d) === 0; })[0];
+    if (dir) {
+      var b = BULK[dir];
+      if (!bundles[b]) bundles[b] = {};
+      bundles[b][f.path] = f.text;
+    } else {
+      singles.push(f);
+    }
+  });
+
+  var manifest = { bundled: {}, single: [] };
+  Object.keys(bundles).sort().forEach(function (name) {
+    var paths = Object.keys(bundles[name]).sort();
+    raw.createFile(name, JSON.stringify(bundles[name], null, 2), MimeType.PLAIN_TEXT);
+    manifest.bundled[name] = { count: paths.length, paths: paths };
+  });
+  singles.forEach(function (f) {
+    // PLAIN_TEXT for everything, .json and .jsonl alike. A Drive file's type is a
+    // hint for whoever opens it and nothing else, and asking for JSON here would
+    // make Drive try to parse a `.jsonl` (many objects, one file) and fail the
+    // whole export on the busiest file in the store.
+    raw.createFile(f.name, f.text, MimeType.PLAIN_TEXT);
+    manifest.single.push({ path: f.path, bytes: f.text.length });
+  });
+
+  // The manifest is the restore's INDEX — what the store held on this date, how each
+  // part is filed, and how big it was. It is what lets a restore say "sections/IR412
+  // is missing from this archive" instead of silently putting back a smaller store,
+  // which is the failure mode of a backup that cannot describe itself.
+  raw.createFile('_manifest.json',
+    JSON.stringify({ takenAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+                     stamp: stamp, storeFiles: files.length, manifest: manifest }, null, 2),
+    MimeType.PLAIN_TEXT);
+
+  var counts = { files: files.length, irs: 0, users: 0 };
+
+  var irsStore  = readJson(sentinelStoreFile('__IRS__')) || {};
+  var usersJson = readJson('users.json') || {};
+  var accessJson = readJson('access.json') || {};
+  counts.irs   = Object.keys(irsStore).length;
+  counts.users = Object.keys(usersJson).length;
+
+  var irRows   = csvFromKeyedStore(irsStore, 'IR');
+  var userRows = csvFromKeyedStore(usersJson, 'email');
+  var accRows  = csvFromKeyedStore(accessJson, 'key');
+  // From the ALREADY-READ section files, never a second pass over Drive — reading
+  // them twice was the largest single cost in the export.
+  var secRows  = sectionRows(bundles['sections.json'] || {});
+
+  csv.createFile('irs.csv',      csvFromRows(irRows),  MimeType.CSV);
+  csv.createFile('users.csv',    csvFromRows(userRows), MimeType.CSV);
+  csv.createFile('access.csv',   csvFromRows(accRows), MimeType.CSV);
+  csv.createFile('sections.csv', csvFromRows(secRows), MimeType.CSV);
+
+  // The Sheet. It is an OUTPUT and never an input: nothing in this backend reads it
+  // back, and it is not a second copy of the app's data — it is a snapshot, dated,
+  // and thrown away by the rotation like everything else in the folder. That
+  // distinction is the whole reason a spreadsheet is allowed here at all. See
+  // docs/02 — "No spreadsheet holds app data" is still true.
+  var ss = SpreadsheetApp.create('I-PASSBOOK backup ' + stamp);
+  var first = ss.getSheets()[0];
+  var tabs = [
+    { title: 'IRs',      rows: irRows },
+    { title: 'Users',    rows: userRows },
+    { title: 'Access',   rows: accRows },
+    { title: 'Sections', rows: secRows }
+  ];
+  tabs.forEach(function (tab, i) {
+    var sheet = (i === 0) ? first : ss.insertSheet(tab.title);
+    if (i === 0) sheet.setName(tab.title);
+    var rows = tab.rows && tab.rows.length ? tab.rows : [['(nothing to back up)']];
+    // Sheets wants a rectangular range; rows of unequal length would throw. Pad
+    // each row out to the widest one.
+    var width = rows.reduce(function (w, r) { return Math.max(w, r.length); }, 0);
+    var padded = rows.map(function (r) {
+      var copy = r.slice();
+      while (copy.length < width) copy.push('');
+      return copy;
+    });
+    sheet.getRange(1, 1, padded.length, width).setValues(padded);
+    sheet.setFrozenRows(1);
+  });
+  var ssFile = DriveApp.getFileById(ss.getId());
+  ssFile.moveTo(day);
+
+  return { folder: day, sheet: ss, sheetId: ss.getId(), counts: counts,
+           tookMs: Date.now() - started, folderId: day.getId() };
+}
+
+// The nightly run. Everything that can fail is caught, because a thrown error in a
+// timed trigger writes nothing anywhere and the job simply never appears to have
+// run — see CONFIG.BACKUP_BUDGET_MS.
+function runNightlyBackup() {
+  var started = Date.now();
+  var stamp = backupStamp();
+  try {
+    var root = getBackupRootFolder(true);
+    var result = exportStoreToFolder(root, stamp);
+
+    // A run that overran its budget is reported as a FAILURE even though it
+    // finished, because at this size it did not finish normally — it finished
+    // slowly, which is the shape of the thing that fails tomorrow.
+    var overran = (Date.now() - started) > CONFIG.BACKUP_BUDGET_MS;
+
+    var rotated = pruneBackups();
+
+    writeBackupHealth({
+      lastRunAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+      lastRunMs: Date.now(),
+      ok: !overran,
+      stamp: stamp,
+      folderId: result.folderId,
+      sheetUrl: result.sheet.getUrl(),
+      files: result.counts.files,
+      irs: result.counts.irs,
+      users: result.counts.users,
+      tookMs: result.tookMs,
+      rotatedOut: rotated.deleted.length,
+      message: overran ? 'The export finished but took longer than expected.' : 'Backup complete.'
+    });
+
+    if (overran) {
+      sendAdminNotice('I-PASSBOOK backup was slow',
+        'The nightly backup on ' + stamp + ' finished but took ' +
+        Math.round((Date.now() - started) / 1000) + 's, over the ' +
+        Math.round(CONFIG.BACKUP_BUDGET_MS / 1000) + 's budget.\n\n' + result.sheet.getUrl() + '\n');
+    }
+    return report('Backup ' + stamp + ': ' + result.counts.files + ' file(s), ' +
+                  result.counts.irs + ' IR(s), ' + result.counts.users + ' account(s), ' +
+                  'rotated out ' + rotated.deleted.length + ' old folder(s).');
+  } catch (err) {
+    var message = (err && err.message) || String(err);
+    try {
+      writeBackupHealth({
+        lastRunAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+        lastRunMs: Date.now(),
+        ok: false,
+        stamp: stamp,
+        tookMs: Date.now() - started,
+        message: message
+      });
+    } catch (e2) { /* nothing left to do if even the health file cannot be written */ }
+
+    sendAdminNotice('I-PASSBOOK BACKUP FAILED',
+      'The nightly backup on ' + stamp + ' did not complete.\n\n' +
+      'What it said:\n' + message + '\n\n' +
+      'The previous backup folder is untouched — open the app to see when the last good one was.\n');
+    return report('Backup FAILED for ' + stamp + ': ' + message);
+  }
+}
+
+// ── SETTING UP THE NIGHTLY TRIGGER ────────────────────────────────────────────
+// Run this ONCE from the Apps Script editor after pasting a new backend.gs. It is
+// idempotent: an existing backup trigger is deleted first, so running it twice
+// leaves one trigger and not two — two triggers would run the export twice a night
+// into two folders, and the second would rotate the first one out early.
+function installBackupTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runNightlyBackup') ScriptApp.deleteTrigger(t);
+  });
+  // 23:40 IST — after the working day, before midnight, so "last night's backup"
+  // and the date on its folder agree. A run at 00:15 would file today's data under
+  // tomorrow's name and read as a day late forever.
+  ScriptApp.newTrigger('runNightlyBackup').timeBased().atHour(23).nearMinute(40).everyDays(1).create();
+  return report('Nightly backup trigger installed — every day at about 23:40 IST.\n' +
+                'Run runNightlyBackup() once NOW to prove it works and to give the app a ' +
+                '"last backup" line to show.');
+}
+
+// ── BACKUP HEALTH, FOR THE ADMIN SCREEN ───────────────────────────────────────
+// Read by admins only. It reports what HAPPENED, and says "never" plainly when the
+// export has never run — which is the state a fresh paste is in, and the one most
+// likely to be mistaken for "fine".
+function getBackupHealth(email) {
+  if (!isAdminEmail(email)) return { status: 'error', message: 'Admins only.' };
+  var h = readBackupHealth();
+  if (!h || !h.lastRunMs) {
+    return { status: 'ok', never: true, ok: false, message: 'No backup has run yet.' };
+  }
+  // `at` is what the screen prints verbatim: "Last backup: 03-Oct-2026 23:40".
+  return { status: 'ok',
+           never: false,
+           ok: h.ok !== false,
+           at: h.lastRunAt || '',
+           ago: backupAgeLabel(h.lastRunMs),
+           irs: h.irs || 0,
+           users: h.users || 0,
+           files: h.files || 0,
+           sheetUrl: h.sheetUrl || '',
+           message: h.message || '' };
+}
+
+// "6h 12m ago" / "2 days ago" — the same "how long ago" wording the sign-in code
+// uses, because a bare timestamp makes a person do date arithmetic to answer the
+// only question they have, which is whether the backup is RECENT.
+function backupAgeLabel(ms) {
+  if (!ms) return '';
+  var mins = Math.floor((Date.now() - ms) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + ' min ago';
+  var hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + 'h ' + (mins % 60) + 'm ago';
+  var days = Math.floor(hours / 24);
+  return days + (days === 1 ? ' day ago' : ' days ago');
 }
 
 // ── ONE-TIME SETUP (run from the Apps Script editor) ──────────────────────────
@@ -2525,6 +3118,9 @@ function doGet(e) {
       listLegacyIRs: function () { return listLegacyIRs(); },
       getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber); },
       listUsers:     function () { return listUsers(email); },
+      // Read-only, and admins only — it re-checks inside (see getBackupHealth); the
+      // gate here is only routing, exactly as the admin POST actions are.
+      getBackupHealth: function () { return getBackupHealth(email); },
     };
     result = authed[action] ? authed[action]() : unknownAction(action);
   } catch (err) {
@@ -3551,6 +4147,12 @@ function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
       // The audit goes LAST, inside the same lock: a failed data write must not
       // leave an entry for a save that never happened.
       appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), lines);
+      // And the journal, for the same reason and in the same place. It records the
+      // WRITE — which store, which key, by whom — where the audit records the
+      // CHANGE. One answers "what did IR409 look like before?", the other answers
+      // "what did we touch since last night?", and a restore needs both.
+      journalLocked({ by: savedBy, action: 'saveSection', ir: irNumber,
+                      sec: sectionId, keys: Object.keys(fields || {}), auto: isAutoSave });
       return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
     }
 
@@ -3586,6 +4188,9 @@ function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
     data[sectionId] = next;
     writeIR(irNumber, data, ir.fileId);
     appendAuditLinesLocked(auditSubjectFor(irNumber, sectionId), lines);
+    // The journal, inside the same lock — see the sentinel branch above.
+    journalLocked({ by: savedBy, action: 'saveSection', ir: irNumber,
+                    sec: sectionId, keys: Object.keys(next || {}), auto: isAutoSave });
 
     return { status: 'ok', message: 'Section ' + sectionId + ' saved for ' + irNumber };
   });
@@ -3728,6 +4333,11 @@ function restoreField(irNumber, sectionId, fieldId, value, expectCurrent, by, la
       { t: ts, ir: irNumber, sec: sectionId, by: by, ev: 'reverted',
         fid: fieldId, old: snapValue(current), nw: snapValue(restoreVal) }
     ]);
+    // Journalled as its own action, not as a save: "someone put a value back" is the
+    // thing a person investigating a surprise wants to find, and calling it a save
+    // would bury it among the hundreds of ordinary ones.
+    journalLocked({ by: by, action: 'restoreField', ir: irNumber, sec: sectionId,
+                    keys: [fieldId] });
 
     return {
       status: 'ok',

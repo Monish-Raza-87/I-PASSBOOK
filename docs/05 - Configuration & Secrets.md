@@ -91,8 +91,11 @@ self-signup on either door, so there is no captcha or allowlist either. See
 | Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` |
 | Admin emails | `CONFIG.ADMIN_EMAILS` | `['monish.raza@indrones.com']` |
 | External exceptions | `CONFIG.EXTERNAL_EMAILS` | `['kishor.salunkhe@uavgarage.com']` |
-| API version | `CONFIG.API_VERSION` | `3` — the Drive-JSON store. A different deployment from v2 |
+| API version | `CONFIG.API_VERSION` | `5` — the Drive-JSON store **plus the Phase-1 safety net** (change journal, nightly export, backup health). A stale cached frontend reads the number off `ping` and explains itself instead of failing obscurely |
 | Session TTL · temp-password TTL | `CONFIG.SESSION_HOURS` · `CONFIG.TEMP_PW_TTL_DAYS` | `8.5` hours (**absolute**, never slid) · `14` days |
+| Backup folder name | `CONFIG.BACKUP_FOLDER_NAME` | `I-PASSBOOK backups` — a **sibling** of `_store/`, inside the same private root, and the one folder in there shared **`DOMAIN_WITH_LINK`** so a backup can be opened from a phone |
+| Backup run budget | `CONFIG.BACKUP_BUDGET_MS` | `240000` (4 min). The Apps Script kill at six minutes leaves **no record at all**, so the run stops itself early, while it can still write `ok: false` and mail the admin |
+| Backup rotation | `CONFIG.BACKUP_KEEP_DAILY` · `_WEEKLY` · `_MONTHLY` | `14` · `8` · `12`, then one **a year forever** |
 
 `CONFIG.PASSBOOK_SHEET_ID` and `CONFIG.DATA_TAB` are **gone**. The old
 "I-Passbook App Repository" spreadsheet is not read, written or required by

@@ -52,6 +52,18 @@ class FakeFile {
   getLastUpdated() { return new Date(2026, 0, 1, 0, 0, this.updated); }
   getUrl() { return 'https://drive.google.com/file/d/' + this.id; }
   setSharing(access, perm) { this.sharing = access + '/' + perm; }
+  // A FILE move, distinct from FakeFolder.moveTo above and needed by the nightly
+  // export, which creates its backup Sheet wherever Drive puts it (`My Drive`) and
+  // then moves it into the dated folder. Without this the export's own sheet would
+  // never be reachable from the folder it is supposed to live in — and the whole
+  // point of the backup folder is that everything for one night is in one place.
+  moveTo(target) {
+    events.push('movefile:' + this.name + '->' + target.getName());
+    if (this.folder) this.folder.files = this.folder.files.filter(f => f !== this);
+    this.folder = target;
+    target.files.push(this);
+    return this;
+  }
   getBlob() {
     // An unreadable file is a REAL Drive condition, and readJson must throw on it
     // rather than answer "empty". Modelled as a throw, not as '' — '' is the empty
@@ -94,6 +106,16 @@ class FakeFolder {
   // Child LISTING, consistent unlike a search. The archive sweep uses this to read
   // `Archive IRs/` in one call rather than searching for ~450 tickets one by one.
   getFolders() { return iter(this.folders.slice()); }
+  // Drive's own trash — the REAL member (DriveApp Folder/File both carry it), added
+  // for the backup rotation. It removes the folder from its parent, because a
+  // trashed-but-still-listed folder would let "it deleted 340 folders" pass while
+  // every one of them was still sitting there.
+  setTrashed(v) {
+    events.push('trash:' + this.name);
+    if (this.parent) this.parent.folders = this.parent.folders.filter(f => f !== this);
+    this.trashed = !!v;
+    return this;
+  }
   // A move, not a copy. The id survives, which is exactly why archiving a ticket
   // does not break the file links already stored in its passbook.
   //
@@ -144,11 +166,52 @@ function iter(list) {
   return { hasNext: () => i < list.length, next: () => list[i++] };
 }
 
+// ── A SHEET, AS THE EXPORT SEES ONE ───────────────────────────────────────────
+// Only what the backup writes through: the first sheet, extra tabs, a rectangular
+// range, and the URL. `rows` is kept so a test can read back WHAT was written —
+// which is the only way to tell a filled backup from an empty one.
+class FakeSheet {
+  constructor(ss, name) { this.ss = ss; this.name = name; this.rows = null; this.frozen = 0; }
+  getName() { return this.name; }
+  setName(n) { this.name = n; return this; }
+  setFrozenRows(n) { this.frozen = n; return this; }
+  getRange(row, col, numRows, numCols) {
+    const sheet = this;
+    return {
+      setValues(values) {
+        // The real API THROWS on a ragged array. Enforced, because the export pads
+        // its rows for exactly this reason and a fake that accepted anything would
+        // let the padding be removed without a single test noticing.
+        const w = values.reduce((m, r) => Math.max(m, r.length), 0);
+        if (values.some(r => r.length !== w)) throw new Error('the number of columns must be the same in each row');
+        if (numRows !== values.length) throw new Error('range rows do not match the values');
+        sheet.rows = values;
+        events.push('sheetwrite:' + sheet.ss.name + '/' + sheet.name + ':' + values.length + 'x' + w);
+        return this;
+      },
+    };
+  }
+}
+
+class FakeSpreadsheet {
+  constructor(name, id) {
+    this.name = name; this.id = id;
+    this.sheets = [new FakeSheet(this, 'Sheet1')];
+  }
+  getId() { return this.id; }
+  getUrl() { return 'https://docs.google.com/spreadsheets/d/' + this.id + '/edit'; }
+  getSheets() { return this.sheets.slice(); }
+  insertSheet(name) { const s = new FakeSheet(this, name); this.sheets.push(s); return s; }
+}
+
+const spreadsheets = [];        // every backup Sheet created in this run
+const triggers = [];            // installed time-driven triggers, as ScriptApp reports them
+
 const ROOT = new FakeFolder('root-id', 'I-PASSBOOK');
 const allFiles = new Map();     // id -> FakeFile, for DriveApp.getFileById
 
 const DriveAppFake = {
-  Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE' },
+  Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE', DOMAIN_WITH_LINK: 'DOMAIN_WITH_LINK' },
   Permission: { VIEW: 'VIEW', NONE: 'NONE' },
   // The real folder id is read from CONFIG rather than hardcoded, so a test that
   // passes cannot be passing against an id the code no longer uses.
@@ -226,7 +289,7 @@ const ctx = {
   console,
   DriveApp: DriveAppFake,
   CacheService: CacheServiceFake,
-  MimeType: { PLAIN_TEXT: 'text/plain', HTML: 'text/html' },
+  MimeType: { PLAIN_TEXT: 'text/plain', HTML: 'text/html', CSV: 'text/csv' },
   Utilities: {
     // Faithful to the real Utilities.getUuid(): a v4 UUID — 36 characters, lower
     // case, dashes in the standard places. It used to be 'uuid-N', which was
@@ -285,8 +348,27 @@ const ctx = {
       releaseLock() { lockEvents.push('releaseLock'); lockState.held = false; },
     }),
   },
-  // Present so a stray reference elsewhere in the file cannot throw at load time.
-  SpreadsheetApp: { openById: () => { throw new Error('no sheet in this suite'); } },
+  // ── THE BACKUP SHEET, AND NOTHING ELSE ───────────────────────────────────────
+  // The app still has NO spreadsheet store, and `openById` throwing is how that
+  // stays true: every read path in this backend goes to Drive, and a suite where a
+  // sheet read silently worked would be a suite that could not see the day one came
+  // back. The ONE member implemented is `create`, used by the nightly export to make
+  // its own snapshot Sheet — an OUTPUT in the dated backup folder, never read back.
+  // It is modelled with enough of the real shape (`getSheets`/`insertSheet`/
+  // `getRange().setValues`) to prove the export actually fills its tabs, because
+  // "the code calls create" is not "the tabs have rows in them".
+  SpreadsheetApp: {
+    create(name) {
+      const file = new FakeFile('sheet-' + (++FakeFolder.seq), name, ROOT);
+      allFiles.set(file.getId(), file);
+      const ss = new FakeSpreadsheet(name, file.getId());
+      ss.file = file;
+      spreadsheets.push(ss);
+      events.push('createsheet:' + name);
+      return ss;
+    },
+    openById: () => { throw new Error('the app has no spreadsheet store — nothing may read a sheet'); },
+  },
   // Mail is RECORDED, not thrown. sendAuthMail swallows a throw and answers false,
   // so a throwing MailApp cannot distinguish "we sent a code" from "we did not" —
   // and the OTP flow's whole contract is which of those happened. PropertiesService
@@ -320,7 +402,33 @@ const ctx = {
   // app URL — because production DROPS the link when that read comes back empty, and
   // a stub missing entirely would take that silent branch and let a page with no way
   // out of a wrong account pass as correct.
-  ScriptApp: { getService: () => ({ getUrl: () => DOOR_URL }) },
+  // `getProjectTriggers` / `newTrigger` exist for the nightly backup installer, and
+  // they are modelled faithfully in one respect that matters: a trigger created here
+  // PERSISTS in `triggers`, so installing twice can be shown to leave one and not
+  // two. Two backup triggers would run the export twice a night, and the second run
+  // would rotate the first one's folder out early — a silent loss of retention.
+  ScriptApp: {
+    getService: () => ({ getUrl: () => DOOR_URL }),
+    getProjectTriggers: () => triggers.slice(),
+    deleteTrigger: (t) => {
+      const i = triggers.indexOf(t);
+      if (i > -1) triggers.splice(i, 1);
+    },
+    newTrigger(fn) {
+      const t = {
+        fn, hour: null, minute: null, days: null,
+        // The real Trigger carries this, and installBackupTrigger reads it to find
+        // the trigger it must delete before creating its own.
+        getHandlerFunction() { return fn; },
+        timeBased() { return t; },
+        atHour(h) { t.hour = h; return t; },
+        nearMinute(m) { t.minute = m; return t; },
+        everyDays(n) { t.days = n; return t; },
+        create() { triggers.push(t); return t; },
+      };
+      return t;
+    },
+  },
   ContentService: {
     // Faithful to the real pair: createTextOutput(content) returns an object whose
     // setMimeType returns the SAME object, and both the content and the chosen type
@@ -1538,8 +1646,24 @@ r.ok('EVERY folder move happened OUTSIDE the script lock',
   !/move:.*:lock=true/.test(events.join('|')), moveEvents);
 
 // ── out of scope, enforced ────────────────────────────────────────────────────
+// The nearest TOP-LEVEL function declaration before a match. Deliberately anchored
+// at column 0 — a bare `function (` inside a forEach callback would otherwise be
+// mistaken for the enclosing function, which is exactly how this assertion would
+// pass while the delete sat somewhere it should not be.
+function ownerFnAt(idx) {
+  const before = src.slice(0, idx);
+  const hits = [...before.matchAll(/^function\s+(\w+)\s*\(/gm)];
+  return hits.length ? hits[hits.length - 1][1] : null;
+}
+// "Nothing erases anything" is still the rule; Phase 1 added ONE exception and it is
+// named here rather than waved through. The backup ROTATION trashes dated folders in
+// the backup root — never a store file, and never a folder it could not match to a
+// date. A setTrashed in any other function still fails this line.
+const trashHits = [...src.matchAll(/setTrashed|removeFile\(|deleteFile\(/g)];
 r.ok('nothing in the backend erases anything — archiving MOVES and stops',
-  !/setTrashed|removeFile\(|deleteFile\(/.test(src), 'grep over the real source');
+  trashHits.every(m => ownerFnAt(m.index) === 'pruneBackups') &&
+  !/removeFile\(|deleteFile\(/.test(src),
+  trashHits.map(m => ownerFnAt(m.index) + ' @' + m.index));
 
 // ── PUT A VALUE BACK ──────────────────────────────────────────────────────────
 // The audit trail has always RECORDED every field change; restoreField is the first
@@ -2414,5 +2538,241 @@ r.ok('a revoked token is NOT reusable — the device must enroll again',
 
 ctx.Session.getActiveUser = realActiveUser;
 reexec();
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PHASE 1 — THE SAFETY NET, BEHAVIOURALLY
+// ══════════════════════════════════════════════════════════════════════════════
+// The regex suite (smoke-backend.mjs) pins the SHAPE of the journal and the export.
+// This one runs them: a save, then read the journal back; a nightly run, then open
+// the folder it made. "The code calls create" is not "the tabs have rows in them",
+// and this is the phase where that difference is the whole point.
+
+r.head('the change journal is written by the same save it describes');
+const journalDay = ctx.Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+const journalBefore = ctx.readJournal(journalDay).length;
+
+ctx.saveSection('IR409', 'sec-b', { b_remarks: 'journalled', b_qty: '7' }, [], ADMIN);
+const jAfter = ctx.readJournal(journalDay);
+const jLine = jAfter[jAfter.length - 1];
+r.ok('one save, one journal line', jAfter.length === journalBefore + 1,
+  { before: journalBefore, after: jAfter.length });
+r.ok('the line names the store, the section and the person who wrote it',
+  jLine.ir === 'IR409' && jLine.sec === 'sec-b' && jLine.by === ADMIN,
+  { ir: jLine.ir, sec: jLine.sec, by: jLine.by });
+r.ok('it records the KEYS written', jLine.keys.indexOf('b_remarks') > -1 && jLine.keys.indexOf('b_qty') > -1,
+  jLine.keys);
+r.ok('and NOT the values — it is an index, not a second copy of the store',
+  JSON.stringify(jLine).indexOf('journalled') === -1, jLine);
+r.ok('it carries the count of keys, so a restore can size what it lost', jLine.n === 2, jLine.n);
+
+ctx.saveSection('IR409', 'sec-b', { b_remarks: 'typed' }, [], ADMIN, 'auto');
+const jAuto = ctx.readJournal(journalDay);
+r.ok('an auto-save is marked as one — the journal stays readable at human scale',
+  jAuto[jAuto.length - 1].auto === true && jAuto[jAuto.length - 2].auto === false);
+
+ctx.saveSection('__IRS__', 'IR409', { status: 'Production' }, [], ADMIN);
+const jSentinel = ctx.readJournal(journalDay);
+r.ok('a WORKFLOW write is journalled too, against the real IR, not the store name',
+  jSentinel[jSentinel.length - 1].ir === '__IRS__' &&
+  jSentinel[jSentinel.length - 1].sec === 'IR409',
+  { ir: jSentinel[jSentinel.length - 1].ir, sec: jSentinel[jSentinel.length - 1].sec });
+r.ok('the journal is APPEND-ONLY — the earlier lines are all still there',
+  jSentinel.length === journalBefore + 3);
+
+r.head('the journal is one file per day, so a restore has a time window');
+r.ok('the file is named for the date and lives in journal/',
+  !!store.getFoldersByName('journal').next() &&
+  !!store.getFoldersByName('journal').next().getFilesByName(journalDay + '.jsonl').next(),
+  journalDay + '.jsonl');
+r.ok('an untouched day is empty, never an error',
+  ctx.readJournal('2020-01-01').length === 0);
+
+r.head('the nightly export writes a restorable copy into a dated folder');
+
+// Two readers used throughout this section, declared before their first use.
+// `drain` exists because DriveApp hands back an ITERATOR: `.map` or `.length` on one
+// is the TypeError an earlier version of this very block hit, and the fake must not
+// turn that into a passing test. `fileText` reads through the REAL shape — a Drive
+// File has no getContent(), only a Blob — so the fake cannot paper over a read the
+// live API would refuse.
+const drain = it => { const out = []; while (it.hasNext()) out.push(it.next()); return out; };
+const fileText = f => f.getBlob().getDataAsString();
+
+ctx.runNightlyBackup();
+
+const bRoot = ROOT.getFoldersByName(ctx.CONFIG.BACKUP_FOLDER_NAME).next();
+r.ok('a backup folder exists, BESIDE _store/ — not inside the folder it copies',
+  !!bRoot && bRoot.parent === ROOT && bRoot.getName() !== ctx.CONFIG.STORE_FOLDER_NAME,
+  bRoot && bRoot.getName());
+r.ok('...and it is the one folder that IS shared, so the owner can open it',
+  /LINK/.test(bRoot.sharing || ''), bRoot.sharing);
+
+const stamp = ctx.Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+const day = bRoot.getFoldersByName(stamp).next();
+r.ok('the run made exactly one folder, named for today', !!day && day.getName() === stamp, stamp);
+
+const raw = day.getFoldersByName('raw').next();
+const csvf = day.getFoldersByName('csv').next();
+r.ok('raw/ and csv/ both exist inside it', !!raw && !!csvf);
+
+// raw/ MIRRORS the store layout, which is the one thing that makes it restorable.
+r.ok('raw/ holds the small store files AS THEMSELVES', !!raw.getFilesByName('irs.json').next() &&
+  !!raw.getFilesByName('users.json').next(),
+  drain(raw.getFiles()).length + ' file(s) in raw/');
+r.ok('...and NO subfolders — the per-IR parts are bundled, not laid out one file each',
+  drain(raw.getFolders()).length === 0, drain(raw.getFolders()).map(f => f.getName()));
+
+// THE SCALING PROPERTY, asserted rather than assumed. One Drive file per IR is a
+// file count that grows with the company — the first real run (19 IRs) took 89s,
+// and ~900 files at 450 IRs would be three times over the export's budget, with a
+// six-minute Apps Script kill leaving NO record that it ever ran.
+const rawNames = drain(raw.getFiles()).map(f => f.getName());
+r.ok('the file count is BOUNDED — it does not grow with the number of IRs',
+  rawNames.length < 20,
+  rawNames.length + ' files for ' + ctx.CONFIG.BACKUP_KEEP_DAILY + ' days of retention: ' + rawNames.join(', '));
+r.ok('sections, audit and journal each became ONE bundle file',
+  rawNames.indexOf('sections.json') > -1 && rawNames.indexOf('audit.json') > -1 &&
+  rawNames.indexOf('journal.json') > -1);
+
+const sectionsBundle = JSON.parse(fileText(raw.getFilesByName('sections.json').next()));
+r.ok('the bundle keeps the store PATH as its key, so a restore never guesses',
+  Object.keys(sectionsBundle).every(k => k.indexOf('sections/') === 0) &&
+  !!sectionsBundle['sections/IR409.json'],
+  Object.keys(sectionsBundle));
+const journalBundle = JSON.parse(fileText(raw.getFilesByName('journal.json').next()));
+r.ok('today\'s journal travelled with it, under its own path',
+  !!journalBundle['journal/' + journalDay + '.jsonl'], Object.keys(journalBundle));
+
+const manifest = JSON.parse(fileText(raw.getFilesByName('_manifest.json').next()));
+r.ok('_manifest.json describes BOTH kinds of entry, so a restore can name what is missing',
+  !!manifest.manifest && !!manifest.manifest.bundled &&
+  manifest.manifest.bundled['sections.json'].paths.indexOf('sections/IR409.json') > -1 &&
+  Array.isArray(manifest.manifest.single) && manifest.storeFiles > 0,
+  { bundled: Object.keys(manifest.manifest.bundled), storeFiles: manifest.storeFiles });
+r.ok('...and its counts add up to every store file that was copied',
+  manifest.manifest.bundled['sections.json'].count + manifest.manifest.bundled['audit.json'].count +
+  manifest.manifest.bundled['journal.json'].count + manifest.manifest.single.length === manifest.storeFiles,
+  { accounted: manifest.manifest.bundled['sections.json'].count +
+                manifest.manifest.bundled['audit.json'].count +
+                manifest.manifest.bundled['journal.json'].count + manifest.manifest.single.length,
+    storeFiles: manifest.storeFiles });
+r.ok('the old backups/ snapshots are NOT copied into a backup of a backup',
+  !raw.getFilesByName('backups.json').hasNext() && manifest.manifest.single.every(e => e.path.indexOf('backups/') !== 0));
+
+r.ok('the CSVs are written as CSV, not as .json with a .csv name',
+  csvf.getFilesByName('irs.csv').next().mime === 'text/csv' &&
+  csvf.getFilesByName('sections.csv').next().mime === 'text/csv');
+r.ok('the IR CSV actually holds the IRs', /IR409/.test(fileText(csvf.getFilesByName('irs.csv').next())),
+  fileText(csvf.getFilesByName('irs.csv').next()).split('\n').length + ' line(s)');
+
+r.head('the backup Sheet has a tab per record type, and the tabs have rows');
+const ss = spreadsheets[spreadsheets.length - 1];
+const tabNames = ss.getSheets().map(s => s.getName());
+r.ok('the tabs are named IRs, Users, Access, Sections',
+  ['IRs', 'Users', 'Access', 'Sections'].every(n => tabNames.indexOf(n) > -1), tabNames);
+r.ok('every tab was actually WRITTEN to — a created-but-empty sheet is not a backup',
+  ss.getSheets().every(s => Array.isArray(s.rows) && s.rows.length > 1),
+  ss.getSheets().map(s => s.getName() + ':' + (s.rows ? s.rows.length : 0)));
+r.ok('the header row is frozen, so it survives scrolling on a phone',
+  ss.getSheets().every(s => s.frozen === 1));
+r.ok('the IR tab carries the IR keys', JSON.stringify(ss.getSheets()[0].rows).indexOf('status') > -1);
+r.ok('the sheet was MOVED into the dated folder, not left loose in My Drive',
+  !!day.getFilesByName(ss.name).next() && !ROOT.getFilesByName(ss.name).hasNext());
+
+r.head('the backup records its own health — a silent failure is impossible');
+const health = ctx.readBackupHealth();
+r.ok('the run wrote a health record', !!health.lastRunMs && health.stamp === stamp, health);
+r.ok('it says OK, and carries counts a person can sanity-check',
+  health.ok === true && health.irs > 0 && health.users > 0 && health.files > 0,
+  { irs: health.irs, users: health.users, files: health.files });
+r.ok('it links to the sheet it made', /^https:\/\/docs\.google\.com\//.test(health.sheetUrl || ''));
+r.ok('health lives in the PRIVATE store, never in the folder the rotation deletes',
+  !!store.getFilesByName('backup.json').next() && !bRoot.getFilesByName('backup.json').hasNext());
+
+const bh = ctx.getBackupHealth(ADMIN);
+r.ok('an admin reads it back with a plain "how long ago"',
+  bh.status === 'ok' && bh.ok === true && /ago|just now/.test(bh.ago || ''), bh);
+r.ok('...and a non-admin is refused, re-checked inside the function',
+  ctx.getBackupHealth('someone@indrones.com').status === 'error');
+
+r.head('a backup that FAILED says so, and mails the admin — it never fails silently');
+const realCreateFile2 = bRoot.createFolder;
+let failRoot = null;
+// Make the export folder creation throw, which is the shape of a Drive quota or a
+// permission loss. The previous good backup must survive it untouched.
+const goodFolders = drain(bRoot.getFolders()).map(f => f.getName());
+ROOT.getFoldersByName(ctx.CONFIG.BACKUP_FOLDER_NAME);
+const realGetRoot = ROOT.getFoldersByName.bind(ROOT);
+ROOT.getFoldersByName = function (name) {
+  if (name === ctx.CONFIG.BACKUP_FOLDER_NAME) {
+    return iter([{ getName: () => ctx.CONFIG.BACKUP_FOLDER_NAME, createFolder: () => { throw new Error('Drive quota exceeded'); } }]);
+  }
+  return realGetRoot(name);
+};
+const mailsBefore = mails.length;
+ctx.runNightlyBackup();
+ROOT.getFoldersByName = realGetRoot;
+
+const failedHealth = ctx.readBackupHealth();
+r.ok('a failed run records ok:false and says what happened',
+  failedHealth.ok === false && /quota/i.test(failedHealth.message || ''), failedHealth.message);
+r.ok('...and mails the admin, so nobody has to go looking',
+  mails.length === mailsBefore + 1 && /BACKUP FAILED/.test(mails[mails.length - 1].subject),
+  mails[mails.length - 1] && mails[mails.length - 1].subject);
+r.ok('the previous good backup is untouched by the failure',
+  JSON.stringify(drain(bRoot.getFolders()).map(f => f.getName())) === JSON.stringify(goodFolders),
+  drain(bRoot.getFolders()).map(f => f.getName()));
+r.ok('and the screen would now say the last run FAILED, not that it is fine',
+  ctx.getBackupHealth(ADMIN).ok === false);
+
+r.head('the rotation keeps 14 daily, then one a week, one a month, one a year — and nothing else');
+// 400 consecutive days, which is the shape the real rotation has to survive: a year
+// and more of dailies, where "keep the last 14" alone would have thrown away
+// everything older than a fortnight.
+const rotRoot = ROOT.getFoldersByName(ctx.CONFIG.BACKUP_FOLDER_NAME).next();
+const base = new Date(2025, 0, 1);
+for (let i = 0; i < 400; i++) {
+  const d = new Date(base.getTime() + i * 86400000);
+  const p = istParts(d);
+  rotRoot.createFolder(p.year + '-' + p.month + '-' + p.day);
+}
+// A folder NOT named for a date is the one thing the rotation must never touch.
+rotRoot.createFolder('do-not-touch');
+// The dated folders present BEFORE the prune, oldest first — so every claim below is
+// about a real list rather than a number typed into the test.
+const datedBefore = drain(rotRoot.getFolders()).map(f => f.getName())
+  .filter(n => /^\d{4}-\d{2}-\d{2}$/.test(n)).sort();
+
+const rot = ctx.pruneBackups();
+const survivors = drain(rotRoot.getFolders()).map(f => f.getName());
+
+r.ok('it deleted most of them — 400 dailies cannot all be kept',
+  rot.deleted.length > 300, { deleted: rot.deleted.length, was: datedBefore.length });
+r.ok('the newest 14 are all still there',
+  datedBefore.slice(-14).every(d => survivors.indexOf(d) > -1));
+r.ok('a folder that is NOT a date is left completely alone',
+  survivors.indexOf('do-not-touch') > -1, survivors.filter(n => !/^\d{4}-\d{2}-\d{2}$/.test(n)));
+r.ok('it accounts for EVERY dated folder — kept plus deleted is all of them',
+  rot.kept.length + rot.deleted.length === datedBefore.length,
+  { kept: rot.kept.length, deleted: rot.deleted.length, was: datedBefore.length });
+
+// The point of grandfather–father–son is that retention does not decay into "a
+// fortnight": the oldest surviving copy must be far older than the 14 the daily rule
+// would have kept on its own. Expressed as a POSITION in the pre-prune list, so it
+// needs no date arithmetic and cannot drift as the clock moves.
+const oldestKept = rot.kept.slice().sort()[0];
+r.ok('...and it reaches far past the daily window — the oldest kept has 60+ newer folders than it',
+  datedBefore.indexOf(oldestKept) <= datedBefore.length - 60,
+  { oldestKept: oldestKept, newerThanIt: datedBefore.length - 1 - datedBefore.indexOf(oldestKept) });
+
+r.head('the nightly trigger is installed by hand, and installing twice leaves ONE');
+ctx.installBackupTrigger();
+ctx.installBackupTrigger();
+const backupTriggers = triggers.filter(t => t.fn === 'runNightlyBackup');
+r.ok('exactly one backup trigger exists after installing twice',
+  backupTriggers.length === 1, backupTriggers.length);
+r.ok('it runs daily at 23:40, so "last night" and the folder name agree',
+  backupTriggers[0].hour === 23 && backupTriggers[0].minute === 40 && backupTriggers[0].days === 1,
+  backupTriggers[0]);
 
 r.finish();

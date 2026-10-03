@@ -650,6 +650,38 @@ relies on fixed positioning — do not re-parent one into an ancestor with a
 `transform` or `overflow`. Z-index now comes from the `--z-*` scale; the old
 stylesheet had `#user-menu` and `.inward-options-modal` colliding at `200`.
 
+### The backup-health line — three states, and unknown is not fine
+
+One line at the top of User Access → **Versions**:
+`.access-backup`, with `.access-backup-when` for the timestamp and
+`.access-backup-ok` / `.access-backup-bad` for the colour. It is the only place in the
+app where the state of the safety net is visible, and the state that matters is the
+third one:
+
+| State | What it looks like |
+|---|---|
+| checking | `Checking…` — the request is in flight |
+| healthy | `✓ Last backup: <when> (<how long ago>)`, in green, with the counts and a link to the backup Sheet |
+| failed | `⚠ Last backup: …` in red, with the run's own message |
+| **unknown** | `⚠ Backup status unknown — <why>` in **the same red**, plus a sentence saying this says nothing about the backups, only that this device could not ask |
+
+**Unknown must never render as healthy.** The tempting shortcut is to treat a failed
+request as "no news", which turns an unreadable status into a reassurance — the exact
+inversion a backup screen exists to prevent. `smoke-ui.mjs` pins all four states,
+including that the unknown branch contains no `✓` anywhere.
+
+The line repaints **only if the Versions tab is still the one open** when the answer
+arrives (`settle()` re-checks `accessTab`), so a slow reply cannot overwrite whatever
+the admin has since moved to. It is fetched on the **first open of the Versions tab**,
+not with the modal, because it is an admin-only request that the other three tabs have
+no use for.
+
+> The tab strip had a bug worth remembering: it set `accessTab`, re-highlighted the
+> tabs, and **never re-rendered the panel**. Every tab but the one the modal opened on
+> looked broken. No snapshot assertion could have caught it — a missing call is not a
+> wrong value — which is why `smoke-ui.mjs` now asserts that the click handler calls
+> `renderAccessPanel()`.
+
 ### The Legacy record card — read-only, from the backend
 The 🏛 Legacy button no longer embeds the workbook, and never will again: the file is
 **restricted** (2 October 2026), which is what closed the leak — embedding a tab forced

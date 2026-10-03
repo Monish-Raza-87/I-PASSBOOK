@@ -819,13 +819,21 @@ r.head('the emoji debt is a ledger, not a licence');
 // line directly above it has always carried. No new emoji was introduced into the
 // file — one more line uses the old one, in the same helper, for the same kind of
 // message. Bumping the ledger is the decision this test exists to force.
+//
+// 46 → 47, and the recorded figure had drifted: HEAD's app.js measures 44, so the
+// previous number was two above the file it claimed to describe. The three new lines
+// are the backup-health line on the User Access screen — the failure state, the
+// never-ran state, and the healthy/at-risk pair. Like the bump before it, no glyph is
+// new: ⚠ is on the sync-status line and the access hints, and ✓ is on the "session ✓"
+// line of this same modal. The number is pinned to what the file MEASURES, so the
+// next emoji has to come past this assertion and someone has to decide about it.
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const emojiLines = appCode.split('\n').filter(l => EMOJI.test(l));
 r.ok('no emoji is left in a slot the icon helper fills',
   !/(💬|🔔|🎫)/.test(appCode),
   emojiLines.filter(l => /💬|🔔|🎫/.test(l)));
-r.ok('the count has not grown past the recorded number', emojiLines.length <= 46,
-  { now: emojiLines.length, budget: 45, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
+r.ok('the count has not grown past the recorded number', emojiLines.length <= 47,
+  { now: emojiLines.length, budget: 47, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
 r.ok('and none of them sits in the activity-log renderer, which owns its own icons',
   !EMOJI.test(appCode.slice(appCode.indexOf('function renderTimelineInto'),
                             appCode.indexOf('function renderTimelineInto') + 4000)));
@@ -1483,6 +1491,115 @@ r.ok('the navigating call asks to outlive the page',
   warm.first.length === 1 && warm.tap.init.keepalive === true, warm.tap);
 r.ok('a refusing backend cannot throw out of a warm-up', warm.threw === false);
 r.ok('...and neither can a transport that throws on the way in', warm.threw === false);
+
+// ── The backup-health line, and the tab that had stopped switching ────────────
+// Two things are pinned here, and they fail differently.
+//
+// The health line has THREE states and only one of them is reassuring: healthy,
+// failed, and "could not ask". The third is the one worth a test, because the
+// tempting implementation renders it as fine — which turns an unknown into a
+// reassurance, the exact inversion a backup screen must never make.
+//
+// The tab switch is the other kind of bug: not a wrong value but a MISSING CALL.
+// Four tabs highlighted while the body below them never changed, and no snapshot
+// assertion could ever have noticed, because nothing was wrong with what was
+// rendered — nothing was rendered at all.
+r.head('the backup line tells the truth in all three states, and the tabs actually switch');
+
+const ACCESS_BINDINGS = `
+  document,
+  loadBackupHealth, backupHealthHtml, renderAccessPanel, renderAccessTabs,
+  set accessTab(v) { accessTab = v; },
+  get accessTab() { return accessTab; },
+  set accessCache(v) { accessCache = v; },
+`;
+
+// Drive one load to completion and read what the panel ended up holding. The
+// panel is the real #access-panels element from the stub DOM, so this reads the
+// markup the browser would have been handed — not a copy the test assembled.
+async function healthOnScreen(reply, tab) {
+  const which = tab || 'versions';
+  const A = loadApp(ACCESS_BINDINGS, {
+    capture: true,
+    fetch: () => (reply instanceof Error ? Promise.reject(reply) : Promise.resolve({ json: () => Promise.resolve(reply) })),
+  });
+  const panel = A.T.document.getElementById('access-panels');
+  A.T.accessCache = { users: [], departments: [], apiVersion: 5 };
+  A.T.accessTab = which;
+  panel.innerHTML = '';
+  A.T.loadBackupHealth();
+  await new Promise(r => setTimeout(r, 30));
+  return panel.innerHTML;
+}
+
+const healthy = await healthOnScreen({
+  status: 'ok', apiVersion: 5, ok: true, never: false,
+  at: '2026-10-03 23:40', ago: '2 hours ago', irs: 19, users: 18,
+  sheetUrl: 'https://docs.google.com/spreadsheets/d/EXAMPLE/edit',
+});
+r.ok('a healthy backup reads as healthy, with the time and the counts',
+  healthy.includes('access-backup-ok') && healthy.includes('Last backup') &&
+  healthy.includes('2026-10-03 23:40') && healthy.includes('19 IRs') && healthy.includes('18 accounts'),
+  healthy.slice(0, 120));
+r.ok('...and offers the sheet without pretending the counts are the whole story',
+  healthy.includes('open the backup sheet') && healthy.includes('14 daily copies'),
+  healthy.indexOf('14 daily copies') >= 0);
+
+const unknownReply = await healthOnScreen(new Error('no network in test'));
+r.ok('a transport that refuses is shown as UNKNOWN, wearing the failure colour',
+  unknownReply.includes('access-backup-bad') && unknownReply.includes('unknown'),
+  unknownReply.slice(0, 140));
+r.ok('...and it does NOT wear the tick, which is the whole point of the state',
+  !unknownReply.includes('access-backup-ok') && unknownReply.indexOf('✓') === -1,
+  unknownReply.indexOf('✓'));
+r.ok('...and it says in words that it knows nothing, rather than nothing at all',
+  unknownReply.includes('could not ask') || unknownReply.includes('Read it as unknown'),
+  unknownReply.includes('Read it as unknown'));
+
+const refused = await healthOnScreen({ status: 'error', message: 'Unauthorized' });
+r.ok('a backend that refuses is UNKNOWN too, and shows the real reason',
+  refused.includes('access-backup-bad') && refused.includes('Unauthorized'),
+  refused.slice(0, 140));
+r.ok('...still without a tick anywhere on the line', refused.indexOf('✓') === -1);
+
+const never = await healthOnScreen({ status: 'ok', apiVersion: 5, ok: true, never: true });
+r.ok('a deployment with no backup yet says so, and names the fix',
+  never.includes('No backup has run yet') && never.includes('runNightlyBackup'),
+  never.slice(0, 140));
+r.ok('...and never claims a last-backup time it does not have',
+  !never.includes('Last backup'), never.indexOf('Last backup'));
+
+// The repaint guard: an answer that arrives after the admin moved to another tab
+// must not overwrite that tab's body. This is why `settle` re-checks accessTab.
+const elsewhere = await healthOnScreen({ status: 'ok', ok: true, never: false, at: 'x', ago: 'y' }, 'people');
+r.ok('a late answer for a tab the admin has left does not paint over the new tab',
+  elsewhere.indexOf('Last backup') === -1 && elsewhere.indexOf('Backups') === -1,
+  JSON.stringify(elsewhere));
+
+// The tab handler itself. Source, not behaviour: the harness cannot click a
+// button, and absence-of-a-call is precisely what a rendered snapshot cannot see.
+const tabHandler = /accessTab\s*=\s*btn\.dataset\.tab;[\s\S]{0,600}?renderAccessPanel\(\)[\s\S]{0,400}?\}\);/.exec(appCode);
+r.ok('switching tabs re-renders the panel, not only the highlight', !!tabHandler,
+  tabHandler ? tabHandler[0].replace(/\s+/g, ' ').slice(0, 90) : 'no handler re-renders the panel');
+r.ok('...and the versions tab is the one that asks for the backup state',
+  !!tabHandler && tabHandler[0].indexOf('loadBackupHealth') >= 0,
+  tabHandler ? tabHandler[0].indexOf('loadBackupHealth') : -1);
+
+// Every tab the strip can select must end up painting something. Three have an
+// explicit branch and People is the fallback, which is why the fallback is
+// asserted rather than a fourth literal 'people' comparison that does not exist.
+const panelFn = /function renderAccessPanel\s*\(\)\s*\{[\s\S]*?\n\}/.exec(appCode);
+const panelText = panelFn ? panelFn[0].replace(/\s+/g, ' ') : '';
+r.ok('every tab the strip offers has a branch in the panel renderer',
+  !!panelFn && ['depts', 'create', 'versions'].every(t =>
+    new RegExp(`accessTab === '${t}'`).test(panelText)) && /else renderPeopleTab\(\)/.test(panelText),
+  panelText.slice(0, 160));
+
+// The classes the line leans on must be real styles, or the red is not red.
+r.ok('the healthy and unknown colours are defined in views.css, from tokens',
+  /\.access-backup-ok\s*\{[^}]*var\(--ink-green/.test(viewsCode) &&
+  /\.access-backup-bad\s*\{[^}]*var\(--ink-red/.test(viewsCode),
+  (viewsCode.match(/\.access-backup-(?:ok|bad)\s*\{[^}]*\}/g) || []).join(' | '));
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

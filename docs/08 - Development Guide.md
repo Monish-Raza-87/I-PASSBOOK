@@ -192,6 +192,23 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 > unauthenticated request to that deployment is turned away by Google before any of
 > our code runs. If the first sign-in of the day is still slow after this is
 > installed, that assumption is the first thing to doubt.
+>
+> **Then run `installBackupTrigger()` once, followed by `runNightlyBackup()` once.**
+> Same dropdown, signed in as `monish.raza@indrones.com`. The first creates the daily
+> ~23:40 IST trigger; the second **proves it works** and is what gives the app a "last
+> backup" line to show. Skipping the second leaves the health line reading *no backup
+> has run yet* — and an installed-but-never-fired trigger is indistinguishable, from
+> the outside, from one that does not work. The run prints what it wrote:
+>
+> ```
+> Backup 2026-10-03: 35 file(s), 19 IR(s), 18 account(s), rotated out 0 old folder(s).
+> ```
+>
+> Read that line back to front: `rotated out 0` is correct on the first run, because
+> every kept folder is newer than the retention window. If the file count is far above
+> ~12 on a store with hundreds of IRs, the **bundling** has been broken and the export
+> is back to one Drive file per store file — see the scaling note in
+> [04 — Backend API Reference](04 - Backend API Reference.md).
 
 
 **Step 1 — one-time setup (run from the editor, before the deploy).**
@@ -418,7 +435,14 @@ one folder:
     ├── sections/       IR409.json → { "sec-b": {…}, "sec-f": {…} }  +  index.json
     ├── audit/          IR409.jsonl — one JSON object per line, append-only
     │                   signins.jsonl — the same shape, for sign-ins (see docs/10)
+    ├── journal/        2026-10-03.jsonl — one line per WRITE, one file per day.
+    │                   An index (who/when/what/which keys), never the values
+    ├── backup.json     the last nightly export's outcome — read by getBackupHealth
     └── backups/        <store>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
+
+1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK/I-PASSBOOK backups/    ← SIBLING of _store/
+└── 2026-10-03/       raw/ (restore source) · csv/ · a Sheet · _manifest.json
+                     14 daily · 8 weekly · 12 monthly · one a year, forever
 ```
 
 Everything is created by `initializeStore()` — there is no `getOrCreate*`

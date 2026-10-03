@@ -91,6 +91,48 @@ completely, and the honest mitigation is named rather than implied.
   `backups/<label>-<yyyy-MM-dd-HHmmss>.json` — **always a new file**, so it can never
   overwrite an earlier snapshot — and the response names it.
 
+### The safety net — Phase 1 of the plan (built 2026-10-03)
+
+The plan's Phase 1 is a **second copy of the store that exists without anyone
+remembering to make it, and whose state can be read from the app**. Four pieces, all
+in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
+
+- ✅ **The change journal** — `_store/journal/YYYY-MM-DD.jsonl`, one line per write,
+  appended **inside the same lock as the write it describes**. It is an **index, not a
+  copy**: who, when, which action, which IR, which section, and the key *names* —
+  never the values. That is what lets it be kept for years without becoming a second
+  database. Auto-saves are journalled (`auto: true`) but stay out of the audit trail,
+  because the audit trail is a record of what *people* changed.
+- ✅ **The nightly export** — one dated folder a night in `I-PASSBOOK backups`
+  (a sibling of `_store/`, and the one folder in there shared `DOMAIN_WITH_LINK` so
+  the owner can open a backup from a phone): `raw/` for restore, `csv/` for
+  spreadsheets, a Google Sheet with a tab per record type for reading.
+- ✅ **Rotation** — 14 daily, 8 weekly, 12 monthly, and one a year **forever**,
+  grandfather-father-son. A folder not named for a date is never touched, and the
+  only code that can trash anything is `pruneBackups`, which can only reach the
+  backup root. **The rotation is the one place in this app that deletes something**,
+  so both suites find every trash site and require it to live inside that one
+  function.
+- ✅ **Health, visible** — `_store/backup.json` is rewritten at the end of every run
+  and read by the admin-only `getBackupHealth`, which paints one line on the User
+  Access → Versions tab. **Three states, and unknown is not fine**: a health line that
+  renders "fine" when the request failed turns an unknown into a reassurance, so an
+  unreadable status wears the failure red and says it knows nothing.
+- ⚠️ **A nightly run that fails is loud, but only as loud as one mail.** The run
+  records `ok: false` and mails the admin; the health line turns red the next time an
+  admin opens that tab. Nothing pushes. That is the deliberate line — the app has no
+  notification channel of its own — but it does mean a failure can sit unnoticed over
+  a weekend if nobody opens the admin screen.
+- ❌ **The restore rehearsal is not built yet.** The plan asks for a script that takes
+  a backup folder and proves it can be read back into a store, **on a copy**, so the
+  first real restore is never the rehearsal. Until that exists, `raw/` is a backup
+  that has never been restored — which is a claim, not a fact. This is the next piece
+  of Phase 1.
+- ❌ **Yearly archives of out-of-window IRs are not built.** The rotation keeps
+  yearly folders forever, but nothing yet moves an old IR's *section data* into a
+  yearly bundle of its own, so the live store still grows with every IR ever raised.
+  Also Phase 1, also unstarted.
+
 ### Security
 - ⚠️ **The pre-auth surface is open by necessity.** `ping`, `sessionCheck`, `login`, `changePassword`, `forgotPassword` and `resetPassword` must answer without a session, so the GAS URL being public is not itself the boundary — the **rate limits** are. `login`/`changePassword` share `attempts.json` (5 failures → 15-minute lockout); the two emailed-code paths share one issuer with a **3-codes/hour/email** budget counted across *both* purposes (so a password reset cannot buy extra sign-in codes), a 60-second resend gap, a **per-purpose** global hourly ceiling — **12 reset codes**, **120 sign-in codes**, the looser one justified because a sign-in code is only issued after a correct password — and every mail sits under one daily `MailApp` cap. Weakening any of those re-opens a guessing oracle.
 - ⚠️ **A leaked sign-in code is useful for a whole working day.** The code is deliberately **reusable** (`consume=false`) so one mail covers every sign-in that day, which means a code read over someone's shoulder stays live until the shift ends — the same window as the session it mints. What bounds it is the shared attempt counter (5 wrong guesses burn it) and the password that must be presented alongside it. **The mitigation is now in place: every successful sign-in writes a line to `audit/signins.jsonl`** — the account, the time, what the browser claimed to be, and **how old the code was** when it was redeemed. That last field is the signal: a code issued and used within a minute is ordinary, one issued at 9am and redeemed at 4pm is the shape to look for. Read it with `reportRecentSignins(days)` from the editor (there is deliberately no screen for it). The record cannot refuse a sign-in — its write sits in its own `try`, and `smoke-store.mjs` proves a *throwing* audit write still returns a working session.

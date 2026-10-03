@@ -314,6 +314,32 @@ never the whole workbook — a several-hundred-tab read to show one record would
 slow, heavy answer to a question nobody asked. Returns `irNumber`, `label`, `gid`,
 `openUrl` and `grid`.
 
+### `getBackupHealth`
+**Admin-only**, and the one read that answers "is the safety net actually working?"
+without opening Drive. It reads `_store/backup.json` — a small private file the
+nightly export rewrites at the end of every run — and returns the last run's
+timestamp, its age in words, its `ok` flag, the counts it wrote, and the URL of the
+backup Sheet it produced.
+
+```
+GET {BASE_URL}?action=getBackupHealth
+→ { "status":"ok", "apiVersion":5, "ok":true, "never":false,
+    "at":"03-Oct-2026 23:40:11", "ago":"2 hours ago",
+    "irs":19, "users":18, "files":12,
+    "sheetUrl":"https://docs.google.com/spreadsheets/d/…/edit" }
+```
+
+- **`never: true`** is a distinct answer from a failure: no run has ever completed
+  on this deployment, which is the state a fresh install is in and the state that
+  must read as loud, not as quiet.
+- It is an **admin-only** key in the `doGet` map — deliberately, because it names a
+  folder and a Sheet in the owner's Drive, and because "when did the last backup
+  run?" is an operator's question, not a user's.
+- It **never throws into a false reassurance.** If `backup.json` cannot be read the
+  frontend shows "unknown" in the failure colour and says so in words. A health line
+  that renders "fine" when the request failed converts an unknown into a
+  reassurance, which is worse than showing nothing.
+
 ### `googleStart`
 The Google door, **half one**. A **GET** (`?action=googleStart`), served by the
 **second, domain-scoped** deployment, and dispatched by a branch at the top of
@@ -903,9 +929,18 @@ var CONFIG = {
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 3,
+  API_VERSION: 5,            // 5 = the safety net (journal + nightly export + health)
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
+
+  // The nightly export. The folder is a SIBLING of _store/, inside the same
+  // private root — and it is the one folder in there that is DOMAIN_WITH_LINK,
+  // so the owner can open a backup on a phone without a second sign-in.
+  BACKUP_FOLDER_NAME: 'I-PASSBOOK backups',
+  BACKUP_BUDGET_MS:   240000,   // 4 min — the 6-min kill leaves NO record, so stop early
+  BACKUP_KEEP_DAILY:   14,
+  BACKUP_KEEP_WEEKLY:   8,
+  BACKUP_KEEP_MONTHLY: 12,      // then one a year, forever
 };
 ```
 
@@ -988,6 +1023,9 @@ Once, to turn on automatic archiving:
 
 Once, to stop the first sign-in of the day paying the cold start:
   installKeepWarmTrigger()
+
+Once, to turn on the nightly backup, and to prove it works:
+  installBackupTrigger() → runNightlyBackup()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -1011,6 +1049,8 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `keepBackendWarm()` | **does nothing** | The handler for the trigger below. An empty function on purpose: a script with a live execution is not idle, so a time-driven trigger calling this keeps the container from being shut down — which is what removes the cold start instead of merely overlapping it. It must stay empty — every millisecond in it is billed 1,440 times a day. See the cold start's numbers in [08 — Development Guide](08 - Development Guide.md) |
 | `installKeepWarmTrigger()` | idempotent | Creates the **every-minute** time-driven trigger that calls `keepBackendWarm()`. The interval is the feature: the script was measured cold after 5.5 minutes idle, so a five-minute timer arrives after the container is already gone. 1,440 runs a day is a few minutes against the six hours of trigger runtime a Workspace account gets |
 | `removeKeepWarmTrigger()` | idempotent | Deletes only the `keepBackendWarm` triggers — matched by handler name, so it can never take the nightly archive sweep with it. Installed-but-unwanted is a state worth being able to leave |
+| `runNightlyBackup()` | idempotent, safe by day | The export itself: collects the store, writes one dated folder into `I-PASSBOOK backups`, rotates old folders out, and records the outcome in `_store/backup.json`. Run by hand to prove it works and to give the app a "last backup" line to show. Running it twice on the same day **overwrites that day's folder**, never makes a second one |
+| `installBackupTrigger()` | idempotent | Creates the **daily** ~23:40 IST time-driven trigger that calls `runNightlyBackup()`. A second run does not create a second trigger. It prints, in its own output, the command to run once by hand — because an installed trigger that has never fired leaves the health line reading "never", and the only way to tell a working trigger from an untested one is to run it once |
 
 ### Archiving, and the hazard that had to be closed first
 
@@ -1050,6 +1090,83 @@ The full procedure, with the verification steps, is in
 
 ---
 
+## Phase 1 — the safety net (journal, nightly export, health)
+
+Three files and one folder, all inside the private store root. The whole point is
+that the app's data is no longer only in one place, and that the copy's state is
+**visible** rather than assumed.
+
+### The change journal — `_store/journal/YYYY-MM-DD.jsonl`
+
+One line per write, **written inside the same `withRowLockOrThrow` block as the write
+it describes**. That is the load-bearing part: a journal appended outside the lock
+can interleave with a concurrent write and name a state that never existed.
+
+A line is an **index, never a copy**: when, who, which action, which IR, which
+section, how many keys, and the key **names** — never the field values. So the
+journal is safe to keep for years and small enough to keep for years, and it answers
+"who changed this, and when" without becoming a second copy of the database.
+
+```json
+{"t":"03-Oct-2026 23:41:02","ms":1759515062000,"by":"monish.raza@indrones.com",
+ "a":"saveSection","ir":"IR409","sec":"quality","n":3,
+ "keys":["qc1","qc2","qc3"],"auto":false}
+```
+
+`auto: true` marks a write that came from the auto-save path. The `mode` parameter
+keeps auto-saves out of the **audit trail** (a human did not change a field); the
+journal still records them, because a restore rehearsal has to be able to replay the
+day, and "the app wrote it by itself" is part of the day.
+
+`reportJournal()` is the editor-facing read of it, and it is the one thing to run
+when the question is "what happened on Tuesday".
+
+### The nightly export — `I-PASSBOOK backups/<yyyy-MM-dd>/`
+
+| Part | What it is |
+|---|---|
+| `raw/` | The **restore source**: the whole store, verbatim, in a shape meant to be read back by a script and not by a person |
+| `csv/` | One CSV per record type, for reading in Excel or Sheets |
+| a Google Sheet | One **tab per record type**, so the owner can open a backup on a phone and read it |
+| `_manifest.json` | What was written, how big, and where it came from |
+
+**The export is BUNDLED, and that is a scaling decision, not tidiness.** `raw/` does
+not carry one file per store file. The three directories that grow with the number of
+IRs — `sections/`, `audit/`, `journal/` — are each written as **one** file
+(`sections.json`, `audit.json`, `journal.json`), keyed by store path inside. The
+first version wrote one Drive file per store file, and the owner's own run measured
+**89 seconds for 19 IRs**; at 450 IRs that extrapolates past the budget, and an Apps
+Script run killed at six minutes leaves **no record at all**. With bundling the file
+count is a constant ~12 no matter how many IRs exist, so the export's cost grows with
+the data, not with the file count.
+
+`BACKUP_BUDGET_MS` (4 minutes) exists for that same reason: the run stops itself
+**early**, while it can still write a `ok: false` health record and mail the admin,
+rather than being killed mid-write and leaving nothing behind.
+
+### Rotation — grandfather-father-son
+
+| Kept | Count |
+|---|---|
+| daily | 14 |
+| weekly | 8 (one per ISO week) |
+| monthly | 12 |
+| yearly | one per year, **forever** |
+
+A folder whose name is **not** a date is never touched — not by the rotation, and not
+by anything else. Trashing happens in exactly one function, `pruneBackups`, which can
+only reach the backup root and only dated folders; both smoke suites assert that by
+finding every trash site and requiring it to be inside that one function.
+
+### Health — `_store/backup.json`, read by `getBackupHealth`
+
+Rewritten at the end of every run, whether it succeeded or failed. The frontend shows
+**three** states and the third is the important one: healthy, failed, and
+**unknown** — and unknown wears the failure red and says, in words, that it knows
+nothing. See [`getBackupHealth`](#getbackuphealth).
+
+---
+
 ## Deleted with the sheet
 
 These existed only to make positional rows safe or to migrate sheet data. With no
@@ -1071,7 +1188,10 @@ rollback path, so `snapshotStore()` writes a
 `backups/<store>-<yyyy-MM-dd-HHmmss>.json` **new file** before every destructive
 admin operation, and `purgeUsers` names that file in its response.
 
-`SpreadsheetApp` survives in exactly **two** functions — `listIRs()` and
-`listLegacyIRs()` — and the suite asserts that by walking every call site to its
-enclosing function, because a third appearance would mean the app is writing to a
-sheet again.
+`SpreadsheetApp` survives in exactly **four** functions, and the suite asserts that
+by walking every call site to its enclosing function:
+`listIRs()`, `listLegacyIRs()`, `getLegacyIR()` — all three **reads** of a source
+Sheet the app does not own — and `exportStoreToFolder()`, which **creates** a fresh
+backup Sheet each night, writes into it, and never opens an existing one back. Every
+one of the four is `SpreadsheetApp.create` or an open of a **read-only source**; an
+appearance anywhere else would mean the app is writing to a sheet again.

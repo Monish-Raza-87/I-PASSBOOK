@@ -43,3 +43,5 @@ tools/.cache/*.log
 
 # Build artifacts
 dist/
+# A third-party log analyser, downloaded to read for ideas. Not ours to commit.
+indrones-dev-loganalyzer-*/

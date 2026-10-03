@@ -526,23 +526,45 @@ is left is small.
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
 
+   **One further paste is owed as of 2026-10-03.** The live deployment answers
+   `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1 safety net — the
+   bundled export, the rotation, the health line and `API_VERSION: 5` — **is already
+   pasted and running**: `38 file(s), 20 IR(s)` is that version's own log line. What
+   the live copy does *not* hold is everything committed since: the **`…file(s) read,
+   …written` log line** (which is the count that proves the bundling is holding; the
+   old line printed a number that grows with the company either way) and
+   **`rehearseRestore()`**. Both ride the next paste — paste the current `backend.gs`
+   into **both** `/exec` deployments (the primary and the domain-scoped Google door)
+   and both go live at once.
+
+   > **Then run `rehearseRestore()` once**, from the same function dropdown, *after* a
+   > `runNightlyBackup()` — there has to be an archive to read back. It rebuilds that
+   > archive into `_rehearsal/` and reads it back; the last line says
+   > `REHEARSAL PASSED`. Until it has been run on a real archive, `raw/` is a backup
+   > that has never been restored, which is a claim and not a fact. Procedure and
+   > sample output in [08 — Development Guide](08 - Development Guide.md).
+
    > **`https://script.google.com/d/<deployment-id>/edit` does NOT work.** The editor
    > is keyed by the **script ID**, not the deployment ID, and the deployment ID is
    > what appears in the `/exec` URL (`…/macros/s/AKfycb…jQXatfT/exec`). Pasting that
    > into a `/d/…/edit` link opens Google Drive's *"the file you have requested does
    > not exist"*. Use the `/home/projects/<script-id>/edit` form above.
-2. **Run `installArchiveTrigger()` once** if the Triggers page is empty, signed in as
-   `monish.raza@indrones.com` — the account that owns the Drive folder, because the
-   trigger executes as whoever installed it. Idempotent; confirm exactly one trigger on
-   the Triggers page. Until it exists, closed IR folders are archived only by hand.
+2. **Check the Triggers page holds three triggers**: `keepBackendWarm` (every minute),
+   the nightly backup, and the archive sweep. Each is installed by running its own
+   idempotent function once from the editor — `installKeepWarmTrigger()`,
+   `installBackupTrigger()`, `installArchiveTrigger()` — signed in as
+   `monish.raza@indrones.com`, the account that owns the Drive folder, because a
+   trigger executes as whoever installed it. Each replies *already installed* if it is
+   there. Until the archive sweep exists, closed IR folders are archived only by hand.
 3. **Publish the frontend** whenever `app.js` moves: `node tools/deploy-ghpages.mjs` to
    dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
    `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
    `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
    shell for a load. The last publish is `762927d` (2026-10-03, cache v66), carrying
-   Phase 1's backup-health line. **Its backend half is still owed** — the live
-   deployment answers `apiVersion 4`, so the bundled export and `API_VERSION: 5` have
-   not been pasted yet (see the Phase 1 note under Known Issues).
+   Phase 1's backup-health line. **Nothing is owed on the frontend right now** — the
+   restore rehearsal is editor-run and adds no `app.js` change, so it needs no publish
+   — but the backend paste in item 1 is still owed and is the thing standing between
+   the deployed code and the committed code.
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
    safe date; they are the only record of the old hand-assigned grants, which is the

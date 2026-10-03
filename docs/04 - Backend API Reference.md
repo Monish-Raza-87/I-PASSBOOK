@@ -1144,6 +1144,12 @@ the data, not with the file count.
 **early**, while it can still write a `ok: false` health record and mail the admin,
 rather than being killed mid-write and leaving nothing behind.
 
+The run's log line prints **both** counts, because they answer different questions:
+`38 file(s) read, 12 written`. *Read* is how much data there was, and it grows with the
+company; *written* is how many Drive files the run created, and it is flat. Only the
+second is bounded, so it is the one to watch — a `written` that climbs with the IR
+count means the bundling has been broken.
+
 ### Rotation — grandfather-father-son
 
 | Kept | Count |

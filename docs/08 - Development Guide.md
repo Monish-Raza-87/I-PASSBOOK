@@ -201,14 +201,22 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
 > the outside, from one that does not work. The run prints what it wrote:
 >
 > ```
-> Backup 2026-10-03: 35 file(s), 19 IR(s), 18 account(s), rotated out 0 old folder(s).
+> Backup 2026-10-03: 38 file(s) read, 12 written, 20 IR(s), 18 account(s), rotated out 0 old folder(s).
 > ```
 >
-> Read that line back to front: `rotated out 0` is correct on the first run, because
-> every kept folder is newer than the retention window. If the file count is far above
-> ~12 on a store with hundreds of IRs, the **bundling** has been broken and the export
-> is back to one Drive file per store file — see the scaling note in
-> [04 — Backend API Reference](04 - Backend API Reference.md).
+> The two file numbers answer different questions, and **only the second is the one to
+> watch**:
+>
+> - `read` is how much data there was. It **grows with the company** — roughly one per
+>   IR plus its audit file — and always will. 38 on a 20-IR store is correct.
+> - `written` is how many Drive files the run actually **created**. The bundling is
+>   what holds this flat at roughly **12–20** however many IRs exist. If this number
+>   starts climbing with the IR count, the bundling has been broken and the export is
+>   back to one Drive file per store file — see the scaling note in
+>   [04 — Backend API Reference](04 - Backend API Reference.md).
+>
+> `rotated out 0` is correct on a first run, because every kept folder is newer than
+> the retention window.
 
 
 **Step 1 — one-time setup (run from the editor, before the deploy).**

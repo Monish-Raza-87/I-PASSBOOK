@@ -2598,7 +2598,7 @@ r.head('the nightly export writes a restorable copy into a dated folder');
 const drain = it => { const out = []; while (it.hasNext()) out.push(it.next()); return out; };
 const fileText = f => f.getBlob().getDataAsString();
 
-ctx.runNightlyBackup();
+const backupReport = ctx.runNightlyBackup();
 
 const bRoot = ROOT.getFoldersByName(ctx.CONFIG.BACKUP_FOLDER_NAME).next();
 r.ok('a backup folder exists, BESIDE _store/ — not inside the folder it copies',
@@ -2658,6 +2658,19 @@ r.ok('...and its counts add up to every store file that was copied',
     storeFiles: manifest.storeFiles });
 r.ok('the old backups/ snapshots are NOT copied into a backup of a backup',
   !raw.getFilesByName('backups.json').hasNext() && manifest.manifest.single.every(e => e.path.indexOf('backups/') !== 0));
+
+// The log line has to carry the number the bundling is ABOUT. It printed only the
+// store-file count, which grows with the company by design — so a working export and
+// a broken one printed the same shape of line, and the operator could not tell them
+// apart by reading. `written` is the bounded one.
+const createdHere = rawNames.length + 4 /* the CSVs */ + 1 /* the Sheet */;
+r.ok('the run reports how many store files it READ and how many Drive files it WROTE',
+  /\d+ file\(s\) read, \d+ written/.test(backupReport), backupReport);
+r.ok('...and the "written" figure is the real count, not a description',
+  backupReport.indexOf(createdHere + ' written') > -1,
+  { said: (backupReport.match(/(\d+) written/) || [])[1], actually: createdHere, raw: rawNames.length });
+r.ok('the same figure is recorded in the health file, so the screen can show it too',
+  ctx.readBackupHealth().written === createdHere, ctx.readBackupHealth().written);
 
 r.ok('the CSVs are written as CSV, not as .json with a .csv name',
   csvf.getFilesByName('irs.csv').next().mime === 'text/csv' &&

@@ -1131,7 +1131,17 @@ function exportStoreToFolder(root, stamp) {
   var ssFile = DriveApp.getFileById(ss.getId());
   ssFile.moveTo(day);
 
-  return { folder: day, sheet: ss, sheetId: ss.getId(), counts: counts,
+  // How many Drive files this date actually CREATED, which is the number the
+  // bundling is about and the one an operator needs to see. It is deliberately
+  // separate from `counts.files`, which is how many store files were READ — that
+  // one grows with the company by design and always will, so reporting it alone
+  // made a working export and a broken one print the same shape of line. Printed
+  // by runNightlyBackup; see the scaling note above.
+  var written = Object.keys(bundles).length + singles.length + 1   // + _manifest.json
+              + 4                                                  // the four CSVs
+              + 1;                                                 // the Sheet
+
+  return { folder: day, sheet: ss, sheetId: ss.getId(), counts: counts, written: written,
            tookMs: Date.now() - started, folderId: day.getId() };
 }
 
@@ -1160,6 +1170,7 @@ function runNightlyBackup() {
       folderId: result.folderId,
       sheetUrl: result.sheet.getUrl(),
       files: result.counts.files,
+      written: result.written,
       irs: result.counts.irs,
       users: result.counts.users,
       tookMs: result.tookMs,
@@ -1173,7 +1184,13 @@ function runNightlyBackup() {
         Math.round((Date.now() - started) / 1000) + 's, over the ' +
         Math.round(CONFIG.BACKUP_BUDGET_MS / 1000) + 's budget.\n\n' + result.sheet.getUrl() + '\n');
     }
-    return report('Backup ' + stamp + ': ' + result.counts.files + ' file(s), ' +
+    // BOTH numbers, and they answer different questions. `read` is how much data
+    // there was; `written` is how many Drive files it cost. Only the second one is
+    // bounded — it stays flat as the company grows — so it is the number to watch,
+    // and a line where it has started climbing with the IR count means the bundling
+    // has been broken.
+    return report('Backup ' + stamp + ': ' + result.counts.files + ' file(s) read, ' +
+                  result.written + ' written, ' +
                   result.counts.irs + ' IR(s), ' + result.counts.users + ' account(s), ' +
                   'rotated out ' + rotated.deleted.length + ' old folder(s).');
   } catch (err) {

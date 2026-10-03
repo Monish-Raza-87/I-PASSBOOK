@@ -1008,7 +1008,9 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 .triage-row { display: flex; flex-direction: column; gap: 0.2rem; }
 .triage-row > span { font-size: var(--text-xs); color: var(--ink-gray-6); font-weight: var(--weight-medium); }
 
-/* Legacy record embed (read-only iframe into the old workbook) */
+/* Legacy record — read-only, rendered from the backend (see openLegacyRecord in
+   app.js). There is no iframe any more: the workbook was restricted on
+   2 October 2026, because embedding it was what forced it to stay link-shared. */
 #legacy-modal { padding: 0.5rem; }
 .legacy-card {
   width: 100%;
@@ -1032,46 +1034,48 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
 }
 .legacy-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
 .legacy-sub { font-size: var(--text-xs); color: var(--ink-gray-5); margin-top: 1px; }
-/* The notice shown in place of the embed. The workbook was restricted on
-   2 October 2026, so `.legacy-frame` is no longer reached — the card sizes to its
-   content instead of holding 92vh open for a frame that will not load. */
-.legacy-card-notice { height: auto; max-width: 560px; }
-.legacy-notice { padding: 1rem 1.1rem 1.2rem; overflow-y: auto; }
-.legacy-notice p { margin: 0 0 0.75rem; font-size: var(--text-sm); color: var(--ink-gray-7); line-height: var(--leading-body); }
-.legacy-notice p:last-child { margin-bottom: 0; }
-.legacy-notice strong { color: var(--ink-gray-9); font-weight: var(--weight-semibold); }
-.legacy-notice .url-open-btn { display: inline-block; margin: 0.25rem 0 0.9rem; }
-.legacy-notice-note { font-size: var(--text-xs); color: var(--ink-gray-5); }
-.legacy-frame-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; position: relative; }
-.legacy-frame { flex: 1; width: 100%; border: 0; background: #fff; min-height: 0; }
-.legacy-fallback {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.7rem;
-  padding: 0.45rem 1rem;
-  border-top: 1px solid var(--outline-gray-1);
-  font-size: var(--text-sm);
-  color: var(--ink-gray-5);
-  background: var(--surface-gray-1);
-}
+/* The card sizes to its content and the record scrolls inside it — there is no
+   frame to hold 92vh open for. */
+.legacy-card-record { height: auto; max-height: 92vh; max-width: 720px; }
+.legacy-record { padding: 0.9rem 1.1rem 1.2rem; overflow-y: auto; }
 
-/* The wait, said out loud. The app makes no request for this view — Google renders
-   a ~450-tab workbook in the frame — so this panel exists to tell a slow load apart
-   from a hung one, and it is removed the instant the frame reports `load`. It sits
-   OVER the frame rather than beside it, so the workbook gets the full card the
-   moment it paints and the panel's removal costs no relayout. */
+/* One grid row becomes a stacked label/value, NEVER a table: a legacy tab is wide,
+   and a phone answers a table with sideways scrolling — the exact thing this app
+   refuses to ask of someone reading a record. */
+.legacy-row { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.45rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.legacy-row:last-child { border-bottom: 0; }
+.legacy-row-head { border-bottom: 1px solid var(--outline-gray-2); }
+.legacy-label { font-size: var(--text-xs); color: var(--ink-gray-6); font-weight: var(--weight-medium); }
+.legacy-value { font-size: var(--text-sm); color: var(--ink-gray-8); line-height: var(--leading-body); white-space: pre-wrap; word-break: break-word; }
+.legacy-row-head .legacy-value { font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
+.legacy-link-note { margin: 1rem 0 0; padding-top: 0.8rem; border-top: 1px solid var(--outline-gray-1); font-size: var(--text-xs); color: var(--ink-gray-5); }
+.legacy-link-note .url-open-btn { display: inline-block; margin-top: 0.5rem; }
+.legacy-empty { margin: 0; padding: 0.5rem 0; font-size: var(--text-sm); color: var(--ink-gray-5); }
+.legacy-error p { margin: 0 0 0.6rem; font-size: var(--text-sm); color: var(--ink-gray-7); }
+
+/* The archive index: every pre-app IR, each one a tap away. Tab names only, so it
+   costs nothing to show — a record's content is fetched only when it is opened. */
+.legacy-index { display: flex; flex-direction: column; }
+.legacy-index-item {
+  display: flex; align-items: baseline; gap: 0.6rem; width: 100%; text-align: left;
+  padding: 0.6rem 0.2rem; background: none; border: 0;
+  border-bottom: 1px solid var(--outline-gray-1); cursor: pointer; font: inherit;
+}
+.legacy-index-item:last-child { border-bottom: 0; }
+.legacy-index-item:hover { background: var(--surface-gray-1); }
+.legacy-index-ir { flex: 0 0 auto; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
+.legacy-index-label { font-size: var(--text-xs); color: var(--ink-gray-5); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The wait, said out loud — inside the record body, since there is no frame to sit
+   over any more. The record read is fast, but a cold Apps Script start is not, and
+   a blank card reads as broken rather than slow. */
 .legacy-loading {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 0.5rem;
-  padding: 2rem 1.5rem;
+  padding: 1.6rem 1rem;
   text-align: center;
-  background: var(--surface-elevation-2);
 }
 .legacy-spinner {
   width: 28px;
@@ -1081,10 +1085,7 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   border-top-color: var(--accent);
   animation: spin 0.9s linear infinite;
 }
-.legacy-loading-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--ink-gray-9); }
 .legacy-loading-note { font-size: var(--text-sm); color: var(--ink-gray-5); max-width: 34ch; line-height: var(--leading-body); }
-/* tabular-nums so the count does not jitter the line as the digits change width. */
-.legacy-loading-elapsed { font-size: var(--text-sm); color: var(--ink-gray-4); font-variant-numeric: tabular-nums; }
 
 /* ══════════════════════════════════════════════════════════
    LOADING + EMPTY STATES

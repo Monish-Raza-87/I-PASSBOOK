@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v64';
+const APP_VERSION = 'v65';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -108,19 +108,18 @@ const CONFIG = {
   // without Google auth while this prototype is still being built.
   ENABLE_DEV_AUTH_BYPASS: true,
 
-  // IR Repository spreadsheet — read by the BACKEND (action=listIRs), which hands
-  // the tab over as a grid that the mapper below turns into records. The frontend
-  // used to read this file itself, as CSV from a URL that needed no login; that is
-  // gone. Column meanings live in INTAKE_FIELDS, matched by header substring.
-  IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_TAB:      'Form Responses',
-
-  // Legacy I-PASSBOOK workbook — one tab per pre-app IR. RESTRICTED since
-  // 2 October 2026, which is why the 🏛 Legacy button no longer embeds it: the
-  // frontend cannot open a restricted file, and a frame cannot detect a Google
-  // sign-in wall. The BACKEND can still read it, because Apps Script runs as the
-  // deployer — which is what brings these records into the app.
-  LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
+  // ── NO SHEET ADDRESSES LIVE HERE ANY MORE (2026-10-03) ───────────────────────
+  // The IR Repository and the legacy workbook used to be named in this file. Both
+  // were read from the BROWSER, one of them (the IR Repository) over a URL that
+  // needed no login at all. That made their addresses part of a public repository,
+  // which is a standing hazard: change a sharing setting by accident and the data
+  // is readable by anyone who has read the repo, with no deploy and no sign on
+  // screen. Both reads now go through the token-gated backend, which knows the
+  // addresses because it runs as the file's owner — so the frontend no longer
+  // needs them, and they are gone. do not add them back.
+  //
+  // The column meanings are not here either: INTAKE_FIELDS below matches headers by
+  // substring, and mapSheetRows() is the one place a sheet grid becomes records.
 };
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -908,7 +907,7 @@ window.fetch = function (input, init) {
 let allIRs      = [];          // master list fetched from GAS
 let currentIR   = null;        // the IR open in detail view
 let currentSectionData = {};   // cached data for open passbook
-let legacyMap   = {};          // irNumber -> { label, gid, embedUrl, openUrl } for legacy IRs (≤~IR441)
+let legacyMap   = {};          // irNumber -> { label, gid, openUrl } for legacy IRs (≤~IR441)
 
 // ─── ADMIN (config editors + access managers) ─────────────────────────────────
 // Admins bypass every permission check and are the only accounts that can
@@ -5641,9 +5640,10 @@ function renderSyncBar() {
 }
 
 // ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
-// Loads the index of legacy per-IR tabs (token-gated via the backend) so the
-// master list can badge legacy IRs and the detail view can embed a read-only
-// copy of the original sheet record. Best-effort: failures just skip legacy.
+// Loads the INDEX of legacy per-IR tabs (token-gated via the backend) so the master
+// list can badge legacy IRs and the detail view can open a record read-only. The
+// index is tab names only — a record's content is fetched one at a time, when it is
+// actually opened (getLegacyIR). Best-effort: failures just skip legacy.
 async function loadLegacyIndex() {
   try {
     const controller = new AbortController();
@@ -6461,12 +6461,12 @@ async function openPassbook(irNumber) {
   const legacyBtn = document.getElementById('ir-legacy-btn');
   if (legacy && legacyBtn) {
     legacyBtn.style.display = '';
-    // The legacy workbook is restricted, so there is no embed to open any more —
-    // see openLegacyRestrictedNotice. The button stays because the record still
-    // exists and is still reachable; what changed is that it is no longer shown
-    // inside this app.
+    // A pre-app IR that has no data in the new app yet: show its original record
+    // straight away rather than six empty tabs. The record is read from the backend
+    // (getLegacyIR) — see openLegacyRecord — because the workbook itself is
+    // restricted and the browser cannot open it.
     const hasNewData = currentSectionData && Object.keys(currentSectionData).length > 0;
-    if (!hasNewData) openLegacyRestrictedNotice(legacy.label || irNumber, CONFIG.LEGACY_SHEET_ID);
+    if (!hasNewData) openLegacyRecord(irNumber);
   } else if (legacyBtn) {
     legacyBtn.style.display = 'none';
   }
@@ -7285,133 +7285,51 @@ async function applyTriage() {
   }
 }
 
-// ─── LEGACY RECORD: THE WAIT, MADE HONEST ────────────────────────────────────
-// The app makes ZERO requests for this view — Google renders a ~450-tab workbook
-// inside the iframe — so there is nothing here to await and nothing here to make
-// faster. What there IS to fix is the silence: a blank frame with a permanent
-// "Can't see it?" note underneath reads as hung and as broken at the same time, and
-// a user cannot tell which. So: a spinner, the elapsed count so a long wait reads as
-// long rather than stuck, and the fallback link withheld until the frame has really
-// failed or a generous timeout has passed.
+// ─── LEGACY RECORD: READ-ONLY, FROM THE BACKEND ──────────────────────────────
+// The legacy I-PASSBOOK workbook is restricted, so the browser cannot open it and
+// the embed that used to live here is gone for good. The RECORDS are not gone:
+// getLegacyIR hands back ONE tab as a grid of the cells it displays, read by the
+// backend as the file's owner, and this renders it read-only. That is what lets the
+// workbook stay restricted — the embed was the only reason it had to remain
+// link-shared, and link-sharing is per FILE, not per tab, so one embedded tab kept
+// every tab readable by anyone with the address.
 //
-// The loaded frame is KEPT (detached, not discarded) once it has painted, so
-// reopening the same archive reattaches it instead of paying the render again. And
-// the frame no longer carries `loading="lazy"`: it is on screen the moment it is
-// built, so asking the browser to decide whether it is *near* the viewport only
-// adds a decision to the front of a twenty-second render.
-const LEGACY_SLOW_MS = 20000;
-let _legacyTimer = null;
-let _legacyLoaded = { key: '', modal: null };
-
-function legacyTick(modal, startedAt) {
-  const out = modal.querySelector('.legacy-loading-elapsed');
-  if (!out) return;
-  const secs = Math.round((Date.now() - startedAt) / 1000);
-  out.textContent = secs < 60 ? secs + 's' : Math.floor(secs / 60) + 'm ' + (secs % 60) + 's';
-}
-
-// Open a full-screen, read-only embed of the IR's legacy I-PASSBOOK tab. The
-// sheet itself is shown via Google's preview endpoint (no editing UI); a link
-// to open it directly in Google Sheets is provided as a fallback.
-function openLegacyModal(embedUrl, label, openUrl) {
-  const key = embedUrl + '|' + String(label || '');
-  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
-
-  // Reopening the same archive: the frame already painted once, so reattach it and
-  // skip the loading state entirely. This is the difference between a two-second
-  // reopen and a twenty-second one, and it costs nothing but not throwing the
-  // element away.
-  if (_legacyLoaded.modal && _legacyLoaded.key === key) {
-    document.body.appendChild(_legacyLoaded.modal);
-    return;
-  }
-
-  let modal = document.getElementById('legacy-modal');
-  if (modal) modal.remove();
-  modal = document.createElement('div');
-  modal.className = 'inward-options-modal';   // reuse the full-screen overlay style
-  modal.id = 'legacy-modal';
-  modal.innerHTML = `
-    <div class="legacy-card">
-      <div class="legacy-head">
-        <div>
-          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
-          <div class="legacy-sub">${escHtml(label || '')} · read-only</div>
-        </div>
-        <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
-      </div>
-      <div class="legacy-frame-wrap">
-        <iframe src="${embedUrl}" class="legacy-frame" title="Legacy record ${escHtml(label || '')}" referrerpolicy="no-referrer"></iframe>
-        <div class="legacy-loading" id="legacy-loading" role="status" aria-live="polite">
-          <span class="legacy-spinner" aria-hidden="true"></span>
-          <span class="legacy-loading-title">Loading the archive…</span>
-          <span class="legacy-loading-note">This is the old I-PASSBOOK workbook, and it is a big one. It can take a moment.</span>
-          <span class="legacy-loading-elapsed">0s</span>
-        </div>
-        <div class="legacy-fallback" id="legacy-fallback" style="display:none">
-          <span>Still not showing?</span>
-          <a href="${openUrl}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>
-        </div>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
-
-  const frame = modal.querySelector('.legacy-frame');
-  const startedAt = Date.now();
-  const done = () => {
-    if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
-    const load = modal.querySelector('.legacy-loading');
-    if (load) load.remove();
-    // The frame painted, so this view is worth keeping for a reopen — but only the
-    // one that actually loaded.
-    _legacyLoaded = { key, modal };
-  };
-  if (frame) frame.addEventListener('load', done, { once: true });
-
-  // The clock, and the point at which the fallback stops being noise and becomes
-  // advice. Both stop the moment the frame loads — `done` owns that.
-  legacyTick(modal, startedAt);
-  _legacyTimer = setInterval(() => {
-    legacyTick(modal, startedAt);
-    if (Date.now() - startedAt < LEGACY_SLOW_MS) return;
-    if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
-    const fb = modal.querySelector('.legacy-fallback');
-    if (fb) fb.style.display = 'flex';
-  }, 1000);
-}
-
-function closeLegacyModal() {
-  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
-  const m = document.getElementById('legacy-modal');
-  // Detached, NOT discarded — `_legacyLoaded` keeps it so a reopen is instant. The
-  // reference is dropped the moment a different archive is opened.
-  if (m) m.remove();
-}
-
-// Open the entire legacy I-PASSBOOK workbook (IR1–IR441) read-only, embedded
-// with tab switching — via Google's preview endpoint. The workbook is
-// link-shared, so this needs NO Google sign-in, NO token, NO backend call and
-// therefore NO sign-in pop-ups. A fallback link opens it directly in Sheets.
-function openLegacyWorkbook() {
-  openLegacyRestrictedNotice('All pre-app records', CONFIG.LEGACY_SHEET_ID);
-}
-
-// The legacy workbook was RESTRICTED on 2 October 2026, at the owner's instruction.
+// One tab per open, so the cost tracks what is actually being looked at: a
+// several-hundred-tab workbook is never read to show one record.
 //
-// It had been link-shared because this button embedded it live — and link-sharing
-// is per FILE, not per tab, so every tab in that workbook was readable by anyone
-// holding the address, and the address is written in app.js, which lives in a
-// public repository. Restricting it was the only way to close that, and the cost
-// the owner accepted is exactly this: the embedded view goes dark until Phase 0
-// renders the legacy records from the app's own backend.
-//
-// So this says what happened rather than showing a Google sign-in wall inside a
-// frame and letting people conclude the app is broken. The direct link still works
-// for anyone whose Google account has been granted access to the file.
-function openLegacyRestrictedNotice(label, sheetId) {
-  const openUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
-  if (_legacyTimer) { clearInterval(_legacyTimer); _legacyTimer = null; }
+// The grid becomes label/value rows and is NEVER a <table>. A legacy tab is wide,
+// and a phone answers a table with sideways scrolling — the exact thing this app
+// refuses to ask of someone reading. A row with one filled cell reads as a heading;
+// a row with none is a spacer and is dropped.
+let _legacyReq = 0;   // a sequence number, so a superseded fetch cannot paint last
+
+function legacyGridHtml(grid) {
+  const rows = Array.isArray(grid) ? grid : [];
+  let out = '';
+  (rows || []).forEach(row => {
+    const filled = (row || []).map(c => String(c == null ? '' : c).trim()).filter(Boolean);
+    if (!filled.length) return;                     // blank spacer row — say nothing
+    if (filled.length === 1) {
+      out += `<div class="legacy-row legacy-row-head"><span class="legacy-value">${escHtml(filled[0])}</span></div>`;
+      return;
+    }
+    out += `<div class="legacy-row">` +
+             `<span class="legacy-label">${escHtml(filled[0])}</span>` +
+             `<span class="legacy-value">${escHtml(filled.slice(1).join(' · ')).replace(/\n/g, '<br/>')}</span>` +
+           `</div>`;
+  });
+  // A tab that is genuinely empty (or all spacers) says so — an empty card would
+  // read as a failed load rather than an empty record.
+  return out || '<p class="legacy-empty">This record has no content in the workbook.</p>';
+}
+
+// Open one legacy record, read-only. The fetch is the same token-gated shape as
+// every other read; the sequence number drops a slow answer that arrives after the
+// user has already moved to a different record.
+function openLegacyRecord(irNumber) {
+  const rec = legacyMap[irNumber] || {};
+  const label = rec.label || irNumber || 'Legacy record';
+  const req = ++_legacyReq;
 
   const existing = document.getElementById('legacy-modal');
   if (existing) existing.remove();
@@ -7419,35 +7337,99 @@ function openLegacyRestrictedNotice(label, sheetId) {
   modal.className = 'inward-options-modal';
   modal.id = 'legacy-modal';
   modal.innerHTML = `
-    <div class="legacy-card legacy-card-notice">
+    <div class="legacy-card legacy-card-record">
       <div class="legacy-head">
         <div>
-          <div class="legacy-title">Legacy I-PASSBOOK</div>
-          <div class="legacy-sub">${escHtml(label || '')} · no longer embedded</div>
+          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
+          <div class="legacy-sub">${escHtml(label)} · read-only</div>
         </div>
         <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
       </div>
-      <div class="legacy-notice">
-        <p><strong>This view was switched off on 2 October 2026, on purpose.</strong></p>
-        <p>
-          The workbook used to be embedded right here, and to make that work it had to stay
-          link-shared — which meant every tab in it could be read by anyone who had the
-          address, without signing in. It is now restricted, and only people who have been
-          granted access to the file can open it.
-        </p>
-        <p>
-          The records are not lost and nothing has been deleted. They will come back inside
-          this app, read-only, as part of the same work that removes the app's last
-          dependency on the Sheet.
-        </p>
-        <a href="${openUrl}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>
-        <p class="legacy-notice-note">
-          That link only opens for a Google account that has been given access to the file.
-        </p>
+      <div class="legacy-record" id="legacy-record-body">
+        <div class="legacy-loading" role="status" aria-live="polite">
+          <span class="legacy-spinner" aria-hidden="true"></span>
+          <span class="legacy-loading-note">Loading the record…</span>
+        </div>
       </div>
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
+
+  const body = modal.querySelector('#legacy-record-body');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  const openLink = url => url
+    ? `<a href="${escHtml(url)}" target="_blank" rel="noopener" class="url-open-btn">Open in Google Sheets ↗</a>` : '';
+  const openUrl = rec.openUrl || '';
+
+  fetch(`${CONFIG.GAS_URL}?action=getLegacyIR&irNumber=${encodeURIComponent(irNumber)}`,
+        { signal: controller.signal })
+    .then(r => r.json())
+    .then(data => {
+      if (req !== _legacyReq) return;               // a newer record is on screen
+      if (!data || data.status !== 'ok') throw new Error((data && data.message) || 'getLegacyIR failed');
+      body.innerHTML = legacyGridHtml(data.grid) +
+        `<p class="legacy-link-note">The original is in a restricted workbook; this copy is read-only. ` +
+        openLink(data.openUrl || openUrl) + `</p>`;
+    })
+    .catch(err => {
+      if (req !== _legacyReq) return;
+      const timedOut = err && err.name === 'AbortError';
+      body.innerHTML =
+        `<div class="legacy-error">` +
+          `<p>${timedOut ? 'The archive did not answer in time.' : 'Could not load this legacy record.'}</p>` +
+          `<p class="legacy-sub">${escHtml((err && err.message) || 'Unavailable.')}</p>` +
+          openLink(openUrl) +
+        `</div>`;
+    })
+    .finally(() => clearTimeout(timer));
+}
+
+function closeLegacyModal() {
+  _legacyReq++;   // a fetch in flight must not paint into a closed modal
+  const m = document.getElementById('legacy-modal');
+  if (m) m.remove();
+}
+
+// The home screen's 🏛 Legacy button: the INDEX of pre-app records (IR1–IR441).
+//
+// There is no embedded workbook any more, and there never will be again — the file
+// is restricted precisely because the embed forced it to stay link-shared. So this
+// is the way in: a tappable list of the legacy IRs the backend enumerated, each one
+// opening its record read-only through getLegacyIR. The index is cheap (tab names
+// only); the content is fetched only for the record actually opened.
+function openLegacyWorkbook() {
+  const items = Object.values(legacyMap).sort((a, b) =>
+    parseInt(String(b.irNumber).replace(/\D/g, ''), 10) -
+    parseInt(String(a.irNumber).replace(/\D/g, ''), 10));
+
+  const existing = document.getElementById('legacy-modal');
+  if (existing) existing.remove();
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'legacy-modal';
+  const list = items.length
+    ? items.map(it =>
+        `<button type="button" class="legacy-index-item" data-ir="${escHtml(it.irNumber)}">` +
+          `<span class="legacy-index-ir">${escHtml(it.irNumber)}</span>` +
+          `<span class="legacy-index-label">${escHtml(it.label || '')}</span>` +
+        `</button>`).join('')
+    : `<p class="legacy-empty">No pre-app records were found in the legacy workbook.</p>`;
+  modal.innerHTML = `
+    <div class="legacy-card legacy-card-record">
+      <div class="legacy-head">
+        <div>
+          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
+          <div class="legacy-sub">${items.length} pre-app record${items.length === 1 ? '' : 's'} · read-only</div>
+        </div>
+        <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
+      </div>
+      <div class="legacy-record legacy-index">${list}</div>
+    </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
+  modal.querySelectorAll('.legacy-index-item').forEach(btn =>
+    btn.addEventListener('click', () => openLegacyRecord(btn.dataset.ir)));
 }
 
 // Back button (mobile only — the desktop split pane keeps the list on screen).
@@ -7491,8 +7473,7 @@ if (irHistoryBtn) irHistoryBtn.addEventListener('click', () => openHistoryModal(
 // IR banner legacy-record button
 const irLegacyBtn = document.getElementById('ir-legacy-btn');
 if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
-  const l = legacyMap[currentIR?.irNumber];
-  if (l) openLegacyRestrictedNotice(l.label || currentIR?.irNumber, CONFIG.LEGACY_SHEET_ID);
+  if (legacyMap[currentIR?.irNumber]) openLegacyRecord(currentIR?.irNumber);
 });
 // Home-screen "Legacy I-PASSBOOK" button — opens the whole old workbook read-only
 const legacyWorkbookBtn = document.getElementById('legacy-workbook-btn');
@@ -11925,10 +11906,10 @@ function closeHistoryModal() {
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',  incidentDate: '2025-09-28' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
-    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',            incidentDate: '2025-09-18' },
-    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
-    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: 'https://docs.google.com/spreadsheets/d/1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4/edit#gid=0', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
+    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',  incidentDate: '2025-09-28' },
+    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
+    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',            incidentDate: '2025-09-18' },
+    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
+    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
   ];
 }

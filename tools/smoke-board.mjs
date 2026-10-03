@@ -11,6 +11,11 @@
 //     once, none invented, none missing. A status the app can store and the board
 //     cannot place is the failure a reader could never see: the card would simply
 //     be nowhere, and the board would look fine.
+//   * and they place every value the app can still be HANDED, because the store
+//     holds old tickets. The eight retired Sheet words are folded to the stage they
+//     mean (canonicalStage) and land in that stage's column; 'Other', which is not a
+//     stage at all, keeps the column it has always had. Both halves are asserted
+//     against boardColumnOf itself rather than against the table it reads.
 //   * a section column is named with the app's OWN short name, so the column a
 //     card sits in and the tab it lives on say the same words.
 //   * the header count is the column's FULL count while only the drawing is
@@ -21,6 +26,7 @@
 
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { loadApp } from './harness.mjs';
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
@@ -48,7 +54,7 @@ head('the columns are the app\'s own workflow stages');
 
 const statusValues = [...((appJs.match(/const IR_STATUS_VALUES\s*=\s*\[([^\]]*)\]/) || [])[1] || '')
   .matchAll(/'([^']+)'/g)].map(m => m[1]);
-ok('the app really does store fourteen workflow stages', statusValues.length === 14, statusValues.join(' '));
+ok('the app really does store ten workflow stages', statusValues.length === 10, statusValues.join(' '));
 
 // The BOARD_COLUMNS literal, brace-matched from its `[` so a later array in the
 // file cannot be swept in.
@@ -59,13 +65,20 @@ ok('the board declares its columns', boardCols.length > 0, bcStart);
 
 const placed = [...boardCols.matchAll(/stages:\s*\[([^\]]*)\]/g)]
   .flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]));
-ok('every stage a column claims is one of the app\'s own',
-  placed.length > 0 && placed.every(s => statusValues.includes(s)),
-  placed.filter(s => !statusValues.includes(s)));
-ok('and the nine columns place all fourteen, each exactly once',
-  placed.length === statusValues.length &&
-  [...placed].sort().join('|') === [...statusValues].sort().join('|'),
+// The ONE stage-less value a column has to keep a place for. 'Other' is not in
+// IR_STATUS_VALUES and must not be: nothing new can be set to it. But old tickets
+// hold it, canonicalStage returns it unchanged, and a card in no column is a card
+// nobody can see — so it keeps the finished column it has always had.
+const KEPT_NON_STAGE = 'Other';
+ok('every stage a column claims is one of the app\'s own, or the retired Other',
+  placed.length > 0 && placed.every(s => statusValues.includes(s) || s === KEPT_NON_STAGE),
+  placed.filter(s => !statusValues.includes(s) && s !== KEPT_NON_STAGE));
+ok('the nine columns place all ten, each exactly once',
+  placed.filter(s => s !== KEPT_NON_STAGE).length === statusValues.length &&
+  [...placed.filter(s => s !== KEPT_NON_STAGE)].sort().join('|') === [...statusValues].sort().join('|'),
   `${placed.length} placed: ${placed.join('/')}`);
+ok('...and the retired Other keeps a column of its own there too',
+  placed.filter(s => s === KEPT_NON_STAGE).length === 1, placed);
 
 const colCount = (boardCols.match(/\{\s*key:/g) || []).length;
 ok('there are nine columns', colCount === 9, colCount);
@@ -92,10 +105,52 @@ head('the stages that name no section still get a column each');
 // themselves are smoke-i18n.mjs's business, and only its business.
 ok('a start column holds the un-started stages',
   /title:\s*t\('board\.notStarted'\)[^}]*stages:\s*\[\s*'Open'\s*,\s*'Remote Support'\s*\]/.test(boardCols));
-ok('a paused column holds Hold',
-  /title:\s*t\('board\.paused'\)[^}]*stages:\s*\[\s*'Hold'\s*\]/.test(boardCols));
-ok('a finished column holds the closed stages, and is drawn quiet',
-  /title:\s*t\('board\.finished'\)[^}]*stages:\s*\[[^\]]*'Close'[^\]]*\][^}]*quiet:\s*true/.test(boardCols));
+ok('a paused column holds On Hold',
+  /title:\s*t\('board\.paused'\)[^}]*stages:\s*\[\s*'On Hold'\s*\]/.test(boardCols));
+ok('a finished column holds the closing stages, and is drawn quiet',
+  /title:\s*t\('board\.finished'\)[^}]*stages:\s*\[[^\]]*'Delivered'[^\]]*\][^}]*quiet:\s*true/.test(boardCols));
+ok('...and it is the ONE place a value that is not a stage can sit',
+  /title:\s*t\('board\.finished'\)[^}]*stages:\s*\[\s*'Delivered'\s*,\s*'Other'\s*\]/.test(boardCols),
+  (boardCols.match(/stages:\s*\[[^\]]*'Other'[^\]]*\]/) || ['(none)'])[0]);
+
+// ── Every value the app can be HANDED still lands somewhere ─────────────────
+// The table above is a claim about the board; this is the board's behaviour, run
+// against the real function rather than read out of the source. The population is
+// every value that can be sitting in the store today: the ten, the eight words the
+// Sheet wrote before the vocabulary changed, and Other.
+head('nothing the store can hold falls off the board');
+
+const T = loadApp('canonicalStage, boardColumnOf, IR_STATUS_VALUES, STATUS_LEGACY');
+const RETIRED = ['Hold', 'Visual Inspection', 'QC Investigation', 'QC',
+                 'Flight Test', 'PDI', 'Approval', 'Close'];
+
+ok('the fold table holds exactly the eight retired words',
+  Object.keys(T.STATUS_LEGACY).sort().join('|') === RETIRED.map(w => w.toLowerCase()).sort().join('|'),
+  Object.keys(T.STATUS_LEGACY).sort());
+ok('none of the ten needs folding — every one is already a stage',
+  T.IR_STATUS_VALUES.every(s => T.canonicalStage(s) === s));
+// The mapping, stated in full rather than as a property, because it is a DECISION:
+// two old words folding to one stage is intended (QC and Flight Test both mean
+// Quality Test), and a change to any single row should be a conscious edit here.
+const COLUMN = {
+  'Open': 'start', 'Remote Support': 'start', 'On Hold': 'hold',
+  'Inward': 'B', 'Inspection': 'C', 'Investigation': 'D', 'Production': 'E',
+  'Quality Test': 'F', 'PDI/Dispatch': 'G', 'Delivered': 'done', 'Other': 'done',
+  'Hold': 'hold', 'Visual Inspection': 'C', 'QC Investigation': 'D',
+  'QC': 'F', 'Flight Test': 'F', 'PDI': 'G', 'Approval': 'G', 'Close': 'done',
+};
+Object.entries(COLUMN).forEach(([value, col]) => {
+  ok(`"${value}" sits in the ${col} column`, T.boardColumnOf(value) === col, T.boardColumnOf(value));
+});
+// The two properties the table above cannot express: a retired word goes where the
+// stage it MEANS goes, whatever its casing, and a value nobody recognises still gets
+// a column rather than vanishing.
+ok('a retired word lands exactly where the stage it means lands',
+  RETIRED.every(w => T.boardColumnOf(w) === T.boardColumnOf(T.canonicalStage(w))));
+ok('...and casing does not change the answer',
+  RETIRED.every(w => T.boardColumnOf(w.toUpperCase()) === T.boardColumnOf(w)));
+ok('a value nobody recognises still gets the first column, never none',
+  T.boardColumnOf('Something New') === 'start' && T.boardColumnOf('') === 'start');
 
 // ── A column's count is the truth even when its drawing is capped ────────────
 head('a capped column still counts everything it holds');

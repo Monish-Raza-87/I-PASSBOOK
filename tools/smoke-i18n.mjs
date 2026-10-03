@@ -144,13 +144,35 @@ ok('the close buttons supply their letter, so no button shows a bare {letter}',
 head('every workflow status has a word, and no word has no status');
 const statusValues = [...((appJs.match(/const IR_STATUS_VALUES\s*=\s*\[([^\]]*)\]/) || [])[1] || '')
   .matchAll(/'([^']+)'/g)].map(m => m[1]);
-ok('the app stores fourteen statuses', statusValues.length === 14, statusValues.length);
-ok('all fourteen are mapped, each to a real string',
+ok('the app stores ten statuses', statusValues.length === 10, statusValues.length);
+ok('all ten are mapped, each to a real string',
   statusValues.every(v => L.I18N.STATUS_KEYS[v] && keys.includes(L.I18N.STATUS_KEYS[v])),
   statusValues.filter(v => !L.I18N.STATUS_KEYS[v]));
-ok('...and the map invents no status the app cannot store',
-  Object.keys(L.I18N.STATUS_KEYS).every(v => statusValues.includes(v)),
-  Object.keys(L.I18N.STATUS_KEYS).filter(v => !statusValues.includes(v)));
+// The map carries a SECOND arm now, and this is the assertion that keeps it honest.
+// The eight words the Sheet wrote before the vocabulary changed, plus Other, are
+// still held by tickets in the store — and the map must reach the same string as the
+// stage each one now means, because that shared key is the whole mechanism by which
+// an old ticket reads as a word instead of as a raw stored value.
+const RETIRED_WORDS = ['Hold', 'Visual Inspection', 'QC Investigation', 'QC',
+                       'Flight Test', 'PDI', 'Approval', 'Close', 'Other'];
+const FOLD = { 'Hold': 'On Hold', 'Visual Inspection': 'Inspection',
+               'QC Investigation': 'Investigation', 'QC': 'Quality Test',
+               'Flight Test': 'Quality Test', 'PDI': 'PDI/Dispatch',
+               'Approval': 'PDI/Dispatch', 'Close': 'Delivered' };
+ok('every retired word is mapped too, and to the stage it means',
+  RETIRED_WORDS.every(w => L.I18N.STATUS_KEYS[w] &&
+    (w === 'Other' ? true : L.I18N.STATUS_KEYS[w] === L.I18N.STATUS_KEYS[FOLD[w]])),
+  RETIRED_WORDS.filter(w => !L.I18N.STATUS_KEYS[w]));
+ok('...so an old ticket reads as its stage, not as its stored word',
+  L.I18N.status('QC Investigation') === 'Investigation' &&
+  L.I18N.status('Close') === 'Delivered' &&
+  L.I18N.status('Hold') === 'On Hold',
+  [L.I18N.status('QC Investigation'), L.I18N.status('Close'), L.I18N.status('Hold')]);
+ok('...while Other still reads as itself, since it is not a stage',
+  L.I18N.status('Other') === 'Other');
+ok('...and the map invents no status the app can neither store nor fold',
+  Object.keys(L.I18N.STATUS_KEYS).every(v => statusValues.includes(v) || RETIRED_WORDS.includes(v)),
+  Object.keys(L.I18N.STATUS_KEYS).filter(v => !statusValues.includes(v) && !RETIRED_WORDS.includes(v)));
 ok('a status with no mapping reads as the stored value, never as blank',
   L.I18N.status('Something New') === 'Something New' && L.I18N.status('') === '');
 

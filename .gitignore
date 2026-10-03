@@ -30,5 +30,16 @@ tools/.cache/polish-preview.html
 # none, because it looks like the app.
 tools/.cache/theme-shots/
 
+# Throwaway driver scripts and their scratch output — a probe written to answer one
+# question about one release, and the .txt files a shell command feeds it. Same
+# reasoning as the shots above, one level up: they bake in a localhost URL and a
+# hand-written fixture, so they are not a durable test and must not be read as one.
+# The suites that DO belong to the repo are tools/smoke-*.mjs, which smoke-all.mjs
+# globs. The *.json colour cache beside these stays tracked — tools/gen-tokens.mjs
+# reads it.
+tools/.cache/*.mjs
+tools/.cache/*.txt
+tools/.cache/*.log
+
 # Build artifacts
 dist/

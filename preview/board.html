@@ -409,10 +409,10 @@
   <section class="pv-block" id="board">
     <span class="pv-kicker">The board</span>
     <h2 class="pv-block-title">Every IR has a status. The status says which section it is in. So the columns are the sections.</h2>
-    <p class="pv-block-note">That is the whole mechanism. The app has fourteen statuses and ten of
+    <p class="pv-block-note">That is the whole mechanism. The app has ten workflow stages and six of
     them name one of your six sections, so those are the middle six columns. The other four —
-    Open, Remote Support, Hold and the finished ones — get columns at the two ends so that nothing
-    falls off the board.</p>
+    Open and Remote Support, On Hold, and the finished one — get columns at the two ends so that
+    nothing falls off the board.</p>
     <div class="pv-demo">
       <div class="pv-demo-cap"><b>All 412 IRs</b><span>every status the app has lands in exactly one column</span></div>
       <div class="pv-demo-pad">
@@ -454,7 +454,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">Paused</span><span class="pv-kb-col-count">6</span></div>
-                <span class="pv-kb-col-sub">Hold</span>
+                <span class="pv-kb-col-sub">On Hold</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card is-late">
                   <div class="pv-kb-card-top">
@@ -497,7 +497,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <span class="pv-kb-col-sub">Inspection</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -513,7 +513,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
-                <span class="pv-kb-col-sub">QC Investigation</span>
+                <span class="pv-kb-col-sub">Investigation</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card is-late">
                   <div class="pv-kb-card-top">
@@ -556,7 +556,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
-                <span class="pv-kb-col-sub">QC · Flight Test</span>
+                <span class="pv-kb-col-sub">Quality Test</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -572,7 +572,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">G · PDI Report/Dispatch Record</span><span class="pv-kb-col-count">3</span></div>
-                <span class="pv-kb-col-sub">PDI · Approval</span>
+                <span class="pv-kb-col-sub">PDI/Dispatch</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -588,7 +588,7 @@
               </div>
               <div class="pv-kb-col pv-kb-col-quiet">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">Finished</span><span class="pv-kb-col-count">369</span></div>
-                <span class="pv-kb-col-sub">Delivered · Close · Other</span>
+                <span class="pv-kb-col-sub">Delivered · Other</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -607,7 +607,7 @@
 
       <div class="pv-caveat">
         <b>Two things the board cannot say, and both are the app's doing rather than the board's.</b>
-        A <b>Paused</b> IR keeps its status as Hold, so the app no longer knows which section it was
+        A <b>Paused</b> IR keeps its status as On Hold, so the app no longer knows which section it was
         paused in — which is why Paused is a column of its own rather than the card sitting where it
         stopped. And <b>Finished</b> is deliberately one wide column: 369 IRs that need no action do
         not deserve eight columns of screen, and the count is the useful part. Both are columns
@@ -622,12 +622,12 @@
     which is sitting in the Investigation column with 2 of 6 sections saved.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Triage</b><span>what the app does today</span></div>
+      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Allot CAPS</b><span>what the app does today</span></div>
       <div class="pv-demo-pad">
             <div class="pv-kb-board" role="region" aria-label="Rule 1: the card does not move" tabindex="0">
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <span class="pv-kb-col-sub">Inspection</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -643,7 +643,7 @@
               </div>
               <div class="pv-kb-col pv-kb-col-here">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">7</span></div>
-                <span class="pv-kb-col-sub">QC Investigation</span>
+                <span class="pv-kb-col-sub">Investigation</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card is-late">
                   <div class="pv-kb-card-top">
@@ -687,7 +687,7 @@
             </div></div>
     </div>
     <p class="pv-block-note"><b>Nothing moves.</b> Saving a section is not a stage change, so IR-409
-    stays in D until somebody opens Triage. The cost is that the board is only as current as the
+    stays in D until somebody opens Allot CAPS. The cost is that the board is only as current as the
     last person to triage — and this is the rule the app's own comments argue for.</p>
 
     <div class="pv-demo">
@@ -696,7 +696,7 @@
             <div class="pv-kb-board" role="region" aria-label="Rule 2: the card advances on save" tabindex="0">
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
-                <span class="pv-kb-col-sub">QC Investigation</span>
+                <span class="pv-kb-col-sub">Investigation</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card is-late">
                   <div class="pv-kb-card-top">
@@ -739,7 +739,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">F · Quality Test Report</span><span class="pv-kb-col-count">4</span></div>
-                <span class="pv-kb-col-sub">QC · Flight Test</span>
+                <span class="pv-kb-col-sub">Quality Test</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -768,7 +768,7 @@
             <div class="pv-kb-board" role="region" aria-label="Rule 3: advance on save, drag to correct" tabindex="0">
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">C · IQC Visual Inspection</span><span class="pv-kb-col-count">3</span></div>
-                <span class="pv-kb-col-sub">Visual Inspection</span>
+                <span class="pv-kb-col-sub">Inspection</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card">
                   <div class="pv-kb-card-top">
@@ -784,7 +784,7 @@
               </div>
               <div class="pv-kb-col">
                 <div class="pv-kb-col-head"><span class="pv-kb-col-title">D · Investigation</span><span class="pv-kb-col-count">6</span></div>
-                <span class="pv-kb-col-sub">QC Investigation</span>
+                <span class="pv-kb-col-sub">Investigation</span>
                 <div class="pv-kb-col-body">
                 <div class="pv-kb-card is-late">
                   <div class="pv-kb-card-top">
@@ -882,7 +882,7 @@
         category, the raised date, and <b>ir.done[]</b>. Adopting a board is a rendering pass, not a
         data change.</p></div>
       <div class="pv-lic-row"><b>A ten-line map is the only new code</b><span class="yes">Small</span>
-        <p>The app folds its fourteen statuses into four buckets today. Pointing them at your six
+        <p>The app folds its ten workflow stages into four buckets today. Pointing them at your six
         sections instead is a pure function with no backend, no new field and no write — and which
         status goes in which column is written out under each column heading above, where you can
         check it against the ticket.</p></div>

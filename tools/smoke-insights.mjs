@@ -33,7 +33,7 @@ const { T, byId } = loadApp(`
   insightsFacets, insightsSummary, INSIGHTS_SKELETON, renderInsights,
   categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter,
   IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS, UNCATEGORISED, CATEGORY_ALL,
-  INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel,
+  INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel, statusCategory,
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
   get insightsFilters() { return insightsFilters; }, set insightsFilters(v) { insightsFilters = v; },
   get activeCategory() { return activeCategory; },
@@ -175,9 +175,19 @@ r.ok('a year filter excludes the undated row', T.insightsSummary(FIXTURE, F({ fy
 r.ok('...and the unfiltered view still reports it', s0.undated === 1);
 
 r.head('the other four filters');
-r.ok('status filters by the four buckets',
-  T.insightsSummary(FIXTURE, F({ status: 'resolved' })).matched === 1,
+// Two, not one — and the second one is the assertion that matters. IRb is
+// Delivered. IRe still holds the retired word "Close", which STATUS_LEGACY folds
+// onto Delivered, so a ticket finished under the old vocabulary counts as resolved
+// under the new one instead of silently dropping out of the totals. The row did not
+// move; the word it was written with did.
+r.ok('status filters by the four buckets, and a retired Close folds into resolved',
+  T.insightsSummary(FIXTURE, F({ status: 'resolved' })).matched === 2,
   T.insightsSummary(FIXTURE, F({ status: 'resolved' })).matched);
+r.ok('...so the retired word and the stage it means land in the same bucket',
+  T.statusCategory('Close') === T.statusCategory('Delivered') &&
+  T.statusCategory('Hold') === T.statusCategory('On Hold') &&
+  T.statusCategory('Other') !== T.statusCategory('Delivered'),
+  ['Close', 'Delivered', 'Hold', 'On Hold', 'Other'].map(w => [w, T.statusCategory(w)]));
 r.ok('...and the buckets are the list strip\'s own words',
   T.SEGMENT_LABELS.map(([k]) => k).join(',') === 'all,open,paused,resolved,closed',
   T.SEGMENT_LABELS);

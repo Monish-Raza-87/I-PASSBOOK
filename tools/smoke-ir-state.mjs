@@ -14,6 +14,7 @@ import { loadApp, makeReporter } from './harness.mjs';
 const T = loadApp(`
   setAllIRs, applyIRStateToAllIRs, appState, ownedStatus, markSectionDone,
   statusCategory, IR_STATUS_VALUES, IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS,
+  canonicalStage, STATUS_LEGACY, boardColumnOf,
   get allIRs() { return allIRs; },
   get irState() { return irState; }, set irState(v) { irState = v; },
   get currentIR() { return currentIR; }, set currentIR(v) { currentIR = v; },
@@ -23,10 +24,29 @@ const T = loadApp(`
 const { ok, head, finish } = makeReporter();
 
 head('constants');
-ok('14 status values, unchanged', T.IR_STATUS_VALUES.length === 14, T.IR_STATUS_VALUES);
-ok("statuses are the Form's exact strings",
-  T.IR_STATUS_VALUES.includes('QC Investigation') && T.IR_STATUS_VALUES.includes('Remote Support'),
-  T.IR_STATUS_VALUES);
+ok('ten status values, the desk\'s own', T.IR_STATUS_VALUES.length === 10, T.IR_STATUS_VALUES);
+ok('...and they are the ten the vocabulary change settled on',
+  T.IR_STATUS_VALUES.join('|') === 'Open|Inward|Inspection|Investigation|Production|' +
+                                  'Quality Test|PDI/Dispatch|Delivered|On Hold|Remote Support',
+  T.IR_STATUS_VALUES.join('|'));
+// The old words must be FOLDABLE, not merely absent: this is the table every
+// reader goes through, and a word missing from it would leave an old ticket
+// sitting in the open bucket with a clock running on finished work.
+ok('the retired Sheet vocabulary folds into a stage, or onto nothing',
+  Object.keys(T.STATUS_LEGACY).join('|') ===
+    'hold|visual inspection|qc investigation|qc|flight test|pdi|approval|close' &&
+  Object.values(T.STATUS_LEGACY).every(v => T.IR_STATUS_VALUES.includes(v)),
+  T.STATUS_LEGACY);
+ok('...and Other is deliberately NOT in it, since it is not one of the ten',
+  !Object.values(T.STATUS_LEGACY).includes('Other') && !T.IR_STATUS_VALUES.includes('Other'));
+ok('every retired word folds to a stage, so none can point into nothing',
+  ['Hold','Visual Inspection','QC Investigation','QC','Flight Test','PDI','Approval','Close']
+    .every(w => T.IR_STATUS_VALUES.includes(T.canonicalStage(w))));
+ok('...and every one of those still lands in a board column',
+  ['Hold','Visual Inspection','QC Investigation','QC','Flight Test','PDI','Approval','Close']
+    .every(w => T.boardColumnOf(w) !== 'start' || T.canonicalStage(w) === 'Open'),
+  ['Hold','Visual Inspection','QC Investigation','QC','Flight Test','PDI','Approval','Close']
+    .map(w => [w, T.boardColumnOf(w)]));
 ok('the four categories, in the order the desk reads them',
   T.IR_CATEGORIES.join('|') === 'CRASH|GENERAL MAINTENANCE|REMOTE SUPPORT|REPAIR', T.IR_CATEGORIES);
 ok('nine REPAIR sub-categories, OTHERS last',
@@ -37,11 +57,14 @@ ok('...and the escape hatch is spelled the same in both places',
   T.REPAIR_OTHERS === 'OTHERS' && T.REPAIR_SUBCATEGORIES.includes(T.REPAIR_OTHERS), T.REPAIR_OTHERS);
 
 head('merge precedence (app > Sheet)');
-// Three tickets as fetchIRsFromSheet hands them over: status from Col D.
+// Three tickets as mapSheetRows hands them over since Release B: the Sheet's own
+// word rides on `initialStatus` (the intake record, kept and shown as what the
+// client reported) and `status` starts EMPTY, because the Sheet no longer writes
+// the workflow status at all.
 T.setAllIRs([
-  { irNumber: 'IR409', status: 'Inward',            droneId: 'S25G-1', dateRaised: '1 Aug' },
-  { irNumber: 'IR410', status: 'Visual Inspection', droneId: 'S75-2',  dateRaised: '2 Aug' },
-  { irNumber: 'IR411', status: 'Open',              droneId: 'F-3',    dateRaised: '3 Aug' },
+  { irNumber: 'IR409', status: '', initialStatus: 'Inward',            droneId: 'S25G-1', dateRaised: '1 Aug' },
+  { irNumber: 'IR410', status: '', initialStatus: 'Visual Inspection', droneId: 'S75-2',  dateRaised: '2 Aug' },
+  { irNumber: 'IR411', status: '', initialStatus: 'Open',              droneId: 'F-3',    dateRaised: '3 Aug' },
 ]);
 T.irState = {
   // Triaged: the app owns the status.
@@ -49,7 +72,10 @@ T.irState = {
            assignee: 'ravi@indrones.com', assigneeName: 'Ravi Singh', priority: 'Urgent',
            category: 'REPAIR', subCategory: 'GPS', subCategoryNote: '',
            done: ['sec-a', 'sec-b'], updatedBy: 'a@indrones.com' },
-  // First-sight seed: the app has seen this ticket but nobody has edited it.
+  // A seed written BEFORE Release B: the app has seen this ticket, but in the era
+  // when seeding deliberately claimed nothing, so the row holds an empty status.
+  // Every ticket opened before the vocabulary change still looks like this, which
+  // is exactly why the merge has to keep falling back for it.
   IR410: { status: '', seededAt: 1, seededFrom: 'sheet', seededBy: 'a@indrones.com' },
   // Section B saved (a real edit) but the status was never set by the app.
   IR411: { done: ['sec-b'], updatedBy: 'a@indrones.com' },
@@ -57,7 +83,7 @@ T.irState = {
 T.applyIRStateToAllIRs();
 const by = n => T.allIRs.find(i => i.irNumber === n);
 
-ok('app status beats Sheet Col D', by('IR409').status === 'Production', by('IR409').status);
+ok('app status beats the Sheet', by('IR409').status === 'Production', by('IR409').status);
 ok('assignee lands on the record', by('IR409').assigneeName === 'Ravi Singh', by('IR409').assignee);
 ok('priority lands on the record', by('IR409').priority === 'Urgent', by('IR409').priority);
 ok('category lands on the record', by('IR409').category === 'REPAIR', by('IR409').category);
@@ -67,10 +93,21 @@ ok('sub-category lands beside it', by('IR409').subCategory === 'GPS', by('IR409'
 // the only place that could carry it back onto a record the UI then renders.
 ok('...and the retired `type` is NOT read off the store', by('IR409').type === undefined, by('IR409').type);
 ok('done[] lands on the record', by('IR409').done.length === 1, by('IR409').done);
-ok('a bare seed does NOT claim the status', by('IR410').status === 'Visual Inspection', by('IR410').status);
+// The fallback is a STARTING value, folded into the ten — never the raw Sheet word.
+ok('a ticket with no app status takes the Sheet\'s stage, FOLDED',
+  by('IR410').status === 'Inspection', by('IR410').status);
+ok('...and no record ever leaves here holding a retired word',
+  T.allIRs.every(i => T.IR_STATUS_VALUES.includes(i.status)),
+  T.allIRs.map(i => i.status));
+ok('...while the Sheet\'s own word is still kept as the intake record',
+  by('IR410').initialStatus === 'Visual Inspection', by('IR410').initialStatus);
+ok('a ticket nobody has opened holds no app status at all', T.ownedStatus('IR410') === '');
 ok('a bare seed exposes no assignee', !by('IR410').assignee, by('IR410').assignee);
 ok('a bare seed exposes no category', !by('IR410').category, by('IR410').category);
-ok('saving a section does NOT claim the status', by('IR411').status === 'Open', by('IR411').status);
+// Not a claim that the Sheet still owns it: the ticket simply holds no app status,
+// and its starting stage is Open either way.
+ok('a section save alone leaves the stage where the Sheet put it',
+  by('IR411').status === 'Open', by('IR411').status);
 ok('but it does record the section as done', by('IR411').done.join(',') === 'sec-b', by('IR411').done);
 ok('appState() rejects a bare seed', T.appState('IR410') === null, T.appState('IR410'));
 ok('appState() accepts a real edit', !!T.appState('IR409'));
@@ -82,11 +119,23 @@ head('the badge bug, and that it is fixed');
 // even though everything else about the change was saved correctly.
 ok('IR409 badge shows the app value, not Inward', by('IR409').status === 'Production', by('IR409').status);
 ok('and it colours by the new category', T.statusCategory('Production') === 'open', T.statusCategory('Production'));
-ok('Hold still maps to paused', T.statusCategory('Hold') === 'paused');
-ok('Delivered still maps to resolved', T.statusCategory('Delivered') === 'resolved');
+ok('On Hold maps to paused', T.statusCategory('On Hold') === 'paused');
+ok('Delivered maps to resolved', T.statusCategory('Delivered') === 'resolved');
+// The retired words must reach the SAME bucket, or every old ticket quietly
+// changes colour — and a finished one starts a red clock — the day the list moved.
+ok('...and the words they replaced reach the same buckets',
+  T.statusCategory('Hold') === 'paused' &&
+  T.statusCategory('Close') === 'resolved' &&
+  T.statusCategory('QC Investigation') === 'open' &&
+  T.statusCategory('Flight Test') === 'open',
+  ['Hold','Close','QC Investigation','Flight Test'].map(w => [w, T.statusCategory(w)]));
+ok('...while Other is finished without being Resolved, exactly as before',
+  T.statusCategory('Other') === 'closed', T.statusCategory('Other'));
 
 head('a Sheet edit cannot overwrite a triaged ticket');
-T.setAllIRs([{ irNumber: 'IR409', status: 'Close', droneId: 'S25G-1', dateRaised: '1 Aug' }]);
+// The Sheet no longer feeds `status` at all — what it can now only affect is
+// `initialStatus`, which is the intake record and never the workflow.
+T.setAllIRs([{ irNumber: 'IR409', status: '', initialStatus: 'Close', droneId: 'S25G-1', dateRaised: '1 Aug' }]);
 ok('re-fetch + re-merge keeps the app value', by('IR409').status === 'Production', by('IR409').status);
 
 head('section completion');

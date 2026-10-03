@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v62';
+const APP_VERSION = 'v63';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -47,6 +47,21 @@ paintVersion();
 const t          = (key, vars) => (window.I18N ? window.I18N.t(key, vars) : key);
 const tStatus    = v => (window.I18N ? window.I18N.status(v) : v);
 const tPriority  = v => (window.I18N ? window.I18N.priority(v) : v);
+
+// The word to PRINT for a stored status, for every renderer that shows one.
+//
+// One helper rather than a spelling at each site, because there WERE two. The
+// ticket header printed `tStatus(ir.status)` and the list card printed `ir.status`
+// raw, so a ticket still holding a retired word read two ways at once: the card
+// said 'QC Investigation' while the header said 'Investigation' — and the store
+// WILL hold retired words for a while, because re-aligning old entries is a job the
+// desk does gradually (see STATUS_LEGACY). tStatus() is what folds them (i18n.js's
+// STATUS_KEYS carries the same fold, keyed for translation), and the `|| 'Open'`
+// covers the empty case, where the store holds nothing for a ticket nobody has
+// opened. Nothing else may print `ir.status` directly.
+function statusLabel(status) {
+  return tStatus(status) || 'Open';
+}
 
 // ─── CONFIG ──────────────────────────────────────────────────────────────────
 // IMPORTANT: Replace these with your actual values before deploying.
@@ -1029,11 +1044,17 @@ function saveSentinel(irNumber, sectionId, fields) {
 // owns everything mutable — status, assignee, priority, category, which sections
 // are done, CSAT. One row per IR, keyed by irNumber.
 //
-// Ownership of an IR's status begins the moment a human changes the STATUS in
-// the app (statusOwned). Until then the Sheet's Col D is still what the list
-// shows, so an edit made in the Sheet on an untriaged IR still works — it
-// only stops mattering once somebody has taken the IR in hand here. Note
-// that assigning or categorising does NOT take over the status.
+// OWNERSHIP OF THE STATUS IS TOTAL. The Sheet is the client's intake record — what
+// the customer wrote, and nothing else. Its Col D is read exactly ONCE per ticket,
+// as that ticket's STARTING stage, the first time the app opens it (seedIRState);
+// after that the app is the only writer of a status, through Allot CAPS or a
+// section's move-on offer. That is what "the bridge between status updating via
+// sheet has to stop" means in code: the Sheet can hand a ticket its first stage,
+// and can never move it again.
+//
+// A ticket nobody here has opened yet has no app row, so the merge falls back to
+// the Sheet's stage for it (applyIRStateToAllIRs). That fallback is a STARTING
+// value, not a feed: it disappears for a ticket the moment it is opened once.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
                               //              assignee, priority, category, subCategory, done[], … }
@@ -1052,23 +1073,34 @@ function appState(irNumber) {
   return s;
 }
 
-// The status this app has actually taken ownership of, or '' while the Sheet is
-// still the authority for the IR. Deliberately separate from appState():
-// saving Section B is not triage, so an IR whose Section B was saved must go
-// on following the Sheet's Col D until somebody changes the status here.
+// The stage the app holds for this ticket, or '' when it holds none — which means
+// the ticket has never been opened here and the merge will give it the Sheet's
+// starting stage instead. Deliberately separate from appState(): saving Section B
+// is a real edit but not triage, and it must not be mistaken for one.
+//
+// It reads `status`, not a `statusOwned` flag. The flag belonged to the era when
+// the app only owned a status a human had chosen here; now that the app owns every
+// ticket it has seen, the flag would be true everywhere and mean nothing. Rows in
+// the store still carry it and are left alone — a stored key is data.
 function ownedStatus(irNumber) {
   const s = irState[irNumber];
-  return (s && s.statusOwned && s.status) ? s.status : '';
+  return (s && s.status) ? s.status : '';
 }
 
-// Record that the app has seen this IR, without claiming ownership of its
-// status yet. Written once per IR, on first open. Records `seededAt` rather
-// than a `statusAt`, because we genuinely do not know when the Sheet's status
-// was set and Stage 4's ageing must not be built on an invented timestamp.
-function seedIRState(irNumber) {
+// Record that the app has seen this IR, and ADOPT its stage. Written once per IR,
+// on first open — and this write IS the handover: the Sheet's Col D is read here
+// for the last time, folded into the ten the desk uses now, and stored as the
+// app's own. `canonicalStage` is what stops a retired word like 'QC Investigation'
+// being carried forward: the ticket is held as 'Investigation' from its first sight.
+//
+// Records `seededAt`, never a `statusAt`: nobody knows when the Sheet's status was
+// set, and Stage 4's ageing must not be built on an invented timestamp. So an
+// adopted stage ages from the raise date and says so, exactly as before.
+function seedIRState(irNumber, sheetStatus) {
   if (irState[irNumber]) return;
   irState[irNumber] = {
-    status: '',
+    status: canonicalStage(sheetStatus),
+    statusOwned: true,
     seededAt: Date.now(),
     seededFrom: 'sheet',
     seededBy: myEmail() || 'unknown',
@@ -1128,7 +1160,13 @@ function setAllIRs(records) {
 function applyIRStateToAllIRs() {
   allIRs.forEach(ir => {
     const owned = ownedStatus(ir.irNumber);
-    if (owned) ir.status = owned;
+    // UNCONDITIONAL, so every record leaves here holding one of the ten. The app's
+    // own stage wins whenever it holds one; with none — a ticket nobody has opened
+    // here — the Sheet's stage is the STARTING value, folded into the ten by
+    // canonicalStage. Without that fallback every legacy ticket would read as Open
+    // and the board would show a finished aircraft as not started, which is a worse
+    // lie than reading a value the desk itself wrote into the Sheet.
+    ir.status = owned || canonicalStage(ir.initialStatus) || 'Open';
     const s = appState(ir.irNumber);
     if (!s) return;
     ir.statusAt     = s.statusAt     || null;
@@ -1218,12 +1256,54 @@ const INWARD_OPTIONS_DEFAULTS = {
   base:     ['Emlid RS2', 'Spectra SP85', 'Spectra SP60', 'DID NOT COME'],
 };
 
-// The 14 workflow statuses. These are written by the customer Google Form into
-// the Sheet's Col D, so they are NEVER renamed here — Frappe's Open/Paused/
-// Resolved/Closed vocabulary is a mapping over them (STATUS_CATEGORIES below).
-// The status dropdown in the triage modal and the Section A form both read this
-// one list.
-const IR_STATUS_VALUES = ['Open','Hold','Close','Inward','Visual Inspection','QC Investigation','Production','QC','Flight Test','PDI','Approval','Delivered','Remote Support','Other'];
+// The TEN workflow stages the app owns: nine name a step of the work, one
+// (On Hold) suspends it, and Delivered ends it. This is now the only list a
+// control OFFERS and the only vocabulary the filters, the board and the analytics
+// speak — the customer Google Form's fourteen-value Col D vocabulary was retired
+// in Release B, and the Sheet no longer writes a status at all.
+const IR_STATUS_VALUES = ['Open','Inward','Inspection','Investigation','Production',
+                          'Quality Test','PDI/Dispatch','Delivered','On Hold','Remote Support'];
+
+// What the Sheet's Col D used to write — and what rows already in the store still
+// hold — with the stage each one means today. This is a READING table and never a
+// writing one: no control offers these words, nothing new is ever stored as one,
+// and it exists so that an old ticket keeps its place. A ticket stored as 'QC
+// Investigation' must still count as Investigation, still land in the Investigation
+// column, and still read as a word on the card instead of vanishing from the totals.
+//
+// 'Other' is deliberately ABSENT. It was the escape hatch out of a closed list and
+// it has no home among the ten; it stays readable on the tickets holding it
+// (canonicalStage returns it unchanged) and nothing new can be set to it.
+const STATUS_LEGACY = {
+  'hold':              'On Hold',
+  'visual inspection': 'Inspection',
+  'qc investigation':  'Investigation',
+  'qc':                'Quality Test',
+  'flight test':       'Quality Test',
+  'pdi':               'PDI/Dispatch',
+  'approval':          'PDI/Dispatch',
+  'close':             'Delivered',
+};
+
+// The stage a stored status means TODAY — the one place the old vocabulary is
+// folded into the new. Every reader of a status goes through it: the merge, the
+// board column, the filter bucket, the dropdown's selected option. A second folding
+// table anywhere would be a second answer waiting to disagree.
+//
+//   ''            → 'Open'. Nothing has set this ticket, and Open is the app's own
+//                   starting stage — not the Sheet's.
+//   one of the ten→ itself.
+//   a retired word→ the stage it means now.
+//   anything else → ITSELF, unchanged. A hand-edited store row must keep saying
+//                   what it says, and boardColumnOf/statusCategory still have to
+//                   place it somewhere rather than inventing a stage it never had.
+function canonicalStage(status) {
+  const s = String(status == null ? '' : status).trim();
+  if (!s) return 'Open';
+  const cur = IR_STATUS_VALUES.find(v => v.toLowerCase() === s.toLowerCase());
+  if (cur) return cur;
+  return STATUS_LEGACY[s.toLowerCase()] || s;
+}
 
 // Triage Category, app-owned (the Form has no such column). This REPLACED an
 // earlier `type` field whose values (Repair/Replacement/Warranty/AMC/Demo/
@@ -5325,7 +5405,8 @@ function mapSheetRows(rows) {
   const idxOf = needle => headers.findIndex(h => h.includes(needle));
   const iIrNo = idxOf('IR Number');
   const iStat = idxOf('Issue Status');
-  const iPrio = idxOf('Priority');
+  // No `iPrio`: the Priority column is still ACCOUNTED FOR (INTAKE_HIDDEN_NEEDLES
+  // consumes it so the audit stays quiet) but its value is deliberately not read.
   const cell = (row, i) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '');
 
   const records = [];
@@ -5364,7 +5445,12 @@ function mapSheetRows(rows) {
       droneId:       cell(row, map.droneId),
       dateRaised:    toDisplayDate(ts),
       dateRaisedISO: toISODate(ts),
-      status:        stat,
+      // NO status off the Sheet. `status` is app-owned and starts empty here, so
+      // the merge gives the ticket the Sheet's stage only as its STARTING value and
+      // the app's own store wins from the first moment it holds one. The Sheet's
+      // word is kept beside it as `initialStatus` — the customer's own report, shown
+      // on the intake view as what was said, never read as the workflow.
+      status:        '',
       summaryLink:   cell(row, map.summaryLink),
       customerName:  name,
       contactPhone:  phone,
@@ -5372,7 +5458,11 @@ function mapSheetRows(rows) {
       issueType:     cell(row, map.issueType),
       issueDesc:     cell(row, map.issueDesc),
       spoc:          cell(row, map.spoc),
-      priority:      cell(row, iPrio),
+      // NO priority off the Sheet either. The column is still consumed (see
+      // INTAKE_HIDDEN_NEEDLES) so the intake audit does not report it as dropped,
+      // but its value is not read: priority is app-owned, and it is set in Allot
+      // CAPS. Leaving the Sheet as a second writer here while the status bridge was
+      // cut would have been the same split-brain one field over.
       initialStatus: stat,
       incidentDate:  toISODate(inc),
       // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
@@ -5672,7 +5762,7 @@ function renderIRList(records) {
       </div>
       <div class="ir-card-side">
         ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(priorityLabel(ir.priority))}</span>` : ''}
-        <span class="${getBadgeClass(ir.status)}">${escHtml(ir.status || 'Open')}</span>
+        <span class="${getBadgeClass(ir.status)}">${escHtml(statusLabel(ir.status))}</span>
         ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
         ${showProg ? progressChip(prog) : ''}
       </div>
@@ -5736,29 +5826,36 @@ function progressSteps(ir, prog) {
 // in; the two at the start and the one at the end hold the statuses that name no
 // section at all. Without them those IRs would be in no column — the one failure a
 // reader could never see, because a card that is simply nowhere looks like a card
-// that does not exist. The union of every `stages` array below is IR_STATUS_VALUES
-// exactly, each value once; `smoke-board.mjs` asserts that against app.js so a
-// status the app can store and the board cannot place is a failing test.
+// that does not exist. The union of every `stages` array below is the TEN of
+// IR_STATUS_VALUES, each value once, plus the retired 'Other' — which is not one of
+// the ten and still has to sit somewhere, because old tickets hold it and a card in
+// no column is invisible. `smoke-board.mjs` asserts both halves: every one of the
+// ten is placed exactly once, and EVERY value the app can be handed — one of the
+// ten or one of the eight retired words or 'Other' — lands in exactly one column.
 //
 // The headings are the app's OWN short names (SECTION_SHORT), so the column a card
 // sits in and the tab it lives on say the same words.
 const BOARD_COLUMNS = [
   { key: 'start', title: t('board.notStarted'),         stages: ['Open', 'Remote Support'] },
-  { key: 'hold',  title: t('board.paused'),             stages: ['Hold'] },
+  { key: 'hold',  title: t('board.paused'),             stages: ['On Hold'] },
   { key: 'B', title: 'B · ' + SECTION_SHORT['sec-b'],   stages: ['Inward'] },
-  { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Visual Inspection'] },
-  { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['QC Investigation'] },
+  { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Inspection'] },
+  { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['Investigation'] },
   { key: 'E', title: 'E · ' + SECTION_SHORT['sec-e'],   stages: ['Production'] },
-  { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['QC', 'Flight Test'] },
-  { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI', 'Approval'] },
-  { key: 'done', title: t('board.finished'),            stages: ['Delivered', 'Close', 'Other'], quiet: true },
+  { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['Quality Test'] },
+  { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI/Dispatch'] },
+  { key: 'done', title: t('board.finished'),            stages: ['Delivered', 'Other'], quiet: true },
 ];
 
 // Which column a status belongs in. Pure: same input, same answer, no DOM, no
-// clock. An unrecognised value lands in 'start' rather than disappearing — the
-// board may never lose an IR, not even one hand-edited in the store.
+// clock. Canonicalised FIRST, so the eight retired words place a card by the stage
+// they mean now — a ticket the Sheet called 'QC Investigation' belongs in D, not in
+// a column of its own that no longer exists.
+//
+// An unrecognised value lands in 'start' rather than disappearing — the board may
+// never lose an IR, not even one hand-edited in the store.
 function boardColumnOf(status) {
-  const s = String(status || 'Open').trim().toLowerCase();
+  const s = canonicalStage(status).toLowerCase();
   const col = BOARD_COLUMNS.find(c => c.stages.some(v => v.toLowerCase() === s));
   return col ? col.key : 'start';
 }
@@ -5841,7 +5938,9 @@ function paintBoardMoveOffer(irNumber) {
 // The evidence is on screen anyway: the status pill changes as the patch lands, and
 // the movement is on the timeline.
 async function moveOnByHand(irNumber, stage) {
-  const cur = String((irState[irNumber] || {}).status || 'Open');
+  // The ticket's stage, not its stored word: a ticket held as 'QC Investigation'
+  // IS 'Investigation', and moving it on to Investigation is not a movement.
+  const cur = canonicalStage((irState[irNumber] || {}).status);
   if (!stage || cur === stage) return;      // never re-stamp a clock for no movement
   await patchIRState(irNumber, {
     status: stage,
@@ -5993,19 +6092,25 @@ function updateListCounts(shown) {
 // ─── STATUS CATEGORIES ───────────────────────────────────────────────────────
 // Frappe groups workflow statuses into three categories — Open (clock running),
 // Paused (clock suspended), Resolved (clock stopped) — and colours the pill by
-// category rather than by status. The 14 values in a_overallStatus are written
-// by the customer Google Form and read by getAllIRStatuses(), so they are
-// mapped here, never renamed.
+// category rather than by status. There is a fourth, Closed, for the one value that
+// is finished without being Resolved.
 //
-// The old getBadgeClass() painted everything that was not Open/Hold as grey
-// "closed", so Inward, Production, PDI and Flight Test all *looked* finished
-// while they were still in the pipeline. This map fixes that.
+// This table holds the TEN, plus 'Other'. It does NOT need the eight retired words:
+// statusCategory() canonicalises first, so 'QC Investigation' reaches the open bucket
+// through 'Investigation' and 'Close' reaches resolved through 'Delivered'. A second
+// copy of the fold table here would be a second answer waiting to disagree.
+//
+// 'Other' is the one exception and it is here on purpose. It is not one of the ten
+// and canonicalStage leaves it as itself, so without an entry an old 'Other' ticket
+// would fall to the `open` default and sit in the pipeline forever with a red clock
+// on it — the exact "finished but looks open" bug the old getBadgeClass() had, one
+// value over.
 const STATUS_CATEGORIES = {
-  open:     ['Open', 'Inward', 'Visual Inspection', 'QC Investigation', 'Production',
-             'QC', 'Flight Test', 'PDI', 'Approval', 'Remote Support'],
-  paused:   ['Hold'],
+  open:     ['Open', 'Inward', 'Inspection', 'Investigation', 'Production',
+             'Quality Test', 'PDI/Dispatch', 'Remote Support'],
+  paused:   ['On Hold'],
   resolved: ['Delivered'],
-  closed:   ['Close', 'Other'],
+  closed:   ['Other'],
 };
 
 const CATEGORY_BADGE = {
@@ -6016,7 +6121,7 @@ const CATEGORY_BADGE = {
 };
 
 function statusCategory(status) {
-  const s = String(status || 'Open').trim().toLowerCase();
+  const s = canonicalStage(status).toLowerCase();
   for (const cat of Object.keys(STATUS_CATEGORIES)) {
     if (STATUS_CATEGORIES[cat].some(v => v.toLowerCase() === s)) return cat;
   }
@@ -6301,6 +6406,10 @@ async function openPassbook(irNumber) {
     // This IR may not be in allIRs yet (deep link into a list that has not
     // loaded), so apply its app-owned state directly instead of relying on the
     // merge in setAllIRs.
+    // First sight of this IR: adopt its stage from the Sheet. This runs BEFORE the
+    // reads below, because adopting is precisely what makes `owned` non-empty — and
+    // it is the last moment the Sheet's word for this ticket is ever consulted.
+    seedIRState(irNumber, currentIR.status || currentIR.initialStatus);
     const st = appState(irNumber);
     const owned = ownedStatus(irNumber);
     if (owned) currentIR.status = owned;
@@ -6314,9 +6423,6 @@ async function openPassbook(irNumber) {
       currentIR.done = Array.isArray(st.done) ? st.done : [];
     }
     renderBannerMeta();
-    // First sight of this IR: record that the app has seen it. Deliberately
-    // does NOT claim ownership of the status — see seedIRState.
-    seedIRState(irNumber);
   }
 
   currentView = 'detail';
@@ -6780,7 +6886,7 @@ function renderBannerMeta() {
   const age  = irAge(ir);
   const late = irOverdue(ir);
   bannerPills.innerHTML =
-    `<span class="${getBadgeClass(ir.status)}">${escHtml(tStatus(ir.status) || 'Open')}</span>` +
+    `<span class="${getBadgeClass(ir.status)}">${escHtml(statusLabel(ir.status))}</span>` +
     (ir.priority ? `<span class="prio prio-${String(ir.priority).toLowerCase()}">${escHtml(priorityLabel(ir.priority))}</span>` : '') +
     (ir.category ? `<span class="meta-pill">${escHtml(categoryLabel(ir.category))}</span>` : '') +
     (ir.subCategory ? `<span class="meta-pill">${escHtml(subCategoryLabel(ir.subCategory))}</span>` : '') +
@@ -6830,7 +6936,11 @@ function openTriageModal() {
       <p class="inward-options-hint">Recorded here in the passbook, not in the client's Google Sheet — the Sheet keeps the customer's original report untouched. Assigning someone sends them a notification.</p>
       <div class="inward-options-body triage-body">
         <label class="triage-row"><span>Status</span>
-          <select class="form-input" id="triage-status">${IR_STATUS_VALUES.map(v => opt(v, ir.status || 'Open')).join('')}</select>
+          <!-- The TEN are what this offers and nothing else. An IR holding a
+               retired word opens on the stage it now means (canonicalStage), so CR
+               sees one honest answer rather than a blank box, and saving writes the
+               stage — which is how an old IR is re-aligned, in the app. -->
+          <select class="form-input" id="triage-status">${IR_STATUS_VALUES.map(v => opt(v, canonicalStage(ir.status))).join('')}</select>
         </label>
         <label class="triage-row"><span>Assigned to</span>
           <!-- A type-to-search picker rather than a <select>: the team directory is
@@ -7133,12 +7243,30 @@ async function applyTriage() {
   patch.type = undefined;
   // Only a real status CHANGE moves the clock. Re-saving the same status must
   // not reset time-in-status, or every triage edit would fake a fresh IR.
-  if (status && status !== currentIR.status) {
+  //
+  // The comparison is against the ticket's stage, NOT against its stored word. A
+  // ticket the Sheet called 'QC Investigation' shows 'Investigation' in the box,
+  // and comparing the raw word would read that as a change on every single save —
+  // stamping a fresh `statusAt` and wiping the real time-in-status of exactly the
+  // old tickets the fold-in is meant to carry forward.
+  if (status && status !== canonicalStage(currentIR.status)) {
     patch.statusAt = Date.now();
     patch.statusBy = myEmail() || 'unknown';
   }
   closeTriageModal();
   await patchIRState(irNumber, patch);
+  // The category decides which sections apply, and Allot CAPS is where it is set —
+  // so the tabs have to be re-decided here, not only when a ticket is opened.
+  //
+  // The FULL gate, not the applicability pass alone. A category can be changed BOTH
+  // ways: re-triaging a REMOTE SUPPORT ticket to REPAIR takes the sections back ON,
+  // and the applicability pass only ever writes a Close button as it switches a
+  // section off — it has no way to put one back, because the access grant owns the
+  // enabled state. Run alone, it would leave five sections visible and working but
+  // with their Close buttons dead. The access pass first, the applicability pass
+  // second: that order is what makes the pair correct, and it is why every caller
+  // of applyCategoryApplicability() is one of these two.
+  applySectionAccessGating();
   showToast('Allot CAPS saved');
   loadActivityLog(irNumber);
 
@@ -7442,12 +7570,30 @@ if (irOverviewPanel) {
 }
 
 // ─── TAB NAVIGATION ──────────────────────────────────────────────────────────
+// The ONE place a section is shown, so "which pane is open" has a single answer.
+// Both the tab press and the category-applicability rule (below) come through here;
+// two copies of these four lines is how a pane and its tab end up disagreeing.
+function showSection(sectionId) {
+  const tab = document.querySelector(`.tab[data-section="${sectionId}"]`);
+  if (!tab) return;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
+  tab.classList.add('active');
+  const pane = document.getElementById(sectionId);
+  if (pane) pane.classList.add('active');
+}
+
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(tab.dataset.section).classList.add('active');
+    // A tab this ticket's category switches off is not a tab. It stays in the row
+    // so the reason can be read, and pressing it SAYS so: a control that greys out
+    // and then does nothing at all is what sends someone to an admin about access
+    // they already have.
+    if (tab.classList.contains('tab-inapplicable')) {
+      showToast('Not part of a Remote Support job');
+      return;
+    }
+    showSection(tab.dataset.section);
   });
 });
 
@@ -7754,6 +7900,69 @@ function applySectionAccessGating() {
   // The Overview is not in SECTION_IDS — it has no tab to hide and no per-section
   // grant — so it is gated separately, on the Triage flag alone.
   applyOverviewGating();
+  // Access is settled; now switch off the sections this ticket's CATEGORY makes
+  // meaningless. A separate axis from access, and a separate pass, so neither can
+  // be mistaken for the other: access says who may write, this says what applies.
+  applyCategoryApplicability();
+}
+
+// ─── CATEGORY APPLICABILITY: "this step is not part of this job" ──────────────
+// Before this, a section was only ever ACCESS-granted or not, and `done[]` means
+// FINISHED rather than applicable — so nothing in the app could say that a step is
+// not part of the job at all. A REMOTE SUPPORT ticket is exactly that: nothing is
+// unloaded, nothing is inspected, nothing is reworked or dispatched. Its five work
+// sections go OFF and Investigation stays open, because a remote job is diagnosed
+// and then closed.
+//
+// OFF, NOT HIDDEN. A tab that vanishes reads as a permission problem and sends
+// someone to an admin to ask for access they already have. A greyed tab that
+// explains itself — and that answers a press with the reason — says what is true.
+//
+// The pane is switched off along with its tab, because the tab is not the only way
+// into a section: a deep link, a back-navigation and a restored view all land on the
+// pane directly. And the Close button is disabled with it, because Close is the only
+// WRITE control a section has — the same reason it is what the edit grant gates.
+const REMOTE_SUPPORT_KEEPS = ['sec-d'];   // Investigation — the one a remote job needs
+
+function categoryInapplicableSections(ir) {
+  if (!ir || ir.category !== 'REMOTE SUPPORT') return [];
+  return SECTION_IDS.filter(id => !REMOTE_SUPPORT_KEEPS.includes(id));
+}
+
+// MUST run immediately AFTER the access pass, never on its own.
+//
+// It is one-directional by design: it turns sections off, and the only thing it ever
+// writes to Close is "disabled, with the reason". Putting a section back is the
+// ACCESS pass's job — it owns whether the caller may write there at all — so a pass
+// that ran alone could switch a section back on and leave its Close button dead.
+// Both callers (applySectionAccessGating, and Allot CAPS through it) get that order
+// for free; nothing else may call this directly.
+function applyCategoryApplicability() {
+  const off = new Set(categoryInapplicableSections(currentIR));
+  SECTION_IDS.forEach(secId => {
+    const tab  = document.querySelector(`.tab[data-section="${secId}"]`);
+    const pane = document.getElementById(secId);
+    const isOff = off.has(secId);
+    if (tab) {
+      tab.classList.toggle('tab-inapplicable', isOff);
+      tab.setAttribute('aria-disabled', isOff ? 'true' : 'false');
+      tab.title = isOff ? 'Not part of a Remote Support job' : '';
+    }
+    if (pane) {
+      pane.classList.toggle('is-inapplicable', isOff);
+      const closeBtn = document.getElementById('close-' + secId);
+      if (closeBtn && isOff) {
+        closeBtn.disabled = true;
+        closeBtn.style.opacity = '0.5';
+        closeBtn.style.cursor = 'not-allowed';
+        closeBtn.title = 'Not part of a Remote Support job';
+      }
+    }
+  });
+  // Never leave the user standing in a section that has just gone off — the category
+  // can change under an open tab, because Allot CAPS writes it.
+  const active = document.querySelector('.tab.active[data-section]');
+  if (active && off.has(active.dataset.section)) showSection(REMOTE_SUPPORT_KEEPS[0]);
 }
 
 function buildField(field, irNumber, sectionId) {

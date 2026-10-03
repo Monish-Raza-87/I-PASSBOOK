@@ -76,7 +76,15 @@ ok('every INTAKE_FIELD is read or explicitly derived',
 head('the record the rest of the app reads is unchanged');
 const ir = one();
 ok('irNumber', ir.irNumber === 'IR409', ir.irNumber);
-ok('status from Col D', ir.status === 'In Production', ir.status);
+// Col D is READ, but not as the workflow status. Since Release B the app owns
+// `status`, so the map leaves it empty and parks the Sheet's own word on
+// `initialStatus` — the customer's report, shown as what was said and never read
+// as the workflow. Both halves are asserted together, because the failure this
+// guards against is exactly a value quietly surviving in the old slot.
+ok('status is NOT taken from Col D any more — the app owns it',
+  ir.status === '', JSON.stringify(ir.status));
+ok('...while the Sheet\'s own word still rides on initialStatus, unedited',
+  ir.initialStatus === 'In Production', ir.initialStatus);
 ok('dateRaised is still display-formatted', ir.dateRaised === '28 September 2025', ir.dateRaised);
 ok('dateRaisedISO is still ISO', ir.dateRaisedISO === '2025-09-28', ir.dateRaisedISO);
 ok('incidentDate is still ISO', ir.incidentDate === '2025-09-25', ir.incidentDate);
@@ -87,7 +95,11 @@ ok('issueDesc', ir.issueDesc === 'Drone arm cracked during landing', ir.issueDes
 ok('spoc', ir.spoc === 'Monish Raza', ir.spoc);
 ok('summaryLink', ir.summaryLink.endsWith('SUMMARY'), ir.summaryLink);
 ok('incidentLocationWeather', ir.incidentLocationWeather === 'Pune, 32C clear', ir.incidentLocationWeather);
-ok('no Priority column → empty, not undefined', ir.priority === '', ir.priority);
+// Priority is app-owned now, set in Allot CAPS. The map does not read the column
+// at all, so `priority` is simply never on the record — with or without a Sheet
+// column — and the merge only ever fills it from the store.
+ok('no Priority is read off the Sheet, so the field is absent, not blank',
+  ir.priority === undefined && !('priority' in ir), JSON.stringify(ir.priority));
 
 head("Col L splits into name + phone");
 ok('customerName is the name only', ir.customerName === 'SREENIVAS PAI', ir.customerName);
@@ -127,7 +139,8 @@ const REV_H = HEADERS.slice().reverse();
 const REV_R = ROW.slice().reverse();
 const rev = one(REV_H, REV_R);
 ok('irNumber survives a reversed header row', rev.irNumber === 'IR409', rev.irNumber);
-ok('status survives', rev.status === 'In Production', rev.status);
+ok('status stays empty and initialStatus survives',
+  rev.status === '' && rev.initialStatus === 'In Production', [rev.status, rev.initialStatus]);
 ok('droneId survives', rev.droneId === 'S25P014', rev.droneId);
 ok('name/phone split survives', rev.customerName === 'SREENIVAS PAI' && rev.contactPhone === '7828148298',
   [rev.customerName, rev.contactPhone]);
@@ -138,7 +151,14 @@ head('a Priority column, when the Form grows one');
 const PH = HEADERS.concat(['Priority']);
 const PR = ROW.concat(['Urgent']);
 const pri = one(PH, PR);
-ok('priority flows straight through', pri.priority === 'Urgent', pri.priority);
+// The bridge is CUT, not merely unused: a column appearing in the Form must not
+// start feeding the app again. This is the assertion that fails if someone
+// re-adds the read on the reasonable-sounding grounds of "but the data is there".
+ok('the Sheet\'s priority is NOT read — Allot CAPS is the only writer',
+  pri.priority === undefined && !('priority' in pri), JSON.stringify(pri.priority));
+ok('...and the column is still accounted for, so the audit does not cry "dropped"',
+  (() => { one(PH, PR); return !T.lastSheetAudit.unmapped.includes('Priority'); })(),
+  T.lastSheetAudit.unmapped);
 ok('and is not duplicated into extra', !pri.extra.some(x => x.label === 'Priority'), pri.extra);
 ok('and the audit is unchanged by it',
   T.lastSheetAudit.unmapped.join(',') === 'Your Role,Score,Internal Notes', T.lastSheetAudit.unmapped);

@@ -107,10 +107,10 @@ const missingIds = REQUIRED_IDS.filter(id => !new RegExp('id="' + id + '"').test
 // the real REPAIR sub-categories — so the owner is judging the design against
 // rows that look like his rows, not against "Lorem Ipsum IR".
 const ROWS = [
-  { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',             sub: '',        date: '12-Sep-2026', age: '19d', who: 'A. Sharma', prio: 'Urgent', status: 'QC Investigation', badge: 'badge-open',     late: false },
-  { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR',            sub: 'BATTERY', date: '08-Sep-2026', age: '23d', who: 'R. Kumar',  prio: 'High',   status: 'Hold',             badge: 'badge-pending',  late: true  },
+  { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',             sub: '',        date: '12-Sep-2026', age: '19d', who: 'A. Sharma', prio: 'Urgent', status: 'Investigation', badge: 'badge-open',     late: false },
+  { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR',            sub: 'BATTERY', date: '08-Sep-2026', age: '23d', who: 'R. Kumar',  prio: 'High',   status: 'On Hold',          badge: 'badge-pending',  late: true  },
   { no: 'IR-407', sn: 'VTR-0007',  cat: 'GENERAL MAINTENANCE', sub: '',      date: '02-Sep-2026', age: '29d', who: 'P. Nair',   prio: 'Medium', status: 'Delivered',        badge: 'badge-resolved', late: false },
-  { no: 'IR-401', sn: 'D10G-0221', cat: 'REMOTE SUPPORT',    sub: '',        date: '21-Aug-2026', age: '41d', who: '',          prio: 'Low',    status: 'Close',            badge: 'badge-closed',   late: false },
+  { no: 'IR-401', sn: 'D10G-0221', cat: 'REMOTE SUPPORT',    sub: '',        date: '21-Aug-2026', age: '41d', who: '',          prio: 'Low',    status: 'Delivered',        badge: 'badge-closed',   late: false },
 ];
 
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -230,12 +230,12 @@ const screenTicket = () => `
             <div id="ir-banner-sub">H25P-0032 · REPAIR · BATTERY · raised 08-Sep-2026</div>
             <div class="banner-pills">
               <span class="prio">High</span>
-              <span class="badge badge-pending">Hold</span>
+              <span class="badge badge-pending">On Hold</span>
               <span class="badge badge-danger">Overdue</span>
             </div>
           </div>
           <div class="banner-actions">
-            <button type="button" class="btn-ghost">Triage</button>
+            <button type="button" class="btn-ghost">Allot CAPS</button>
             <button type="button" class="btn-ghost">Comments</button>
             <button type="button" class="btn-ghost">History</button>
           </div>
@@ -1543,7 +1543,7 @@ const peopleCard = () => {
             <span class="person-n">${open}</span>
             ${late ? `<span class="badge badge-danger">${late} late</span>` : '<span class="person-clear"></span>'}
           </div>`).join('')}
-          <p class="chart-note">Counted from the Triage <b>assignee</b>. Untriaged IRs have none, so they are the last row rather than missing from the sum. Initials, not photographs — the app already draws an initials avatar in its header, and initials need nothing vendored.</p>
+          <p class="chart-note">Counted from the Allot CAPS <b>assignee</b>. Untriaged IRs have none, so they are the last row rather than missing from the sum. Initials, not photographs — the app already draws an initials avatar in its header, and initials need nothing vendored.</p>
         </div>`;
 };
 
@@ -2262,12 +2262,12 @@ ${demo('Humaaans', 'eleven fills: skin, hair, jumper, jeans — a whole fixed fi
 // "how does a card move between columns" — and the honest starting point is
 // that the app ALREADY HAS the field a board needs.
 //
-// `ir.status` is a fourteen-value workflow stage (IR_STATUS_VALUES, app.js). It
-// is written by hand in the Triage modal and nowhere else, stamped with
-// `statusAt` only when someone really changes it, and bucketed into
-// Open/Paused/Resolved/Closed by statusCategory(). So a board is a new DRAWING
-// of a field that exists, not a new field — which is why this page can show real
-// columns at all, and why it does not need a migration.
+// `ir.status` is one of TEN workflow stages (IR_STATUS_VALUES, app.js). It is
+// written by hand in Allot CAPS and nowhere else, stamped with `statusAt` only
+// when someone really changes it, and bucketed into Open/Paused/Resolved/Closed
+// by statusCategory(). So a board is a new DRAWING of a field that exists, not a
+// new field — which is why this page can show real columns at all, and why it
+// does not need a migration.
 //
 // The literals below are written out rather than imported, because this builder
 // reads CSS and HTML as text and never evaluates app.js. smoke-preview.mjs is
@@ -2282,16 +2282,18 @@ ${demo('Humaaans', 'eleven fills: skin, hair, jumper, jeans — a whole fixed fi
 // decided here, and the first version of this page managed to make it look hard
 // by arguing about it for four screens.
 //
-// The only thing that needs care is this: the app has fourteen statuses and only
-// ten of them name a section. The other four — Open, Remote Support, Hold and the
-// finished ones — would fall off a board whose columns were sections alone. So
-// they get columns of their own at the two ends, and the result is that every
-// status lands in exactly one column and the counts add up to every IR there is.
+// The only thing that needs care is this: the app has ten stages and only six of
+// them name a section. The other four — Open and Remote Support, On Hold, and the
+// finished one — would fall off a board whose columns were sections alone. So
+// they get columns of their own at the two ends, and the result is that every stage
+// lands in exactly one column and the counts add up to every IR there is. The
+// retired word 'Other' keeps a place in the last column too: it is not a stage any
+// more, but tickets in the store still hold it and a card in no column is invisible.
 //
 // Written out rather than imported, because this builder reads CSS and HTML as
 // text and never evaluates app.js. smoke-preview.mjs is what makes that safe: it
-// reads the fourteen statuses out of app.js and requires this page to place each
-// of them exactly once.
+// reads the ten stages out of app.js and requires this page to place each of them
+// exactly once, with Other beside them and nothing else invented.
 const KB_IR_TOTAL = 412;
 
 // Left to right. `stages` is the app's own status values that land in the column,
@@ -2302,30 +2304,30 @@ const KB_COLUMNS = [
     { no: 'IR-396', sn: 'D25G-0102', cat: 'REPAIR',         age: '44d', who: '',        done: 0 },
     { no: 'IR-388', sn: 'H25P-0018', cat: 'REMOTE SUPPORT', age: '52d', who: 'P. Nair', done: 0 },
   ] },
-  { key: 'hold', title: 'Paused', stages: ['Hold'], n: 6, cards: [
+  { key: 'hold', title: 'Paused', stages: ['On Hold'], n: 6, cards: [
     { no: 'IR-402', sn: 'D10G-0221', cat: 'CRASH', age: '41d', who: '', done: 1, late: true },
   ] },
   { key: 'B', letter: 'B', title: 'Inward Checklist', stages: ['Inward'], n: 4, cards: [
     { no: 'IR-415', sn: 'VTR-0011',  cat: 'GENERAL MAINTENANCE', age: '4d',  who: '',         done: 0 },
     { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',               age: '19d', who: 'A. Sharma', done: 1, late: true },
   ] },
-  { key: 'C', letter: 'C', title: 'IQC Visual Inspection', stages: ['Visual Inspection'], n: 3, cards: [
+  { key: 'C', letter: 'C', title: 'IQC Visual Inspection', stages: ['Inspection'], n: 3, cards: [
     { no: 'IR-411', sn: 'H25P-0029', cat: 'REPAIR', age: '8d', who: 'P. Nair', done: 1 },
   ] },
-  { key: 'D', letter: 'D', title: 'Investigation', stages: ['QC Investigation'], n: 7, cards: [
+  { key: 'D', letter: 'D', title: 'Investigation', stages: ['Investigation'], n: 7, cards: [
     { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR', age: '23d', who: 'R. Kumar',  done: 2, late: true },
     { no: 'IR-408', sn: 'S25P-0044', cat: 'CRASH',  age: '25d', who: 'A. Sharma', done: 2, late: true },
   ] },
   { key: 'E', letter: 'E', title: 'Production (Rework)', stages: ['Production'], n: 5, cards: [
     { no: 'IR-406', sn: 'VTR-0007', cat: 'GENERAL MAINTENANCE', age: '29d', who: 'P. Nair', done: 3 },
   ] },
-  { key: 'F', letter: 'F', title: 'Quality Test Report', stages: ['QC', 'Flight Test'], n: 4, cards: [
+  { key: 'F', letter: 'F', title: 'Quality Test Report', stages: ['Quality Test'], n: 4, cards: [
     { no: 'IR-403', sn: 'D10G-0207', cat: 'CRASH', age: '31d', who: 'R. Kumar', done: 4 },
   ] },
-  { key: 'G', letter: 'G', title: 'PDI Report/Dispatch Record', stages: ['PDI', 'Approval'], n: 3, cards: [
+  { key: 'G', letter: 'G', title: 'PDI Report/Dispatch Record', stages: ['PDI/Dispatch'], n: 3, cards: [
     { no: 'IR-401', sn: 'S25P-0014', cat: 'REMOTE SUPPORT', age: '36d', who: 'A. Sharma', done: 5 },
   ] },
-  { key: 'done', title: 'Finished', stages: ['Delivered', 'Close', 'Other'], n: 369, quiet: true, cards: [
+  { key: 'done', title: 'Finished', stages: ['Delivered', 'Other'], n: 369, quiet: true, cards: [
     { no: 'IR-398', sn: 'VTR-0003', cat: 'GENERAL MAINTENANCE', age: '58d', who: 'P. Nair', done: 6 },
   ] },
 ];
@@ -2401,7 +2403,7 @@ const kbJump = () => `
 const CAVEAT_BOARD = `
       <div class="pv-caveat">
         <b>Two things the board cannot say, and both are the app's doing rather than the board's.</b>
-        A <b>Paused</b> IR keeps its status as Hold, so the app no longer knows which section it was
+        A <b>Paused</b> IR keeps its status as On Hold, so the app no longer knows which section it was
         paused in — which is why Paused is a column of its own rather than the card sitting where it
         stopped. And <b>Finished</b> is deliberately one wide column: 369 IRs that need no action do
         not deserve eight columns of screen, and the count is the useful part. Both are columns
@@ -2425,10 +2427,10 @@ const boardBoard = () => kbJump() + `
   <section class="pv-block" id="board">
     <span class="pv-kicker">The board</span>
     <h2 class="pv-block-title">Every IR has a status. The status says which section it is in. So the columns are the sections.</h2>
-    <p class="pv-block-note">That is the whole mechanism. The app has fourteen statuses and ten of
+    <p class="pv-block-note">That is the whole mechanism. The app has ten workflow stages and six of
     them name one of your six sections, so those are the middle six columns. The other four —
-    Open, Remote Support, Hold and the finished ones — get columns at the two ends so that nothing
-    falls off the board.</p>
+    Open and Remote Support, On Hold, and the finished one — get columns at the two ends so that
+    nothing falls off the board.</p>
     <div class="pv-demo">
       <div class="pv-demo-cap"><b>All ${KB_IR_TOTAL} IRs</b><span>every status the app has lands in exactly one column</span></div>
       <div class="pv-demo-pad">${kbStrip()}
@@ -2444,7 +2446,7 @@ ${CAVEAT_BOARD}
     which is sitting in the Investigation column with 2 of 6 sections saved.</p>
 
     <div class="pv-demo">
-      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Triage</b><span>what the app does today</span></div>
+      <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Allot CAPS</b><span>what the app does today</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 1: the card does not move', [
         kbCol(kbOf('C')),
         kbCol(kbOf('D'), { cls: 'pv-kb-col-here' }),
@@ -2452,7 +2454,7 @@ ${CAVEAT_BOARD}
       ])}</div>
     </div>
     <p class="pv-block-note"><b>Nothing moves.</b> Saving a section is not a stage change, so IR-409
-    stays in D until somebody opens Triage. The cost is that the board is only as current as the
+    stays in D until somebody opens Allot CAPS. The cost is that the board is only as current as the
     last person to triage — and this is the rule the app's own comments argue for.</p>
 
     <div class="pv-demo">
@@ -2522,7 +2524,7 @@ ${CAVEAT_MOVES}
         category, the raised date, and <b>ir.done[]</b>. Adopting a board is a rendering pass, not a
         data change.</p></div>
       <div class="pv-lic-row"><b>A ten-line map is the only new code</b><span class="yes">Small</span>
-        <p>The app folds its fourteen statuses into four buckets today. Pointing them at your six
+        <p>The app folds its ten workflow stages into four buckets today. Pointing them at your six
         sections instead is a pure function with no backend, no new field and no write — and which
         status goes in which column is written out under each column heading above, where you can
         check it against the ticket.</p></div>

@@ -444,28 +444,36 @@ r.ok('board: the second board and the mapping table stay gone',
 // added to the app without a column to hold it fails the build instead of
 // rendering as a card in no column at all.
 const statusValues = [...((appJs.match(/const IR_STATUS_VALUES\s*=\s*\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([^']+)'/g)].map(m => m[1]);
-r.ok('board: the app really does store fourteen workflow stages', statusValues.length === 14, statusValues.join(' '));
+r.ok('board: the app really does store ten workflow stages', statusValues.length === 10, statusValues.join(' '));
+
+// The ONE value a column keeps a place for without it being a stage: the retired
+// escape hatch, which old tickets still hold and nothing new can be set to.
+const KEPT_NON_STAGE = 'Other';
 
 // The board is ONE board now, and the assertion that replaces the old mapping
-// table is stronger than the table ever was: it does not check that fourteen
-// rows exist, it checks the property those rows were there to demonstrate.
+// table is stronger than the table ever was: it does not check that a row per
+// stage exists, it checks the property those rows were there to demonstrate.
 // Each column prints the app's own status values under its heading; the union of
 // all nine must be IR_STATUS_VALUES EXACTLY — every status placed, no status
-// placed twice, nothing invented. A status the app can store and the board cannot
-// place is precisely the silent hole this catches, and it is the failure mode a
-// reader of the board could never see: the card would simply be nowhere.
+// placed twice, nothing invented — PLUS Other, once. A status the app can store
+// and the board cannot place is precisely the silent hole this catches, and it is
+// the failure mode a reader of the board could never see: the card would simply be
+// nowhere.
 const mainBoard = BOARD.slice(BOARD.indexOf('id="board"'), BOARD.indexOf('id="moves"'));
 const colRe = /<span class="pv-kb-col-title">([^<]*)<\/span><span class="pv-kb-col-count">(\d+)<\/span>/g;
 const boardCols = [...mainBoard.matchAll(colRe)].map(m => ({ title: m[1], n: Number(m[2]) }));
 const placedStages = [...mainBoard.matchAll(/<span class="pv-kb-col-sub">([^<]*)<\/span>/g)]
   .flatMap(m => m[1].split(/\s*·\s*/).filter(Boolean));
-r.ok('board: every stage a column claims is one of the app\'s own',
-  placedStages.length > 0 && placedStages.every(s => statusValues.includes(s)),
-  placedStages.filter(s => !statusValues.includes(s)));
-r.ok('...and the nine columns place all fourteen, each exactly once',
-  placedStages.length === statusValues.length &&
-  [...placedStages].sort().join('|') === [...statusValues].sort().join('|'),
-  `${placedStages.length} placed: ${placedStages.join('/')}`);
+const stageOnly = placedStages.filter(s => s !== KEPT_NON_STAGE);
+r.ok('board: every stage a column claims is one of the app\'s own, or the retired Other',
+  placedStages.length > 0 && placedStages.every(s => statusValues.includes(s) || s === KEPT_NON_STAGE),
+  placedStages.filter(s => !statusValues.includes(s) && s !== KEPT_NON_STAGE));
+r.ok('...and the nine columns place all ten, each exactly once',
+  stageOnly.length === statusValues.length &&
+  [...stageOnly].sort().join('|') === [...statusValues].sort().join('|'),
+  `${stageOnly.length} placed: ${stageOnly.join('/')}`);
+r.ok('...with the retired Other kept in the finished column beside them',
+  placedStages.filter(s => s === KEPT_NON_STAGE).length === 1, placedStages);
 
 // The four buckets are still statusCategory's four, and the strip above the board
 // still speaks in them — that is the whole-picture half of the page, and it must

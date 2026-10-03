@@ -138,6 +138,27 @@ var CONFIG = {
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
+// WORKFLOW STAGES THE BACKEND HAS TO RECOGNISE BY NAME
+// ──────────────────────────────────────────────────────────────────────────────
+// The frontend's status vocabulary is the desk's, and it changed: the ten stages
+// are Open, Inward, Inspection, Investigation, Production, Quality Test,
+// PDI/Dispatch, Delivered, On Hold and Remote Support. The Sheet's old
+// fourteen-value wording is retired, but ROWS STORED UNDER IT ARE NOT — a ticket
+// archived while the app still called its last stage "Close" holds that word today.
+//
+// So both words mean FINISHED here, and both must keep the archive behaving. This
+// is the one place that decides it, because two rules read it and a third rule
+// (the reopen hook) is its exact inverse: a ticket is finished when its status is
+// one of these, and it has LEFT the archive the moment its status stops being one.
+// Pinning only the new word would silently stop archiving every historical ticket,
+// and the symptom would be silent in the worst way — folders that simply never move.
+var TERMINAL_STATUSES = ['Delivered', 'Close'];
+
+function isTerminalStatus(value) {
+  return TERMINAL_STATUSES.indexOf(String(value == null ? '' : value).trim()) !== -1;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ENTRY POINTS
 // ──────────────────────────────────────────────────────────────────────────────
 // AUTH — verify the caller by a server-issued, revocable session token.
@@ -3519,20 +3540,25 @@ function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
       var store = readJsonLocked(storeFile) || {};
       var existing = (store[sectionId] && typeof store[sectionId] === 'object') ? store[sectionId] : {};
 
-      // A ticket LEAVING Close gets its Drive folder back from the archive.
+      // A ticket LEAVING a finished stage gets its Drive folder back from the archive.
       //
       // Decided here, and only here, because `existing` is the stored status as it
-      // was BEFORE this write — the one instant the close→open transition is
+      // was BEFORE this write — the one instant the finished→open transition is
       // visible. Left to the daily sweep, a reopened ticket would keep its files
       // archived until the next run, and a new upload would land in the archive
       // beside them, which is exactly what nobody expects a reopened ticket to do.
       //
-      // The reverse is deliberately NOT handled here: entering Close does not
-      // archive anything. That happens 30 days later, in archiveClosedIRs.
+      // Both words count, through isTerminalStatus: Delivered is the stage the app
+      // writes now and Close is what the same state was called before it, so a
+      // ticket stored under either one is reopened the moment it stops being
+      // finished — and a ticket moved from Close to Delivered is NOT a reopen.
+      //
+      // The reverse is deliberately NOT handled here: entering a finished stage does
+      // not archive anything. That happens 30 days later, in archiveClosedIRs.
       //
       // The frontend sends the whole merged row (patchIRState), so `fields.status`
       // is the new status, not a missing key.
-      if (irNumber === '__IRS__' && existing.status === 'Close' && fields.status !== 'Close') {
+      if (irNumber === '__IRS__' && isTerminalStatus(existing.status) && !isTerminalStatus(fields.status)) {
         reopenIR = String(sectionId);
       }
 
@@ -4847,7 +4873,14 @@ function runArchiveSweep() {
     // `statusOwned` is load-bearing. Without it, a status inherited from the Sheet's
     // Col D would read as the app's own decision, and a ticket nobody closed in the
     // app could have its folder archived.
-    var closed = !!(row && typeof row === 'object' && row.statusOwned && row.status === 'Close');
+    //
+    // The stage itself is matched through isTerminalStatus, so BOTH words still
+    // count: 'Delivered' (what the app writes now) and 'Close' (what the same state
+    // was called before the vocabulary changed, and what every already-archived or
+    // long-closed ticket still holds). Pinning the new word alone would leave every
+    // historical ticket outside the sweep, and the only symptom would be folders
+    // that never move — the quietest possible failure.
+    var closed = !!(row && typeof row === 'object' && row.statusOwned && isTerminalStatus(row.status));
 
     // Archived, but no longer closed. The reopen hook in saveSection runs on the
     // app's own status change and normally gets there first — but it CAN fail (and
@@ -4857,8 +4890,8 @@ function runArchiveSweep() {
     if (!closed) return;
 
     // An unusable `statusAt` is NOT guessed at. The field arrived with statusOwned,
-    // so a stored Close can predate it; that ticket waits for the owner to sweep it
-    // by hand rather than being archived on an invented date.
+    // so a stored Close (or Delivered) can predate it; that ticket waits for the
+    // owner to sweep it by hand rather than being archived on an invented date.
     var at = Number(row.statusAt);
     if (!isFinite(at) || at <= 0) { noClock++; return; }
 

@@ -245,9 +245,30 @@ const D = loadApp(`
 
 const VSEC = 'sec-b';
 // A fake element carrying only the surface applySectionAccessGating touches.
+//
+// The classList is a REAL one — backed by a Set, with the two-argument
+// `toggle(name, force)` the DOM has. The gate now also runs the category
+// applicability rule, which toggles a class on the pane; a stub missing
+// `toggle` throws inside the app rather than in an assertion, so the failure
+// reads as a broken app when it is a broken double. `contains` reads the same
+// Set the other three write, so a class added here is a class the sweep sees.
+const fakeClassList = (...classes) => {
+  const set = new Set(classes);
+  return {
+    contains: c => set.has(c),
+    add: (...n) => { n.forEach(x => set.add(x)); },
+    remove: (...n) => { n.forEach(x => set.delete(x)); },
+    toggle(n, force) {
+      const on = force === undefined ? !set.has(n) : !!force;
+      on ? set.add(n) : set.delete(n);
+      return on;
+    },
+    get _set() { return set; },
+  };
+};
 const fakeEl = (...classes) => ({
   id: '', type: 'button', disabled: false, style: {}, title: '',
-  classList: { contains: c => classes.includes(c), add() {}, remove() {} },
+  classList: fakeClassList(...classes),
 });
 
 let sweepEls = [];
@@ -256,7 +277,7 @@ D.document.querySelector = () => null;
 D.document.getElementById = id => {
   if (id === VSEC) {
     return { id: VSEC, style: {}, dataset: {},
-             classList: { contains: () => false, add() {}, remove() {} },
+             classList: fakeClassList(),
              querySelectorAll: () => sweepEls, querySelector: () => null };
   }
   if (id === 'close-' + VSEC) return fakeSave;

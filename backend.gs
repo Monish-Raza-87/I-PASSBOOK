@@ -4166,8 +4166,9 @@ function purgeUsers(params, authEmail) {
 //    customer's own words and nothing else. This used to merge in a status from the
 //    app store, which meant the list read had two answers for one question — the
 //    same split-brain the status bridge was cut to end. The sheet's Col D still
-//    travels, as an ordinary grid cell, and the frontend reads it once per ticket as
-//    that ticket's STARTING stage (seedIRState).
+//    travels, as an ordinary grid cell, but the frontend no longer reads it as a
+//    stage at all: since 2026-10-03 every ticket starts Open and the first stage a
+//    ticket holds is one a person allotted. Col D is kept as `initialStatus`.
 function listIRs() {
   var ss  = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID);
   var tab = ss.getSheetByName(CONFIG.IR_REPO_TAB);

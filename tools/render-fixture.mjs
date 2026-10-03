@@ -191,3 +191,81 @@ ${legacyRows}
 </body></html>`);
 console.log(legacyFile);
 console.log(`  legacy ${legacyRows.length} bytes of rows`);
+
+// ── The board and the list as they are BEFORE anybody allots anything ─────────
+// The fixture at the top of this file sets `status` directly on each record, which
+// is the shape of a store where every ticket HAS a stage — the steady state once CR
+// has walked them. This page is the other end: what the app shows the moment a list
+// is fetched and nobody has touched it.
+//
+// It is a separate page, and a separate loadApp, because the records here have to
+// carry `status: ''` and a legacy Col-D word in `initialStatus` — exactly what
+// mapSheetRows produces (see the note there) — and then be pushed through the REAL
+// merge. Hand-setting `status: 'Open'` would have proved nothing: the question this
+// page answers is whether the merge puts it there, on every surface that draws it.
+// Reading that off the source is not evidence; the release before last proved it.
+const { T: OP, byId: opById } = loadApp(`
+  applyIRStateToAllIRs, renderIRList, renderBoard, renderInsights, renderBannerMeta,
+  INSIGHTS_ALL, SECTION_IDS,
+  get allIRs(){return allIRs;}, set allIRs(v){allIRs=v;},
+  get irState(){return irState;}, set irState(v){irState=v;},
+  get currentIR(){return currentIR;}, set currentIR(v){currentIR=v;},
+  get currentView(){return currentView;}, set currentView(v){currentView=v;},
+  get insightsFilters(){return insightsFilters;}, set insightsFilters(v){insightsFilters=v;},
+  get _dataIsDemo(){return _dataIsDemo;}, set _dataIsDemo(v){_dataIsDemo=v;},
+  get irList(){return irList;},
+`, { capture: true });
+
+// `initialStatus` holds the words the desk actually stopped maintaining: retired
+// stage names that no longer map to anything, plus a couple that still do. If the
+// old adoption rule were alive, these are what would leak onto the screens.
+const UNALLOTTED = [
+  ['IR701', 'In Production',   { assigneeName: 'Ravi Singh',      category: 'REPAIR' }],
+  ['IR702', 'QC Investigation',{ assigneeName: 'Adhik Nair' }],
+  ['IR703', 'Open',            { assigneeName: 'Mohd Abdul Raza', category: 'REMOTE SUPPORT', priority: 'Urgent' }],
+  ['IR704', 'Delivered',       { assigneeName: 'Ravi Singh',      category: 'CRASH', done: ['sec-b'] }],
+  ['IR705', 'Closed',          {}],
+  ['IR706', '',                { assigneeName: 'Adhik Nair',      category: 'GENERAL MAINTENANCE' }],
+].map(([irNumber, initialStatus, o], i) => ({
+  irNumber,
+  initialStatus,
+  status: '',                    // as mapSheetRows leaves it: app-owned, and empty
+  dateRaisedISO: iso(i * 9 + 2),
+  dateRaised: new Date(NOW - (i * 9 + 2) * DAY).toISOString().slice(0, 10),
+  statusAt: null,
+  droneId: 'S25P02' + i,
+  ...o,
+}));
+
+OP.allIRs = UNALLOTTED;
+OP.irState = {};                 // nobody has allotted anything
+OP.applyIRStateToAllIRs();       // ← the merge under test
+OP._dataIsDemo = false;
+OP.insightsFilters = { fy: ALL, month: ALL, status: ALL, category: ALL, customer: ALL, drone: ALL };
+
+OP.renderInsights();
+const opInsights = opById.get('insights-body').innerHTML;
+OP.currentIR = UNALLOTTED[0];
+OP.currentView = 'detail';
+OP.renderBannerMeta();
+const opBanner = opById.get('ir-banner-pills').innerHTML;
+OP.renderIRList(OP.allIRs);
+const opList = opById.get('ir-list').innerHTML;
+OP.renderBoard(OP.allIRs);
+const opBoard = opById.get('ir-board').innerHTML;
+
+const openFile = path.join(outDir, 'open.html');
+fs.writeFileSync(openFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nothing allotted</title>
+${css}
+</head><body>
+<div id="index-view" style="display:block">
+  <div id="ir-list">${opList}</div>
+  <div id="ir-board">${opBoard}</div>
+</div>
+<div id="detail-view" style="display:block"><div id="ir-banner">${opBanner}</div></div>
+<div id="insights-view" style="display:block"><div id="insights-body">${opInsights}</div></div>
+</body></html>`);
+console.log(openFile);
+console.log(`  open ${opList.length} bytes of list · ${opBoard.length} of board · ${opInsights.length} of insights`);

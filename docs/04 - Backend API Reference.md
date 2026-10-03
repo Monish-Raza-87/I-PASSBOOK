@@ -183,9 +183,9 @@ GET {BASE_URL}?action=listIRs
   shape, which would make every date column read as unparseable.
 - **Carries no status and reads no store.** It used to merge one in from `irs.json`
   through `getAllIRStatuses()`, which gave one question two answers; `__IRS__` is the
-  only owner of the workflow. The sheet's Col D still travels as an ordinary grid
-  cell, and the frontend reads it **once per ticket** as that ticket's starting stage
-  (`seedIRState`).
+  only owner of the workflow. The sheet's Col D still travels as an ordinary grid cell,
+  but the frontend no longer reads it as a stage at all — it lands on `initialStatus`
+  and nothing branches on it. Every ticket the app holds no row for is **Open**.
 - An empty or header-only sheet answers `{"status":"ok","grid":[]}` rather than
   throwing, so a fresh install can still load its list.
 

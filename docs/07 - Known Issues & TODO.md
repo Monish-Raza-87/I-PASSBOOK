@@ -173,6 +173,19 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 - ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
 
 ### Functionality
+- ⚠️ **Every ticket starts Open — including old finished ones, until CR allots them.**
+  Since 2026-10-03 a ticket's stage is the app's alone: a ticket with no store row reads
+  **Open** by derivation, and the Sheet's Col D is no longer a starting value — it is
+  carried as `initialStatus` and is now read by **no line of `app.js`**. The sharp edge is
+  deliberate and worth saying out loud: a legacy ticket whose Col D said *Close* or
+  *Delivered* now reads **Open**, so the board shows a finished aircraft as not started
+  until somebody allots it. The alternative was a ticket wearing a stage the desk had
+  stopped maintaining, which is the worse lie. **Rows already in the store are left
+  exactly as they are** — CR is reviewing and re-allotting every ticket by hand, so they
+  are corrected by the people who own them rather than by a migration. `seedIRState()` is
+  **deleted, not disabled**, and `smoke-workflow.mjs` renders all four screens that show a
+  stage (list card, ticket header, board column, Insights "open now") rather than
+  asserting the merged value once — Release B proved those four can disagree.
 - ❌ **No offline editing** — PWA caches static assets but can't function without GAS backend
 - ❌ **No conflict resolution *for the user*** — the lock stops a lost write at the file level, but if two people edit the same section the second save still wins with no warning and no diff. The store being correct is not the same as the humans being told.
 - ❌ **No delete capability** — sections can be updated but never cleared/deleted

@@ -72,10 +72,10 @@ T.irState = {
            assignee: 'ravi@indrones.com', assigneeName: 'Ravi Singh', priority: 'Urgent',
            category: 'REPAIR', subCategory: 'GPS', subCategoryNote: '',
            done: ['sec-a', 'sec-b'], updatedBy: 'a@indrones.com' },
-  // A seed written BEFORE Release B: the app has seen this ticket, but in the era
-  // when seeding deliberately claimed nothing, so the row holds an empty status.
-  // Every ticket opened before the vocabulary change still looks like this, which
-  // is exactly why the merge has to keep falling back for it.
+  // A legacy SEED row: written by `seedIRState` when the app still adopted the Sheet's
+  // Col D on first sight, but from an era when seeding deliberately claimed no status,
+  // so it holds an empty one. Rows like this are still in the store and must contribute
+  // NOTHING — see the assertion below.
   IR410: { status: '', seededAt: 1, seededFrom: 'sheet', seededBy: 'a@indrones.com' },
   // Section B saved (a real edit) but the status was never set by the app.
   IR411: { done: ['sec-b'], updatedBy: 'a@indrones.com' },
@@ -93,9 +93,14 @@ ok('sub-category lands beside it', by('IR409').subCategory === 'GPS', by('IR409'
 // the only place that could carry it back onto a record the UI then renders.
 ok('...and the retired `type` is NOT read off the store', by('IR409').type === undefined, by('IR409').type);
 ok('done[] lands on the record', by('IR409').done.length === 1, by('IR409').done);
-// The fallback is a STARTING value, folded into the ten — never the raw Sheet word.
-ok('a ticket with no app status takes the Sheet\'s stage, FOLDED',
-  by('IR410').status === 'Inspection', by('IR410').status);
+// THERE IS NO FALLBACK TO THE SHEET. The row above holds no status, so the ticket is
+// Open — the whole of the 2026-10-03 decision, and its sharpest edge: this record's
+// Col D says 'Visual Inspection', and a legacy one saying 'Close' behaves the same, so
+// the board shows a finished aircraft as not started until CR allots it. That was
+// chosen deliberately, over wearing a stage the desk had stopped maintaining. The old
+// rule read 'Inspection' here; this assertion is the change, not a regression.
+ok('a ticket with no app status is Open, whatever the Sheet says',
+  by('IR410').status === 'Open', by('IR410').status);
 ok('...and no record ever leaves here holding a retired word',
   T.allIRs.every(i => T.IR_STATUS_VALUES.includes(i.status)),
   T.allIRs.map(i => i.status));

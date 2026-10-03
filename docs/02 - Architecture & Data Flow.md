@@ -147,12 +147,28 @@ it is still saved, and the legacy log still shows it, but nothing reads it back 
 the badge's truth. `__IRS__` (`irs.json`) is the only owner of the workflow, and the
 list read no longer merges a status of its own.
 
-The app takes ownership of a ticket's status **when someone changes the status in
-the app** (`irState[x].statusOwned`), not by opening a ticket or saving a section.
-An edit made in the Sheet therefore still works on an untriaged ticket.
+The app is the **only** writer of a ticket's status, and **every ticket begins at Open**
+(decided 2026-10-03). A ticket the app holds no row for reads `Open` by derivation in
+`applyIRStateToAllIRs()` — it is not stored, because there is nothing to store. The first
+stage a ticket ever holds is one a person allotted, through Allot CAPS or a section's
+move-on offer.
 
-> **Consequence worth saying out loud to staff:** once a ticket is triaged in the
-> app, changing Col D in the Sheet no longer does anything.
+There is deliberately **no first-sight adoption** any more. Until 2026-10-03 a ticket was
+*seeded* the first time the app opened it: the Sheet's Col D was folded into the ten and
+stored as that ticket's starting stage (`seedIRState()`, removed). That made an untriaged
+ticket's stage depend on a column the desk had stopped maintaining. The Sheet's Col D now
+rides on `initialStatus` and is read by **no line of `app.js`** — it is carried, not shown.
+
+`irState[x].statusOwned` still exists on rows and is still load-bearing, but for a
+different question: the backend's 30-day archive sweep uses it to tell a stage the app
+decided from one inherited off Col D, so a ticket nobody closed here can never have its
+folder archived. Rows written before this change are left exactly as they are — CR is
+re-allotting every ticket by hand, so they are corrected by the people who own them
+rather than by a migration.
+
+> **Consequence worth saying out loud to staff:** changing Col D in the Sheet does
+> nothing to any ticket's stage, new or old. It is the client's own words, kept as a
+> record of what they reported.
 
 ## Data Flow
 

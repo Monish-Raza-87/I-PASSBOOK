@@ -561,9 +561,10 @@ mean the app is writing to a sheet again. None of the three writes.
   `base.css` / `components.css` / `views.css`; see [09 — Design System](09 - Design System.md)
 - **Mobile-first** — always test on phone viewport first
 - **Dev bypass** — always use `?dev=1` for local development
-- **Status field** — IR status on the index is **app-owned** (`__IRS__`). The Sheet's
-  Col D is read **once per ticket**, on first open, as that ticket's *starting* stage
-  (`seedIRState`), and is never read as the live workflow again. See
+- **Status field** — IR status on the index is **app-owned** (`__IRS__`) and **every
+  ticket starts Open**. A ticket with no store row reads Open by derivation; the Sheet's
+  Col D is never read as a stage (`initialStatus` is carried and read by nothing), and
+  there is no first-sight seed — `seedIRState()` was removed 2026-10-03. See
   [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md). `a_overallStatus`
   in Section A is still saved and the legacy log still shows it, but nothing reads it
   back as the badge's truth. The 14 status *values* are written by the customer Google

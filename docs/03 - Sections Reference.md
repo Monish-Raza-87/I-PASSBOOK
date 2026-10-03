@@ -366,7 +366,7 @@ what each column means (the backend's old `IR_REPO_*_COL` constants are gone; se
 | `evidenceFormN` | Col N — Evidence: Attach Files From The Incident | `Evidence: Attach Files From The Incident` |
 | `evidenceFormQ` | Col Q — Evidence: Attach Screenshot of UAV Forecast | `Evidence: Attach Screenshot of UAV Forecast` |
 | `summaryLink` | Col A — Summary | `Summary` |
-| `initialStatus` | Col D — Issue Status | `Issue Status` — **read once per ticket as its starting stage**, never as the live workflow |
+| `initialStatus` | Col D — Issue Status | `Issue Status` — **carried, and read by nothing.** It was once the starting stage; since 2026-10-03 every ticket starts Open and no workflow value comes off the Sheet |
 | *priority* | — | the Sheet column is **consumed but deliberately not read**: priority is app-owned |
 
 Anything the Form writes that this table does not name lands in `extra[]` and is

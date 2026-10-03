@@ -67,9 +67,9 @@ const { T, byId } = loadApp(`
   SECTION_IDS, REMOTE_SUPPORT_KEEPS, categoryInapplicableSections,
   applyCategoryApplicability, applySectionAccessGating, canEditSection,
   showSection, moveOnByHand,
-  mapSheetRows, applyIRStateToAllIRs, ownedStatus, seedIRState, appState,
+  mapSheetRows, applyIRStateToAllIRs, ownedStatus, appState,
   openTriageModal, applyTriage,
-  renderIRList, renderBannerMeta, statusLabel,
+  renderIRList, renderBannerMeta, renderBoard, renderInsights, statusLabel, t,
   setUser: u => { currentUser = u; },
   set allIRs(v) { allIRs = v; }, get allIRs() { return allIRs; },
   set irState(v) { irState = v; }, get irState() { return irState; },
@@ -241,7 +241,7 @@ ok('...while a real movement writes the stage and the clock together',
   { status: T.irState.IR703.status, statusAt: T.irState.IR703.statusAt });
 
 // ── 5. The Sheet is not a writer ──────────────────────────────────────────────
-head('the Sheet hands over a starting stage, and can never move one');
+head('the Sheet is not a writer of a status, not even a starting one');
 
 const HEAD = ['Summary', 'IR Number', 'Timestamp', 'Issue Status'];
 const mapOne = (status, extraHead = [], extraRow = []) =>
@@ -256,22 +256,20 @@ ok('...it is kept beside it as the intake record, unedited',
 T.allIRs = [fromSheet];
 T.irState = {};
 T.applyIRStateToAllIRs();
-ok('a ticket nobody has opened takes the Sheet\'s stage as its STARTING value, folded',
-  T.allIRs[0].status === 'Investigation', T.allIRs[0].status);
+// The 2026-10-03 decision, and it is deliberately the harder option: 'QC Investigation'
+// in Col D gets a ticket nothing but Open. There is no first-sight writer any more, so
+// the Sheet has no way in at all — not even the one read it used to get.
+ok('a ticket nobody has allotted is Open, NOT the Sheet\'s stage',
+  T.allIRs[0].status === 'Open', T.allIRs[0].status);
 ok('...and the app holds no status of its own for it',
   T.ownedStatus('IR800') === '', T.ownedStatus('IR800'));
-// The one read of Col D there is: the first time the app opens the ticket. What gets
-// STORED is the folded stage, not the word the Sheet used — the store leaves the old
-// vocabulary at the moment of adoption, so nothing downstream has to fold it again
-// and no retired word is ever written back into __IRS__.
-T.seedIRState('IR800', 'QC Investigation');
-ok('opening the ticket stores the STAGE, folded as it is adopted',
-  T.irState.IR800.status === 'Investigation', T.irState.IR800.status);
-// And now the Sheet cannot move it: a re-fetch only ever rewrites `initialStatus`.
+// The only writer is a person. Here that is simulated with the row Allot CAPS would
+// leave, because the point under test is the merge, not the modal that writes it.
+T.irState = { IR800: { status: 'Production', statusOwned: true, statusAt: 1, updatedBy: 'a@indrones.com' } };
 T.allIRs = [mapOne('Close')];
 T.applyIRStateToAllIRs();
 ok('a later Sheet edit cannot move a ticket the app holds',
-  T.allIRs[0].status === 'Investigation', T.allIRs[0].status);
+  T.allIRs[0].status === 'Production', T.allIRs[0].status);
 ok('...while the Sheet\'s own word changes freely, because it is a record of what was said',
   T.allIRs[0].initialStatus === 'Close', T.allIRs[0].initialStatus);
 
@@ -472,5 +470,78 @@ ok('a ticket with no status prints Open, never an empty pill',
 // it must still print its own word rather than falling into the Open default.
 ok("an old 'Other' ticket still reads as Other",
   T.statusLabel('Other') === 'Other', T.statusLabel('Other'));
+
+// ── 8. Every ticket starts Open — on all FOUR screens that show a stage ───────
+// The rule is one line in one function, and four screens read its output. Each is a
+// place it could have been bypassed, so each is RENDERED and read back rather than the
+// merged value being asserted once and trusted. Release B shipped a list card and a
+// ticket header that spelled one ticket differently, and only rendering found it — an
+// assertion on the merged value would have passed the whole time.
+head('a ticket nobody has allotted reads Open on every screen that shows one');
+
+const untouched = {
+  irNumber: 'IR730', droneId: 'S25P001', initialStatus: 'QC Investigation',
+  dateRaised: '2025-09-28', dateRaisedISO: '2025-09-28', done: [],
+};
+T.irState = {};            // no row at all: nothing here has ever been told about it
+T.allIRs = [untouched];
+T.applyIRStateToAllIRs();
+ok('the merged record is Open, NOT the Sheet\'s word',
+  untouched.status === 'Open', untouched.status);
+
+const badge = html => (html.match(/class="badge[^"]*">\s*([^<]*?)\s*</) || [])[1];
+
+T.renderIRList([untouched]);
+ok('the LIST card reads Open',
+  badge(byId.get('ir-list').innerHTML) === 'Open', badge(byId.get('ir-list').innerHTML));
+
+T.currentIR = untouched;
+T.renderBannerMeta();
+ok('the TICKET HEADER reads Open',
+  badge(byId.get('ir-banner-pills').innerHTML) === 'Open', badge(byId.get('ir-banner-pills').innerHTML));
+
+T.renderBoard([untouched]);
+// Each column is cut at the NEXT column's head, so a block is exactly one column —
+// head, sub-line and body. Splitting on `kb-col` alone does not work: `kb-col-sub`,
+// `kb-col-head` and `kb-col-body` all match it, and the block found is a fragment of
+// the wrong one. Read LIVE from the element rather than captured once, or the second
+// render below is measured against the first render's markup.
+const boardCol = stages => byId.get('ir-board').innerHTML
+  .split('<div class="kb-col-head">').slice(1)
+  .find(c => c.includes(`kb-col-sub">${stages}<`));
+// Found by the Open column's OWN sub-line rather than by position, and asserted by
+// count: 'Open' is the first of the two stages in the start column, so a card landing
+// in the wrong column is exactly the bug this is here to catch. A card in the wrong
+// column still contains the string 'IR730', and a bare `includes` would miss it.
+const startCol = boardCol('Open · Remote Support');
+ok('the BOARD puts it in the Open column, and counts 1',
+  !!startCol && /class="kb-col-count">\s*1\s*</.test(startCol) && startCol.includes('IR730'),
+  startCol && startCol.replace(/\s+/g, ' ').slice(0, 240));
+
+T.renderInsights();
+const stats = [...byId.get('insights-body').innerHTML.matchAll(
+  /insights-stat-n">(\d+)<\/span>\s*<span class="insights-stat-label">([^<]*)</g)]
+  .map(m => [m[2], Number(m[1])]);
+const openNow = stats.find(([label]) => label === T.t('insights.openNow'));
+ok('the INSIGHTS "open now" tile counts it', !!openNow && openNow[1] === 1, stats);
+
+// And the other half of the rule, on the same four: a ticket CR HAS allotted keeps the
+// stage they gave it. Asserting only the first half would pass just as well if the app
+// ignored the store entirely and called everything Open.
+T.irState = { IR730: { status: 'Quality Test', statusOwned: true, statusAt: 1, updatedBy: 'cr@indrones.com' } };
+T.allIRs = [untouched];
+T.applyIRStateToAllIRs();
+T.renderIRList([untouched]);
+T.currentIR = untouched;
+T.renderBannerMeta();
+T.renderBoard([untouched]);
+const qtCol = boardCol('Quality Test');
+ok('an allotted ticket keeps its stage, on every screen that shows one',
+  untouched.status === 'Quality Test' &&
+  badge(byId.get('ir-list').innerHTML) === 'Quality Test' &&
+  badge(byId.get('ir-banner-pills').innerHTML) === 'Quality Test' &&
+  !!qtCol && /class="kb-col-count">\s*1\s*</.test(qtCol) && qtCol.includes('IR730'),
+  [untouched.status, badge(byId.get('ir-list').innerHTML), badge(byId.get('ir-banner-pills').innerHTML),
+   qtCol && qtCol.replace(/\s+/g, ' ').slice(0, 160)]);
 
 finish();

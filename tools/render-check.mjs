@@ -26,9 +26,19 @@
 //   · an element sticks out past the right edge. Usually the cause of the first,
 //     and named separately so the report says WHERE rather than just that.
 //
-// `.scroll-x` containers are exempt from the second and NOT from the first: a
-// pane that scrolls inside its own frame is a deliberate design (the IR board and
-// the chart axis both use one), but the page itself still must not move.
+// A pane that scrolls or CLIPS inside its own frame is exempt from the second and
+// NOT from the first: the board and the chart axis scroll on purpose, and the IR
+// row's meta line clips on purpose (views.css: `.ir-meta { overflow: hidden }` —
+// the middle gives way so the status pills can never be pushed off the edge).
+// `hidden` matters here and was missing at first: a clipped element still reports a
+// `getBoundingClientRect().right` past the page edge — clipping changes the paint,
+// not the box — so the IR list failed at 320px on `span.ir-age.is-late` while the
+// page itself measured `scrollWidth 320` and not one pixel moved. The measurement
+// that found it: on all six cards the age chip's right edge sat 43–314px past its
+// own `.ir-meta` right edge, i.e. entirely inside the clip, and on two of them it
+// happened to land past 320 as well. Exempting it here costs nothing, because
+// genuine sideways movement is still caught by the page-scroll check above, which
+// no descendant's overflow style can excuse.
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -85,7 +95,7 @@ const PROBE = `(() => {
   const scrollsItself = el => {
     for (let n = el; n && n !== document.body; n = n.parentElement) {
       const o = getComputedStyle(n).overflowX;
-      if (o === 'auto' || o === 'scroll') return true;
+      if (o === 'auto' || o === 'scroll' || o === 'hidden') return true;
     }
     return false;
   };

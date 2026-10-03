@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v65';
+const APP_VERSION = 'v66';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3559,7 +3559,20 @@ function openAccessModal() {
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
   modal.querySelectorAll('.access-tab').forEach(btn => {
-    btn.addEventListener('click', () => { accessTab = btn.dataset.tab; renderAccessTabs(); });
+    // renderAccessPanel() IS the tab switch. Without it the four tabs highlight and
+    // the body never changes — the panel was only ever painted by the FIRST load and
+    // by a refresh finishing, so every tab but the one you landed on looked broken.
+    // Nothing in the suites could see it: a missing call is not a wrong value, and
+    // no assertion had ever asked what a tap does.
+    btn.addEventListener('click', () => {
+      accessTab = btn.dataset.tab;
+      renderAccessTabs();
+      renderAccessPanel();
+      // The backup line is a separate, admin-only request, so it is asked for the
+      // first time the tab that shows it is actually opened — never on every open
+      // of this modal for the three tabs that do not display it.
+      if (accessTab === 'versions') loadBackupHealth();
+    });
   });
   renderAccessTabs();
   // Paint the roster from this device's last copy FIRST — on the same frame as the
@@ -3576,6 +3589,9 @@ function openAccessModal() {
     renderAccessPanel();
     markAccessRefreshing();
   }
+  // Reopening the modal on the Versions tab must re-ask, or the line would sit on
+  // "Checking…" forever: the cached paint above renders it before any answer exists.
+  if (accessTab === 'versions') loadBackupHealth();
   loadAccessData();
 }
 function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
@@ -3701,6 +3717,68 @@ function renderAccessPanel() {
   else                             renderPeopleTab();
 }
 
+// ─── BACKUP HEALTH ───────────────────────────────────────────────────────────
+// The one line the whole Phase 1 safety net is judged by, on the screen an admin
+// already opens. A backup nobody can see the state of is a backup nobody knows is
+// broken, and the failure it prevents is silent by nature — the export simply stops
+// appearing, and nothing anywhere says so.
+//
+// THREE STATES, AND THEY ARE NOT TWO. Healthy, failed, and "could not ask". The
+// third is the dangerous one: a health line that renders "fine" when the request
+// failed is worse than no line at all, because it converts an unknown into a
+// reassurance. So an unreadable status wears the same red as a failure and says, in
+// words, that it knows nothing.
+let backupHealth = null;        // null = never asked; otherwise the backend's answer
+let backupHealthPending = false;
+
+function loadBackupHealth() {
+  if (backupHealthPending) return;
+  backupHealthPending = true;
+  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=getBackupHealth';
+  const settle = (v) => {
+    backupHealthPending = false;
+    backupHealth = v;
+    // Repaint only if the tab that shows it is still the one open — otherwise a
+    // slow answer would overwrite whatever the admin has since moved to.
+    if (accessTab === 'versions') renderAccessPanel();
+  };
+  fetch(url)
+    .then(r => r.json())
+    .then(data => {
+      if (data && data.status === 'ok') settle(data);
+      else settle({ status: 'error', message: (data && data.message) || 'The backend refused the request.' });
+    })
+    .catch(() => settle({ status: 'error', message: 'Could not reach the backend.' }));
+}
+
+function backupHealthHtml() {
+  if (backupHealth === null || backupHealthPending) {
+    return `<div class="access-section"><h3>Backups</h3>
+      <p class="access-backup">Checking…</p></div>`;
+  }
+  if (backupHealth.status !== 'ok') {
+    return `<div class="access-section"><h3>Backups</h3>
+      <p class="access-backup access-backup-bad">⚠ Backup status unknown — ${escHtml(backupHealth.message || 'no answer')}</p>
+      <p class="access-hint">This says nothing about the backups themselves, only that this device could not ask. Read it as unknown, not as fine.</p></div>`;
+  }
+  if (backupHealth.never) {
+    return `<div class="access-section"><h3>Backups</h3>
+      <p class="access-backup access-backup-bad">⚠ No backup has run yet</p>
+      <p class="access-hint">The nightly export has never completed on this deployment. Run <strong>runNightlyBackup()</strong> once from the Apps Script editor to prove it works — until then there is no copy of the data to fall back on.</p></div>`;
+  }
+  const ok = backupHealth.ok !== false;
+  const counts = `${backupHealth.irs || 0} IRs · ${backupHealth.users || 0} accounts`;
+  const sheet = backupHealth.sheetUrl
+    ? ` · <a href="${escHtml(backupHealth.sheetUrl)}" target="_blank" rel="noopener">open the backup sheet ↗</a>`
+    : '';
+  return `<div class="access-section"><h3>Backups</h3>
+    <p class="access-backup ${ok ? 'access-backup-ok' : 'access-backup-bad'}">
+      ${ok ? '✓' : '⚠'} Last backup: <span class="access-backup-when">${escHtml(backupHealth.at || '—')}</span>
+      (${escHtml(backupHealth.ago || '')})</p>
+    <p class="access-hint">${escHtml(counts)}${sheet}${backupHealth.message ? ' · ' + escHtml(backupHealth.message) : ''}</p>
+    <p class="access-hint">Every night at about 23:40 IST, into <strong>I-PASSBOOK backups</strong> in Drive. 14 daily copies are kept, then one a week, one a month, and one a year forever.</p></div>`;
+}
+
 // ─── TAB 4: which build each account is running ──────────────────────────────
 // The answer to "has everyone picked up the new version?" without asking anyone.
 // It reads the SAME listUsers snapshot the other three tabs read — no extra
@@ -3717,7 +3795,11 @@ function renderVersionsTab() {
   if (!panels) return;
   const users = accessCache.users || [];
   if (!users.length) {
-    panels.innerHTML = '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
+    // The backup line is shown even with no roster: it is about the DEPLOYMENT, not
+    // about the accounts, and on a fresh store "no backup has run yet" is exactly
+    // the thing an admin needs to see.
+    panels.innerHTML = backupHealthHtml() +
+      '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
     return;
   }
 
@@ -3754,6 +3836,7 @@ function renderVersionsTab() {
   }).join('');
 
   panels.innerHTML = `
+    ${backupHealthHtml()}
     <div class="access-section">
       <h3>Who is on which version</h3>
       <p class="access-hint">The build each account last signed in with. This app is

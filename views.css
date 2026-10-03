@@ -1533,6 +1533,14 @@
    that nobody reads a stale roster as the current one. */
 .access-stale { color: var(--ink-gray-4); font-style: italic; }
 .access-error { font-size: var(--text-sm); color: var(--ink-red-7); padding: 0.4rem 0; }
+/* The backup line on the Versions tab. Two states that cannot be confused, and a
+   third that is deliberately NOT either of them: a health line that reads "fine"
+   when the app could not actually ask is worse than having no line at all, so the
+   unknown state wears the same red as a failure and says so in words. */
+.access-backup { font-size: var(--text-sm); color: var(--ink-gray-5); margin: 0 0 0.35rem; }
+.access-backup-when { color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+.access-backup-ok  { color: var(--ink-green-7); font-weight: var(--weight-semibold); }
+.access-backup-bad { color: var(--ink-red-7); font-weight: var(--weight-semibold); }
 .access-add-row { display: flex; gap: 0.5rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
 .access-add-row .form-input { flex: 1; min-width: 160px; }
 .access-add-row .btn { width: auto; flex: 0 0 auto; }

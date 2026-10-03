@@ -123,11 +123,36 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
   admin opens that tab. Nothing pushes. That is the deliberate line — the app has no
   notification channel of its own — but it does mean a failure can sit unnoticed over
   a weekend if nobody opens the admin screen.
-- ❌ **The restore rehearsal is not built yet.** The plan asks for a script that takes
-  a backup folder and proves it can be read back into a store, **on a copy**, so the
-  first real restore is never the rehearsal. Until that exists, `raw/` is a backup
-  that has never been restored — which is a claim, not a fact. This is the next piece
-  of Phase 1.
+- ✅ **The restore rehearsal** (`rehearseRestore()`, built 2026-10-03). It rebuilds a
+  real store from a real backup folder into `_rehearsal/` — a scratch folder inside
+  the backup root, **not named for a date**, so the rotation can never reach it — and
+  then reads it back and prints a verdict (`REHEARSAL PASSED` / `REHEARSAL FAILED`).
+  It is run by hand from the editor. The property that matters is structural: it
+  resolves the backup root and nothing else, so it **cannot** write to `_store/`, and
+  a pinned test forbids any helper it is built from naming a live store path. It
+  catches an archive that holds less than its manifest says, and one holding a file
+  that will not parse. **The finding it was built for:** `sections/index.json` holds
+  **Drive file ids**, so an index copied verbatim names ids that no longer exist —
+  the rehearsal rebuilds it from the restored files and proves every ticket resolves.
+  Mechanism in [04](04 - Backend API Reference.md); procedure in
+  [08](08 - Development Guide.md).
+- ⚠️ **The nightly backup carries the store, not the uploaded evidence.** `raw/` is
+  every file under `_store/` — records, links, hashes, audit and journal. The photos
+  and documents a passbook holds live in the per-IR folders (`IR409/Section …/`)
+  *beside* `_store/`, so a restore from a backup brings back every record and every
+  link but **not the files themselves**. The rehearsal says this out loud in its own
+  report rather than leaving it to be discovered. Those files reach the owner's server
+  by a different road — `Archive IRs`, which is what `CONFIG.ARCHIVE_FOLDER_NAME` is
+  bound to — and Drive's own copy of them is the live one. If that is not enough, the
+  export needs a second pass over the per-IR folders, which is real work and a real
+  cost increase, and has not been started.
+- ⚠️ **The backup folder is `DOMAIN_WITH_LINK`, and a copy of `_store/` is in it.**
+  That sharing is deliberate — the owner has to open a backup from a phone and their
+  server has to fetch it — but it is worth saying out loud that `raw/users.json`
+  (password hashes and salts) and `raw/sessions.json` (live session tokens) therefore
+  travel with it, and `_rehearsal/` adds a second copy. The boundary is the domain
+  rather than the folder. This does not weaken `_store/` itself, which stays
+  `PRIVATE`/`NONE`; it means the backup folder's link is as sensitive as the store.
 - ❌ **Yearly archives of out-of-window IRs are not built.** The rotation keeps
   yearly folders forever, but nothing yet moves an old IR's *section data* into a
   yearly bundle of its own, so the live store still grows with every IR ever raised.

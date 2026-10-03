@@ -96,6 +96,7 @@ self-signup on either door, so there is no captcha or allowlist either. See
 | Backup folder name | `CONFIG.BACKUP_FOLDER_NAME` | `I-PASSBOOK backups` — a **sibling** of `_store/`, inside the same private root, and the one folder in there shared **`DOMAIN_WITH_LINK`** so a backup can be opened from a phone |
 | Backup run budget | `CONFIG.BACKUP_BUDGET_MS` | `240000` (4 min). The Apps Script kill at six minutes leaves **no record at all**, so the run stops itself early, while it can still write `ok: false` and mail the admin |
 | Backup rotation | `CONFIG.BACKUP_KEEP_DAILY` · `_WEEKLY` · `_MONTHLY` | `14` · `8` · `12`, then one **a year forever** |
+| Rehearsal folder name | `REHEARSAL_FOLDER_NAME` | `_rehearsal` — a scratch folder **inside** `I-PASSBOOK backups` where `rehearseRestore()` rebuilds the newest archive and reads it back. Deliberately **not named for a date**, so the rotation skips it; overwritten each run, so it never grows |
 
 `CONFIG.PASSBOOK_SHEET_ID` and `CONFIG.DATA_TAB` are **gone**. The old
 "I-Passbook App Repository" spreadsheet is not read, written or required by

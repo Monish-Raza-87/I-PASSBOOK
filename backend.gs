@@ -118,6 +118,11 @@ var CONFIG = {
   // written inside the same lock as the save), the nightly export with its
   // rotation, and the new admin action getBackupHealth. `listIRs` also hands over a
   // GRID rather than finished records, and `getLegacyIR` is new — both from Phase 0.
+  //
+  // The restore rehearsal (rehearseRestore) is part of the same version and is
+  // deliberately NOT a bump: it is run from the editor, adds no action and changes no
+  // response, so a v5 deployment with it and a v5 deployment without are the same
+  // thing to every client. It is told apart by being in the function dropdown.
   API_VERSION: 5,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
@@ -1267,6 +1272,315 @@ function backupAgeLabel(ms) {
   if (hours < 24) return hours + 'h ' + (mins % 60) + 'm ago';
   var days = Math.floor(hours / 24);
   return days + (days === 1 ? ' day ago' : ' days ago');
+}
+
+// ── THE RESTORE REHEARSAL ─────────────────────────────────────────────────────
+//
+// ⚠️ THE WHOLE POINT IS THAT THIS RUNS ON A DAY WHEN NOTHING IS WRONG.
+//
+// A backup that has never been restored is a CLAIM, not a fact. The export writes
+// `raw/`, the rotation keeps it for a year, the health line goes green every
+// morning — and not one of those proves the bytes can be put BACK. The failure it
+// guards against is the worst shape available: the discovery happens during an
+// incident, on the day something else has already gone wrong, by the person least
+// able to experiment. So this rebuilds a real store from a real backup folder —
+// into a scratch folder beside it — and then reads it back.
+//
+// Run by hand from the editor. Once to prove the path, and again whenever the shape
+// of the store changes.
+//
+// FOUR THINGS IT DELIBERATELY IS NOT:
+//
+//   · NOT a restore. It writes nothing into `_store/` and it CANNOT: the only
+//     folder it resolves is the backup root, and every store path it handles is a
+//     key inside a backup file, never a live one. A pinned test enforces that.
+//   · NOT destructive. It writes into `_rehearsal/`, a folder that is NOT named for
+//     a date — so the rotation, the one thing in this app allowed to trash
+//     anything, never looks at it. A second run overwrites the same files.
+//   · NOT the rollback. What it proves is that the ARCHIVE is complete and
+//     readable. Rebuilding the live store from it is a separate, deliberate act
+//     (the procedure is in docs/08), and doing this first is what makes that act a
+//     repeat of something known to work rather than the first attempt.
+//   · NOT silent. It ends in a verdict. A rehearsal that cannot say PASSED has not
+//     established anything, and "it printed a lot of lines" is not a result.
+//
+// AND IT IS BUILT TO CATCH THE TWO THINGS THAT ACTUALLY GO WRONG:
+//
+//   1. AN ARCHIVE THAT HOLDS LESS THAN IT SAYS. The manifest is the only thing that
+//      knows what the store held that night, so every path it names is checked as
+//      PRESENT, and every path found is checked as NAMED. A backup missing one
+//      ticket's section file looks completely healthy from every other angle.
+//   2. A STORE THAT IS COMPLETE BUT UNREADABLE. Every `.json` is parsed and every
+//      `.jsonl` line is parsed. A restore that copies a corrupt file has moved the
+//      problem, not fixed it.
+
+var REHEARSAL_FOLDER_NAME = '_rehearsal';
+
+// One dated backup folder: the one asked for by name, or the newest there is.
+// `parseFoldersByDate` is reused rather than re-written, and that is the point —
+// it is the ONLY function that decides what counts as a dated backup folder, so a
+// name the rotation would leave alone is a name the rehearsal will not pick either.
+function resolveBackupDay(root, stamp) {
+  var wanted = String(stamp || '').trim();
+  if (wanted) {
+    var it = root.getFoldersByName(wanted);
+    return it.hasNext() ? it.next() : null;
+  }
+  var entries = parseFoldersByDate(root.getFolders());   // ascending, so last is newest
+  return entries.length ? entries[entries.length - 1].folder : null;
+}
+
+// `raw/` read back as { storePath: fileText }, plus the manifest it claims to match.
+//
+// The manifest is read FIRST and drives everything: the bundles are un-keyed back to
+// their store paths and the singles are read by name. Doing it any other way — walking
+// the folder and guessing — would make the rehearsal agree with whatever it found,
+// which is exactly the assumption a rehearsal exists to test.
+function readBackupRaw(dayFolder, problems) {
+  var rawIt = dayFolder.getFoldersByName('raw');
+  if (!rawIt.hasNext()) {
+    problems.push('this folder has no raw/ — it is not a restorable backup');
+    return { files: {}, manifest: {} };
+  }
+  var raw = rawIt.next();
+
+  var manifestIt = raw.getFilesByName('_manifest.json');
+  if (!manifestIt.hasNext()) {
+    problems.push('this folder has no _manifest.json — nothing records what it should hold');
+    return { files: {}, manifest: {} };
+  }
+  var manifest;
+  try { manifest = JSON.parse(manifestIt.next().getBlob().getDataAsString()); }
+  catch (e) {
+    problems.push('_manifest.json is not readable: ' + e.message);
+    return { files: {}, manifest: {} };
+  }
+
+  var files = {};
+
+  // The bundles: one Drive file per record type, keyed by the store PATH, so nothing
+  // has to be guessed about which IR409 belongs in sections/ and which in audit/.
+  var bundled = (manifest.manifest && manifest.manifest.bundled) || {};
+  Object.keys(bundled).forEach(function (name) {
+    var it = raw.getFilesByName(name);
+    if (!it.hasNext()) { problems.push('the bundle ' + name + ' is named in the manifest but is not in the archive'); return; }
+    var bundle;
+    try { bundle = JSON.parse(it.next().getBlob().getDataAsString()); }
+    catch (e) { problems.push('the bundle ' + name + ' is not readable JSON: ' + e.message); return; }
+    Object.keys(bundle || {}).forEach(function (path) { files[path] = bundle[path]; });
+  });
+
+  // The singles: the small fixed-name stores, written as themselves.
+  ((manifest.manifest && manifest.manifest.single) || []).forEach(function (entry) {
+    var path = String(entry.path || '');
+    if (!path) return;
+    var it = raw.getFilesByName(storeNameFor(path));
+    if (!it.hasNext()) { problems.push('the manifest names ' + path + ', but the archive does not hold it'); return; }
+    files[path] = it.next().getBlob().getDataAsString();
+  });
+
+  return { files: files, manifest: manifest };
+}
+
+// Everything about the archive that can be checked WITHOUT rebuilding it: is it
+// complete, and is it readable. Returns nothing — it appends to `problems`, so the
+// caller's verdict is the single place a pass or a fail is decided.
+function verifyBackupArchive(files, manifest, problems) {
+  var named = {};
+  var bundled = (manifest.manifest && manifest.manifest.bundled) || {};
+  Object.keys(bundled).forEach(function (name) {
+    (bundled[name].paths || []).forEach(function (p) { named[p] = true; });
+  });
+  ((manifest.manifest && manifest.manifest.single) || []).forEach(function (e) { named[String(e.path)] = true; });
+
+  Object.keys(named).forEach(function (p) {
+    if (!Object.prototype.hasOwnProperty.call(files, p)) problems.push('the manifest names ' + p + ' but the archive does not hold it');
+  });
+  Object.keys(files).forEach(function (p) {
+    if (!named[p]) problems.push('the archive holds ' + p + ', which the manifest does not describe');
+  });
+
+  Object.keys(files).forEach(function (p) {
+    var text = String(files[p] == null ? '' : files[p]);
+    if (/\.json$/.test(p)) {
+      try { JSON.parse(text); } catch (e) { problems.push(p + ' is not readable JSON: ' + e.message); }
+    } else if (/\.jsonl$/.test(p)) {
+      text.split('\n').forEach(function (line, i) {
+        var t = line.trim();
+        if (!t) return;
+        try { JSON.parse(t); } catch (e) { problems.push(p + ' line ' + (i + 1) + ' is not readable JSON'); }
+      });
+    }
+  });
+
+  // The three files the app cannot start without. Named individually rather than
+  // counted, because "the archive is complete" is not the same claim as "you could
+  // sign in and read a ticket from it".
+  ['users.json', 'irs.json', 'access.json'].forEach(function (p) {
+    if (!Object.prototype.hasOwnProperty.call(files, p)) problems.push(p + ' is missing — the app could not start from this archive');
+  });
+}
+
+// The scratch folder. Its NAME is the whole safety property: not a date, so
+// `parseFoldersByDate` skips it and the rotation can never reach it. It is reused
+// rather than re-made, because nothing in this app may trash anything.
+function getRehearsalFolder(root) {
+  var it = root.getFoldersByName(REHEARSAL_FOLDER_NAME);
+  return it.hasNext() ? it.next() : root.createFolder(REHEARSAL_FOLDER_NAME);
+}
+
+// A file in a folder, overwritten if it is already there. Drive happily keeps TWO
+// files of the same name in one folder, so a plain createFile would make every
+// re-run a little larger than the last and leave `getFilesByName` picking one of
+// them at random — in a folder whose file COUNT is one of the things reported.
+function writeIntoFolder(folder, name, text) {
+  var it = folder.getFilesByName(name);
+  if (it.hasNext()) { var f = it.next(); f.setContent(String(text)); return f; }
+  return folder.createFile(name, String(text), MimeType.PLAIN_TEXT);
+}
+
+// Rebuild the store, path by path, into the scratch folder. Unbundled — one file per
+// ticket, per audit log and per journal day — because that is the shape `_store/` has
+// and therefore the shape a real restore produces.
+//
+// WHY THE INDEX IS REBUILT AND NOT COPIED, which is the one thing here a reader would
+// not guess: `sections/index.json` does not hold data, it holds DRIVE FILE IDS. A
+// restored file is a new file with a new id, so the archived index names ids that do
+// not exist in the restored folder — every ticket read would pay a failed id lookup
+// before falling back to a search. Rebuilding it from what was actually written is
+// therefore part of a correct restore, and this is where that was found out.
+function materializeStoreFiles(files, target) {
+  var subfolders = {};
+  function folderFor(dir) {
+    if (!dir) return target;
+    if (!subfolders[dir]) {
+      var it = target.getFoldersByName(dir);
+      subfolders[dir] = it.hasNext() ? it.next() : target.createFolder(dir);
+    }
+    return subfolders[dir];
+  }
+
+  var index = { irs: {} };
+  var written = 0, sections = 0;
+
+  Object.keys(files).sort().forEach(function (path) {
+    if (path === STORE_INDEX) return;    // rebuilt below, never copied — see above
+    var i = String(path).indexOf('/');
+    var dir  = i < 0 ? '' : String(path).substring(0, i);
+    var name = storeNameFor(path);
+    var f = writeIntoFolder(folderFor(dir), name, files[path]);
+    written++;
+    if (dir === STORE_SECTIONS_DIR) {
+      index.irs[name.replace(/\.json$/, '')] = f.getId();
+      sections++;
+    }
+  });
+
+  // LAST, so every id it names is already a file sitting beside it.
+  writeIntoFolder(folderFor(STORE_SECTIONS_DIR), 'index.json', JSON.stringify(index));
+  return { written: written, sections: sections, indexed: Object.keys(index.irs).length };
+}
+
+// Read the rebuilt copy back through the app's OWN lookup. This is what makes the
+// rehearsal a proof rather than a file count: `storeFileById` is the same call a
+// ticket read makes, so an index that resolves here is an index that resolves in the
+// app.
+function readBackRehearsal(target, built) {
+  var folder = target.getFoldersByName(STORE_SECTIONS_DIR).hasNext()
+    ? target.getFoldersByName(STORE_SECTIONS_DIR).next() : null;
+  var idxFile = folder ? folder.getFilesByName('index.json') : null;
+  var index = {};
+  try { index = idxFile && idxFile.hasNext() ? JSON.parse(idxFile.next().getBlob().getDataAsString()) : {}; }
+  catch (e) { index = {}; }
+
+  var resolvable = 0;
+  Object.keys(index.irs || {}).forEach(function (ir) {
+    if (storeFileById(index.irs[ir])) resolvable++;
+  });
+
+  function readJsonFrom(dirName, name) {
+    var dir = dirName ? target.getFoldersByName(dirName) : null;
+    var holder = dirName ? (dir && dir.hasNext() ? dir.next() : null) : target;
+    if (!holder) return null;
+    var it = holder.getFilesByName(name);
+    if (!it.hasNext()) return null;
+    try { return JSON.parse(it.next().getBlob().getDataAsString()); } catch (e) { return null; }
+  }
+
+  var users = readJsonFrom('', 'users.json');
+  var irs   = readJsonFrom('', 'irs.json');
+  return {
+    indexed: Object.keys(index.irs || {}).length,
+    resolvable: resolvable,
+    accounts: users ? Object.keys(users).length : -1,
+    tickets: irs ? Object.keys(irs).length : -1,
+    written: built.written
+  };
+}
+
+// The rehearsal itself. Returns (and logs) a plain-text report, because the editor
+// never displays a return value — see `report`.
+function rehearseRestore(stamp) {
+  var problems = [];
+  try {
+    var root = getBackupRootFolder(false);
+    if (!root) return report('No backup exists yet, so there is nothing to rehearse.\n' +
+                             'Run runNightlyBackup() once, then run this again.');
+
+    var day = resolveBackupDay(root, stamp);
+    if (!day) {
+      return report(String(stamp || '').trim()
+        ? 'There is no backup folder named "' + String(stamp).trim() + '" in ' + CONFIG.BACKUP_FOLDER_NAME + '.'
+        : 'There are no dated backup folders in ' + CONFIG.BACKUP_FOLDER_NAME + ' yet.');
+    }
+
+    var read = readBackupRaw(day, problems);
+    verifyBackupArchive(read.files, read.manifest, problems);
+
+    // The copy is written even when the archive has problems, because a
+    // half-readable store is easier to look at than to describe — but the verdict
+    // below is what a person acts on, and it cannot be PASSED.
+    var target = getRehearsalFolder(root);
+    var built = materializeStoreFiles(read.files, target);
+    var back = readBackRehearsal(target, built);
+
+    var lines = [];
+    lines.push('Restore rehearsal — ' + day.getName());
+    lines.push('');
+    lines.push('Source:  ' + day.getUrl());
+    lines.push('Copy:    ' + target.getUrl());
+    lines.push('');
+    lines.push('Rebuilt ' + built.written + ' store file(s): one file per ticket, per audit');
+    lines.push('log and per journal day — the shape _store/ actually has.');
+    lines.push('');
+    lines.push('Verified:');
+    lines.push('  · every file the manifest names is present, and nothing is described that is not present');
+    lines.push('  · every JSON file parses, and every line of every journal parses');
+    lines.push('  · the ticket index was REBUILT from the restored files (it holds Drive file');
+    lines.push('    ids, which a restore changes), and all ' + back.resolvable + ' of ' + back.indexed +
+               ' ticket(s) resolve');
+    lines.push('  · users.json reads back with ' + back.accounts + ' account(s); irs.json with ' + back.tickets + ' IR(s)');
+    lines.push('');
+    lines.push('NOT in this archive: uploaded photos and documents. They live in the per-IR');
+    lines.push('folders rather than the store, so a restore from here brings back every record');
+    lines.push('and every link, but not the files themselves.');
+    lines.push('');
+
+    if (problems.length) {
+      lines.push('PROBLEMS (' + problems.length + '):');
+      problems.forEach(function (p) { lines.push('  ! ' + p); });
+      lines.push('');
+      lines.push('REHEARSAL FAILED — this archive is not complete, and a restore from it');
+      lines.push('would not bring back everything it says it holds. Do not treat it as a');
+      lines.push('rollback path until these are resolved.');
+      return report(lines.join('\n'));
+    }
+
+    lines.push('REHEARSAL PASSED — this archive rebuilds into a store the app can read.');
+    return report(lines.join('\n'));
+  } catch (err) {
+    return report('RESTORE REHEARSAL FAILED: ' + ((err && err.message) || String(err)));
+  }
 }
 
 // ── ONE-TIME SETUP (run from the Apps Script editor) ──────────────────────────

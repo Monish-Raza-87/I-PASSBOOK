@@ -1026,6 +1026,9 @@ Once, to stop the first sign-in of the day paying the cold start:
 
 Once, to turn on the nightly backup, and to prove it works:
   installBackupTrigger() → runNightlyBackup()
+
+Then, to prove a backup can be read back into a store:
+  rehearseRestore()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -1051,6 +1054,7 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `removeKeepWarmTrigger()` | idempotent | Deletes only the `keepBackendWarm` triggers — matched by handler name, so it can never take the nightly archive sweep with it. Installed-but-unwanted is a state worth being able to leave |
 | `runNightlyBackup()` | idempotent, safe by day | The export itself: collects the store, writes one dated folder into `I-PASSBOOK backups`, rotates old folders out, and records the outcome in `_store/backup.json`. Run by hand to prove it works and to give the app a "last backup" line to show. Running it twice on the same day **overwrites that day's folder**, never makes a second one |
 | `installBackupTrigger()` | idempotent | Creates the **daily** ~23:40 IST time-driven trigger that calls `runNightlyBackup()`. A second run does not create a second trigger. It prints, in its own output, the command to run once by hand — because an installed trigger that has never fired leaves the health line reading "never", and the only way to tell a working trigger from an untested one is to run it once |
+| `rehearseRestore(stamp?)` | **writes to a copy only** | Rebuilds a store from a dated backup folder (the newest, or the one named) into `_rehearsal/`, reads it back, and prints `REHEARSAL PASSED` or `REHEARSAL FAILED`. It resolves the backup root and nothing else, so it **cannot** touch `_store/`, and `_rehearsal` is not named for a date, so the rotation can never reach it. Run it after the first `runNightlyBackup()`, and again whenever the store's shape changes |
 
 ### Archiving, and the hazard that had to be closed first
 
@@ -1170,6 +1174,44 @@ Rewritten at the end of every run, whether it succeeded or failed. The frontend 
 **three** states and the third is the important one: healthy, failed, and
 **unknown** — and unknown wears the failure red and says, in words, that it knows
 nothing. See [`getBackupHealth`](#getbackuphealth).
+
+### The restore rehearsal — `rehearseRestore()`
+
+**A backup that has never been restored is a claim, not a fact.** Everything else in
+Phase 1 makes a copy; this is the only part that proves the copy can be put *back*.
+It is run by hand from the Apps Script editor — once to prove the path, and again
+whenever the shape of the store changes — and the procedure is in
+[08 — Development Guide](08 - Development Guide.md).
+
+It takes one dated backup folder (by name, or the newest there is), reads its `raw/`
+**through `_manifest.json`**, and rebuilds the store — unbundled, one file per
+ticket, per audit log and per journal day — into `_rehearsal/`, a scratch folder
+**inside the backup root**. It then reads that copy back and prints a verdict.
+
+Four properties are structural rather than promised, and pinned by tests:
+
+| Property | How it is guaranteed |
+|---|---|
+| **It cannot reach the live store** | The only folder it resolves is the backup root; every store path it handles is a *key inside a backup file*. No helper it is built from may name `getStoreFolder`, `findStoreFile`, `getStoreSubfolder`, `writeJson` or `readJson`. |
+| **It cannot delete anything** | `_rehearsal` is **not named for a date**, so `parseFoldersByDate` skips it and `pruneBackups` — the only thing allowed to trash — cannot reach it. A re-run overwrites the same files. |
+| **It is not a restore** | Rebuilding `_store/` from an archive is a separate, deliberate act. This makes that act a repeat of something known to work rather than the first attempt. |
+| **It ends in a verdict** | `REHEARSAL PASSED` or `REHEARSAL FAILED`. A rehearsal that cannot say which has established nothing. |
+
+**The ticket index is REBUILT, not copied** — and this is the finding the rehearsal
+was built for. `sections/index.json` does not hold data; it holds **Drive file ids**.
+A restored file is a new file with a new id, so an index copied verbatim names ids
+that do not exist in the restored folder, and every ticket read pays a failed id
+lookup before falling back to a name search. The index is therefore written **last**,
+from the ids of the files actually written beside it.
+
+**What it checks, and the two failures it is aimed at.** The manifest is the only
+thing that knows what the store held that night, so every path it names is checked as
+present and every path found is checked as named — a backup quietly missing one
+ticket's section file looks perfectly healthy from every other angle. And every
+`.json` is parsed and every `.jsonl` line is parsed: a restore that copies a corrupt
+file has moved the problem, not fixed it. The report ends by naming the one thing the
+archive does **not** hold — the uploaded photos and documents, which live in the
+per-IR folders rather than the store (see [07](07 - Known Issues & TODO.md)).
 
 ---
 

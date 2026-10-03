@@ -90,6 +90,11 @@ class FakeFolder {
 
   getName() { return this.name; }
   getId() { return this.id; }
+  // A real Drive Folder carries its own web address, and the restore rehearsal
+  // prints it so the owner can open the copy it made. Modelled rather than dropped:
+  // a fake that is missing a member the platform HAS forces production code to not
+  // use it, which is the tail wagging the dog.
+  getUrl() { return 'https://drive.google.com/drive/folders/' + this.id; }
   setSharing(access, perm) { this.sharing = access + '/' + perm; }
 
   getFoldersByName(name) {
@@ -2777,6 +2782,124 @@ const oldestKept = rot.kept.slice().sort()[0];
 r.ok('...and it reaches far past the daily window — the oldest kept has 60+ newer folders than it',
   datedBefore.indexOf(oldestKept) <= datedBefore.length - 60,
   { oldestKept: oldestKept, newerThanIt: datedBefore.length - 1 - datedBefore.indexOf(oldestKept) });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE RESTORE REHEARSAL — a backup that has never been restored is a claim
+// ══════════════════════════════════════════════════════════════════════════════
+// The export writing a folder, and the health line going green, and the rotation
+// keeping a year of it — none of those prove the bytes can be put BACK. This drives
+// the real function over the real archive the run above produced.
+//
+// The first assertion is the one the whole design rests on: it rebuilds into a COPY.
+// Everything else is about whether the copy is any good.
+
+r.head('the restore rehearsal rebuilds the store from an archive, into a copy');
+
+// Captured BEFORE it runs. "It wrote to a copy" is a claim about the LIVE store, and
+// only a before/after can settle it.
+const liveUsers = JSON.stringify(fresh('users.json'));
+const liveIR409 = JSON.stringify(fresh('sections/IR409.json'));
+const liveStoreNames = JSON.stringify(drain(store.getFiles()).map(f => f.getName()).sort());
+
+const reh = ctx.rehearseRestore();
+r.ok('it ends in a VERDICT, because "it printed a lot of lines" is not a result',
+  /REHEARSAL PASSED/.test(reh), reh.split('\n').slice(-1)[0]);
+r.ok('...and names both the archive it read and the copy it made',
+  /Source:\s+https:/.test(reh) && /Copy:\s+https:/.test(reh));
+
+const rehFolder = bRoot.getFoldersByName('_rehearsal').next();
+r.ok('THE COPY IS NOT _store/ — the live store is never the thing being written',
+  !!rehFolder && rehFolder.getName() !== ctx.CONFIG.STORE_FOLDER_NAME, rehFolder.getName());
+r.ok('...and its name is NOT a date, so the rotation — the only thing that trashes — cannot reach it',
+  !/^\d{4}-\d{2}-\d{2}$/.test(rehFolder.getName()), rehFolder.getName());
+r.ok('THE LIVE STORE IS BYTE-FOR-BYTE WHAT IT WAS — nothing read a record out of it',
+  JSON.stringify(fresh('users.json')) === liveUsers &&
+  JSON.stringify(fresh('sections/IR409.json')) === liveIR409 &&
+  JSON.stringify(drain(store.getFiles()).map(f => f.getName()).sort()) === liveStoreNames);
+
+// The bundles are the export's scaling fix; unbundling them is the restore's job.
+// A restore that cannot find IR409.json again is a restore that lost the ticket.
+r.ok('sections/audit/journal are UNBUNDLED back into their own folders',
+  rehFolder.getFoldersByName('sections').next().getFilesByName('IR409.json').hasNext() &&
+  rehFolder.getFoldersByName('audit').next().getFilesByName('IR409.jsonl').hasNext() &&
+  rehFolder.getFoldersByName('journal').next().getFilesByName(journalDay + '.jsonl').hasNext(),
+  drain(rehFolder.getFoldersByName('sections').next().getFiles()).map(f => f.getName()));
+r.ok('...and the restored ticket holds exactly what the live one holds',
+  JSON.stringify(JSON.parse(fileText(rehFolder.getFoldersByName('sections').next()
+    .getFilesByName('IR409.json').next()))) === liveIR409);
+
+// The finding that made the rehearsal worth building. `sections/index.json` holds
+// DRIVE FILE IDS, and a restored file is a new file with a new id — so an index
+// copied verbatim names ids that do not exist in the restored folder, and every
+// ticket read pays a failed lookup before falling back to a search.
+const rehIndex = JSON.parse(fileText(rehFolder.getFoldersByName('sections').next()
+  .getFilesByName('index.json').next()));
+r.ok('THE TICKET INDEX IS REBUILT, not copied — it names a file in the COPY',
+  !!rehIndex.irs.IR409 && rehIndex.irs.IR409 !== fresh('sections/index.json').irs.IR409,
+  { copy: rehIndex.irs.IR409, live: fresh('sections/index.json').irs.IR409 });
+r.ok('...and every id it names resolves through the app\'s OWN lookup, not a lookup of its own',
+  !!ctx.storeFileById(rehIndex.irs.IR409), rehIndex.irs.IR409);
+r.ok('...which is what the report claims, in numbers',
+  /all \d+ of \d+ ticket\(s\) resolve/.test(reh),
+  (reh.match(/all \d+ of \d+ ticket\(s\) resolve/) || [''])[0]);
+r.ok('it reads the restored accounts and IRs back out of the copy',
+  /users\.json reads back with \d+ account\(s\); irs\.json with \d+ IR\(s\)/.test(reh));
+r.ok('AND IT NAMES WHAT THE ARCHIVE DOES NOT HOLD — the uploaded evidence lives outside the store',
+  /NOT in this archive: uploaded photos and documents/.test(reh));
+
+r.head('an archive that holds less than it says is CAUGHT — not during an incident');
+// The manifest is the only thing that knows what the store held that night, so the
+// failure to reproduce is a backup that is quietly incomplete: it looks fine from
+// every other angle, including the health line.
+const bundleFile = day.getFoldersByName('raw').next().getFilesByName('sections.json').next();
+const goodBundle = bundleFile.content;
+const missingPath = Object.keys(JSON.parse(goodBundle))
+  .filter(p => /^sections\/IR\d+\.json$/.test(p))[0];
+r.ok('the fixture found a real section file to remove, so the test is not vacuous', !!missingPath, missingPath);
+
+const dropped = JSON.parse(goodBundle);
+delete dropped[missingPath];
+bundleFile.content = JSON.stringify(dropped);
+const rehMissing = ctx.rehearseRestore();
+r.ok('the rehearsal FAILS rather than reporting a healthy copy',
+  /REHEARSAL FAILED/.test(rehMissing) && !/REHEARSAL PASSED/.test(rehMissing),
+  rehMissing.split('\n').slice(-3).join(' '));
+r.ok('...and it names the EXACT path the archive lost',
+  rehMissing.indexOf(missingPath) > -1, missingPath);
+
+// A file that is present but unreadable is the other half: a restore that copies it
+// has moved the problem rather than fixed it.
+const corrupt = JSON.parse(goodBundle);
+corrupt['sections/index.json'] = '{ not json';
+bundleFile.content = JSON.stringify(corrupt);
+const rehCorrupt = ctx.rehearseRestore();
+r.ok('a CORRUPT file is caught as well as a missing one',
+  /REHEARSAL FAILED/.test(rehCorrupt) && /not readable JSON/.test(rehCorrupt));
+bundleFile.content = goodBundle;
+
+r.head('it refuses plainly when there is nothing to rehearse');
+r.ok('a stamp that names no backup folder is refused BY NAME',
+  /no backup folder named "1999-01-01"/.test(ctx.rehearseRestore('1999-01-01')),
+  ctx.rehearseRestore('1999-01-01'));
+(function () {
+  const realRoot = ROOT.getFoldersByName.bind(ROOT);
+  ROOT.getFoldersByName = function (name) {
+    return name === ctx.CONFIG.BACKUP_FOLDER_NAME ? iter([]) : realRoot(name);
+  };
+  const none = ctx.rehearseRestore();
+  ROOT.getFoldersByName = realRoot;
+  r.ok('with no backups at all it says so, and names the function that makes one',
+    /No backup exists yet/.test(none) && /runNightlyBackup\(\)/.test(none), none);
+})();
+
+// A re-run must overwrite. Drive keeps two files of the same name in one folder, and
+// a fresh createFile each run would make the copy grow a little every time — in a
+// folder whose file count is one of the things the report is about.
+const rehSectionsCount = () => drain(rehFolder.getFoldersByName('sections').next().getFiles()).length;
+const firstRunCount = rehSectionsCount();
+ctx.rehearseRestore();
+r.ok('a second run OVERWRITES the copy instead of piling up a second set of files',
+  rehSectionsCount() === firstRunCount, { first: firstRunCount, second: rehSectionsCount() });
 
 r.head('the nightly trigger is installed by hand, and installing twice leaves ONE');
 ctx.installBackupTrigger();

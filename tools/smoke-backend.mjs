@@ -2476,4 +2476,59 @@ r.ok('it runs at 23:40, so "last night" and the folder name agree',
 r.ok('and it tells the operator to run the export once by hand to prove it',
   /runNightlyBackup\(\) once NOW/.test(ibt));
 
+r.head('the restore rehearsal rebuilds a COPY, and can never reach the live store');
+// A rehearsal that wrote into `_store/` would not be a rehearsal — it would be the
+// restore, performed on the one day nobody asked for it. So "it only touches the
+// backup root" is the load-bearing property, and it is enforced structurally rather
+// than trusted: none of the helpers it is built from may name a live store path.
+const rr = fnBody('rehearseRestore');
+const REH_HELPERS = ['resolveBackupDay', 'readBackupRaw', 'verifyBackupArchive',
+                     'getRehearsalFolder', 'writeIntoFolder', 'materializeStoreFiles', 'readBackRehearsal'];
+r.ok('there is a rehearsal, it is run from the editor, and it is NOT a routed action',
+  /function rehearseRestore\(/.test(code) && !/\brehearseRestore:/.test(code),
+  (code.match(/[^\n]*rehearseRestore[^\n]*/g) || []).slice(0, 2));
+r.ok('it resolves the BACKUP root, and no helper names a live store path',
+  /getBackupRootFolder\(false\)/.test(rr) &&
+  REH_HELPERS.every(f => !/getStoreFolder\(|findStoreFile\(|getStoreSubfolder\(|writeJson\(|readJson\(/.test(fnBody(f))),
+  REH_HELPERS.filter(f => /getStoreFolder\(|findStoreFile\(|getStoreSubfolder\(|writeJson\(|readJson\(/.test(fnBody(f))));
+r.ok('it ends in a VERDICT — a rehearsal that cannot say PASSED has established nothing',
+  /REHEARSAL PASSED/.test(rr) && /REHEARSAL FAILED/.test(rr));
+r.ok('...and it catches a throw rather than half-reporting one',
+  /catch \(err\)/.test(rr) && /RESTORE REHEARSAL FAILED/.test(rr));
+
+r.ok('the scratch folder is NOT named for a date, so the rotation can never reach it',
+  /var REHEARSAL_FOLDER_NAME = '_rehearsal';/.test(code) &&
+  !/\d{4}|\bdate\b/i.test(fnBody('getRehearsalFolder')),
+  (code.match(/var REHEARSAL_FOLDER_NAME[^\n]*/) || [''])[0]);
+r.ok('the newest-dated-folder rule is REUSED, so "a dated backup" has one definition',
+  /parseFoldersByDate\(root\.getFolders\(\)\)/.test(fnBody('resolveBackupDay')),
+  (fnBody('resolveBackupDay').match(/[^\n]*parseFoldersByDate[^\n]*/) || [''])[0]);
+
+// The finding the rehearsal exists for: `sections/index.json` holds Drive file IDs,
+// and a restored file is a NEW file with a new id. Copying the index across hands
+// back a store where every ticket read fails an id lookup first.
+r.ok('THE TICKET INDEX IS REBUILT FROM THE RESTORED FILES, never copied',
+  /path === STORE_INDEX\) return;/.test(fnBody('materializeStoreFiles')) &&
+  /writeIntoFolder\(folderFor\(STORE_SECTIONS_DIR\), 'index\.json'/.test(fnBody('materializeStoreFiles')),
+  'a copied index names file ids that do not exist in the restored folder');
+r.ok('...and it is written LAST, so every id it names already exists beside it',
+  /writeIntoFolder\(folderFor\(STORE_SECTIONS_DIR\), 'index\.json'/.test(fnBody('materializeStoreFiles')) &&
+  fnBody('materializeStoreFiles').lastIndexOf('index.json') > fnBody('materializeStoreFiles').indexOf('.sort()'));
+
+r.ok('it checks the archive against its own manifest, in BOTH directions',
+  fnBody('verifyBackupArchive').indexOf('but the archive does not hold it') > -1 &&
+  fnBody('verifyBackupArchive').indexOf('which the manifest does not describe') > -1,
+  'a backup missing one ticket is invisible from every other angle');
+r.ok('...and it PARSES every file rather than only counting them',
+  /JSON\.parse\(text\)/.test(fnBody('verifyBackupArchive')) &&
+  /\.jsonl\$/.test(fnBody('verifyBackupArchive')));
+r.ok('...and it names the three stores the app cannot start without',
+  /'users\.json', 'irs\.json', 'access\.json'/.test(fnBody('verifyBackupArchive')));
+r.ok('it reads the rebuilt copy back through the app\'s OWN file lookup',
+  /storeFileById\(/.test(fnBody('readBackRehearsal')),
+  'a proof that used its own lookup would be checking itself');
+r.ok('a re-run overwrites rather than creating a second file of the same name',
+  /getFilesByName\(name\)/.test(fnBody('writeIntoFolder')) && /setContent\(String\(text\)\)/.test(fnBody('writeIntoFolder')),
+  'Drive keeps two files of one name in a folder, so a plain create grows the copy every run');
+
 r.finish();

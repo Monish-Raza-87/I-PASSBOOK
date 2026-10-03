@@ -263,6 +263,7 @@ There is no `APP_DATA` tab any more. The equivalent layout is:
 | `AUDIT_LOG`, matched by scanning a column | `audit/IR409.jsonl`, one JSON object per line, **one file per ticket** |
 | `APP_DATA_BACKUP_<date>` tab | `backups/<store>-<yyyy-MM-dd-HHmmss>.json`, always a **new file** |
 | — (nothing kept a history of *writes*) | `journal/YYYY-MM-DD.jsonl`, one line per write, **one file per day**, appended **inside the lock of the write it describes**. An **index, never a copy** — who, when, which action, which IR, which section, and the key *names*, never the values |
+| — (a Drive file was the only copy) | `I-PASSBOOK backups/<date>/` — the nightly export, a sibling of `_store/`: `raw/` is the restore source, `csv/` and a Sheet are for reading. `rehearseRestore()` rebuilds a store from `raw/` **into a copy** and proves it reads back |
 | a row has no name, so its fields are addressed by **position** (`userCol`, `USER_HEADS`, `getRange(i+1, 4)`) | a record has names, so every read-modify-write is a **key** assignment |
 
 Three consequences worth remembering:

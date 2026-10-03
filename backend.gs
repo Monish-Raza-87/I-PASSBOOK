@@ -2523,6 +2523,7 @@ function doGet(e) {
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
       getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId); },
       listLegacyIRs: function () { return listLegacyIRs(); },
+      getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber); },
       listUsers:     function () { return listUsers(email); },
     };
     result = authed[action] ? authed[action]() : unknownAction(action);
@@ -4171,15 +4172,30 @@ function getAuditLog(irNumber, limit, fieldId) {
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ACTION: listLegacyIRs
-// Enumerates the per-IR tabs in the legacy I-PASSBOOK workbook (tabs named like
-// "IR310 | S25P023"). Returns each IR's number, full tab label, and ready-made
-// embed/open URLs so the frontend can show the legacy record read-only. Tabs not
-// matching /^IR\d+/ (Flow chart, index, format, etc.) are skipped. Token-gated.
+// The INDEX of the legacy I-PASSBOOK workbook: one row per per-IR tab (tabs named
+// like "IR310 | S25P023"), each carrying its number, full tab label and a Sheets
+// link. Tabs not matching /^IR\d+/ (Flow chart, index, format, etc.) are skipped.
+// Token-gated.
+//
+// This is an INDEX and no longer carries an `embedUrl`, on purpose (2026-10-03).
+// The embed URL pointed Google's own `/preview` endpoint at this workbook, which
+// only works while the FILE is link-shared — and link-sharing is per FILE, not per
+// tab, so it was what forced every legacy record to be readable by anyone holding
+// the address, which is written in app.js and app.js is in a public repository.
+// The address is out of the frontend now and the workbook is restricted, so the
+// frame can never load again; dropping the URL is what stops it coming back. The
+// records themselves arrive through getLegacyIR below, one at a time, read by this
+// script as the file's owner.
+//
+// The whole-workbook `workbookUrl` is still returned, because the frontend offers
+// it as a link — not a frame. It opens only for a Google account that has been
+// granted access to the file.
 // ──────────────────────────────────────────────────────────────────────────────
 function listLegacyIRs() {
   var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
   var sheets = ss.getSheets();
   var sheetId = CONFIG.LEGACY_SHEET_ID;
+  var workbookUrl = 'https://docs.google.com/spreadsheets/d/' + sheetId + '/edit';
   var records = [];
   for (var i = 0; i < sheets.length; i++) {
     var name = sheets[i].getName();
@@ -4190,14 +4206,62 @@ function listLegacyIRs() {
       irNumber:  'IR' + m[1],
       label:     name,
       gid:       gid,
-      embedUrl:  'https://docs.google.com/spreadsheets/d/' + sheetId + '/preview?rm=minimal&gid=' + gid + '&single=true',
       openUrl:   'https://docs.google.com/spreadsheets/d/' + sheetId + '/edit#gid=' + gid
     });
   }
   records.sort(function (a, b) {
     return parseInt(b.irNumber.replace(/\D/g, ''), 10) - parseInt(a.irNumber.replace(/\D/g, ''), 10);
   });
-  return { status: 'ok', records: records };
+  return { status: 'ok', workbookUrl: workbookUrl, records: records };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ACTION: getLegacyIR
+// ONE legacy record, as the grid of cells its tab displays. This is the read that
+// replaces the embedded workbook: the app renders it read-only, so the record is
+// still reachable inside the app even though the file is restricted and the browser
+// can no longer open it.
+//
+// ONE TAB AT A TIME, never the workbook. This workbook has hundreds of tabs, and
+// reading them all in a single call would be a slow, heavy answer to a question
+// nobody asked — the user opened one record. It also keeps the cost proportional
+// to what is looked at, which is the same reason listIRs only ever returns the one
+// input tab.
+//
+// getDisplayValues, not getValues, for the same reason it is used in listIRs: the
+// strings the sheet shows are what a person expects to read, and a Date object
+// through JSON arrives in a shape the renderer would have to guess at.
+// ──────────────────────────────────────────────────────────────────────────────
+function getLegacyIR(irNumber) {
+  var target = String(irNumber == null ? '' : irNumber).trim();
+  var digits = target.replace(/^IR\s*/i, '');
+  if (!/^\d+$/.test(digits)) throw new Error('getLegacyIR needs an IR number (got "' + target + '").');
+  var want = parseInt(digits, 10);
+
+  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    var m = name.match(/^IR\s*(\d+)/i);
+    if (!m || parseInt(m[1], 10) !== want) continue;
+    var tab = sheets[i];
+    var lastRow = tab.getLastRow(), lastCol = tab.getLastColumn();
+    var grid = (lastRow < 1 || lastCol < 1)
+      ? []
+      : tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+    return {
+      status:   'ok',
+      irNumber: 'IR' + m[1],
+      label:    name,
+      gid:      tab.getSheetId(),
+      // The direct link is offered alongside the rendered copy: for the few people
+      // who have been granted access to the file, the original is one tap away.
+      openUrl:  'https://docs.google.com/spreadsheets/d/' + CONFIG.LEGACY_SHEET_ID +
+                '/edit#gid=' + tab.getSheetId(),
+      grid:     grid
+    };
+  }
+  return { status: 'error', message: 'No legacy record found for ' + target + '.' };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

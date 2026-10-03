@@ -145,3 +145,49 @@ console.log(outFile);
 console.log(`  insights ${insights.length} bytes · banner ${banner.length} · list ${list.length}`);
 console.log(doorFile);
 console.log(`  door ${doorBlock.length} bytes`);
+
+// ── The legacy record card, read-only ─────────────────────────────────────────
+// The rows come from the app's OWN legacyGridHtml — the one function that turns a
+// sheet grid into record markup — so what is measured is the app's output and the
+// app's cascade, not a mock-up of them. The card shell around it is the same shape
+// openLegacyRecord builds. The grid is a spread, not a tidy record: a single-cell
+// banner, a multi-column row, and a description long enough to force wrapping,
+// because those are the shapes that decide whether a phone scrolls sideways.
+const LG = loadApp(`legacyGridHtml`);
+const LEGACY_GRID = [
+  ['I-PASSBOOK'],
+  ['', ''],
+  ['IR Number', 'IR310'],
+  ['Drone Serial No', 'S25P023'],
+  ['Date of Incident', '2025-03-14'],
+  ['Customer / Operator', 'SREENIVAS PAI', '', '7828148298'],
+  ['Problem Description', 'Drone lost GPS lock at 40m AGL during a spray run; RTL triggered and it landed hard on the left arm. Arm cracked, two propellers broken.'],
+  ['Action Taken', 'Arm replaced, GPS module reseated, test flown two packs.'],
+  ['', '', ''],
+];
+const legacyRows = LG.legacyGridHtml(LEGACY_GRID);
+const legacyFile = path.join(outDir, 'legacy.html');
+fs.writeFileSync(legacyFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>legacy record</title>
+${css}
+</head><body>
+<div class="inward-options-modal" id="legacy-modal">
+  <div class="legacy-card legacy-card-record">
+    <div class="legacy-head">
+      <div>
+        <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
+        <div class="legacy-sub">IR310 | S25P023 · read-only</div>
+      </div>
+      <button type="button" class="inward-options-close" title="Close">&times;</button>
+    </div>
+    <div class="legacy-record">
+${legacyRows}
+      <p class="legacy-link-note">The original is in a restricted workbook; this copy is read-only.
+        <a href="#" class="url-open-btn">Open in Google Sheets ↗</a></p>
+    </div>
+  </div>
+</div>
+</body></html>`);
+console.log(legacyFile);
+console.log(`  legacy ${legacyRows.length} bytes of rows`);

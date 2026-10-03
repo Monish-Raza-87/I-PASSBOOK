@@ -21,8 +21,11 @@
 **No spreadsheet holds app data.** The app's own store is JSON files in Drive —
 accounts, sessions, the access matrix, every saved section, the audit trail — under
 `_store/` in `CONFIG.DRIVE_ROOT_FOLDER_ID`. The only two Sheets the backend touches
-are read-only inputs: the client's `Form Responses` tab, and the legacy workbook for
-the 🏛 Legacy view. See [08 — Development Guide](08 - Development Guide.md) for the
+are read-only inputs, and **the browser never touches either of them** (2026-10-03):
+the client's `Form Responses` tab (`listIRs` → a grid the frontend maps) and the
+legacy workbook (`listLegacyIRs` for the index, `getLegacyIR` for one record at a
+time). Both files are **restricted**, so only the backend — running as their owner —
+can read them. See [08 — Development Guide](08 - Development Guide.md) for the
 store layout.
 
 ## App Screens

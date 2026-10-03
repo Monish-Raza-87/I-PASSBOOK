@@ -843,68 +843,55 @@ r.ok('every lowercase survivor is a deliberate identifier', (() => {
   const bad = appCode.split('\n').filter(l => /ticket/i.test(l) && !allowed.test(l));
   return bad.length === 0;
 })(), appCode.split('\n').filter(l => /ticket/i.test(l)).slice(0, 8));
-// ── The legacy archive: the wait, said out loud ───────────────────────────────
-// The owner reported the archive as slow and asked for it to SAY it is loading. The
-// app makes no request for this view — Google renders a ~450-tab workbook in an
-// iframe — so there is nothing here to speed up; what was wrong was the silence, and
-// a permanent "can't see it?" note that read as broken while it was merely slow.
-r.head('the legacy archive says it is loading, and only cries help when it is');
-const L = loadApp(`legacyTick, LEGACY_SLOW_MS, openLegacyModal, closeLegacyModal, _legacyLoaded`);
-r.ok('the panel is announced to a screen reader and names the archive',
-  /class="legacy-loading" id="legacy-loading" role="status" aria-live="polite"/.test(appCode) &&
-  /Loading the archive…/.test(appCode), (appCode.match(/.*legacy-loading".*/) || [])[0]);
-r.ok('a spinner, and the note that explains the scale of the wait',
-  /class="legacy-spinner"/.test(appCode) && /the old I-PASSBOOK workbook/.test(appCode));
-r.ok('the elapsed count reads in seconds, and rolls into minutes', (() => {
-  const el = { textContent: '' };
-  const modal = { querySelector: () => el };
-  const t0 = Date.now();
-  L.legacyTick(modal, t0);
-  const zero = el.textContent;
-  L.legacyTick(modal, t0 - 5000);
-  const five = el.textContent;
-  L.legacyTick(modal, t0 - 65000);
-  const min = el.textContent;
-  return zero === '0s' && five === '5s' && min === '1m 5s';
-})(), 'expected 0s / 5s / 1m 5s');
-r.ok('and it survives a missing element rather than throwing mid-count', (() => {
-  try { L.legacyTick({ querySelector: () => null }, Date.now()); return true; } catch (e) { return 'threw: ' + e.message; }
-})());
-r.ok('the "open in Sheets" fallback starts hidden — a slow load is not a failure',
-  /id="legacy-fallback" style="display:none"/.test(appCode));
-r.ok('and is revealed only after a real timeout', (() => {
-  const m = /Date\.now\(\) - startedAt < LEGACY_SLOW_MS\) return;/.test(appCode);
-  const reveal = /if \(fb\) fb\.style\.display = 'flex';/.test(appCode);
-  return m && reveal && L.LEGACY_SLOW_MS >= 10000;
-})(), L.LEGACY_SLOW_MS);
-r.ok('the panel goes away on the frame\'s OWN load event, not on a guessed delay',
-  /frame\.addEventListener\('load', done, \{ once: true \}\)/.test(appCode) &&
-  /if \(load\) load\.remove\(\);/.test(appCode));
-r.ok('the archive frame no longer waits to be told it is near the viewport', (() => {
-  const tag = (appCode.match(/<iframe src="\$\{embedUrl\}"[\s\S]{0,200}?>/) || [''])[0];
-  return tag !== '' && !/loading=/.test(tag);
-})(), (appCode.match(/<iframe src="\$\{embedUrl\}"[\s\S]{0,200}?>/) || [''])[0]);
-// Evidence thumbnails keep their lazy loading — they really do scroll into view.
-r.ok('...while the evidence thumbnails keep theirs, which is what lazy is for',
-  /class="evidence-thumb" alt="evidence" loading="lazy"/.test(appCode));
-r.ok('a loaded archive is KEPT, so reopening it is instant rather than re-rendered', (() => {
-  const reopen = /_legacyLoaded\.modal && _legacyLoaded\.key === key/.test(appCode);
-  const kept   = /_legacyLoaded = \{ key, modal \};/.test(appCode);
-  return reopen && kept;
-})(), (appCode.match(/.*_legacyLoaded.*/g) || []).map(l => l.trim()));
-r.ok('closing detaches the frame but does NOT throw the loaded one away', (() => {
-  const from = appCode.indexOf('function closeLegacyModal()');
-  const body = appCode.slice(from, from + 400);
-  return /clearInterval\(_legacyTimer\)/.test(body) && !/_legacyLoaded\s*=/.test(body);
-})(), appCode.slice(appCode.indexOf('function closeLegacyModal()'), appCode.indexOf('function closeLegacyModal()') + 260));
-r.ok('a key that does not match never reattaches the wrong archive',
-  /_legacyLoaded\.key === key/.test(appCode) && /const key = embedUrl \+ '\|' \+ String\(label \|\| ''\)/.test(appCode));
-r.ok('the wait is drawn over the frame, so removing it costs no relayout',
-  /\.legacy-loading \{[\s\S]{0,200}?position: absolute;/.test(componentsCode) &&
-  /\.legacy-frame-wrap \{[^}]*position: relative/.test(componentsCode), (componentsCode.match(/.*legacy-loading \{.*/) || [])[0]);
+// ── The legacy record: read-only, from the backend ────────────────────────────
+// The embedded workbook is gone for good. The file is restricted, which is what
+// closed the leak, and the browser can no longer open it — so the records come back
+// through the token-gated backend instead, ONE tab at a time. The card must render
+// the grid as label/value rows (never a table: a legacy tab is wide, and a phone
+// answers a table with sideways scrolling), and the dead iframe machinery must not
+// survive anywhere in the app.
+r.head('the legacy record is rendered read-only from the backend, never embedded');
+const L = loadApp(`legacyGridHtml, openLegacyRecord, openLegacyWorkbook, closeLegacyModal`);
+r.ok('there is no iframe and no embed URL left anywhere in the app',
+  !/<iframe/.test(appCode) && !/embedUrl/.test(appCode) && !/rm=minimal/.test(appCode),
+  (appCode.match(/[^\n]*iframe[^\n]*/g) || ['none'])[0]);
+r.ok('...and the dead embed helpers went with it',
+  !/openLegacyModal|legacyTick|_legacyLoaded|LEGACY_SLOW_MS/.test(appCode));
+r.ok('the record read is the token-gated getLegacyIR action',
+  /action=getLegacyIR&irNumber=/.test(appCode) && /function openLegacyRecord\(/.test(appCode));
+r.ok('a single filled cell reads as a heading, not a label with an empty value', (() => {
+  const html = L.legacyGridHtml([['Overview'], ['', ''], ['IR Number', 'IR310']]);
+  return /legacy-row-head/.test(html) && /Overview/.test(html) &&
+         /legacy-label[^>]*>IR Number</.test(html) && /legacy-value[^>]*>IR310</.test(html);
+})(), L.legacyGridHtml([['Overview'], ['IR Number', 'IR310']]));
+r.ok('a two-column row becomes a stacked label/value — NOT a <table>',
+  (() => { const h = L.legacyGridHtml([['IR Number', 'IR310']]);
+           return !/<table/i.test(h) && /legacy-row/.test(h); })(),
+  L.legacyGridHtml([['IR Number', 'IR310']]));
+r.ok('blank spacer rows are dropped, and an empty record says so plainly', (() => {
+  const blank = L.legacyGridHtml([[''], ['  ', '']]);
+  const empty = L.legacyGridHtml([]);
+  return !/legacy-row/.test(blank) && /legacy-empty/.test(empty);
+})(), L.legacyGridHtml([]));
+r.ok('opening a record paints a loading state before the fetch resolves',
+  /class="legacy-loading"/.test(appCode) && /getLegacyIR&irNumber=/.test(appCode));
+r.ok('a slow record read is abandoned rather than left spinning forever',
+  /setTimeout\(\(\) => controller\.abort\(\), 12000\)/.test(appCode));
+r.ok('closing bumps the sequence, so an in-flight fetch cannot paint into a closed card',
+  /_legacyReq\+\+/.test(appCode) && /if \(req !== _legacyReq\)/.test(appCode));
+r.ok('the index is built from legacyMap and every row opens its own record',
+  /Object\.values\(legacyMap\)/.test(appCode) && /legacy-index-item/.test(appCode) &&
+  /openLegacyRecord\(btn\.dataset\.ir\)/.test(appCode));
 r.ok('the spinner is the app\'s own spin animation, so reduced-motion already covers it',
   /\.legacy-spinner \{[\s\S]{0,220}?animation: spin /.test(componentsCode) &&
   /@keyframes spin/.test(fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8')));
+r.ok('the record card scrolls inside itself rather than off the phone screen',
+  /\.legacy-card-record \{[^}]*max-height: 92vh/.test(componentsCode) &&
+  /\.legacy-record \{[^}]*overflow-y: auto/.test(componentsCode));
+// The legacy frame's `loading="lazy"` went with the frame, but evidence thumbnails
+// keep theirs — they really do scroll into view, which is what lazy is for.
+r.ok('evidence thumbnails keep their lazy loading, which is what lazy is for',
+  /class="evidence-thumb" alt="evidence" loading="lazy"/.test(appCode));
 
 r.ok('the deep link still works — the route name was NOT renamed',
   /parts\[0\] === 'tickets'/.test(appCode) && T.IR_CATEGORIES.length === 4);

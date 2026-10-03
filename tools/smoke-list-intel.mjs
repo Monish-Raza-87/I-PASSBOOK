@@ -18,6 +18,7 @@
 // supplied and is deliberately not parseable here.
 
 import { loadApp, makeReporter } from './harness.mjs';
+import fs from 'node:fs';
 
 const r = makeReporter();
 const DAY = 86400000;
@@ -469,5 +470,28 @@ r.ok('an old backend\'s records still reach the list',
   JSON.stringify(F.T.allIRs.map(x => x.irNumber)));
 r.ok('and the demo flag stays off — a real record, however old its shape',
   F.T.dataIsDemo === false, F.T.syncText);
+
+// ── Phase 0's standing guard: the public read path must never come back ───────
+// The list used to be fetched from Google's gviz CSV endpoint with NO token, and
+// that URL was written in app.js — so every row of the IR Repository was readable
+// by anyone holding the address. The read goes through the token-gated backend now.
+// This is the check the plan asked for, and it earns its place because this is the
+// kind of regression that would otherwise be invisible: the app keeps working, and
+// the data quietly becomes public again with no deploy and no sign on screen.
+r.head('Phase 0: the app has no public read path, and never gets one back');
+const appSrc = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
+r.ok('no gviz CSV fetch survives', !/tqx=out/.test(appSrc),
+  (appSrc.match(/[^\n]*tqx=out[^\n]*/g) || ['none — correct'])[0]);
+r.ok('the app names no Google address for the IR sheet or the legacy workbook',
+  !/docs\.google\.com\/spreadsheets\/d\//.test(appSrc) &&
+  !/1MPcWvgZ|14VnWnCg/.test(appSrc),
+  (appSrc.match(/[^\n]*(docs\.google\.com\/spreadsheets|1MPcWvgZ|14VnWnCg)[^\n]*/g) || ['none — correct'])[0]);
+r.ok('the IR list is read ONLY through the token-gated action',
+  /action=listIRs/.test(appSrc) && !/IR_REPO_SHEET_ID/.test(appSrc));
+r.ok('and the legacy records come through the token gate too',
+  /action=getLegacyIR&irNumber=/.test(appSrc) && !/LEGACY_SHEET_ID/.test(appSrc));
+r.ok('no sheet address hides in the demo fixtures either',
+  !/spreadsheets\/d\/[A-Za-z0-9_-]{20,}/.test(appSrc),
+  (appSrc.match(/[^\n]*spreadsheets\/d\/[A-Za-z0-9_-]{20,}[^\n]*/g) || ['none — correct'])[0]);
 
 r.finish();

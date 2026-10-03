@@ -650,24 +650,30 @@ relies on fixed positioning — do not re-parent one into an ancestor with a
 `transform` or `overflow`. Z-index now comes from the `--z-*` scale; the old
 stylesheet had `#user-menu` and `.inward-options-modal` colliding at `200`.
 
-### The Legacy archive modal — a loading state, and one that is kept
-The 🏛 Legacy button embeds the old ~450-tab workbook in an iframe. **The app makes
-zero requests for it** — Google renders the whole workbook, which is why it is slow,
-and why "make it faster" is not a code question here. What was missing was honesty
-about the wait: previously a blank frame, with a "Can't see the record here?" note
-*always* visible, so a slow load and a broken one looked identical.
+### The Legacy record card — read-only, from the backend
+The 🏛 Legacy button no longer embeds the workbook, and never will again: the file is
+**restricted** (2 October 2026), which is what closed the leak — embedding a tab forced
+the whole file to stay link-shared, and link-sharing is per file, not per tab. The
+records come back through the token-gated backend instead.
 
-- `.legacy-loading` (absolute, inset 0, over the frame) holds `.legacy-spinner` and
-  a `role="status" aria-live="polite"` message, with a live **elapsed counter**
-  (`.legacy-loading-elapsed`, `tabular-nums`) so the wait is visibly progressing.
-- It is removed on the iframe's `load` event. `.legacy-fallback` ("Still not
-  showing?") appears **only** after `LEGACY_SLOW_MS` (20s) has passed without a
-  load, or if the load fails — never before.
-- The iframe carries **no `loading="lazy"`**, deliberately: it must start loading
-  when the modal opens, not when it scrolls into view.
-- The loaded frame is **kept in the DOM** (`_legacyLoaded`) keyed by URL + label, so
-  reopening the same archive after the first load is instant, and `closeLegacyModal`
-  detaches rather than destroys it.
+- **The 🏛 Legacy button opens an INDEX** (`openLegacyWorkbook`) — the tab names from
+  `listLegacyIRs`, each row (`.legacy-index-item`) a tap away, with the label
+  ellipsised so a long tab name cannot push the row wide.
+- **Opening a record** (`openLegacyRecord`) fetches one tab (`getLegacyIR`) and paints
+  `.legacy-loading` (a `.legacy-spinner` plus a `role="status" aria-live="polite"`
+  note) until it lands. The read is abandoned after 12s rather than spinning forever.
+- **The grid is rendered as label/value ROWS, never a `<table>`.** `.legacy-row` stacks
+  `.legacy-label` over `.legacy-value`; a row with a single filled cell becomes
+  `.legacy-row-head` (a heading), and a row with none is a spacer and is dropped. A
+  legacy tab is wide, and a phone answers a table with sideways scrolling — the exact
+  thing this app refuses to ask of someone reading.
+- `.legacy-card-record` sizes to its content (`max-height: 92vh`, `max-width: 720px`)
+  and `.legacy-record` scrolls inside it; there is no frame holding the card open.
+- **The dead iframe machinery is deleted**, not left dark: `openLegacyModal`,
+  `legacyTick`, `_legacyLoaded` and `LEGACY_SLOW_MS` are gone, and `listLegacyIRs` no
+  longer hands out an `embedUrl`. `smoke-ui.mjs` asserts no `<iframe>` and no embed URL
+  survives in `app.js`, and `smoke-list-intel.mjs` fails if a public read path — a
+  `gviz` CSV fetch or a `docs.google.com/spreadsheets/d/…` address — ever returns.
 
 ### Toast (`#toast`)
 Bottom-centre, `--z-toast`, above the phone bottom bar. `app.js` toggles the `.show`

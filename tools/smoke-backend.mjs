@@ -945,20 +945,39 @@ r.head('the positional column layout is really gone, not adapted');
     !/getRange\(|getDataRange|setValues|deleteRow|appendRow|insertSheet/.test(body),
     (body.match(/[^\n]*(getRange|getDataRange|setValues|deleteRow|appendRow)[^\n]*/g) || ['none']));
 });
-// SpreadsheetApp is still needed — but ONLY for the two read-only inputs, which
-// are not stores. Anything else reaching for it is the app writing to a sheet again.
+// SpreadsheetApp is still needed — but ONLY for the read-only inputs, which are not
+// stores: the IR Repository (listIRs) and the legacy workbook (listLegacyIRs for the
+// index, getLegacyIR for one record). Anything else reaching for it is the app
+// writing to a sheet again.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly twice', ssSites.length === 2, ssSites.length);
+r.ok('SpreadsheetApp is used exactly three times', ssSites.length === 3, ssSites.length);
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a read-only input (' + (owner ? owner.name : 'top level') + ')',
-    !!owner && ['listIRs', 'listLegacyIRs'].indexOf(owner.name) > -1,
+    !!owner && ['listIRs', 'listLegacyIRs', 'getLegacyIR'].indexOf(owner.name) > -1,
     { site: i + 1, fn: owner && owner.name });
 });
-r.ok('and neither of them writes: the client sheet is an INPUT, never a store',
+r.ok('and none of them writes: both sheets are INPUTS, never stores',
   !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('listIRs')) &&
-  !/setValue|appendRow/.test(fnBody('listLegacyIRs')),
+  !/setValue|appendRow/.test(fnBody('listLegacyIRs')) &&
+  !/setValue|appendRow/.test(fnBody('getLegacyIR')),
   (code.match(/[^\n]*(appendRow|\.setValue)[^\n]*/g) || ['']));
+
+r.head('the legacy record read is one tab at a time, as the sheet displays it');
+r.ok('getLegacyIR exists and is routed behind the token gate',
+  /function getLegacyIR\s*\(/.test(code) && /getLegacyIR:\s*function/.test(code),
+  (code.match(/[^\n]*getLegacyIR:[^\n]*/) || [''])[0]);
+r.ok('it reads ONE tab by matching the IR number, never the whole workbook',
+  /match\(\/\^IR\\s\*\(\\d\+\)\/i\)/.test(fnBody('getLegacyIR')) &&
+  !/getSheets\(\)\.map/.test(fnBody('getLegacyIR')));
+r.ok('and it uses getDisplayValues, never getValues',
+  /getDisplayValues\(\)/.test(fnBody('getLegacyIR')) && !/getValues\(\)/.test(fnBody('getLegacyIR')),
+  (fnBody('getLegacyIR').match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
+r.ok('its answer carries a grid, not an embed URL — the frame cannot come back',
+  /\bgrid\b/.test(fnBody('getLegacyIR')) && !/embedUrl|preview\?rm=minimal/.test(fnBody('getLegacyIR')));
+r.ok('listLegacyIRs no longer hands out an embed URL either',
+  !/embedUrl|rm=minimal/.test(fnBody('listLegacyIRs')),
+  (fnBody('listLegacyIRs').match(/[^\n]*(embedUrl|rm=minimal)[^\n]*/) || ['none — correct'])[0]);
 
 r.head('a store write replaces ONE KEY, never the file');
 // The single most dangerous mis-reading of this design:

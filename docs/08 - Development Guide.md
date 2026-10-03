@@ -480,16 +480,19 @@ Three more details that are load-bearing:
 
 ### The two read-only input Sheets
 
-These are **inputs**, not stores. Nothing in the app writes to either.
+These are **inputs**, not stores. Nothing in the app writes to either. **The browser
+never reads either one** — both go through the token-gated backend, and both files are
+restricted, so the backend reads them as their owner. The addresses live **only** in
+`backend.gs`; `app.js` names neither.
 
 | Sheet | `CONFIG` key | Used for |
 |---|---|---|
-| Customer Support Form (External) (Responses) | `IR_REPO_SHEET_ID` | tab `Form Responses` only — columns A (summary link), B (IR Number), C (timestamp), K (drone serial no.) |
-| Legacy workbook | `LEGACY_SHEET_ID` | the 🏛 Legacy read-only view |
+| Customer Support Form (External) (Responses) | `IR_REPO_SHEET_ID` | tab `Form Responses` only — `listIRs` returns it as a grid the frontend maps |
+| Legacy workbook | `LEGACY_SHEET_ID` | the 🏛 Legacy read-only view — `listLegacyIRs` for the index, `getLegacyIR` for one record |
 
-`SpreadsheetApp` appears in exactly two functions — `listIRs()` and
-`listLegacyIRs()` — and the suites assert that, because a third appearance would
-mean the app is writing to a sheet again.
+`SpreadsheetApp` appears in exactly three functions — `listIRs()`, `listLegacyIRs()`
+and `getLegacyIR()` — and the suites assert that, because a fourth appearance would
+mean the app is writing to a sheet again. None of the three writes.
 
 ## Project Conventions
 

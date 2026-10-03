@@ -296,8 +296,23 @@ and reporting that verbatim would hand back `__IRS__` — the store, not the tic
 and quietly make any `e.irNumber === irNumber` filter drop every status change.
 
 ### `listLegacyIRs`
-Lists the pre-app per-IR tabs (legacy workbook, ~IR310–IR441) so the master list
-can badge them and the detail view can show a read-only copy.
+The **index** of the pre-app per-IR tabs (legacy workbook, ~IR310–IR441), so the
+master list can badge them and the 🏛 Legacy button can list them. Returns each IR's
+number, tab label, gid and a Sheets `openUrl`, plus a whole-workbook `workbookUrl`
+— **and no `embedUrl`**, deliberately (2026-10-03). The embed URL pointed Google's
+`/preview` at the workbook, which only works while the file is link-shared, and
+link-sharing is per **file**, not per tab — so an embedded tab kept every tab
+readable by anyone with the address. With the workbook restricted the frame can
+never load again, and dropping the URL is what stops it coming back.
+
+### `getLegacyIR`
+**One** legacy record, as the grid of cells its tab displays (`getDisplayValues()`),
+token-gated. This is the read that replaces the embedded workbook: the frontend
+renders it read-only, so a pre-app record is still reachable inside the app even
+though the file is restricted and the browser cannot open it. **One tab at a time**,
+never the whole workbook — a several-hundred-tab read to show one record would be a
+slow, heavy answer to a question nobody asked. Returns `irNumber`, `label`, `gid`,
+`openUrl` and `grid`.
 
 ### `googleStart`
 The Google door, **half one**. A **GET** (`?action=googleStart`), served by the

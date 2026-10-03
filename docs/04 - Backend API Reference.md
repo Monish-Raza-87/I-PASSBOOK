@@ -151,10 +151,16 @@ per-cell length ceiling to hit silently.
 ## GET Endpoints
 
 ### `listIRs`
-Fetches all IR records from the **Form Responses** tab.
+Returns the **Form Responses** tab as a raw grid: the header row followed by every
+data row, exactly as the sheet displays them. **This is the only IR-list read** — the
+frontend's anonymous CSV fetch was deleted on 2026-10-03 (see [07](07 - Known Issues & TODO.md)).
 
-> The frontend now reads this tab directly via Google's CSV endpoint (no deploy
-> needed); this GAS action is the fallback.
+> **Why a grid and not records.** The frontend's `mapSheetRows()` is the one place
+> that knows how a column becomes a field, and it matches headers by **substring**,
+> so a reworded Form question cannot break the map. Shipping the grid keeps that
+> table on one side of the wire instead of duplicating it, and it is what made the
+> old objection to promoting this action — that its records lacked `intake`,
+> `extra`, `dateRaisedISO` and the split name/phone — simply stop applying.
 
 ```
 GET {BASE_URL}?action=listIRs
@@ -164,25 +170,24 @@ GET {BASE_URL}?action=listIRs
 ```json
 {
   "status": "ok",
-  "records": [
-    {
-      "irNumber": "IR409",
-      "droneId": "S25P014",
-      "dateRaised": "01-Oct-2025",
-      "summaryLink": "https://...",
-      "status": "In Production"
-    }
+  "grid": [
+    ["Summary", "IR Number", "Timestamp", "Issue Status", "…"],
+    ["https://…", "IR409", "01-Oct-2025 14:02:03", "In Production", "…"]
   ]
 }
 ```
 
-- Reads from IR Repository sheet (`Form Responses` tab)
-- Merges status from **`__IRS__`** (`fields.status`), falling back to the Sheet's
-  Col D. It used to scan `sec-a` rows for `a_overallStatus` — that was the
-  pre-Stage-1 path and it died with Section A. The truthiness test matters:
-  `seedIRState` writes `status: ''` on first sight, so an empty string must fall
-  through to the Sheet rather than blanking the badge.
-- Returns latest-first order (reversed)
+- Token-gated, like every other read here (`requireAuth`).
+- `getDisplayValues()`, **never** `getValues()`: the mapper is written against the
+  strings a CSV carries, and a `Date` object arrives through JSON in a different
+  shape, which would make every date column read as unparseable.
+- **Carries no status and reads no store.** It used to merge one in from `irs.json`
+  through `getAllIRStatuses()`, which gave one question two answers; `__IRS__` is the
+  only owner of the workflow. The sheet's Col D still travels as an ordinary grid
+  cell, and the frontend reads it **once per ticket** as that ticket's starting stage
+  (`seedIRState`).
+- An empty or header-only sheet answers `{"status":"ok","grid":[]}` rather than
+  throwing, so a fresh install can still load its list.
 
 ### `getPassbook`
 Fetches all saved section data for a specific IR.
@@ -861,24 +866,16 @@ empty for the same reason.
 
 ```javascript
 var CONFIG = {
-  // IR Repository sheet
+  // IR Repository sheet — the file and the tab, and NOTHING positional.
+  //
+  // There used to be an IR_REPO_*_COL constant per column here. They are gone
+  // (2026-10-03): they were a second, positional copy of the sheet's layout, and
+  // the frontend already owns a better one — INTAKE_FIELDS in app.js matches
+  // columns by HEADER SUBSTRING, so a reworded Form question or an inserted column
+  // cannot silently shift every field by one. listIRs now hands over the grid and
+  // lets that one table decide what each column means.
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_TAB:      'Form Responses',
-  IR_REPO_IR_COL:      2,   // B  "IR Number"
-  IR_REPO_ID_COL:     11,   // K  "Mention the Drone Serial No (S250XX)"
-  IR_REPO_SUMLINK_COL: 1,   // A  "Summary"
-  IR_REPO_DATE_COL:    3,   // C  "Timestamp"
-  IR_REPO_STATUS_COL:  4,   // D  "Issue Status"
-  IR_REPO_SPOC_COL:    6,   // F  "SPOC"
-  IR_REPO_SUPPORT_COL: 7,   // G  "What Support Is Required?"
-  IR_REPO_DESC_COL:    8,   // H  "Please Describe Your Problem..."
-  IR_REPO_INCIDENT_COL: 9,  // I  "Date of Incident"
-  IR_REPO_REPORTER_COL: 12, // L  "Who's Reporting? (Name & Contact)"
-  IR_REPO_EMAIL_COL:   16,  // P  "Email Address"
-  IR_REPO_INCIDENT_LOC_COL: 13, // M  "Incident Location and Weather"
-  IR_REPO_EVIDENCE_N_COL:   14, // N  "Evidence: Attach Files From The Incident"
-  IR_REPO_EVIDENCE_Q_COL:   17, // Q  "Evidence: Attach Screenshot of UAV Forecast..."
-  IR_REPO_COMPANY_COL:      18, // R  "Where Do You Work?"
 
   // The app's store — JSON files in the owner's Drive folder, under _store/
   DRIVE_ROOT_FOLDER_ID: '1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK',

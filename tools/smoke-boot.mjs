@@ -52,9 +52,9 @@ const MIME = {
 };
 
 // ── The Sheet fixture, for the second phase ───────────────────────────────────
-// The Form Responses header row as backend.gs describes it, with plausible
-// questions at E, J and O — the three columns its IR_REPO_*_COL constants do not
-// account for. The live render must surface all three.
+// The Form Responses header row as the app reads it, with plausible questions at
+// E, J and O — the three columns INTAKE_FIELDS claims no field for. The live render
+// must surface all three.
 const HEADERS = [
   'Summary', 'IR Number', 'Timestamp', 'Issue Status', 'Your Role', 'SPOC',
   'What Support Is Required?', 'Please Describe Your Problem', 'Date of Incident', 'Score',
@@ -69,18 +69,21 @@ const ROW = [
   'https://drive.google.com/file/d/N/view', 'chase the courier',
   'ops@agrikart.in', 'https://drive.google.com/file/d/Q/view', 'AgriKart Pvt Ltd',
 ];
-const csvCell = v => (/[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v);
-const SHEET_CSV = [HEADERS, ROW].map(r => r.map(csvCell).join(',')).join('\n');
-
-// Stubs only the Sheet read and blocks everything else, so a real network can
+// Stubs only the IR list read and blocks everything else, so a real network can
 // never make this test pass or fail by accident. Injected ahead of app.js, which
 // captures window.fetch at parse time.
+//
+// The list read is `action=listIRs`, and it answers with the sheet's GRID — the
+// header row followed by the data rows. It used to be an anonymous fetch of the
+// sheet's CSV from Google's gviz endpoint; see listIRs in backend.gs for why that
+// had to go, and why the wire carries a grid rather than finished records.
 const FIXTURE_PATH = '/__sheet-fixture.html';
 const STUB = `<script>
   window.fetch = function (url) {
-    if (String(url).indexOf('gviz/tq') >= 0) {
-      return Promise.resolve(new Response(${JSON.stringify(SHEET_CSV)},
-        { status: 200, headers: { 'Content-Type': 'text/csv' } }));
+    if (String(url).indexOf('action=listIRs') >= 0) {
+      return Promise.resolve(new Response(
+        JSON.stringify({ status: 'ok', grid: ${JSON.stringify([HEADERS, ROW])} }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
     return Promise.reject(new Error('blocked in test'));
   };

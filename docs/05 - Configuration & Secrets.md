@@ -7,7 +7,7 @@
 | GAS Web App URL | `CONFIG.GAS_URL` | `https://script.google.com/macros/s/AKfycbz.../exec` | The **new** project under `monish.raza@indrones.com`. Until this is switched the app keeps talking to the old backend — which is also the rollback (see [08](08 - Development Guide.md)) |
 | Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Emails must end with this domain, plus the `EXTERNAL_EMAILS` exceptions in `backend.gs` |
 | Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` | `true` | Set to `false` in production |
-| IR Repository CSV | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_GID` | `1MPcWvgZ...` / `335027370` | Read directly by the frontend from the link-shared sheet |
+| IR Repository sheet | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_TAB` | `1MPcWvgZ...` / `Form Responses` | Read by the **backend** (`action=listIRs`), token-gated. The **file is restricted to the company**, and the frontend no longer reads it at all — see [07](07 - Known Issues & TODO.md) |
 | Google door | `CONFIG.SSO_URL` | `https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-.../exec` (set 2026-09-20) | The **second** deployment's `/exec` URL. Note the `/a/macros/indrones.com/` segment — that is what marks it as the domain-scoped deployment, not the primary one. Empty is a working state: the Google button is not shown and nothing else changes. See below and [08](08 - Development Guide.md) |
 
 There is **no Google OAuth client ID**. The `CONFIG.SSO_URL` row above is not a

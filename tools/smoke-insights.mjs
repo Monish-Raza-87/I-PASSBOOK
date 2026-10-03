@@ -341,8 +341,8 @@ r.head('a dashboard built from the demo sample says so');
 // The IR list falling back to demo data is self-evident — five sample cards in a
 // list of 450 real ones reads as a placeholder. The SAME five rows on a dashboard
 // read as statistics, and "CRASH: 2" is a number somebody could quote in a meeting.
-// The gviz read has an 8s abort and both fallbacks are silent, so this is reachable
-// in normal use rather than theoretical.
+// The list read has a 12s abort and every failure path is silent, so this is
+// reachable in normal use rather than theoretical.
 T.allIRs = FIXTURE;
 T.dataIsDemo = true;
 T.insightsFilters = Object.assign({}, ALL_ON);

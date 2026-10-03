@@ -22,10 +22,10 @@ const { T, byId } = loadApp(`
 
 const { ok, head, finish } = makeReporter();
 
-// ── The Form Responses header row, as backend.gs describes it ─────────────────
-// Columns A–D, F–I, K–N and P–R are accounted for by backend.gs's
-// IR_REPO_*_COL constants. E, J and O are NOT — they are the audit's reason to
-// exist, so the fixture uses plausible form questions for them.
+// ── The Form Responses header row, as the app reads it ───────────────────────
+// Columns A–D, F–I, K–N and P–R are claimed by INTAKE_FIELDS below, matched by
+// header substring. E, J and O are NOT — they are the audit's reason to exist, so
+// the fixture uses plausible form questions for them.
 const HEADERS = [
   'Summary',                                       // A
   'IR Number',                                     // B

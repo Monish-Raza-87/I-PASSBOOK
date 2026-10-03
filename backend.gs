@@ -33,24 +33,18 @@
 // CONFIG — Update DRIVE_ROOT_FOLDER_ID before deploying
 // ──────────────────────────────────────────────────────────────────────────────
 var CONFIG = {
-  // The IR Repository sheet (Form Responses tab) — source of new IR records
+  // The IR Repository sheet (Form Responses tab) — source of new IR records.
+  //
+  // Only the file and the tab are named. The COLUMN NUMBERS that used to sit here
+  // are gone on purpose (2026-10-03): they were a second, positional copy of the
+  // sheet's layout, and the frontend already owns a better one — INTAKE_FIELDS in
+  // app.js matches columns by HEADER SUBSTRING, so a reworded Form question or an
+  // inserted column cannot silently shift every field by one. Two copies of the
+  // same layout is one copy too many, and the row[13] kind of read is exactly how
+  // a sheet layout rots. listIRs now hands over the grid and lets that one table
+  // decide what each column means.
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_TAB:      'Form Responses',   // IR records (Col G = What Support, Col H = Description)
-  IR_REPO_IR_COL:        2,   // Column B  — "IR Number"
-  IR_REPO_ID_COL:        11,   // Column K  — "Mention the Drone Serial No (S250XX)"
-  IR_REPO_SUMLINK_COL:   1,   // Column A  — "Summary"
-  IR_REPO_DATE_COL:       3,   // Column C  — "Timestamp"
-  IR_REPO_STATUS_COL:     4,  // Column D  — "Issue Status"
-  IR_REPO_SPOC_COL:       6,   // Column F  — "SPOC"
-  IR_REPO_SUPPORT_COL:    7,   // Column G  — "What Support Is Required?"
-  IR_REPO_DESC_COL:       8,   // Column H  — "Please Describe Your Problem..."
-  IR_REPO_INCIDENT_COL:   9,   // Column I  — "Date of Incident"
-  IR_REPO_REPORTER_COL:  12,   // Column L  — "Who's Reporting? (Name & Contact)"
-  IR_REPO_EMAIL_COL:      16,   // Column P  — "Email Address"
-  IR_REPO_INCIDENT_LOC_COL: 13, // Column M  — "Incident Location and Weather"
-  IR_REPO_EVIDENCE_N_COL:   14, // Column N  — "Evidence: Attach Files From The Incident"
-  IR_REPO_EVIDENCE_Q_COL:   17, // Column Q  — "Evidence: Attach Screenshot of UAV Forecast..."
-  IR_REPO_COMPANY_COL:      18, // Column R  — "Where Do You Work?"
+  IR_REPO_TAB:      'Form Responses',
 
   // ── THE APP'S OWN STORE ──────────────────────────────────────────────────────
   // There is no app spreadsheet any more. Everything the app owns — accounts,
@@ -3224,70 +3218,46 @@ function purgeUsers(params, authEmail) {
 }
 // Reads Form Responses tab from IR Repository and returns IR list, latest first
 // ──────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
+// ACTION: listIRs
+// Returns the IR Repository's Form Responses tab as a raw GRID — the header row
+// followed by every data row, exactly as the sheet DISPLAYS them.
+//
+// Two things about this shape are deliberate, and both are load-bearing.
+//
+// 1. IT IS A GRID, NOT A LIST OF RECORDS. The frontend used to build these records
+//    from a CSV it fetched ANONYMOUSLY from Google's gviz endpoint, because that
+//    needed no login. That made every row of this sheet readable by anyone holding
+//    the address — and the address is written in app.js, which a client's browser
+//    downloads. The read is now token-gated like every other read here. Returning
+//    the grid rather than records is what keeps that change small: mapSheetRows()
+//    in app.js stays the ONLY thing that knows how a column becomes a field, so the
+//    header-substring table is not duplicated here and cannot drift from it.
+//
+// 2. IT CARRIES NO STATUS. `__IRS__` (irs.json) owns the workflow; the sheet is the
+//    customer's own words and nothing else. This used to merge in a status from the
+//    app store, which meant the list read had two answers for one question — the
+//    same split-brain the status bridge was cut to end. The sheet's Col D still
+//    travels, as an ordinary grid cell, and the frontend reads it once per ticket as
+//    that ticket's STARTING stage (seedIRState).
 function listIRs() {
-  var ss   = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID);
-  var tab  = ss.getSheetByName(CONFIG.IR_REPO_TAB);
+  var ss  = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID);
+  var tab = ss.getSheetByName(CONFIG.IR_REPO_TAB);
   if (!tab) throw new Error('Tab "' + CONFIG.IR_REPO_TAB + '" not found in IR Repository.');
 
   var lastRow = tab.getLastRow();
-  if (lastRow < 2) return { status: 'ok', records: [] };
+  var lastCol = tab.getLastColumn();
+  // An empty or header-only sheet is a real state, not an error: it must answer
+  // "no records" rather than throw, or a fresh install can never load its list.
+  if (lastRow < 1 || lastCol < 1) return { status: 'ok', grid: [] };
 
-  // 1. Pre-fetch all statuses from the data sheet once
-  var statusMap = getAllIRStatuses();
-
-  var rows = tab.getRange(2, 1, lastRow - 1, tab.getLastColumn()).getValues();
-  var records = rows
-    .map(function(row) {
-      var irNumber = (row[CONFIG.IR_REPO_IR_COL - 1] || '').toString().trim();
-      return {
-        dateRaised:    row[CONFIG.IR_REPO_DATE_COL - 1]
-                        ? Utilities.formatDate(new Date(row[CONFIG.IR_REPO_DATE_COL - 1]), 'Asia/Kolkata', 'dd-MMM-yyyy')
-                        : '',
-        irNumber:      irNumber,
-        droneId:       (row[CONFIG.IR_REPO_ID_COL - 1] || '').toString().trim(),
-        summaryLink:   (row[CONFIG.IR_REPO_SUMLINK_COL - 1] || '').toString().trim(),
-        status:        statusMap[irNumber] || 'Open',
-        customerName:  (row[CONFIG.IR_REPO_REPORTER_COL - 1] || '').toString().trim(),
-        contactEmail:  (row[CONFIG.IR_REPO_EMAIL_COL - 1] || '').toString().trim(),
-        issueType:     (row[CONFIG.IR_REPO_SUPPORT_COL - 1] || '').toString().trim(),
-        issueDesc:     (row[CONFIG.IR_REPO_DESC_COL - 1] || '').toString().trim(),
-        spoc:          (row[CONFIG.IR_REPO_SPOC_COL - 1] || '').toString().trim(),
-        initialStatus: (row[CONFIG.IR_REPO_STATUS_COL - 1] || '').toString().trim(),
-        incidentDate:  (row[CONFIG.IR_REPO_INCIDENT_COL - 1] || '').toString().trim(),
-        // Section A auto-populated intake fields (read-only in the app, sourced
-        // from the customer form). N & Q are two separate evidence columns the
-        // frontend combines into a single "Evidence" field.
-        incidentLocationWeather: (row[CONFIG.IR_REPO_INCIDENT_LOC_COL - 1] || '').toString().trim(),
-        evidenceFormN: (row[CONFIG.IR_REPO_EVIDENCE_N_COL - 1] || '').toString().trim(),
-        evidenceFormQ: (row[CONFIG.IR_REPO_EVIDENCE_Q_COL - 1] || '').toString().trim(),
-        companyName:  (row[CONFIG.IR_REPO_COMPANY_COL - 1] || '').toString().trim(),
-      };
-    })
-    .filter(function(r) { return r.irNumber !== ''; })
-    .reverse();
-
-  return { status: 'ok', records: records };
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Helper: Get all IR statuses in one single read
-// ──────────────────────────────────────────────────────────────────────────────
-function getAllIRStatuses() {
-  var map = {};
-  try {
-    // irs.json is the whole `__IRS__` store: one key per IR. This used to scan
-    // APP_DATA rows for the sentinel, which is the same data in a different shape.
-    var irs = readJson('irs.json') || {};
-    Object.keys(irs).forEach(function (irNum) {
-      if (!irNum) return;
-      var fields = irs[irNum];
-      // Truthiness, not `|| 'Open'`: seedIRState() writes `status: ''` the
-      // first time it sees an IR, and an empty string must fall through to
-      // the caller's own default rather than overwrite it with 'Open'.
-      if (fields && fields.status) map[irNum] = fields.status;
-    });
-  } catch(e) {}
-  return map;
+  // getDisplayValues, not getValues. The mapper on the other end is written against
+  // the strings a CSV carries — that is what the client typed, and what the sheet
+  // shows. getValues() hands back Date objects for the timestamp columns, which
+  // arrive through JSON in a different shape entirely and would make a date column
+  // read as unparseable. This is the half that makes the grid a faithful stand-in
+  // for the CSV it replaces.
+  return { status: 'ok', grid: tab.getRange(1, 1, lastRow, lastCol).getDisplayValues() };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

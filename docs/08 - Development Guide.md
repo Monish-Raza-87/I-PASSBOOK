@@ -498,13 +498,17 @@ mean the app is writing to a sheet again.
   `base.css` / `components.css` / `views.css`; see [09 — Design System](09 - Design System.md)
 - **Mobile-first** — always test on phone viewport first
 - **Dev bypass** — always use `?dev=1` for local development
-- **Status field** — IR status on the index is **app-owned** (`__IRS__`), with the
-  Sheet's Col D as the fallback until someone changes the status in the app. See
+- **Status field** — IR status on the index is **app-owned** (`__IRS__`). The Sheet's
+  Col D is read **once per ticket**, on first open, as that ticket's *starting* stage
+  (`seedIRState`), and is never read as the live workflow again. See
   [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md). `a_overallStatus`
-  in Section A is still saved (the audit trail and the backend's `getAllIRStatuses()`
-  read it) but is no longer read back as the badge's truth. The 14 status *values*
-  are written by the customer Google Form and are never renamed; `STATUS_CATEGORIES`
-  maps them to Frappe's Open/Paused/Resolved/Closed **categories** for pill colouring
+  in Section A is still saved and the legacy log still shows it, but nothing reads it
+  back as the badge's truth. The 14 status *values* are written by the customer Google
+  Form and are never renamed; `STATUS_CATEGORIES` maps them to Frappe's
+  Open/Paused/Resolved/Closed **categories** for pill colouring
+- **The IR list has ONE read** — `action=listIRs`, token-gated, which returns the
+  sheet as a grid that `mapSheetRows()` turns into records. There is no direct Sheet
+  read any more; do not add one back. See [07 — Known Issues](07 - Known Issues & TODO.md)
 - **Shell DOM is static** — `app.js` captures twelve element references at parse
   time (`app.js:699-726` — 28 of them), so `index.html` must keep those ids and `app.js` must
   stay a plain end-of-body `<script src>` (never `type="module"`/`defer`)

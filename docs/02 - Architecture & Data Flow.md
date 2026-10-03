@@ -136,13 +136,13 @@ app. The app owns all **mutable workflow state**.
 | Status, assignee, priority, category, section completion, SLA, CSAT | **App** | `irs.json` under `__IRS__` |
 
 Precedence is always **app > Sheet**, merged in the single writer `setAllIRs()`
-(`app.js`), which every `fetchIRs()` path funnels through so the three paths
-cannot disagree. This is what fixed the original badge bug: the list badge read
+(`app.js`), which the list read funnels through so no path can disagree with it. This is what fixed the original badge bug: the list badge read
 the Sheet's Col D while an in-app status edit saved to the app's own store as
 `sec-a.a_overallStatus` — itself auto-filled *from* Col D on every open — so an
 in-app status change never reached the badge. `a_overallStatus` is now **legacy**:
 it is still saved, and the legacy log still shows it, but nothing reads it back as
-the badge's truth and `getAllIRStatuses()` reads `irs.json`.
+the badge's truth. `__IRS__` (`irs.json`) is the only owner of the workflow, and the
+list read no longer merges a status of its own.
 
 The app takes ownership of a ticket's status **when someone changes the status in
 the app** (`irState[x].statusOwned`), not by opening a ticket or saving a section.
@@ -156,14 +156,33 @@ An edit made in the Sheet therefore still works on an untriaged ticket.
 ### Fetching IR List (`fetchIRs`)
 ```
 Browser → localStorage 'ipb_ir_list'  ← this device's last copy, painted first
-       → GET docs.google.com/.../gviz/tq?tqx=out:csv&gid=<Form Responses>
-       → parseCSV → mapSheetRows(rows) → setAllIRs()   ← app state merged here
-       → No Apps Script deploy required (sheet is link-shared)
-       → Falls back to GAS ?action=listIRs, then demo data, on failure
+       → GET GAS_URL?action=listIRs        ← token-gated, the ONLY list read
+       → mapSheetRows(grid) → setAllIRs()  ← app state merged here
+       → On failure: keep the real records and say so, or demo data on a cold start
 ```
-> **Note:** The IR list is read directly from the **"Form Responses"** tab by the
-> frontend. The GAS `listIRs` action reads the same tab (`IR_REPO_TAB`) and is
-> kept as a fallback; it also joins `irs.json` for the app-owned status.
+> **The list read is token-gated, and there is exactly one of them** (changed
+> 2026-10-03). It used to be an **anonymous** fetch of the sheet's own CSV from
+> Google's `gviz` endpoint, with the backend as a fallback. That URL needed no login,
+> so every row of the IR Repository — every customer's name, email, phone and problem
+> description — was readable by anyone who could read `app.js`, which is any browser
+> that opens the app. **Hiding something on a screen hides nothing when the same data
+> has a public URL**, and no client account could be safe while that door stood open.
+> The sheet is now restricted to the company, and the frontend no longer knows how to
+> read it.
+>
+> `listIRs` returns the tab **as a grid** (the header row followed by the data rows,
+> via `getDisplayValues()`), not as finished records. That is what keeps the change
+> small and the mapping honest: `mapSheetRows()` on the frontend stays the **one**
+> place that knows how a column becomes a field, so `INTAKE_FIELDS` is not duplicated
+> across the wire and cannot drift from it. `getDisplayValues()` rather than
+> `getValues()` because the mapper is written against the strings a CSV carries — a
+> `Date` object arrives through JSON in a different shape and would make every date
+> column read as unparseable.
+>
+> **`listIRs` carries no status, and reads no store.** It used to merge one in from
+> `irs.json` through a helper called `getAllIRStatuses()`, which gave one question two
+> answers. `__IRS__` owns the workflow; the sheet is the customer's own words and
+> nothing else.
 >
 > **The cache is a first paint, not a source of truth.** It exists so the list is on
 > screen before any network call, and it needs no invalidation because the read
@@ -173,12 +192,6 @@ Browser → localStorage 'ipb_ir_list'  ← this device's last copy, painted fir
 > list"*. The five fabricated sample IRs are reached **only** from a cold start with
 > nothing real to show. Showing samples to someone who has four hundred real IRs is
 > not a placeholder, it is misinformation they could act on.
->
-> **`listIRs` was NOT promoted to the primary read**, though it was planned. It
-> returns no `intake`, no `extra` and no `dateRaisedISO` and does not split the name
-> from the phone, unlike `mapSheetRows` — promoting it would have silently emptied
-> the 📋 Report tab's raw cells and made Insights treat every IR as undated. See
-> [07](07 - Known Issues & TODO.md).
 
 ### The intake column map (`INTAKE_FIELDS` / `mapSheetRows`)
 `mapSheetRows()` is pure — no fetch, no DOM — so the whole mapping is unit-tested
@@ -193,11 +206,10 @@ field-for-field. Each record carries:
   drops)
 - `extra[]` — any column the Form writes that `INTAKE_FIELDS` does not model
 
-`extra` is the audit. `backend.gs`'s `IR_REPO_*_COL` constants account for columns
-A–D, F–I, K–N and P–R, so **columns E, J and O are unaccounted for** — and so is
-anything the Form grows later. Rather than dropping them, they surface on the 📋
-Report tab and the app records which headers it did not recognise
-(`lastSheetAudit`).
+`extra` is the audit. `INTAKE_FIELDS` claims a column per field, matched by header
+substring — so **columns E, J and O are unaccounted for**, and so is anything the
+Form grows later. Rather than dropping them, they surface on the 📋 Report tab and
+the app records which headers it did not recognise (`lastSheetAudit`).
 
 ### Fetching Passbook Data (`getPassbook`)
 ```

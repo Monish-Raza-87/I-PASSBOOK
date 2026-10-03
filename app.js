@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v63';
+const APP_VERSION = 'v64';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -108,20 +108,18 @@ const CONFIG = {
   // without Google auth while this prototype is still being built.
   ENABLE_DEV_AUTH_BYPASS: true,
 
-  // IR Repository spreadsheet — read directly by the frontend via Google's
-  // public CSV endpoint (sheet is link-shared, so no login/Apps Script needed).
-  // "Form Responses" tab (gid 335027370) holds the IR records (matched by header):
-  //   Col A Summary · Col B IR Number · Col C Timestamp · Col D Issue Status ·
-  //   Col F SPOC · Col G What Support Is Required? · Col H Please Describe… ·
-  //   Col I Date of Incident · Col K Drone Serial No · Col L Who's Reporting? · Col P Email Address
+  // IR Repository spreadsheet — read by the BACKEND (action=listIRs), which hands
+  // the tab over as a grid that the mapper below turns into records. The frontend
+  // used to read this file itself, as CSV from a URL that needed no login; that is
+  // gone. Column meanings live in INTAKE_FIELDS, matched by header substring.
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
-  IR_REPO_GID:      '335027370',   // numeric gid — more reliable than the tab name
   IR_REPO_TAB:      'Form Responses',
 
-  // Legacy I-PASSBOOK workbook (pre-app records, kept current until the app is
-  // released and the user confirms go-live). Link-shared, so it embeds read-only
-  // with NO Google sign-in / token / backend — shown via the 🏛 Legacy button on
-  // the home screen. Each IR is its own tab in this workbook.
+  // Legacy I-PASSBOOK workbook — one tab per pre-app IR. RESTRICTED since
+  // 2 October 2026, which is why the 🏛 Legacy button no longer embeds it: the
+  // frontend cannot open a restricted file, and a frame cannot detect a Google
+  // sign-in wall. The BACKEND can still read it, because Apps Script runs as the
+  // deployer — which is what brings these records into the app.
   LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 };
 
@@ -4298,7 +4296,7 @@ function mapsLink(value) {
 // ─── INSIGHTS ────────────────────────────────────────────────────────────────
 // Counts over the IR list, sliced by the variables the desk actually asks about.
 // Everything here is client-side over `allIRs` + `irState`, both of which are
-// already fully in memory (one gviz CSV read, plus one `__IRS__` read), so this
+// already fully in memory (one list read, plus one `__IRS__` read), so this
 // page adds NO endpoint, no cache and no second source of truth. If the two ever
 // disagree it is because the list is stale, not because the dashboard is.
 //
@@ -5269,35 +5267,14 @@ if (logView) {
   });
 }
 
-// ─── IR REPOSITORY — DIRECT SHEET READ ───────────────────────────────────────
-// Reads the "Form Responses" tab straight from Google Sheets as CSV. No Apps Script
-// deploy required. Falls back to GAS / demo if the sheet is unreachable.
-
-// Parse CSV text into rows[][] — handles quoted fields, embedded commas,
-// doubled quotes, and newlines inside quoted fields.
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQuotes = false;
-      } else field += c;
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      row.push(field); field = '';
-    } else if (c === '\n') {
-      row.push(field); rows.push(row); row = []; field = '';
-    } else if (c !== '\r') {
-      field += c;
-    }
-  }
-  if (field !== '' || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
+// ─── IR REPOSITORY ────────────────────────────────────────────────────────────
+// The "Form Responses" tab is read through the BACKEND (action=listIRs), which
+// returns it as a grid of displayed cell strings. It used to be read straight from
+// Google Sheets as CSV over a URL that needed no login; that is gone, and the
+// mapper below is what it fed, unchanged.
+//
+// See fetchIRsFromBackend() for why the read moved, and listIRs in backend.gs
+// for why the wire carries a grid rather than finished records.
 
 // 'DD MONTH YYYY' for display (full month name). Falls back to raw string.
 function toDisplayDate(val) {
@@ -5394,9 +5371,14 @@ function buildIntakeMap(headers) {
 // the Form writes that the app does not model. Refreshed on every sync.
 let lastSheetAudit = { headers: [], unmapped: [] };
 
-// Rows (as parseCSV returns them) → IR records, latest first.
+// A sheet grid (header row + data rows, as displayed) → IR records, latest first.
 // Pure: no fetch and no DOM, so tools/smoke-intake.mjs can assert the whole
 // mapping — including a reordered or extended header row — with neither.
+//
+// That purity is why the backend ships the raw grid rather than finished records:
+// this function stays the ONE place that knows how a column becomes a field, so
+// INTAKE_FIELDS below is not duplicated on the other side of the wire (see
+// listIRs in backend.gs).
 function mapSheetRows(rows) {
   const headers = (rows && rows[0] ? rows[0] : []).map(h => String(h).trim());
   const { map, consumed, unmapped } = buildIntakeMap(headers);
@@ -5477,14 +5459,45 @@ function mapSheetRows(rows) {
   return records.reverse();   // latest first
 }
 
-async function fetchIRsFromSheet() {
-  const url = `https://docs.google.com/spreadsheets/d/${CONFIG.IR_REPO_SHEET_ID}/gviz/tq?tqx=out:csv&gid=${CONFIG.IR_REPO_GID}`;
+// The IR list, from the BACKEND. Token-gated, like every other read.
+//
+// This replaced an anonymous fetch of the sheet's own CSV (Google's gviz
+// endpoint), and that is the whole point of the change. The gviz URL needed no
+// login, so every row of the IR Repository — every customer's name, email, phone
+// and problem description — was readable by anyone who could read app.js, which
+// is any browser that opens the app. A client account could not have been safe
+// while that door stood open, because hiding things on a screen hides nothing
+// when the same data has a public URL.
+//
+// The wire carries the sheet's GRID, not finished records: mapSheetRows below
+// stays the only thing that knows how a column becomes a field, so the
+// header-substring table that makes the mapper robust to a reworded Form question
+// is not duplicated on the backend. See listIRs in backend.gs.
+async function fetchIRsFromBackend() {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  const res = await fetch(url, { signal: controller.signal });
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  const res = await fetch(`${CONFIG.GAS_URL}?action=listIRs`, { signal: controller.signal });
   clearTimeout(timeout);
-  const text = await res.text();
-  return mapSheetRows(parseCSV(text));
+  const data = await res.json();
+  if (!data || data.status !== 'ok') throw new Error((data && data.message) || 'listIRs failed');
+
+  // TWO SHAPES ARE ACCEPTED, on purpose, for as long as it takes the new backend
+  // to be pasted into BOTH deployments.
+  //
+  //   grid    — the sheet's own rows, mapped HERE by the one mapper. The new shape.
+  //   records — the old, lossier record list: no `intake`, no `extra`, no
+  //             `dateRaisedISO`, name and phone not split. Accepted deliberately,
+  //             because this frontend ships BEFORE the backend is pasted, and
+  //             without this branch that window would leave the live app showing an
+  //             empty list. It is exactly what the app already showed as its
+  //             outage fallback, so nothing gets worse than it already was.
+  //
+  // Delete the `records` branch once both deployments report the grid. `data.grid`
+  // is tested for ARRAY-ness, not truthiness: an empty repository is a real answer
+  // and must not fall through to the old branch.
+  if (Array.isArray(data.grid))   return mapSheetRows(data.grid);
+  if (Array.isArray(data.records)) return data.records;
+  return [];
 }
 
 async function fetchIRs() {
@@ -5503,36 +5516,19 @@ async function fetchIRs() {
     ? `⟳ Refreshing ${allIRs.length} IRs…`
     : '⟳ Syncing with the IR Repository…');
 
-  // 1. Primary: read the sheet directly (no backend deploy needed)
+  // 1. The one list read there is.
   try {
-    const records = await fetchIRsFromSheet();
-    if (records && records.length) {
-      setAllIRs(records);
-      writeIRListCache();
-      _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} IRs loaded from the Sheet`);
-      renderIRList(allIRs);
-      return;
-    }
-  } catch (e) { /* fall through to GAS backend */ }
-
-  // 2. Fallback: Apps Script backend
-  try {
-    const url = `${CONFIG.GAS_URL}?action=listIRs`;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 8000);
-    const res  = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    const data = await res.json();
-    if (data.status === 'ok') {
-      setAllIRs(data.records || []);
-      writeIRListCache();
-      _lastSyncAt = new Date();
-      setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
-      renderIRList(allIRs);
-      return;
-    }
-    throw new Error(data.message || 'Unknown error');
+    const records = await fetchIRsFromBackend();
+    // An empty list is ACCEPTED, not treated as a failure. A repository with no
+    // rows yet is a real state, and the old `records.length` guard turned it into
+    // a silent fall-through to demo data — five invented tickets shown to someone
+    // whose repository is genuinely empty.
+    setAllIRs(records);
+    writeIRListCache();
+    _lastSyncAt = new Date();
+    setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
+    renderIRList(allIRs);
+    return;
   } catch (err) {
     // A REAL list is never replaced by fabricated cards. If a list is already on
     // screen — painted from this device's cache, or left by an earlier successful

@@ -343,23 +343,34 @@ synthesising entries from it would invent timestamps the data does not have. It 
 a separate, labelled block.
 
 ### Auto-Population from the IR Repository
-Locked intake fields are pre-filled from the IDS/CR/007 sheet's **"Form
-Responses"** tab when an IR is opened:
+Locked intake fields are pre-filled from the IR Repository's **"Form Responses"** tab
+when an IR is opened. Columns are matched by **header substring**, never by position —
+that table is `INTAKE_FIELDS` in `app.js`, and it is the single source of truth for
+what each column means (the backend's old `IR_REPO_*_COL` constants are gone; see
+[07](07 - Known Issues & TODO.md)).
 
-| Overview field (`sec-a` data key) | Form Responses Column | Config Key |
+| IR record field | Form Responses column | Matched on header |
 |---|---|---|
-| `a_irNumber` | Col B — IR Number | `IR_REPO_IR_COL` |
-| `a_droneId` | Col K — Mention the Drone Serial No (S250XX) | `IR_REPO_ID_COL` |
-| `a_dateRaised` | Col I — Date of Incident | `IR_REPO_INCIDENT_COL` |
-| `a_companyName` | Col R — Where Do You Work? | `IR_REPO_COMPANY_COL` |
-| `a_customerName` | Col L — Who's Reporting? (name portion) | `IR_REPO_REPORTER_COL` |
-| `a_contactEmail` | Col P — Email Address | `IR_REPO_EMAIL_COL` |
-| `a_issueType` | Col G — What Support Is Required? | `IR_REPO_SUPPORT_COL` |
-| `a_issueDesc` | Col H — Please Describe Your Problem... | `IR_REPO_DESC_COL` |
-| `a_incidentLocationWeather` | Col M — Incident Location and Weather | `IR_REPO_INCIDENT_LOC_COL` |
-| `a_evidence` | Cols N and Q — Evidence links | `IR_REPO_EVIDENCE_N_COL` / `_Q_COL` |
-| `a_overallStatus` | Col D — Issue Status | `IR_REPO_STATUS_COL` |
-| `a_crmOwner` | Col F — SPOC (seed only; editable after) | `IR_REPO_SPOC_COL` |
+| `irNumber` | Col B — IR Number | `IR Number` |
+| `droneId` | Col K — Mention the Drone Serial No (S250XX) | `Drone Serial No` |
+| `dateRaised` / `dateRaisedISO` | Col C — Timestamp | `Timestamp` |
+| `incidentDate` | Col I — Date of Incident | `Date of Incident` |
+| `companyName` | Col R — Where Do You Work? | `Where Do You Work` |
+| `customerName` | Col L — Who's Reporting? (**name portion**) | `Who's Reporting` |
+| `contactPhone` | Col L — Who's Reporting? (**phone portion**) | *derived by `splitNamePhone`* |
+| `contactEmail` | Col P — Email Address | `Email Address` |
+| `spoc` | Col F — SPOC | `SPOC` |
+| `issueType` | Col G — What Support Is Required? | `What Support` |
+| `issueDesc` | Col H — Please Describe Your Problem… | `Please Describe` |
+| `incidentLocationWeather` | Col M — Incident Location and Weather | `Incident Location and Weather` |
+| `evidenceFormN` | Col N — Evidence: Attach Files From The Incident | `Evidence: Attach Files From The Incident` |
+| `evidenceFormQ` | Col Q — Evidence: Attach Screenshot of UAV Forecast | `Evidence: Attach Screenshot of UAV Forecast` |
+| `summaryLink` | Col A — Summary | `Summary` |
+| `initialStatus` | Col D — Issue Status | `Issue Status` — **read once per ticket as its starting stage**, never as the live workflow |
+| *priority* | — | the Sheet column is **consumed but deliberately not read**: priority is app-owned |
+
+Anything the Form writes that this table does not name lands in `extra[]` and is
+surfaced on the 📋 Report tab rather than dropped.
 
 ### The automated timeline
 Every activity in an IR is recorded for context, from four sources, so nobody has to

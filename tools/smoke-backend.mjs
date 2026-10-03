@@ -952,7 +952,7 @@ r.ok('SpreadsheetApp is used exactly twice', ssSites.length === 2, ssSites.lengt
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a read-only input (' + (owner ? owner.name : 'top level') + ')',
-    !!owner && ['listIRs', 'listLegacyIRs', 'getAllIRStatuses'].indexOf(owner.name) > -1,
+    !!owner && ['listIRs', 'listLegacyIRs'].indexOf(owner.name) > -1,
     { site: i + 1, fn: owner && owner.name });
 });
 r.ok('and neither of them writes: the client sheet is an INPUT, never a store',
@@ -993,13 +993,25 @@ r.ok('saveSection assigns store[sectionId], not the whole store',
 r.ok('and it never writes the sibling keys away',
   !/writeJsonLocked\(storeFile,\s*fields\)/.test(sv),
   (sv.match(/[^\n]*writeJsonLocked\(storeFile[^\n]*/) || [''])[0]);
-// irs.json is the one non-sentinel keyed store: one key per IR, never "the value".
-r.ok('irs.json is read as a keyed map, never as "the value"',
-  /var irs = readJson\('irs\.json'\)/.test(fnBody('getAllIRStatuses')),
-  (fnBody('getAllIRStatuses').match(/[^\n]*readJson\([^\n]*/) || [''])[0]);
-r.ok('and the reader indexes it by IR number, so one ticket cannot stand for all',
-  /irs\[irNum\]/.test(fnBody('getAllIRStatuses')),
-  (fnBody('getAllIRStatuses').match(/[^\n]*irs\[[^\n]*/) || [''])[0]);
+// The list read carries NO status, and reads no app store. It used to merge one in
+// from irs.json (getAllIRStatuses), which gave one question two answers — the same
+// split-brain the status bridge was cut to end in Release B. `__IRS__` owns the
+// workflow; the sheet is the customer's own words and nothing else.
+r.ok('listIRs injects no status — the app store is the only owner of the workflow',
+  !/getAllIRStatuses|statusMap|irs\.json/.test(fnBody('listIRs')),
+  (fnBody('listIRs').match(/[^\n]*(statusMap|irs\.json)[^\n]*/) || ['none — correct'])[0]);
+r.ok('and it reads no store at all, so there is nothing for it to disagree with',
+  !/readJson\(/.test(fnBody('listIRs')),
+  (fnBody('listIRs').match(/[^\n]*readJson[^\n]*/) || ['none — correct'])[0]);
+// It hands over the sheet AS DISPLAYED, so the frontend's one mapper can consume
+// it unchanged. getValues() would hand back Date objects, which JSON-serialise into
+// a shape the mapper cannot read, and a date column would arrive unparseable.
+r.ok('listIRs returns the sheet as a displayed grid, which is what the mapper eats',
+  /getDisplayValues\(\)/.test(fnBody('listIRs')) && /\bgrid\b/.test(fnBody('listIRs')),
+  (fnBody('listIRs').match(/[^\n]*getRange\([^\n]*/) || [''])[0]);
+r.ok('and it uses getDisplayValues, never getValues',
+  !/getValues\(\)/.test(fnBody('listIRs')),
+  (fnBody('listIRs').match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
 
 r.head('readJson: null only for an absent file, and it throws otherwise');
 // The tempting version of this helper answers {} for an unreadable file, and that

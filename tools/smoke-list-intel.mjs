@@ -356,8 +356,8 @@ const SEED = [
     customerName: 'Real Customer', issueDesc: 'real one', intake: { spoc: 'real spoc' } },
 ];
 
-// A fetch that never succeeds: the sheet read and the backend read both fail, which
-// is the outage this branch exists for.
+// A fetch that never succeeds: the one list read fails, which is the outage this
+// branch exists for.
 const deadFetch = () => Promise.reject(new Error('offline'));
 function loadList(fetchImpl) {
   return loadApp(`
@@ -413,13 +413,23 @@ r.ok('and the wording is the one the demo notice is pinned to',
   /Could not sync — showing demo data/.test(C.T.syncText), C.T.syncText);
 
 r.head('a successful sync replaces the copy, which is the whole invalidation story');
-const SHEET = 'Timestamp,IR Number,Drone Serial,Customer Name\n2026-08-01,IR900,S25P901,Fresh Customer\n';
-const liveFetch = url => String(url).indexOf('gviz/tq') >= 0
-  ? Promise.resolve({ ok: true, text: () => Promise.resolve(SHEET), json: () => Promise.resolve({}) })
+// The list now arrives as the BACKEND's grid — the header row plus the data rows,
+// as displayed. Same columns as the fixture above, but reached through the
+// token-gated action rather than an anonymous CSV URL; see listIRs in backend.gs.
+const FRESH_GRID = [
+  ['Timestamp', 'IR Number', 'Mention the Drone Serial No (S250XX)', "Who's Reporting? (Name & Contact)"],
+  ['2026-08-01', 'IR900', 'S25P901', 'Fresh Customer 9000000001'],
+];
+const liveFetch = url => String(url).indexOf('action=listIRs') >= 0
+  ? Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ status: 'ok', grid: FRESH_GRID }),
+      text: () => Promise.resolve(''),
+    })
   : Promise.reject(new Error('backend not needed'));
 const D = loadList(liveFetch);
 seed(D.T, SEED);
-r.ok('a fresh read puts the sheet records up and drops the stale ones', await (async () => {
+r.ok('a fresh read puts the backend records up and drops the stale ones', await (async () => {
   await D.T.fetchIRs();
   const now = D.T.allIRs.map(x => x.irNumber);
   return now.length === 1 && now[0] === 'IR900';
@@ -427,7 +437,37 @@ r.ok('a fresh read puts the sheet records up and drops the stale ones', await (a
 r.ok('...and writes them to the copy, so the next cold start paints the NEW list',
   (() => { const got = D.T.readIRListCache(); return !!got && got.length === 1 && got[0].irNumber === 'IR900'; })(),
   D.T.readIRListCache());
-r.ok('the status line credits the Sheet, and no demo flag is set',
-  /loaded from the Sheet/.test(D.T.syncText) && D.T.dataIsDemo === false, D.T.syncText);
+r.ok('the fresh record was mapped by the one mapper, phone split off the name',
+  D.T.allIRs[0].customerName === 'Fresh Customer' && D.T.allIRs[0].contactPhone === '9000000001',
+  JSON.stringify({ n: D.T.allIRs[0].customerName, p: D.T.allIRs[0].contactPhone }));
+r.ok('and no demo flag is set', D.T.dataIsDemo === false, D.T.syncText);
+
+r.head('an EMPTY repository is a real answer, not an outage');
+// The old read only accepted a non-empty list, so a repository with no rows fell
+// through to the sample cards — five invented tickets shown to somebody whose
+// repository is genuinely empty, with the word "demo" too small to notice.
+const E = loadList(url => String(url).indexOf('action=listIRs') >= 0
+  ? Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'ok', grid: [] }), text: () => Promise.resolve('') })
+  : Promise.reject(new Error('backend not needed')));
+await E.T.fetchIRs();
+r.ok('zero IRs is rendered as zero IRs, and the demo flag stays off',
+  E.T.allIRs.length === 0 && E.T.dataIsDemo === false,
+  JSON.stringify({ n: E.T.allIRs.length, demo: E.T.dataIsDemo }));
+
+r.head('the migration window: this frontend, the OLD backend, still shows a list');
+// This frontend ships BEFORE the new backend is pasted into both deployments. If it
+// only understood the grid, that whole window would be an empty list on every
+// screen — which is why the old `records` shape is accepted too, and why that
+// tolerance needs its own test rather than being assumed from the happy path.
+const OLD_RECORDS = [{ irNumber: 'IR500', status: 'Open', customerName: 'Old Shape', issueDesc: 'legacy record' }];
+const F = loadList(url => String(url).indexOf('action=listIRs') >= 0
+  ? Promise.resolve({ ok: true, json: () => Promise.resolve({ status: 'ok', records: OLD_RECORDS }), text: () => Promise.resolve('') })
+  : Promise.reject(new Error('backend not needed')));
+await F.T.fetchIRs();
+r.ok('an old backend\'s records still reach the list',
+  F.T.allIRs.length === 1 && F.T.allIRs[0].irNumber === 'IR500',
+  JSON.stringify(F.T.allIRs.map(x => x.irNumber)));
+r.ok('and the demo flag stays off — a real record, however old its shape',
+  F.T.dataIsDemo === false, F.T.syncText);
 
 r.finish();

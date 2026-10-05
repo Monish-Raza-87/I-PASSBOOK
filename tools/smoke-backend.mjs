@@ -64,8 +64,15 @@ r.head('the owner\'s security decisions');
 // plus Phase 0's grid-shaped listIRs and the new getLegacyIR. Bumped because the
 // action set changed — `ping` reports this, so a deployment that was not re-pasted
 // after a backend change can be told apart from one that was.
-r.ok('API_VERSION is 5 — Phase 1\'s safety net and Phase 0\'s new actions',
-  /API_VERSION:\s*5\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+//
+// v6 = `backupPulse`, the ONE public read of backup health. Bumped for the same
+// reason and it is the reason this number is worth watching: the page that shows it
+// lives outside the app and cannot be told to reload, so a paste that did not happen
+// is otherwise invisible — the page would ask for an action the deployment does not
+// have. `ping` answering `apiVersion 6` is how you know the paste landed. See
+// tools/smoke-backup-pulse.mjs.
+r.ok('API_VERSION is 6 — Phase 1\'s safety net, Phase 0\'s actions, and the public backup pulse',
+  /API_VERSION:\s*6\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));

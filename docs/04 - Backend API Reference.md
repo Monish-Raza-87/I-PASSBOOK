@@ -323,7 +323,7 @@ backup Sheet it produced.
 
 ```
 GET {BASE_URL}?action=getBackupHealth
-→ { "status":"ok", "apiVersion":5, "ok":true, "never":false,
+→ { "status":"ok", "apiVersion":6, "ok":true, "never":false,
     "at":"03-Oct-2026 23:40:11", "ago":"2 hours ago",
     "irs":19, "users":18, "files":12,
     "sheetUrl":"https://docs.google.com/spreadsheets/d/…/edit" }
@@ -339,6 +339,46 @@ GET {BASE_URL}?action=getBackupHealth
   frontend shows "unknown" in the failure colour and says so in words. A health line
   that renders "fine" when the request failed converts an unknown into a
   reassurance, which is worse than showing nothing.
+
+### `backupPulse`
+**The one public read in the whole API**, and it is the answer to a specific
+problem: a backup that has quietly stopped running reports nothing anywhere, and
+the moment you most need to check is the moment signing in may itself be what is
+broken. A check that needs a session cannot answer that, so this one does not.
+
+```
+GET {BASE_URL}?action=backupPulse
+→ { "status":"ok", "atMs":1759512011000, "ok":true }
+```
+
+**Two fields, and the smallness is the design**, not a first cut:
+
+- **`atMs`** — epoch milliseconds of the last recorded run, `0` when none has ever
+  run. A number, so the page formats it in the viewer's own locale and timezone.
+- **`ok`** — the verdict. False when no run has ever been recorded, when the last
+  run recorded a **failure**, and when the last run is older than
+  `CONFIG.BACKUP_STALE_MS` (36 hours). Three causes, one word, on purpose: a page
+  someone glances at does not need the difference, and an anonymous caller has not
+  earned it.
+
+What it deliberately does **not** return is the interesting half of the contract.
+The failure path stores whatever the exception said, and an Apps Script Drive error
+quotes the thing it could not open — which is a file id. So the stored `message`,
+the counts, `sheetUrl`, `folderId`, `stamp` and `lastRunAt` all stay behind. An
+admin gets those from [`getBackupHealth`](#getbackuphealth), over an authenticated
+action. `tools/smoke-backup-pulse.mjs` runs the real function against a fake drive
+and asserts the exact key set, so a field added here later fails the suite rather
+than shipping.
+
+- It takes **no parameter** and reads no part of `e` — there is nothing to
+  enumerate.
+- It is **GET-only**, in `doGet`'s pre-auth map. There is no POST twin.
+- Like every store read, a **missing `backup.json` is `atMs: 0`**, not an error —
+  "no backup yet" is a legitimate answer and the loudest one this page can give.
+- It is shown by **`backup.html`**, a standalone page served from the app's GitHub
+  Pages and kept out of the service worker's shell. It carries its own styles and
+  loads no app code, because the moment you open it may be the moment the app is
+  what is broken.
 
 ### `googleStart`
 The Google door, **half one**. A **GET** (`?action=googleStart`), served by the
@@ -358,6 +398,7 @@ about an account:
 |---|---|
 | `ping` | Version handshake. Returns `API_VERSION`; a stale cached frontend uses it to explain itself instead of failing obscurely. The frontend also fires it as a **wake-up** on the way to the sign-in screen, because Apps Script's cold start is measured in tens of seconds and the sign-in screen is the one place overlapping it costs the person nothing — see [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md). |
 | `sessionCheck` | Cheap liveness probe. Called by `confirmSessionAlive()` — which treats an unreachable server as **alive**, because ejecting someone on a flaky connection is the bug, not the fix. **It also fails open on a store error**, with a message that never starts with `unauthorized`: the frontend's interceptor auto-logs-out on that prefix, so a `sessions.json` that cannot be read would sign out all twenty users in the same poll window. |
+| `backupPulse` | The **one public read of app health**: when the nightly backup last ran, and whether it was any good. Two fields and no more. It exists so the backup can be checked from outside when signing in is the thing that is broken — see [`backupPulse`](#backuppulse) below. |
 | `login` | Email + password → a code, then email + password + code → session token. **Two steps** — the password alone buys no token; see [`login`](#login) below. |
 | `changePassword` | Verifies the current password, clears the must-change flag, revokes every existing session, mints a new one. Unauthenticated by design (a first-login account has no token) and therefore wired to the **same** `attempts.json` limiter as `login` — and it enforces the **same temp-password expiry**, because a temp password posted here buys a session exactly as it would at `login`. Both go through `isTempPasswordAccount()` / `tempPasswordExpired()` so the two doors cannot drift. |
 | `forgotPassword` | Mails a 6-digit **reset** code. Response is byte-identical whether or not the account exists (no enumeration), and it does no throttling of its own — it calls the one shared `issueAuthCode(email, 'reset', CODE_TTL_MIN)`, which is where the per-email budget, the resend gap, the global ceiling and the retire-the-older-code rule live. |
@@ -929,7 +970,7 @@ var CONFIG = {
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 5,            // 5 = the safety net (journal + nightly export + health)
+  API_VERSION: 6,            // 6 = ... + the public backupPulse (see below)
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 
@@ -941,6 +982,7 @@ var CONFIG = {
   BACKUP_KEEP_DAILY:   14,
   BACKUP_KEEP_WEEKLY:   8,
   BACKUP_KEEP_MONTHLY: 12,      // then one a year, forever
+  BACKUP_STALE_MS:     36 * 3600 * 1000,   // when backupPulse calls a night MISSED
 };
 ```
 

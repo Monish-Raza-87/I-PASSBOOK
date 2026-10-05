@@ -99,6 +99,13 @@ var CONFIG = {
   BACKUP_KEEP_WEEKLY: 8,
   BACKUP_KEEP_MONTHLY: 12,
 
+  // How old the last backup may be before the public status page calls it stale.
+  // The run is scheduled daily at ~23:40 IST, so a healthy record is under 24h old
+  // and anything past a day and a half means a night was MISSED rather than merely
+  // late. It is deliberately generous: a red light that is usually amber is a light
+  // nobody looks at.
+  BACKUP_STALE_MS: 36 * 3600 * 1000,
+
   ALLOWED_DOMAIN: 'indrones.com',
 
   // Bump this whenever the action set or a response shape changes. `ping` reports
@@ -123,7 +130,11 @@ var CONFIG = {
   // deliberately NOT a bump: it is run from the editor, adds no action and changes no
   // response, so a v5 deployment with it and a v5 deployment without are the same
   // thing to every client. It is told apart by being in the function dropdown.
-  API_VERSION: 5,
+  //
+  // v6 = `backupPulse`, the one PUBLIC read of backup health, so a page outside the
+  // app can answer "was there a backup last night?" without a sign-in. It returns two
+  // fields and nothing else. See the note on it — the smallness is the design.
+  API_VERSION: 6,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -1272,6 +1283,38 @@ function backupAgeLabel(ms) {
   if (hours < 24) return hours + 'h ' + (mins % 60) + 'm ago';
   var days = Math.floor(hours / 24);
   return days + (days === 1 ? ' day ago' : ' days ago');
+}
+
+// ── THE PUBLIC PULSE — the ONE unauthenticated read, and why it is two fields ──
+//
+// Every other read in this file needs an identity, because every other read is app
+// data. This one exists for a different reason: a backup that is quietly not running
+// is the failure this whole phase is about, and the one person who must be able to
+// see it is the owner, from a phone, without signing in — because when the thing
+// that has broken is sign-in itself, a check that needs a sign-in is no check at all.
+//
+// So it answers the smallest question that is still worth asking, and it is built to
+// give away as little as it can while answering it:
+//
+//   · TWO fields. `atMs`, the epoch milliseconds of the last run (0 = never), and
+//     `ok`, the verdict. That is the entire response.
+//   · NOT the message. The failure path stores whatever the exception said, and an
+//     Apps Script Drive error quotes the thing it could not open. That is a name, and
+//     a name here is a file id.
+//   · NOT the counts, not `sheetUrl`, not the stamp, not the folder. `getBackupHealth`
+//     returns all of those to an admin, over an authenticated action, and that is the
+//     right place for them.
+//   · NO parameter is read. There is nothing to enumerate and nothing to traverse.
+//
+// `ok` is false when no run has ever been recorded, when the last run recorded a
+// failure, and when the last run is older than CONFIG.BACKUP_STALE_MS — three
+// different causes behind one honest word, because a page that a person glances at
+// does not need the difference and an anonymous caller has not earned it.
+function backupPulse() {
+  var h = readBackupHealth();
+  var atMs = (h && h.lastRunMs) || 0;
+  var ok = !!atMs && h.ok !== false && (Date.now() - atMs) <= CONFIG.BACKUP_STALE_MS;
+  return { status: 'ok', atMs: atMs, ok: ok };
 }
 
 // ── THE RESTORE REHEARSAL ─────────────────────────────────────────────────────
@@ -3434,6 +3477,10 @@ function doGet(e) {
     var preAuth = {
       ping:         function () { return ping(); },
       sessionCheck: function () { return sessionCheck(e); },
+      // The one public read of app health, and the reason the daily check can work
+      // when sign-in is the thing that is broken. It takes NO argument: see the note
+      // on backupPulse for why that, and the two-field response, are the design.
+      backupPulse:  function () { return backupPulse(); },
     };
     if (preAuth[action]) return buildResponse(preAuth[action]());
 

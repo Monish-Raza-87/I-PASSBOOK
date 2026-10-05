@@ -45,8 +45,14 @@ const TARGET = 'gh-pages'
 // not part of the app — the build plan, and the Inspector's rule book he ticks
 // off. Each carries its own styles and loads nothing at all, so neither can drift
 // when the app's tokens change, and like `preview/` both stay out of sw.js's SHELL.
+//
+// `backup.html` is the same shape for the same reason: one line, its own styles, no
+// app code. It answers "did the backup run last night?" without a sign-in, which is
+// the only way that question survives sign-in being the thing that broke. It reaches
+// the backend through the one public action, `backupPulse`.
 const SERVED = [
   'app.js',
+  'backup.html',
   'base.css',
   'components.css',
   'dataflash.js',

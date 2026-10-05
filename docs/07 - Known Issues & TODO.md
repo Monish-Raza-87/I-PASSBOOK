@@ -539,16 +539,25 @@ is left is small.
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
 
-   **One further paste is owed as of 2026-10-03.** The live deployment answers
-   `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1 safety net — the
-   bundled export, the rotation, the health line and `API_VERSION: 5` — **is already
-   pasted and running**: `38 file(s), 20 IR(s)` is that version's own log line. What
-   the live copy does *not* hold is everything committed since: the **`…file(s) read,
-   …written` log line** (which is the count that proves the bundling is holding; the
-   old line printed a number that grows with the company either way) and
-   **`rehearseRestore()`**. Both ride the next paste — paste the current `backend.gs`
-   into **both** `/exec` deployments (the primary and the domain-scoped Google door)
-   and both go live at once.
+   **One further paste is owed as of 2026-10-03, and it grew on 2026-10-05.** The live
+   deployment answers `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1
+   safety net — the bundled export, the rotation, the health line and
+   `API_VERSION: 5` — **is already pasted and running**: `38 file(s), 20 IR(s)` is that
+   version's own log line. What the live copy does *not* hold is everything committed
+   since: the **`…file(s) read, …written` log line** (which is the count that proves the
+   bundling is holding; the old line printed a number that grows with the company either
+   way), **`rehearseRestore()`**, and **`backupPulse`** — the one public read the
+   `backup.html` page asks for, which is why `API_VERSION` is now `6`. All of it rides
+   the next paste — paste the current `backend.gs` into **both** `/exec` deployments
+   (the primary and the domain-scoped Google door) and everything goes live at once.
+
+   > **`backup.html` reads `not available on the backend` until that paste lands**, and
+   > that is the expected state, not a broken page: it asks for an action a `v5`
+   > deployment does not have. The way to tell them apart without opening the page is
+   > `ping` — it answers `apiVersion 6` only after the paste. Open the page at
+   > `https://monish-raza-87.github.io/i-passbook-app/backup.html`, and the live-check is
+   > the red one: the page must go RED when the timestamp it is given is stale, which is
+   > the state a stopped backup would produce.
 
    > **Then run `rehearseRestore()` once**, from the same function dropdown, *after* a
    > `runNightlyBackup()` — there has to be an archive to read back. It rebuilds that

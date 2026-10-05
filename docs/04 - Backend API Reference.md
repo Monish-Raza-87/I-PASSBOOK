@@ -1071,6 +1071,9 @@ Once, to turn on the nightly backup, and to prove it works:
 
 Then, to prove a backup can be read back into a store:
   rehearseRestore()
+
+Once, to survey what the legacy workbook actually contains:
+  inventoryLegacyWorkbook()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -1097,6 +1100,7 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `runNightlyBackup()` | idempotent, safe by day | The export itself: collects the store, writes one dated folder into `I-PASSBOOK backups`, rotates old folders out, and records the outcome in `_store/backup.json`. Run by hand to prove it works and to give the app a "last backup" line to show. Running it twice on the same day **overwrites that day's folder**, never makes a second one |
 | `installBackupTrigger()` | idempotent | Creates the **daily** ~23:40 IST time-driven trigger that calls `runNightlyBackup()`. A second run does not create a second trigger. It prints, in its own output, the command to run once by hand — because an installed trigger that has never fired leaves the health line reading "never", and the only way to tell a working trigger from an untested one is to run it once |
 | `rehearseRestore(stamp?)` | **writes to a copy only** | Rebuilds a store from a dated backup folder (the newest, or the one named) into `_rehearsal/`, reads it back, and prints `REHEARSAL PASSED` or `REHEARSAL FAILED`. It resolves the backup root and nothing else, so it **cannot** touch `_store/`, and `_rehearsal` is not named for a date, so the rotation can never reach it. Run it after the first `runNightlyBackup()`, and again whenever the store's shape changes |
+| `inventoryLegacyWorkbook()` | **read-only, editor-run** | Prints the legacy workbook's contents to the execution log: every tab's name **in the workbook's own order**, its used dimensions, how many of its rows hold anything at all, and the first row that does — the header, **wherever it sits**. It exists because `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **silently skips every other tab**, so nobody knows what else is in that workbook; bringing that data into the app cannot be planned until somebody does. It is **not an action** — no route, so it adds no API surface and does not move `API_VERSION` — and it touches nothing but the workbook. It reads every cell of every tab (one `getDisplayValues()` per tab) because `getLastRow()` counts a row that was merely *formatted*; a tab over 200,000 cells is reported by dimension and left unscanned. Each line goes through `report()`, one log entry per tab, because a single entry of a thousand lines is what a copy-paste truncates |
 
 ### Archiving, and the hazard that had to be closed first
 

@@ -958,7 +958,8 @@ r.head('the positional column layout is really gone, not adapted');
 });
 // SpreadsheetApp is still needed — but ONLY for the read-only inputs, which are not
 // stores: the IR Repository (listIRs) and the legacy workbook (listLegacyIRs for the
-// index, getLegacyIR for one record).
+// index, getLegacyIR for one record, and inventoryLegacyWorkbook for the one-off
+// survey of what is actually in there). All four READ. Not one of them writes.
 //
 // ONE exception, added by Phase 1, and it is an exception in one direction only: the
 // nightly backup's own Sheet. The app CREATES it, writes a snapshot into it, and
@@ -966,9 +967,14 @@ r.head('the positional column layout is really gone, not adapted');
 // everything else in there. "No spreadsheet holds app data" is still true; that
 // sentence is about the app's STORE, and this is a dated copy of it. Anything else
 // reaching for SpreadsheetApp is the app writing to a sheet again.
+//
+// The count going 4 → 5 is the deliberate act the number exists to force: a fifth
+// site cannot appear by accident, and the site it names here is an editor-run read
+// with no route, so the public surface is unchanged.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly four times', ssSites.length === 4, ssSites.length);
-const ssAllowed = ['listIRs', 'listLegacyIRs', 'getLegacyIR', 'exportStoreToFolder'];
+r.ok('SpreadsheetApp is used exactly five times', ssSites.length === 5, ssSites.length);
+const ssAllowed = ['listIRs', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
+                   'exportStoreToFolder'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a named site (' + (owner ? owner.name : 'top level') + ')',
@@ -978,7 +984,8 @@ ssSites.forEach((m, i) => {
 r.ok('and none of them writes: both sheets are INPUTS, never stores',
   !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('listIRs')) &&
   !/setValue|appendRow/.test(fnBody('listLegacyIRs')) &&
-  !/setValue|appendRow/.test(fnBody('getLegacyIR')),
+  !/setValue|appendRow/.test(fnBody('getLegacyIR')) &&
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('inventoryLegacyWorkbook')),
   (code.match(/[^\n]*(appendRow|\.setValue)[^\n]*/g) || ['']));
 r.ok('the backup sheet is CREATED and never opened back — an output, not a store',
   /SpreadsheetApp\.create\(/.test(fnBody('exportStoreToFolder')) &&
@@ -1003,6 +1010,50 @@ r.ok('its answer carries a grid, not an embed URL — the frame cannot come back
 r.ok('listLegacyIRs no longer hands out an embed URL either',
   !/embedUrl|rm=minimal/.test(fnBody('listLegacyIRs')),
   (fnBody('listLegacyIRs').match(/[^\n]*(embedUrl|rm=minimal)[^\n]*/) || ['none — correct'])[0]);
+
+// ── The workbook inventory — a survey, not a feature ──────────────────────────
+// It exists because listLegacyIRs silently skips every non-IR tab, so nobody knows
+// what else is in that workbook. It must stay a READ, and it must stay OFF the API
+// surface: it is run by hand from the editor, and the moment it grows a route it is
+// a new public-ish action on a restricted file.
+r.head('the workbook inventory is an editor-run read, and never an action');
+const inv = fnBody('inventoryLegacyWorkbook');
+r.ok('it exists, and it is NOT routed in doGet or doPost — so it adds no API surface',
+  /function inventoryLegacyWorkbook\s*\(/.test(code) &&
+  !/inventoryLegacyWorkbook\s*:/.test(code),
+  (code.match(/[^\n]*inventoryLegacyWorkbook[^\n]*/g) || []).slice(0, 2));
+r.ok('...which is why the paste that ships it does NOT move API_VERSION',
+  /API_VERSION:\s*6\b/.test(code));
+r.ok('it READS the workbook and touches nothing else — no store, no Drive, no mail',
+  /SpreadsheetApp\.openById\(CONFIG\.LEGACY_SHEET_ID\)/.test(inv) &&
+  !/writeJson|writeIR|appendAudit|MailApp|DriveApp|getStoreFolder|findStoreFile|Utilities\./.test(inv),
+  (inv.match(/[^\n]*(writeJson|DriveApp|MailApp|getStoreFolder)[^\n]*/) || ['none — correct'])[0]);
+r.ok('it uses getDisplayValues, never getValues',
+  /getDisplayValues\(\)/.test(inv) && !/getValues\(\)/.test(inv),
+  (inv.match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
+// The whole reason it is not just getLastRow(): a formatted-but-empty row counts as
+// the last row, so lastRow turns one stray click at row 5000 into a "5000-row" tab.
+// The report has to be built from rows that actually hold a value.
+r.ok('it counts rows that HOLD something, rather than trusting getLastRow',
+  /String\(row\[c\]\)\.trim\(\) !== ''/.test(inv) &&
+  /filledRows/.test(inv) &&
+  !/filled\s*=\s*String\(lastRow\)/.test(inv));
+r.ok('it reports the header row WHEREVER it sits, not assuming row 1',
+  /headerRow\s*=\s*r \+ 1/.test(inv) && /header@r/.test(inv));
+r.ok('it walks the tabs in the workbook\'s own order — no sort, so it can be checked against the Sheet',
+  /var sheets = ss\.getSheets\(\)/.test(inv) && !/\bsort\(/.test(inv));
+r.ok('every line goes through report(), so the output lands in the execution log',
+  /lines\.forEach\(function \(line\) \{ report\(line\); \}\)/.test(inv) &&
+  /return 'Inventory of '/.test(inv));
+// The output is pasted around by hand. It must not carry the workbook's address,
+// for the same reason app.js must not: the file is restricted, and its id is not
+// something to spread. The name and the tab names are what makes it checkable.
+r.ok('it prints no workbook id and no address — the name and the tabs are the proof',
+  (inv.match(/CONFIG\.LEGACY_SHEET_ID/g) || []).length === 1 &&
+  !/docs\.google\.com|spreadsheets\/d\//.test(inv) &&
+  /ss\.getName\(\)/.test(inv));
+r.ok('a single unreadable tab becomes a line, not a lost run',
+  /catch \(err\)/.test(inv) && /ERROR reading this tab/.test(inv));
 
 r.head('a store write replaces ONE KEY, never the file');
 // The single most dangerous mis-reading of this design:

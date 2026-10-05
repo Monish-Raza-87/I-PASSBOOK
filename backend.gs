@@ -5254,6 +5254,140 @@ function getLegacyIR(irNumber) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// EDITOR-RUN: inventoryLegacyWorkbook
+//
+// WHY THIS EXISTS. The app already reads the legacy workbook, but it reads ONLY the
+// tabs that are named like an IR: `listLegacyIRs` above matches /^IR\s*(\d+)/i and
+// skips every other tab without ever saying that it did. The owner wants the
+// investigation data and the rest of the IR material from this workbook inside the
+// app — and "bring the workbook's data in" cannot be planned until somebody knows
+// what is actually in there. Nothing in this environment can read it (the file is
+// restricted, so a read from outside 401s), which leaves exactly one way to find
+// out: a function he runs once from the editor and pastes back.
+//
+// IT IS NOT AN ACTION. It is run from the editor, like `rehearseRestore()`, and is
+// deliberately NOT routed in doGet or doPost — so it adds no API surface, is
+// unreachable from the app, and does not move API_VERSION. Nothing the app does
+// changes when this is pasted.
+//
+// IT READS AND NOTHING ELSE. No store, no Drive folder, no mail, no write of any
+// kind. The workbook is opened read-only by the script's owner account, which is the
+// same access `listLegacyIRs` and `getLegacyIR` already use.
+//
+// WHAT IT PRINTS, and why each part is there:
+//   · every tab's name, in the workbook's OWN TAB ORDER — because the only check
+//     that this ran against the right file is that it matches what he sees when he
+//     opens the Sheet: same tab count, same names, same order;
+//   · its used dimensions, so a tab that looks empty in the UI but reports 1,000
+//     rows is visible for what it is;
+//   · how many of its rows hold ANYTHING AT ALL — which is the number that matters,
+//     and deliberately not getLastRow(): a row that was merely formatted counts as
+//     the last row and holds nothing, so getLastRow() turns a stray click at row
+//     5,000 into a "5,000-row" tab. Counting the rows that actually hold a value is
+//     the difference between "this tab has data" and "this tab has had a scrollbar";
+//   · the first row that holds anything, wherever it sits — the header. Reporting
+//     its ROW is the point: a tab whose header is on row 3 has a title or a blank
+//     above it, which makes it a different kind of tab from one that starts at row 1.
+//
+//   inventoryLegacyWorkbook()   — run from the editor; prints to the execution log
+// ──────────────────────────────────────────────────────────────────────────────
+function inventoryLegacyWorkbook() {
+  // Reading every cell of every tab is what makes the "rows with content" count
+  // truthful rather than a guess, and it is the only real cost in here — so a tab
+  // over this many cells is reported by its dimensions and marked unscanned instead
+  // of being read. This workbook has hundreds of tabs; the ceiling exists so one
+  // pathologically formatted tab cannot turn a 30-second diagnostic into a timeout.
+  var MAX_CELLS = 200000;
+  // When a tab is too big to read whole, how far down to look for its header.
+  var HEADER_SEARCH_ROWS = 10;
+
+  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var sheets = ss.getSheets();
+
+  var lines = [];
+  var irTabs = 0, otherTabs = 0, errored = 0;
+
+  lines.push('LEGACY WORKBOOK INVENTORY — "' + ss.getName() + '"');
+  lines.push(sheets.length + ' tab(s), in the order they appear in the workbook. ' +
+             'Each line: name — dimensions, rows holding anything, and the header row.');
+  lines.push('');
+
+  for (var i = 0; i < sheets.length; i++) {
+    var tab = sheets[i];
+    var name = '(unnamed)';
+    var isIR = false;
+    var dims = '?';
+    var filled = '?';
+    var header = '(none)';
+
+    // One bad tab must not cost the whole inventory — a chart sheet or a tab this
+    // account cannot open is reported as a line, not thrown as a failed run.
+    try {
+      name = tab.getName();
+      isIR = /^IR\s*\d+/i.test(name);
+      if (isIR) irTabs++; else otherTabs++;
+
+      var lastRow = tab.getLastRow();
+      var lastCol = tab.getLastColumn();
+      dims = lastRow + ' rows x ' + lastCol + ' cols';
+
+      if (lastRow < 1 || lastCol < 1) {
+        filled = '0';
+        header = '(empty tab)';
+      } else if (lastRow * lastCol > MAX_CELLS) {
+        filled = 'not scanned (over ' + MAX_CELLS + ' cells)';
+        // Still worth finding the header, and cheaply: the top slice only.
+        var top = tab.getRange(1, 1, Math.min(lastRow, HEADER_SEARCH_ROWS), lastCol).getDisplayValues();
+        for (var t = 0; t < top.length; t++) {
+          if (top[t].join('').trim() !== '') {
+            header = 'header@r' + (t + 1) + ': ' + top[t].join(' | ');
+            break;
+          }
+        }
+      } else {
+        var grid = tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+        var filledRows = 0, headerRow = 0, headerCells = null;
+        for (var r = 0; r < grid.length; r++) {
+          var row = grid[r], holds = false;
+          for (var c = 0; c < row.length; c++) {
+            if (String(row[c]).trim() !== '') { holds = true; break; }
+          }
+          if (!holds) continue;
+          filledRows++;
+          if (!headerRow) { headerRow = r + 1; headerCells = row; }
+        }
+        filled = String(filledRows);
+        header = headerRow
+          ? 'header@r' + headerRow + ': ' + headerCells.join(' | ')
+          : '(no content)';
+      }
+    } catch (err) {
+      errored++;
+      header = 'ERROR reading this tab: ' + ((err && err.message) ? err.message : String(err));
+    }
+
+    // The [IR] / [--] tag is the split `listLegacyIRs` makes silently: the first
+    // group already has a screen in the app, the second is the part nobody has seen.
+    lines.push((isIR ? '[IR] ' : '[--] ') + name + ' — ' + dims + ', ' + filled +
+               ' row(s) with content, ' + header);
+  }
+
+  lines.push('');
+  lines.push('IR-numbered tabs (already reachable in the app): ' + irTabs +
+             '   ·   other tabs: ' + otherTabs +
+             (errored ? '   ·   tabs that could not be read: ' + errored : ''));
+
+  // ONE report() PER LINE, not one very long one. This workbook has hundreds of tabs,
+  // and a single execution-log entry of a thousand lines is exactly the thing the log
+  // folds away and a copy-paste truncates — which would hand back a partial inventory
+  // that looks complete. `report` is the same console.log every other editor-run
+  // function uses, so this output lands in the same place as `runNightlyBackup()`'s.
+  lines.forEach(function (line) { report(line); });
+  return 'Inventory of ' + sheets.length + ' tab(s) printed to the execution log — ' +
+         'copy it back in full.';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // ONE-TIME SETUP — run these from the Apps Script editor, in this order.
 //
 //   initializeStore()      creates _store/ and seeds the empty files

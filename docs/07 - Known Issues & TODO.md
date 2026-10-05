@@ -168,6 +168,8 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
   - **`listIRs` also carries no status any more.** It used to merge one in from `irs.json` via `getAllIRStatuses()`, giving one question two answers. `__IRS__` is the only owner of the workflow.
   - **Regression guards:** `smoke-backend.mjs` asserts `listIRs` uses `getDisplayValues()` (never `getValues()`), reads no store, and injects no status; `smoke-list-intel.mjs` asserts an empty repository renders as empty rather than falling through to the sample cards.
   - **The app names no sheet any more, and the legacy records came back (2026-10-03).** Phase 0's last two halves. First, the addresses: `IR_REPO_SHEET_ID`, `IR_REPO_TAB` and `LEGACY_SHEET_ID` are **gone from `app.js`**, along with the five demo records that carried the Repository URL as a `summaryLink` — because the frontend no longer reads either file, and an address in a public repo is a standing hazard (change a sharing setting by accident and the data is public instantly, with no deploy and no sign on screen). The backend keeps both addresses; it reads the files as their owner. Second, the **legacy view is rebuilt** from backend data: `listLegacyIRs` returns tab names only (no `embedUrl` — the frame can never load against a restricted file, so the URL was removed rather than left to rot), and a new token-gated `getLegacyIR` returns **one tab at a time** as a displayed grid, which `openLegacyRecord` renders read-only as label/value rows — never a `<table>`, because a legacy tab is wide and a phone answers a table with sideways scrolling. The dead iframe machinery (`openLegacyModal`, `legacyTick`, `_legacyLoaded`) is deleted, not kept dark. **`smoke-list-intel.mjs` now carries the guard the plan asked for**: it fails if a `gviz`/`tqx=out` fetch, a `docs.google.com/spreadsheets/d/…` address, or a sheet id ever returns to `app.js`.
+  - ⏳ **The rest of the workbook is still unseen, and one editor command is what reveals it (2026-10-05).** Only the tabs named like an IR are reachable in the app — `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **skips every other tab without saying so**, so the investigation data and the other IR material the owner wants brought in cannot even be scoped yet. The workbook is restricted and reads from this environment 401, so the only way to find out is a function he runs once. `inventoryLegacyWorkbook()` is **built and committed** — it is **not an action** (no route, so it adds no API surface and does not move `API_VERSION`), it reads the workbook and nothing else, and it prints one log line per tab: the name **in the workbook's own order**, the used dimensions, **how many rows hold anything at all** (not `getLastRow()`, which counts a merely *formatted* row), and the **header row wherever it sits**. `smoke-backend.mjs` holds it to being a read, to using `getDisplayValues`, to counting content rather than trusting `lastRow`, to walking tabs unsorted, and to printing no workbook id or address.
+    > **To run it:** open the backend editor — https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit — pick **`inventoryLegacyWorkbook`** in the function dropdown, press **Run**, open **Execution log**, and copy the whole log back. It ships with the next paste (see item 1 below), so if the dropdown does not list it, paste the current `backend.gs` first. **The check that it ran against the right file is that it matches what you see when you open the Sheet** — same tab count, same names, same order.
 - ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
 - ⚠️ **Everyone signed in can view every section, including Section D and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [10](10 - Auth & Access Model.md).
 - ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
@@ -546,18 +548,21 @@ is left is small.
    version's own log line. What the live copy does *not* hold is everything committed
    since: the **`…file(s) read, …written` log line** (which is the count that proves the
    bundling is holding; the old line printed a number that grows with the company either
-   way), **`rehearseRestore()`**, and **`backupPulse`** — the one public read the
-   `backup.html` page asks for, which is why `API_VERSION` is now `6`. All of it rides
-   the next paste — paste the current `backend.gs` into **both** `/exec` deployments
-   (the primary and the domain-scoped Google door) and everything goes live at once.
+   way), **`rehearseRestore()`**, **`backupPulse`** — the one public read the
+   `backup.html` page asks for, which is why `API_VERSION` is now `6` — and
+   **`inventoryLegacyWorkbook()`**, the editor-run workbook survey. All of it rides the
+   next paste — paste the current `backend.gs` into **both** `/exec` deployments (the
+   primary and the domain-scoped Google door) and everything goes live at once.
 
    > **`backup.html` reads `not available on the backend` until that paste lands**, and
    > that is the expected state, not a broken page: it asks for an action a `v5`
    > deployment does not have. The way to tell them apart without opening the page is
    > `ping` — it answers `apiVersion 6` only after the paste. Open the page at
-   > `https://monish-raza-87.github.io/i-passbook-app/backup.html`, and the live-check is
-   > the red one: the page must go RED when the timestamp it is given is stale, which is
-   > the state a stopped backup would produce.
+   > `https://monish-raza-87.github.io/I-PASSBOOK/backup.html` (**`I-PASSBOOK`, capitalised
+   > — the lowercase `i-passbook-app` path is the repo *name*, not the Pages path, and it
+   > 404s**), and the live-check is the red one: the page must go RED when the timestamp
+   > it is given is stale, which is the state a stopped backup would produce. The page is
+   > confirmed serving as of 2026-10-05 (HTTP 200, cache `ipassbook-v67`).
 
    > **Then run `rehearseRestore()` once**, from the same function dropdown, *after* a
    > `runNightlyBackup()` — there has to be an archive to read back. It rebuilds that

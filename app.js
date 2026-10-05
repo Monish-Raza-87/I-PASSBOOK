@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v66';
+const APP_VERSION = 'v67';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1041,17 +1041,17 @@ function saveSentinel(irNumber, sectionId, fields) {
 // owns everything mutable — status, assignee, priority, category, which sections
 // are done, CSAT. One row per IR, keyed by irNumber.
 //
-// OWNERSHIP OF THE STATUS IS TOTAL. The Sheet is the client's intake record — what
-// the customer wrote, and nothing else. Its Col D is read exactly ONCE per ticket,
-// as that ticket's STARTING stage, the first time the app opens it (seedIRState);
-// after that the app is the only writer of a status, through Allot CAPS or a
-// section's move-on offer. That is what "the bridge between status updating via
-// sheet has to stop" means in code: the Sheet can hand a ticket its first stage,
-// and can never move it again.
+// OWNERSHIP OF THE STATUS IS TOTAL, AND EVERY TICKET BEGINS AT OPEN. The Sheet is the
+// client's intake record — what the customer wrote, and nothing else. Its Col D is not
+// read as a stage at all any more: it rides along as `initialStatus`, the customer's own
+// words, and no ticket's workflow ever starts from it. That is what "the bridge between
+// status updating via sheet has to stop" means in code, taken to its end.
 //
-// A ticket nobody here has opened yet has no app row, so the merge falls back to
-// the Sheet's stage for it (applyIRStateToAllIRs). That fallback is a STARTING
-// value, not a feed: it disappears for a ticket the moment it is opened once.
+// A ticket the app holds no row for reads 'Open' (applyIRStateToAllIRs). That 'Open' is
+// DERIVED, not stored — which is why nothing seeds a ticket on first sight any more. A
+// row exists only once a human has allotted a stage through Allot CAPS or a section's
+// move-on offer, so every status in the store is one a person chose. CR allots every
+// ticket by hand; the app's job is to remember what they said, not to guess it.
 const IR_STATE_IR = '__IRS__';
 let irState = {};             // irNumber -> { status, statusOwned, statusAt, statusBy,
                               //              assignee, priority, category, subCategory, done[], … }
@@ -1084,26 +1084,17 @@ function ownedStatus(irNumber) {
   return (s && s.status) ? s.status : '';
 }
 
-// Record that the app has seen this IR, and ADOPT its stage. Written once per IR,
-// on first open — and this write IS the handover: the Sheet's Col D is read here
-// for the last time, folded into the ten the desk uses now, and stored as the
-// app's own. `canonicalStage` is what stops a retired word like 'QC Investigation'
-// being carried forward: the ticket is held as 'Investigation' from its first sight.
+// There is deliberately NO first-sight writer here. Until 2026-10-03 a ticket was
+// SEEDED the first time the app opened it: the Sheet's Col D was read, folded into the
+// ten, and stored as the app's own starting stage (`seedIRState`, rows still carrying
+// `seededFrom: 'sheet'`). That made an untriaged ticket's stage depend on a column the
+// desk had stopped maintaining, and it made "the app owns this" true of a stage nobody
+// here had ever chosen.
 //
-// Records `seededAt`, never a `statusAt`: nobody knows when the Sheet's status was
-// set, and Stage 4's ageing must not be built on an invented timestamp. So an
-// adopted stage ages from the raise date and says so, exactly as before.
-function seedIRState(irNumber, sheetStatus) {
-  if (irState[irNumber]) return;
-  irState[irNumber] = {
-    status: canonicalStage(sheetStatus),
-    statusOwned: true,
-    seededAt: Date.now(),
-    seededFrom: 'sheet',
-    seededBy: myEmail() || 'unknown',
-  };
-  saveSentinel(IR_STATE_IR, irNumber, irState[irNumber]);
-}
+// It is gone. A ticket with no row reads 'Open' by derivation, and the first stage a
+// ticket ever holds is the one a person gives it. No migration was run against the rows
+// already seeded — CR is reviewing and re-allotting every ticket by hand, so those rows
+// are corrected by the people who own them rather than by a script.
 
 // Read the whole store once at boot. On failure the existing `irState` is kept
 // rather than wiped — an empty store and an unreachable backend look identical
@@ -1157,13 +1148,15 @@ function setAllIRs(records) {
 function applyIRStateToAllIRs() {
   allIRs.forEach(ir => {
     const owned = ownedStatus(ir.irNumber);
-    // UNCONDITIONAL, so every record leaves here holding one of the ten. The app's
-    // own stage wins whenever it holds one; with none — a ticket nobody has opened
-    // here — the Sheet's stage is the STARTING value, folded into the ten by
-    // canonicalStage. Without that fallback every legacy ticket would read as Open
-    // and the board would show a finished aircraft as not started, which is a worse
-    // lie than reading a value the desk itself wrote into the Sheet.
-    ir.status = owned || canonicalStage(ir.initialStatus) || 'Open';
+    // UNCONDITIONAL, so every record leaves here holding one of the ten. The app's own
+    // stage wins whenever it holds one; with none the ticket is **Open**, because
+    // nobody here has allotted it yet and Open is what "not yet allotted" means.
+    //
+    // `initialStatus` is deliberately NOT consulted. It used to be the fallback — the
+    // Sheet's Col D folded into the ten — which meant a legacy ticket wore a stage the
+    // desk had stopped maintaining, and could be moved by a Sheet edit the app never
+    // saw. It is now carried and nothing else: it is read by no line of this file.
+    ir.status = owned || 'Open';
     const s = appState(ir.irNumber);
     if (!s) return;
     ir.statusAt     = s.statusAt     || null;
@@ -5509,11 +5502,14 @@ function mapSheetRows(rows) {
       droneId:       cell(row, map.droneId),
       dateRaised:    toDisplayDate(ts),
       dateRaisedISO: toISODate(ts),
-      // NO status off the Sheet. `status` is app-owned and starts empty here, so
-      // the merge gives the ticket the Sheet's stage only as its STARTING value and
-      // the app's own store wins from the first moment it holds one. The Sheet's
-      // word is kept beside it as `initialStatus` — the customer's own report, shown
-      // on the intake view as what was said, never read as the workflow.
+      // NO status off the Sheet — not even as a starting value. `status` is app-owned
+      // and starts EMPTY here, and nothing fills it but the store, so a ticket nobody
+      // has allotted reads Open (applyIRStateToAllIRs). The Sheet's Col D still travels,
+      // one field over, as `initialStatus`: the customer's own report. It is CARRIED,
+      // and that is all it does — nothing renders it today, and nothing branches on it
+      // (this comment used to claim an "intake view" showed it; there is no such view).
+      // Worth a small screen of its own later, so CR can read what the client wrote
+      // without opening the Sheet; it is not one now.
       status:        '',
       summaryLink:   cell(row, map.summaryLink),
       customerName:  name,
@@ -5629,6 +5625,11 @@ async function fetchIRs() {
     // from a sample is a number somebody could quote in a meeting. Reached only on
     // a COLD start with nothing real to show.
     _dataIsDemo = true;
+    // The sample's STAGES go in the same place real ones live. They used to ride on
+    // each record's own `status`, which no longer survives the merge — every sample
+    // card would read Open and the board would show one column, which is how a demo
+    // stops demonstrating anything. In memory only, never saved: nothing here is real.
+    irState = getDemoIRState();
     setAllIRs(getDemoIRs());
     renderIRList(allIRs);
   }
@@ -6485,13 +6486,14 @@ async function openPassbook(irNumber) {
     // This IR may not be in allIRs yet (deep link into a list that has not
     // loaded), so apply its app-owned state directly instead of relying on the
     // merge in setAllIRs.
-    // First sight of this IR: adopt its stage from the Sheet. This runs BEFORE the
-    // reads below, because adopting is precisely what makes `owned` non-empty — and
-    // it is the last moment the Sheet's word for this ticket is ever consulted.
-    seedIRState(irNumber, currentIR.status || currentIR.initialStatus);
     const st = appState(irNumber);
     const owned = ownedStatus(irNumber);
-    if (owned) currentIR.status = owned;
+    // Set UNCONDITIONALLY, and repeat the merge's own rule rather than trusting what
+    // arrived: a stub `{ irNumber }` off a deep link carries no status at all, and the
+    // 30 suites would not catch a blank pill because none of them renders this path
+    // without a loaded list. Idempotent when the record HAS been merged — there,
+    // `ir.status` is already `owned || 'Open'`.
+    currentIR.status = owned || 'Open';
     if (st) {
       currentIR.assignee     = st.assignee     || '';
       currentIR.assigneeName = st.assigneeName || '';
@@ -11987,12 +11989,31 @@ function closeHistoryModal() {
 
 // ─── DEMO MODE DATA ──────────────────────────────────────────────────────────
 // Shown before the GAS endpoint is connected, so the UI is visible immediately.
+//
+// The records carry NO `status`, exactly like the real ones that come back from
+// `listIRs` — app-owned state is app-owned even when it is invented. `initialStatus`
+// keeps the customer's own words, unfixed: 'In Production' and 'QC Investigation' are
+// what the Sheet says, which is the point of the field.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014', dateRaised: '2025-10-01', status: 'In Production',  summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'AgriKart Pvt Ltd',      contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',  incidentDate: '2025-09-28' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', status: 'QC Investigation', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'FarmVista Solutions',   contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
-    { irNumber: 'IR407', droneId: 'S25P017', dateRaised: '2025-09-20', status: 'Open',            summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'SkyHarvest Corp',       contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',            incidentDate: '2025-09-18' },
-    { irNumber: 'IR406', droneId: 'S25P010', dateRaised: '2025-09-15', status: 'Delivered',        summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'GreenField Agri',       contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
-    { irNumber: 'IR405', droneId: 'S25P040', dateRaised: '2025-09-10', status: 'Closed',           summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'DroneWorks India',      contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
+    { irNumber: 'IR409', droneId: 'S25P014',  dateRaised: '2025-10-01', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'AgriKart Pvt Ltd',     contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',    incidentDate: '2025-09-28' },
+    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'FarmVista Solutions', contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
+    { irNumber: 'IR407', droneId: 'S25P017',  dateRaised: '2025-09-20', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'SkyHarvest Corp',     contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',             incidentDate: '2025-09-18' },
+    { irNumber: 'IR406', droneId: 'S25P010',  dateRaised: '2025-09-15', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'GreenField Agri',     contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
+    { irNumber: 'IR405', droneId: 'S25P040',  dateRaised: '2025-09-10', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'DroneWorks India',    contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
   ];
+}
+
+// The sample's stages, and they are exactly what the old fallback produced: the Sheet's
+// word for each record, folded into the ten. No `updatedBy`, so `appState()` returns null
+// and no assignee, priority or category is invented for a ticket nobody has worked —
+// which is the same restraint the real records get.
+function getDemoIRState() {
+  return {
+    IR409: { status: 'Production'    },
+    IR408: { status: 'Investigation' },
+    IR407: { status: 'Open'          },
+    IR406: { status: 'Delivered'     },
+    IR405: { status: 'Delivered'     },
+  };
 }

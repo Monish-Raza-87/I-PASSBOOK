@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-PASSBOOK Backup</title>
+<meta name="robots" content="noindex">
+<style>
+  /* This page carries its OWN styles and loads nothing — no tokens.css, no icons,
+     no fonts, no app.js. It is the page someone opens when they already suspect
+     something is wrong, which is the worst moment to depend on the thing that might
+     be broken. It is also why it cannot drift when the app's look changes: there is
+     nothing here to drift. Same rule as plan.html and inspector.html. */
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --ok: #1d6b45;
+    --ok-soft: #e2f3ea;
+    --stop: #a51f2c;
+    --stop-soft: #fbe8ea;
+    --warn: #7a5600;
+    --warn-soft: #fdf3dc;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    /* The house guard form, the same one faq/inspector/plan carry: "did the viewer
+       express no preference?", never "did they not pick light?" — the attribute is
+       the absence of a choice, and this page honours the choice the APP recorded,
+       since it is the same origin. */
+    :root:not([data-theme]) {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --fg: #e7eaf1;
+      --fg-muted: #98a1b3;
+      --line: #2a3140;
+      --ok: #6fd3a0;
+      --ok-soft: #14291f;
+      --stop: #f08e97;
+      --stop-soft: #2e1519;
+      --warn: #e8b06a;
+      --warn-soft: #2c2314;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --fg: #e7eaf1;
+    --fg-muted: #98a1b3;
+    --line: #2a3140;
+    --ok: #6fd3a0;
+    --ok-soft: #14291f;
+    --stop: #f08e97;
+    --stop-soft: #2e1519;
+    --warn: #e8b06a;
+    --warn-soft: #2c2314;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px 16px;
+    background: var(--bg); color: var(--fg);
+    font-family: var(--sans); line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { width: 100%; max-width: 30rem; }
+  h1 {
+    margin: 0 0 18px; font-size: 0.8125rem;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-muted); font-weight: 600;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px 20px;
+  }
+  /* The state is carried by the WORD first and the colour second. A colour-only
+     answer is unreadable to anyone who cannot tell red from green, and this is a
+     page whose entire content is one verdict. */
+  .dot {
+    display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+    margin-right: 10px; vertical-align: baseline; background: var(--fg-muted);
+  }
+  .verdict {
+    display: flex; align-items: baseline;
+    font-size: 1.375rem; font-weight: 650; letter-spacing: -0.01em;
+    margin: 0 0 10px;
+  }
+  .detail { margin: 0; color: var(--fg-muted); font-size: 0.9375rem; }
+  .is-ok   .dot { background: var(--ok); }
+  .is-ok   .verdict { color: var(--ok); }
+  .is-stop .dot { background: var(--stop); }
+  .is-stop .verdict { color: var(--stop); }
+  .is-warn .dot { background: var(--warn); }
+  .is-warn .verdict { color: var(--warn); }
+  .card.is-ok   { background: var(--ok-soft);   border-color: var(--ok); }
+  .card.is-stop { background: var(--stop-soft); border-color: var(--stop); }
+  .card.is-warn { background: var(--warn-soft); border-color: var(--warn); }
+  footer {
+    margin-top: 14px; display: flex; flex-wrap: wrap; gap: 12px;
+    align-items: center; justify-content: space-between;
+    font-size: 0.8125rem; color: var(--fg-muted);
+  }
+  button {
+    font: inherit; font-size: 0.8125rem; cursor: pointer;
+    padding: 8px 14px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--surface); color: var(--fg);
+    min-height: 40px;
+  }
+  button:hover { border-color: var(--fg-muted); }
+  noscript p { color: var(--stop); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>I-PASSBOOK · nightly backup</h1>
+
+  <div class="card" id="card">
+    <p class="verdict"><span class="dot" aria-hidden="true"></span><span id="verdict">Checking…</span></p>
+    <p class="detail" id="detail">Asking the server how last night went.</p>
+  </div>
+
+  <footer>
+    <span id="checked"></span>
+    <button type="button" id="again">Check again</button>
+  </footer>
+
+  <noscript><p>This page needs JavaScript: it asks the server a question and shows the answer.</p></noscript>
+</main>
+
+<script>
+/* ── What this page is, and what it deliberately is not ──────────────────────
+ *
+ * One question, answered without a sign-in: did the nightly backup run last night,
+ * and was it any good? It exists because the failure it watches for is a QUIET one —
+ * a backup that stopped running reports nothing anywhere — and because the moment
+ * you most need to check is the moment signing in may itself be what is broken. A
+ * check that requires a session cannot answer that.
+ *
+ * The endpoint behind it (action=backupPulse) returns exactly two fields: `atMs`,
+ * the epoch milliseconds of the last run, and `ok`, the verdict. It returns no
+ * counts, no file names, no sheet address and no error text — so this page cannot
+ * leak what it does not receive, and there is nothing here to redact.
+ *
+ * ⚠️ THE THIRD STATE IS THE POINT. A page that shows green when it cannot reach the
+ * server is worse than no page at all: it converts "I do not know" into "everything
+ * is fine", which is exactly the mistake this whole phase exists to stop. So a failed
+ * fetch is AMBER and says in words that it says nothing about the backup.
+ */
+(function () {
+  'use strict';
+
+  // The PUBLIC deployment. This URL is already in app.js on a public website — it is
+  // not a secret and cannot be one, which is precisely why the action behind it hands
+  // out two fields and no more.
+  var API = 'https://script.google.com/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec';
+
+  var card    = document.getElementById('card');
+  var verdict = document.getElementById('verdict');
+  var detail  = document.getElementById('detail');
+  var checked = document.getElementById('checked');
+
+  function show(kind, word, line) {
+    card.className = 'card is-' + kind;
+    verdict.textContent = word;
+    detail.textContent = line;
+  }
+
+  // "8h 12m ago" — the same wording the app's own backup screen uses, because a bare
+  // timestamp makes a person do date arithmetic to answer the only question they have.
+  function ago(ms) {
+    var mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'less than a minute ago';
+    if (mins < 60) return mins + (mins === 1 ? ' minute ago' : ' minutes ago');
+    var hours = Math.floor(mins / 60);
+    if (hours < 24) return hours + 'h ' + (mins % 60) + 'm ago';
+    var days = Math.floor(hours / 24);
+    return days + (days === 1 ? ' day ago' : ' days ago');
+  }
+
+  function when(ms) {
+    try {
+      return new Date(ms).toLocaleString(undefined,
+        { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) { return ''; }
+  }
+
+  function check() {
+    show('', 'Checking…', 'Asking the server how last night went. A cold backend can take a minute to wake up.');
+    var done = false;
+    // ⚠️ SEVENTY-FIVE SECONDS, and the number is measured, not guessed. Apps Script
+    // goes cold after about five minutes idle and then takes 30-60s to answer the
+    // first request — 66.6s has been observed on this project. A 20-second timeout
+    // (this page's first draft) fired on a perfectly healthy backend and announced a
+    // problem that was not there, which is the SAME class of lie as a green light on a
+    // dead server, just pointed the other way. An unanswered question and a bad answer
+    // must never look alike, and neither may be dressed up as the other.
+    var WAKE_UP_MS = 75000;
+    var timer = setTimeout(function () {
+      if (done) return;
+      done = true;
+      show('warn', 'The server did not answer',
+           'No answer within ' + (WAKE_UP_MS / 1000) + ' seconds. This says nothing about the backup — press Check again.');
+    }, WAKE_UP_MS);
+
+    fetch(API + '?action=backupPulse')
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        if (!d || d.status !== 'ok') {
+          // ⚠️ The state the page is in UNTIL THE BACKEND IS PASTED, and the reason it
+          // says so in words. A `v5` deployment has no `backupPulse` and answers
+          // `{status:"error", message:"This action is not available on the backend…"}`,
+          // so "the backend is older than this page" is the overwhelmingly likely
+          // cause. The server's own message is deliberately NOT shown: it is the one
+          // field on this endpoint that can quote an internal error, and this page has
+          // no business rendering text it did not choose.
+          show('warn', 'The backend did not answer this check',
+               'It replied, but not with a backup verdict — most often because this page ' +
+               'is newer than the backend that was pasted. This says nothing about the backup.');
+          return;
+        }
+        var atMs = Number(d.atMs) || 0;
+        if (!atMs) {
+          show('stop', 'No backup has ever run',
+               'The nightly export has never recorded a run.');
+        } else if (d.ok) {
+          show('ok', 'Backup is fine',
+               'Last good run ' + ago(Date.now() - atMs) + ' (' + when(atMs) + ').');
+        } else {
+          // The server collapses "failed" and "missed" into one `ok:false`, on purpose:
+          // an anonymous caller has not earned the difference. The AGE carries it here
+          // instead, and the person reading knows a night was missed when the number is
+          // more than a day.
+          show('stop', 'Not backed up',
+               'Last recorded run was ' + ago(Date.now() - atMs) + ' (' + when(atMs) +
+               ') — it either failed or a night was missed.');
+        }
+      })
+      .catch(function () {
+        if (done) return;
+        done = true; clearTimeout(timer);
+        show('warn', 'Cannot reach the server',
+             'The request did not go through. This says nothing about the backup.');
+      })      .then(function () {
+        checked.textContent = 'Checked at ' + new Date().toLocaleTimeString();
+      });
+  }
+
+  document.getElementById('again').addEventListener('click', check);
+  check();
+  // Re-check while the page is left open, so a phone propped on a desk is not showing
+  // yesterday's answer. Five minutes is far shorter than the thing being watched,
+  // which changes once a night.
+  setInterval(check, 300000);
+})();
+</script>
+</body>
+</html>

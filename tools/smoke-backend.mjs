@@ -1055,6 +1055,43 @@ r.ok('it prints no workbook id and no address — the name and the tabs are the 
 r.ok('a single unreadable tab becomes a line, not a lost run',
   /catch \(err\)/.test(inv) && /ERROR reading this tab/.test(inv));
 
+// ── The peek — the half of the survey that prints actual rows ─────────────────
+// The inventory can say a tab is 81x7 and headed "Root Cause Analysis". It cannot say
+// whether a ROW of it is one investigation, one finding, or one part — and a screen
+// cannot be designed from a dimension. So the survey also prints the top-left corner
+// of a named list of tabs. Same rules as the inventory, plus one more: it must not
+// become a SIXTH SpreadsheetApp site, which is why it is handed the already-open
+// spreadsheet rather than opening one of its own.
+r.head('the workbook peek prints rows, and stays inside the one read it was given');
+const peek = fnBody('legacyPeekLines');
+r.ok('it exists and takes the OPEN spreadsheet, so the five-site count stays honest',
+  /function legacyPeekLines\s*\(\s*ss\s*,/.test(code) && !/SpreadsheetApp\./.test(peek),
+  (peek.match(/[^\n]*SpreadsheetApp[^\n]*/) || ['none — correct'])[0]);
+r.ok('...and only the inventory calls it, from inside the read it already had',
+  /legacyPeekLines\(ss, PEEK_TABS\)/.test(inv) &&
+  (code.match(/legacyPeekLines\s*\(/g) || []).length === 2);
+r.ok('it is NOT routed, so the peek adds no API surface either — and moves no version',
+  !/legacyPeekLines\s*:/.test(code) && /API_VERSION:\s*6\b/.test(code));
+r.ok('it uses getDisplayValues, never getValues',
+  /getDisplayValues\(\)/.test(peek) && !/getValues\(\)/.test(peek),
+  (peek.match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
+r.ok('it never writes, and never reaches outside the workbook it was handed',
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(peek) &&
+  !/writeJson|appendAudit|MailApp|DriveApp|getStoreFolder|findStoreFile|Utilities\./.test(peek),
+  (peek.match(/[^\n]*(writeJson|DriveApp|MailApp)[^\n]*/) || ['none — correct'])[0]);
+r.ok('all three dimensions are capped, so one wide tab cannot flood the log',
+  /MAX_ROWS\s*=/.test(peek) && /MAX_COLS\s*=/.test(peek) && /MAX_CELL\s*=/.test(peek) &&
+  /Math\.min\(lastRow, MAX_ROWS\)/.test(peek) && /Math\.min\(lastCol, MAX_COLS\)/.test(peek));
+r.ok('a tab that cannot be read becomes a line, not a lost run',
+  /catch \(err\)/.test(peek) && /COULD NOT BE READ/.test(peek));
+r.ok('a name that matches nothing prints its near miss, rather than printing nothing',
+  /NO TAB WITH THIS EXACT NAME/.test(peek) && /did you mean/.test(peek));
+r.ok('the newest IR tab rides along, so the INTENDED form can be read against a live one',
+  /\/\^IR\\s\*\(\\d\+\)\/i\.exec/.test(peek) && /newest/.test(peek),
+  (peek.match(/[^\n]*(newest|\^IR)[^\n]*/g) || ['none']).slice(0, 2));
+r.ok('the tab list is a named constant, so the peek can be switched OFF without editing code',
+  /var PEEK_TABS = \[/.test(inv) && /if \(PEEK_TABS\.length\)/.test(inv));
+
 r.head('a store write replaces ONE KEY, never the file');
 // The single most dangerous mis-reading of this design:
 //   writeJson('config.json', fields)   destroys the team directory and dropdowns

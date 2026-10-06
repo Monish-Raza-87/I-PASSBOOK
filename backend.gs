@@ -5301,6 +5301,21 @@ function inventoryLegacyWorkbook() {
   // When a tab is too big to read whole, how far down to look for its header.
   var HEADER_SEARCH_ROWS = 10;
 
+  // Tabs to look INSIDE, after the one-line summary of every tab.
+  //
+  // The summary answers "what is in this workbook?"; this answers the question that
+  // comes next and that no summary can: "what does a ROW of it look like?" For an IR
+  // tab the summary is enough, because the app already renders one. For the tabs that
+  // are NOT named like an IR it is not — and those are the tabs nobody has ever seen.
+  // `inventoryLegacyWorkbook` reported that `STRIVER 003` is 31x2 with its first
+  // non-empty row reading "Fuselage | 1", which is a title and a column count; it did
+  // not report one cell of what is under them.
+  //
+  // SET THIS TO [] once the screens are designed. The summary is the part worth
+  // keeping and running again; the peek is a one-off, and a diagnostic that keeps
+  // printing the customer's own rows forever is a liability.
+  var PEEK_TABS = ['INDEX', 'S100 TC', 'STRIVER 003', 'FORMAT'];
+
   var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
   var sheets = ss.getSheets();
 
@@ -5377,6 +5392,15 @@ function inventoryLegacyWorkbook() {
              '   ·   other tabs: ' + otherTabs +
              (errored ? '   ·   tabs that could not be read: ' + errored : ''));
 
+  // The peek, when one is asked for. It takes `ss` rather than opening the workbook
+  // again on purpose: this file is allowed exactly five SpreadsheetApp sites and a
+  // suite counts them, so a diagnostic that would make it six is a diagnostic that
+  // has to justify itself. Passing the handle in does not.
+  if (PEEK_TABS.length) {
+    lines.push('');
+    lines = lines.concat(legacyPeekLines(ss, PEEK_TABS));
+  }
+
   // ONE report() PER LINE, not one very long one. This workbook has hundreds of tabs,
   // and a single execution-log entry of a thousand lines is exactly the thing the log
   // folds away and a copy-paste truncates — which would hand back a partial inventory
@@ -5385,6 +5409,113 @@ function inventoryLegacyWorkbook() {
   lines.forEach(function (line) { report(line); });
   return 'Inventory of ' + sheets.length + ' tab(s) printed to the execution log — ' +
          'copy it back in full.';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// THE PEEK — the top-left corner of a named list of tabs, one line per row.
+//
+// It exists because a summary cannot design a screen. Knowing that `S100 TC` is 81x7
+// and headed "Root Cause Analysis" says the tab is worth a screen; it does not say
+// whether a row of it is one investigation, one finding, or one part. Only the columns
+// do, and the columns are what this prints.
+//
+// IT IS HANDED THE OPEN SPREADSHEET and never opens one itself — see the note at the
+// call site. Read-only, editor-run, not in the router map, and it bumps no version.
+//
+// WHAT IT PRINTS IS THE WORKBOOK'S OWN CONTENT, which is the customer's. It goes to
+// the execution log and nowhere else: nothing here is committed, and nothing here is
+// served. Read the output; do not paste it into a file.
+function legacyPeekLines(ss, tabNames) {
+  // How much of each tab, and how much of each cell. The point is the COLUMNS — what
+  // each field is called — not the data underneath them. A 50-column form printed
+  // whole is one line the log wraps into unreadability, which is the exact failure
+  // this file's per-line reporting style exists to avoid.
+  var MAX_ROWS = 12;
+  var MAX_COLS = 24;
+  var MAX_CELL = 30;
+
+  var lines = [];
+  var all = ss.getSheets();
+  // Object.create(null), not {}: a tab called "constructor" would otherwise be found
+  // in the prototype chain and reported as a tab that does not exist. Cheap to be
+  // right about, and impossible to debug from the log if it ever happens.
+  var byName = Object.create(null);
+  for (var i = 0; i < all.length; i++) byName[all[i].getName()] = all[i];
+
+  // The newest IR tab rides along, always. `FORMAT` shows the layout somebody
+  // INTENDED; only a live tab shows whether that is the layout people actually fill
+  // in. The two are worth reading side by side, and the newest IR is the cheapest way
+  // to get the second without having to name it.
+  var newest = null, newestNum = -1;
+  for (var n = 0; n < all.length; n++) {
+    var m = /^IR\s*(\d+)/i.exec(all[n].getName());
+    if (m && Number(m[1]) > newestNum) { newestNum = Number(m[1]); newest = all[n].getName(); }
+  }
+
+  var wanted = tabNames.slice();
+  if (newest && wanted.indexOf(newest) < 0) wanted.push(newest);
+
+  lines.push('WORKBOOK PEEK — ' + wanted.length + ' tab(s), first ' + MAX_ROWS +
+             ' rows x ' + MAX_COLS + ' cols. "·" = empty cell, "…" = cut off.');
+
+  for (var t = 0; t < wanted.length; t++) {
+    var want = wanted[t];
+    var tab = byName[want];
+    lines.push('');
+
+    if (!tab) {
+      // A near miss is the usual reason a name fails — an extra space, a different
+      // case — and printing the near miss saves a trip to the workbook to find out
+      // it was one character out.
+      var near = [];
+      for (var k = 0; k < all.length; k++) {
+        if (all[k].getName().toLowerCase().indexOf(want.toLowerCase()) >= 0) {
+          near.push(all[k].getName());
+        }
+      }
+      lines.push('### ' + want + ' — NO TAB WITH THIS EXACT NAME');
+      lines.push('    ' + (near.length ? 'did you mean: ' + near.join(' , ')
+                                       : 'nothing in the workbook resembles it'));
+      continue;
+    }
+
+    try {
+      var lastRow = tab.getLastRow();
+      var lastCol = tab.getLastColumn();
+      var rows = Math.min(lastRow, MAX_ROWS);
+      var cols = Math.min(lastCol, MAX_COLS);
+
+      lines.push('### ' + want + ' — ' + lastRow + ' x ' + lastCol +
+                 (rows < lastRow ? ', first ' + rows + ' rows' : '') +
+                 (cols < lastCol ? ', first ' + cols + ' of ' + lastCol + ' cols' : ''));
+
+      if (lastRow < 1 || lastCol < 1) {
+        lines.push('    (empty tab)');
+        continue;
+      }
+
+      var grid = tab.getRange(1, 1, rows, cols).getDisplayValues();
+      for (var r = 0; r < grid.length; r++) {
+        var cells = [], holds = false;
+        for (var c = 0; c < grid[r].length; c++) {
+          var v = String(grid[r][c]).replace(/\s+/g, ' ').trim();
+          if (v === '') { cells.push('·'); continue; }
+          holds = true;
+          cells.push(v.length > MAX_CELL ? v.slice(0, MAX_CELL) + '…' : v);
+        }
+        // A blank row prints as one mark, not as twenty-four dots. The GAP is the
+        // information — it is where a department band ends and the field labels begin
+        // — and it reads at a glance only when it is one character wide.
+        lines.push(holds ? 'r' + (r + 1) + ' | ' + cells.join(' | ')
+                         : 'r' + (r + 1) + ' | (blank)');
+      }
+    } catch (err) {
+      lines.push('### ' + want + ' — COULD NOT BE READ: ' +
+                 ((err && err.message) ? err.message : String(err)));
+    }
+  }
+
+  return lines;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

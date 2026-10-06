@@ -5314,7 +5314,13 @@ function inventoryLegacyWorkbook() {
   // SET THIS TO [] once the screens are designed. The summary is the part worth
   // keeping and running again; the peek is a one-off, and a diagnostic that keeps
   // printing the customer's own rows forever is a liability.
-  var PEEK_TABS = ['INDEX', 'S100 TC', 'STRIVER 003', 'FORMAT'];
+  //
+  // IT IS NOW []. The peek was run its one time on 2026-10-06 by reading the four
+  // tabs straight out of the Sheet, so those rows are known and there is no reason
+  // to print them again — nor for the owner to run this function to get them. The
+  // mechanism stays: put a tab name back here if a new tab ever appears and the
+  // workbook is not readable from outside.
+  var PEEK_TABS = [];
 
   var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
   var sheets = ss.getSheets();

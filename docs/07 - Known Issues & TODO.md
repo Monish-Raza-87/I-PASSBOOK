@@ -541,62 +541,36 @@ is left is small.
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
 
-   ✅ **THE PASTE IS IN — confirmed 2026-10-06 ~16:23 IST.** The paste owed from
-   2026-10-03 has landed. The proof is not a claim about a deploy date but a live read:
-   `backup.html` reports **"Backup is fine — last good run 16h 48m ago (Oct 05, 2026,
-   11:34 PM)"**, and that verdict is reachable *only* when the backend answers
-   `backupPulse` with `{status:'ok', ok:true, atMs}` — a `v5` deployment has no such
-   action and the page would instead say *"The backend did not answer this check"*. So
-   all four items named below are live. **The one step still owed is
-   `rehearseRestore()`** — see the note below it; until it has run on a real archive,
-   `raw/` is a backup that has never been restored. The paragraph below is kept as the
-   record of what that paste carried. The live
-   deployment answered `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1
-   safety net — the bundled export, the rotation, the health line and
-   `API_VERSION: 5` — **is already pasted and running**: `38 file(s), 20 IR(s)` is that
-   version's own log line. What the live copy does *not* hold is everything committed
-   since: the **`…file(s) read, …written` log line** (which is the count that proves the
-   bundling is holding; the old line printed a number that grows with the company either
-   way), **`rehearseRestore()`**, **`backupPulse`** — the one public read the
-   `backup.html` page asks for, which is why `API_VERSION` is now `6` — and
-   **`inventoryLegacyWorkbook()`**, the editor-run workbook survey. All of it rides the
-   next paste — paste the current `backend.gs` into **both** `/exec` deployments (the
-   primary and the domain-scoped Google door) and everything goes live at once.
+   ✅ **A paste has landed since, and a further one is owed. The live state as of
+   2026-10-07 is `apiVersion 7`** — proven by `ping`, not by a deploy date — so
+   everything up to and including the flight-log limits is running. **What the live
+   copy does *not* hold is `API_VERSION: 8`, the customer accounts**, and that is the
+   paste now owed. It is the one that matters most of any so far: a `v7` deployment
+   does not merely lack the feature, it **answers a customer's token with the whole
+   repository**, so no customer account may be created until it is in. It rides the
+   whole committed backend at once — paste the current `backend.gs` into **both**
+   `/exec` deployments (the primary and the domain-scoped Google door) and everything
+   goes live together. The way to confirm it without opening anything is `ping`
+   answering **`apiVersion 8`**.
 
-   ⏳ **And a SECOND paste is owed as of 2026-10-07 — `API_VERSION` is now `7`.** The
-   flight-log limits the owner sets per airframe (25G / S25, S75, STRIVER, …) live in the
-   store, not in the public repo, so the backend needs two things a `v6` copy lacks:
-   **`'analyser'` in `SENTINEL_SECTIONS['__CONFIG__']`** (without it the write is refused
-   as an unknown key) and the **key-scoped admin gate** in `saveSection` — a sentinel store
-   is writable by *any* signed-in user by design, which is fine for comments and dropdowns
-   and wrong for a number that decides whether an aircraft is cleared to fly. `ping`
-   answering **`apiVersion 7`** is how this paste is confirmed, and until it lands the panel
-   still works on each admin's own device (it writes `localStorage` first) while the shared
-   copy stays empty — so the symptom of a missing paste here is **not** an error, it is
-   *"I set the numbers and nobody else got it."* Both pastes are the same paste: send the
-   current `backend.gs` to both `/exec` deployments once and `v6` and `v7` arrive together.
+   **The history, kept because each line was an operational lesson, none of it now
+   outstanding.** The `backup.html` verdict was proved live by exactly the mechanism
+   that makes it worth trusting — it can only print *"Backup is fine — last good run
+   …"* when the backend actually answers `backupPulse` with `{status:'ok', ok:true,
+   atMs}`; a deployment without that action makes the page say *"The backend did not
+   answer this check"* instead. **`rehearseRestore()` has since been run on a real
+   archive and returned `REHEARSAL PASSED`** — and so have `runNightlyBackup()` (*"40
+   file(s) read, 20 written, 21 IR(s), 18 account(s), rotated out 0 old folder(s)"*)
+   and `installBackupTrigger()` (*"Nightly backup trigger installed — every day at
+   about 23:40 IST"*). The rehearsal only ever rebuilds into `_rehearsal/`, so it
+   cannot touch `_store/`.
 
-   **Nothing in the 2026-10-07 pack work adds to that paste.** The per-cell voltage and the
-   capacity percentage are computed in the reader (`dataflash.js`), and the pack itself is
-   another key inside the same `analyser` object — so the deployed `v6` backend already
-   serves it and the packs go live the moment the seed is re-run. `API_VERSION` stays `7`.
-
-   > **`backup.html` reads `not available on the backend` until that paste lands**, and
-   > that is the expected state, not a broken page: it asks for an action a `v5`
-   > deployment does not have. The way to tell them apart without opening the page is
-   > `ping` — it answers `apiVersion 6` only after the paste. Open the page at
-   > `https://monish-raza-87.github.io/I-PASSBOOK/backup.html` (**`I-PASSBOOK`, capitalised
-   > — the lowercase `i-passbook-app` path is the repo *name*, not the Pages path, and it
-   > 404s**), and the live-check is the red one: the page must go RED when the timestamp
-   > it is given is stale, which is the state a stopped backup would produce. The page is
-   > confirmed serving as of 2026-10-05 (HTTP 200, cache `ipassbook-v67`).
-
-   > **Then run `rehearseRestore()` once**, from the same function dropdown, *after* a
-   > `runNightlyBackup()` — there has to be an archive to read back. It rebuilds that
-   > archive into `_rehearsal/` and reads it back; the last line says
-   > `REHEARSAL PASSED`. Until it has been run on a real archive, `raw/` is a backup
-   > that has never been restored, which is a claim and not a fact. Procedure and
-   > sample output in [08 — Development Guide](08 - Development Guide.md).
+   > **`backup.html` lives at
+   > `https://monish-raza-87.github.io/I-PASSBOOK/backup.html`** — **`I-PASSBOOK`,
+   > capitalised**. The lowercase `i-passbook-app` path is the repo *name*, not the
+   > Pages path, and it 404s. The live check is the red one: the page must go RED when
+   > the timestamp it is given is stale, which is the state a stopped backup would
+   > produce.
 
    > **`https://script.google.com/d/<deployment-id>/edit` does NOT work.** The editor
    > is keyed by the **script ID**, not the deployment ID, and the deployment ID is
@@ -610,15 +584,16 @@ is left is small.
    `monish.raza@indrones.com`, the account that owns the Drive folder, because a
    trigger executes as whoever installed it. Each replies *already installed* if it is
    there. Until the archive sweep exists, closed IR folders are archived only by hand.
-3. **Publish the frontend** whenever `app.js` moves: `node tools/deploy-ghpages.mjs` to
-   dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
-   `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
-   `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
-   shell for a load. The last publish is `b2ec9ed` (2026-10-06, cache v67), the backup-check
-   page. **Nothing is owed on the frontend right now** — the restore rehearsal and the
-   workbook survey are both editor-run and add no `app.js` change, so neither needs a
-   publish — but the backend paste in item 1 is still owed and is the thing standing between
+3. ✅ **The frontend was published on 2026-10-07 at cache `v69`**, carrying the customer
+   portal and the invite panel. Publishing is `DEPLOY_SOURCE=category-insights node
+   tools/deploy-ghpages.mjs` to dry-run, then the same with `--commit --push`; it needs
+   the working tree clean, so the commits go first, and a `CACHE_NAME` bump in `sw.js`
+   or it warns that returning users keep the stale shell for a load. The deploy is
+   confirmed by reading the **served** files, never by a deploy date: `sw.js` answering
+   `ipassbook-v69` and `app.js` answering `APP_VERSION = 'v69'`. **Nothing is owed on
+   the frontend right now**; the backend paste in item 1 is the thing standing between
    the deployed code and the committed code.
+
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
    safe date; they are the only record of the old hand-assigned grants, which is the

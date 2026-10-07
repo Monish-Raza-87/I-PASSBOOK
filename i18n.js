@@ -154,6 +154,23 @@
     'common.overdue':      'Overdue',
     'common.openInMaps':   'Open in Maps →',
 
+    // ── The two doors on the landing page ────────────────────────────────────
+    // One address, two audiences. The chip is the whole of the identification, so
+    // it is a single word each and it is the first thing on its card.
+    //
+    // door.customerHint says the quiet part out loud — "nothing of anybody else's" —
+    // because it is the one thing a customer actually wants to know before typing a
+    // password, and because it is true: the backend narrows the rows on the server,
+    // not in the page.
+    'door.employee':      'Employee',
+    'door.customer':      'Customer',
+    'door.customerTitle': 'Customer Space',
+    'door.customerFull':  'Indrones after-sales, for your aircraft',
+    'door.customerHint':  "Sign in and everything we have done for your fleet is in one place — and nothing of anybody else's.",
+    'door.custReports':   'Every request you have raised, and the stage it is at today.',
+    'door.custAccess':    'No public sign-up — we create your account when your aircraft is handed over, and email your invitation.',
+    'door.openSpace':     'Open the Customer Space',
+
     // ── The customer door, and the FAQ behind it ─────────────────────────────
     // The app's second open door. These strings are read on the sign-in screen,
     // before anyone has an account — so they are the only words in this table a

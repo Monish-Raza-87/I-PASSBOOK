@@ -74,6 +74,11 @@
   }
 
   * { box-sizing: border-box; }
+  /* `hidden` must actually hide. This page toggles whole blocks with the attribute, and
+     `.btn` is inline-flex while `.ticket` is flex — each of those beats the UA's own
+     `[hidden] { display: none }`, so without this line a "hidden" section is fully
+     visible. That is the classic way a signed-out visitor sees a signed-in panel. */
+  [hidden] { display: none !important; }
   html, body { margin: 0; padding: 0; }
   body {
     background: var(--bg);
@@ -196,6 +201,9 @@
   }
   .aside p { margin: 0; font-size: 14px; color: var(--fg-muted); }
   .aside .btn { justify-self: start; }
+  /* The two states of the aside are siblings inside a grid, so each is itself a grid —
+     otherwise the gap between h3, paragraph and button collapses. */
+  .aside-block { display: grid; gap: 10px; }
 
   .split { display: grid; gap: 24px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
   @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
@@ -204,6 +212,112 @@
   .contact div { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
   .contact .k { color: var(--fg-muted); font-size: 13px; min-width: 84px; }
   .contact .v { font-weight: 600; }
+
+  /* ── Your reports ─────────────────────────────────────────────────────── */
+  .reports-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .who {
+    font-size: 13px; color: var(--fg-muted);
+    min-width: 0; max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  @media (max-width: 560px) { .who { display: none; } }
+
+  .tickets { display: grid; gap: 12px; margin: 20px 0 0; padding: 0; list-style: none; }
+  .ticket {
+    display: flex; flex-direction: column; gap: 6px;
+    width: 100%; text-align: left;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 16px;
+    color: inherit; font: inherit; cursor: pointer;
+  }
+  .ticket:hover { border-color: var(--line-strong); }
+  .ticket-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .ticket-ir { font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+  .ticket-when { font-size: 13px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+  .ticket-issue { font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+  .ticket-desc {
+    font-size: 14px; color: var(--fg-muted); overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+
+  /* The stage, in the one vocabulary the app uses. `done` and `hold` are the only two that
+     are not simply "in hand" — see STATUS class list in the script. */
+  .pill {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .pill.done { background: var(--ok-soft); color: var(--ok); }
+  .pill.hold { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-line); }
+  .ticket-top .pill { margin-left: auto; }
+
+  .record { display: grid; gap: 16px; margin: 18px 0 0; }
+  .record-block {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 18px;
+    display: grid; gap: 14px;
+  }
+  .record-block h3 { margin: 0; font-size: 15px; letter-spacing: .02em; }
+  .record-row { display: grid; gap: 3px; min-width: 0; }
+  .record-row .k {
+    font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-muted);
+  }
+  .record-row .v { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+  /* The customer's own words keep their line breaks — the Form's description box is where
+     people write a paragraph, and re-wrapping it into one blob loses the structure they
+     typed. */
+  .record-row .v.long { white-space: pre-wrap; }
+  .record-row .v a { word-break: break-all; }
+  .record-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .record-head .ticket-ir { font-size: 20px; }
+
+  /* ── The sign-in sheet ─────────────────────────────────────────────────── */
+  .sheet {
+    position: fixed; inset: 0; z-index: 60;
+    display: grid; place-items: center;
+    padding: 16px;
+    background: color-mix(in srgb, #000 48%, transparent);
+    overflow-y: auto;
+  }
+  .sheet-card {
+    position: relative;
+    width: 100%; max-width: 400px;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 22px;
+    display: grid; gap: 14px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, .3);
+  }
+  .sheet-card h2 { margin: 0; font-size: 20px; padding-right: 32px; }
+  .sheet-x {
+    position: absolute; top: 10px; right: 10px;
+    width: 32px; height: 32px; border-radius: 50%;
+    display: grid; place-items: center;
+    border: 1px solid transparent; background: transparent; color: var(--fg-muted);
+    font: inherit; font-size: 15px; cursor: pointer;
+  }
+  .sheet-x:hover { background: var(--surface-2); color: var(--fg); }
+  .field { display: grid; gap: 6px; min-width: 0; }
+  .field label { font-size: 13px; font-weight: 600; }
+  /* 16px, not 14: iOS zooms the whole page in on focus below that, and a sign-in card that
+     jumps to 2x is the most common complaint about forms on a phone. */
+  .field input {
+    min-height: 44px; padding: 10px 12px;
+    font: inherit; font-size: 16px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: var(--surface-2); color: var(--fg);
+  }
+  .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .field input[readonly] { color: var(--fg-muted); }
+  #signin-code { font-variant-numeric: tabular-nums; letter-spacing: .22em; }
+  .sheet-card .btn { justify-self: stretch; }
+  .msg { margin: 0; font-size: 14px; min-height: 1.4em; }
+  .msg.err { color: var(--warn); }
+  .msg.ok  { color: var(--ok); }
+  .sheet-note { margin: 0; font-size: 13px; color: var(--fg-muted); }
+  .error-box {
+    background: var(--warn-soft); border: 1px solid var(--warn-line);
+    border-radius: var(--radius); padding: 12px 14px;
+    font-size: 14px; color: var(--warn);
+  }
 
   footer.foot {
     border-top: 1px solid var(--line); padding-block: 28px 40px;
@@ -214,6 +328,24 @@
 
   @media (max-width: 420px) { section { padding-block: 32px; } }
 </style>
+<script>
+  // The viewer's stored appearance preference, applied before the first paint so a customer
+  // who chose dark does not get a white flash while the page loads. This is the only thing
+  // this page reads out of storage before the user does anything, and it is the APP's own
+  // key (`theme`) on purpose: same origin, same person, same preference — and a display
+  // preference is not identity. The keys that must never be shared are the session token and
+  // the profile, and this page keeps its own for both (see PORTAL in the script at the foot
+  // of the file). A shared theme cannot paint somebody else's tickets.
+  //
+  // 'cream' resolves to light. The portal has one light palette, not two, so a stored
+  // preference it cannot honour is mapped to the nearest one it can — never left to fall
+  // through to the OS, which would look like the preference had been ignored.
+  try {
+    var storedTheme = localStorage.getItem('theme');
+    if (storedTheme === 'dark') document.documentElement.dataset.theme = 'dark';
+    else if (storedTheme === 'light' || storedTheme === 'cream') document.documentElement.dataset.theme = 'light';
+  } catch (e) { /* storage blocked — the OS setting decides, which is the default anyway */ }
+</script>
 </head>
 <body>
 
@@ -224,7 +356,9 @@
       <b>Indrones</b><span>Customer Space</span>
     </a>
     <span class="bar-spacer"></span>
-    <a class="btn" href="#access">Sign in</a>
+    <span class="who" id="header-who" hidden></span>
+    <a class="btn js-signin" id="header-signin" href="#signin">Sign in</a>
+    <button type="button" class="btn js-signout" id="signout" hidden>Sign out</button>
   </div>
 </header>
 
@@ -237,7 +371,38 @@
     every service we have carried out on your fleet. No phone calls to find out where things stand.</p>
     <div class="btn-row">
       <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
-      <a class="btn" href="#access">Sign in to your reports</a>
+      <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
+    </div>
+  </section>
+
+  <!-- ── YOUR REPORTS ─────────────────────────────────────────────────────────
+       Hidden until a session is proved, and painted fresh on every load. It is the only
+       part of this page that holds anything private: one customer's own tickets, narrowed
+       server-side to their company. Nothing here is ever read back out of storage — see
+       the note on PORTAL in the script. -->
+  <section id="reports" class="wrap" hidden>
+    <div class="reports-head">
+      <h2>Your reports</h2>
+      <span class="bar-spacer"></span>
+    </div>
+    <p class="sub" id="reports-sub"></p>
+
+    <div id="reports-list">
+      <ul class="tickets" id="ticket-list"></ul>
+
+      <div class="aside" id="reports-empty" hidden>
+        <h3>No requests are showing for your account</h3>
+        <p>Every request raised under <b id="empty-company"></b> should be listed here. If
+        you have raised one and it is missing, tell the service desk — the company name
+        typed into the form has to match the one we hold on your account, and we will put
+        that right straight away.</p>
+        <a class="btn btn-primary" id="raise-3" href="#" target="_blank" rel="noopener">Report a problem</a>
+      </div>
+    </div>
+
+    <div id="report-one" hidden>
+      <button type="button" class="btn" id="back-to-list">&#8592; All reports</button>
+      <div id="one-body"></div>
     </div>
   </section>
 
@@ -250,16 +415,28 @@
         record you see is only ever your own.</p>
         <ol class="steps">
           <li><b>We onboard you</b><span>When your order is delivered, we set you up in the portal and send an invitation to your official email address.</span></li>
-          <li><b>You set your credentials</b><span>The invitation link lets you choose your own password. Nobody at Indrones chooses it for you, and nobody can read it.</span></li>
+          <li><b>You set your credentials</b><span>On your own space, press &ldquo;First time here?&rdquo; and we email you a code. Enter it with the password you want — nobody at Indrones chooses it for you, and nobody here can read it.</span></li>
           <li><b>You use it from then on</b><span>Every request, every report, every dispatch note for your fleet — under one sign-in, for the life of the aircraft.</span></li>
         </ol>
       </div>
       <div class="aside">
-        <h3>Already have an account?</h3>
-        <p>Sign in with your email address. We will send you a one-time code, so you do not have to
-        remember a password every morning.</p>
-        <a class="btn btn-primary" href="./index.html#customer-signin">Sign in</a>
-        <p>Not onboarded yet? Raise a request below and the service desk will set you up.</p>
+        <!-- Two states, and only one is ever shown. A customer who is already signed in must
+             not be offered "Sign in" again — it is the one thing on this page that reads as a
+             contradiction, and it is below the fold on a phone, where the header has already
+             dropped the account name for room. -->
+        <div class="aside-block" id="access-visitor">
+          <h3>Already have an account?</h3>
+          <p>Sign in with your email address. We will send you a code that stays good for the
+          rest of the working day, so you do not have to remember a password every morning.</p>
+          <a class="btn btn-primary js-signin" href="#signin">Sign in</a>
+          <p>Not onboarded yet? Raise a request below and the service desk will set you up.</p>
+        </div>
+        <div class="aside-block" id="access-member" hidden>
+          <h3>You are signed in</h3>
+          <p>Showing the reports for <b id="access-member-who"></b>. If this is not you, sign out
+          before you leave the device.</p>
+          <button type="button" class="btn js-signout">Sign out</button>
+        </div>
       </div>
     </div>
   </section>
@@ -391,6 +568,49 @@
   </div>
 </footer>
 
+<!-- ── THE SIGN-IN SHEET ───────────────────────────────────────────────────────
+     One card, two doors, two steps each:
+       · the daily door — email, then the 6-digit code that arrives. This is the
+         default and it is what the page has always promised the customer.
+       · the first-time door — email, then a code plus the password they choose. It
+         exists because an account we create is issued a temporary password nobody
+         hands over, and the app refuses to sign such an account in by code until
+         that password has been replaced. This is where it gets replaced.
+     Both are the app's OWN backend actions (`login`, `forgotPassword`, `resetPassword`).
+     This page adds no auth machinery, and stores nothing but the session it is given. -->
+<div class="sheet" id="signin" hidden>
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="signin-title">
+    <button type="button" class="sheet-x" id="signin-close" aria-label="Close">&#10005;</button>
+
+    <h2 id="signin-title">Sign in to your reports</h2>
+    <p class="msg" id="signin-msg" aria-live="polite"></p>
+
+    <div class="field">
+      <label for="signin-email">Your email address</label>
+      <input id="signin-email" type="email" inputmode="email" autocomplete="email"
+             autocapitalize="off" spellcheck="false" placeholder="you@company.com">
+    </div>
+
+    <div class="field" id="code-field" hidden>
+      <label for="signin-code">The 6-digit code we emailed you</label>
+      <input id="signin-code" type="text" inputmode="numeric" autocomplete="one-time-code"
+             maxlength="6" placeholder="000000">
+    </div>
+
+    <div class="field" id="newpass-field" hidden>
+      <label for="signin-newpass">Choose your password</label>
+      <input id="signin-newpass" type="password" autocomplete="new-password" minlength="8"
+             placeholder="At least 8 characters">
+    </div>
+
+    <button type="button" class="btn btn-primary" id="signin-go">Email me a code</button>
+
+    <p class="sheet-note" id="signin-note"></p>
+    <p class="sheet-note"><a href="#" id="signin-firsttime">First time here?</a></p>
+    <p class="sheet-note">Looking for the service desk app? <a href="./index.html">Sign in there instead</a>.</p>
+  </div>
+</div>
+
 <script>
   // ── The two form URLs, in ONE place each ───────────────────────────────────
   // Both are the SHARE link (`/d/e/…/viewform`), not the editor link, which opens
@@ -417,7 +637,605 @@
   };
   wire('raise', SUPPORT_FORM_URL);
   wire('raise-2', SUPPORT_FORM_URL);
+  wire('raise-3', SUPPORT_FORM_URL);
   wire('feedback', FEEDBACK_FORM_URL);
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  //  THE SIGNED-IN HALF
+  // ══════════════════════════════════════════════════════════════════════════════
+  // Everything above is the same for every visitor. Below, one customer's own tickets
+  // are painted — and the two properties that keep that safe are worth stating before
+  // the code, because both are easy to undo by accident.
+  //
+  // 1. THIS PAGE KEEPS ITS OWN STORAGE KEYS. Not `ipb_session` / `ipb_user`. A shared
+  //    machine is the case that matters: a staff member signs in here, a customer signs
+  //    in on the same browser, and a shared key would have the second inherit the first's
+  //    session, or the first's list. The `ipbc_` prefix is the whole mechanism, and
+  //    smoke-portal fails if this file ever names one of the app's own keys.
+  //
+  // 2. THE TICKET LIST IS NEVER READ FROM STORAGE. It is fetched on every load, and the
+  //    only things this page stores are the session token and the account facts the header
+  //    needs. What is stored on a device outlives the sign-out that was meant to remove it;
+  //    a cached list of somebody's tickets sitting in a browser on a shared machine is
+  //    exactly the leak the scope exists to prevent.
+  const PORTAL = {
+    // The same deployment the staff app talks to. Written here because this page loads no
+    // shared script — the two form URLs above are duplicated for the same reason — and
+    // smoke-portal pins this copy to the one in app.js, so a moved backend is a failing
+    // test rather than a portal that signs nobody in.
+    GAS_URL: 'https://script.google.com/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec',
+    // The app's own keys are `ipb_session` and `ipb_user`. These are deliberately not them.
+    SESSION_KEY: 'ipbc_session',
+    USER_KEY:    'ipbc_user',
+  };
+
+  const REACH = 'Could not reach the service desk. Check your connection and try again.';
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const msgOf = r => (r && r.message) ? r.message : 'Something went wrong. Please try again.';
+
+  // ── The session, and only the session ────────────────────────────────────────
+  function token() {
+    try { return localStorage.getItem(PORTAL.SESSION_KEY) || ''; } catch (e) { return ''; }
+  }
+  function saveSession(t, me) {
+    try {
+      localStorage.setItem(PORTAL.SESSION_KEY, t);
+      localStorage.setItem(PORTAL.USER_KEY, JSON.stringify(me || {}));
+    } catch (e) { /* private mode — the session still works for this visit */ }
+  }
+  function forget() {
+    try {
+      localStorage.removeItem(PORTAL.SESSION_KEY);
+      localStorage.removeItem(PORTAL.USER_KEY);
+    } catch (e) { /* nothing to clear */ }
+  }
+
+  // ── Talking to the backend ───────────────────────────────────────────────────
+  // Two thin wrappers, and no interceptor: this page has no other backend traffic, so the
+  // token is attached in the two places that make a request rather than in a global patch
+  // nobody can see. A reply that is not JSON — Apps Script's content hop occasionally
+  // returns an HTML error page — fails the parse and is reported as unreachable, which is
+  // what it is.
+  function apiGet(action, params) {
+    const q = new URLSearchParams(Object.assign({ action: action }, params || {}));
+    if (token()) q.set('sessionToken', token());
+    return fetch(PORTAL.GAS_URL + '?' + q.toString(), { cache: 'no-store' })
+      .then(r => r.json())
+      .catch(() => ({ status: 'error', message: REACH }));
+  }
+  function apiPost(action, fields) {
+    const fd = new FormData();
+    fd.append('action', action);
+    Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
+    if (token()) fd.append('sessionToken', token());
+    // NOT retried. Every POST from this page either spends a credential (a login or reset
+    // code is burned by its first look) or revokes one — see the note on
+    // CREDENTIAL_SPENDING_ACTIONS in app.js for the day a retry on one of these broke the
+    // Google door. The app learned that lesson; this page starts with it.
+    return fetch(PORTAL.GAS_URL, { method: 'POST', body: fd })
+      .then(r => r.json())
+      .catch(() => ({ status: 'error', message: REACH }));
+  }
+  const isUnauthorized = r => /^unauthorized/i.test(String((r && r.message) || ''));
+
+  // What the sign-in audit line records. Same shape and the same coarse OS/browser split
+  // as the app's deviceLabel(), with one addition: the words "customer portal", so the
+  // desk reading the audit can tell a sign-in from this page apart from one in the staff
+  // app without guessing. The portal sends NO version — that field records the APP BUILD a
+  // device runs, and the backend keeps the last known value when it is absent. Inventing
+  // one here would put a fiction in the admin's Versions list.
+  function deviceLabel() {
+    const ua = navigator.userAgent || '';
+    const os = /Android/i.test(ua) ? 'Android' : /iPhone|iPad|iPod/i.test(ua) ? 'iOS'
+             : /Windows/i.test(ua) ? 'Windows' : /Mac OS X/i.test(ua) ? 'Mac'
+             : /Linux/i.test(ua) ? 'Linux' : 'unknown OS';
+    const br = /Edg\//.test(ua) ? 'Edge' : /OPR\/|Opera/.test(ua) ? 'Opera'
+             : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome'
+             : /Safari\//.test(ua) ? 'Safari' : 'unknown browser';
+    return os + ' · ' + br + ' · customer portal';
+  }
+
+  // ── The ten stages, and the retired words for some of them ───────────────────
+  // The app owns every ticket's stage. These ten are its vocabulary, and the fold below is
+  // the same one app.js applies, kept here for the same reason it exists there: the store
+  // still holds words the app has stopped using, and a customer must not be shown a stage
+  // that the desk no longer has. A second copy is a risk, so it is a short list and
+  // smoke-portal pins it to app.js's own table.
+  const STATUS_LEGACY = {
+    'hold':              'On Hold',
+    'visual inspection': 'Inspection',
+    'qc investigation':  'Investigation',
+    'qc':                'Quality Test',
+    'flight test':       'Quality Test',
+    'pdi':               'PDI/Dispatch',
+    'approval':          'PDI/Dispatch',
+    'close':             'Delivered',
+  };
+  const stageLabel = s => {
+    const v = String(s == null ? '' : s).trim();
+    return STATUS_LEGACY[v.toLowerCase()] || v;
+  };
+  // Done, paused, or in hand — the only three things a customer needs from a badge.
+  const stageClass = s => {
+    const v = stageLabel(s);
+    if (v === 'Delivered') return 'done';
+    if (v === 'On Hold')   return 'hold';
+    return '';
+  };
+
+  // ── The sheet's grid → the handful of columns this page shows ─────────────────
+  // Deliberately NOT the app's fifty-column intake model. A customer needs their own words
+  // and the state of the job; every column added here is a column that has to be argued for
+  // again, and the app's own mapper is the one that model lives in.
+  //
+  // Needles are matched case-insensitively because the Form's question text is typed by
+  // hand, and the header is whatever it currently says. The IR number and its shape rule are
+  // the same as app.js's, so a row the desk typed that is not a ticket is skipped rather than
+  // drawn as one.
+  const IR_NUMBER_RE = /^IR\s*-?\s*\d+$/i;
+  function colIndex(headers, needle) {
+    const n = needle.toLowerCase();
+    return headers.findIndex(h => String(h).toLowerCase().includes(n));
+  }
+  function rowsFromGrid(grid) {
+    if (!grid || !grid.length) return [];
+    const h = (grid[0] || []).map(x => String(x).trim());
+    const i = n => colIndex(h, n);
+    const cell = (row, idx) => (idx >= 0 && row[idx] != null ? String(row[idx]).trim() : '');
+    const c = {
+      ir:    i('ir number'),
+      date:  i('timestamp'),
+      drone: i('drone serial no'),
+      issue: i('what support'),
+      desc:  i('please describe'),
+      where: i('incident location and weather'),
+      evN:   i('evidence: attach files'),
+      evQ:   i('evidence: attach screenshot'),
+    };
+    const out = [];
+    for (let r = 1; r < grid.length; r++) {
+      const row = grid[r];
+      if (!row) continue;
+      const ir = cell(row, c.ir);
+      if (!ir || !IR_NUMBER_RE.test(ir)) continue;
+      out.push({
+        ir: ir,
+        // The same normalisation the backend's own irKey() uses to match a ticket to its
+        // store row: the IR Number cell is free text, so "IR 107" and "IR107" are one
+        // ticket and the store always spells it the second way.
+        key: ir.toUpperCase().replace(/\s+/g, ''),
+        date: cell(row, c.date),   drone: cell(row, c.drone),
+        issue: cell(row, c.issue), desc: cell(row, c.desc),
+        where: cell(row, c.where),
+        evN: cell(row, c.evN),     evQ: cell(row, c.evQ),
+      });
+    }
+    return out.reverse();   // latest first, the order the app's own list uses
+  }
+
+  const OVERVIEW_KEY = 'sec-a';      // the app's id for one ticket's Overview record
+  const DESK_FIELDS = [
+    { id: 'a_crmOwner',     label: 'Your point of contact' },
+    { id: 'a_contactPhone', label: 'Phone we hold for you' },
+    { id: 'a_siteLocation', label: 'Site location' },
+  ];
+
+  // ── State ────────────────────────────────────────────────────────────────────
+  let ME = null;        // { email, customerOf, name } — from the backend, never from storage
+  let TICKETS = [];     // this customer's rows, as the sheet displays them
+  let STAGE = {};       // irNumber → { status, assignee, updatedAt } from the app's store
+  let STAGE_OK = false; // false when that read failed — see paintList()
+
+  // ── Boot ──────────────────────────────────────────────────────────────────────
+  async function boot() {
+    if (!token()) return;                 // signed out: nothing to paint, nothing to ask for
+
+    const me = await apiGet('getMyCustomer');
+    if (!me || me.status !== 'ok') {
+      // An expired session is the one failure that must clear itself, or every later
+      // request carries a dead token and the customer sees the same error forever.
+      // Anything else is a real failure and is shown in words.
+      if (isUnauthorized(me)) { forget(); setSignedOut(); return; }
+      showSignin(msgOf(me));
+      return;
+    }
+    if (!me.customerOf) { showStaff(me); return; }
+
+    ME = me;
+    setSignedIn(me);
+    await loadTickets();
+  }
+
+  async function loadTickets() {
+    $('reports').hidden = false;
+    $('reports-list').hidden = false;
+    $('report-one').hidden = true;
+    $('reports-sub').textContent = 'Signed in as ' + ME.email + '.';
+
+    const res = await apiGet('listIRs');
+    if (!res || res.status !== 'ok') {
+      if (isUnauthorized(res)) { forget(); setSignedOut(); return; }
+      $('ticket-list').innerHTML = '<li><p class="error-box">' + esc(msgOf(res)) + '</p></li>';
+      return;
+    }
+    TICKETS = rowsFromGrid(res.grid);
+
+    // The stages come from the app's OWN store, not from the sheet's status column. That
+    // column is the customer's own report of the state when they wrote it; the app has
+    // owned every stage since v68, and one ticket nobody has allotted reads Open. This is
+    // one read for the whole list, and the backend hands a customer only their own rows —
+    // three fields each.
+    const st = await apiGet('getPassbook', { irNumber: '__IRS__' });
+    STAGE_OK = !!(st && st.status === 'ok' && st.sections);
+    STAGE = (STAGE_OK && st.sections.__IRS__) ? st.sections.__IRS__ : {};
+
+    paintList();
+  }
+
+  // '' is not a stage. A ticket the app holds no row for reads Open — that is the app's own
+  // rule, derived rather than stored, and the portal shows the same word for the same state.
+  const stageOf = key => {
+    const row = STAGE[key];
+    return (row && row.status) ? stageLabel(row.status) : 'Open';
+  };
+  const assigneeOf = key => {
+    const row = STAGE[key];
+    return (row && row.assignee) ? String(row.assignee) : '';
+  };
+
+  function paintList() {
+    const list = $('ticket-list');
+    const empty = $('reports-empty');
+    list.innerHTML = '';
+    $('empty-company').textContent = ME.customerOf;
+
+    if (!TICKETS.length) { empty.hidden = false; return; }
+    empty.hidden = true;
+
+    // When that one store read failed, the LIST is still true — it is the customer's own
+    // report, straight from the sheet — but the STAGES are unknown, and painting them all
+    // as "Open" would be a confident lie about every ticket at once. So they are left off
+    // and the fact is stated.
+    const note = STAGE_OK ? null :
+      'We could not read the current stage of your requests just now. What is below is the record of what you reported.';
+
+    TICKETS.forEach(t => {
+      const st = stageOf(t.key);
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ticket';
+      b.innerHTML =
+        '<span class="ticket-top">' +
+          '<span class="ticket-ir">' + esc(t.ir) + '</span>' +
+          (STAGE_OK ? '<span class="pill ' + stageClass(st) + '">' + esc(st) + '</span>' : '') +
+        '</span>' +
+        '<span class="ticket-when">' + esc(t.date) + (t.drone ? ' · ' + esc(t.drone) : '') + '</span>' +
+        (t.issue ? '<span class="ticket-issue">' + esc(t.issue) + '</span>' : '') +
+        (t.desc  ? '<span class="ticket-desc">'  + esc(t.desc)  + '</span>' : '');
+      b.addEventListener('click', () => openTicket(t));
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+
+    if (note) list.insertAdjacentHTML('afterbegin', '<li><p class="error-box">' + esc(note) + '</p></li>');
+  }
+
+  // ── One ticket ────────────────────────────────────────────────────────────────
+  async function openTicket(t) {
+    $('reports-list').hidden = true;
+    $('report-one').hidden = false;
+    $('one-body').innerHTML = '<p class="sub">Loading ' + esc(t.ir) + '…</p>';
+
+    const rec = await apiGet('getPassbook', { irNumber: t.ir });
+    let desk = {};
+    if (rec && rec.status === 'ok' && rec.sections && rec.sections[OVERVIEW_KEY]) {
+      desk = rec.sections[OVERVIEW_KEY] || {};
+    }
+    // A ticket outside this account's company THROWS on the backend rather than answering
+    // empty, so a refusal arrives as an error, and an unreachable store arrives as one too.
+    // Either way it is shown in words — and the customer's OWN report, already fetched from
+    // the sheet, still renders underneath it. This must never look like an empty ticket.
+    const problem = (rec && rec.status !== 'ok') ? msgOf(rec) : '';
+
+    const st = STAGE_OK ? stageOf(t.key) : '';
+    const who = STAGE_OK ? assigneeOf(t.key) : '';
+
+    const row = (k, v, long) => v
+      ? '<div class="record-row"><span class="k">' + esc(k) + '</span>' +
+        '<p class="v' + (long ? ' long' : '') + '">' + v + '</p></div>'
+      : '';
+    const txt = v => esc(v).replace(/\n/g, '<br>');
+
+    // Evidence cells hold one or more uploaded file links, sometimes with stray text. Only
+    // the customer's OWN uploads are here, and the app shows them the same way to the desk —
+    // so they are links, with the one caveat that matters said out loud: Drive decides who
+    // may open them, and this page cannot find out whether it did.
+    const evidence = v => {
+      const parts = String(v || '').split(/[\s,]+/).map(x => x.trim()).filter(Boolean);
+      if (!parts.length) return '';
+      return parts.map((p, i) => /^https?:\/\//i.test(p)
+        ? '<a href="' + esc(p) + '" target="_blank" rel="noopener noreferrer" title="' + esc(p) + '">Evidence file ' + (i + 1) + ' ↗</a>'
+        : txt(p)).join('<br>');
+    };
+
+    const deskRows = DESK_FIELDS.map(f => row(f.label, txt(desk[f.id] || ''))).join('');
+
+    $('one-body').innerHTML =
+      '<div class="record">' +
+
+        (problem
+          ? '<p class="error-box">' + esc(problem) + '</p>'
+          : '') +
+
+        '<div class="record-block">' +
+          '<div class="record-head">' +
+            '<span class="ticket-ir">' + esc(t.ir) + '</span>' +
+            (st ? '<span class="pill ' + stageClass(st) + '">' + esc(st) + '</span>' : '') +
+          '</div>' +
+          row('Being worked on by', esc(who)) +
+          row('Drone serial no.', esc(t.drone)) +
+          row('Raised on', esc(t.date)) +
+        '</div>' +
+
+        '<div class="record-block">' +
+          '<h3>What you reported</h3>' +
+          row('Support required', esc(t.issue)) +
+          row('Description', txt(t.desc), true) +
+          row('Location and weather', txt(t.where), true) +
+          row('Evidence — incident files', evidence(t.evN)) +
+          row('Evidence — UAV forecast', evidence(t.evQ)) +
+        '</div>' +
+
+        (deskRows
+          ? '<div class="record-block"><h3>Recorded by the service desk</h3>' + deskRows + '</div>'
+          : '') +
+
+        '<p class="card-note">Evidence files open in Google Drive, which decides for itself who ' +
+        'may read them — if it asks you to sign in, that is Google asking and not Indrones. ' +
+        'Anything else on your ticket is written by the desk, so if something looks wrong here, ' +
+        'tell the service desk rather than assume it is lost.</p>' +
+      '</div>';
+
+    $('report-one').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ── Header state ──────────────────────────────────────────────────────────────
+  // Three places on this page say who you are: the header, the hero's second button and
+  // the aside in "How access works". They are swapped together, in one function each, so
+  // a state can never be updated in two of them and forgotten in the third — the failure
+  // that had a signed-in customer still being offered "Sign in to your reports".
+  function setSignedOut() {
+    ME = null; TICKETS = []; STAGE = {}; STAGE_OK = false;
+    $('reports').hidden = true;
+    $('report-one').hidden = true;
+    $('reports-list').hidden = false;
+    $('ticket-list').innerHTML = '';
+    $('header-signin').hidden = false;
+    $('signout').hidden = true;
+    $('header-who').hidden = true;
+    $('header-who').textContent = '';
+    $('hero-cta').textContent = 'Sign in to your reports';
+    $('hero-cta').setAttribute('href', '#access');
+    $('access-visitor').hidden = false;
+    $('access-member').hidden = true;
+    $('access-member-who').textContent = '';
+  }
+  function setSignedIn(me) {
+    $('header-signin').hidden = true;
+    $('signout').hidden = false;
+    $('header-who').hidden = false;
+    $('header-who').textContent = me.customerOf || me.email || '';
+    // Signed in, the hero's second button stops being a way to sign in — there are already
+    // reports a screen below, and a button offering to sign you in when you are is the one
+    // thing on this page that contradicts itself.
+    $('hero-cta').textContent = 'Your reports';
+    $('hero-cta').setAttribute('href', '#reports');
+    $('access-visitor').hidden = true;
+    $('access-member').hidden = false;
+    $('access-member-who').textContent = me.customerOf || me.email || '';
+  }
+
+  // A staff account that signs in here is not an error, it is a wrong door — and the useful
+  // answer is the other door, not an empty list that looks like a bug.
+  function showStaff(me) {
+    setSignedIn(me);
+    $('reports').hidden = false;
+    $('reports-list').hidden = true;
+    $('report-one').hidden = true;
+    $('reports-sub').innerHTML = 'This is a service-desk account, so there are no customer ' +
+      'reports to show here. <a href="./index.html">Open the service desk app &#8594;</a>';
+  }
+
+  // ── Sign out ──────────────────────────────────────────────────────────────────
+  function signOut() {
+    const t = token();
+    forget();
+    setSignedOut();
+    // Revoke it on the server too, so the token is dead everywhere and not merely gone from
+    // this browser. Fired and not awaited: the page is already signed out, and a failure here
+    // must not keep somebody staring at a screen that has done what they asked.
+    if (t) apiPost('logout', { sessionToken: t });
+  }
+
+  // ── The sign-in sheet ──────────────────────────────────────────────────────────
+  // Two doors, two steps each. Nothing here is invented: `login` is the app's own daily
+  // door, `forgotPassword` + `resetPassword` are its own password path.
+  let flow = { mode: 'code', step: 1, busy: false };
+
+  function showSignin(message) {
+    flow = { mode: 'code', step: 1, busy: false };
+    $('signin').hidden = false;
+    $('signin-code').value = '';
+    $('signin-newpass').value = '';
+    paintFlow();
+    setMsg(message || '', 'err');
+    setTimeout(() => { if (!$('signin-email').value) $('signin-email').focus(); }, 30);
+  }
+  function hideSignin() { $('signin').hidden = true; }
+
+  function setMsg(text, kind) {
+    const el = $('signin-msg');
+    el.textContent = text || '';
+    el.className = 'msg' + (kind ? ' ' + kind : '');
+  }
+
+  const goLabel = () => flow.step === 1
+    ? 'Email me a code'
+    : (flow.mode === 'setpass' ? 'Set my password' : 'Sign in');
+
+  function paintFlow() {
+    const setpass = flow.mode === 'setpass';
+    const second  = flow.step === 2;
+
+    $('signin-title').textContent = setpass ? 'Set your password' : 'Sign in to your reports';
+    $('code-field').hidden    = !second;
+    $('newpass-field').hidden = !(setpass && second);
+    $('signin-email').readOnly = second;
+    $('signin-go').textContent = goLabel();
+    $('signin-go').disabled = false;
+    $('signin-firsttime').textContent = setpass
+      ? '← Sign in with a code instead'
+      : 'First time here? Choose your password';
+
+    $('signin-note').textContent = setpass
+      ? (second
+          ? 'Enter the code we just emailed you, and the password you want. At least 8 characters.'
+          : 'Enter the email address we onboarded, and we will send you a code to set your own password with. Nobody at Indrones chooses it, and nobody here can read it.')
+      : (second
+          ? 'Enter the 6-digit code we emailed you. You can reuse it for the rest of the working day.'
+          : 'We email you a 6-digit code. One every morning is enough — you never have to remember a password.');
+  }
+
+  function setBusy(on) {
+    flow.busy = !!on;
+    $('signin-go').disabled = !!on;
+    $('signin-go').textContent = on ? 'Working…' : goLabel();
+  }
+
+  async function submitSignin() {
+    if (flow.busy) return;
+
+    const email = $('signin-email').value.trim().toLowerCase();
+    const code  = $('signin-code').value.trim();
+    const pass  = $('signin-newpass').value;
+
+    if (!email) { setMsg('Enter your email address.', 'err'); return; }
+    if (flow.step === 2 && !code) { setMsg('Enter the 6-digit code we emailed you.', 'err'); return; }
+    if (flow.mode === 'setpass' && flow.step === 2 && pass.length < 8) {
+      setMsg('Choose a password of at least 8 characters.', 'err');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      // ── The first-time / forgotten-password door ──
+      if (flow.mode === 'setpass') {
+        if (flow.step === 1) {
+          // The answer is the same whether or not we hold that address. That is the
+          // backend's design — it does not enumerate — and the wording here must not
+          // promise more than the backend would.
+          await apiPost('forgotPassword', { email: email });
+          flow.step = 2;
+          paintFlow();
+          setMsg('If we hold that address, a code is on its way. Enter it below with the password you want.', '');
+          $('signin-code').focus();
+          return;
+        }
+        const set = await apiPost('resetPassword', { email: email, code: code, newPassword: pass });
+        if (set && set.status === 'ok') {
+          // The reset door returns NO session token, on purpose: the password proves itself
+          // by being used. So the customer goes back to the code door rather than being left
+          // to believe they are already signed in.
+          flow = { mode: 'code', step: 1, busy: false };
+          $('signin-code').value = '';
+          $('signin-newpass').value = '';
+          paintFlow();
+          setMsg('Your password is set. Now press the button and we will email you a sign-in code.', 'ok');
+        } else {
+          setMsg(msgOf(set), 'err');
+        }
+        return;
+      }
+
+      // ── The daily door ──
+      // No `password` key at all: the backend reads that absence as the passwordless door.
+      const fields = { email: email, device: deviceLabel() };
+      if (code) fields.code = code;
+
+      const res = await apiPost('login', fields);
+
+      if (res && res.status === 'ok' && res.sessionToken) {
+        saveSession(res.sessionToken, { email: email, customerOf: (res.access && res.access.customerOf) || '' });
+        hideSignin();
+        await boot();
+        $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      if (res && res.status === 'ok' && res.otpRequired) {
+        flow.step = 2;
+        paintFlow();
+        if (res.codeSent === false) {
+          // Stage one was answered without a code going out. For an account we have just
+          // onboarded that is the temporary-password rule, and "a code is on its way" would
+          // be a plain lie that leaves them waiting forever.
+          setMsg('No code was sent. If you have just been onboarded, use "First time here?" below to choose your password first.', 'err');
+        } else {
+          setMsg('We emailed you a 6-digit code.', 'ok');
+        }
+        $('signin-code').focus();
+        return;
+      }
+      if (res && res.status === 'ok' && res.mustChangePassword) {
+        setMsg('This account is still on the temporary password we issued. Use "First time here?" below to choose your own.', 'err');
+        return;
+      }
+      setMsg(msgOf(res), 'err');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ── Wiring ────────────────────────────────────────────────────────────────────
+  document.querySelectorAll('.js-signin').forEach(el =>
+    el.addEventListener('click', e => { e.preventDefault(); showSignin(''); }));
+
+  $('signin-close').addEventListener('click', hideSignin);
+  $('signin').addEventListener('click', e => { if (e.target === $('signin')) hideSignin(); });
+  $('signin-go').addEventListener('click', submitSignin);
+  document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
+  $('back-to-list').addEventListener('click', () => {
+    $('report-one').hidden = true;
+    $('reports-list').hidden = false;
+    $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  $('signin-firsttime').addEventListener('click', e => {
+    e.preventDefault();
+    flow = { mode: flow.mode === 'setpass' ? 'code' : 'setpass', step: 1, busy: false };
+    $('signin-code').value = '';
+    $('signin-newpass').value = '';
+    paintFlow();
+    setMsg(flow.mode === 'setpass'
+      ? 'Enter your email address and we will send you a code to set your own password with.'
+      : 'Enter your email address and we will send you a sign-in code.');
+    $('signin-email').focus();
+  });
+
+  // Enter submits from anywhere in the card, which is how a form behaves — and this is a
+  // card of one or two fields and a button, so a customer reaching for Enter is certain.
+  $('signin').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); submitSignin(); }
+    if (e.key === 'Escape') hideSignin();
+  });
+
+  // A link from the invitation email may carry them straight to the sheet.
+  if (location.hash === '#signin' && !token()) showSignin('');
+
+  boot();
 </script>
 
 </body>

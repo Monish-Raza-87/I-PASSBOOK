@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v68';
+const APP_VERSION = 'v69';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -175,6 +175,27 @@ function hasStoredSession() {
 // ejection path for as long as the login screen is up.
 function clearLocalAuth() {
   try {
+    // The IR list copy goes WITH the profile it is named after, and it must be dropped
+    // BEFORE the profile, because the key is derived from the profile's email. Signing
+    // out is the one gesture that means "I am done on this machine", and it would be a
+    // strange reading of that to leave a full copy of the repository behind it — this
+    // function is the ONE place local auth state is torn down, and the list is not a
+    // lesser secret than the token. The cost is one refresh at the next sign-in, on the
+    // sign-out path only; a device that is simply left signed in keeps its warm copy.
+    const listKey = irListCacheKey();
+    if (listKey) localStorage.removeItem(listKey);
+    // And the pre-scoping key, from builds before the copy carried an identity. It is
+    // never read again — readIRListCache() only asks for a scoped key — so this is
+    // cleanup of dead bytes rather than a security step.
+    localStorage.removeItem(IR_LIST_CACHE_KEY);
+    // The roster copy (ipb_access_cache) goes too. It is not the same class of secret as
+    // the IR list — it can only be PAINTED inside the admin-gated modal, so no ordinary
+    // or customer account is ever shown it by accident — but it is a list of who has
+    // which rights at Indrones, it is on disk, and sign-out is where this function's
+    // whole job is "leave nothing of the last person behind". It needs no key of its own
+    // on the way out for the opposite reason to the IR list's: there is no scoped read
+    // to protect, because the modal it feeds refuses to open for a non-admin.
+    localStorage.removeItem(ACCESS_CACHE_KEY);
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');   // legacy key from the sessionStorage build
@@ -3529,6 +3550,9 @@ function credentialsTxt(email, tempPassword, name) {
 
 function openAccessModal() {
   if (!isAdmin()) { showToast('Admins only'); return; }
+  // A confirmation of an invitation sent ten minutes ago is stale news by the time the
+  // page is reopened, and it would greet the admin ahead of whatever they came back for.
+  custNotice = null;
   let modal = document.getElementById('access-modal');
   if (modal) modal.remove();
   modal = document.createElement('div');
@@ -3545,6 +3569,7 @@ function openAccessModal() {
         <button type="button" class="access-tab" data-tab="people">People &amp; departments</button>
         <button type="button" class="access-tab" data-tab="depts">Departments</button>
         <button type="button" class="access-tab" data-tab="create">Create people</button>
+        <button type="button" class="access-tab" data-tab="customers">Customers</button>
         <button type="button" class="access-tab" data-tab="versions">Versions</button>
       </div>
       <div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>
@@ -3706,6 +3731,7 @@ function renderAccessPanel() {
   if (!panels) return;
   if (accessTab === 'depts')       renderDepartmentsTab();
   else if (accessTab === 'create') renderCreateTab();
+  else if (accessTab === 'customers') renderCustomersTab();
   else if (accessTab === 'versions') renderVersionsTab();
   else                             renderPeopleTab();
 }
@@ -3859,17 +3885,24 @@ function renderPeopleTab() {
     const badge = u.isAdmin
       ? '<span class="acc-badge acc-badge-admin">admin</span>'
       : (u.status === 'disabled' ? '<span class="acc-badge acc-badge-off">disabled</span>' : '');
+    // A scoped account, said out loud. Without it a customer looks like a colleague whose
+    // departments happen to be empty, and the natural next move — tick them some — is the
+    // one thing that does nothing for them.
+    const scope = u.customerOf
+      ? '<span class="acc-badge acc-badge-cust">customer · ' + escHtml(u.customerOf) + '</span>' : '';
     const pending = u.mustChangePassword ? '<span class="acc-badge acc-badge-temp">temp password</span>' : '';
     return `<tr data-email="${escHtml(u.email)}">
       <td class="acc-matrix-name">
         <div class="access-email-line">${escHtml(u.email)}</div>
-        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${pending}</div>
+        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${scope}${pending}</div>
         <div class="acc-matrix-actions">
           <button type="button" class="btn btn-sm btn-secondary acc-reset" data-email="${escHtml(u.email)}">Reset password</button>
           ${u.isAdmin ? '' : `<button type="button" class="btn btn-sm btn-secondary acc-toggle" data-email="${escHtml(u.email)}" data-status="${u.status === 'disabled' ? 'active' : 'disabled'}">${u.status === 'disabled' ? 'Enable' : 'Disable'}</button>`}
         </div>
       </td>
-      ${depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>'}
+      ${u.customerOf
+        ? `<td class="acc-matrix-sub" colspan="${depts.length}">Scoped to <strong>${escHtml(u.customerOf)}</strong> — a customer sees that company's IRs and nothing else, so department access does not apply. Manage it in the <em>Customers</em> tab.</td>`
+        : (depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>')}
     </tr>`;
   }).join('');
 
@@ -3905,6 +3938,10 @@ function savePeopleMatrix() {
   });
   const jobs = [];
   (accessCache.users || []).forEach(u => {
+    // A customer is scoped by company, never by department, and their row has no ticks
+    // in it — so an empty set here means "nothing to say", not "remove everything".
+    // Writing it would be a silent change to an account this grid cannot manage.
+    if (u.customerOf) return;
     const next = (byEmail[u.email] || []).slice().sort();
     const prev = (u.departments || []).slice().sort();
     if (next.join('|') === prev.join('|')) return;      // unchanged — don't write
@@ -4016,6 +4053,195 @@ function saveDepartmentAction(key) {
 function deleteDepartmentAction(key) {
   if (!confirm('Delete the department "' + key + '"?\n\nEveryone in it loses the edit rights it granted. This cannot be undone.')) return;
   adminPost('deleteDepartment', { key: key }).then(d => { showToast((d && d.message) || 'Deleted'); loadAccessData(); });
+}
+
+// ─── TAB 5: customers — the portal's accounts ─────────────────────────────────
+//
+// A customer account is a SCOPE ON ROWS, not a permission level. It is an ordinary
+// account plus one line in access.json naming a company; the backend then narrows
+// every read to that company's tickets, and getEffectiveAccess turns the scope into
+// "view the overview, nothing else, no triage". So there is no customer permission to
+// configure on this screen — the company name IS the whole setting, which is why the
+// panel below is a text field and a button rather than a matrix.
+//
+// WHICH IS ALSO WHY THE PEOPLE TAB CANNOT MANAGE ONE. A department tick means "edit
+// these sections", and a scoped account has no sections to edit. renderPeopleTab
+// therefore shows a customer row as a statement with no ticks in it, and
+// savePeopleMatrix() skips customers outright, so a stray membership can never be
+// written behind this panel's back.
+let custNotice = null;
+
+// The portal sits beside this app, so the app's own directory is the answer — the same
+// derivation the backend's customerPortalUrl() makes from CONFIG.APP_URL. Not a
+// constant, because this page is served from GitHub Pages and from a local preview,
+// and the link has to be the one that works from wherever it was copied.
+function customerPortalLink() {
+  return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html';
+}
+
+// Every company an admin might be inviting into: the ones already on a ticket (the same
+// `customerName` column the Insights filter reads, so the two lists can never disagree)
+// plus the ones a customer is already scoped to — a second contact at a company whose
+// tickets happen not to be in the loaded list is a normal thing to invite.
+function knownCompanies() {
+  const seen = new Set();
+  (accessCache.users || []).forEach(u => { if (u.customerOf) seen.add(String(u.customerOf).trim()); });
+  (allIRs || []).forEach(ir => { if (ir && ir.customerName) seen.add(String(ir.customerName).trim()); });
+  return [...seen].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+// The handover text, in the same shape as credentialsTxt() — a customer has no
+// temporary password, so what they need instead is the link and the one button to
+// press. This is what an admin sends when the invitation email could not go out, and
+// it is offered on success too, because "we emailed them" is not the same as "they
+// will find it".
+function customerHandoverTxt(email, company) {
+  const link = customerPortalLink();
+  return [
+    'I-PASSBOOK — your customer space',
+    '================================',
+    '',
+    (company ? 'Company: ' + company : ''),
+    'Sign in with: ' + email,
+    '',
+    'How to get in (first time only)',
+    '-------------------------------',
+    '1. Open: ' + link,
+    '2. Press "First time here?" and enter the email address above.',
+    '3. A code arrives by email. Enter it together with the password you want.',
+    '   Nobody at Indrones sets that password, and nobody here can read it.',
+    '',
+    'After that you can sign in either way — with that password, or by asking',
+    'for a code each morning and never having to remember one.',
+    '',
+    'What you can do',
+    '---------------',
+    '• Raise a request against any of your aircraft, and follow what we are',
+    '  doing about it.',
+    '• Read the service record of every aircraft we support for you.',
+    '',
+    'On a phone: open the link, then use your browser menu →',
+    '"Add to Home screen" so it opens like an app.',
+    '',
+    'Keep this safe and do not forward it.',
+  ].filter(l => l !== '').join('\n');
+}
+
+function renderCustomersTab() {
+  const panels = document.getElementById('access-panels');
+  if (!panels) return;
+  const companies = knownCompanies();
+  const customers = (accessCache.users || []).filter(u => u.customerOf);
+
+  const options = companies.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  // "Other company" is ALWAYS offered, and is preselected when there is nothing to pick
+  // from. A company with no ticket yet is the normal state on a first sale, and a
+  // dropdown that cannot name it would make the first customer the one you cannot
+  // onboard.
+  const nothingToPick = companies.length === 0;
+
+  const notice = custNotice ? `
+    <div class="access-section acc-invite-${custNotice.mailed ? 'ok' : 'warn'}">
+      <h3>${custNotice.mailed ? '✅ Invited' : '⚠️ Account created — the invitation email could NOT be sent'}</h3>
+      <p class="access-hint">${escHtml(custNotice.message)}</p>
+      <div class="access-add-row">
+        <button type="button" class="btn btn-sm" id="access-cust-copy">📋 Copy what to send them</button>
+        <button type="button" class="btn btn-sm btn-secondary" id="access-cust-copy-link">Copy the portal link</button>
+      </div>
+      <p class="access-hint" style="margin-top:0.5rem;"><code>${escHtml(customerPortalLink())}</code></p>
+    </div>` : '';
+
+  panels.innerHTML = `
+    <div class="access-section">
+      <h3>Invite a customer</h3>
+      <p class="access-hint">Creates the account and emails the customer the portal address.
+        Their <strong>company</strong> is the whole setting — it decides which IRs they
+        can see, and nothing else. There is no temporary password to hand over: the customer
+        sets their own, and nobody at Indrones ever sees it.</p>
+      <div class="access-add-row">
+        <input type="email" id="access-cust-email" class="form-input access-cust-field" placeholder="contact@customer.com" />
+        <input type="text" id="access-cust-name" class="form-input access-cust-field" placeholder="Contact name (optional)" />
+      </div>
+      <div class="access-add-row" style="margin-top:0.5rem;">
+        <select id="access-cust-company" class="form-input">
+          ${options}
+          <option value=""${nothingToPick ? ' selected' : ''}>Other company (type it)…</option>
+        </select>
+        <input type="text" id="access-cust-company-new" class="form-input" placeholder="Company name"
+               value=""${nothingToPick ? '' : ' hidden'} />
+        <button type="button" class="btn" id="access-cust-invite">Invite customer</button>
+      </div>
+      <p class="access-hint" style="margin-top:0.5rem;">The list is every company already named on an
+        IR, plus every company a customer is already scoped to.</p>
+      ${notice}
+    </div>
+    <div class="access-section">
+      <h3>Customer accounts <span class="acc-badge acc-badge-cust">${customers.length}</span></h3>
+      <p class="access-hint">Everyone scoped to a company. A scoped account sees only that
+        company's IRs, and cannot change anything. Clearing the scope would give them
+        <strong>every</strong> IR, so an account that should no longer have access is
+        <em>disabled</em> in the People tab, never unscoped.</p>
+      ${customers.length ? customers.map(u => `
+        <div class="access-user-card">
+          <div class="access-email-line">${escHtml(u.email)}</div>
+          <div class="acc-matrix-sub">${escHtml(u.name || 'no name given')} · ${escHtml(u.lastLoginAt || 'never signed in')}${u.status === 'disabled' ? ' · <span class="acc-badge acc-badge-off">disabled</span>' : ''}</div>
+          <div class="access-add-row" style="margin-top:0.4rem;">
+            <input type="text" class="form-input acc-cust-company" data-email="${escHtml(u.email)}" value="${escHtml(u.customerOf)}" aria-label="Company for ${escHtml(u.email)}" />
+            <button type="button" class="btn btn-sm btn-secondary acc-cust-save" data-email="${escHtml(u.email)}">Save company</button>
+          </div>
+        </div>`).join('') : '<div class="access-empty">No customer accounts yet. Invite the first one above.</div>'}
+    </div>`;
+
+  const sel = document.getElementById('access-cust-company');
+  const neu = document.getElementById('access-cust-company-new');
+  if (sel && neu) sel.addEventListener('change', () => {
+    const other = !sel.value;
+    neu.hidden = !other;
+    if (other) neu.focus();
+  });
+
+  const invite = document.getElementById('access-cust-invite');
+  if (invite) invite.addEventListener('click', () => {
+    const emailEl = document.getElementById('access-cust-email');
+    const nameEl  = document.getElementById('access-cust-name');
+    const email   = (emailEl && emailEl.value || '').trim().toLowerCase();
+    const name    = (nameEl && nameEl.value || '').trim();
+    const company = (sel && sel.value) ? sel.value : ((neu && neu.value || '').trim());
+    if (!email)   { showToast('Enter the customer\'s email address'); return; }
+    if (!company) { showToast('Choose or type the company this customer belongs to'); return; }
+    custNotice = null;
+    invite.disabled = true; invite.textContent = 'Inviting…';
+    adminPost('inviteCustomer', { email: email, name: name, company: company }).then(d => {
+      invite.disabled = false; invite.textContent = 'Invite customer';
+      if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Could not invite the customer.'); return; }
+      // THE ACCOUNT AND ITS SCOPE ARE REAL WHETHER OR NOT THE MAIL LEFT. A mail failure is
+      // reported as a next step — with the text to send by hand — and never as a failed
+      // onboarding, because the backend has already written both the scope and the
+      // account by the time it tries to send. Re-rendering twice here is deliberate:
+      // once now so the notice appears immediately, and once when the roster refresh
+      // lands, which is what puts the new customer in the list underneath it.
+      custNotice = { mailed: !!d.mailed, message: d.message || '', email: d.email, company: d.company };
+      renderCustomersTab();
+      loadAccessData();
+    });
+  });
+
+  const copyAll = document.getElementById('access-cust-copy');
+  if (copyAll) copyAll.addEventListener('click', () => copyText(customerHandoverTxt(custNotice.email, custNotice.company)));
+  const copyLink = document.getElementById('access-cust-copy-link');
+  if (copyLink) copyLink.addEventListener('click', () => copyText(customerPortalLink()));
+
+  panels.querySelectorAll('.acc-cust-save').forEach(b => b.addEventListener('click', () => {
+    const input = panels.querySelector('.acc-cust-company[data-email="' + b.dataset.email.replace(/"/g, '\\"') + '"]');
+    const company = (input && input.value || '').trim();
+    if (!company) { showToast('Type the company this customer should see, or disable the account instead'); return; }
+    b.disabled = true; b.textContent = 'Saving…';
+    adminPost('setCustomerCompany', { email: b.dataset.email, company: company }).then(d => {
+      b.disabled = false; b.textContent = 'Save company';
+      showToast((d && d.message) || (d && d.status === 'ok' ? 'Saved' : 'Could not save the company.'));
+      if (d && d.status === 'ok') loadAccessData();
+    });
+  }));
 }
 
 // ─── TAB 3: create people (single + bulk) ────────────────────────────────────
@@ -5896,9 +6122,30 @@ async function fetchIRs() {
 // cached record, and a trimmed copy would quietly empty its 📋 Report tab.
 const IR_LIST_CACHE_KEY = 'ipb_ir_list';
 
+// WHO the copy belongs to, appended to the key. Without this the copy was
+// device-global, and that is not merely a staleness problem: this app has two kinds of
+// account, and the backend narrows a customer's list to a single company. On a shared
+// machine, a customer signing in after a staff member would be painted that staff
+// member's whole repository — every company's IRs — for as long as the first round trip
+// took, with the customer's own scoped answer only replacing it afterwards. Scoping the
+// key costs nothing and makes that impossible rather than brief.
+//
+// The email is read from the stored profile, which is written at sign-in and is one of
+// the two keys `hasStoredSession()` requires, so it is known before any network call and
+// before the paint this key exists to serve. With no profile there is no identity, and
+// no identity means no cache — a null key disables both the read and the write rather
+// than falling back to a shared one.
+function irListCacheKey() {
+  const u = loadStoredUser();
+  const who = u && u.email ? String(u.email).trim().toLowerCase() : '';
+  return who ? IR_LIST_CACHE_KEY + ':' + who : null;
+}
+
 function readIRListCache() {
   try {
-    const raw = localStorage.getItem(IR_LIST_CACHE_KEY);
+    const key = irListCacheKey();
+    if (!key) return null;
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const c = JSON.parse(raw);
     if (!c || !Array.isArray(c.records) || !c.records.length) return null;
@@ -5908,7 +6155,9 @@ function readIRListCache() {
 
 function writeIRListCache() {
   try {
-    localStorage.setItem(IR_LIST_CACHE_KEY, JSON.stringify({ at: Date.now(), records: allIRs }));
+    const key = irListCacheKey();
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify({ at: Date.now(), records: allIRs }));
   } catch { /* non-fatal: a full quota must never break a sync that succeeded */ }
 }
 

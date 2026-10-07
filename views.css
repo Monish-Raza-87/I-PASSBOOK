@@ -1495,10 +1495,17 @@
   border-bottom: 1px solid var(--outline-gray-1);
   background: var(--surface-gray-1);
 }
-/* Tab strip. Four panes, one listUsers snapshot — see openAccessModal(). The
-   Versions pane reads the same snapshot the other three do rather than fetching
+/* Tab strip. Five panes, one listUsers snapshot — see openAccessModal(). The
+   Versions pane reads the same snapshot the other four do rather than fetching
    its own, which is what keeps the roster and the version list from disagreeing. */
-.access-tabs { display: flex; gap: 2px; padding: 0.5rem 1.2rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+/* Five labels do not fit a phone, and the first attempt at this SCROLLED the strip —
+   which measured clean and was still wrong. A screenshot showed why: "Create people"
+   sat cut in half at the right edge with no sign that anything was off-screen, so the
+   Customers tab was findable only by someone who already knew it was there. Wrapping
+   costs a second row on a settings modal and shows every tab at once. Each tab still
+   refuses to shrink, because a flex item that shrinks clips its own label before
+   anything wraps. */
+.access-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 0.5rem 1.2rem 0; border-bottom: 1px solid var(--outline-gray-1); }
 .access-tab {
   padding: 0.45rem 0.85rem;
   border: 1px solid transparent;
@@ -1510,6 +1517,8 @@
   font-size: var(--text-sm);
   cursor: pointer;
   margin-bottom: -1px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .access-tab:hover { color: var(--ink-gray-8); background: var(--surface-gray-2); }
 .access-tab.is-active {
@@ -1583,6 +1592,29 @@
 .acc-badge-admin { background: var(--surface-blue-2); color: var(--ink-blue-6); }
 .acc-badge-off   { background: var(--surface-red-2); color: var(--ink-red-7); }
 .acc-badge-temp  { background: var(--surface-amber-2); color: var(--ink-amber-8); }
+/* A customer, which is a scope and not a rung on the same ladder as admin — so it gets
+   its own colour rather than reusing the admin blue. */
+.acc-badge-cust  { background: var(--surface-green-2); color: var(--ink-green-7); }
+
+/* The invite result. A left edge rather than a fill: it has to read as one line of
+   outcome on a page that is otherwise a list of accounts, and amber is the state that
+   needs something done about it. */
+.acc-invite-ok, .acc-invite-warn {
+  border-left: 3px solid var(--ink-green-6);
+  padding: 0.1rem 0 0.1rem 0.8rem;
+  margin-bottom: 0.8rem;
+}
+.acc-invite-warn { border-left-color: var(--ink-amber-8); }
+
+/* The invite row's two fields carry real placeholders — an example address and the word
+   "optional" — and at the shared 160px minimum both were cut mid-word on a 414px phone:
+   "contact@customer.c" and "Contact name (optio". A placeholder is the only label these
+   fields have, so cutting it is not cosmetic. Widening the minimum makes them wrap to one
+   full-width field per row on a phone and sit side by side everywhere else, which is what
+   the other add-rows (departments, people) do not need because their placeholders are one
+   word each. The row's own 0.5rem gap plus two 240px minimums is 488px — above that the
+   pair shares the line, below it they stack. */
+.access-add-row .access-cust-field { min-width: 240px; }
 
 /* ── Department → section grant grid ─────────────────────── */
 .access-user-card {

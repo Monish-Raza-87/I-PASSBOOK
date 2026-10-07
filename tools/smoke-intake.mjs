@@ -15,6 +15,7 @@ import { loadApp, makeReporter } from './harness.mjs';
 const { T, byId } = loadApp(`
   mapSheetRows, buildIntakeMap, INTAKE_FIELDS, intakeValueHtml, toDisplayDateTime,
   toDisplayDate, toISODate, renderIntake, renderIRList, escHtml, escJsAttr, safeUrl,
+  sheetGapNote,
   get lastSheetAudit() { return lastSheetAudit; },
   get currentIR() { return currentIR; }, set currentIR(v) { currentIR = v; },
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
@@ -170,6 +171,41 @@ ok('null input → no records, no throw', T.mapSheetRows(null).length === 0);
 const noIr = one(HEADERS, ROW.map((v, i) => (i === 1 ? '' : v)));
 ok('a row with no IR Number is skipped', noIr === undefined, noIr);
 ok('and the audit still ran', T.lastSheetAudit.headers.length === HEADERS.length);
+
+head('the IR number is shape-checked, and a bad row is NAMED rather than lost');
+// Row 107 of the real sheet held `IR0NA` and the app rendered it as a real
+// ticket: there was no shape check at all, only a blank test. The value is
+// checked now, and — just as important — the row it came from is reported.
+const bad1 = one(HEADERS, ROW.map((v, i) => (i === 1 ? 'IR0NA' : v)));
+ok('a value that is not an IR number makes no card', bad1 === undefined, bad1);
+ok('...and is reported, with the value',
+  T.lastSheetAudit.badIRRows.length === 1 && T.lastSheetAudit.badIRRows[0].value === 'IR0NA',
+  JSON.stringify(T.lastSheetAudit.badIRRows));
+ok('...and with the Sheet row number it sits on',
+  T.lastSheetAudit.badIRRows[0] && T.lastSheetAudit.badIRRows[0].row === 2,
+  JSON.stringify(T.lastSheetAudit.badIRRows));
+ok('...and the list says so out loud rather than showing nothing',
+  /IR0NA/.test(T.sheetGapNote()) && /row 2/.test(T.sheetGapNote()), T.sheetGapNote());
+
+// The accepted shape is the CRAWLER's, not the backend's stricter /^IR\d+$/. A
+// spaced number is a real ticket, so it must not vanish from the list; the
+// backend will not write it, so that must be said too.
+const spaced = one(HEADERS, ROW.map((v, i) => (i === 1 ? 'IR 483' : v)));
+ok('a spaced IR number still becomes a card, because it is a real ticket',
+  !!spaced && spaced.irNumber === 'IR 483', spaced && spaced.irNumber);
+ok('...and is flagged as not writable until the cell is fixed',
+  T.lastSheetAudit.badIRRows.length === 1 && /writable/.test(T.lastSheetAudit.badIRRows[0].reason),
+  JSON.stringify(T.lastSheetAudit.badIRRows));
+ok('a dashed IR number is accepted, as the crawler accepts it',
+  !!one(HEADERS, ROW.map((v, i) => (i === 1 ? 'IR-483' : v))));
+
+// The value keys the store file (seedIRState), so it must pass through untouched:
+// normalising it here would orphan every row already written under the old spelling.
+const clean = one(HEADERS, ROW);
+ok('a good IR number is NOT rewritten', clean.irNumber === ROW[1], clean.irNumber);
+ok('...and the audit carries no reject from an earlier call',
+  T.lastSheetAudit.badIRRows.length === 0, JSON.stringify(T.lastSheetAudit.badIRRows));
+ok('...and sheetGapNote is silent when there is nothing to say', T.sheetGapNote() === '', T.sheetGapNote());
 
 head('intake value rendering');
 ok('an empty value renders an em-dash', T.intakeValueHtml('text', '') === '<span class="intake-empty">—</span>');

@@ -5444,7 +5444,7 @@ function buildIntakeMap(headers) {
 
 // The last header row read from the Sheet, so the intake view can name columns
 // the Form writes that the app does not model. Refreshed on every sync.
-let lastSheetAudit = { headers: [], unmapped: [] };
+let lastSheetAudit = { headers: [], unmapped: [], badIRRows: [] };
 
 // A sheet grid (header row + data rows, as displayed) → IR records, latest first.
 // Pure: no fetch and no DOM, so tools/smoke-intake.mjs can assert the whole
@@ -5454,6 +5454,34 @@ let lastSheetAudit = { headers: [], unmapped: [] };
 // this function stays the ONE place that knows how a column becomes a field, so
 // INTAKE_FIELDS below is not duplicated on the other side of the wire (see
 // listIRs in backend.gs).
+// The Sheet's IR Number column is free text a human types, so it is shape-checked
+// before it becomes a card. Until 2026-10-06 there was NO check at all — only a
+// blank test — and one row holding `IR0NA` rendered as a real ticket.
+//
+// The accepted shape is the crawler's (`eiIRs_` in email-index.gs), not the
+// backend's stricter `/^IR\d+$/`. That is deliberate: a value like "IR 483" is a
+// real ticket and must not vanish from the list, while the backend REFUSES TO
+// WRITE it. Both facts get reported rather than one hiding behind the other.
+//
+// The value is never rewritten. It keys the store file (`seedIRState`), so
+// normalising "IR 105" to "IR105" here would orphan every row already written
+// under the old spelling — and the decision on this was explicit: CR walks the
+// tickets by hand, nothing is migrated.
+const IR_NUMBER_RE  = /^IR\s*-?\s*\d+$/i;   // what the crawler accepts
+const IR_WRITABLE_RE = /^IR\d+$/;           // what the backend will write (assertRealIR)
+
+// Rows the Sheet holds that never became a ticket, NAMED rather than dropped in
+// silence: a ticket that disappears without a word is worse than one that looks
+// odd, and the only fix is a human editing the Sheet.
+function sheetGapNote() {
+  const bad = lastSheetAudit.badIRRows || [];
+  if (!bad.length) return '';
+  const listed = bad.map(b => 'row ' + b.row + ' ("' + b.value + '")').join(', ');
+  return `<p class="intake-audit">${bad.length} row${bad.length === 1 ? '' : 's'} in the Sheet ` +
+    `could not be read as an IR number and ${bad.length === 1 ? 'is' : 'are'} not shown: ` +
+    `${escHtml(listed)}.</p>`;
+}
+
 function mapSheetRows(rows) {
   const headers = (rows && rows[0] ? rows[0] : []).map(h => String(h).trim());
   const { map, consumed, unmapped } = buildIntakeMap(headers);
@@ -5467,11 +5495,21 @@ function mapSheetRows(rows) {
   const cell = (row, i) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '');
 
   const records = [];
+  const badIRRows = [];
   for (let r = 1; r < (rows ? rows.length : 0); r++) {
     const row = rows[r];
     if (!row) continue;
     const irNumber = cell(row, iIrNo);
     if (!irNumber) continue;
+    if (!IR_NUMBER_RE.test(irNumber)) {
+      badIRRows.push({ row: r + 1, value: irNumber, reason: 'not an IR number' });
+      continue;                       // no card — but it is reported, not lost
+    }
+    if (!IR_WRITABLE_RE.test(irNumber)) {
+      // Shown, because it is a real ticket; reported, because the app cannot save
+      // to it until someone fixes the cell.
+      badIRRows.push({ row: r + 1, value: irNumber, reason: 'not writable until the Sheet cell is fixed' });
+    }
 
     const ts   = cell(row, map.dateRaised);
     const inc  = cell(row, map.incidentDate);
@@ -5534,6 +5572,7 @@ function mapSheetRows(rows) {
       extra,
     });
   }
+  lastSheetAudit.badIRRows = badIRRows;
   return records.reverse();   // latest first
 }
 
@@ -5780,14 +5819,14 @@ function renderIRList(records) {
   renderSegments();
   renderCategorySegments();
   if (!records || records.length === 0) {
-    irList.innerHTML = allIRs.length
+    irList.innerHTML = sheetGapNote() + (allIRs.length
       ? '<div class="empty-state"><span>🔍</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
-      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>';
+      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>');
     updateListCounts(0);
     return;
   }
 
-  irList.innerHTML = records.map(ir => {
+  irList.innerHTML = sheetGapNote() + records.map(ir => {
     const owner = ir.assigneeName || ir.assignee || '';
     // Stage 3 and Stage 4, read off the merged record. Both are no-ops when the
     // data cannot support them — an IR with no saved sections and no clock

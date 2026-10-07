@@ -35,6 +35,20 @@ Grants live in `access.json`, in `_store/` — never in a sentinel store (see be
 |---|---|
 | `departments` | `{ "cr": { name, active, grants: { "sec-b": true, … }, triage: true }, … }`. A section appears in `grants` only when the department has **edit**; `triage` is a sibling of `grants`, deliberately outside it. |
 | `memberships` | `{ "someone@indrones.com": ["production", "qa"], … }` — **a list per person**, so reading one person's departments is one key read rather than a scan of an edge list. |
+| `customers` | `{ "ops@agrikart.in": "AgriKart Pvt Ltd", … }` — a **scope**, not a permission. The value is a company name and it is the whole setting. Read by `customerCompany(email)`, the only reader of that map. |
+
+**A customer is not a third level on the list above.** `getEffectiveAccess` resolves
+the scope *before* building the section map, and returns every `SECTION_KEY` as
+`'none'` with `none[OVERVIEW_KEY] = 'view'` — so the withholding rides the existing
+`canView()` filter in `getPassbook` and needs no new code, and the Overview's two
+inputs are disabled by the same `canEdit()` seam. `role` is three-valued
+(`admin` / `customer` / `user`) and `refuseCustomer(access, what)` blocks a customer at
+endpoints with no per-record ACL: `saveSection`, the comment thread, `getAuditLog`,
+`getLegacyIR` and `listLegacyIRs`. Those are the sharp ones — the audit log trusts the
+caller's token for the whole repository, and the legacy reads take an arbitrary IR
+number. Clearing a scope is **refused** for an outside address rather than written,
+because "no company" means *every* IR. See
+[10](10 - Auth & Access Model.md#a-customer-is-a-scope-not-a-third-level).
 
 There is no positional read and no column offset to keep in sync: a section grant is
 a key, and `triage` lives in its own field precisely so that nothing iterating
@@ -55,9 +69,9 @@ a key, and `triage` lives in its own field precisely so that nothing iterating
 
 The admin entry points are `listUsers` (read everything the modal needs in one
 call), `createUser` / `bulkCreateUsers`, `resetUserPassword`, `setUserStatus`,
-`setUserDepartments`, `saveDepartment`, `deleteDepartment` and `purgeUsers` — all
-gated by `requireAdmin`. There is no request-access flow: nobody asks, the admin
-grants.
+`setUserDepartments`, `saveDepartment`, `deleteDepartment`, `purgeUsers`,
+`inviteCustomer` and `setCustomerCompany` — all gated by `requireAdmin`. There is no
+request-access flow: nobody asks, the admin grants.
 
 Every function that mutates the store (`saveSection`, `mintSession`, `issueAuthCode`,
 `doLogout`, `revokeAllSessions`, `pruneSessions`, `recordFailedLogin`,
@@ -791,6 +805,43 @@ ceiling, and returns a visible `status: 'error'` when the day's mail is spent �
 comment still posts, and the sender is told the notification did not go. Failing
 silently would leave people believing a colleague had been emailed.
 
+### Customer accounts — `inviteCustomer`, `setCustomerCompany`, `getMyCustomer`
+
+Three actions, and only the middle one is new surface for the admin UI. What a
+customer *is* — a scope on rows rather than a permission level — is
+[10 — Auth & Access Model](10 - Auth & Access Model.md#a-customer-is-a-scope-not-a-third-level);
+this is the wire.
+
+| Action | Who | Does |
+|---|---|---|
+| `inviteCustomer` | **admin** | Creates the account, writes the scope, sends the invitation. Re-checks admin inside the function, not only at the router. |
+| `setCustomerCompany` | **admin** | Changes — or clears — one account's company. |
+| `getMyCustomer` | **any signed-in** | The portal's own half: the caller's company, display name and the portal URL. Returns `{ customerOf, name, portalUrl }`. |
+
+`inviteCustomer` is an **ordered** three-step, and the order is the design:
+
+1. **The scope goes into `access.json` first.** If it were written last, there would
+   be a window in which the account exists, the invitation email is already sent, and
+   the account is unscoped — which in this model means *every* IR.
+2. **Then `createUserRow`**, which always sets `mustChange: 'yes'`, so the first
+   sign-in is forced through the password change like any other new account.
+3. **Then the mail.** No code rides in it: a fresh temp-password account **cannot**
+   redeem a login code, because `passwordlessLogin` refuses one by design, so the mail
+   names the ordinary *"First time here?"* reset door instead.
+
+The reply carries **`mailed`** separately from `status`. A send failure comes back as
+`{ status: 'ok', mailed: false }` and the panel reports it in words as a next step —
+never as a failed create, because the account *does* exist and that is the part that
+matters. It also carries the handover text so the admin can pass it on by hand.
+
+`setCustomerCompany` **refuses to write an empty company** for an address outside the
+organisation. "No company" does not mean "no access" in this model — it means *every*
+IR — so clearing would silently promote the account to a full staff view. Disabling is
+the reversible switch, and the action says so rather than doing it.
+
+Both admin actions return the same `{ status }` shape as every other write, so the
+panel's error path is the one it already has.
+
 ### `login`
 Sign-in is **two steps**, and the password alone buys no session.
 
@@ -970,7 +1021,7 @@ var CONFIG = {
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 6,            // 6 = ... + the public backupPulse (see below)
+  API_VERSION: 8,            // 8 = customer accounts; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 

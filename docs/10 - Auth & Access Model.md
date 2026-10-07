@@ -165,6 +165,67 @@ unauthorised write is not. It previously failed open on edit, which turned
 "permissions have not arrived yet" into "everyone can write". The backend enforces
 independently, so a wrong guess costs a button — never a bad write.
 
+### A customer is a scope, not a third level
+
+The two levels above are about *what you may do*. There is a third kind of account,
+and conflating it with a level is the mistake to avoid: a **customer** is an ordinary
+account that is **scoped to one company**. They may do almost nothing, but that is a
+side effect of the scope rather than the reason for it — what defines them is that
+the backend narrows every read to a single company's rows.
+
+The whole setting is a **company name**, stored as a third map in `access.json`
+beside `departments` and `memberships`:
+
+```json
+"customers": { "ops@agrikart.in": "AgriKart Pvt Ltd" }
+```
+
+`customerCompany(email)` is the **one** reader of that map — a second copy of the
+lookup is how one caller ends up disagreeing with another — and `getEffectiveAccess`
+resolves it **before** the section map is built, because the scope changes what that
+map is allowed to say. The answer is every `SECTION_KEY` set to `'none'`, with
+`none[OVERVIEW_KEY] = 'view'` and `triage: false`. That is deliberately built out of
+the *existing* seams: `getPassbook` already filters rows through `canView()`, so the
+withholding needs **no new filter code**, and the Overview's two inputs are disabled
+by the same `canEdit()` seam every other field uses rather than by a customer branch.
+
+Three details are load-bearing:
+
+- **A customer must never be granted view because the scope lookup failed.** The
+  `customerCompany` read sits *outside* the `try/catch` that guards the department
+  read — and it cannot fail open either, because `accessStore()` throws on a malformed
+  file and that throw leaves `getEffectiveAccess` rather than resolving to `''`.
+- **Admin is tested first.** An admin is never also a customer, so a stale row in the
+  customers map cannot quietly narrow the owner's own view of the repository.
+- **The Overview is not a section, but it is a gated record**, so it gets a permission
+  key like any other. Leaving it out is the exact bug described under *Triage* below:
+  `getPassbook`'s filter would drop that row for every non-admin, and the tester —
+  being the admin — would see nothing wrong.
+
+**"Customer" is also a `role` value**, and that is a separate axis from the scope:
+`role` is `admin` / `customer` / `user`, and `refuseCustomer(access, what)` blocks a
+customer at doors that are staff-only. Those endpoints have **no per-record ACL**, so
+that check is the only thing standing between an outsider's token and another
+company's data. `getAuditLog` and `getLegacyIR` are the sharp examples: the first
+trusts the caller's token for the whole repository, the second takes an arbitrary IR
+number. This is why **v8 is not a cosmetic bump** — see the `API_VERSION` note in
+[04](04 - Backend API Reference.md).
+
+**Clearing a scope is refused, on purpose.** `setCustomerCompany` will not write an
+empty company for an address outside the organisation, because "no company" does not
+mean "no access" — it means *every* IR. Clearing would silently **promote** the
+account to a full staff view. An admin who wants a customer to lose access sets them
+**disabled**; that is the reversible switch, and the Customers tab says so in words
+rather than leaving the trap in place.
+
+**How an account is created** is the invitation flow, not a password handover: the
+scope is written to `access.json` **first**, then the ordinary `createUserRow` (which
+always sets `mustChange: 'yes'`), then the email. **No code rides in that email** — a
+fresh temp-password account cannot redeem a login code, because `passwordlessLogin`
+refuses one by design — so the mail names the ordinary reset door. A send failure is
+reported in words and never as a failed create: the account exists, which is the part
+that matters, and the admin can hand the same text over by hand.
+
 ## The forced first password change
 
 **Enforced by the absence of a token.** When an account still has
@@ -395,11 +456,13 @@ user could loop it and take out password recovery for the whole company.
 
 ## The admin UI (User Access)
 
-Three tabs, all powered by one `?action=listUsers` call:
+**Five tabs**, all powered by one `?action=listUsers` call:
 
-- **People** — a people × departments tick matrix. One "Save all" posts the grid,
-  and unchanged rows are skipped, so a 19-person grid with one edit is one write.
-  Per-row actions: reset password, enable/disable.
+- **People & departments** — a people × departments tick matrix. One "Save all" posts
+  the grid, and unchanged rows are skipped, so a 19-person grid with one edit is one
+  write. Per-row actions: reset password, enable/disable. A customer's row carries a
+  green `customer · <Company>` badge, holds **no ticks**, and says in a full-width row
+  that department access does not apply to them and where to manage them instead.
 - **Departments** — the department → section grant grid (six checkboxes, **B–G**)
   plus a **Triage** checkbox rendered after them and labelled `TR`, so it reads as a
   different kind of thing, plus a member count. *"Need one person to edit one
@@ -409,8 +472,32 @@ Three tabs, all powered by one `?action=listUsers` call:
 - **Create people** — single add, a bulk textarea (one email per line, split on
   `[\s,;]+`, deduped, **skip-and-report** so one typo cannot abort a 19-person
   run), and the one-time credentials panel.
+- **Customers** — invite a customer (email, optional contact name, and the company),
+  edit an existing account's company, and copy the handover text. See
+  *A customer is a scope* above for why the company is the whole setting.
+- **Versions** — who is on which build (see [08](08 - Development Guide.md)).
 
-**The page paints from the last saved copy, then refreshes.** One `listUsers` round
+### The Customers tab's company picker is derived, never invented
+
+The dropdown is every company **already named on an IR** (the `customerName` column)
+plus every company an account is **already scoped to**, unioned and sorted. It is not
+a stored list, because a stored list is a second source of truth that drifts the first
+time somebody types a new customer into the support form. An **"Other company (type
+it)…"** option is always present, so the picker can never block a genuinely new
+company — and choosing it reveals a text field instead of leaving a stale hidden value
+to be submitted in place of the choice actually made.
+
+### A customer's row cannot be emptied by the grid
+
+`savePeopleMatrix()` **skips customer rows outright**, and that is not an optimisation.
+A customer holds no department ticks, so their row is an empty set — and an empty set
+in that grid means "remove everything". Writing it would be a silent change to an
+account the grid cannot manage in the first place. The row exists there only so an
+admin can find them; the Customers tab is where they are changed.
+
+### The page paints from the last saved copy, then refreshes
+
+One `listUsers` round
 trip against a cold Apps Script container, with seven boot calls already in flight,
 is a long blank page — reported from the field as *"User access page also takes
 forever to load"*. `ipb_access_cache` (localStorage) now holds the last roster, and
@@ -555,6 +642,16 @@ misgrant anything.
   the other wrote lose one of the two changes, and a read taken before the lock is
   merged over whatever landed in between. `readJson`'s memo is *not* usable inside a
   lock for exactly that reason.
+- **`clearLocalAuth()` is the ONE place local auth state is torn down**, and that now
+  includes the two device caches. The IR list's copy is keyed **by the account it
+  belongs to** (`ipb_ir_list:<email>`) and is removed on sign-out; the roster copy
+  (`ipb_access_cache`) is removed with it. The key is the security-relevant half: a
+  device-global list meant a customer signing in on a shared machine was painted a
+  staff member's whole repository for one round trip before their own scoped answer
+  replaced it. With no stored profile there is no identity, so there is **no cache at
+  all** — the key is `null` and both the read and the write are no-ops, rather than
+  falling back to a shared one. A device that is simply left signed in keeps its warm
+  copy; the cost is one refresh, on the sign-out path only.
 
 ## Related
 

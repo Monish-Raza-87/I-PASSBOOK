@@ -33,6 +33,11 @@ import { pathToFileURL } from 'node:url';
 import { loadApp } from './harness.mjs';
 
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+// The flight-log reader is a plain script loaded before app.js, and the log pane
+// and the limits panel are BOTH built from it (window.DataFlash.TUNED is the field
+// list, so the panel and the scorer cannot disagree about which numbers exist).
+// Evaluated inside the sandbox, the way index.html loads it.
+const DATAPLASH_SRC = fs.readFileSync(path.join(ROOT, 'dataflash.js'), 'utf8');
 const outDir = path.join(os.tmpdir(), 'ipassbook-render');
 fs.mkdirSync(outDir, { recursive: true });
 const outFile = path.join(outDir, 'app.html');
@@ -269,3 +274,156 @@ ${css}
 </body></html>`);
 console.log(openFile);
 console.log(`  open ${opList.length} bytes of list · ${opBoard.length} of board · ${opInsights.length} of insights`);
+
+// ── The Flight log pane, and the limits panel ─────────────────────────────────
+// Both of these are the only screens in the app whose content is a TABLE-shaped
+// thing at phone width — a score row with three fields on it, and a limits form
+// with a label, an input and a unit — which is exactly the shape that has scrolled
+// sideways before. The score block and the panel are drawn from the app's OWN
+// renderers over a report with the app's own field names, so what is measured is
+// the app's markup in the app's cascade.
+//
+// The report is a spread rather than a tidy one: a vibration detail long enough to
+// force wrapping, a profile name longer than any real airframe, a finding that
+// carries a source message (so the jump button is drawn) and one that does not.
+// A clean fixture lays out cleanly and would prove nothing about the messy case.
+const REPORT = {
+  verdict: 'REVIEW',
+  fileName: '2026-10-04 13-22-07.bin',
+  fileBytes: 8412160,
+  meta: {
+    firmware: 'ArduCopter V4.5.7 (f1e4c9b0)',
+    vehicle: 'S25',
+    durationSeconds: 743,
+    frames: 128456,
+    skippedBytes: 0,
+    truncated: false,
+  },
+  score: {
+    total: 86,
+    airframe: 'STRIVER MK-II LONG RANGE',
+    profile: 'STRIVER MK-II LONG RANGE',
+    parts: [
+      { id: 'vibeX', label: 'X vibration', score: 100, band: 'green', detail: 'peak 12.4 m/s², watch above 30' },
+      { id: 'vibeY', label: 'Y vibration', score: 92, band: 'green', detail: 'peak 21.8 m/s², watch above 30' },
+      { id: 'vibeZ', label: 'Z vibration', score: 74, band: 'amber', detail: 'peak 38.1 m/s², watch above 30, fail above 60' },
+      { id: 'current', label: 'Current', score: 61, band: 'amber', detail: '78.2 A held 6.4 s, watch above 70, fail above 90' },
+      { id: 'motors', label: 'Motor balance', score: 100, band: 'green', detail: 'widest spread 84 µs' },
+      { id: 'attitude', label: 'Attitude tracking', score: 96, band: 'green', detail: 'worst 11.2°' },
+      { id: 'gps', label: 'GPS quality', score: 88, band: 'amber', detail: 'worst HDop 1.62, 11 satellites' },
+    ],
+    checklist: [
+      { id: 'clipping', label: 'Accelerometer clipping', detail: 'IMU1 clipped 4 times, most at 41:12.', needsTick: true },
+      { id: 'err', label: 'ERR subsystem codes', detail: 'EKF altitude and compass variance were raised.', needsTick: true },
+    ],
+    open: [
+      { id: 'profile', label: 'Limits used', detail: 'Judged against STRIVER MK-II LONG RANGE.' },
+      { id: 'voltage', label: 'Pack voltage', detail: 'No rule yet — recorded and shown, not scored.' },
+      { id: 'res', label: 'Battery resistance', detail: 'No rule yet — recorded and shown, not scored.' },
+      { id: 'norule', label: 'Battery temperature — no limit set', detail: 'The area is left out of the average until a number is set.' },
+    ],
+  },
+  findings: [
+    { severity: 'review', title: 'Z vibration reached 38.1 m/s²', atSeconds: 612, message: 'VIBE',
+      detail: 'Above the 30 m/s² watch level and well under the 60 m/s² fail level. Worth a look at the motor mounts before the next flight.' },
+    { severity: 'review', title: 'Current held 78.2 A for 6.4 s', message: 'BAT',
+      detail: 'Longer than the 5 s the pack is rated to hold it for.' },
+    { severity: 'note', title: 'Log ends mid-frame', detail: 'The file looks truncated — the last partial frame could not be read.' },
+  ],
+  parameters: [
+    { message: 'VIBE', column: 'VibeX', unit: 'm/s²', count: 12840, min: 0.4, max: 12.4, mean: 1.8 },
+    { message: 'VIBE', column: 'VibeY', unit: 'm/s²', count: 12840, min: 0.5, max: 21.8, mean: 2.1 },
+    { message: 'BAT', column: 'Curr', unit: 'A', count: 6210, min: 0.1, max: 78.2, mean: 31.4 },
+  ],
+};
+
+const { T: LG2, byId: lgById } = loadApp(`
+  renderLog, logScoreHTML, logProfileNoteHTML, renderAnalyserLimitsBody,
+  normaliseAnalyserConfig, isAdmin, ADMIN_EMAILS, SECTION_IDS,
+  get logState() { return logState; },
+  get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
+  get analyserConfig() { return analyserConfig; }, set analyserConfig(v) { analyserConfig = v; },
+  get _alDraft() { return _alDraft; }, set _alDraft(v) { _alDraft = v; },
+  get _alProfile() { return _alProfile; }, set _alProfile(v) { _alProfile = v; },
+  get currentUser() { return currentUser; }, set currentUser(v) { currentUser = v; },
+  // The voltage and capacity lines on this page are built by the READER, not by this
+  // fixture — a hand-typed stand-in would render just as prettily and prove nothing
+  // about the real string, which is the one thing a rendered probe is for. So the
+  // page scores a real (synthetic) flight through the real scorer and splices out
+  // the two entries the pack produces.
+  __fixturePackScore: pack => DataFlash.scoreFlightLog(
+    { __messages: __fixtureMsgs, __time: { min: 1000, max: 1108 } }, [],
+    DataFlash.resolveRules({ profiles: { STRIVER: pack } }, 'STRIVER')).score,
+`, {
+  capture: true,
+  preload: DATAPLASH_SRC,
+  globals: {
+    // 100 A held for 108 s: 3000 mAh, a tenth of the pack declared below. A sample
+    // every 2 s, so the trapezoid integration has a real series to work on.
+    __fixtureMsgs: Array.from({ length: 55 }, (_, i) =>
+      ({ _name: 'BAT', _t: 1000 + i * 2, Volt: 23.4, Curr: 100 })),
+  },
+});
+
+LG2.currentUser = { email: LG2.ADMIN_EMAILS[0] };   // the panel is admin-only, so the fixture is an admin
+LG2.allIRs = FIXTURE;
+LG2.analyserConfig = LG2.normaliseAnalyserConfig({
+  profiles: { STRIVER: { curReview: 70, curFail: 90, pwmSpread: 250 } },
+  models: ['STRIVER'],
+});
+// The two lines the pack produces, as the reader actually writes them.
+const packBits = LG2.__fixturePackScore({ cellsSeries: 6, packMah: 30000 });
+REPORT.score.open = REPORT.score.open.filter(o => o.id !== 'voltage')
+  .concat(packBits.open.filter(o => o.id === 'voltage'));
+REPORT.score.checklist = packBits.checklist.filter(c => c.id === 'mah')
+  .concat(REPORT.score.checklist);
+
+LG2.logState.report = REPORT;
+LG2.logState.model = 'STRIVER MK-II LONG RANGE';
+LG2.logState.target = 'IR601';
+LG2.logState.fileName = REPORT.fileName;
+LG2.logState.fileSize = REPORT.fileBytes;
+LG2.renderLog();
+const logPane = lgById.get('log-body').innerHTML;
+
+// The panel renders into #al-body through the app's real renderer. The card shell
+// around it is the one openAnalyserLimitsModal builds — copied, not re-invented,
+// because the shell is what decides whether the form has room at phone width.
+// (openAnalyserLimitsModal itself cannot be called here: it bails if a
+// `#analyser-limits-modal` already exists, and the capture stub auto-creates an
+// element for every id it is asked for, so the guard is always true under test.)
+LG2._alDraft = LG2.normaliseAnalyserConfig(LG2.analyserConfig);
+LG2._alDraft.profiles.__default__ = { attTrack: 15, hdopFail: 2.0 };
+LG2._alProfile = 'STRIVER';
+LG2.renderAnalyserLimitsBody();
+const alBody = lgById.get('al-body').innerHTML;
+
+const logFile = path.join(outDir, 'log.html');
+fs.writeFileSync(logFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flight log pane</title>
+${css}
+</head><body>
+<div id="log-view">
+  <div class="list-toolbar">
+    <div class="list-toolbar-top"><span class="list-title">Log Analyser</span></div>
+  </div>
+  <div id="log-body" class="log-body">${logPane}</div>
+</div>
+<div class="inward-options-modal" id="analyser-limits-modal" style="display:flex">
+  <div class="inward-options-card">
+    <div class="inward-options-head">
+      <h3>Log limits</h3>
+      <button type="button" class="inward-options-close">&times;</button>
+    </div>
+    <p class="inward-options-hint">The numbers a flight log is scored against, per airframe. They are stored privately and never appear in the app's published files.</p>
+    <div class="inward-options-body" id="al-body">${alBody}</div>
+    <div class="inward-options-foot">
+      <button type="button" class="btn">Cancel</button>
+      <button type="button" class="btn btn-primary">Save limits</button>
+    </div>
+  </div>
+</div>
+</body></html>`);
+console.log(logFile);
+console.log(`  log pane ${logPane.length} bytes · limits panel ${alBody.length} bytes`);

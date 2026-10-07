@@ -72,11 +72,34 @@ globalThis.DataFlash = (function () {
   // detector is a number nobody can argue with. Where a value comes from the
   // existing blueprint it says so; where it is a first pass it says that too,
   // rather than implying a precision this does not have.
+  // ── WHAT IS ALLOWED TO BE IN THIS FILE ──────────────────────────────────────
+  //
+  // This file is served from a public website, so it may hold ONLY numbers that
+  // are already published somewhere a stranger can read. In practice that means
+  // ArduPilot's own documentation, cited at each line below, plus the first-pass
+  // ratios this reader has always used.
+  //
+  // Every number INDROVES gave us is deliberately NOT here. Those are operating
+  // data, and they live in the private Drive store instead — written by the Log
+  // limits panel and read back through `resolveRules` below. Adding one here
+  // would publish it, so `TUNED` is the list of keys that must never gain a value
+  // in this file.
   const LIMITS = {
-    // ArduPilot's own guidance: vibration above 30 m/s/s is the level at which
-    // the EKF and the attitude controller start to suffer, and it is the
-    // threshold the existing blueprint already used.
+    // Vibration. ArduPilot's published guidance (Common Measuring Vibration):
+    // "Vibration levels below 30m/s/s are normally acceptable", and levels "above
+    // 60m/s/s nearly always have problems with position or altitude hold".
+    //
+    // Those two figures are the default for EVERY axis here, and they are the
+    // only vibration numbers in this file on purpose: X and Y are not Z, and the
+    // per-axis limits that recognise that are Indrones' own — they arrive from
+    // the store, not from here.
+    //
+    // `vibe` is kept as the X/Y fail level for any older caller still reading it.
     vibe: 30,
+    vibeXYReview: 30,
+    vibeXYFail: 60,
+    vibeZReview: 30,
+    vibeZFail: 60,
     // RCOU is a PWM output. ~1900+ means the controller is asking for everything
     // the motor has; ~1100- means it is pinned at idle (a motor or an ESC that
     // has stopped responding). Either must HOLD to matter — a single sample is a
@@ -101,7 +124,117 @@ globalThis.DataFlash = (function () {
     batSag: 0.90,
     batBrownout: 0.80,
     batSpike: 2.0,
+
+    // Current: ArduPilot's SHAPE, not an airframe's numbers. BATT_LOW_TIMER is
+    // the documented period a battery condition must PERSIST before the failsafe
+    // acts, and its default is 10 seconds. So a spike is never a fault and a
+    // condition that holds is — which is the half of the rule that is public.
+    // The airframe's own current limits are in the store (see TUNED).
+    curHoldMs: 10000,
+
+    // GPS. ArduPilot's own published guidance, which Indrones confirmed.
+    hdopReview: 1.5,
+    hdopFail: 2.0,
   };
+
+  // ── the numbers that must NOT live in this file ─────────────────────────────
+  //
+  // One list, because a number in two places is a number that will disagree with
+  // itself. This is BOTH the panel's field list AND the contract for what
+  // `resolveRules` will accept from the store — and it is the list a reviewer
+  // should check this file against before it ships.
+  //
+  // `pub` is what the field starts from where a figure is already public
+  // (ArduPilot's); `null` means no figure has ever been published, so the field
+  // starts EMPTY, and an empty field means NO GATE AT ALL. That is the safe
+  // reading of "we have not agreed a limit": the log is shown and not failed.
+  //
+  // `perAirframe: true` marks a field that describes ONE AIRCRAFT rather than a
+  // limit everyone can share — a pack's cell count, in practice. See the top of
+  // `resolveRules` for why the shared default may not set one.
+  const TUNED = [
+    // ── the pack itself: what the aircraft IS, not a limit on it ─────────────
+    //
+    // These two exist for exactly one reason, and it is not decoration: a voltage
+    // is only comparable between two aircraft once it is PER CELL. This fleet is
+    // 4S in one airframe and 6S in another, so the same 21 V is a healthy pack on
+    // one and 3.5 V/cell — nearly empty — on the other. A single pack-level number
+    // would therefore be wrong for one of them by construction, and the reader
+    // cannot divide by a cell count it does not know. So declaring the pack is the
+    // PREREQUISITE for any voltage rule: without it there is no per-cell figure to
+    // apply a rule to.
+    //
+    // Nothing in this group is a limit. It cannot fail a log, it is not scored,
+    // and a blank one costs nothing but the readout. `pub: null` because no cell
+    // count has ever been published.
+    //
+    // Both fields are the FINISHED number rather than a component of one. A "packs
+    // in parallel" and a "cell mAh" would have had to be multiplied, and a fleet
+    // where one airframe carries one pack and another carries two in parallel
+    // makes that count ambiguous to type — an ambiguity that surfaces as a
+    // plausible-looking, wrong percentage. So the pack's capacity is entered whole,
+    // all batteries together, and nothing is multiplied here.
+    { group: 'The pack — read from this, never scored', key: 'cellsSeries', label: 'Cells in series',       unit: 'S',   pub: null, min: 1, perAirframe: true, none: 'not recorded' },
+    { group: 'The pack — read from this, never scored', key: 'packMah',     label: 'Capacity, all packs',   unit: 'mAh', pub: null, min: 1, perAirframe: true, none: 'not recorded' },
+    { group: 'Vibration', key: 'vibeXYReview', label: 'X and Y — watch above', unit: 'm/s²', pub: 30 },
+    { group: 'Vibration', key: 'vibeXYFail',   label: 'X and Y — fail above',  unit: 'm/s²', pub: 60 },
+    { group: 'Vibration', key: 'vibeZReview',  label: 'Z — watch above',       unit: 'm/s²', pub: 30 },
+    { group: 'Vibration', key: 'vibeZFail',    label: 'Z — fail above',        unit: 'm/s²', pub: 60, min: 1 },
+    { group: 'Current',   key: 'curReview',    label: 'Watch above',           unit: 'A',    pub: null },
+    { group: 'Current',   key: 'curFail',      label: 'Fail above',            unit: 'A',    pub: null },
+    { group: 'Current',   key: 'curHoldMs',    label: 'Only if held for',      unit: 'ms',   pub: 10000, min: 1000 },
+    { group: 'Motors',    key: 'pwmSpread',    label: 'Most the motors may differ by', unit: 'µs', pub: null },
+    { group: 'Attitude',  key: 'attTrack',     label: 'Commanded vs achieved', unit: '°',    pub: null },
+    { group: 'GPS',       key: 'hdopReview',   label: 'Watch above',           unit: '',     pub: 1.5 },
+    { group: 'GPS',       key: 'hdopFail',     label: 'Fail above',           unit: '',     pub: 2.0 },
+    { group: 'Reporting', key: 'scoreWobble',  label: 'Score may drift by',    unit: 'pts',  pub: null },
+  ];
+
+  // Build the rules one log is scored against: this file's public defaults, then
+  // the store's profile for the airframe, then the store's `__default__` profile
+  // underneath it. Precedence is deliberate — the most specific wins, and a
+  // value of null or '' means "no limit agreed", which REMOVES the default rather
+  // than falling back to it. Without that a blank field would quietly inherit a
+  // number nobody chose.
+  //
+  // Never throws. A store file that has been hand-edited into nonsense resolves
+  // to the public defaults, because a malformed config must not take the
+  // analyser down with it.
+  function resolveRules(config, airframe) {
+    const out = Object.assign({}, LIMITS);
+    let profiles = null;
+    if (config && typeof config === 'object' && config.profiles && typeof config.profiles === 'object') {
+      profiles = config.profiles;
+    }
+    const name = airframe && profiles && profiles[airframe] ? String(airframe) : '';
+    const defaultLayer = (profiles && profiles.__default__) ? profiles.__default__ : null;
+    const layers = [];
+    if (defaultLayer) layers.push(defaultLayer);
+    if (name) layers.push(profiles[name]);
+    layers.forEach(src => {
+      if (!src || typeof src !== 'object') return;
+      // A limit can be shared; an AIRCRAFT cannot. `perAirframe` fields (the pack's
+      // cell count) describe one machine, so the shared default is not allowed to
+      // set them — a 4S default silently picked up by a 6S airframe would divide
+      // the pack voltage by the wrong number and produce a per-cell figure that
+      // looks entirely reasonable and is wrong. Refusing the layer means the
+      // airframe that has not declared its pack simply gets no per-cell readout,
+      // which is a missing number rather than a false one.
+      const fromDefault = (src === defaultLayer);
+      TUNED.forEach(f => {
+        if (f.perAirframe && fromDefault) return;
+        if (!Object.prototype.hasOwnProperty.call(src, f.key)) return;
+        const v = src[f.key];
+        if (v === null || v === '') delete out[f.key];
+        else if (typeof v === 'number' && isFinite(v)) out[f.key] = v;
+      });
+    });
+    // What the report says it was scored against, so a number on screen can
+    // always be traced to the profile that produced it.
+    out.airframe = name;
+    out.profile = name || (layers.length ? 'the default profile' : 'built-in defaults');
+    return out;
+  }
 
   // Messages the analyser reads. Anything else is counted and skipped, which is
   // what keeps the memory bound independent of how many message types there are.
@@ -369,7 +502,7 @@ globalThis.DataFlash = (function () {
 
   // ── analysis ────────────────────────────────────────────────────────────────
 
-  function analyse(parsed) {
+  function analyse(parsed, rules) {
     // No FMT table means no message has a known length, so nothing can be read
     // and a verdict would be a guess. The two cases are distinguished by what the
     // scanner actually SAW, not by `frames`: a frame can only be counted once its
@@ -406,10 +539,6 @@ globalThis.DataFlash = (function () {
         message: message || null,
       });
 
-    // ── VIBE ──
-    let vibMax = -Infinity, vibMaxAt = null, vibMaxAxis = null;
-    const clip = { Clip0: 0, Clip1: 0, Clip2: 0 };
-    let clipSeen = false;
     // ── RCOU ──
     const run = new Map();             // column -> {since, value}
     let lastRcouT = null;
@@ -437,14 +566,15 @@ globalThis.DataFlash = (function () {
       const t = msg._t;
       switch (name) {
         case 'VIBE': {
+          // VALUES ONLY. This case used to judge vibration and clipping as well,
+          // and it no longer does: both rules changed on 2026-10-06 and both are
+          // decided in scoreFlightLog below, so that one condition is reported
+          // once rather than twice. The axis limits there are per-axis (X and Y
+          // are not Z, and they never were), and clipping there is a count a
+          // human accepts or rejects rather than a flat review. What stays here
+          // is the per-column ledger the numbers table is built from.
           ['VibeX', 'VibeY', 'VibeZ'].forEach(axis => {
-            const v = msg[axis];
-            if (typeof v !== 'number') return;
-            note('VIBE', axis, v, t);
-            if (v > vibMax) { vibMax = v; vibMaxAt = t; vibMaxAxis = axis; }
-          });
-          ['Clip0', 'Clip1', 'Clip2'].forEach((c, i) => {
-            if (typeof msg[c] === 'number') { clipSeen = true; clip[c] = Math.max(clip[c], msg[c]); }
+            if (typeof msg[axis] === 'number') note('VIBE', axis, msg[axis], t);
           });
           break;
         }
@@ -561,14 +691,17 @@ globalThis.DataFlash = (function () {
 
     // ── findings that need the whole run ──────────────────────────────────────
 
-    if (vibMax > LIMITS.vibe) {
-      add(vibMax > LIMITS.vibe * 2 ? 'fail' : 'review', 'Excessive vibration', vibMaxAt,
-        `Peak ${vibMax.toFixed(1)} m/s/s on ${vibMaxAxis} against a ${LIMITS.vibe} m/s/s limit. Vibration at this level degrades the attitude estimate and is a common cause of unexplained loss of control.`, 'VIBE');
-    }
-    if (clipSeen && (clip.Clip0 || clip.Clip1 || clip.Clip2)) {
-      add('review', 'Accelerometer clipping', null,
-        `Clip counters — ${clip.Clip0}/${clip.Clip1}/${clip.Clip2}. A non-zero count means the accelerometer hit its limit, so the attitude estimate was wrong for the moments it did.`, 'VIBE');
-    }
+    // VIBRATION AND CLIPPING ARE NOT REPORTED HERE ANY MORE. Both moved into
+    // scoreFlightLog below, which is called before the verdict is folded, so
+    // they still decide it. They moved because BOTH rules changed on 2026-10-06
+    // and two detectors reporting one condition is a bug whatever the numbers:
+    //   - vibration is now PER AXIS (X and Y are read against their own pair of
+    //     limits, Z against a different pair), where this block applied one
+    //     threshold to every axis;
+    //   - clipping is now a count a human accepts or rejects, with a climbing
+    //     count the signal that matters, where this block raised a flat review.
+    // Deleting the old pair rather than editing it is deliberate: leaving either
+    // one alive would report the same fault twice.
     // A channel still saturated when the log ends never got its closing edge.
     run.forEach((st, col) => {
       if (lastRcouT != null && (lastRcouT - st.since) * 1000 >= LIMITS.rcouRunMs) {
@@ -616,6 +749,11 @@ globalThis.DataFlash = (function () {
         `Types ${parsed.unknownTypes.join(', ')} appeared without a preceding FMT, so their length is unknown and they were skipped. This is normal for the first frames after a mid-flight log restart.`);
     }
 
+    // Indrones' own rules — the second pass. Merged in BEFORE the verdict is
+    // folded so its observations can decide it, and it reads the RCOU findings
+    // above rather than measuring motor saturation twice. See scoreFlightLog.
+    const scored = scoreFlightLog(parsed, findings, rules);
+
     // ── verdict ───────────────────────────────────────────────────────────────
     const worst = findings.reduce((w, f) =>
       f.severity === 'fail' ? 'FAIL' : (f.severity === 'review' && w !== 'FAIL' ? 'REVIEW' : w), 'PASS');
@@ -639,6 +777,7 @@ globalThis.DataFlash = (function () {
     return {
       ok: true,
       verdict: worst,
+      score: scored.score,
       meta: {
         firmware: firmware || 'not reported in this log',
         vehicle,
@@ -665,7 +804,7 @@ globalThis.DataFlash = (function () {
   // instead of in one push. It exists so the carry logic — including a frame
   // split between the two sync bytes — is exercised by the same entry point the
   // file reader uses, rather than only being reachable from a browser.
-  function analyseBuffer(bytes, chunkSize) {
+  function analyseBuffer(bytes, chunkSize, rules) {
     const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     const messages = [];
     const time = new Stats();
@@ -681,14 +820,14 @@ globalThis.DataFlash = (function () {
     const parsed = parser.finish();
     parsed.__messages = messages;
     parsed.__time = time;
-    return analyse(parsed);
+    return analyse(parsed, rules);
   }
 
   // Streamed. A 100 MB log must never become a 100 MB string or a 100 MB
   // Uint8Array — phones run out of memory and the tab dies with no error worth
   // reading. So the file is read in 4 MB slices and only the parser's own state
   // is kept.
-  async function analyseFile(file, onProgress) {
+  async function analyseFile(file, onProgress, rules) {
     const messages = [];
     const time = new Stats();
     const parser = createParser(msg => {
@@ -707,16 +846,489 @@ globalThis.DataFlash = (function () {
     const parsed = parser.finish();
     parsed.__messages = messages;
     parsed.__time = time;
-    return analyse(parsed);
+    return analyse(parsed, rules);
+  }
+
+  // ═══ Indrones' own rules ═══════════════════════════════════════════════════
+  //
+  // A SECOND pass over the same decoded frames, kept separate from the detectors
+  // in `analyse` so that nothing which already worked had to be rewritten. It
+  // turns them into a subscore per area and one overall number, and it reports
+  // the observations that carry a DECISION for a human rather than a number.
+  //
+  // Every NUMBER this pass uses arrives in `rules` — built by resolveRules from
+  // the public defaults in this file and the store's profile for the airframe.
+  // NOTHING Indrones gave us is written below, because this file is published:
+  // see TUNED for the keys that must stay out of it. Where no number has been
+  // agreed, NONE is invented — the area is reported and left unscored, and it
+  // appears in `open` so the gap is visible rather than silently averaged away.
+  //
+  // The method is the desktop analyser's, as Indrones asked (Q14, "same as the
+  // legacy analyser"): an area scores 100 x (fraction of samples inside the
+  // REVIEW level), less a magnitude penalty that reaches 100 at the FAIL level.
+  // An area with only one agreed level (attitude error, PWM spread) gets the
+  // proportion alone — no second number is invented to complete the formula.
+  // The total is the PLAIN MEAN of the areas actually measured, so vibration,
+  // which has three of them, carries the most weight — exactly as it does in the
+  // tool this replaces.
+  //
+  // Comparing two logs of one airframe: drift of no more than the configured
+  // wobble is noise; anything larger must name the area that moved.
+  // Full-charge cell voltage for the Li-ion chemistry these packs use — a
+  // published constant of the cell, not an Indrones figure, and the same 4.2 V for
+  // every airframe in the fleet. It is here only to turn a cell count into a pack
+  // voltage on the report ("25.2 V full" beside "6S"); it gates nothing.
+  const CELL_FULL_V = 4.2;
+
+  // The pack, reduced to the three numbers the report actually uses. Every input
+  // is optional and an absent one yields null rather than a guess: a wrong cell
+  // count is worse than a missing one, because it produces a plausible number.
+  function packInfo(R) {
+    const num = v => (typeof v === 'number' && isFinite(v) && v > 0) ? v : null;
+    const series = num(R && R.cellsSeries);
+    const packMah = num(R && R.packMah);
+    return {
+      series, packMah,
+      fullPack: series ? series * CELL_FULL_V : null,
+    };
+  }
+
+  function scoreFlightLog(parsed, findings, rules) {
+    // The numbers this log is judged against: the public defaults, overlaid with
+    // whatever the store's profile for this airframe says. An absent key means no
+    // gate was agreed, and every threshold below is therefore read as "is there
+    // one?" before it is compared to anything.
+    const R = rules || LIMITS;
+    // What the declared pack lets us SAY about a reading — and nothing more. Every
+    // input is a fact about the aircraft (cells in series, packs in parallel, cell
+    // capacity) and every output is arithmetic on those facts. There is no rule
+    // here and nothing here can fail a log; it is only what turns a number into one
+    // that can be COMPARED with another aircraft's.
+    const pack = packInfo(R);
+    const source = parsed.__messages || [];
+    const out = [];
+    const add = (severity, title, atSeconds, detail, message) =>
+      findings.push({
+        severity, title,
+        atSeconds: atSeconds == null ? null : +atSeconds.toFixed(3),
+        detail: detail || '',
+        message: message || null,
+      });
+
+    // 100 x fraction inside `review`, less a penalty reaching 100 at `fail`.
+    // Used wherever we have a SERIES of samples to count.
+    const subscore = (over, n, worst, review, fail) => {
+      if (!n) return null;
+      let s = 100 * (1 - over / n);
+      if (worst != null && fail != null && fail > review && worst > review) {
+        s -= Math.min(100, (100 * (worst - review)) / (fail - review));
+      }
+      return Math.max(0, Math.round(s));
+    };
+    // 100 at or below `review`, 0 at or beyond `fail`. Used where the rule is
+    // about ONE number that must be HELD, so there is no sample series to count.
+    const ratioScore = (worst, review, fail) => {
+      if (worst == null || !isFinite(worst)) return null;
+      if (worst <= review) return 100;
+      if (worst >= fail) return 0;
+      return Math.round((100 * (fail - worst)) / (fail - review));
+    };
+
+    // ── accumulators ─────────────────────────────────────────────────────────
+    const axis = {
+      VibeX: { hi: null, at: null, over: 0, n: 0 },
+      VibeY: { hi: null, at: null, over: 0, n: 0 },
+      VibeZ: { hi: null, at: null, over: 0, n: 0 },
+    };
+    // A RUNNING MAXIMUM across the whole flight and all three IMUs. The desktop
+    // analyser reads only the LAST Vibe sample and only IMU 1, so a clip early in
+    // a flight is invisible to it — we had the same shape of bug in the rate
+    // detectors below, kept only because they are not what this scores.
+    const clip = { Clip0: 0, Clip1: 0, Clip2: 0 };
+    let clipFirstAt = null, clipLastRiseAt = null;
+    let vMin = null, vMinAt = null;
+    let curPeak = null, curPeakAt = null, curSustained = null, curSustainedAt = null;
+    let mahUsed = null, curPrevT = null, curPrevV = null;
+    const curWindow = [];                        // samples inside the hold period
+    let att = { hi: null, at: null, over: 0, n: 0 };
+    const pwm = new Map();                       // channel -> { sum, n }
+    let hdop = { hi: null, at: null, over: 0, n: 0 };
+
+    const wrap180 = d => { while (d > 180) d -= 360; while (d < -180) d += 360; return d; };
+
+    for (let i = 0; i < source.length; i++) {
+      const msg = source[i];
+      const t = msg._t;
+
+      if (msg._name === 'VIBE') {
+        ['VibeX', 'VibeY', 'VibeZ'].forEach(a => {
+          const v = msg[a];
+          if (typeof v !== 'number' || !isFinite(v)) return;
+          const s = axis[a];
+          s.n++;
+          // X and Y are the arms the airframe pushes against; Z is what the props
+          // load, so the two pairs are read separately. Both come from the
+          // resolved rules — this file carries only ArduPilot's 30/60 for each.
+          // A rule with no value leaves `review` undefined, and `v > undefined`
+          // is always false, so an un-agreed limit counts nothing as over.
+          const review = a === 'VibeZ' ? R.vibeZReview : R.vibeXYReview;
+          if (v > review) s.over++;
+          if (s.hi == null || v > s.hi) { s.hi = v; s.at = t; }
+        });
+        ['Clip0', 'Clip1', 'Clip2'].forEach(c => {
+          const v = msg[c];
+          if (typeof v !== 'number' || !isFinite(v)) return;
+          if (v > clip[c]) {
+            clip[c] = v;
+            if (v > 0) { if (clipFirstAt == null) clipFirstAt = t; clipLastRiseAt = t; }
+          }
+        });
+
+      } else if (msg._name === 'BAT') {
+        if (typeof msg.Volt === 'number' && isFinite(msg.Volt) && msg.Volt > 0) {
+          if (vMin == null || msg.Volt < vMin) { vMin = msg.Volt; vMinAt = t; }
+        }
+        const c = msg.Curr;
+        if (typeof c === 'number' && isFinite(c)) {
+          if (curPeak == null || c > curPeak) { curPeak = c; curPeakAt = t; }
+          // Energy drawn, integrated by trapezoid so an uneven log rate cannot
+          // skew it. Reported, never gated — Indrones will set the threshold.
+          if (curPrevT != null && t != null && t > curPrevT) {
+            mahUsed = (mahUsed || 0) + ((curPrevV + c) / 2) * (t - curPrevT) * (1000 / 3600);
+          }
+          curPrevT = t; curPrevV = c;
+
+          // "Held for N seconds", not a spike. The value we score is the highest
+          // one that EVERY sample in a window of that length stayed above, so a
+          // single sample cannot qualify and a real overload does.
+          //
+          // ArduPilot gates a battery on a condition held for 10 s
+          // (BATT_LOW_TIMER). The duration is a store value like the limits
+          // themselves, because Indrones overrode it for current on 2026-10-06;
+          // the SHAPE — hold, not spike — is ArduPilot's and does not move.
+          if (t != null) {
+            curWindow.push({ t: t, v: c });
+            const hold = (R.curHoldMs != null ? R.curHoldMs : LIMITS.curHoldMs) / 1000;
+            if (t - curWindow[0].t >= hold) {
+              let lo = Infinity;
+              for (let k = 0; k < curWindow.length; k++) {
+                if (t - curWindow[k].t <= hold && curWindow[k].v < lo) lo = curWindow[k].v;
+              }
+              if (isFinite(lo) && (curSustained == null || lo > curSustained)) {
+                curSustained = lo; curSustainedAt = t;
+              }
+            }
+            while (curWindow.length && t - curWindow[0].t > hold * 2) curWindow.shift();
+          }
+        }
+
+      } else if (msg._name === 'ATT') {
+        // COMMANDED vs ACHIEVED, which is what Indrones mean by attitude error,
+        // in hover and in cruise alike. The limit is a store value — only the
+        // measurement belongs here.
+        //
+        // This is not what the desktop analyser measures — it stores
+        // `acos(cos(field))`, a RADIAN wrap whose output is always in [0, pi],
+        // and compares it to a threshold of about 3.1, i.e. pi. Its attitude
+        // check therefore cannot fail anything, and the report it prints is
+        // labelled "degrees" while holding radians.
+        [[msg.Roll, msg.DesRoll], [msg.Pitch, msg.DesPitch]].forEach(pair => {
+          const actual = pair[0], wanted = pair[1];
+          if (typeof actual !== 'number' || typeof wanted !== 'number') return;
+          if (!isFinite(actual) || !isFinite(wanted)) return;
+          att.n++;
+          const e = Math.abs(wrap180(actual - wanted));
+          if (e > R.attTrack) att.over++;
+          if (att.hi == null || e > att.hi) { att.hi = e; att.at = t; }
+        });
+
+      } else if (msg._name === 'RCOU') {
+        Object.keys(msg).forEach(col => {
+          if (!/^C\d+$/.test(col)) return;
+          const v = msg[col];
+          if (typeof v !== 'number' || !isFinite(v)) return;
+          const s = pwm.get(col) || { sum: 0, n: 0 };
+          s.sum += v; s.n++;
+          pwm.set(col, s);
+        });
+
+      } else if (msg._name === 'GPS') {
+        let h = msg.HDop;
+        if (typeof h === 'number' && isFinite(h) && h > 0) {
+          // DataFlash stores HDop x100, so a good fix reads ~80-150, not 0.8-1.5.
+          // Anything at or below 20 cannot be that scaled form, so it is taken as
+          // already in metres. One rule, right either way — ArduPilot's own gate
+          // is 1.5 to review and 2.0 to fail.
+          if (h > 20) h = h / 100;
+          hdop.n++;
+          if (h > R.hdopReview) hdop.over++;
+          if (hdop.hi == null || h > hdop.hi) { hdop.hi = h; hdop.at = t; }
+        }
+      }
+    }
+
+    // ── the scored areas ─────────────────────────────────────────────────────
+    //
+    // An area is scored ONLY when a limit was agreed for it. With the number
+    // missing the area is not averaged in at 100 (which would quietly reward
+    // having no rule) and it is not failed (which would punish it) — it is left
+    // out of the mean entirely, and named in `open` below so the gap is visible
+    // on screen instead of being a silence.
+    const has = (...keys) => keys.every(k => R[k] != null && isFinite(R[k]));
+    const parts = [];
+    const band = (hi, review, fail) => hi == null ? '' : (hi >= fail ? 'red' : (hi > review ? 'amber' : 'green'));
+    const noRule = [];
+
+    [['VibeX', 'X', R.vibeXYReview, R.vibeXYFail, 'X and Y vibration'],
+     ['VibeY', 'Y', R.vibeXYReview, R.vibeXYFail, 'X and Y vibration'],
+     ['VibeZ', 'Z', R.vibeZReview, R.vibeZFail, 'Z vibration']].forEach(row => {
+      const s = axis[row[0]], label = row[1], review = row[2], fail = row[3];
+      if (s.n === 0) return;
+      if (review == null || fail == null || !isFinite(review) || !isFinite(fail)) {
+        if (noRule.indexOf(row[4]) < 0) noRule.push(row[4]);
+        return;
+      }
+      const score = subscore(s.over, s.n, s.hi, review, fail);
+      if (score == null) return;
+      parts.push({
+        id: 'vibe' + label, label: label + ' vibration', score,
+        band: band(s.hi, review, fail),
+        detail: `peak ${s.hi.toFixed(1)} m/s² — watch above ${review}, fail above ${fail}`,
+      });
+      if (s.hi >= fail) {
+        add('fail', `${label} vibration past the limit`, s.at,
+          `Peak ${s.hi.toFixed(1)} m/s² on ${row[0]} against a ${fail} m/s² limit, on ${s.over} of ${s.n} samples above the ${review} m/s² watch level. Vibration at this level degrades the attitude estimate and is a common cause of unexplained loss of control.`, 'VIBE');
+      } else if (s.hi > review) {
+        add('review', `${label} vibration worth a look`, s.at,
+          `Peak ${s.hi.toFixed(1)} m/s² on ${row[0]}, between the ${review} m/s² watch level and the ${fail} m/s² limit.`, 'VIBE');
+      }
+    });
+
+    if (att.n) {
+      if (!has('attTrack')) noRule.push('Attitude tracking');
+      else {
+        parts.push({
+          id: 'attitude', label: 'Attitude tracking', score: subscore(att.over, att.n, att.hi, R.attTrack, null),
+          band: band(att.hi, R.attTrack, Infinity),
+          detail: `worst commanded-vs-achieved error ${att.hi.toFixed(1)}° — ${R.attTrack}° is the limit`,
+        });
+        if (att.over) {
+          add(att.hi > R.attTrack * 2 ? 'fail' : 'review', 'Attitude not tracking the command', att.at,
+            `Worst error ${att.hi.toFixed(1)}° between commanded and achieved attitude, and ${att.over} of ${att.n} samples past the ${R.attTrack}° limit.`, 'ATT');
+        }
+      }
+    }
+
+    if (curSustained != null) {
+      if (!has('curReview', 'curFail')) noRule.push('Current');
+      else {
+        const score = ratioScore(curSustained, R.curReview, R.curFail);
+        parts.push({
+          id: 'current', label: 'Current', score,
+          band: band(curSustained, R.curReview, R.curFail),
+          detail: `${curSustained.toFixed(1)} A held for ${R.curHoldMs / 1000} s (peak ${curPeak.toFixed(1)} A) — watch ${R.curReview} A, fail ${R.curFail} A`,
+        });
+        if (curSustained >= R.curFail) {
+          add('fail', 'Current held past the limit', curSustainedAt,
+            `${curSustained.toFixed(1)} A held for at least ${R.curHoldMs / 1000} s, against a ${R.curFail} A limit. The peak was ${curPeak.toFixed(1)} A.`, 'BAT');
+        } else if (curSustained > R.curReview) {
+          add('review', 'Current held above the watch level', curSustainedAt,
+            `${curSustained.toFixed(1)} A held for at least ${R.curHoldMs / 1000} s, between the ${R.curReview} A watch level and the ${R.curFail} A limit.`, 'BAT');
+        }
+      }
+    }
+    // A spike that never HELD is not a fault on this rule, but it must not be
+    // hidden either. Skipped when the peak IS the sustained value — then the
+    // finding above already says it. Needs a limit to be meaningful at all.
+    if (curPeak != null && has('curFail') && curPeak > R.curFail && (curSustained == null || curPeak > curSustained)) {
+      add('info', 'Current spike, not held', curPeakAt,
+        `Peak ${curPeak.toFixed(1)} A` +
+        (curSustained == null
+          ? `, never held for ${R.curHoldMs / 1000} s`
+          : ` against ${curSustained.toFixed(1)} A held for ${R.curHoldMs / 1000} s`) +
+        `, so it is not a fault on this rule.`, 'BAT');
+    }
+
+    if (pwm.size >= 2) {
+      const means = [...pwm.entries()]
+        .filter(e => e[1].n > 0)
+        .map(e => ({ col: e[0], mean: e[1].sum / e[1].n }));
+      const lo = means.reduce((a, b) => b.mean < a.mean ? b : a);
+      const hi = means.reduce((a, b) => b.mean > a.mean ? b : a);
+      const spread = hi.mean - lo.mean;
+      if (!has('pwmSpread')) noRule.push('Motor balance');
+      else {
+        // One level, so the score is a straight pass or fail rather than a
+        // gradient built from a number nobody gave.
+        parts.push({
+          id: 'pwmSpread', label: 'Motor balance', score: spread <= R.pwmSpread ? 100 : 0,
+          band: spread <= R.pwmSpread ? 'green' : 'red',
+          detail: `${spread.toFixed(0)} µs between the highest and lowest motor average (${hi.col} vs ${lo.col}) — limit ${R.pwmSpread}`,
+        });
+        if (spread > R.pwmSpread) {
+          add('review', 'Motors working unevenly', null,
+            `${hi.col} averages ${hi.mean.toFixed(0)} µs against ${lo.col} at ${lo.mean.toFixed(0)} µs — a spread of ${spread.toFixed(0)} µs, past the ${R.pwmSpread} limit. A thrust or ESC imbalance works one motor harder than the rest.`, 'RCOU');
+        }
+      }
+      // Saturation was already decided by the main pass, which requires it to
+      // HOLD (LIMITS.rcouRunMs). Read its verdict rather than measuring twice.
+      const pinned = findings.filter(f => f.message === 'RCOU' && f.severity === 'fail');
+      parts.push({
+        id: 'motorSaturation', label: 'Motor saturation',
+        score: pinned.length ? 0 : 100,
+        band: pinned.length ? 'red' : 'green',
+        detail: pinned.length ? pinned.length + ' channel(s) pinned at an end of the 1100–1900 range'
+                              : 'no channel pinned at either end',
+      });
+    }
+
+    if (hdop.n) {
+      if (!has('hdopReview', 'hdopFail')) noRule.push('GPS quality');
+      else {
+        parts.push({
+          id: 'gps', label: 'GPS quality', score: subscore(hdop.over, hdop.n, hdop.hi, R.hdopReview, R.hdopFail),
+          band: band(hdop.hi, R.hdopReview, R.hdopFail),
+          detail: `worst HDop ${hdop.hi.toFixed(2)} — review ${R.hdopReview}, fail ${R.hdopFail}`,
+        });
+        if (hdop.hi >= R.hdopFail) {
+          add('fail', 'GPS position quality poor', hdop.at,
+            `HDop reached ${hdop.hi.toFixed(2)} against a ${R.hdopFail} limit — the position estimate was worse than the aircraft can safely hold against.`, 'GPS');
+        } else if (hdop.hi > R.hdopReview) {
+          add('review', 'GPS position quality dipped', hdop.at,
+            `HDop reached ${hdop.hi.toFixed(2)}, past the ${R.hdopReview} review level.`, 'GPS');
+        }
+      }
+    }
+
+    // ── what needs a human, not a number ─────────────────────────────────────
+    const total = Math.max(clip.Clip0, clip.Clip1, clip.Clip2);
+    const times = parsed.__time;
+    const dur = times && isFinite(times.min) && isFinite(times.max) ? times.max - times.min : null;
+    // ArduPilot: the counters "should stay at zero", but "low numbers (<100) are
+    // likely ok especially if they occur during hard landings", and it is a
+    // STEADILY CLIMBING count that signals a real vibration problem. So what
+    // matters is whether the count was rising THROUGHOUT the flight, not whether
+    // it happened to still be moving at the end — a single jump on touchdown is
+    // the hard-landing case ArduPilot calls benign, and reading "moved late" as
+    // "climbing" would fail every aircraft that lands firmly.
+    const midpoint = dur ? times.min + dur * 0.5 : null;
+    const clipClimbing = midpoint != null && clipFirstAt != null && clipLastRiseAt != null &&
+                         clipFirstAt < midpoint && clipLastRiseAt > midpoint;
+    const checklist = [];
+    if (total > 0) {
+      checklist.push({
+        id: 'clipping',
+        label: 'Accelerometer clipping',
+        detail: `${total} clip${total === 1 ? '' : 's'} on the worst accelerometer` +
+                (clipClimbing ? ', rising through the flight' : '') +
+                '. Nothing is accepted until you tick it — no tick means fail.',
+        needsTick: true,
+      });
+      add(clipClimbing ? 'fail' : 'review', 'Accelerometer clipping', clipFirstAt,
+        `${total} clips. ArduPilot: the counter should stay at zero, though low numbers are likely ok on a hard landing` +
+        (clipClimbing ? ' — and this one was climbing steadily through the flight, which is the signal that matters.'
+                      : ', and this one did not rise steadily.'), 'VIBE');
+    }
+    if (mahUsed != null) {
+      // How much of the pack that actually was, where the pack is known. mAh drawn
+      // means nothing on its own — 3000 mAh is a third of a two-pack SIGMA100 and
+      // most of a single-pack 25G — so the percentage is the readable number and
+      // the raw mAh is kept beside it.
+      const packPct = pack.packMah ? (mahUsed / pack.packMah) * 100 : null;
+      checklist.push({
+        id: 'mah',
+        label: 'Capacity used',
+        detail: `${mahUsed.toFixed(0)} mAh drawn` +
+          (packPct != null
+            ? ` — ${packPct.toFixed(0)}% of the ${pack.packMah} mAh the pack holds`
+            : ' (the pack is not recorded for this airframe, so this cannot be read as a proportion)') +
+          ` over the flight. Accepted or rejected by you, not by a threshold — there is no rule yet.`,
+        needsTick: true,
+      });
+    }
+
+    // Areas with no agreed rule. Reported, never averaged in.
+    const open = [];
+    // What the log was actually judged against. On screen this is the difference
+    // between "this scored 78" and "this scored 78 as an S25" — and it is the
+    // first thing to check when a score does not look like the airframe.
+    open.push({
+      id: 'profile',
+      label: 'Scored against',
+      detail: R.airframe
+        ? `the ${R.airframe} profile` + (R.profile === R.airframe ? '' : ' with the default profile underneath')
+        : (R.profile === 'built-in defaults'
+            ? 'the built-in defaults only — no airframe was chosen and no default profile is set, so anything without a public figure below has no limit at all.'
+            : 'the shared default profile — no airframe was chosen for this log.'),
+    });
+    // Every limit that is not set. Named individually, because "no limit agreed"
+    // is a decision someone has to make, not a quiet zero.
+    noRule.forEach(name => open.push({
+      id: 'norule:' + name,
+      label: name + ' — no limit set',
+      detail: `There is no agreed figure for this, so it is shown and NOT scored. It is left out of the total rather than counted as a pass. Set it in Log limits.`,
+    }));
+    if (vMin != null) {
+      // PER CELL wherever the pack is recorded, because that is the only form in
+      // which the number means anything across this fleet: the same 21 V is a
+      // healthy 4S pack and a nearly-empty 6S one. With no cell count declared we
+      // still show the pack voltage — it is a real measurement — but say plainly
+      // that it cannot be read against another airframe's, rather than quietly
+      // implying it can.
+      const perCell = pack.series ? vMin / pack.series : null;
+      open.push({
+        id: 'voltage',
+        label: perCell != null ? 'Lowest cell voltage' : 'Lowest pack voltage',
+        detail: (perCell != null
+            ? `${perCell.toFixed(2)} V per cell — ${vMin.toFixed(2)} V on a ${pack.series}S pack ` +
+              `(${pack.fullPack.toFixed(1)} V full), at ${vMinAt == null ? '—' : vMinAt.toFixed(1) + ' s'}. `
+            : `${vMin.toFixed(2)} V at ${vMinAt == null ? '—' : vMinAt.toFixed(1) + ' s'}. The pack's cell ` +
+              `count is not recorded for this airframe, so this cannot be compared with another aircraft's — ` +
+              `set it under Log limits. `) +
+          `No limit is applied: Indrones is still settling the voltage rule, so this is shown and not scored.`,
+      });
+    }
+    open.push({
+      id: 'err',
+      label: 'ERR subsystem codes',
+      detail: 'No rule yet. The list of codes that must fail a log outright is still being chosen, so these are counted above and scored on nothing.',
+    });
+    open.push({
+      id: 'resistance',
+      label: 'Battery internal resistance',
+      detail: 'No rule yet — there is no value at which a pack is replaced, so it is shown and not scored.',
+    });
+
+    const measured = parts.filter(p => p.score != null);
+    return {
+      findings,
+      score: {
+        total: measured.length ? Math.round(measured.reduce((a, p) => a + p.score, 0) / measured.length) : null,
+        parts,
+        checklist,
+        open,
+        // Which profile produced this. Carried on the score itself so a stored
+        // report still says what it was judged against months later.
+        airframe: R.airframe || '',
+        profile: R.profile || '',
+        // The change between two logs of one airframe that is noise rather than
+        // news. A store value like the limits — see TUNED.
+        wobble: R.scoreWobble != null ? R.scoreWobble : null,
+      },
+    };
   }
 
   return {
     VERSION: '1.0.0',
     LIMITS,
+    TUNED,
+    resolveRules,
+    packInfo,
     WATCHED,
     parseFormat,
     createParser,
     analyseBuffer,
     analyseFile,
+    scoreFlightLog,
   };
 })();

@@ -168,8 +168,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
   - **`listIRs` also carries no status any more.** It used to merge one in from `irs.json` via `getAllIRStatuses()`, giving one question two answers. `__IRS__` is the only owner of the workflow.
   - **Regression guards:** `smoke-backend.mjs` asserts `listIRs` uses `getDisplayValues()` (never `getValues()`), reads no store, and injects no status; `smoke-list-intel.mjs` asserts an empty repository renders as empty rather than falling through to the sample cards.
   - **The app names no sheet any more, and the legacy records came back (2026-10-03).** Phase 0's last two halves. First, the addresses: `IR_REPO_SHEET_ID`, `IR_REPO_TAB` and `LEGACY_SHEET_ID` are **gone from `app.js`**, along with the five demo records that carried the Repository URL as a `summaryLink` — because the frontend no longer reads either file, and an address in a public repo is a standing hazard (change a sharing setting by accident and the data is public instantly, with no deploy and no sign on screen). The backend keeps both addresses; it reads the files as their owner. Second, the **legacy view is rebuilt** from backend data: `listLegacyIRs` returns tab names only (no `embedUrl` — the frame can never load against a restricted file, so the URL was removed rather than left to rot), and a new token-gated `getLegacyIR` returns **one tab at a time** as a displayed grid, which `openLegacyRecord` renders read-only as label/value rows — never a `<table>`, because a legacy tab is wide and a phone answers a table with sideways scrolling. The dead iframe machinery (`openLegacyModal`, `legacyTick`, `_legacyLoaded`) is deleted, not kept dark. **`smoke-list-intel.mjs` now carries the guard the plan asked for**: it fails if a `gviz`/`tqx=out` fetch, a `docs.google.com/spreadsheets/d/…` address, or a sheet id ever returns to `app.js`.
-  - ⏳ **The rest of the workbook is still unseen, and one editor command is what reveals it (2026-10-05).** Only the tabs named like an IR are reachable in the app — `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **skips every other tab without saying so**, so the investigation data and the other IR material the owner wants brought in cannot even be scoped yet. The workbook is restricted and reads from this environment 401, so the only way to find out is a function he runs once. `inventoryLegacyWorkbook()` is **built and committed** — it is **not an action** (no route, so it adds no API surface and does not move `API_VERSION`), it reads the workbook and nothing else, and it prints one log line per tab: the name **in the workbook's own order**, the used dimensions, **how many rows hold anything at all** (not `getLastRow()`, which counts a merely *formatted* row), and the **header row wherever it sits**. `smoke-backend.mjs` holds it to being a read, to using `getDisplayValues`, to counting content rather than trusting `lastRow`, to walking tabs unsorted, and to printing no workbook id or address.
-    > **To run it:** open the backend editor — https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit — pick **`inventoryLegacyWorkbook`** in the function dropdown, press **Run**, open **Execution log**, and copy the whole log back. It ships with the next paste (see item 1 below), so if the dropdown does not list it, paste the current `backend.gs` first. **The check that it ran against the right file is that it matches what you see when you open the Sheet** — same tab count, same names, same order.
+  - ✅ **The rest of the workbook has been seen, and nothing is owed here (2026-10-06).** Only the tabs named like an IR are reachable in the app — `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **skips every other tab without saying so**. The workbook is restricted and reads from this environment 401, so the only way to find out what else was in it was a function the owner runs once, and he has run it: `inventoryLegacyWorkbook()` reported **170 tabs — 161 named like an IR and 9 others**, four of those empty, and only `INDEX`, `S100 TC` (a Root Cause Analysis) and `STRIVER 003` (a two-column parts list) holding data. It also settled a trap worth remembering: **row 1 is a department band, not the field labels**, and the form has two generations (a 50-column one and an older 30-column one). The function stays committed — it is **not an action** (no route, so it adds no API surface and does not move `API_VERSION`), reads the workbook and nothing else, and prints one log line per tab through `report()`. Its companion, `legacyPeekLines()`, is **retired**: it existed only to print the non-IR tabs' rows, and those are now known, so `PEEK_TABS` is `[]` and no customer row is printed again. **Run it again only if a new tab appears while the workbook is restricted.**
 - ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
 - ⚠️ **Everyone signed in can view every section, including Section D and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [10](10 - Auth & Access Model.md).
 - ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
@@ -541,8 +540,17 @@ is left is small.
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
 
-   **One further paste is owed as of 2026-10-03, and it grew on 2026-10-05.** The live
-   deployment answers `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1
+   ✅ **THE PASTE IS IN — confirmed 2026-10-06 ~16:23 IST.** The paste owed from
+   2026-10-03 has landed. The proof is not a claim about a deploy date but a live read:
+   `backup.html` reports **"Backup is fine — last good run 16h 48m ago (Oct 05, 2026,
+   11:34 PM)"**, and that verdict is reachable *only* when the backend answers
+   `backupPulse` with `{status:'ok', ok:true, atMs}` — a `v5` deployment has no such
+   action and the page would instead say *"The backend did not answer this check"*. So
+   all four items named below are live. **The one step still owed is
+   `rehearseRestore()`** — see the note below it; until it has run on a real archive,
+   `raw/` is a backup that has never been restored. The paragraph below is kept as the
+   record of what that paste carried. The live
+   deployment answered `apiVersion 5` (checked 2026-10-03 19:46 IST), so the Phase-1
    safety net — the bundled export, the rotation, the health line and
    `API_VERSION: 5` — **is already pasted and running**: `38 file(s), 20 IR(s)` is that
    version's own log line. What the live copy does *not* hold is everything committed
@@ -553,6 +561,24 @@ is left is small.
    **`inventoryLegacyWorkbook()`**, the editor-run workbook survey. All of it rides the
    next paste — paste the current `backend.gs` into **both** `/exec` deployments (the
    primary and the domain-scoped Google door) and everything goes live at once.
+
+   ⏳ **And a SECOND paste is owed as of 2026-10-07 — `API_VERSION` is now `7`.** The
+   flight-log limits the owner sets per airframe (25G / S25, S75, STRIVER, …) live in the
+   store, not in the public repo, so the backend needs two things a `v6` copy lacks:
+   **`'analyser'` in `SENTINEL_SECTIONS['__CONFIG__']`** (without it the write is refused
+   as an unknown key) and the **key-scoped admin gate** in `saveSection` — a sentinel store
+   is writable by *any* signed-in user by design, which is fine for comments and dropdowns
+   and wrong for a number that decides whether an aircraft is cleared to fly. `ping`
+   answering **`apiVersion 7`** is how this paste is confirmed, and until it lands the panel
+   still works on each admin's own device (it writes `localStorage` first) while the shared
+   copy stays empty — so the symptom of a missing paste here is **not** an error, it is
+   *"I set the numbers and nobody else got it."* Both pastes are the same paste: send the
+   current `backend.gs` to both `/exec` deployments once and `v6` and `v7` arrive together.
+
+   **Nothing in the 2026-10-07 pack work adds to that paste.** The per-cell voltage and the
+   capacity percentage are computed in the reader (`dataflash.js`), and the pack itself is
+   another key inside the same `analyser` object — so the deployed `v6` backend already
+   serves it and the packs go live the moment the seed is re-run. `API_VERSION` stays `7`.
 
    > **`backup.html` reads `not available on the backend` until that paste lands**, and
    > that is the expected state, not a broken page: it asks for an action a `v5`
@@ -587,10 +613,10 @@ is left is small.
    dry-run, then `node tools/deploy-ghpages.mjs --commit --push`. Needs
    `DEPLOY_SOURCE=category-insights` while the work is on that branch, and a
    `CACHE_NAME` bump in `sw.js` or the deploy warns that returning users keep the stale
-   shell for a load. The last publish is `762927d` (2026-10-03, cache v66), carrying
-   Phase 1's backup-health line. **Nothing is owed on the frontend right now** — the
-   restore rehearsal is editor-run and adds no `app.js` change, so it needs no publish
-   — but the backend paste in item 1 is still owed and is the thing standing between
+   shell for a load. The last publish is `b2ec9ed` (2026-10-06, cache v67), the backup-check
+   page. **Nothing is owed on the frontend right now** — the restore rehearsal and the
+   workbook survey are both editor-run and add no `app.js` change, so neither needs a
+   publish — but the backend paste in item 1 is still owed and is the thing standing between
    the deployed code and the committed code.
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest

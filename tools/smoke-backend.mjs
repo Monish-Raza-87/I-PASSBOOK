@@ -71,8 +71,8 @@ r.head('the owner\'s security decisions');
 // is otherwise invisible — the page would ask for an action the deployment does not
 // have. `ping` answering `apiVersion 6` is how you know the paste landed. See
 // tools/smoke-backup-pulse.mjs.
-r.ok('API_VERSION is 6 — Phase 1\'s safety net, Phase 0\'s actions, and the public backup pulse',
-  /API_VERSION:\s*6\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 7 — Phase 1\'s safety net, Phase 0\'s actions, the backup pulse, and the analyser limits',
+  /API_VERSION:\s*7\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -321,6 +321,20 @@ r.ok('and only for sentinel writes — real IRs still go through canEdit',
 r.ok('a sentinel write cannot carry a file upload into Drive',
   /App stores cannot carry file uploads/.test(sv),
   (sv.match(/cannot carry[^\n]*/) || [''])[0]);
+// The analyser limits are the ONE sentinel key that is control plane rather than
+// shared data. Sentinel stores are otherwise writable by any signed-in user — that
+// openness is deliberate for comments and dropdowns, and it would be a hole here,
+// because these numbers decide whether an aircraft is cleared to fly.
+r.ok('the analyser config is on the allowlist at all — without it the admin save is rejected',
+  /'__CONFIG__':\s*\[[^\]]*'analyser'/.test(code),
+  (code.match(/'__CONFIG__':[^\n]*/) || [''])[0]);
+r.ok('...and it carries its OWN admin gate, rather than inheriting the sentinel openness',
+  /'analyser'[\s\S]{0,220}access\.role\s*!==\s*'admin'[\s\S]{0,80}Forbidden/.test(sv),
+  (sv.match(/[^\n]*analyser[^\n]*/) || [''])[0]);
+r.ok('...and the gate is on the analyser key specifically, not on __CONFIG__ as a whole — '
+  + 'the dropdowns and the team directory must stay writable as they were',
+  /String\(irNumber\)\s*===\s*'__CONFIG__'\s*&&\s*String\(sectionId\)\s*===\s*'analyser'/.test(sv),
+  (sv.match(/String\(sectionId\)[^\n]*/) || [''])[0]);
 // An IR number becomes a Drive FOLDER and FILE name. Asserted after the ACL and
 // before any folder or file work, so `../../etc` cannot escape its namespace.
 r.ok('a real IR number is shape-checked before it reaches the filesystem',
@@ -1022,8 +1036,12 @@ r.ok('it exists, and it is NOT routed in doGet or doPost — so it adds no API s
   /function inventoryLegacyWorkbook\s*\(/.test(code) &&
   !/inventoryLegacyWorkbook\s*:/.test(code),
   (code.match(/[^\n]*inventoryLegacyWorkbook[^\n]*/g) || []).slice(0, 2));
-r.ok('...which is why the paste that ships it does NOT move API_VERSION',
-  /API_VERSION:\s*6\b/.test(code));
+// The version clause that used to sit here ("...and the paste does NOT move
+// API_VERSION") has been RETIRED, not loosened. It read the version as a proxy for
+// "this function adds no API surface", and that proxy is only valid while nothing
+// ELSE is moving the version — which stopped being true in v7. The property it was
+// standing in for is the routing one asserted directly above, so the assertion is
+// narrower now, not weaker.
 r.ok('it READS the workbook and touches nothing else — no store, no Drive, no mail',
   /SpreadsheetApp\.openById\(CONFIG\.LEGACY_SHEET_ID\)/.test(inv) &&
   !/writeJson|writeIR|appendAudit|MailApp|DriveApp|getStoreFolder|findStoreFile|Utilities\./.test(inv),
@@ -1070,8 +1088,8 @@ r.ok('it exists and takes the OPEN spreadsheet, so the five-site count stays hon
 r.ok('...and only the inventory calls it, from inside the read it already had',
   /legacyPeekLines\(ss, PEEK_TABS\)/.test(inv) &&
   (code.match(/legacyPeekLines\s*\(/g) || []).length === 2);
-r.ok('it is NOT routed, so the peek adds no API surface either — and moves no version',
-  !/legacyPeekLines\s*:/.test(code) && /API_VERSION:\s*6\b/.test(code));
+r.ok('it is NOT routed, so the peek adds no API surface either',
+  !/legacyPeekLines\s*:/.test(code));
 r.ok('it uses getDisplayValues, never getValues',
   /getDisplayValues\(\)/.test(peek) && !/getValues\(\)/.test(peek),
   (peek.match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);

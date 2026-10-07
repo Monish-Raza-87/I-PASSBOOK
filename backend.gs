@@ -134,7 +134,14 @@ var CONFIG = {
   // v6 = `backupPulse`, the one PUBLIC read of backup health, so a page outside the
   // app can answer "was there a backup last night?" without a sign-in. It returns two
   // fields and nothing else. See the note on it — the smallness is the design.
-  API_VERSION: 6,
+  //
+  // v7 = `__CONFIG__`/analyser became writable, so the flight-log limits live in the
+  // private store instead of in the published dataflash.js. No new action and no
+  // changed response — the bump is here so the app can TELL whether the backend it is
+  // talking to can hold the config, and say "the latest backend needs pasting" instead
+  // of letting a save vanish into a whitelist rejection. The numbers it holds are
+  // Indrones' operating data and must never be committed; see the Log limits panel.
+  API_VERSION: 7,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4261,7 +4268,12 @@ var SENTINEL_SECTIONS = {
   // only by an admin — the write gate is isAdminEmail, checked in saveSection, not
   // this list. Adding it here is what unlocks the write at all; until this ships
   // and the backend is redeployed, the admin UI's save is rejected.
-  '__CONFIG__': ['team-directory', 'inward-options', 'iqc-config', 'theme'],
+  //
+  // 'analyser' is the flight-log limits: { profiles: { S25: {...}, ... } }. Same
+  // shape of gate — every signed-in user needs to READ it to score a log, and only
+  // an admin may write it. It lives here rather than in dataflash.js because that
+  // file is served from the PUBLIC site, and these numbers are Indrones' own.
+  '__CONFIG__': ['team-directory', 'inward-options', 'iqc-config', 'theme', 'analyser'],
   '__NUDGES__': ['all'],
   '__IRS__':    '*',   // one row per IR number
   '__KB__':     '*'    // one row per article id (Stage 7 — not yet written)
@@ -4387,7 +4399,22 @@ function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
   // user: they ARE shared app data, and comments are part of view access. That
   // openness is bounded by the allowlist — see SENTINEL_SECTIONS — because an
   // unbounded sentinel write is a write to the app's own control plane.
-  if (isSentinel) assertSentinelWritable(irNumber, sectionId);
+  if (isSentinel) {
+    assertSentinelWritable(irNumber, sectionId);
+    // ...but for the ONE sentinel key that is control plane rather than shared data,
+    // the allowlist is not enough on its own. Comments and dropdown options are safe
+    // for every signed-in user to touch; the flight-log limits are not — they decide
+    // whether an aircraft is cleared to fly, and a wrong number there either grounds a
+    // healthy fleet or releases a bad one. So this key carries its own admin gate
+    // instead of inheriting the sentinel openness above.
+    //
+    // INSIDE the sentinel arm, not beside it: a top-level `if` here would let a
+    // sentinel write fall through into the canEdit check below, which is written for
+    // real sections and rejects every sentinel key.
+    if (String(irNumber) === '__CONFIG__' && String(sectionId) === 'analyser' &&
+        access.role !== 'admin')
+      throw new Error('Forbidden: only an admin may change the flight-log limits.');
+  }
   else if (RETIRED_SECTION_IDS.indexOf(String(sectionId)) > -1)
     // sec-g/sec-h/sec-i were merged into sec-f/sec-g. A client on a stale service
     // worker still holds the old shell and will keep posting them; appending would

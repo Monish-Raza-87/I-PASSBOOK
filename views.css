@@ -1709,6 +1709,48 @@
 .log-target { display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; color: var(--ink-gray-7); font-size: var(--text-sm); }
 .log-note { color: var(--ink-gray-6); font-size: var(--text-sm); line-height: var(--leading-body); }
 
+/* The score. Rows WRAP rather than becoming a table: a phone table means sideways
+   scrolling, and this screen is read on a phone at the aircraft. The badge is the
+   number, the label names the area, and the detail drops to its own line when
+   there is no room beside it — which is why the detail is a block, not a cell. */
+.log-score-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--outline-gray-1);
+}
+.log-score-row:last-child { border-bottom: 0; }
+.log-score-label { font-weight: var(--weight-medium); color: var(--ink-gray-9); }
+.log-score-detail {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: var(--ink-gray-6);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  font-variant-numeric: tabular-nums;
+}
+/* The limiter editor. One profile at a time, fields stacked, because the whole
+   point is that it is usable on a phone without scrolling sideways. */
+.al-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+.al-chip {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-9);
+  background: var(--surface-gray-1);
+  color: var(--ink-gray-8);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.al-chip.is-on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink, var(--ink-gray-9)); font-weight: var(--weight-medium); }
+.al-group { margin: 0.8rem 0 0.3rem; font-size: var(--text-2xs); font-weight: var(--weight-medium); color: var(--ink-gray-6); text-transform: uppercase; letter-spacing: 0.03em; }
+.al-field { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; padding: 0.25rem 0; }
+.al-field > label { flex: 1 1 9rem; min-width: 0; font-size: var(--text-sm); color: var(--ink-gray-8); }
+.al-field > input { width: 6.5rem; }
+.al-unit { color: var(--ink-gray-6); font-size: var(--text-sm); }
+.al-pending { color: var(--ink-gray-6); font-size: var(--text-sm); line-height: var(--leading-body); margin-top: 0.2rem; }
+
 .insights-skeleton {
   height: 64px;
   border-radius: var(--radius-4);

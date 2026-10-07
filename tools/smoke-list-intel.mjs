@@ -362,7 +362,8 @@ const SEED = [
 const deadFetch = () => Promise.reject(new Error('offline'));
 function loadList(fetchImpl) {
   return loadApp(`
-    fetchIRs, paintCachedIRList, readIRListCache, writeIRListCache,
+    fetchIRs, paintCachedIRList, readIRListCache, writeIRListCache, irListCacheKey,
+    persistUser, clearLocalAuth, loadStoredUser,
     IR_LIST_CACHE_KEY, getDemoIRs,
     get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
     get dataIsDemo() { return _dataIsDemo; },
@@ -373,8 +374,16 @@ function loadList(fetchImpl) {
 // `loadApp` gives each instance its OWN localStorage, so the copy is seeded THROUGH
 // the app (writeIRListCache writes `allIRs`) — the only way to reach the sandbox
 // realm's storage from out here.
+//
+// Every instance is signed in first, because the copy is now keyed by the account it
+// belongs to: with no stored profile there is no identity and no cache at all, so a
+// seed with nobody signed in would silently write nothing and every assertion below
+// would fail for a reason that has nothing to do with the code under test.
+const asUser = (T, email) => T.persistUser({ name: email, email, initial: email[0].toUpperCase() });
+
 const A = loadList();
 const seed = (T, records) => { T.allIRs = records; T.writeIRListCache(); T.allIRs = []; };
+asUser(A.T, 'monish.raza@indrones.com');
 seed(A.T, SEED);
 r.ok('the seeded copy is readable back, in the shape the list needs', (() => {
   const got = A.T.readIRListCache();
@@ -393,6 +402,66 @@ r.ok('a copy with no records is not a hit — an empty list is not a cached list
   seed(A.T, []);
   return A.T.readIRListCache() === null;
 })(), A.T.readIRListCache());
+
+// ─── the copy belongs to ONE account ─────────────────────────────────────────
+// The bug this pins: the key was device-global, so on a shared machine the next person
+// to sign in was painted the previous person's list before the network answered. For a
+// customer account — which the backend narrows to a single company — that list could be
+// a staff member's entire repository, and it would be on screen for a whole round trip.
+r.head('the copy is scoped to the account it belongs to, and dies with the sign-out');
+r.ok('the key names the signed-in account', (() => {
+  const k = A.T.irListCacheKey();
+  return typeof k === 'string' && k.indexOf('monish.raza@indrones.com') >= 0 && k !== A.T.IR_LIST_CACHE_KEY;
+})(), A.T.irListCacheKey());
+
+const G = loadList();
+asUser(G.T, 'monish.raza@indrones.com');
+seed(G.T, SEED);
+r.ok('a second account on the SAME device, seeded and signed in as itself, sees an empty cache',
+  (() => {
+    asUser(G.T, 'ops@agrikart.in');
+    return G.T.readIRListCache() === null && G.T.paintCachedIRList() === false;
+  })(), G.T.readIRListCache());
+r.ok('...and the first account\'s copy is still there when they come back',
+  (() => {
+    asUser(G.T, 'monish.raza@indrones.com');
+    const got = G.T.readIRListCache();
+    return !!got && got.length === 1 && got[0].irNumber === 'IR700';
+  })(), G.T.readIRListCache());
+r.ok('an account with the same address in different case is the same account, not a second one',
+  (() => {
+    asUser(G.T, 'Monish.Raza@INDRONES.com');
+    const got = G.T.readIRListCache();
+    return !!got && got.length === 1;
+  })());
+r.ok('with nobody signed in there is no identity, so nothing is read and nothing is written',
+  (() => {
+    const H = loadList();
+    H.T.allIRs = SEED;
+    H.T.writeIRListCache();
+    H.T.allIRs = [];
+    return H.T.irListCacheKey() === null && H.T.readIRListCache() === null && H.T.paintCachedIRList() === false;
+  })());
+r.ok('signing out takes the copy with it — the repository does not stay on the machine',
+  (() => {
+    const J = loadList();
+    asUser(J.T, 'ops@agrikart.in');
+    seed(J.T, SEED);
+    const before = !!J.T.readIRListCache();
+    J.T.clearLocalAuth();
+    return before && J.T.readIRListCache() === null && J.T.loadStoredUser() === null;
+  })());
+r.ok('...and the pre-scoping key from older builds is swept up at the same time',
+  (() => {
+    const K = loadList();
+    asUser(K.T, 'ops@agrikart.in');
+    K.T.allIRs = SEED;
+    // Written by hand, the way a build before this change left it: unscoped, device-wide.
+    K.T.writeIRListCache();
+    try { localStorage.setItem(K.T.IR_LIST_CACHE_KEY, JSON.stringify({ at: Date.now(), records: SEED })); } catch (e) {}
+    K.T.clearLocalAuth();
+    return K.T.readIRListCache() === null;
+  })());
 
 r.head('an outage NEVER replaces a real list with sample IRs');
 const B = loadList();
@@ -429,6 +498,7 @@ const liveFetch = url => String(url).indexOf('action=listIRs') >= 0
     })
   : Promise.reject(new Error('backend not needed'));
 const D = loadList(liveFetch);
+asUser(D.T, 'ravi@indrones.com');
 seed(D.T, SEED);
 r.ok('a fresh read puts the backend records up and drops the stale ones', await (async () => {
   await D.T.fetchIRs();

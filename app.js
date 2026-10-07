@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v67';
+const APP_VERSION = 'v68';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -4898,6 +4898,7 @@ const LOG_TARGET_KEY = 'ipassbook.log.target';
 // never disagree about what is on screen.
 const logState = {
   target:    '',      // IR number the report will be pushed into
+  model:     '',      // airframe the log is scored AS — see logRules()
   fileName:  '',
   fileSize:  0,
   progress:  0,
@@ -4912,6 +4913,98 @@ const logState = {
 // ticket should not re-pick it three times. Wrapped because a private window
 // throws on access rather than returning null.
 try { logState.target = localStorage.getItem(LOG_TARGET_KEY) || ''; } catch (_) { /* private mode */ }
+try { logState.model  = localStorage.getItem(LOG_MODEL_KEY)  || ''; } catch (_) { /* private mode */ }
+
+// ── the limits a log is scored against ────────────────────────────────────────
+//
+// The analyser's numbers are Indrones' own operating data, so NONE of them is in
+// dataflash.js — that file is served from the public site. They live in the
+// private store at `__CONFIG__/analyser`: an admin edits them on the Log limits
+// panel, and every signed-in user reads them to score a log.
+//
+// An EMPTY field is a decision, not a gap. The panel writes only the fields
+// somebody actually filled in; a blank stays blank, so the built-in public figure
+// applies where one exists (ArduPilot's vibration and HDop) and there is NO LIMIT
+// where none does (current, motor spread, attitude). A blank must never quietly
+// inherit a number nobody chose, and the safe reading of "we have not agreed a
+// limit" is to show the log and not fail it — never to fail on an invented zero.
+const ANALYSER_CONFIG_KEY = 'ipb_analyser_config';
+const LOG_MODEL_KEY = 'ipassbook.log.model';
+
+let analyserConfig = { profiles: {}, models: [] };
+try {
+  const raw = localStorage.getItem(ANALYSER_CONFIG_KEY);
+  if (raw) analyserConfig = normaliseAnalyserConfig(JSON.parse(raw));
+} catch (_) { /* private mode, or a value written by an older build */ }
+
+// The store is a shared document that anyone could in principle have hand-edited,
+// so every value that reaches the scorer is shape-checked here rather than trusted.
+// A profile that fails the check is DROPPED, not repaired — a half-read limits table
+// is worse than none, because it would score against numbers nobody typed.
+function normaliseAnalyserConfig(saved) {
+  const out = { profiles: {}, models: [] };
+  if (!saved || typeof saved !== 'object') return out;
+  const NAME = /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$/;
+  const KEY  = /^[A-Za-z0-9_]{1,40}$/;
+  // `__default__` is the ONE reserved profile name — the layer every airframe
+  // inherits from — and it is the reason this is a function rather than a bare
+  // regex. It begins with an underscore, so the ordinary NAME test rejects it, and
+  // using NAME alone would drop the shared default on every save while the scorer
+  // and the panel both went on believing it was there. It is NOT a model, so it is
+  // excluded from the picker below.
+  const isName = n => n === '__default__' || NAME.test(n);
+  const p = saved.profiles;
+  if (p && typeof p === 'object') {
+    Object.keys(p).forEach(name => {
+      if (!isName(name)) return;
+      const prof = p[name];
+      if (!prof || typeof prof !== 'object') return;
+      const clean = {};
+      Object.keys(prof).forEach(k => {
+        if (!KEY.test(k)) return;
+        const v = prof[k];
+        if (v === null || v === '') { clean[k] = null; return; }   // an explicit "no limit"
+        if (typeof v === 'number' && isFinite(v)) clean[k] = v;
+      });
+      out.profiles[name] = clean;
+    });
+  }
+  if (Array.isArray(saved.models)) {
+    saved.models.forEach(m => { if (typeof m === 'string' && NAME.test(m)) out.models.push(m); });
+  }
+  // A profile that exists is a profile you can pick, whether or not the model list
+  // remembers to mention it — the list is a convenience, the profiles are the truth.
+  Object.keys(out.profiles).forEach(n => {
+    if (n !== '__default__' && out.models.indexOf(n) < 0) out.models.push(n);
+  });
+  return out;
+}
+
+function applyAnalyserConfig(saved) {
+  if (!saved || typeof saved !== 'object') return;
+  analyserConfig = normaliseAnalyserConfig(saved);
+  try { localStorage.setItem(ANALYSER_CONFIG_KEY, JSON.stringify(analyserConfig)); } catch (_) { /* private mode */ }
+  renderLog();   // the pane names the profile it will score against
+}
+
+function saveAnalyserConfig() {
+  if (!isAdmin()) { showToast('Only an admin can change the flight-log limits'); return; }
+  try { localStorage.setItem(ANALYSER_CONFIG_KEY, JSON.stringify(analyserConfig)); } catch (_) { /* private mode */ }
+  saveSentinel('__CONFIG__', 'analyser', analyserConfig)
+    .then(r => showToast(r && r.status === 'ok'
+      ? 'Flight-log limits saved'
+      : 'Saved on this device only — the backend refused it. The latest backend has to be pasted for this to reach everyone.'));
+}
+
+// What the scorer should judge THIS log against. Undefined when the reader is
+// missing or too old to know about profiles, which sends it to its own built-in
+// defaults — never to a half-resolved table.
+function logRules() {
+  const DF = window.DataFlash;
+  if (!DF || typeof DF.resolveRules !== 'function') return undefined;
+  return DF.resolveRules(analyserConfig, logState.model || '');
+}
+
 
 // Verdict → the badge family the status pills already use. A PASS is not a status
 // called "Open" — it only borrows the green, which is why the word is written out
@@ -5019,6 +5112,60 @@ function logParametersHTML(report, jump) {
   </div>`;
 }
 
+// ── the score ─────────────────────────────────────────────────────────────────
+//
+// The number this log scored, and the areas it was made from. Deliberately NOT a
+// table — a phone table means sideways scrolling, which is the one thing this
+// screen must not do — so each area is a row that wraps.
+//
+// The headline band is DERIVED from the areas, never from a threshold of its own:
+// red if any area is red, amber if any is amber, green only when every area that
+// was measured is green. That way the colour cannot disagree with the rows beneath
+// it, and no pass/fail number has to be invented for a score that is a summary
+// rather than a limit.
+const LOG_BAND_CLS = { green: 'badge-open', amber: 'badge-pending', red: 'badge-danger' };
+
+function logScoreHTML(report) {
+  const s = report.score;
+  if (!s || (s.total == null && !(s.parts || []).length)) return '';
+  const parts = s.parts || [];
+  const band = parts.some(p => p.band === 'red') ? 'red'
+             : (parts.some(p => p.band === 'amber') ? 'amber' : 'green');
+  const rows = parts.map(p => `
+    <div class="log-score-row">
+      <span class="badge ${LOG_BAND_CLS[p.band] || 'badge-open'}">${p.score}</span>
+      <span class="log-score-label">${escHtml(p.label)}</span>
+      <span class="log-score-detail">${escHtml(p.detail || '')}</span>
+    </div>`).join('');
+
+  const tick = (s.checklist || []).map(c => `
+    <div class="log-score-row">
+      <span class="badge badge-pending">Tick</span>
+      <span class="log-score-label">${escHtml(c.label)}</span>
+      <span class="log-score-detail">${escHtml(c.detail || '')}</span>
+    </div>`).join('');
+
+  const open = (s.open || []).map(o => `
+    <div class="log-score-row">
+      <span class="badge badge-open">Not scored</span>
+      <span class="log-score-label">${escHtml(o.label)}</span>
+      <span class="log-score-detail">${escHtml(o.detail || '')}</span>
+    </div>`).join('');
+
+  return `
+    <div class="insights-block">
+      <h3 class="insights-h">Score</h3>
+      <div class="log-verdict">
+        <span class="badge ${LOG_BAND_CLS[band]}">${s.total == null ? '—' : s.total}</span>
+        <span class="log-verdict-n">${s.total == null ? 'Not scored' : s.total + ' / 100'}</span>
+      </div>
+      <p class="log-note">The plain average of the areas below that HAVE a limit — the same method the desktop analyser uses.${s.profile ? ` Judged against <b>${escHtml(s.profile)}</b>.` : ''}</p>
+      <div class="log-stack">${rows}</div>
+      ${tick ? `<h3 class="insights-h">Needs your tick</h3>${tick}` : ''}
+      ${open ? `<h3 class="insights-h">Shown, not scored</h3>${open}` : ''}
+    </div>`;
+}
+
 function logReportHTML(report, opts) {
   const jump = !!(opts && opts.jump);
   const v = logVerdictInfo(report.verdict);
@@ -5041,6 +5188,7 @@ function logReportHTML(report, opts) {
         ${m.truncated ? '<span><b>Ends mid-frame</b> yes</span>' : ''}
       </div>
     </div>
+    ${logScoreHTML(report)}
     <div class="insights-block">
       <h3 class="insights-h">Findings</h3>
       <div class="log-stack">${logFindingsHTML(report, jump)}</div>
@@ -5062,6 +5210,10 @@ function logReportForStore(report, fileName, fileSize) {
     file: fileName || '',
     fileBytes: fileSize || 0,
     verdict: report.verdict,
+    // The score is the headline number, so it is stored with the report — a
+    // passbook opened in a year should still say what this log scored and which
+    // profile it was judged against, without re-reading the .bin.
+    score: report.score || null,
     meta: {
       firmware: m.firmware || '',
       vehicle: m.vehicle || '',
@@ -5105,6 +5257,33 @@ function logSummaryText(report, fileName, fileSize, stamp) {
 
 // ── the pane ──────────────────────────────────────────────────────────────────
 
+// Which airframe this log is scored as. A .bin does not carry one, so it cannot be
+// inferred — it has to be chosen, and choosing it is what turns the shared limits
+// into THIS aircraft's limits. "Default" is the profile that applies when no model
+// is picked, and it is always offered, because a log for an unnamed airframe still
+// has to be scored against something.
+function logModelSelectHTML() {
+  const models = analyserConfig.models || [];
+  const has = models.indexOf(logState.model) >= 0;
+  const orphan = logState.model && !has
+    ? `<option value="${escHtml(logState.model)}" selected>${escHtml(logState.model)} (no longer configured)</option>` : '';
+  return `<select id="log-model" class="form-input" aria-label="Airframe this log is scored as">
+      <option value=""${logState.model ? '' : ' selected'}>Default (all models)</option>
+      ${orphan}
+      ${models.map(m => `<option value="${escHtml(m)}"${m === logState.model ? ' selected' : ''}>${escHtml(m)}</option>`).join('')}
+    </select>`;
+}
+
+// One line naming the profile, because a score with no profile beside it is a
+// number nobody can check. Says which one, and says plainly when there is none.
+function logProfileNoteHTML() {
+  const r = logState.report;
+  const p = r && r.score && r.score.profile ? r.score.profile : '';
+  if (!p) return '';
+  const airframe = r.score.airframe;
+  return `<p class="log-note">Scored against <b>${escHtml(p)}</b>${airframe ? '' : ' — no airframe was chosen, so the shared profile applies'}.</p>`;
+}
+
 function logTargetSelectHTML() {
   const known = allIRs.some(ir => ir.irNumber === logState.target);
   // A remembered target that has since left the list still has to be SELECTABLE,
@@ -5136,14 +5315,23 @@ function renderLog() {
   const parts = [];
 
   // 1 — the file. Picking one starts the read; there is no second "Analyse" tap.
+  // The airframe sits ABOVE the file on purpose: the limits are applied during the
+  // read, so a picker underneath the result would be a control that changes nothing
+  // until the log is read a second time.
   parts.push(`<div class="insights-block">
     <h3 class="insights-h">Flight log (.bin)</h3>
+    <div class="log-actions">
+      <label class="log-note" for="log-model">Airframe</label>
+      ${logModelSelectHTML()}
+      ${isAdmin() ? `<button type="button" class="btn btn-ghost" id="log-limits">&#9881; Log limits</button>` : ''}
+    </div>
     <div class="log-actions">
       <input type="file" id="log-file" accept=".bin,.BIN,application/octet-stream" />
       ${logState.fileName ? `<span class="log-verdict-file">${escHtml(logState.fileName)} · ${logBytes(logState.fileSize)}</span>` : ''}
       ${logState.fileName && !logState.busy ? `<button type="button" class="btn btn-ghost" id="log-clear">Clear</button>` : ''}
     </div>
     <p class="log-note">Read on this device. The .bin is never uploaded — only the report below is kept, and only if you push it into an IR.</p>
+    <p class="log-note">A log does not say which aircraft it came from, so pick the airframe before reading it: that is what chooses the limits it is scored against.</p>
   </div>`);
 
   // 2 — progress. Only while reading, and only ever in place (see paintLogProgress).
@@ -5163,7 +5351,10 @@ function renderLog() {
   }
 
   // 4 — the report.
-  if (r) parts.push(logReportHTML(r, { jump: true }));
+  if (r) {
+    parts.push(logProfileNoteHTML());
+    parts.push(logReportHTML(r, { jump: true }));
+  }
 
   // 5 — the push. Beneath the verdict, because that is the decision it follows, and
   // it is the only thing here that WRITES.
@@ -5218,10 +5409,13 @@ async function analyseLogFile(file) {
   renderLog();
 
   try {
+    // The airframe's limits are resolved ONCE, before the read, and handed to the
+    // reader — so the numbers on screen were the ones in force when the log was
+    // read, not whatever `logState.model` says by the time a re-render happens.
     const report = await window.DataFlash.analyseFile(file, p => {
       logState.progress = p;
       paintLogProgress(p);
-    });
+    }, logRules());
     if (report && report.ok === false) {
       logState.error = report.error || 'The file could not be read.';
     } else {
@@ -5330,6 +5524,20 @@ if (logView) {
       renderLog();
       return;
     }
+    if (t.id === 'log-model') {
+      logState.model = t.value || '';
+      try { localStorage.setItem(LOG_MODEL_KEY, logState.model); } catch (_) { /* private mode */ }
+      // A report already on screen was scored against the OLD profile, so it is
+      // discarded rather than left there wearing the new airframe's name. Saying
+      // "read it again" is honest; re-scoring a stored report silently is not.
+      if (logState.report) {
+        resetLog();
+        showToast('Airframe changed — pick the log again to score it against ' + (logState.model || 'the default profile'));
+      } else {
+        renderLog();
+      }
+      return;
+    }
     if (t.id === 'log-file' && t.files && t.files[0]) analyseLogFile(t.files[0]);
   });
   logView.addEventListener('click', e => {
@@ -5337,6 +5545,7 @@ if (logView) {
     if (!t || !t.closest) return;
     if (t.closest('#log-clear')) { resetLog(); return; }
     if (t.closest('#log-push')) { pushLogToIR(); return; }
+    if (t.closest('#log-limits')) { openAnalyserLimitsModal(); return; }
     const at = t.closest('[data-jump]');
     if (at) jumpToLogGroup(at.dataset.jump);
   });
@@ -5444,7 +5653,7 @@ function buildIntakeMap(headers) {
 
 // The last header row read from the Sheet, so the intake view can name columns
 // the Form writes that the app does not model. Refreshed on every sync.
-let lastSheetAudit = { headers: [], unmapped: [] };
+let lastSheetAudit = { headers: [], unmapped: [], badIRRows: [] };
 
 // A sheet grid (header row + data rows, as displayed) → IR records, latest first.
 // Pure: no fetch and no DOM, so tools/smoke-intake.mjs can assert the whole
@@ -5454,6 +5663,34 @@ let lastSheetAudit = { headers: [], unmapped: [] };
 // this function stays the ONE place that knows how a column becomes a field, so
 // INTAKE_FIELDS below is not duplicated on the other side of the wire (see
 // listIRs in backend.gs).
+// The Sheet's IR Number column is free text a human types, so it is shape-checked
+// before it becomes a card. Until 2026-10-06 there was NO check at all — only a
+// blank test — and one row holding `IR0NA` rendered as a real ticket.
+//
+// The accepted shape is the crawler's (`eiIRs_` in email-index.gs), not the
+// backend's stricter `/^IR\d+$/`. That is deliberate: a value like "IR 483" is a
+// real ticket and must not vanish from the list, while the backend REFUSES TO
+// WRITE it. Both facts get reported rather than one hiding behind the other.
+//
+// The value is never rewritten. It keys the store file (`seedIRState`), so
+// normalising "IR 105" to "IR105" here would orphan every row already written
+// under the old spelling — and the decision on this was explicit: CR walks the
+// tickets by hand, nothing is migrated.
+const IR_NUMBER_RE  = /^IR\s*-?\s*\d+$/i;   // what the crawler accepts
+const IR_WRITABLE_RE = /^IR\d+$/;           // what the backend will write (assertRealIR)
+
+// Rows the Sheet holds that never became a ticket, NAMED rather than dropped in
+// silence: a ticket that disappears without a word is worse than one that looks
+// odd, and the only fix is a human editing the Sheet.
+function sheetGapNote() {
+  const bad = lastSheetAudit.badIRRows || [];
+  if (!bad.length) return '';
+  const listed = bad.map(b => 'row ' + b.row + ' ("' + b.value + '")').join(', ');
+  return `<p class="intake-audit">${bad.length} row${bad.length === 1 ? '' : 's'} in the Sheet ` +
+    `could not be read as an IR number and ${bad.length === 1 ? 'is' : 'are'} not shown: ` +
+    `${escHtml(listed)}.</p>`;
+}
+
 function mapSheetRows(rows) {
   const headers = (rows && rows[0] ? rows[0] : []).map(h => String(h).trim());
   const { map, consumed, unmapped } = buildIntakeMap(headers);
@@ -5467,11 +5704,21 @@ function mapSheetRows(rows) {
   const cell = (row, i) => (i >= 0 && row[i] != null ? String(row[i]).trim() : '');
 
   const records = [];
+  const badIRRows = [];
   for (let r = 1; r < (rows ? rows.length : 0); r++) {
     const row = rows[r];
     if (!row) continue;
     const irNumber = cell(row, iIrNo);
     if (!irNumber) continue;
+    if (!IR_NUMBER_RE.test(irNumber)) {
+      badIRRows.push({ row: r + 1, value: irNumber, reason: 'not an IR number' });
+      continue;                       // no card — but it is reported, not lost
+    }
+    if (!IR_WRITABLE_RE.test(irNumber)) {
+      // Shown, because it is a real ticket; reported, because the app cannot save
+      // to it until someone fixes the cell.
+      badIRRows.push({ row: r + 1, value: irNumber, reason: 'not writable until the Sheet cell is fixed' });
+    }
 
     const ts   = cell(row, map.dateRaised);
     const inc  = cell(row, map.incidentDate);
@@ -5534,6 +5781,7 @@ function mapSheetRows(rows) {
       extra,
     });
   }
+  lastSheetAudit.badIRRows = badIRRows;
   return records.reverse();   // latest first
 }
 
@@ -5780,14 +6028,14 @@ function renderIRList(records) {
   renderSegments();
   renderCategorySegments();
   if (!records || records.length === 0) {
-    irList.innerHTML = allIRs.length
+    irList.innerHTML = sheetGapNote() + (allIRs.length
       ? '<div class="empty-state"><span>🔍</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
-      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>';
+      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>');
     updateListCounts(0);
     return;
   }
 
-  irList.innerHTML = records.map(ir => {
+  irList.innerHTML = sheetGapNote() + records.map(ir => {
     const owner = ir.assigneeName || ir.assignee || '';
     // Stage 3 and Stage 4, read off the merged record. Both are no-ops when the
     // data cannot support them — an IR with no saved sections and no clock
@@ -8477,6 +8725,7 @@ function loadSharedConfig() {
     applyInwardOptions(sections['inward-options']);
     applyIqcConfig(sections['iqc-config']);
     applyTeamDirectory(sections['team-directory']);
+    applyAnalyserConfig(sections['analyser']);
   });
 }
 
@@ -10680,6 +10929,216 @@ function removeTeamDirRow(btn) {
   btn.closest('.team-dir-row')?.remove();
 }
 function closeTeamDirectoryModal() { document.getElementById('team-dir-modal')?.remove(); }
+
+// ─── LOG LIMITS ───────────────────────────────────────────────────────────────
+//
+// The one place an Indrones flight-log number is ever typed. It writes to the
+// PRIVATE store at `__CONFIG__/analyser`, never to a file — which is the whole
+// reason it exists: dataflash.js is served from the public site, so a limit written
+// there is a limit published, and these are operating data.
+//
+// One profile at a time, fields stacked. A grid of every model against every limit
+// is the obvious design and the wrong one: it scrolls sideways on a phone, which is
+// the one thing this app has been told not to do.
+//
+// VOLTAGE AND THE REST live at the bottom under "no rule yet". They are SAVED with
+// everything else, so the numbers are not lost while the rule is being settled, but
+// nothing scores on them — and the panel says so rather than letting a filled-in
+// field imply a check that does not exist.
+const ANALYSER_DEFERRED = [
+  { group: 'Voltage — no rule yet, so recorded and NOT scored', key: 'voltCellReview', label: 'Per cell — watch below', unit: 'V' },
+  { group: 'Voltage — no rule yet, so recorded and NOT scored', key: 'voltCellFail',   label: 'Per cell — fail below',  unit: 'V' },
+  { group: 'Voltage — no rule yet, so recorded and NOT scored', key: 'voltHoldMs',    label: 'Only if held for',       unit: 'ms' },
+];
+
+let _alDraft = null;
+let _alProfile = '';
+
+function openAnalyserLimitsModal() {
+  if (!isAdmin()) { showToast('Only an admin can change the flight-log limits'); return; }
+  if (document.getElementById('analyser-limits-modal')) return;
+  const DF = window.DataFlash;
+  if (!DF || !Array.isArray(DF.TUNED)) {
+    showToast('The flight-log reader did not load, so there is nothing to edit.');
+    return;
+  }
+  // Edit a COPY. Cancel has to mean cancel, and a half-typed table must never
+  // reach the scorer through a re-render.
+  _alDraft = normaliseAnalyserConfig(analyserConfig);
+  if (!_alDraft.models.length) _alDraft.models.push('S25');
+  if (!_alDraft.profiles.__default__) _alDraft.profiles.__default__ = {};
+  _alProfile = _alDraft.models[0];
+
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'analyser-limits-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Log limits</h3>
+        <button type="button" class="inward-options-close" onclick="closeAnalyserLimitsModal()">&times;</button>
+      </div>
+      <p class="inward-options-hint">The numbers a flight log is scored against, per airframe. They are stored privately and never appear in the app's published files.</p>
+      <p class="inward-options-hint"><b>Default</b> applies to every airframe; a model's own chip overrides it, field by field. A field left <b>blank</b> means no number has been agreed yet — that area is shown on the report but left out of the score. It is never read as zero.</p>
+      <div class="inward-options-body" id="al-body"></div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeAnalyserLimitsModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="saveAnalyserLimits()">Save limits</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  renderAnalyserLimitsBody();
+}
+
+function closeAnalyserLimitsModal() {
+  document.getElementById('analyser-limits-modal')?.remove();
+  _alDraft = null; _alProfile = '';
+}
+
+// Read whatever is in the form back into the draft. Called before ANY re-render,
+// because switching profile is a re-render and an uncaptured edit would be lost.
+//
+// An EMPTY input is stored as NOTHING, not as zero. That is the rule the whole
+// panel rests on: blank means "we have not agreed a number", and a zero written
+// here would fail every aircraft on a limit nobody set.
+function alCaptureFields() {
+  if (!_alDraft) return;
+  const prof = _alDraft.profiles[_alProfile] || (_alDraft.profiles[_alProfile] = {});
+  document.querySelectorAll('#al-body .al-field input[data-key]').forEach(inp => {
+    const k = inp.dataset.key;
+    const raw = (inp.value || '').trim();
+    if (raw === '') { delete prof[k]; return; }
+    const n = Number(raw);
+    if (isFinite(n)) prof[k] = n;
+  });
+}
+
+function renderAnalyserLimitsBody() {
+  const body = document.getElementById('al-body');
+  if (!body || !_alDraft) return;
+  const DF = window.DataFlash;
+  const fields = DF.TUNED || [];
+  const prof = _alDraft.profiles[_alProfile] || {};
+
+  const chips = [{ name: '__default__', label: 'Default (all models)' }]
+    .concat(_alDraft.models.map(m => ({ name: m, label: m })))
+    .map(c => `<button type="button" class="al-chip${c.name === _alProfile ? ' is-on' : ''}" data-al-profile="${escHtml(c.name)}" onclick="alSetProfile(this)">${escHtml(c.label)}</button>`)
+    .join('');
+
+  // Grouped, in the order TUNED declares them, so the panel and the scorer cannot
+  // disagree about which numbers exist.
+  const groups = [];
+  fields.concat(ANALYSER_DEFERRED).forEach(f => {
+    let g = groups.find(x => x.name === f.group);
+    if (!g) { g = { name: f.group, items: [] }; groups.push(g); }
+    g.items.push(f);
+  });
+
+  // What this field will USE if it is left blank. Naming only the built-in number
+  // was a small lie the moment the shared default existed: a model chip with an
+  // empty current field read "no limit set" while the log would in fact be scored
+  // against the shared 35 A — the blank field and the applied rule would disagree
+  // on screen, which is exactly the confusion this panel exists to remove. So the
+  // placeholder walks the same two layers the scorer does: this profile's own
+  // shared default first, then the built-in public figure.
+  const sharedProf = (_alProfile !== '__default__' && _alDraft.profiles.__default__) || null;
+  const inherited = f => {
+    // A `perAirframe` field describes one AIRCRAFT, not a limit everyone shares —
+    // the pack's cell count is the case in point. There is deliberately nothing
+    // above it to inherit from (the scorer refuses the shared default for these),
+    // so offering "inherited: …" here would be a promise the reader does not keep,
+    // and on the Default chip itself the honest answer is that it does not belong
+    // there at all.
+    if (f.perAirframe) {
+      if (_alProfile === '__default__') return 'set this on each model';
+      return f.none || 'not recorded';
+    }
+    if (sharedProf && typeof sharedProf[f.key] === 'number' && isFinite(sharedProf[f.key])) {
+      return 'inherited: ' + sharedProf[f.key];
+    }
+    if (sharedProf && sharedProf[f.key] === null) return 'no limit set';
+    return (f.pub != null) ? 'default ' + f.pub : 'no limit set';
+  };
+
+  const groupHTML = groups.map(g => `
+    <div class="al-group">${escHtml(g.name)}</div>
+    ${g.items.map(f => {
+      const v = prof[f.key];
+      const shown = (typeof v === 'number' && isFinite(v)) ? v : '';
+      const ph = inherited(f);
+      const min = (f.min != null) ? ` min="${f.min}"` : '';
+      return `<div class="al-field">
+        <label for="al-${escHtml(f.key)}">${escHtml(f.label)}</label>
+        <input id="al-${escHtml(f.key)}" class="form-input al-field-in" type="number" step="any"${min}
+               data-key="${escHtml(f.key)}" value="${shown}" placeholder="${escHtml(ph)}" />
+        <span class="al-unit">${escHtml(f.unit || '')}</span>
+      </div>`;
+    }).join('')}`).join('');
+
+  const removable = _alProfile !== '__default__';
+
+  body.innerHTML = `
+    <div class="al-chips">${chips}</div>
+    <p class="log-note">Leave a field <b>empty</b> to mean "no limit agreed" — the log is shown and not failed on it. A field showing a grey <i>default</i> is ArduPilot's own published figure and applies while the field is empty.</p>
+    <div class="log-actions">
+      <input type="text" id="al-new-model" class="form-input" placeholder="New model name" style="width:11rem" />
+      <button type="button" class="btn btn-ghost" onclick="alAddModel()">+ Add model</button>
+      ${removable ? `<button type="button" class="btn btn-ghost" onclick="alRemoveModel()">Remove ${escHtml(_alProfile)}</button>` : ''}
+    </div>
+    ${groupHTML}
+    <p class="al-pending"><b>The pack</b> is not a limit — nothing in it can fail a log. It is what lets the report turn a pack voltage into a <b>per-cell</b> one and mAh into a proportion of capacity, and it must be set on each <b>model</b>, not on Default: a cell count describes one aircraft, and a shared one would be used to read a different aircraft's battery wrongly.</p>
+    <p class="al-pending">Voltage is still being settled, so those three fields are <b>recorded and not applied</b> — filling them in changes no score today. They are saved with the rest so the number is not lost while the rule is decided.</p>`;
+}
+
+// Switching profile. Deliberately an inline handler on the chip rather than a
+// delegated listener on the modal: the body is replaced on every re-render, so a
+// listener added here would be added again each time and fire once per past render.
+function alSetProfile(btn) {
+  if (!btn || !_alDraft) return;
+  alCaptureFields();
+  _alProfile = btn.dataset.alProfile;
+  renderAnalyserLimitsBody();
+}
+
+function alAddModel() {
+  const inp = document.getElementById('al-new-model');
+  if (!inp || !_alDraft) return;
+  const name = (inp.value || '').trim();
+  if (!name) { showToast('Type a model name first'); return; }
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _.-]{0,39}$/.test(name)) {
+    showToast('A model name can use letters, numbers, spaces, dots, dashes and underscores');
+    return;
+  }
+  if (name === '__default__') { showToast('That name is reserved for the shared profile'); return; }
+  alCaptureFields();
+  if (_alDraft.models.indexOf(name) < 0) _alDraft.models.push(name);
+  if (!_alDraft.profiles[name]) _alDraft.profiles[name] = {};
+  _alProfile = name;
+  renderAnalyserLimitsBody();
+}
+
+function alRemoveModel() {
+  if (!_alDraft || _alProfile === '__default__') return;
+  const name = _alProfile;
+  // The limits go with it, so this is said out loud rather than done quietly —
+  // a removed profile leaves every log for that model with NO limit, not with the
+  // last number it had.
+  if (!confirm('Remove ' + name + '? Its limits are deleted, and logs for it will have no limits until you set them again.')) return;
+  delete _alDraft.profiles[name];
+  _alDraft.models = _alDraft.models.filter(m => m !== name);
+  _alProfile = _alDraft.models[0] || '__default__';
+  renderAnalyserLimitsBody();
+}
+
+function saveAnalyserLimits() {
+  if (!isAdmin()) { showToast('Only an admin can change the flight-log limits'); return; }
+  if (!_alDraft) return;
+  alCaptureFields();
+  analyserConfig = normaliseAnalyserConfig(_alDraft);
+  closeAnalyserLimitsModal();
+  saveAnalyserConfig();
+  renderLog();
+}
 function applyTeamDirectory() {
   const rows = document.querySelectorAll('#team-dir-rows .team-dir-row');
   const entries = [];

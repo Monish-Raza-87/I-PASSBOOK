@@ -827,13 +827,22 @@ r.head('the emoji debt is a ledger, not a licence');
 // new: ⚠ is on the sync-status line and the access hints, and ✓ is on the "session ✓"
 // line of this same modal. The number is pinned to what the file MEASURES, so the
 // next emoji has to come past this assertion and someone has to decide about it.
+//
+// 47 → 49, decided deliberately: the User Access screen gained a Customers tab, and two
+// of its lines carry glyphs the SAME modal already uses for the same jobs — ✅/⚠️ on the
+// invite outcome, exactly as the backup-health line above it pairs ✓ with ⚠, and 📋 on
+// the copy button, exactly as "Copy all handover texts" in the Create tab has always
+// carried it. No glyph enters the app that was not already here, and the emoji the tab
+// was DRAWN with (an envelope on the Invite button) was dropped rather than added, since
+// the heading and the label already say what it does. This modal is the one place the
+// ledger's own note calls out as a separate pass; the count still only goes down.
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const emojiLines = appCode.split('\n').filter(l => EMOJI.test(l));
 r.ok('no emoji is left in a slot the icon helper fills',
   !/(💬|🔔|🎫)/.test(appCode),
   emojiLines.filter(l => /💬|🔔|🎫/.test(l)));
-r.ok('the count has not grown past the recorded number', emojiLines.length <= 47,
-  { now: emojiLines.length, budget: 47, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
+r.ok('the count has not grown past the recorded number', emojiLines.length <= 49,
+  { now: emojiLines.length, budget: 49, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
 r.ok('and none of them sits in the activity-log renderer, which owns its own icons',
   !EMOJI.test(appCode.slice(appCode.indexOf('function renderTimelineInto'),
                             appCode.indexOf('function renderTimelineInto') + 4000)));
@@ -1587,13 +1596,25 @@ r.ok('...and the versions tab is the one that asks for the backup state',
 
 // Every tab the strip can select must end up painting something. Three have an
 // explicit branch and People is the fallback, which is why the fallback is
-// asserted rather than a fourth literal 'people' comparison that does not exist.
+// asserted rather than a fifth literal 'people' comparison that does not exist.
+// This list has to grow with the strip: a tab added to the markup and forgotten
+// here would be checked by nothing at all, which is the failure mode this whole
+// section was written for.
 const panelFn = /function renderAccessPanel\s*\(\)\s*\{[\s\S]*?\n\}/.exec(appCode);
 const panelText = panelFn ? panelFn[0].replace(/\s+/g, ' ') : '';
 r.ok('every tab the strip offers has a branch in the panel renderer',
-  !!panelFn && ['depts', 'create', 'versions'].every(t =>
+  !!panelFn && ['depts', 'create', 'customers', 'versions'].every(t =>
     new RegExp(`accessTab === '${t}'`).test(panelText)) && /else renderPeopleTab\(\)/.test(panelText),
-  panelText.slice(0, 160));
+  panelText.slice(0, 200));
+// ...and the list above is the strip's own, not a shorter one written by hand.
+r.ok('...and the list above is complete — every data-tab in the strip is named in it',
+  (() => {
+    const strip = (appCode.match(/<div class="access-tabs">[\s\S]*?<\/div>/) || [''])[0];
+    const tabs = [...strip.matchAll(/data-tab="([a-z]+)"/g)].map(m => m[1]);
+    const named = ['people', 'depts', 'create', 'customers', 'versions'];
+    return tabs.length === named.length && tabs.every(t => named.indexOf(t) >= 0);
+  })(),
+  (appCode.match(/data-tab="[a-z]+"/g) || []));
 
 // The classes the line leans on must be real styles, or the red is not red.
 r.ok('the healthy and unknown colours are defined in views.css, from tokens',

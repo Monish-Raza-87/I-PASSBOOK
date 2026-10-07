@@ -52,6 +52,10 @@ const { T, byId } = loadApp(`
   get insightsFilters(){return insightsFilters;}, set insightsFilters(v){insightsFilters=v;},
   get _dataIsDemo(){return _dataIsDemo;}, set _dataIsDemo(v){_dataIsDemo=v;},
   irList,
+  openAccessModal, renderCustomersTab, renderPeopleTab, renderDepartmentsTab,
+  set accessTab(v){accessTab=v;},
+  set accessCache(v){accessCache=v;},
+  get currentUser(){return currentUser;}, set currentUser(v){currentUser=v;},
 `, { capture: true });
 
 const ALL = T.INSIGHTS_ALL;
@@ -146,8 +150,95 @@ ${css}
 ${doorBlock}
 </body></html>`);
 
+// ── The User Access modal, on the Customers tab ───────────────────────────────
+// A third page, and a separate file for the same reason the door has one: the modal is
+// a FIXED overlay, so on the page above it would sit over everything and every element
+// underneath would read as "past the edge of its frame" — a measurement of nothing.
+//
+// The shell is taken from app.js's own openAccessModal() template literal rather than
+// re-typed here, so what is measured is the app's markup and not a copy of it that can
+// drift. It cannot be obtained by CALLING openAccessModal() under the harness: that
+// function builds its element with document.createElement and appends it to body, and
+// the stub DOM's appendChild is a no-op — the object it fills is thrown away.
+//
+// The roster and the ticket list are the shape a first sale really has: an admin, an
+// active and a disabled staff member, two departments, two scoped customers, and four
+// companies on the IRs — including a long one, which is what decides whether the panel
+// survives a narrow column.
+const ACCESS_USERS = [
+  { email: 'monish.raza@indrones.com', name: 'Monish Raza', status: 'active', isAdmin: true,
+    departments: [], customerOf: '', lastLoginAt: '07-Oct-2026 08:14' },
+  { email: 'ravi@indrones.com', name: 'Ravi Singh', status: 'active', isAdmin: false,
+    departments: ['qa'], customerOf: '', mustChangePassword: true, lastLoginAt: '' },
+  { email: 'adhik@indrones.com', name: 'Adhik Nair', status: 'disabled', isAdmin: false,
+    departments: ['prod'], customerOf: '', lastLoginAt: '02-Oct-2026 17:40' },
+  { email: 'ops@agrikart.in', name: 'Asha Rao', status: 'active', isAdmin: false,
+    departments: [], customerOf: 'AgriKart Pvt Ltd', lastLoginAt: '06-Oct-2026 11:02' },
+  { email: 'support@farmvista.com', name: 'Vikram Iyer', status: 'active', isAdmin: false,
+    departments: [], customerOf: 'FarmVista Solutions', lastLoginAt: '05-Oct-2026 09:30' },
+];
+const ACCESS_DEPTS = [
+  { key: 'qa', name: 'Quality', grants: {} },
+  { key: 'prod', name: 'Production', grants: {} },
+];
+
+T.accessCache = { users: ACCESS_USERS, departments: ACCESS_DEPTS, apiVersion: 8 };
+T.allIRs = [
+  { irNumber: 'IR601', customerName: 'AgriKart Pvt Ltd' },
+  { irNumber: 'IR602', customerName: 'FarmVista Solutions' },
+  { irNumber: 'IR603', customerName: 'GreenField Agri Cooperative Society' },
+  { irNumber: 'IR604', customerName: 'SkyHarvest Corp' },
+];
+
+const accessShellTemplate = (() => {
+  const src = fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8');
+  const at = src.indexOf("<div class=\"access-card\">");
+  if (at === -1) throw new Error('the User Access card is not in app.js');
+  let depth = 0, i = at;
+  while (i < src.length) {
+    if (src.startsWith('<div', i)) { depth++; i += 4; continue; }
+    if (src.startsWith('</div>', i)) { depth--; i += 6; if (!depth) break; continue; }
+    i++;
+  }
+  if (depth) throw new Error('unbalanced <div> in the User Access card');
+  const card = src.slice(at, i);
+  if (card.indexOf('${') >= 0) throw new Error('the User Access card grew an interpolation; it can no longer be lifted out verbatim');
+  return '<div class="inward-options-modal">' + card + '</div>';
+})();
+
+T.accessTab = 'customers';
+T.renderCustomersTab();
+const accessCustomers = byId.get('access-panels').innerHTML;
+T.accessTab = 'people';
+T.renderPeopleTab();
+const accessPeople = byId.get('access-panels').innerHTML;
+
+const withPanel = html => accessShellTemplate.replace(
+  '<div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>',
+  '<div class="access-body" id="access-panels">' + html + '</div>');
+
+const accessFile = path.join(outDir, 'access.html');
+fs.writeFileSync(accessFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>user access — customers</title>
+${css}
+</head><body>
+${withPanel(accessCustomers)}
+</body></html>`);
+
+const accessPeopleFile = path.join(outDir, 'access-people.html');
+fs.writeFileSync(accessPeopleFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>user access — people</title>
+${css}
+</head><body>
+${withPanel(accessPeople)}
+</body></html>`);
+
 console.log(outFile);
 console.log(`  insights ${insights.length} bytes · banner ${banner.length} · list ${list.length}`);
+console.log(accessFile);
+console.log(`  customers panel ${accessCustomers.length} bytes · people panel ${accessPeople.length}`);
 console.log(doorFile);
 console.log(`  door ${doorBlock.length} bytes`);
 

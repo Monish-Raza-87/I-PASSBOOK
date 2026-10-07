@@ -55,6 +55,7 @@ const SERVED = [
   'backup.html',
   'base.css',
   'components.css',
+  'customer.html',
   'dataflash.js',
   'desk.css',
   'faq.html',

@@ -388,7 +388,7 @@ const wrongGuard = guardFiles.filter(f => /:root:not\(\[data-theme="light"\]\)/.
 ok('every OS guard tests for the absence of the attribute',
   wrongGuard.length === 0, wrongGuard.map(f => f.replace('../', '')));
 ok('the standalone pages carry the corrected guard',
-  ['../backup.html', '../faq.html', '../inspector.html', '../plan.html', '../docs/I-PASSBOOK Demo Run-Sheet.html']
+  ['../backup.html', '../customer.html', '../faq.html', '../inspector.html', '../plan.html', '../docs/I-PASSBOOK Demo Run-Sheet.html']
     .every(f => /:root:not\(\[data-theme\]\)/.test(read(f))));
 
 // ── 9. it is actually shipped ───────────────────────────────────────────────────

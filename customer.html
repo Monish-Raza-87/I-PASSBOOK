@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Indrones Customer Space</title>
+<meta name="description" content="After-sales help for Indrones customers — your products, how support works, and every request you have raised with us.">
+<link rel="icon" href="assets/icon-192.png">
+<style>
+  /* Its own token set, in the shape the app's tokens.css uses, so this page reads
+     as the same product without loading a stylesheet — the same reason faq.html
+     carries one. Every token is defined on bare :root FIRST; the two dark blocks
+     only re-point them, so a viewer whose system theme is the other one still
+     gets a complete palette rather than half of each. */
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --line-strong: #b9bfcc;
+    --accent: #2440d8;
+    --accent-fg: #ffffff;
+    --accent-soft: #e8ebfb;
+    --warn: #9a4a00;
+    --warn-soft: #fdf0dd;
+    --warn-line: #e8c48a;
+    --ok: #1d6b45;
+    --ok-soft: #e2f3ea;
+    --radius: 10px;
+    --radius-lg: 16px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --surface-2: #1e2431;
+      --fg: #e7eaf1;
+      --fg-muted: #99a2b4;
+      --line: #2a3141;
+      --line-strong: #3b445a;
+      --accent: #7f95ff;
+      --accent-fg: #0f1218;
+      --accent-soft: #1c2440;
+      --warn: #e0a45e;
+      --warn-soft: #2a2114;
+      --warn-line: #5c4726;
+      --ok: #6cc79a;
+      --ok-soft: #14261d;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218;
+    --surface: #171b24;
+    --surface-2: #1e2431;
+    --fg: #e7eaf1;
+    --fg-muted: #99a2b4;
+    --line: #2a3141;
+    --line-strong: #3b445a;
+    --accent: #7f95ff;
+    --accent-fg: #0f1218;
+    --accent-soft: #1c2440;
+    --warn: #e0a45e;
+    --warn-soft: #2a2114;
+    --warn-line: #5c4726;
+    --ok: #6cc79a;
+    --ok-soft: #14261d;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+    padding-block: 0 env(safe-area-inset-bottom, 0px);
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding-inline: 16px; }
+  a { color: var(--accent); }
+
+  /* ── Header ───────────────────────────────────────────────────────────── */
+  header.bar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar-in {
+    display: flex; align-items: center; gap: 12px;
+    min-height: 60px; padding-block: 8px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; text-decoration: none; color: inherit; }
+  .brand img { width: 28px; height: 28px; display: block; }
+  .brand b { font-size: 15px; letter-spacing: .01em; white-space: nowrap; }
+  .brand span { color: var(--fg-muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-spacer { margin-left: auto; }
+
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 40px; padding: 8px 16px;
+    border: 1px solid var(--line-strong); border-radius: 999px;
+    background: var(--surface); color: var(--fg);
+    font: inherit; font-size: 14px; font-weight: 600;
+    text-decoration: none; cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-primary {
+    background: var(--accent); border-color: var(--accent); color: var(--accent-fg);
+  }
+  .btn-primary:hover { color: var(--accent-fg); filter: brightness(1.06); }
+  .btn[aria-disabled="true"] { opacity: .5; pointer-events: none; }
+
+  /* ── Sections ─────────────────────────────────────────────────────────── */
+  section { padding-block: 40px; }
+  section + section { border-top: 1px solid var(--line); }
+  h1 { font-size: clamp(26px, 5vw, 40px); line-height: 1.15; margin: 0 0 12px; text-wrap: balance; }
+  h2 { font-size: clamp(19px, 3.2vw, 24px); margin: 0 0 6px; text-wrap: balance; }
+  h3 { font-size: 16px; margin: 0 0 4px; }
+  .lede { color: var(--fg-muted); font-size: 17px; max-width: 62ch; margin: 0; }
+  .sub { color: var(--fg-muted); max-width: 62ch; margin: 0 0 22px; }
+  .eyebrow {
+    font-size: 12px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--fg-muted); margin: 0 0 10px;
+  }
+
+  .hero { padding-block: 48px 40px; }
+  .hero .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
+
+  /* ── Cards ────────────────────────────────────────────────────────────── */
+  .cards { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .card {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 20px;
+    display: flex; flex-direction: column; gap: 14px; min-width: 0;
+  }
+  .card h3 { font-size: 18px; letter-spacing: .01em; }
+  .card .tag { color: var(--fg-muted); font-size: 13px; margin: 0; }
+  .chip {
+    align-self: flex-start;
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 3px 9px; border-radius: 999px;
+    background: var(--ok-soft); color: var(--ok); border: 1px solid transparent;
+  }
+  .chip.pending { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
+
+  /* A spec list, not a table: a table on a phone means sideways scrolling, and
+     every number here is readable as a labelled pair on one line. */
+  /* `auto-fit` rather than a fixed 2: two labelled numbers side by side is the
+     readable shape, and it should hold until a column would be too narrow to
+     read — not until an arbitrary phone width. min 130px is what "29 min 37 s"
+     and its label need to stay on one line each. */
+  .specs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px 14px; margin: 0; }
+  .spec { min-width: 0; }
+  .spec dt { font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: var(--fg-muted); margin: 0; }
+  .spec dd { margin: 0; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .payloads { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+  .payloads li {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px;
+    background: var(--surface-2); color: var(--fg-muted); border: 1px solid var(--line);
+  }
+  .card-note { font-size: 13px; color: var(--fg-muted); margin: 0; }
+
+  /* ── Steps (the real pipeline) ────────────────────────────────────────── */
+  .steps { list-style: none; margin: 0; padding: 0; counter-reset: s; display: grid; gap: 2px; }
+  .steps li {
+    counter-increment: s;
+    position: relative; padding: 10px 0 10px 44px;
+    border-bottom: 1px solid var(--line);
+  }
+  .steps li:last-child { border-bottom: 0; }
+  .steps li::before {
+    content: counter(s);
+    position: absolute; left: 0; top: 9px;
+    width: 28px; height: 28px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .steps b { display: block; font-size: 15px; }
+  .steps span { color: var(--fg-muted); font-size: 14px; }
+
+  .aside {
+    display: grid; gap: 10px;
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: var(--radius-lg); padding: 18px;
+  }
+  .aside p { margin: 0; font-size: 14px; color: var(--fg-muted); }
+  .aside .btn { justify-self: start; }
+
+  .split { display: grid; gap: 24px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+
+  .contact { display: grid; gap: 8px; }
+  .contact div { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; }
+  .contact .k { color: var(--fg-muted); font-size: 13px; min-width: 84px; }
+  .contact .v { font-weight: 600; }
+
+  footer.foot {
+    border-top: 1px solid var(--line); padding-block: 28px 40px;
+    color: var(--fg-muted); font-size: 13px;
+  }
+  footer.foot .row { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; }
+  footer.foot a { color: var(--fg-muted); }
+
+  @media (max-width: 420px) { section { padding-block: 32px; } }
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap bar-in">
+    <a class="brand" href="./customer.html">
+      <img src="assets/icon-mark.png" alt="">
+      <b>Indrones</b><span>Customer Space</span>
+    </a>
+    <span class="bar-spacer"></span>
+    <a class="btn" href="#access">Sign in</a>
+  </div>
+</header>
+
+<main>
+
+  <section class="hero wrap">
+    <p class="eyebrow">After-sales</p>
+    <h1>Everything about your aircraft, in one place.</h1>
+    <p class="lede">Raise a request, follow what we are doing about it, and read the record of
+    every service we have carried out on your fleet. No phone calls to find out where things stand.</p>
+    <div class="btn-row">
+      <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
+      <a class="btn" href="#access">Sign in to your reports</a>
+    </div>
+  </section>
+
+  <section id="access" class="wrap">
+    <div class="split">
+      <div>
+        <h2>How access works</h2>
+        <p class="sub">This space is for customers who have bought from us. There is no public
+        sign-up — an account is created for you when your aircraft is handed over, so that the
+        record you see is only ever your own.</p>
+        <ol class="steps">
+          <li><b>We onboard you</b><span>When your order is delivered, we set you up in the portal and send an invitation to your official email address.</span></li>
+          <li><b>You set your credentials</b><span>The invitation link lets you choose your own password. Nobody at Indrones chooses it for you, and nobody can read it.</span></li>
+          <li><b>You use it from then on</b><span>Every request, every report, every dispatch note for your fleet — under one sign-in, for the life of the aircraft.</span></li>
+        </ol>
+      </div>
+      <div class="aside">
+        <h3>Already have an account?</h3>
+        <p>Sign in with your email address. We will send you a one-time code, so you do not have to
+        remember a password every morning.</p>
+        <a class="btn btn-primary" href="./index.html#customer-signin">Sign in</a>
+        <p>Not onboarded yet? Raise a request below and the service desk will set you up.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="products" class="wrap">
+    <h2>Your products</h2>
+    <p class="sub">The platforms we support, and what each one carries.</p>
+    <div class="cards">
+
+      <article class="card">
+        <span class="chip">DGCA Type Certified</span>
+        <div>
+          <h3>SIGMA25G</h3>
+          <p class="tag">Survey-grade platform. Carry more, reach further, operate anywhere.</p>
+        </div>
+        <dl class="specs">
+          <div class="spec"><dt>Max flight time</dt><dd>29 min 37 s</dd></div>
+          <div class="spec"><dt>Mapping accuracy</dt><dd>±5 cm</dd></div>
+          <div class="spec"><dt>Control range</dt><dd>2 km</dd></div>
+          <div class="spec"><dt>Protection</dt><dd>IP53</dd></div>
+          <div class="spec"><dt>Payload modes</dt><dd>6 configurations</dd></div>
+          <div class="spec"><dt>Payload swap</dt><dd>Under 2 min</dd></div>
+        </dl>
+        <ul class="payloads">
+          <li>Multispectral 5-band NDVI</li>
+          <li>RGB survey 20 / 24 MP</li>
+          <li>Training weight</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <span class="chip pending">Certification underway</span>
+        <div>
+          <h3>SIGMA 25 PRO</h3>
+          <p class="tag">Advanced multi-payload survey and surveillance platform. Two mission sets, one airframe.</p>
+        </div>
+        <dl class="specs">
+          <div class="spec"><dt>Max flight time</dt><dd>50 min</dd></div>
+          <div class="spec"><dt>Mapping accuracy</dt><dd>±3 cm</dd></div>
+          <div class="spec"><dt>Control range</dt><dd>4 km</dd></div>
+          <div class="spec"><dt>Protection</dt><dd>IP53</dd></div>
+          <div class="spec"><dt>Payload modes</dt><dd>4 configurations</dd></div>
+          <div class="spec"><dt>Operation</dt><dd>Day and night</dd></div>
+        </dl>
+        <ul class="payloads">
+          <li>RGB zoom up to 10×</li>
+          <li>Multispectral 5-band</li>
+          <li>Radiometric thermal</li>
+          <li>RGB survey</li>
+          <li>Training weight</li>
+        </ul>
+      </article>
+
+      <article class="card">
+        <span class="chip">DGCA Type Certified</span>
+        <div>
+          <h3>SIGMA100</h3>
+          <p class="tag">Enterprise-grade platform tailored for missions. One of the few DGCA Type-Certified LiDAR drones in India.</p>
+        </div>
+        <dl class="specs">
+          <div class="spec"><dt>Max flight time</dt><dd>75 min</dd></div>
+          <div class="spec"><dt>Max take-off weight</dt><dd>8 kg</dd></div>
+          <div class="spec"><dt>Protection</dt><dd>IP53</dd></div>
+          <div class="spec"><dt>Payload modes</dt><dd>8 configurations</dd></div>
+          <div class="spec"><dt>Payload swap</dt><dd>Under 2 min</dd></div>
+          <div class="spec"><dt>Operation</dt><dd>Day and night</dd></div>
+        </dl>
+        <ul class="payloads">
+          <li>LiDAR point cloud</li>
+          <li>Radiometric thermal</li>
+          <li>RGB surveillance 30× zoom</li>
+          <li>Oblique penta 3D</li>
+          <li>Multispectral 5-band</li>
+          <li>RGB survey</li>
+          <li>Speaker</li>
+          <li>Training weight</li>
+        </ul>
+      </article>
+
+    </div>
+  </section>
+
+  <section id="support" class="wrap">
+    <div class="split">
+      <div>
+        <h2>What happens when you raise a request</h2>
+        <p class="sub">Every request gets an IR number the moment it reaches us, and it is worked
+        through the same ten stages every time. You can watch it move.</p>
+        <ol class="steps">
+          <li><b>Open</b><span>Your report has reached the service desk and is waiting to be taken up.</span></li>
+          <li><b>Inward</b><span>The aircraft or component is on its way to us, and we log it in when it arrives.</span></li>
+          <li><b>Inspection</b><span>We look over the unit and record its condition as received.</span></li>
+          <li><b>Investigation</b><span>Our engineers find the cause and write up what they found.</span></li>
+          <li><b>Production</b><span>The repair or replacement is carried out.</span></li>
+          <li><b>Quality Test</b><span>The work is tested before it leaves us.</span></li>
+          <li><b>PDI / Dispatch</b><span>Final checks, packing, and the dispatch note to you.</span></li>
+          <li><b>Delivered</b><span>It is back with you. The request is closed.</span></li>
+        </ol>
+        <p class="card-note">Two of the ten are not steps in that sequence: <b>On Hold</b> means work
+        is paused — usually waiting on a part or on your approval — and <b>Remote Support</b> means
+        we are helping you without the unit coming in.</p>
+      </div>
+
+      <div class="aside">
+        <h3>Reach the service desk</h3>
+        <p>Use the form that matches what you need. Both go straight to the desk, and both give you
+        a record you can point back to.</p>
+        <a class="btn btn-primary" id="raise-2" href="#" target="_blank" rel="noopener">Report a problem</a>
+        <a class="btn" id="feedback" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
+        <p>The form is made with Google Forms. If this device is not already signed in to a Google
+        account, Google will ask you to sign in first — that is Google asking, not Indrones.</p>
+        <div class="contact">
+          <div><span class="k">Phone</span><span class="v">+91 9594 160 160</span></div>
+          <div><span class="k">Email</span><span class="v">info@indrones.com</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot wrap">
+  <div class="row">
+    <span>Indrones Customer Space</span>
+    <a href="./customer.html#products">Products</a>
+    <a href="./customer.html#support">Support</a>
+    <a href="./faq.html">Help &amp; FAQ</a>
+    <a href="https://indrones.com/" target="_blank" rel="noopener">indrones.com</a>
+  </div>
+</footer>
+
+<script>
+  // ── The two form URLs, in ONE place each ───────────────────────────────────
+  // Both are the SHARE link (`/d/e/…/viewform`), not the editor link, which opens
+  // for nobody but its owner. They are set as hrefs here rather than written into
+  // the markup so there is never a second copy to drift.
+  //
+  // The support form is the desk's existing intake — the same form the app's own
+  // sign-in screen already links to, so a request raised here lands exactly where
+  // every other one does. Nothing about it changes.
+  const SUPPORT_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
+
+  // The customer feedback form. Empty until its share link is pasted here; while
+  // it is empty the button is marked disabled rather than opening nothing, because
+  // a button that opens nothing is worse than no button.
+  const FEEDBACK_FORM_URL = '';
+
+  const wire = (id, url) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!url) { el.setAttribute('aria-disabled', 'true'); return; }
+    el.href = url;
+    el.removeAttribute('aria-disabled');
+  };
+  wire('raise', SUPPORT_FORM_URL);
+  wire('raise-2', SUPPORT_FORM_URL);
+  wire('feedback', FEEDBACK_FORM_URL);
+</script>
+
+</body>
+</html>

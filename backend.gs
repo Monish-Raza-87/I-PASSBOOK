@@ -141,7 +141,16 @@ var CONFIG = {
   // talking to can hold the config, and say "the latest backend needs pasting" instead
   // of letting a save vanish into a whitelist rejection. The numbers it holds are
   // Indrones' operating data and must never be committed; see the Log limits panel.
-  API_VERSION: 7,
+  //
+  // v8 = CUSTOMER ACCOUNTS. An account may now be scoped to one company, and role
+  // became three-valued (`admin` / `customer` / `user`). This bump is not cosmetic
+  // like v6 and v7: an older backend does not merely lack the feature, it ANSWERS a
+  // customer's token with the whole repository — a sentinel read bypasses the section
+  // filter (see getPassbook), `getAuditLog`/`getLegacyIR` trust any IR number, and any
+  // signed-in user may write `__IRS__`. So the frontend must never let a customer
+  // account exist against a deployment answering less than 8, and the portal gates
+  // its signed-in half on exactly this number.
+  API_VERSION: 8,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -3497,11 +3506,15 @@ function doGet(e) {
     var authed = {
       // getMyAccess is valid for ANY signed-in user — everyone has at least view.
       getMyAccess:   function () { return getMyAccess(email); },
-      listIRs:       function () { return listIRs(); },
+      // The portal's own boot call. A customer's answer is their company and their
+      // display name; for anyone else it is an empty scope, so the page can tell it is
+      // talking to a staff account and send them to the staff app.
+      getMyCustomer: function () { return getMyCustomer(email); },
+      listIRs:       function () { return listIRs(email); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
-      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId); },
-      listLegacyIRs: function () { return listLegacyIRs(); },
-      getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber); },
+      getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId, email); },
+      listLegacyIRs: function () { return listLegacyIRs(email); },
+      getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber, email); },
       listUsers:     function () { return listUsers(email); },
       // Read-only, and admins only — it re-checks inside (see getBackupHealth); the
       // gate here is only routing, exactly as the admin POST actions are.
@@ -3573,6 +3586,10 @@ function doPost(e) {
 
       // Admin-only (each re-checks isAdminEmail — the gate here is only routing).
       createUser:        function () { return createUser(params, email); },
+      // Onboard a customer: create the account, give it a company scope, and mail the
+      // invitation. Admin-only, and it re-checks inside (see inviteCustomer).
+      inviteCustomer:    function () { return inviteCustomer(params, email); },
+      setCustomerCompany:function () { return setCustomerCompany(params, email); },
       bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
       resetUserPassword: function () { return resetUserPassword(params, email); },
       setUserStatus:     function () { return setUserStatus(params, email); },
@@ -3718,12 +3735,50 @@ function isAdminEmail(email) {
 // is absent, because "no departments configured yet" is a real state on a fresh
 // install. A malformed file still THROWS through readJson — an unreadable grant
 // matrix must never read as "everyone is a plain user" silently.
+//
+// `customers` is the third map, and it is a GRANT rather than an identity: it
+// answers "which ROWS may this account see", which is why it lives here beside the
+// section grants and not in users.json. Two reasons, and the second is the load-
+// bearing one. First, getEffectiveAccess already reads this file on every
+// authenticated request (and readJson memoises it), so a scope here costs no extra
+// Drive round trip; users.json would add ~0.37 s to every section save. Second,
+// this file is the one place a grant cannot be written through saveSection's
+// sentinel path — `accessStore` is reachable only through the admin actions — and
+// a row grant is exactly the kind of thing that must never be self-serve.
+//
+// Shape: { '<lowercased email>': '<Company, exactly as the intake sheet spells it>' }
 function accessStore() {
   var a = readJson('access.json');
-  if (!a || typeof a !== 'object') return { departments: {}, memberships: {} };
+  if (!a || typeof a !== 'object') return { departments: {}, memberships: {}, customers: {} };
   if (!a.departments || typeof a.departments !== 'object') a.departments = {};
   if (!a.memberships || typeof a.memberships !== 'object') a.memberships = {};
+  if (!a.customers   || typeof a.customers   !== 'object') a.customers   = {};
   return a;
+}
+
+// The company an account is scoped to, or '' for everyone who is not a customer.
+// This is the ONE reader of the `customers` map: a second copy of the lookup is how
+// a scope check and a scope write come to disagree.
+//
+// Callers that are deciding whether to WITHHOLD data must let an unreadable
+// access.json throw rather than fall back to '' — '' means "not a customer", and
+// that is the answer that hands an outsider the whole repository. See listIRs,
+// which is the one caller that must fail closed rather than open.
+function customerCompany(email) {
+  var k = usersKey(email);
+  if (!k) return '';
+  var c = accessStore().customers[k];
+  return String(c == null ? '' : c).trim();
+}
+
+// Company names are typed by customers into a Google Form, so the same company
+// arrives as "Tata Power", "TATA POWER " and "tata  power". The comparison is
+// therefore normalised on BOTH sides — the stored scope and the sheet cell — and
+// never by rewriting what is stored, so the admin can still see and correct the
+// exact string they picked.
+function sameCompany(a, b) {
+  var f = function (s) { return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim(); };
+  return f(a) !== '' && f(a) === f(b);
 }
 
 // "Flight Test" -> "flight-test". Stable keys mean renaming a department in the UI
@@ -3777,6 +3832,12 @@ function departmentCapabilities(email) {
 // Resolve a user's role + per-section permissions + Triage. There is no 'none' any
 // more: view+comment is universal, so the only questions this answers are which
 // sections are editable and whether the holder may triage.
+//
+// A CUSTOMER is the one exception, and it is a different KIND of answer: they are
+// scoped to rows, so every section key comes back 'none' and the existing canView()
+// seam in getPassbook does the withholding with no new filter code. Admin is tested
+// FIRST — an admin is never also a customer, so a stale row in the customers map
+// cannot quietly narrow the owner's own view of the repository.
 function getEffectiveAccess(email) {
   email = (email || '').toLowerCase().trim();
   if (isAdminEmail(email)) {
@@ -3786,8 +3847,26 @@ function getEffectiveAccess(email) {
     // permission key like any other. Without it, getPassbook's canView() filter
     // would drop the `sec-a` row for every non-admin — see getPassbook.
     all[OVERVIEW_KEY] = 'edit';
-    return { role: 'admin', permissions: all, departments: [], triage: true };
+    return { role: 'admin', permissions: all, departments: [], triage: true, customerOf: '' };
   }
+
+  // A customer's scope is read BEFORE the section map is built, because it changes
+  // what that map is allowed to say. This read is deliberately NOT inside the
+  // try/catch below: a customer must never be granted view because the scope lookup
+  // failed. It cannot fail open either — accessStore() throws on a malformed file,
+  // and that throw leaves this function rather than resolving to ''.
+  var company = customerCompany(email);
+  if (company) {
+    var none = {};
+    SECTION_KEYS.forEach(function (s) { none[s] = 'none'; });
+    // The Overview stays readable: it is the record of the customer's OWN report and
+    // of the work done on it, which is the whole promise the portal makes. It is
+    // read-only for them — no Triage — so the two inputs it carries are disabled by
+    // the same canEdit seam every other field uses.
+    none[OVERVIEW_KEY] = 'view';
+    return { role: 'customer', permissions: none, departments: [], triage: false, customerOf: company };
+  }
+
   // Default: view + comment everywhere. Built BEFORE the department read so that
   // any failure below still leaves a usable, minimum-privilege profile — the
   // catch fails open on reads and closed on writes, never to locked-out. `triage`
@@ -3806,7 +3885,15 @@ function getEffectiveAccess(email) {
   // Triage also turns the Overview's two inputs editable, through the SAME
   // canEdit() seam every section uses — so the frontend needs no special case.
   if (triage) perms[OVERVIEW_KEY] = 'edit';
-  return { role: 'user', permissions: perms, departments: depts, triage: triage };
+  return { role: 'user', permissions: perms, departments: depts, triage: triage, customerOf: '' };
+}
+
+// Refuse a customer at a door that is staff-only. Named rather than inlined so the
+// reason is written once: these endpoints have no per-record ACL, so the ONLY thing
+// standing between an outsider's token and another customer's data is this check.
+function refuseCustomer(access, what) {
+  if (access && access.role === 'customer')
+    throw new Error('Forbidden: your account does not have access to ' + what + '.');
 }
 
 // Comment now comes WITH view — the owner's rule is "view and comment are for
@@ -3831,6 +3918,9 @@ function getMyAccess(email) {
     permissions: access.permissions,
     departments: access.departments,
     triage: access.triage === true,
+    // '' for everyone who is not a customer. The portal reads this to decide it is
+    // talking to the right backend at all — see the v8 note on API_VERSION.
+    customerOf: access.customerOf || '',
     mustChangePassword: mustChange,
     apiVersion: CONFIG.API_VERSION
   };
@@ -3850,6 +3940,10 @@ function validEmail(email) {
 function listUsers(authEmail) {
   requireAdmin(authEmail);
   var usersStore = allUsers();
+  // Read before the loop, not after: the loop needs `customers` to label each account
+  // with its scope, and `var` hoisting would otherwise make that read an undefined
+  // rather than a late value. readJson memoises, so the later use costs nothing.
+  var store  = accessStore();
   var users = [];
   Object.keys(usersStore).forEach(function (email) {
     var u = usersStore[email] || {};
@@ -3870,12 +3964,16 @@ function listUsers(authEmail) {
       appVersion: userField(u, 'appVersion'),
       isAdmin: isAdminEmail(email),
       departments: access.departments,
-      permissions: access.permissions
+      permissions: access.permissions,
+      // '' for staff, the company name for a customer account. Read off the map
+      // rather than off `access` so the User Access pane can show and manage a scope
+      // that getEffectiveAccess has already turned into a permission set — the scope
+      // IS the raw grant, and it is the thing an admin edits.
+      customerOf: String(store.customers ? (store.customers[email] || '') : '')
     });
   });
   users.sort(function (a, b) { return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0); });
 
-  var store  = accessStore();
   // Member counts, so the Departments tab can show who a change would affect.
   var counts = {};
   Object.keys(store.memberships).forEach(function (e2) {
@@ -3904,6 +4002,178 @@ function listUsers(authEmail) {
   // the Departments tab has always shown them in.
 
   return { status: 'ok', users: users, departments: departments, apiVersion: CONFIG.API_VERSION };
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// THE CUSTOMER DOOR — onboarding, and the portal's own boot call
+// ──────────────────────────────────────────────────────────────────────────────
+// A customer account is an email address outside indrones.com, created by an admin
+// when a unit is handed over, and scoped to one COMPANY. See accessStore() for why the
+// scope lives in access.json and getEffectiveAccess() for what it turns into.
+//
+// Nothing here is a new door. The invitation deliberately reuses the ordinary
+// passwordless machinery the app already has, because every alternative is a second
+// copy of a tested security path: the account is created exactly as a staff account is
+// (createUserRow, mustChange='yes', no password anyone knows), and the invitation
+// carries a one-time sign-in code. So the only mail that ever reaches a customer is
+// mail Indrones chose to send, no password ever travels, and the first thing they do
+// is choose their own credentials. If the code has expired by the time they read the
+// mail, the portal's own "Forgot password" door is the same machinery again.
+
+// Where the portal lives. Built from CONFIG.APP_URL and nothing else — the same rule
+// irDeepLink follows, and for the same reason: a URL that arrives in a request body is
+// a URL an attacker chose, and this one goes into an email signed by Indrones.
+function customerPortalUrl() {
+  var base = String(CONFIG.APP_URL || '');
+  if (!base) return '';
+  return base.replace(/[^/]*$/, '') + 'customer.html';
+}
+
+// The portal's boot call: "who am I, and what am I scoped to". Available to any
+// signed-in account, because a staff member opening the portal should get a plain
+// answer rather than an error — they are told their scope is empty and sent on.
+function getMyCustomer(authEmail) {
+  var email   = usersKey(authEmail);
+  var company = customerCompany(email);
+  var u = null;
+  try { u = findUser(email); } catch (e) { u = null; }
+  return {
+    status:     'ok',
+    email:      email,
+    customerOf: company,
+    name:       u ? userField(u, 'name') : '',
+    portalUrl:  customerPortalUrl(),
+    apiVersion: CONFIG.API_VERSION
+  };
+}
+
+// POST inviteCustomer (admin) — onboard one customer: account, scope, invitation.
+//
+// THE SCOPE IS WRITTEN BEFORE THE ACCOUNT EXISTS, and that ordering is the whole
+// safety of this function. An account with no scope is not an unprivileged account —
+// it is an ordinary one, with view on every section and every ticket in the company
+// (see getEffectiveAccess). So there must never be an instant where the account exists
+// and the scope does not; writing the grant first makes the failure window the harmless
+// one, an email→company mapping with no account behind it, which grants nobody anything.
+// If the account creation then fails, the mapping is removed again.
+function inviteCustomer(params, authEmail) {
+  requireAdmin(authEmail);
+  var email   = usersKey(params.email);
+  var name    = (params.name || '').toString().trim();
+  var company = (params.company || '').toString().trim();
+
+  if (!validEmail(email)) return { status: 'error', message: 'Enter a valid email address.' };
+  if (isAdminEmail(email)) return { status: 'error', message: 'That address is already an admin.' };
+  if (findUser(email))     return { status: 'error', message: 'An account already exists for ' + email + '. Use "Set company" to give it a scope, or reset its password.' };
+  if (!company)            return { status: 'error', message: 'Choose the company this customer belongs to — it is what decides which tickets they can see.' };
+
+  // 1. The scope, first. See the note above.
+  withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json');
+    if (!store || typeof store !== 'object') store = {};
+    if (!store.customers || typeof store.customers !== 'object') store.customers = {};
+    store.customers[email] = company;
+    writeJsonLocked('access.json', store);
+  });
+
+  // 2. The account. createUserRow takes its own lock, so this is a second, sequential
+  //    one rather than a nested one.
+  try {
+    createUserRow(email, name, authEmail);
+  } catch (err) {
+    withRowLockOrThrow(function () {
+      var store = readJsonLocked('access.json');
+      if (store && store.customers) { delete store.customers[email]; writeJsonLocked('access.json', store); }
+    });
+    return { status: 'error', message: 'Could not create the account: ' + ((err && err.message) || 'unknown error') };
+  }
+
+  // 3. The invitation. NO CODE RIDES IN THIS EMAIL, and that is a correction, not an
+  //    omission.
+  //
+  //    The obvious thing to put here is a one-time code, and that is what the first
+  //    version of this function did: it issued a 'login' code and told the customer to
+  //    sign in with it. That invitation could not work. createUserRow leaves the new
+  //    account on an admin-issued temporary password, and passwordlessLogin REFUSES to
+  //    redeem a login code for such an account — "This account starts with its
+  //    admin-issued password once" — so the code in that email was dead on arrival. The
+  //    same mail also promised a "choose your own password" step that nothing offered,
+  //    because the temporary password it would have been typed against was never in the
+  //    email either. Two wrong sentences and a dead credential.
+  //
+  //    What actually works needs no new machinery at all: the account is already
+  //    eligible for the ORDINARY reset door. forgotPassword issues a 'reset' code for
+  //    any active account, and resetPassword redeems it, sets the customer's own
+  //    password, and clears the temp-password flag in the same act. That is precisely
+  //    "they generate their own credentials" — and it retires the admin-issued password
+  //    by using it for nothing. The customer asks for that code ON DEMAND from the
+  //    portal, sitting in front of the screen, so it keeps its fifteen-minute life
+  //    instead of ageing in an inbox.
+  //
+  //    So the email's job is only to say where to go and what to press. `mailed:false` is
+  //    reported in words, never as a failed onboarding — the account and its scope are
+  //    real and usable either way, and the admin can walk the customer through it.
+  var link = customerPortalUrl();
+  var body = [
+    'Hello' + (name ? ' ' + name : '') + ',',
+    '',
+    'Your ' + company + ' fleet has been set up on the Indrones Customer Space.',
+    'From here you can raise a request against any of your aircraft, follow what we are',
+    'doing about it, and read the record of every service we have carried out for you.',
+    '',
+    link ? 'Open your customer space: ' + link : 'Open the Indrones Customer Space.',
+    'Your email address is ' + email + ' — that is the one to sign in with.',
+    '',
+    'To choose your password, press "First time here?" on that page and enter this email',
+    'address. We will send you a code; enter it together with the password you want.',
+    'Nobody at Indrones sets that password, and nobody here can read it.',
+    '',
+    'After that you can sign in either way — with that password, or by asking for a code',
+    'each morning and never having to remember one.',
+    '',
+    'If you did not expect this, tell us and we will remove the account.',
+    '',
+    'Indrones Service Desk'
+  ];
+
+  var mailed = sendAuthMail(email, 'Your Indrones Customer Space account', body.join('\n'));
+  return {
+    status: 'ok', email: email, company: company, mailed: !!mailed,
+    message: 'Account created for ' + email + ', scoped to ' + company + '. ' +
+             (mailed ? 'The invitation has been emailed.' : 'The invitation email could NOT be sent — give the customer the portal link and this email address, and have them press "First time here?".')
+  };
+}
+
+// POST setCustomerCompany (admin) — change, or clear, one account's scope.
+//
+// CLEARING IS REFUSED FOR AN OUTSIDE ADDRESS, and this is the point of the function
+// rather than a nicety. "No company" does not mean "no access" — it means an ordinary
+// account, which sees everything. So removing the scope from a customer's address would
+// silently PROMOTE them. An admin who wants a customer gone disables the account, which
+// is what they actually mean.
+function setCustomerCompany(params, authEmail) {
+  requireAdmin(authEmail);
+  var email   = usersKey(params.email);
+  var company = (params.company || '').toString().trim();
+  if (!email)  return { status: 'error', message: 'Which account?' };
+  if (!findUser(email) && !isAdminEmail(email)) return { status: 'error', message: 'No account found for ' + email + '.' };
+  if (isAdminEmail(email)) return { status: 'error', message: 'An admin is never scoped to a company.' };
+
+  var onDomain = email.indexOf('@' + CONFIG.ALLOWED_DOMAIN) === (email.length - ('@' + CONFIG.ALLOWED_DOMAIN).length);
+  if (!company && !onDomain) {
+    return { status: 'error', message: 'Clearing the scope would give ' + email + ' access to every ticket. Disable the account instead, or set a different company.' };
+  }
+
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('access.json');
+    if (!store || typeof store !== 'object') store = {};
+    if (!store.customers || typeof store.customers !== 'object') store.customers = {};
+    if (company) store.customers[email] = company;
+    else         delete store.customers[email];
+    writeJsonLocked('access.json', store);
+    return { status: 'ok', email: email, company: company,
+             message: company ? email + ' now sees ' + company + ' tickets.' : email + ' is no longer scoped to a company.' };
+  });
 }
 
 // POST createUser (admin) — one account + a one-time temporary password.
@@ -4223,7 +4493,28 @@ function purgeUsers(params, authEmail) {
 //    travels, as an ordinary grid cell, but the frontend no longer reads it as a
 //    stage at all: since 2026-10-03 every ticket starts Open and the first stage a
 //    ticket holds is one a person allotted. Col D is kept as `initialStatus`.
-function listIRs() {
+//
+// 3. A CUSTOMER'S LIST IS NARROWED HERE, ON THE SERVER. This is the one read that
+//    hands out every customer's name, email and phone, so filtering it in the
+//    browser would still have posted all of it to their machine. The scope is read
+//    from access.json — one memoised read, and the only store this action touches;
+//    the "reads no store" rule below is about `__IRS__`, and this does not weaken it.
+function listIRs(authEmail) {
+  var grid = intakeGrid();
+
+  // Deliberately NOT wrapped in try/catch. customerCompany() throws on a malformed
+  // access.json, and for THIS action that throw is the correct answer: the choice is
+  // between an error and possibly handing an outsider every row in the repository,
+  // and only one of those is recoverable.
+  var company = customerCompany(authEmail);
+  if (!company) return { status: 'ok', grid: grid };
+  return { status: 'ok', grid: filterGridToCompany(grid, company) };
+}
+
+// The intake sheet as a grid, exactly as the sheet DISPLAYS it. One place, because
+// three actions now read it and a second copy of "open, find the tab, get the range"
+// is a second place for a bounds bug.
+function intakeGrid() {
   var ss  = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID);
   var tab = ss.getSheetByName(CONFIG.IR_REPO_TAB);
   if (!tab) throw new Error('Tab "' + CONFIG.IR_REPO_TAB + '" not found in IR Repository.');
@@ -4232,7 +4523,7 @@ function listIRs() {
   var lastCol = tab.getLastColumn();
   // An empty or header-only sheet is a real state, not an error: it must answer
   // "no records" rather than throw, or a fresh install can never load its list.
-  if (lastRow < 1 || lastCol < 1) return { status: 'ok', grid: [] };
+  if (lastRow < 1 || lastCol < 1) return [];
 
   // getDisplayValues, not getValues. The mapper on the other end is written against
   // the strings a CSV carries — that is what the client typed, and what the sheet
@@ -4240,7 +4531,101 @@ function listIRs() {
   // arrive through JSON in a different shape entirely and would make a date column
   // read as unparseable. This is the half that makes the grid a faithful stand-in
   // for the CSV it replaces.
-  return { status: 'ok', grid: tab.getRange(1, 1, lastRow, lastCol).getDisplayValues() };
+  return tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+}
+
+// Which column of the intake header row holds the IR number. Substring, never a
+// letter, for the same reason companyColumnIndex below is: the form's questions have
+// been reworded before. -1 when it cannot tell, and every caller then treats that as
+// "owns nothing" rather than "owns everything".
+function irNumberColumnIndex(headerRow) {
+  var header = (headerRow || []).map(function (h) { return String(h == null ? '' : h).toLowerCase(); });
+  for (var c = 0; c < header.length; c++) {
+    if (header[c].indexOf('ir number') > -1) return c;
+  }
+  return -1;
+}
+
+// An IR number as a KEY, not as it is spelled. The Sheet's IR Number column is free
+// text a human types, and both "IR 483" and "IR483" are the same ticket — app.js's
+// IR_NUMBER_RE accepts both on purpose. Matching on the raw string would let a
+// customer be denied their own ticket because of one stray space, and would let a
+// scope check silently miss. Normalising can only ever match MORE of a company's own
+// rows; it is applied after the company filter, never before it.
+function irKey(v) {
+  return String(v == null ? '' : v).toUpperCase().replace(/\s+/g, '');
+}
+
+// The IR numbers the intake sheet attributes to `company` — this customer's own
+// tickets, as a lookup map. Reads the intake grid once.
+//
+// EMPTY WHEN IT CANNOT TELL. If the company column or the IR number column cannot be
+// found by header substring, this returns {}, so a customer sees no tickets at all.
+// That is the deliberate direction: a customer seeing an empty list is a support
+// call, and a customer seeing somebody else's fleet is a breach.
+function customerIRS(company) {
+  var grid = intakeGrid();
+  if (!grid || grid.length < 1) return {};
+  var col = companyColumnIndex(grid[0]);
+  if (col < 0) return {};
+  var irCol = irNumberColumnIndex(grid[0]);
+  if (irCol < 0) return {};
+
+  var own = {};
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    if (!sameCompany(row[col], company)) continue;
+    var k = irKey(row[irCol]);
+    if (k) own[k] = true;
+  }
+  return own;
+}
+
+// Does this one ticket belong to this customer? Used by getPassbook, which is handed
+// an IR number and cannot assume the frontend only offers it legitimate ones — the
+// list is narrowed server-side precisely because the client is not trusted.
+function customerOwnsIR(company, irNumber) {
+  var k = irKey(irNumber);
+  if (!k) return false;
+  return customerIRS(company)[k] === true;
+}
+
+// Which column of the intake header row names the customer's company.
+//
+// BY SUBSTRING, never by letter. The form's questions have been reworded before and
+// a fixed column index would then silently point at the wrong field — and a wrong
+// column here does not produce a wrong number, it produces the WRONG CUSTOMER'S
+// TICKETS. The needle is the same one mapSheetRows uses in app.js ('Where Do You
+// Work'), so the two agree on which column company lives in; the extra candidates
+// are the spellings a reworded form would plausibly use.
+//
+// Returns -1 when it cannot tell. The caller then returns NO ROWS rather than all of
+// them — see filterGridToCompany.
+function companyColumnIndex(headerRow) {
+  var needles = ['where do you work', 'company name', 'company', 'organisation', 'organization'];
+  var header = (headerRow || []).map(function (h) { return String(h == null ? '' : h).toLowerCase(); });
+  for (var n = 0; n < needles.length; n++) {
+    for (var c = 0; c < header.length; c++) {
+      if (header[c].indexOf(needles[n]) > -1) return c;
+    }
+  }
+  return -1;
+}
+
+// Keep the header row, keep only the rows belonging to `company`, and give up
+// entirely if the company column cannot be found. Rows arrive as display strings
+// exactly as the sheet shows them, so both sides of the comparison are normalised
+// by sameCompany().
+function filterGridToCompany(grid, company) {
+  if (!grid || grid.length < 1) return [];
+  var col = companyColumnIndex(grid[0]);
+  if (col < 0) return [];                 // cannot tell → withhold everything
+  var out = [grid[0]];
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    if (sameCompany(row[col], company)) out.push(row);
+  }
+  return out;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -4306,6 +4691,31 @@ function getPassbook(irNumber, authEmail) {
 
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__ app stores
 
+  // A CUSTOMER'S READ IS NARROWED HERE. Two different jobs, and both are needed.
+  //
+  // First the ticket: a customer opening a real IR must be holding one of their own.
+  // The list is filtered server-side (listIRs), but this action is reachable directly
+  // with any IR number, so the check has to exist on this side too — otherwise the
+  // narrowing on the list is decoration. Out of scope THROWS rather than returning
+  // empty: an empty answer is indistinguishable from a ticket that exists and has no
+  // content yet, and the customer should be told plainly that it is not theirs.
+  //
+  // Second the sentinels, which bypass the section filter below entirely (`isSentinel`
+  // short-circuits it). Left alone, `__CONFIG__` would hand this outsider the staff
+  // team directory and the flight-log limits, and `__NUDGES__` every internal comment
+  // on every ticket in the company. So the sentinel arm is reduced to what the portal
+  // legitimately needs and nothing else — their own tickets' state, and the theme.
+  var company = access.customerOf || '';
+  var customerIRs = null;
+  if (company) {
+    if (!isSentinel) {
+      if (!customerOwnsIR(company, irNumber))
+        throw new Error('Forbidden: ' + irNumber + ' is not one of your tickets.');
+    } else {
+      customerIRs = customerIRS(company);
+    }
+  }
+
   // UNLOCKED read, deliberately. The frontend polls a store every 90 s per user, so
   // locking reads would put ~800 requests an hour in front of one lock, and a
   // slightly stale snapshot is already what today's version returns.
@@ -4314,6 +4724,8 @@ function getPassbook(irNumber, authEmail) {
     var storeFile = sentinelStoreFile(irNumber);
     if (!storeFile) throw new Error('Unknown app store: ' + irNumber);
     stored = readJson(storeFile) || {};
+
+    if (company) stored = narrowSentinelForCustomer(irNumber, stored, customerIRs);
   } else if (/^IR\d+$/.test(String(irNumber))) {
     stored = readIR(irNumber, false).data;
   } else {
@@ -4341,6 +4753,47 @@ function getPassbook(irNumber, authEmail) {
   });
 
   return { status: 'ok', sections: sections };
+}
+
+// Reduce a sentinel app store to what a CUSTOMER may see. Returns a new object; never
+// mutates the one readJson handed over, which is memoised and shared for the rest of
+// this execution and would otherwise leak the reduction into every later caller.
+//
+// This is an ALLOWLIST, deliberately, not a blacklist of things to remove. A new key
+// added to a store later — a new internal note field on a ticket, a new config
+// namespace — is invisible to a customer by default and has to be admitted on purpose.
+// A blacklist would leak it silently, and nothing in the codebase would look wrong.
+function narrowSentinelForCustomer(irNumber, stored, ownIRs) {
+  var src = (stored && typeof stored === 'object') ? stored : {};
+
+  // Their own tickets' workflow state, and only the three facts the portal shows.
+  if (String(irNumber) === '__IRS__') {
+    var out = {};
+    Object.keys(src).forEach(function (key) {
+      if (!ownIRs || ownIRs[irKey(key)] !== true) return;
+      var rec = src[key];
+      if (!rec || typeof rec !== 'object') return;
+      var one = {};
+      // The stage the desk has set, who is carrying it, and when it last moved.
+      if (rec.status   != null) one.status   = rec.status;
+      if (rec.assignee != null) one.assignee = rec.assignee;
+      if (rec.updatedAt!= null) one.updatedAt= rec.updatedAt;
+      out[key] = one;
+    });
+    return out;
+  }
+
+  // The theme, and nothing else. `__CONFIG__` also carries the staff team directory,
+  // the inward/dropdown options, the IQC zones and the flight-log limits — every one
+  // of them internal, and the log limits are the ones the owner asked to keep in the
+  // machine and out of the repo entirely.
+  if (String(irNumber) === '__CONFIG__') {
+    return { theme: src.theme };
+  }
+
+  // Internal comment threads, and the knowledge base. Both are staff surfaces; the
+  // portal's own input channel is the two Google Forms, by the owner's decision.
+  return {};
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -4391,6 +4844,14 @@ function saveSection(irNumber, sectionId, fields, files, savedBy, mode) {
   var isAutoSave = String(mode || '') === 'auto';
 
   var access = getEffectiveAccess(savedBy);
+  // READ-ONLY, and refused before anything else happens. A customer's channel into
+  // Indrones is the two Google Forms, by the owner's decision — not this endpoint. Two
+  // things make this check load-bearing rather than tidy: the section-permission test
+  // further down is bypassed entirely for a sentinel irNumber, so without this a
+  // customer could rewrite `__IRS__` and restage every ticket in the company; and
+  // `savedBy` is the caller's own session email, so it is a real gate rather than a
+  // label. Writing for customers is a decision to take later, not an oversight here.
+  refuseCustomer(access, 'saving records');
   var isSentinel = String(irNumber).indexOf('__') === 0; // __NUDGES__ / __CONFIG__
   // Real sections require EDIT permission (admins bypass). This is the check that
   // makes "everyone can view" not become "everyone can write" — the frontend
@@ -4879,6 +5340,11 @@ function sendNudgeEmail(params, authEmail) {
   // No comment gate: comment comes WITH view, so every signed-in user may post one.
   // (Kept as a call to canComment so the seam survives if that ever changes.)
   var access = getEffectiveAccess(authEmail);
+  // A customer does not get the internal comment thread, in either direction. Reading
+  // it is refused in getPassbook; writing into it is refused here, because otherwise
+  // the customer could put a message in front of staff while still being unable to see
+  // the replies. Their channel into Indrones stays the two Google Forms.
+  refuseCustomer(access, 'the comment thread');
   var allowed = access.role === 'admin';
   if (!allowed) {
     if (sectionId) allowed = canComment(access.permissions, sectionId);
@@ -5155,8 +5621,11 @@ function auditEntryFromLine(l, irNumber) {
   };
 }
 
-function getAuditLog(irNumber, limit, fieldId) {
+function getAuditLog(irNumber, limit, fieldId, authEmail) {
   if (!irNumber) throw new Error('irNumber is required.');
+  // The audit trail names staff and records who changed what, and it takes a bare IR
+  // number on trust — there is no per-record check to inherit. Refused outright.
+  refuseCustomer(getEffectiveAccess(authEmail), 'the audit trail');
   var wantField = (fieldId == null) ? '' : String(fieldId);
   var lines = readAuditLines(auditSubjectFor(irNumber, irNumber));
   var entries = [];
@@ -5207,7 +5676,11 @@ function getAuditLog(irNumber, limit, fieldId) {
 // it as a link — not a frame. It opens only for a Google account that has been
 // granted access to the file.
 // ──────────────────────────────────────────────────────────────────────────────
-function listLegacyIRs() {
+function listLegacyIRs(authEmail) {
+  // The legacy workbook is the pre-IR history of every customer at once, with no
+  // per-company boundary anywhere in it to filter on — the tabs are labelled by IR
+  // number and nothing else. So the only safe answer for a customer is no.
+  refuseCustomer(getEffectiveAccess(authEmail), 'legacy records');
   var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
   var sheets = ss.getSheets();
   var sheetId = CONFIG.LEGACY_SHEET_ID;
@@ -5248,7 +5721,8 @@ function listLegacyIRs() {
 // strings the sheet shows are what a person expects to read, and a Date object
 // through JSON arrives in a shape the renderer would have to guess at.
 // ──────────────────────────────────────────────────────────────────────────────
-function getLegacyIR(irNumber) {
+function getLegacyIR(irNumber, authEmail) {
+  refuseCustomer(getEffectiveAccess(authEmail), 'legacy records');
   var target = String(irNumber == null ? '' : irNumber).trim();
   var digits = target.replace(/^IR\s*/i, '');
   if (!/^\d+$/.test(digits)) throw new Error('getLegacyIR needs an IR number (got "' + target + '").');

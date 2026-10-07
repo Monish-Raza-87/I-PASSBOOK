@@ -71,8 +71,8 @@ r.head('the owner\'s security decisions');
 // is otherwise invisible — the page would ask for an action the deployment does not
 // have. `ping` answering `apiVersion 6` is how you know the paste landed. See
 // tools/smoke-backup-pulse.mjs.
-r.ok('API_VERSION is 7 — Phase 1\'s safety net, Phase 0\'s actions, the backup pulse, and the analyser limits',
-  /API_VERSION:\s*7\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 8 — customer accounts, and the scoped reads they forced',
+  /API_VERSION:\s*8\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -181,9 +181,17 @@ r.ok('doPost and doGet both exist', doPostAt > 0 && doGetAt > 0, { doPostAt, doG
 r.head('the new actions are dispatched');
 // Scoped to the two dispatchers, so a name that merely appears elsewhere in the
 // file cannot satisfy this. Keys are unquoted identifiers (`login: function…`).
-const dispatchers = [code.slice(doPostAt, doPostAt + 2600), code.slice(doGetAt, doGetAt + 2600)].join('\n');
+//
+// The window is a byte count, not "up to the closing brace", so it is a number that
+// has to grow when the maps do. It went 2600 → 4200 in v8: `inviteCustomer` and
+// `setCustomerCompany` pushed `deviceRevoke`, the last entry, past the old end — and
+// the failure it produced was "deviceRevoke is absent", which reads like the entry had
+// been deleted rather than like the window had moved. If a name reports absent again,
+// check this number before you go looking for a missing line.
+const dispatchers = [code.slice(doPostAt, doPostAt + 4200), code.slice(doGetAt, doGetAt + 4200)].join('\n');
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
- 'resetPassword', 'getMyAccess', 'listUsers', 'createUser', 'bulkCreateUsers',
+ 'resetPassword', 'getMyAccess', 'getMyCustomer', 'listUsers', 'createUser',
+ 'bulkCreateUsers', 'inviteCustomer', 'setCustomerCompany',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
  'setUserDepartments', 'purgeUsers', 'googleExchange', 'deviceUnlock',
  'deviceRegister', 'deviceRevoke']
@@ -747,7 +755,8 @@ r.ok('requireAuth documents the throw rather than swallowing it',
   (src.match(/[^\n]*THROWS[^\n]*/) || [''])[0]);
 
 r.head('user provisioning is admin-only');
-['createUser', 'bulkCreateUsers', 'resetUserPassword', 'setUserStatus',
+['createUser', 'bulkCreateUsers', 'inviteCustomer', 'setCustomerCompany',
+ 'resetUserPassword', 'setUserStatus',
  'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers', 'listUsers']
   .forEach(fn => {
     const body = fnBody(fn);
@@ -858,6 +867,7 @@ const LOCKED = ['saveSection', 'mintSession', 'doLogout', 'revokeAllSessions', '
   'recordFailedLogin', 'clearFailedLogin', 'changePassword', 'resetPassword',
   'issueAuthCode', 'verifyAuthCode',
   'createUserRow', 'resetUserPassword', 'setUserStatus',
+  'inviteCustomer', 'setCustomerCompany',
   'saveDepartment', 'deleteDepartment', 'setUserDepartments', 'purgeUsers',
   'seedDepartments', 'seedMemberships', 'maintenancePruneAuditLog',
   'restoreField', 'appendAdminNotice',
@@ -987,7 +997,7 @@ r.head('the positional column layout is really gone, not adapted');
 // with no route, so the public surface is unchanged.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
 r.ok('SpreadsheetApp is used exactly five times', ssSites.length === 5, ssSites.length);
-const ssAllowed = ['listIRs', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
+const ssAllowed = ['intakeGrid', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
                    'exportStoreToFolder'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
@@ -1150,18 +1160,61 @@ r.ok('and it never writes the sibling keys away',
 r.ok('listIRs injects no status — the app store is the only owner of the workflow',
   !/getAllIRStatuses|statusMap|irs\.json/.test(fnBody('listIRs')),
   (fnBody('listIRs').match(/[^\n]*(statusMap|irs\.json)[^\n]*/) || ['none — correct'])[0]);
-r.ok('and it reads no store at all, so there is nothing for it to disagree with',
-  !/readJson\(/.test(fnBody('listIRs')),
-  (fnBody('listIRs').match(/[^\n]*readJson[^\n]*/) || ['none — correct'])[0]);
+// Since v8 it reads exactly ONE store, and the test names it rather than the count:
+// the customer scope, through accessStore(). That is a GRANT, not ticket state, so it
+// cannot disagree with the sheet about anything — the rule above is about `__IRS__`.
+// Nothing else may creep in: a second store read here would be the split-brain back.
+r.ok('and the only store it touches is the access scope',
+  /customerCompany\(/.test(fnBody('listIRs')) &&
+  !/readJson\(|readIR\(|readJsonLocked\(/.test(fnBody('listIRs')),
+  (fnBody('listIRs').match(/[^\n]*(readJson|readIR)[^\n]*/) || ['none — only customerCompany'])[0]);
 // It hands over the sheet AS DISPLAYED, so the frontend's one mapper can consume
 // it unchanged. getValues() would hand back Date objects, which JSON-serialise into
 // a shape the mapper cannot read, and a date column would arrive unparseable.
+// The range read itself moved into intakeGrid() in v8, when a third caller appeared;
+// the property being asserted is unchanged and both halves are checked.
 r.ok('listIRs returns the sheet as a displayed grid, which is what the mapper eats',
-  /getDisplayValues\(\)/.test(fnBody('listIRs')) && /\bgrid\b/.test(fnBody('listIRs')),
-  (fnBody('listIRs').match(/[^\n]*getRange\([^\n]*/) || [''])[0]);
+  /\bgrid\b/.test(fnBody('listIRs')) && /getDisplayValues\(\)/.test(fnBody('intakeGrid')),
+  (fnBody('listIRs').match(/[^\n]*grid[^\n]*/) || [''])[0]);
 r.ok('and it uses getDisplayValues, never getValues',
-  !/getValues\(\)/.test(fnBody('listIRs')),
-  (fnBody('listIRs').match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
+  !/getValues\(\)/.test(fnBody('intakeGrid')),
+  (fnBody('intakeGrid').match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
+// A customer's list is narrowed on the SERVER. Filtering it in the browser would
+// still have posted every other customer's name, email and phone to their machine.
+r.ok('listIRs filters a customer\'s rows before they leave the server',
+  /filterGridToCompany\(/.test(fnBody('listIRs')) &&
+  /sameCompany\(/.test(fnBody('filterGridToCompany')) &&
+  /return \[\];/.test(fnBody('filterGridToCompany')));
+r.ok('and it fails CLOSED — an unreadable scope throws rather than sending everything',
+  !/try\s*\{[\s\S]{0,200}?customerCompany/.test(fnBody('listIRs')));
+
+// ─── the doors with no per-record ACL ────────────────────────────────────────
+// Narrowing a customer's LIST is not enough on its own. These five endpoints do not
+// consult a per-record permission at all: the audit log, the two legacy reads and the
+// comment relay trust the caller's token for whatever IR number they are handed, and
+// `saveSection` writes to whatever number it is given. A scoped list would be a
+// decoration if a customer could then name any ticket directly — so `refuseCustomer`
+// is the WHOLE control on each of them, and it is asserted per function rather than in
+// the aggregate. A single call site removed by a later refactor is the failure this
+// test exists to catch, and an aggregate check would still pass with one missing.
+const NO_ACL = ['saveSection', 'sendNudgeEmail', 'getAuditLog', 'listLegacyIRs', 'getLegacyIR'];
+NO_ACL.forEach(fn => {
+  r.ok(fn + ' refuses a customer outright',
+    /refuseCustomer\(/.test(fnBody(fn)),
+    (fnBody(fn).match(/[^\n]*refuseCustomer[^\n]*/) || ['NOT PRESENT — a customer reaches this'])[0]);
+});
+// And the refusal itself is by ROLE, not by a permission level. `role` is the field
+// getEffectiveAccess sets for exactly this purpose; a check against a section key
+// would be the wrong axis and would read as "no edit rights" rather than "not staff".
+r.ok('the refusal is by role, and it throws rather than returning a soft envelope',
+  /function refuseCustomer\(access, what\) \{\s*\n\s*if \(access && access\.role === 'customer'\)\s*\n\s*throw/.test(code),
+  (fnBody('refuseCustomer').match(/[^\n]*role[^\n]*/) || [''])[0]);
+// The list above has to stay exhaustive. If a new no-ACL endpoint appears and is not
+// named here, nothing fails — so the count of call sites is pinned and a sixth one
+// forces this test to be looked at rather than silently skipped.
+r.ok('every refuseCustomer call site is one of the five named above, and there are exactly five',
+  (code.match(/refuseCustomer\(/g) || []).length === NO_ACL.length + 1,
+  'call sites (incl. the definition): ' + (code.match(/refuseCustomer\(/g) || []).length);
 
 r.head('readJson: null only for an absent file, and it throws otherwise');
 // The tempting version of this helper answers {} for an unreadable file, and that

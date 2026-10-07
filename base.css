@@ -277,7 +277,7 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 }
 
 /* ══════════════════════════════════════════════════════════
-   AUTH SCREEN + FIRST-LOGIN PASSWORD CHANGE
+   THE LANDING PAGE (TWO DOORS) + FIRST-LOGIN PASSWORD CHANGE
    ══════════════════════════════════════════════════════════ */
 #auth-container {
   display: none;
@@ -297,6 +297,77 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   padding: 1.75rem;
   width: 100%;
   max-width: 400px;
+}
+
+/* ── The landing page: two doors on one link ────────────────────
+   One address serves both audiences, so the sign-in screen is a LANDING page with
+   two cards on it rather than one card with a link beside it — and each card says
+   which audience it is for before it shows a single control. `auto-fit` gives a
+   phone one column and a desktop two with no media query, so the two arrangements
+   cannot drift apart. */
+.doors {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+  width: 100%;
+  max-width: 860px;
+  align-items: stretch;
+}
+
+/* A door IS a glass card (`<section class="door glass-card">`), so the Desk skin's
+   `#auth-container .glass-card` rule dresses both without a second rule — and this
+   one only has to undo the card's own single-card width. */
+.door {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  min-width: 0;
+  max-width: none;
+}
+/* The head's own bottom margin predates the flex gap; leaving both would double the
+   one gap that was already approved on the sign-in card. 0.9 + 0.6 = the 1.5rem it
+   always had, so the employee card is unchanged and the customer card gets the same
+   rhythm between its own blocks. */
+.door .auth-head { margin-bottom: 0.6rem; }
+
+/* "Which of these two am I?" is the only question this screen has to answer, so the
+   answer is a chip and it is FIRST on the card. */
+.door-role {
+  align-self: center;
+  margin: 0;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: 999px;
+  background: var(--surface-alpha-gray-2);
+  color: var(--ink-gray-7);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+/* What is behind the customer door, said without opening it. Bullets from tokens,
+   never a glyph, so the marker inherits the accent like everything else. */
+.door-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-gray-6);
+  font-size: var(--text-sm);
+}
+.door-list li { position: relative; padding-left: 1.1rem; }
+.door-list li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.5em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* ── Auth / password-change internals ──────────────────────── */

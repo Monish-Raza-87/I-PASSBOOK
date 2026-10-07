@@ -201,6 +201,28 @@ Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and
 light mode before, and `--surface-alpha-*` is the replacement where layering is
 genuinely needed.
 
+### The landing page (`.doors`, `.door`, `.door-role`)
+The sign-in screen is a **grid of two cards**, not one card with a link: an
+`Employee` card carrying the unchanged `#auth-form`, and a `Customer` card that opens
+`customer.html`. `repeat(auto-fit, minmax(280px, 1fr))` gives a phone one column and a
+desktop two **with no media query**, so the two arrangements cannot drift apart —
+and at 320px the two cards measure 288px wide inside the page's 16px gutter, with the
+document's `scrollWidth` still exactly 320. Each card is `<section class="door
+glass-card">`, so the Desk skin's `#auth-container .glass-card` rule dresses both and
+there is no second place for either card's shape to drift from. `.door` sets
+`max-width: none` (the card's own rule caps it at 400px for a single card) and
+`.door .auth-head { margin-bottom: 0.6rem }`, chosen so the flex `gap` plus that margin
+comes to the 1.5rem the single-card screen always had — the employee card is
+byte-for-byte the same screen it was. See
+[10 — Auth & Access Model](10 - Auth & Access Model.md#one-link-two-doors) for why the
+customer half is a link-out rather than a second copy of that page's sign-in.
+
+Nothing about this screen can be measured through `index.html` itself: over `file://`
+app.js fires a blocking `alert()` and the renderer stops answering CDP calls, so
+`tools/render-check.mjs` hangs with no output at all. `tools/render-fixture.mjs` cuts
+the `#auth-container` block out of `index.html` between two named ids and writes it to
+`%TEMP%/ipassbook-render/landing.html`; that is the page to measure and to photograph.
+
 ### Ticket list (`#index-view`)
 `.list-toolbar` (title, count, search, filter segments) over `.ir-list`. Rows are
 `.ir-card` — flat with dividers rather than floating cards, which holds up better

@@ -5,6 +5,44 @@ once they are in. Everything here is the owner's decision, made deliberately, an
 several of the choices invert what the app did before — where that is true, the
 old behaviour is named so a future session does not "fix" it back.
 
+## One link, two doors
+
+**There is one address.** `https://monish-raza-87.github.io/I-PASSBOOK/` is what the
+owner hands to everybody, and it is the landing page for both audiences at once: the
+sign-in screen is a grid of **two cards**, chipped **Employee** and **Customer**, side
+by side on a desktop and stacked on a phone. The owner's ask was that *"both portals are
+linked/accessed via same link"*, with *"clear identification"* of which is which — and
+the chip is the whole of that identification, which is why it is the **first thing on
+each card, above every control**.
+
+`#auth-container` holds a `.doors` grid of two `<section class="door glass-card">`
+elements:
+
+| | Employee (`#door-employee`) | Customer (`#door-customer`) |
+|---|---|---|
+| Holds | the one `#auth-form`, unchanged | a description and one **link** |
+| Primary control | the sign-in form | `<a id="customer-space-open" href="customer.html">` |
+| Update banner | yes — it reports the *app's* build | no — a customer never runs the app |
+| "Report a problem" / "Help & FAQ" | no | yes |
+
+**The customer card opens the door; it does not copy it.** That is the one judgment
+call on this screen and it is deliberate. `customer.html` already exists, is built and
+is tested, reads that company's tickets narrowed **on the server**, and keeps its own
+`ipbc_` storage keys so a customer session can never be inherited by, or inherit, a
+staff one on a shared machine. Re-implementing its sign-in here would be a second
+implementation of one door, free to drift from the first, and it would put the
+customer's session key under a second writer. So the card is a **link-out with a
+description** — and it is not a stub: the two `.door-list` bullets say what is behind
+it and that there is no public sign-up.
+
+`tools/smoke-shell.mjs` pins all of it: two `.door` sections, each headed by its own
+`.door-role` chip as its first child, exactly one `#auth-form` (on the employee card),
+no `<form>` at all on the customer card, the customer card's control being an `<a href>`
+rather than a button, and the grid reflowing to one column with no media query. The
+employee card is not worse off for the company it keeps: `.door .auth-head` is set to
+`0.6rem` precisely so that the flex `gap` plus that margin equals the `1.5rem` the
+single-card screen always had.
+
 ## The funnel, in two steps
 
 **Admin, once per person:** User Access → add the email → tick their departments →

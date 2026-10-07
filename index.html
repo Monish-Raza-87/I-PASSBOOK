@@ -161,122 +161,174 @@
     </div>
   </div>
 
-  <!-- ========== AUTH SCREEN ========== -->
-  <!-- No sign-up and no captcha: every account is provisioned by the admin, so
-       the only things this form does are sign in and recover a password. The
-       three modes share the one form (Enter submits whichever is showing). -->
+  <!-- ========== THE LANDING PAGE: TWO DOORS ==========
+       ONE address for two audiences. Until now this screen was the service desk's
+       sign-in card and nothing else — a customer had a page of their own at
+       customer.html, and the only thing here that pointed at it was one link at the
+       foot of the card. Both now arrive at the SAME link, which is what the owner
+       asked for, and an employee is no line worse off for it.
+
+       Two rules hold the pair together, and neither is cosmetic:
+         · THE TWO CARDS ARE THE SAME CARD — same .glass-card, same .auth-head,
+           same .door-role. The Desk skin in desk.css targets `#auth-container
+           .glass-card`, so it dresses both with no second rule, and there is no
+           second place for either card's shape to drift from.
+         · THE ROLE CHIP IS INSIDE THE CARD AND FIRST ON IT, because "which of
+           these two am I?" is now the only question this screen has to answer.
+       No sign-up and no captcha, on either side: every account is provisioned by an
+       admin, so the employee card only signs in and recovers a password. -->
   <div id="auth-container">
-    <div class="glass-card animate-slide-up">
-      <!-- Update notice, sign-in slot. See the twin in #workspace for the whole
-           story; the short version is that a device sitting on this screen is
-           exactly the device that needs to hear about a new build, and it never
-           reaches the app's own shell. -->
-      <div class="update-banner" id="update-banner-auth" style="display:none"></div>
-      <div class="auth-head">
-        <!-- alt="" on purpose: the brand name is the next line down, so this is
-             the same information twice and the text is the accessible copy. -->
-        <!-- The borderless mark, not the square icon: on a card this size the
-             baked-in light background of the OS icon reads as a tile sitting on
-             the page. Same artwork, background keyed out (tools/make-icons.ps1). -->
-        <img class="auth-logo" src="assets/icon-mark.png" alt="" />
-        <div class="auth-brand" data-i18n="app.name">I-PASSBOOK</div>
-        <p class="auth-full" data-i18n="app.fullName">Indrones Product After-Sales Summary Book</p>
-        <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">Sign in with the credentials your admin gave you.</p>
-      </div>
-      <form id="auth-form" autocomplete="on">
-        <!-- QUICK UNLOCK: shown only when this device holds a registered token
-             (ipb_unlock). The fingerprint runs the platform's own biometric
-             prompt; the pattern is the registered fallback. "Use email code
-             instead" is always one tap away — a quick unlock that cannot be
-             left is a lock nobody signs around. -->
-        <div id="auth-quick" style="display:none">
-          <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
-          <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
-          <button type="button" id="auth-quick-out" class="link-btn">Use email code instead</button>
+    <div class="doors">
+
+      <!-- ── THE EMPLOYEE DOOR ──
+           The form that was here before this screen had two doors, unchanged: the
+           three modes still share the one form and Enter still submits whichever is
+           showing. -->
+      <section class="door glass-card animate-slide-up" id="door-employee" aria-labelledby="door-employee-role">
+        <p class="door-role" id="door-employee-role" data-i18n="door.employee">Employee</p>
+        <!-- Update notice, sign-in slot. See the twin in #workspace for the whole
+             story; the short version is that a device sitting on this screen is
+             exactly the device that needs to hear about a new build, and it never
+             reaches the app's own shell. It sits on the EMPLOYEE card deliberately:
+             it reports the build of the APP, and a customer never runs the app. -->
+        <div class="update-banner" id="update-banner-auth" style="display:none"></div>
+        <div class="auth-head">
+          <!-- alt="" on purpose: the brand name is the next line down, so this is
+               the same information twice and the text is the accessible copy. -->
+          <!-- The borderless mark, not the square icon: on a card this size the
+               baked-in light background of the OS icon reads as a tile sitting on
+               the page. Same artwork, background keyed out (tools/make-icons.ps1). -->
+          <img class="auth-logo" src="assets/icon-mark.png" alt="" />
+          <div class="auth-brand" data-i18n="app.name">I-PASSBOOK</div>
+          <p class="auth-full" data-i18n="app.fullName">Indrones Product After-Sales Summary Book</p>
+          <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">Sign in with the credentials your admin gave you.</p>
         </div>
+        <form id="auth-form" autocomplete="on">
+          <!-- QUICK UNLOCK: shown only when this device holds a registered token
+               (ipb_unlock). The fingerprint runs the platform's own biometric
+               prompt; the pattern is the registered fallback. "Use email code
+               instead" is always one tap away — a quick unlock that cannot be
+               left is a lock nobody signs around. -->
+          <div id="auth-quick" style="display:none">
+            <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
+            <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
+            <button type="button" id="auth-quick-out" class="link-btn">Use email code instead</button>
+          </div>
 
-        <!-- The pattern canvas, for the unlock gesture AND the two-draw setup. -->
-        <div id="auth-pattern" style="display:none">
-          <p id="pattern-title" class="auth-hint"></p>
-          <canvas id="pattern-canvas" width="240" height="240"></canvas>
-        </div>
+          <!-- The pattern canvas, for the unlock gesture AND the two-draw setup. -->
+          <div id="auth-pattern" style="display:none">
+            <p id="pattern-title" class="auth-hint"></p>
+            <canvas id="pattern-canvas" width="240" height="240"></canvas>
+          </div>
 
-        <!-- The Google door, shown when a second deployment is configured. It is
-             FIRST because for most people on most days it is the whole sign-in: one
-             click, no password and no emailed code. The password form below is not a
-             lesser fallback — it is the door for a shared machine with no Google
-             session, and the only door for an account outside the company domain.
+          <!-- The Google door, shown when a second deployment is configured. It is
+               FIRST because for most people on most days it is the whole sign-in: one
+               click, no password and no emailed code. The password form below is not a
+               lesser fallback — it is the door for a shared machine with no Google
+               session, and the only door for an account outside the company domain.
 
-             It is a NAVIGATION, not a background call: clicking it leaves the page
-             for about a second and comes straight back with a one-time code. See
-             app.js's GOOGLE SIGN-IN block for why that is the only way it can work. -->
-        <button type="button" class="btn btn-google" id="auth-google-btn" style="display:none">
-          <span class="google-mark" aria-hidden="true"></span>Sign in with Google
-        </button>
-        <div class="auth-or" id="auth-or" style="display:none"><span>or use your email</span></div>
-        <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required data-i18n-placeholder="auth.email" />
-        <div class="pw-wrap">
-          <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required data-i18n-placeholder="auth.password" />
-          <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
-            <span class="pw-toggle-icon" aria-hidden="true"></span>
+               It is a NAVIGATION, not a background call: clicking it leaves the page
+               for about a second and comes straight back with a one-time code. See
+               app.js's GOOGLE SIGN-IN block for why that is the only way it can work. -->
+          <button type="button" class="btn btn-google" id="auth-google-btn" style="display:none">
+            <span class="google-mark" aria-hidden="true"></span>Sign in with Google
           </button>
-        </div>
-        <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
-        <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
-
-        <!-- Sign-in step 2: the code emailed for the working day. Its own input
-             rather than a share of #auth-code, because reset and sign-in can be
-             on screen moments apart and one box would carry a half-typed code
-             from one step into the other. -->
-        <div id="auth-login-code-wrap" style="display:none">
-          <p id="auth-login-code-note" class="auth-hint"></p>
-          <input class="form-input" type="text" id="auth-login-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                 placeholder="6-digit sign-in code" autocomplete="one-time-code" />
-          <button type="button" class="btn" id="auth-login-code-btn">Verify code</button>
-        </div>
-
-        <!-- Forgot step: ask for the email, get a 6-digit code. -->
-        <div id="auth-forgot-wrap" style="display:none">
-          <button type="button" class="btn" id="auth-forgot-btn">Email me a code</button>
-        </div>
-
-        <!-- Reset step: the code from the email + the new password. -->
-        <div id="auth-reset-wrap" style="display:none">
-          <p id="auth-reset-note" class="auth-hint"></p>
-          <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                 placeholder="6-digit code" autocomplete="one-time-code" />
+          <div class="auth-or" id="auth-or" style="display:none"><span>or use your email</span></div>
+          <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required data-i18n-placeholder="auth.email" />
           <div class="pw-wrap">
-            <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" data-i18n-placeholder="auth.newPassword" />
-            <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
+            <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required data-i18n-placeholder="auth.password" />
+            <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
               <span class="pw-toggle-icon" aria-hidden="true"></span>
             </button>
           </div>
-          <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
-          <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
+          <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
+          <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+
+          <!-- Sign-in step 2: the code emailed for the working day. Its own input
+               rather than a share of #auth-code, because reset and sign-in can be
+               on screen moments apart and one box would carry a half-typed code
+               from one step into the other. -->
+          <div id="auth-login-code-wrap" style="display:none">
+            <p id="auth-login-code-note" class="auth-hint"></p>
+            <input class="form-input" type="text" id="auth-login-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                   placeholder="6-digit sign-in code" autocomplete="one-time-code" />
+            <button type="button" class="btn" id="auth-login-code-btn">Verify code</button>
+          </div>
+
+          <!-- Forgot step: ask for the email, get a 6-digit code. -->
+          <div id="auth-forgot-wrap" style="display:none">
+            <button type="button" class="btn" id="auth-forgot-btn">Email me a code</button>
+          </div>
+
+          <!-- Reset step: the code from the email + the new password. -->
+          <div id="auth-reset-wrap" style="display:none">
+            <p id="auth-reset-note" class="auth-hint"></p>
+            <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                   placeholder="6-digit code" autocomplete="one-time-code" />
+            <div class="pw-wrap">
+              <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" data-i18n-placeholder="auth.newPassword" />
+              <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
+                <span class="pw-toggle-icon" aria-hidden="true"></span>
+              </button>
+            </div>
+            <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
+            <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
+          </div>
+
+          <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
+        </form>
+        <p id="auth-error" class="auth-error" style="display:none"></p>
+      </section>
+
+      <!-- ── THE CUSTOMER DOOR ──
+           The second door, and the one that is genuinely new: it is what makes this
+           a landing page rather than a staff sign-in with a link on it.
+
+           Its primary control is a LINK, not a form, and that is deliberate. The
+           customer's own half already exists and is built and tested
+           (customer.html): it reads their company's tickets, narrowed on the
+           SERVER, and it keeps its own storage keys so that a customer signing in on
+           a machine a staff member has used can never inherit the staff session.
+           Re-implementing that sign-in here would be a second implementation of one
+           door, free to drift from the first, and it would put the customer's session
+           key under a second writer. So this block OPENS the door instead of copying
+           it — and it is not a stub: it says what is behind it. -->
+      <section class="door glass-card" id="door-customer" aria-labelledby="door-customer-role">
+        <p class="door-role" id="door-customer-role" data-i18n="door.customer">Customer</p>
+        <div class="auth-head">
+          <img class="auth-logo" src="assets/icon-mark.png" alt="" />
+          <div class="auth-brand" data-i18n="door.customerTitle">Customer Space</div>
+          <p class="auth-full" data-i18n="door.customerFull">Indrones after-sales, for your aircraft</p>
+          <p class="auth-hint" data-i18n="door.customerHint">Sign in and everything we have done for your fleet is in one place — and nothing of anybody else's.</p>
         </div>
+        <ul class="door-list">
+          <li data-i18n="door.custReports">Every request you have raised, and the stage it is at today.</li>
+          <li data-i18n="door.custAccess">No public sign-up — we create your account when your aircraft is handed over, and email your invitation.</li>
+        </ul>
+        <a class="btn" id="customer-space-open" href="customer.html" data-i18n="door.openSpace">Open the Customer Space</a>
 
-        <button type="button" id="auth-back-link" class="link-btn" style="display:none">Back to sign in</button>
-      </form>
-      <p id="auth-error" class="auth-error" style="display:none"></p>
+        <!-- THE CUSTOMER DOOR, and the app's second open one.
+             Everything else here is token-gated; this line is not, and it is the only
+             thing on this screen a customer ever needs without an account. Both halves
+             are the same promise: a way to reach the desk with no account at all.
 
-      <!-- THE CUSTOMER DOOR, and the app's second open one.
-           Everything else here is token-gated; this line is not, and it is the
-           only thing on this screen a customer ever needs. Both halves are the
-           same promise: a way to reach the desk without an account.
+             The Report button stays hidden until CUSTOMER_FORM_URL is set in app.js —
+             an entry that opens an empty frame is worse than no entry. The FAQ is
+             always available: it is a static page, and it answers the questions the
+             form's own existence raises. -->
+        <p class="auth-doors">
+          <button type="button" class="link-btn" id="customer-door-open" style="display:none" data-i18n="door.report">Report a problem</button>
+          <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
+        </p>
+      </section>
 
-           The Report button stays hidden until CUSTOMER_FORM_URL is set in app.js
-           — an entry that opens an empty frame is worse than no entry. The FAQ is
-           always available: it is a static page, and it answers the questions the
-           form's own existence raises. -->
-      <p class="auth-doors">
-        <button type="button" class="link-btn" id="customer-door-open" style="display:none" data-i18n="door.report">Report a problem</button>
-        <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
-      </p>
-
-      <!-- The credit sits on the sign-in card, not only inside the app: it is the
-           one screen everybody sees on every device, every day. -->
-      <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
     </div>
+
+    <!-- The credit sits on the LANDING SCREEN, not only inside the app: it is the one
+         screen everybody sees on every device, every day. It moved out from under the
+         card to under BOTH doors when there were two of them — the page it belongs to
+         is the landing page, not either sign-in. -->
+    <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
   </div>
 
   <!-- ========== FIRST-LOGIN PASSWORD CHANGE ========== -->

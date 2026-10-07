@@ -143,31 +143,43 @@ try {
   let seq = 0;
   const pending = new Map();
   ws.addEventListener('message', e => {
-    const m = JSON.parse(e.data);
+    let m; try { m = JSON.parse(e.data); } catch { return; }
     if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
   });
   const send = (method, params) => new Promise(res => {
     const id = ++seq; pending.set(id, res);
     ws.send(JSON.stringify({ id, method, params }));
   });
-  // Every call is bounded. A page that boots the whole app (index.html registers a
-  // service worker, wakes a backend and plays an intro before it paints) can leave
-  // `Runtime.evaluate` waiting forever, and an unbounded await there looks exactly
-  // like a tool that found nothing to report — it just never prints. The timeout
-  // turns that into a sentence.
+  // Every call is bounded, and NOT only `Runtime.evaluate`. The first version of
+  // this bounded the probe alone and hung forever on `Emulation.setDeviceMetrics`
+  // — a CDP call whose reply simply never came — which is the same failure the note
+  // below describes and just as silent: no output at all, which reads like "found
+  // nothing to report". A dead socket is worse still, because there is nothing left
+  // to answer at any timeout, so a close/error rejects everything still pending.
   const withTimeout = (p, ms, what) => Promise.race([
     p, new Promise(res => setTimeout(() => res({ __timeout: what }), ms)),
   ]);
+  ws.addEventListener('close', () =>
+    { for (const [id, res] of pending) res({ __timeout: 'the debugger connection closed' }); pending.clear(); });
+  ws.addEventListener('error', () =>
+    { for (const [id, res] of pending) res({ __timeout: 'the debugger connection errored' }); pending.clear(); });
 
-  await send('Page.enable');
-  await send('Runtime.enable');
-  await send('Page.navigate', { url: fileUrl });
+  const cdp = (method, params) => withTimeout(send(method, params), 20000, method + ' never came back');
+  for (const call of [['Page.enable'], ['Runtime.enable'], ['Page.navigate', { url: fileUrl }]]) {
+    const r = await cdp(call[0], call[1]);
+    if (r && r.__timeout) throw new Error(r.__timeout);
+  }
   await sleep(900);   // fonts, and the app's own first paint
 
   let failures = 0;
   for (const width of WIDTHS) {
-    await send('Emulation.setDeviceMetricsOverride',
+    const em = await cdp('Emulation.setDeviceMetricsOverride',
       { width, height: 900, deviceScaleFactor: 1, mobile: width < 640 });
+    if (em && em.__timeout) {
+      console.log(`  FAIL  ${String(width).padStart(4)}px   ${em.__timeout}`);
+      failures++;
+      continue;
+    }
     await sleep(250);
     const res = await withTimeout(send('Runtime.evaluate', { expression: PROBE, returnByValue: true }),
                                   15000, 'the probe');

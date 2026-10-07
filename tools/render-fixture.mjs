@@ -242,6 +242,42 @@ console.log(`  customers panel ${accessCustomers.length} bytes · people panel $
 console.log(doorFile);
 console.log(`  door ${doorBlock.length} bytes`);
 
+// ── The landing page, with both doors standing open ──────────────────────────
+// The one screen EVERYBODY sees, and the one that has to survive a phone: two cards
+// side by side on a desktop and stacked on a 320px screen, each with a chip, a
+// heading, a paragraph and a list on it. It is a separate page and NOT a slice of
+// index.html rendered whole, because index.html cannot be measured at all: loaded
+// over `file://` it fires a blocking `alert()` (app.js detects the local-file
+// protocol and warns), and the renderer then never answers another CDP call — the
+// tool hangs with no output, which reads exactly like a page with nothing wrong.
+//
+// The markup is index.html's own, cut between two named ids rather than by counting
+// closing tags, so a third card or a deeper nest cannot silently shrink the slice.
+const landingBlock = (() => {
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const start = html.indexOf('<div id="auth-container">');
+  const end = html.indexOf('<div id="password-change">');
+  if (start === -1 || end === -1 || end < start) throw new Error('cannot slice the landing page out of index.html');
+  // `display:none` is the shipped state; `flex` is what showAuth() sets on it.
+  // The mark is referenced RELATIVELY in index.html and this page lives in the OS
+  // temp directory, so it has to be made absolute here or it loads as a broken
+  // image — a 76px hole where the logo is. The layout numbers would not notice; a
+  // screenshot would, and would be a picture of a page that does not exist.
+  return html.slice(start, end)
+    .replace('<div id="auth-container">', '<div id="auth-container" style="display:flex">')
+    .replace(/src="assets\//g, `src="${pathToFileURL(path.join(ROOT, 'assets')).href}/`);
+})();
+const landingFile = path.join(outDir, 'landing.html');
+fs.writeFileSync(landingFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>landing page — two doors</title>
+${css}
+</head><body>
+${landingBlock}
+</body></html>`);
+console.log(landingFile);
+console.log(`  landing ${landingBlock.length} bytes`);
+
 // ── The legacy record card, read-only ─────────────────────────────────────────
 // The rows come from the app's OWN legacyGridHtml — the one function that turns a
 // sheet grid into record markup — so what is measured is the app's output and the

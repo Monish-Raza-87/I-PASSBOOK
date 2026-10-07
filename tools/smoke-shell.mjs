@@ -222,20 +222,29 @@ ok('neither cut is precached in the service worker shell',
 // wordmark that sat on that layer moved to the sign-in card. Scoped to the splash
 // block and the splash styles, because `backdrop-filter` is used legitimately
 // elsewhere (the frosted headers).
-const splashBlock = (html.match(/<div id="splash-screen">[\s\S]*?<!-- ========== AUTH SCREEN/) || [''])[0];
+//
+// Both halves are sliced between NAMED section markers rather than by counting
+// closing tags: the screen after the splash became a two-door grid, which is exactly
+// the kind of shape change that silently turns a boundary into '' and a test into a
+// tautology. Keep the two markers in index.html and base.css in step with these.
+const splashBlock = (html.match(/<div id="splash-screen">[\s\S]*?<!-- ========== THE LANDING PAGE/) || [''])[0];
 ok('nothing is layered over the video',
   splashBlock.length > 0 &&
   !/splash-overlay|splash-logo|splash-sub|class="[^"]*overlay/.test(splashBlock),
   splashBlock.replace(/\s+/g, ' ').slice(0, 200));
-const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?AUTH SCREEN/) || [''])[0];
+const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?THE LANDING PAGE \(TWO DOORS\)/) || [''])[0];
 ok('and no blur or darkening rule is left in the splash styles',
   splashCss.length > 0 &&
   !/backdrop-filter|splash-overlay|splash-logo|splash-sub/.test(splashCss));
-// The card, not the splash, is where the full product name now lives. Bounded by
-// the hint paragraph rather than by the next </div>, which closes .auth-brand.
-const authHead = (html.match(/<div class="auth-head">[\s\S]*?id="auth-hint-text"/) || [''])[0];
+// The card, not the splash, is where the full product name now lives. Sliced to the
+// EMPLOYEE door first: the customer card has a .auth-head of its own now, so a bare
+// /<div class="auth-head">/ would be a claim about whichever card happens to come
+// first rather than about the employee's. Bounded by the employee form, which is the
+// next thing after its hint paragraph.
+const employeeDoor = (html.match(/<section class="door[^"]*" id="door-employee"[\s\S]*?<form id="auth-form"/) || [''])[0];
+const authHead = (employeeDoor.match(/<div class="auth-head">[\s\S]*?id="auth-hint-text"/) || [''])[0];
 ok('the product name moved to the sign-in card',
-  /Indrones Product After-Sales Summary Book/.test(authHead),
+  employeeDoor.length > 0 && /Indrones Product After-Sales Summary Book/.test(authHead),
   authHead.replace(/\s+/g, ' '));
 
 // Read the real duration out of an MP4 header, so the timer below is checked
@@ -550,11 +559,20 @@ ok('the number a user reads equals the number their device is running',
 ok('index.html carries version slots (the sign-in card AND the app footer)',
   (html.match(/class="app-version"/g) || []).length >= 2,
   (html.match(/class="app-version"/g) || []).length);
-// …and the credit line, on the sign-in card as well as inside the app. The
-// wording is the owner's, verbatim — "by Mr. Raza For Indrones", capital F.
-ok('the credit is on the sign-in card, not only behind the sign-in',
-  /app-credit/.test((html.match(/<div id="auth-container">[\s\S]*?<\/div>\s*<\/div>/) || [''])[0]) &&
-  /Mr\. Raza For Indrones/.test(html));
+// …and the credit line, on the landing page as well as inside the app. The wording
+// is the owner's, verbatim — "by Mr. Raza For Indrones", capital F.
+//
+// Sliced between the two containers by id, NOT by a `</div></div>` pattern: the
+// landing page is a grid of two <section> cards now, so the old "next two closing
+// divs" bound stops matching and the assertion would have been testing '' — green
+// for the worst possible reason. A named boundary cannot go stale that way.
+const authContainer = html.slice(
+  html.indexOf('<div id="auth-container">'),
+  html.indexOf('<div id="password-change">'));
+ok('the credit is on the landing page, not only behind the sign-in',
+  authContainer.length > 0 &&
+  /app-credit/.test(authContainer) &&
+  /Mr\. Raza For Indrones/.test(authContainer));
 // …filled by one writer, so there is one place to look when the number is wrong.
 ok('app.js fills every slot through the shared .app-version class',
   /querySelectorAll\('\.app-version'\)/.test(appJs));
@@ -669,6 +687,53 @@ ok('the appliers are still the ones the savers round-trip through',
   /saveSentinel\('__CONFIG__', 'iqc-config'/.test(appJs) &&
   /saveSentinel\('__CONFIG__', 'inward-options'/.test(appJs) &&
   /saveSentinel\('__CONFIG__', 'team-directory'/.test(appJs));
+
+// ── The landing page: two doors on one link ───────────────────────────────────
+// One address serves both audiences. The employee's half is the sign-in form that
+// was always here; the customer's half is a LINK to customer.html rather than a
+// second copy of that page's sign-in — one door, one implementation. These
+// assertions exist because the whole point of the screen is that a visitor can tell
+// the two apart BEFORE typing anything, and that is a property of the markup.
+head('the landing page offers two doors, and names them');
+{
+  const doorsBlock = (html.match(/<div class="doors">[\s\S]*?<!-- ========== FIRST-LOGIN PASSWORD CHANGE/) || [''])[0];
+  ok('the landing page is a .doors grid holding two cards',
+    doorsBlock.length > 0 &&
+    (doorsBlock.match(/<section class="door [^"]*"/g) || []).length === 2,
+    (doorsBlock.match(/<section class="door [^"]*"/g) || []).length);
+
+  // Both cards carry the ROLE CHIP and it is the first child, so "which am I?" is
+  // answered above every control on the card rather than beside one of them.
+  for (const [id, key, word] of [
+    ['door-employee', 'door.employee', 'Employee'],
+    ['door-customer', 'door.customer', 'Customer'],
+  ]) {
+    const card = (doorsBlock.match(new RegExp(`<section class="door [^"]*" id="${id}"[\\s\\S]*?</section>`)) || [''])[0];
+    ok(`#${id} is headed "${word}" by its own chip`,
+      card.length > 0 &&
+      new RegExp(`<p class="door-role" id="${id}-role" data-i18n="${key}">${word}</p>`).test(card));
+    ok(`...and the chip is the FIRST thing on #${id}, above every control`,
+      card.replace(/^\s*<section[^>]*>/, '').trimStart().startsWith('<p class="door-role"'));
+  }
+
+  // The customer's primary control is a link to the page that owns that door's
+  // sign-in — asserted as an <a href>, because a button whose label promises a door
+  // and whose handler is missing is exactly the failure this screen cannot have.
+  ok('the customer door OPENS customer.html rather than re-implementing its sign-in',
+    /<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(doorsBlock));
+  // ...and it does not carry the employee form, which would be a second sign-in.
+  ok('the customer door carries no form of its own',
+    !/<form/.test((doorsBlock.match(/<section class="door [^"]*" id="door-customer"[\s\S]*?<\/section>/) || [''])[0]));
+  // The employee door still has the one form, unchanged.
+  ok('the employee door still owns the single #auth-form',
+    (doorsBlock.match(/<form id="auth-form"/g) || []).length === 1 &&
+    /<section class="door [^"]*" id="door-employee"[\s\S]*?<form id="auth-form"/.test(doorsBlock));
+
+  // A two-column landing page that never stacks is a phone with a sideways scroll.
+  ok('the two doors reflow to one column without a media query',
+    /\.doors \{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(280px, 1fr\)\)/.test(read('../base.css')) &&
+    /\.door \{[\s\S]*?max-width: none/.test(read('../base.css')));
+}
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

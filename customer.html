@@ -402,10 +402,11 @@
   // every other one does. Nothing about it changes.
   const SUPPORT_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
 
-  // The customer feedback form. Empty until its share link is pasted here; while
-  // it is empty the button is marked disabled rather than opening nothing, because
-  // a button that opens nothing is worse than no button.
-  const FEEDBACK_FORM_URL = '';
+  // The customer feedback form — a DIFFERENT form from the one above, on its own
+  // Google Form id, which is the whole reason it has its own constant here. Empty
+  // would mark the button disabled rather than open nothing, because a button that
+  // opens nothing is worse than no button.
+  const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc0S3JVIFhOAL4-HweZ3gA6DM2cvQGXYT84lzWXI-qTiwVimA/viewform';
 
   const wire = (id, url) => {
     const el = document.getElementById(id);

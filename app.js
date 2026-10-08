@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v73';
+const APP_VERSION = 'v74';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1799,11 +1799,247 @@ function finishAuth(email, d) {
   refreshMyAccess().then(() => { if (typeof applySectionAccessGating === 'function') applySectionAccessGating(); });
 }
 
+// ─── THE WORDMARK TYPES ITSELF, THEN THE LINE UNDER IT SPELLS IT OUT ────────
+//
+// The owner, 2026-10-08: *"where it is written I-PASSBOOK in CAPS below logo, there is
+// a in-loop animation going on of a curvy underline. Instead, can we have I-PASSBOOK
+// itself in-loop animation where I-PASSBOOK appears as if being typed and then in
+// below line … after I-PASSBOOK has being typed, INDRONES ORIGINATES FROM I, PRODUCT
+// ORIGINATES FROM P …"*
+//
+// So the flourish is gone and the heading animates instead. Three things about how:
+//
+// 1. THE MARKUP IS THE REAL COPY AND THIS IS AN ENHANCEMENT. `index.html` ships
+//    "I-PASSBOOK" and the full expansion sentence as ordinary text. This function
+//    splits them into spans only when it runs, so a reader with no JavaScript, a
+//    screen reader, and a reduced-motion visitor all get the finished words — the
+//    last of those because the CSS in base.css puts every span back on screen.
+// 2. THE WORD GROWS BECAUSE THE CSS HIDES UNTYPED LETTERS WITH `display`, NOT
+//    `opacity`. With `opacity` the whole word would reserve its space from the first
+//    frame and the letters would blink on inside a box that never changed — a
+//    different effect, and not the one he asked for.
+//
+//    Removing a letter from the box is necessary but NOT sufficient, and getting only
+//    that far is a trap worth naming: a heading centred on whatever is on screen is
+//    laid out afresh every keystroke, so every letter already typed SLIDES outward as
+//    the next one arrives. Measured on the rendered page (2026-10-08): the finished
+//    word is 158px wide, so the "I" travels 79px leftward over the first second of
+//    every loop. That is an unfolding, not a typewriter. So reserveBrandBox() below
+//    fixes the heading's width to the finished word up front and base.css left-aligns
+//    the text inside it — each letter lands where it will stay, the word extends to
+//    the right from a fixed origin, and the box stays centred under the mark.
+// 3. THE CARET IS THE LAST CHILD, NOT A MEASURED POSITION. It follows the last shown
+//    letter because inline layout puts it there, so there is nothing to recompute on
+//    resize, on a font swap, or when the language layer rewrites the words.
+//
+// Timings live here rather than in CSS: the sequence is a chain, and half of a chain
+// in each file is a chain nobody can change.
+const BT_OPEN_MS   = 240;   // beat before the first keystroke
+const BT_LETTER_MS = 105;   // per letter of I-PASSBOOK
+const BT_GAP_MS    = 360;   // beat between the word and the line under it
+const BT_TERM_MS   = 230;   // per term of the expansion
+const BT_HOLD_MS   = 3200;  // how long the finished pair is left up
+const BT_TERM_OUT_MS = 90;  // unwriting, in reverse
+const BT_LETTER_OUT_MS = 45;
+const BT_LOOP_MS   = 180;   // beat before it starts again
+
+let _btRun = null;   // the live chain, or null. See stopBrandTyping().
+
+function prefersReducedMotion() {
+  try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch (e) { return false; }
+}
+
+// Splits the two landing elements into animatable spans. Idempotent: `_btBuilt` is
+// stamped on the elements themselves, so a re-entry cannot double the letters.
+function buildBrandTyping() {
+  const brand = document.getElementById('landing-brand');
+  const full  = document.getElementById('landing-full');
+  if (!brand || !full || brand.dataset.btBuilt === '1') return;
+
+  const word = (brand.textContent || '').replace(/\s+/g, ' ').trim();
+  if (word) {
+    brand.dataset.btBuilt = '1';
+    // The label carries the word for anyone who cannot see it: every letter span is
+    // aria-hidden, so without this the h1 would read as an empty heading.
+    brand.setAttribute('aria-label', word);
+    brand.textContent = '';
+    const frag = document.createDocumentFragment();
+    const letters = [];
+    for (const ch of word) {
+      const s = document.createElement('span');
+      s.className = 'bt-lt';
+      s.setAttribute('aria-hidden', 'true');
+      s.textContent = ch;
+      frag.appendChild(s);
+      letters.push(s);
+    }
+    const caret = document.createElement('span');
+    caret.className = 'bt-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    frag.appendChild(caret);
+    brand.appendChild(frag);
+    brand._btLetters = letters;
+    brand._btCaret = caret;
+  }
+
+  // The expansion line is split on the same `·` the markup already uses, so the copy
+  // is still the copy: no term is invented or dropped here, only revealed.
+  const sentence = (full.textContent || '').replace(/\s+/g, ' ').trim();
+  if (sentence) {
+    full.dataset.btBuilt = '1';
+    full.setAttribute('aria-label', sentence);
+    const parts = sentence.split('·').map(s => s.trim()).filter(Boolean);
+    full.textContent = '';
+    const frag = document.createDocumentFragment();
+    const terms = [];
+    parts.forEach((p, i) => {
+      // The separator is its own span so that the gaps between the terms arrive with
+      // the terms. Left as bare text it would be on screen from the first frame, and
+      // the line would start as a row of dots.
+      if (i > 0) {
+        const sep = document.createElement('span');
+        sep.className = 'bt-term';
+        sep.setAttribute('aria-hidden', 'true');
+        sep.textContent = ' · ';
+        frag.appendChild(sep);
+        terms.push(sep);
+      }
+      const s = document.createElement('span');
+      s.className = 'bt-term';
+      s.setAttribute('aria-hidden', 'true');
+      s.textContent = p;
+      frag.appendChild(s);
+      terms.push(s);
+    });
+    full.appendChild(frag);
+    full._btTerms = terms;
+  }
+}
+
+// Fixes the heading's width to the finished word, so the word types left to right into
+// a box that never changes size. See point 2 above for why this is not decoration.
+//
+// It MEASURES rather than guessing, and it measures by lighting every letter for the
+// length of one synchronous call: the letters are revealed by `display`, so there is no
+// way to ask the browser for the width of a word that is not in the box. Nothing is
+// painted in between — the restore happens before this returns — so the measurement
+// cannot be seen, and a call that arrives mid-animation leaves the letters exactly as
+// it found them.
+//
+// No `document.fonts.ready` re-measure is owed here: the wordmark is set in
+// `--font-mono`, which tokens.css defines as a pure system stack. There is no webfont
+// for this heading to swap in behind us.
+function reserveBrandBox() {
+  const brand = document.getElementById('landing-brand');
+  const box   = brand && brand.parentElement;
+  if (!brand || !box || !brand._btLetters || !brand._btLetters.length) return;
+  const wasOn = brand._btLetters.filter(l => l.classList.contains('is-on'));
+  brand._btLetters.forEach(l => l.classList.add('is-on'));
+  // The caret is left out on purpose: measured without it, the box is the WORD's width,
+  // so the finished word is exactly centred and the caret sits just past its last
+  // letter, outside the reservation — which is where a text cursor belongs.
+  const caretWasOn = !!(brand._btCaret && brand._btCaret.classList.contains('is-on'));
+  if (brand._btCaret) brand._btCaret.classList.remove('is-on');
+  const width = brand.getBoundingClientRect().width;
+  if (caretWasOn && brand._btCaret) brand._btCaret.classList.add('is-on');
+  brand._btLetters.forEach(l => { if (!wasOn.includes(l)) l.classList.remove('is-on'); });
+  // A zero width means the sign-in screen is not laid out yet; stamping 0px would pin
+  // the heading shut. Leave it alone and the next showAuth() measures it properly.
+  if (width > 0) box.style.minWidth = Math.ceil(width) + 'px';
+}
+
+function startBrandTyping() {
+  buildBrandTyping();
+  const brand = document.getElementById('landing-brand');
+  const full  = document.getElementById('landing-full');
+  if (!brand || !full || !brand._btLetters || !full._btTerms) return;
+  // Before the `_btRun` guard below, so a second sign-out/sign-in re-reserves too. It
+  // is synchronous and restores the letters, so calling it mid-loop is invisible.
+  reserveBrandBox();
+  if (_btRun) return;                    // already looping; a second chain would race it
+  // Reduced motion is not "no animation" here, it is "the words, finished" — and the
+  // stylesheet already shows them, so the only right move is to not start.
+  if (prefersReducedMotion()) return;
+
+  const letters = brand._btLetters;
+  const terms   = full._btTerms;
+  const caret   = brand._btCaret;
+  const run = _btRun = { stop: false, timer: null, release: null };
+  const wait = (ms) => new Promise(res => {
+    run.timer = setTimeout(() => { run.timer = null; run.release = null; res(); }, ms);
+    run.release = res;
+  });
+  // Every await goes through `next`, which refuses to resolve into a stopped run.
+  // That is what makes stopBrandTyping() safe to call at any instant — mid-letter,
+  // mid-hold — without leaving a chain alive to re-type into a hidden screen.
+  const next = async (ms) => { if (run.stop) return false; await wait(ms); return !run.stop; };
+
+  (async () => {
+    while (!run.stop) {
+      letters.forEach(l => l.classList.remove('is-on'));
+      terms.forEach(t => t.classList.remove('is-on'));
+      if (caret) caret.classList.remove('is-on');
+      if (!await next(BT_OPEN_MS)) return;
+      if (caret) caret.classList.add('is-on');
+      for (const l of letters) {
+        l.classList.add('is-on');
+        if (!await next(BT_LETTER_MS)) return;
+      }
+      if (caret) caret.classList.remove('is-on');
+      if (!await next(BT_GAP_MS)) return;
+      for (const t of terms) {
+        t.classList.add('is-on');
+        if (!await next(BT_TERM_MS)) return;
+      }
+      if (!await next(BT_HOLD_MS)) return;
+      // Unwritten in reverse, so the loop reads as the same sentence being typed a
+      // second time rather than as the page having reloaded.
+      for (let i = terms.length - 1; i >= 0; i--) {
+        terms[i].classList.remove('is-on');
+        if (!await next(BT_TERM_OUT_MS)) return;
+      }
+      if (caret) caret.classList.add('is-on');
+      for (let i = letters.length - 1; i >= 0; i--) {
+        letters[i].classList.remove('is-on');
+        if (!await next(BT_LETTER_OUT_MS)) return;
+      }
+      if (!await next(BT_LOOP_MS)) return;
+    }
+  })();
+}
+
+function stopBrandTyping() {
+  const run = _btRun;
+  _btRun = null;
+  if (run) {
+    run.stop = true;
+    if (run.timer) { clearTimeout(run.timer); run.timer = null; }
+    // Releasing the pending promise lets the chain fall out at its next check
+    // instead of hanging on a timer that will never fire.
+    if (run.release) { const release = run.release; run.release = null; release(); }
+  }
+  // The DOM is put back to "finished", which is what the signed-in app never shows
+  // and what a later sign-out must find: the landing head whole, not mid-type.
+  const brand = document.getElementById('landing-brand');
+  const full  = document.getElementById('landing-full');
+  if (brand) {
+    if (brand._btCaret) brand._btCaret.classList.remove('is-on');
+    (brand._btLetters || []).forEach(l => l.classList.remove('is-on'));
+  }
+  if (full) (full._btTerms || []).forEach(t => t.classList.remove('is-on'));
+}
+
 function showAuth() {
   endSsoWait();
   warmBackend();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
+  // The landing head types itself in the moment the sign-in screen is actually on
+  // screen. That is here rather than in the boot handler because the intro covers the
+  // screen until it finishes — see the note above warmBackend() — so a chain started
+  // at parse time would be several seconds into its loop before anybody could see it.
+  startBrandTyping();
   const pc = document.getElementById('password-change');
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
@@ -2103,13 +2339,29 @@ async function submitUnlock(method, patternSeq) {
       return;
     }
   }
+  // A drawn pattern is a request, and it takes as long as the backend takes. From
+  // here until the answer is in, the canvas refuses new strokes and the line under it
+  // reads "Checking your pattern…" — see patternBusy() for why that pair is one fix
+  // and not two. The matching `resetPatternCanvas()` below is the ONLY way back, and
+  // it is on both exits.
+  const patternish = (method === 'pattern');
+  if (patternish) patternBusy(true);
+
   postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel(), version: APP_VERSION }).then(d => {
     if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
     if (d && d.status === 'ok' && d.sessionToken) { finishAuth(rec.email, d); return; }
     setAuthError((d && d.message) || 'Unlock failed — sign in with your email and code.');
-    if (method === 'pattern') resetPatternCanvas();
+    // Idle title, NOT a verdict. The canvas goes back to asking for a pattern and the
+    // error line above carries what happened — which is exactly how the wrong-draw
+    // path already behaves a dozen lines up. Giving this one its own "that pattern did
+    // not match" title was worse than redundant: the pattern is checked HERE, against
+    // the stored hash, so a refusal from the backend is never a wrong pattern — it is a
+    // device token the backend no longer accepts. The title would have blamed the
+    // person's gesture for the server's answer, and disagreed with the line above it.
+    if (patternish) resetPatternCanvas();
   }).catch(() => {
     if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+    if (patternish) resetPatternCanvas();
     setAuthError('Could not reach the backend — use your email and code.');
   });
 }
@@ -2119,6 +2371,30 @@ async function submitUnlock(method, patternSeq) {
 // neutral palette in both themes; the drawn line follows the same values. All
 // geometry is derived from the canvas size, so a bigger canvas needs no new math.
 const PATTERN_MIN_DOTS = 4;
+
+// ─── THE PATTERN'S TWO STATES, AND WHY THEY ARE ONE BUG ──────────────────────
+// The owner's report, verbatim: *"once we enter pattern it takes a long halt and
+// meanwhile nothing shows on screen on what is happening and I can enter as many
+// times pattern as I want over that."*
+//
+// Both halves of that are the same missing idea: the canvas did not know a
+// verification was in flight. `canvas._busy` is that idea. While it is set,
+// `attachPatternCanvas` ignores `pointerdown`, so a second pattern cannot be drawn
+// over the first one's answer; and the line under the canvas stops being the
+// instruction and becomes the status, so the halt is a sentence on screen instead of
+// a freeze. Clearing it is `resetPatternCanvas()`, which every exit path calls —
+// a match, a refusal, a request that never arrived.
+//
+// The one failure mode worth naming: a busy flag left set. The canvas would then
+// swallow every future attempt in silence, which is the exact symptom being fixed,
+// so `patternForUnlock()` clears it too rather than trusting the last request.
+const PATTERN_IDLE = 'Draw your pattern to unlock.';
+function patternBusy(on) {
+  const canvas = document.getElementById('pattern-canvas');
+  const title  = document.getElementById('pattern-title');
+  if (canvas) { canvas._busy = !!on; canvas.classList.toggle('is-busy', !!on); }
+  if (title && on) title.textContent = 'Checking your pattern…';
+}
 
 function patternHashOf(seq) {
   const bytes = new TextEncoder().encode(seq.join('-') + '|ipb-pattern');
@@ -2162,11 +2438,14 @@ function paintPattern(canvas, seq, hover) {
     ctx.fill();
   });
 }
-function resetPatternCanvas() {
+function resetPatternCanvas(message) {
   const c = document.getElementById('pattern-canvas');
-  if (c) paintPattern(c, []);
+  if (c) { c._busy = false; c.classList.remove('is-busy'); paintPattern(c, []); }
   const t = document.getElementById('pattern-title');
-  if (t) t.textContent = 'Draw your pattern to unlock.';
+  // `message` is how a refusal is said where the finger already is. Omitted, the
+  // line goes back to being the instruction — which is what every caller that is not
+  // reporting a failure wants.
+  if (t) t.textContent = message || PATTERN_IDLE;
 }
 function attachPatternCanvas(canvas, onPattern) {
   if (!canvas || canvas.dataset.pwired === '1') {
@@ -2184,6 +2463,11 @@ function attachPatternCanvas(canvas, onPattern) {
   };
   paintPattern(canvas, []);
   canvas.addEventListener('pointerdown', ev => {
+    // A pattern is being checked: this stroke is refused before it is captured, so
+    // nothing is drawn and nothing is queued. Without this line a second pattern can
+    // be drawn straight over the first one's — the owner could "enter as many times
+    // pattern as I want over that".
+    if (canvas._busy) return;
     ev.preventDefault();
     canvas.setPointerCapture(ev.pointerId);
     seq = []; paintPattern(canvas, seq, dotAt(ev));
@@ -2210,13 +2494,14 @@ function attachPatternCanvas(canvas, onPattern) {
 
 // The sign-in screen's pattern mode: draw = verify = attempt the server call.
 async function patternForUnlock() {
-  const title = document.getElementById('pattern-title');
-  if (title) title.textContent = 'Draw your pattern to unlock.';
   const canvas = document.getElementById('pattern-canvas');
   if (canvas && canvas.dataset.pwired !== '1') {
     attachPatternCanvas(canvas, seq => submitUnlock('pattern', seq));
   }
-  if (canvas) paintPattern(canvas, []);
+  // Not a bare repaint: this is also the one place the busy flag is guaranteed back
+  // to false, so arriving here after a verification that never came back still leaves
+  // a canvas that can be drawn on.
+  resetPatternCanvas();
 }
 
 // ─── SETUP — offered from the user's own profile menu, never sprung on them ──
@@ -2355,40 +2640,79 @@ function setAuthMode(mode) {
   const pwIn = document.getElementById('auth-password');
   if (pwIn) pwIn.required = pwMode;
 
-  set('auth-signin-btn',    mode === 'email' || pwMode);
-  set('auth-forgot-link',   mode === 'email' || pwMode);
+  // ── ONE EMPLOYEE SCREEN, NOT TWO ──────────────────────────────────────────────
+  // The owner, 2026-10-08: "instead of having two screens, one for email based login
+  // and another for other options such as finger print etc, can we not have one?"
+  // So 'email' and 'unlock' are the SAME screen and render identically — the quick
+  // unlock pair moved ON to the entry screen, and the screen that existed only to
+  // hold it is gone. `entry` is that screen; `typed` is "a screen the email field and
+  // the primary button belong to", which is the entry screen plus the password door.
+  const entry = (mode === 'email' || mode === 'unlock');
+  const typed = (entry || pwMode);
+
+  set('auth-signin-btn',    typed);
+  set('auth-forgot-link',   typed);
+  // The password door's own way in, on the entry screen and nowhere else: on the
+  // password screen it would point at itself. Until this existed the door had NO
+  // entry point at all — the only caller of `setAuthMode('login')` was the end of the
+  // reset flow — so an account still on the password the admin issued had no way to
+  // type it from this screen.
+  set('auth-pwd-link',      typed && !pwMode);
   set('auth-login-code-wrap', mode === 'otp');
   set('auth-forgot-wrap',   mode === 'forgot');
   set('auth-reset-wrap',    mode === 'reset');
-  const quickOn = (mode === 'unlock' || mode === 'pattern');
+  // The quick-unlock pair is on the ENTRY screen now — that is the merge above — and
+  // still on the pattern canvas, where the fingerprint button is the one-tap
+  // alternative to drawing. Only the doors this device can actually open: a
+  // fingerprint record with no pattern yet still offered "Use pattern", and drawing
+  // on it fell through to the email form — the door was drawn, not merely hidden.
+  // Read from the record each time rather than once at boot, because the record
+  // changes while the page stays open (the setup overlay writes it).
+  const quickOn = (entry || mode === 'pattern');
   set('auth-quick',         quickOn);
-  // Only the doors this device can actually open. A fingerprint record with no
-  // pattern yet still offered "Use pattern", and drawing on it fell through to the
-  // email form — the door was drawn, not merely hidden. Read from the record each
-  // time rather than once at boot, because the record changes while the page stays
-  // open (the setup overlay writes it).
   if (quickOn) {
     const q = loadUnlock() || {};
     set('auth-unlock-btn',   !!(q.credentialId || q.mode === 'fingerprint'));
     set('auth-pattern-link', !!q.patternHash);
+    // "Use email (OTP) based login method" is the way OFF this block and back to the
+    // typed form — which is the pattern canvas and ONLY the pattern canvas. It used
+    // to be needed on the old quick-unlock screen, where there was no form; now that
+    // the pair lives on the entry screen with the form directly above it, the link
+    // points at what the person is already looking at. Four methods in one box, and
+    // this is the fifth control that would have described one of them.
+    set('auth-quick-out',    mode === 'pattern');
   }
   set('auth-pattern',       mode === 'pattern');
-  set('auth-back-link',     mode !== 'email' && mode !== 'login');
-  // THE OTHER DIRECTION. Until now this screen only pointed ONE way: quick unlock
-  // could be left for the email door, and the email door had no way back — so a
-  // device with a registered fingerprint offered it once and then never again.
-  // `#auth-quick-in` is the way back, and it is offered on exactly the two screens
-  // that are a beginning ('email', 'login'), never mid-flow on the code or reset
-  // steps where the person is already committed to the door they chose.
+  // "Back to sign in" undoes the last tap, so it belongs on every screen that IS one
+  // tap away from the entry screen — and on none of the ones that are the entry
+  // screen. 'unlock' used to show it; it is the entry screen now, so it cannot.
+  //
+  // The password door keeps it too, and used not to. That was right while the only
+  // way in was the end of the reset flow, which had nowhere to go back to; now that
+  // the door has its own line on the entry screen, a person who taps it and finds a
+  // password box they cannot fill must be able to get out — and its own label says
+  // what getting out means, because "Back to sign in" describes the screen they are
+  // already looking at.
+  set('auth-back-link',     !entry);
+  const backOut = document.getElementById('auth-back-link');
+  if (backOut) backOut.textContent = pwMode ? 'Use an email code instead' : 'Back to sign in';
+  // THE OTHER DIRECTION. Until this existed the screen only pointed ONE way: quick
+  // unlock could be left for the email door, and the email door had no way back — so
+  // a device with a registered fingerprint offered it once and then never again.
+  // `#auth-quick-in` is the way back. It used to live on 'email'/'login'; both of
+  // those now carry the quick-unlock PAIR itself, so a second control for the same
+  // two doors would be noise. It is offered instead on the steps where the pair is
+  // NOT on screen — the emailed code and the two recovery steps — which are also the
+  // steps a person reaches for a quicker door from.
   //
   // Gated on the record actually existing, for the same reason `#auth-unlock-btn`
   // is: a link to a door this device cannot open is worse than no link.
   const qIn = loadUnlock() || {};
   const canQuick = !!((qIn.deviceToken && qIn.email) && (qIn.credentialId || qIn.mode === 'fingerprint' || qIn.patternHash));
-  set('auth-quick-in',      canQuick && (mode === 'email' || mode === 'login'));
-  // The email field feeds every typed door — except quick unlock, which knows
-  // the email from its own record and shows none.
-  set('auth-email',         mode !== 'unlock' && mode !== 'pattern');
+  set('auth-quick-in',      canQuick && (mode === 'otp' || mode === 'forgot' || mode === 'reset'));
+  // The email field feeds every typed door. Only the pattern canvas has none: that
+  // screen knows the email from the device's own record.
+  set('auth-email',         mode !== 'pattern');
   // The Google door belongs to the FIRST step and nowhere else. Left visible on
   // the code step it would offer a second way in beside a form that is mid-way
   // through the first — and it is the one control on this screen that ignores
@@ -2402,7 +2726,11 @@ function setAuthMode(mode) {
   // a sentence Google writes, before our code is reached. An absent button would
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
-  const firstStep = (mode === 'email' || pwMode);
+  //
+  // It belongs to the same screens as the typed form, which is now `typed` rather
+  // than "the first step": the entry screen carries all four methods, so the Google
+  // door is one of them and not a step of its own above them.
+  const firstStep = typed;
   set('auth-google-btn',    firstStep && !!CONFIG.SSO_URL);
   set('auth-or',            firstStep && !!CONFIG.SSO_URL);
   const hint = document.getElementById('auth-hint-text');
@@ -2413,21 +2741,29 @@ function setAuthMode(mode) {
         ? 'Enter the code from your email and choose a new password.'
         : mode === 'otp'
           ? 'One more step. Enter the code we emailed you.'
-          // EMPTY on the quick-unlock step, on the owner's instruction: he asked for
-          // the sentence that told a person they were on a registered device to be
+          // EMPTY on the pattern canvas, on the owner's instruction: he asked for the
+          // sentence that told a person they were on a registered device to be
           // removed. It was true and it was still the wrong thing to say — somebody
-          // looking at a fingerprint prompt does not need telling which kind of
-          // device they are holding, and the two buttons below say everything else.
+          // drawing a pattern does not need telling which kind of device they are
+          // holding, and the canvas and the button under it say everything else.
           // (The exact wording is deliberately not quoted here; smoke-shell asserts
           // it no longer appears in this file, comments included, so that a phrase
           // cannot survive as a comment and quietly come back as a string.) Leaving
           // the line blank rather than removing the element keeps every mode one
           // element wide, so nothing after the hint jumps as modes change.
-          : mode === 'unlock' || mode === 'pattern'
+          : mode === 'pattern'
             ? ''
             : pwMode
               ? 'Sign in with the credentials your admin gave you.'
-              : 'We’ll email you a 6-digit sign-in code.';
+              // THE ENTRY SCREEN'S ONE LINE — and it is one line for BOTH modes that
+              // render that screen. It used to differ: 'email' had a sentence and
+              // 'unlock' had none, which was right when they were two screens and is
+              // a screen silently changing its own heading now that they are one. It
+              // adapts to what the device can actually do instead, so the second half
+              // is only offered where there is a second half to offer.
+              : (canQuick
+                  ? 'Sign in with your email, or unlock this device.'
+                  : 'We’ll email you a 6-digit sign-in code.');
   }
   // The stage-1 button reads differently per door it opens: the email step
   // requests a code, the password step signs in.
@@ -2766,6 +3102,13 @@ function wireAuthForm() {
   if (resendLink) resendLink.addEventListener('click', resend);
   const forgotLink = document.getElementById('auth-forgot-link');
   if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
+  // The password door is now a door INSIDE the one entry screen rather than a screen
+  // of its own — one line at the foot of the card, and `setAuthMode('login')` reveals
+  // the password box in place. It exists for the one account that has a password to
+  // type and no other way in: a new hire still holding the password their admin
+  // issued, who has not yet been through the reset flow that replaces it.
+  const pwdLink = document.getElementById('auth-pwd-link');
+  if (pwdLink) pwdLink.addEventListener('click', () => setAuthMode('login'));
   // The back door exists in every sub-mode: unlock, pattern, code, forgot,
   // reset — and from the password door too. 'email' is the screen every one of
   // those is a variation of, so 'login' as the target was wrong once email mode
@@ -2853,11 +3196,9 @@ function wireCustomerForm() {
   form.dataset.wired = '1';
 
   const emailIn = document.getElementById('cust-email');
-  const passIn  = document.getElementById('cust-password');
   const codeIn  = document.getElementById('cust-code');
   const signBtn = document.getElementById('cust-signin-btn');
   const codeBtn = document.getElementById('cust-code-btn');
-  const otpLink = document.getElementById('cust-otp-link');
   const backLink = document.getElementById('cust-back-link');
   const codeWrap = document.getElementById('cust-code-wrap');
   const errEl   = document.getElementById('cust-error');
@@ -2874,57 +3215,30 @@ function wireCustomerForm() {
   const setStage = (stage) => {
     _custStage = stage;
     if (codeWrap) codeWrap.style.display = (stage === 'code') ? '' : 'none';
-    // The OTP entry point is a way INTO the code step, so it is gone once you are in
-    // it — and the back link is its inverse, so the two are never up together.
-    if (otpLink)  otpLink.style.display  = (stage === 'code') ? 'none' : '';
+    // The back link is the inverse of the code step, so the two are never up together.
+    // It used to have a partner — the "use email (OTP)" link that was a way INTO the
+    // code step — and that link is gone with the password field, because on an
+    // OTP-only door the code step is not an alternative, it is the whole route.
     if (backLink) backLink.style.display = (stage === 'code') ? '' : 'none';
-    // The password field is not part of the code step. A second factor is a code, and
-    // leaving a password box on that screen invites a customer to retype it.
-    const pwWrap = form.querySelector('.pw-wrap');
-    if (passIn)  passIn.style.display  = (stage === 'code') ? 'none' : '';
-    if (pwWrap)  pwWrap.style.display  = (stage === 'code') ? 'none' : '';
     showError('');
   };
 
-  // STAGE 1, the password route: email + password. A correct password still earns a
-  // code, so this ends on the code step exactly like the passwordless route — and a
-  // temp-password account is refused here, because the change is a screen the APP
-  // owns and this card has no room to grow one.
-  const submitCustomerPassword = () => {
-    const email = emailOf();
-    const password = (passIn && passIn.value) || '';
-    if (!email) { showError('Enter your email address.'); return; }
-    if (!password) { showError('Enter your password, or use the email (OTP) method below.'); return; }
-    if (signBtn) { signBtn.disabled = true; signBtn.textContent = 'Signing in…'; }
-    const idle = () => { if (signBtn) { signBtn.disabled = false; signBtn.textContent = 'Sign in'; } };
-    customerAuth('login', { email: email, password: password }).then(d => {
-      idle();
-      if (d && d.status === 'ok' && d.sessionToken) { finishCustomerAuth(email, d); return; }
-      if (d && d.status === 'ok' && d.otpRequired) {
-        if (codeIn) codeIn.value = '';
-        setStage('code');
-        showCustomerCodeNote(d, email);
-        if (codeIn) setTimeout(() => codeIn.focus(), 60);
-        return;
-      }
-      if (d && d.status === 'ok' && d.mustChangePassword) {
-        showError('This account is still on the password Indrones issued. Use “First time here, or forgot your password?” below to choose your own.');
-        return;
-      }
-      showError((d && d.message) || 'Could not sign in.');
-    });
-  };
-
-  // STAGE 1, the passwordless route. This is the button the owner named — "use email
-  // (OTP) based login method" — and it carries NO password field at all: the backend
-  // reads the absence of `password` as the passwordless door.
+  // THE CUSTOMER'S ONE AND ONLY DOOR: an email address, and a code we mail to it.
+  //
+  // There is no password field on this card by the owner's instruction — "for
+  // customers as well, there is no password method like of employee's, it is only
+  // email OTP based login" — so this button does what the customer can actually do.
+  // `password: ''` is not an empty password: the backend reads the ABSENCE of a real
+  // one as the passwordless door, which is why the key is present and empty rather
+  // than missing (doLoginPassword's other branch would reject a blank string).
   const requestCustomerCode = () => {
     const email = emailOf();
-    if (!email) { showError('Enter your email address first.'); return; }
+    if (!email) { showError('Enter your email address.'); return; }
     showError('');
-    if (otpLink) { otpLink.textContent = 'Sending…'; otpLink.style.pointerEvents = 'none'; }
+    if (signBtn) { signBtn.disabled = true; signBtn.textContent = 'Sending…'; }
+    const idle = () => { if (signBtn) { signBtn.disabled = false; signBtn.textContent = 'Sign in'; } };
     customerAuth('login', { email: email, password: '' }).then(d => {
-      if (otpLink) { otpLink.textContent = 'Use email (OTP) based login method'; otpLink.style.pointerEvents = ''; }
+      idle();
       if (d && d.status === 'ok' && d.otpRequired) {
         if (codeIn) codeIn.value = '';
         setStage('code');
@@ -2935,9 +3249,10 @@ function wireCustomerForm() {
       // A brand-new invitee is on a temporary password, and the backend will not mint
       // a login code for one. Saying "we emailed you a code" here would send them to
       // an inbox that is empty and keep them there — customer.html learned the same
-      // lesson and says the same thing.
+      // lesson and says the same thing. The way out is now the "Forgot password?"
+      // link beside this button, which is where a customer replaces that password.
       if (d && d.status === 'ok' && d.mustChangePassword) {
-        showError('No code was sent. Your account is still on the password Indrones issued — use “First time here, or forgot your password?” below to choose your own.');
+        showError('No code was sent. Your account is still on the password Indrones issued — use “Forgot password?” to choose your own.');
         return;
       }
       showError((d && d.message) || 'Could not send a sign-in code.');
@@ -2948,14 +3263,17 @@ function wireCustomerForm() {
     const note = document.getElementById('cust-code-note');
     if (!note) return;
     // codeSent:false means an unspent code from earlier today was reused, so claiming
-    // a fresh mail would send them looking for one that does not exist.
+    // a fresh mail would send them looking for one that does not exist. "has already
+    // been sent", not "was already sent" — the owner's correction, and he is right:
+    // the code is still in the inbox and still valid, so the perfect tense is the
+    // true one. It is the same sentence the staff card shows for the same reason.
     note.textContent = (d && d.codeSent === false)
-      ? 'A 6-digit code was already sent to ' + email + ' today. It is valid for 8:30 hours from when it was sent.'
+      ? 'A 6-digit code has already been sent to ' + email + ' today. It is valid for 8:30 hours from when it was sent.'
       : 'A 6-digit code is on its way to ' + email + '. It is valid for 8:30 hours.';
   };
 
-  // STAGE 2: the code. Both routes close here and there is one code box, so there is
-  // one place a code can be typed and one place it can be wrong.
+  // STAGE 2: the code. There is one code box, so there is one place a code can be
+  // typed and one place it can be wrong.
   const submitCustomerCode = () => {
     const email = emailOf();
     const code = ((codeIn && codeIn.value) || '').trim();
@@ -2970,13 +3288,12 @@ function wireCustomerForm() {
     });
   };
 
-  if (signBtn) signBtn.addEventListener('click', submitCustomerPassword);
+  if (signBtn) signBtn.addEventListener('click', requestCustomerCode);
   if (codeBtn) codeBtn.addEventListener('click', submitCustomerCode);
-  if (otpLink) otpLink.addEventListener('click', requestCustomerCode);
   if (backLink) backLink.addEventListener('click', () => setStage('form'));
   form.addEventListener('submit', ev => {
     ev.preventDefault();
-    (_custStage === 'code') ? submitCustomerCode() : submitCustomerPassword();
+    (_custStage === 'code') ? submitCustomerCode() : requestCustomerCode();
   });
   // Enter inside the code box submits the code even if the form's own submit is
   // swallowed by the browser's implicit-submission rules for a multi-button form.
@@ -3015,16 +3332,22 @@ const THEME_KEY = 'theme';
 // below is what turns it into one.
 const THEME_VALUES = ['light', 'cream', 'dark'];
 
-// DEFAULT DARK, as of 2026-10-08. The owner chose the Indrones Industrial look and
-// it is a dark instrument panel — an unlit one is a different design, not a variant
-// of it. So a device that has never chosen gets dark rather than whatever its
-// operating system happens to be; someone who wants light still says so, and that
-// choice is honoured because it is stored.
+// DEFAULT LIGHT, on the owner's instruction of 2026-10-08: "Default theme is light
+// and color is yellow." That is the whole rule — a device that has never chosen
+// gets light, and a device that HAS chosen gets what it chose, because the value is
+// stored per device.
+//
+// It was 'dark' for part of one day, on the reading that the Indrones Industrial
+// look is a dark instrument panel. That reading was mine and it was wrong about
+// which half the owner was asking for: industrial.css is theme-aware by design — it
+// names no brand yellow and no fixed ink step — so the look is the SAME look in
+// light, and the choice of default is a preference rather than a consequence of the
+// skin.
 //
 // 'system' has NOT gone away — it is still one of THEME_CHOICES and still means
-// "ask the OS". It is simply no longer what an unanswered question resolves to.
+// "ask the OS". It is simply not what an unanswered question resolves to.
 function storedTheme() {
-  try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
+  try { return localStorage.getItem(THEME_KEY) || 'light'; } catch { return 'light'; }
 }
 function prefersDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
 
@@ -3597,6 +3920,12 @@ function showApp() {
   // password-change screen, and a diverted sign-in still has to lose the wait
   // screen. Any route to a real screen clears it.
   endSsoWait();
+  // The landing head is about to be hidden, so its loop is stopped where it stands
+  // rather than left running against a screen nobody is looking at — a timer chain
+  // that keeps mutating hidden DOM for the length of a session is a cost with no
+  // payer. stopBrandTyping() also puts the words back to "finished", which is what a
+  // later sign-out has to find.
+  stopBrandTyping();
   // Guard: an account still holding a temporary password must never reach the
   // shell. This is belt-and-braces — the backend mints no session in that state,
   // so finishAuth() cannot be reached with mustChangePassword set — but a guard

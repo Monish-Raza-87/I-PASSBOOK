@@ -438,7 +438,15 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   gap: 1.25rem;
   width: 100%;
   max-width: 860px;
-  align-items: stretch;
+  /* `start`, NOT the grid default of `stretch`. Measured on the rendered page
+     (2026-10-08): the employee door carries six controls and the customer door
+     three, so a stretch gave the customer card a ~155px blank hole below its
+     "Forgot password?" — a void that reads as a control that failed to load.
+     Each card is now the size of what is actually in it. The owner's ask was that
+     the elements be PLACED alike, which they are — same chip, same hint line, same
+     field, same primary, same forgot-password control, in that order — and equal
+     outlines were never the thing that made them read as a pair. */
+  align-items: start;
 }
 
 /* A door IS a glass card (`<section class="door glass-card">`), so the Desk skin's
@@ -483,7 +491,14 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 /* Smaller than the old in-card mark (76px): it is no longer the only thing on the
    screen doing the branding, and the head has a wordmark now. */
 .landing-mark { display: block; height: 60px; width: auto; margin-bottom: 0.35rem; }
-.landing-wordmark { position: relative; display: block; }
+/* The box the word is typed INTO. `text-align: left` is the half of the effect that
+   makes it read as typing rather than unfolding: app.js stamps this box with the
+   finished word's width (see reserveBrandBox()), so it is the same size from the first
+   keystroke to the last, and with the text left-aligned every letter lands where it
+   will stay instead of sliding outward as the next one arrives. With no JavaScript the
+   box is content-width and the alignment is a no-op, so the heading is simply centred
+   as it always was. */
+.landing-wordmark { position: relative; display: block; text-align: left; }
 .landing-brand {
   margin: 0;
   font-size: var(--text-3xl);
@@ -493,55 +508,60 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   line-height: 1.1;
 }
 
-/* ── The cursive flourish under the wordmark ─────────────────────────────────
-   A single stroke that writes itself, holds, rubs itself out and starts again.
+/* ── The typed wordmark, and the line that follows it ────────────────────────
+   THE OWNER'S INSTRUCTION, 2026-10-08: the looping cursive stroke under
+   "I-PASSBOOK" becomes "I-PASSBOOK itself in-loop animation where I-PASSBOOK
+   appears as if being typed", and once it has been typed the line beneath it
+   spells the name out. The stroke, its keyframes and its SVG are gone.
 
-   The animation is driven by stroke-dashoffset against a pathLength of 1 (set in
-   the markup). That is the whole trick, and it matters for one practical reason: a
-   hand-written dash animation needs the path's LENGTH as a number, and any measured
-   length is wrong the moment the SVG is stretched. Normalising it in the markup
-   means `stroke-dasharray: 1` is the entire path, at any width, with no measuring
-   and no JS.
+   TWO RULES CARRY THE WHOLE EFFECT, and both are load-bearing rather than
+   decorative:
 
-   `preserveAspectRatio="none"` lets the stroke stretch with the heading, and
-   `vector-effect: non-scaling-stroke` keeps the nib its own weight while it does —
-   without it the line would fatten as the wordmark got wider. */
-.brand-stroke {
-  display: block;
-  width: 100%;
-  height: 10px;
-  margin-top: 0.1rem;
-  overflow: visible;
+     · `display: none` on an unrevealed letter, NOT `opacity: 0`. `opacity` leaves
+       the glyph occupying its own width, so the wordmark would be its full width
+       from the first frame and the letters would simply fade in — a fade, never a
+       type. Removing it from the box is what makes the word grow left to right,
+       and it is also what lets the caret, which sits last in the heading, follow
+       the last letter actually on screen with no measuring.
+     · the caret is a plain inline-block that blinks on its own keyframes. It has no
+       width of its own until it is shown, so it cannot push the wordmark around.
+
+   The timings are NOT here. app.js's buildBrandTyping() splits the text into the
+   spans and its loop adds and removes `.is-on`; a duration written in two places
+   is a duration that disagrees with itself. This file only says what a revealed
+   letter looks like.
+
+   THE REDUCED-MOTION BLOCK IS NOT A COURTESY, IT IS A FALLBACK WITH TEETH: if
+   app.js never runs, or dies part-way through, `!important` here paints the whole
+   sentence anyway. The markup carries the finished text, so there is nothing to
+   lose by showing it. */
+.bt-lt { display: none; }
+.bt-lt.is-on { display: inline; }
+
+.bt-caret {
+  display: none;
+  width: 0.07em;
+  height: 0.82em;
+  margin-left: 0.08em;
+  background: var(--accent);
+  vertical-align: -0.05em;
 }
-.brand-stroke-path {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 2.5;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: brandWrite 4s ease-in-out infinite;
-}
-/* The hold between 35% and 70% is deliberate: a flourish that is always mid-stroke
-   reads as a loading spinner. This is a wordmark that occasionally reminds you it
-   was written by hand. */
-@keyframes brandWrite {
-  0%   { stroke-dashoffset: 1; }
-  35%  { stroke-dashoffset: 0; }
-  70%  { stroke-dashoffset: 0; }
-  88%  { stroke-dashoffset: -1; }
-  100% { stroke-dashoffset: -1; }
-}
-/* The stroke drawn but not moving. An animation that loops forever is exactly the
-   kind of decoration this setting exists to stop. */
-@media (prefers-reduced-motion: reduce) {
-  .brand-stroke-path { animation: none; stroke-dashoffset: 0; }
+.bt-caret.is-on { display: inline-block; animation: btBlink 1.05s steps(1, end) infinite; }
+@keyframes btBlink {
+  0%, 50%   { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
 }
 
-/* The product name, under the flourish. Quieter than the wordmark — it is a full
-   form, not a headline. */
+/* The expansion line. Quieter than the wordmark — it is a sentence, not a
+   headline — and it appears one term at a time, after the name has finished. */
 .landing-full { color: var(--ink-gray-5); font-size: var(--text-sm); margin: 0.3rem 0 0; }
+.landing-full .bt-term { display: none; }
+.landing-full .bt-term.is-on { display: inline; }
+
+@media (prefers-reduced-motion: reduce) {
+  .bt-lt, .landing-full .bt-term { display: inline !important; }
+  .bt-caret { display: none !important; }
+}
 
 /* ── The quick-unlock row, and the step under it ──────────────────────────────
    The fingerprint and the pattern are ONE decision — open this device the way I set
@@ -601,45 +621,22 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 
 .auth-error { color: var(--ink-red-6); text-align: center; margin-top: 1rem; font-size: var(--text-sm); }
 
-/* ── The Google door, and the divider under it ─────────────────────────────── */
-/* A white pill with a real border, not a brand-coloured button: Google's own
-   guidance draws the identity button in ITS colours, and the accent role here
-   belongs to whichever palette the user picked. Keeping it neutral also makes the
-   two doors visually equal — the password form is not the afterthought. */
-.btn-google {
-  background: #fff;
-  color: #3c4043;
-  border-color: var(--outline-gray-3);
-  font-weight: var(--weight-medium);
-}
-.btn-google:hover  { background: #f8f9fa; border-color: var(--outline-gray-4); }
-.btn-google:active { background: #f1f3f4; }
-.btn-google:disabled { opacity: 0.6; }
+/* ── The Indrones-email door, and the divider under it ────────────────────────
+   THIS CLASS IS GONE, and its absence is the change. `.btn-google` was a white pill
+   carrying Google's own colours and a hand-drawn four-colour G beside the words
+   "Sign in with Google". On 2026-10-08 the owner renamed the door to "Sign in with
+   Indrones email" and asked for it in the accent like every other action on the
+   card: "if buttons are yellow mostly then even signin with indrones email also has
+   to be in yellow instead of black." Both the class and the mark are deleted rather
+   than left unstyled — the button is a plain `.btn` now, so the colour it takes is
+   the one industrial.css already gives every action on these two cards, and there
+   is no second rule that could disagree with it.
 
-/* The four-colour G, drawn with gradients rather than loaded as a file: it is four
-   bars of colour, and an inline element keeps the button working offline (this is
-   a PWA) and adds no request to the sign-in screen. */
-.google-mark {
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-  background:
-    conic-gradient(from -45deg,
-      #4285f4 0 25%, #34a853 0 50%, #fbbc05 0 75%, #ea4335 0 100%);
-  /* The white ring + blue centre is what makes it read as the G rather than as a
-     pie chart: a coloured ring around a solid core. */
-  box-shadow: inset 0 0 0 3px #fff;
-  position: relative;
-}
-.google-mark::after {
-  content: '';
-  position: absolute; inset: 4px;
-  border-radius: 50%;
-  background: #4285f4;
-}
+   `.google-mark` went with it: a four-colour G on a button that no longer says
+   Google is a logo for a step the button does not take. */
 
-/* "or use your email and password" — a hairline that reads as a junction, so the
-   eye knows the form below is the other way in rather than more of the same. */
+/* "or get a code by email" — a hairline that reads as a junction, so the eye knows
+   the form below is the other way in rather than more of the same. */
 .auth-or {
   display: flex;
   align-items: center;

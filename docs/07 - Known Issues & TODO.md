@@ -660,7 +660,9 @@ is left is small.
       | one full `renderIRList` | 21 ms | 42 ms | 60 ms | 91–122 ms |
       | one `renderInsights` (dashboard) | 7 ms | 11 ms | 21 ms | 28 ms |
       | `renderBoard` (capped at 25 cards) | — | — | 4.5 ms | — |
-      | `renderLayout`, `renderSegments`, `renderCategorySegments`, `applyIRStateToAllIRs`, `refreshCommentCounts` (46 buttons), `buildTimeline` | | | **all under 2 ms** | |
+      | `renderLayout` | 0.1 ms | 0.5 ms | 0.6 ms | 1.3 ms |
+      | `renderSegments` / `renderCategorySegments` | — | — | 0.8 / 0.3 ms | — |
+      | `applyIRStateToAllIRs`, `refreshCommentCounts` (46 buttons), `buildTimeline` | — | — | under 2 ms each | — |
 
       So there is exactly **one** cost in this app proportional to the data — putting N
       cards on screen at ~0.06–0.1 ms each — and everything else a static read flags

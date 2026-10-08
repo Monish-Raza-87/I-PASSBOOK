@@ -34,6 +34,7 @@
 // It parses the real files. It never restates a value.
 
 import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
@@ -396,10 +397,16 @@ ok('...and in the deploy list, so it is actually published',
   /'faq\.html'/.test(deploy), 'deploy SERVED');
 ok('the other static pages stay OUT of the shell — review pages are not app screens',
   !/inspector\.html|plan\.html/.test(stripJs(swJs)), 'sw.js scan (comments stripped)');
+// The sidebar entry used to be a NEW TAB onto faq.html. Since 2026-10-08 it is a
+// route into a pane of this app — the owner's "our FAQ page is opening in a new tab,
+// that is not good for us. It has to be in our app, as per our UI and a part of our
+// app." So the assertions invert: it must NOT open the standalone page, and it must
+// NOT carry a target, because a second tab is exactly what was complained about.
 ok('the sidebar carries it too, so a signed-in person can reach it',
-  /id="nav-faq"[^>]*href="faq\.html"/.test(indexCode), 'sidebar link');
-ok('...and opens it in a new tab, so a half-filled form is never lost to a question',
-  /<a class="nav-item" id="nav-faq"[^>]*target="_blank"[^>]*rel="noopener"/.test(indexCode),
+  /id="nav-faq"[^>]*href="#\/faq"/.test(indexCode), 'sidebar link');
+ok('...and it is a ROUTE now, not a link out to the standalone page',
+  !/id="nav-faq"[^>]*href="faq\.html"/.test(indexCode) &&
+  !/<a class="nav-item" id="nav-faq"[^>]*target="_blank"/.test(indexCode),
   (indexCode.match(/<a class="nav-item" id="nav-faq"[\s\S]{0,300}?<\/a>/) || [''])[0].slice(0, 140));
 ok('...and its glyph comes from the ONE icon set, not a literal <svg> in the markup',
   /#nav-faq \.nav-icon/.test(appCode) && /\n  help:\s+'<circle/.test(appCode) &&
@@ -407,6 +414,133 @@ ok('...and its glyph comes from the ONE icon set, not a literal <svg> in the mar
 ok('...and its label is its own key, not shared with the sign-in card',
   /'nav\.help':/.test(i18nJs) && /'door\.faq':/.test(i18nJs),
   'separate keys');
+
+// ── The FAQ inside the app ────────────────────────────────────────────────────
+//
+// The owner, 2026-10-08: "our FAQ page is opening in a new tab, that is not good for
+// us. It has to be in our app, as per our UI and a part of our app."
+//
+// The way to do that badly is a second copy of the answers in app.js, which drifts
+// from faq.html within a month and leaves nobody able to say which is right. So the
+// text lives in faq-content.js and there are two RENDERERS of it. This section pins
+// the arrangement: the content file is the only source, faq.html is BUILT from it,
+// and the in-app view never grows a second copy of a sentence.
+head('the same answers, inside the app');
+
+const contentJs = read('../faq-content.js');
+const buildFaq = read('./build-faq.mjs');
+const contentCode = stripJs(contentJs);
+
+ok('the content is its own file, and it assigns the shape both renderers read',
+  /window\.FAQ_CONTENT\s*=\s*\{/.test(contentCode) &&
+  /"sections":/.test(contentCode) && /"jump":/.test(contentCode),
+  Object.keys(JSON.parse(contentCode.slice(contentCode.indexOf('{'), contentCode.lastIndexOf('}') + 1)) || {}));
+
+ok('index.html loads it BEFORE app.js, which renders from it on the way in',
+  indexHtml.indexOf('faq-content.js') > -1 &&
+  indexHtml.indexOf('faq-content.js') < indexHtml.indexOf('src="app.js"'),
+  { content: indexHtml.indexOf('faq-content.js'), app: indexHtml.indexOf('src="app.js"') });
+
+ok('app.js renders #/faq from window.FAQ_CONTENT rather than carrying the answers',
+  /window\.FAQ_CONTENT/.test(appCode) &&
+  // The check that matters: not one of the questions is written into app.js. If a
+  // future edit pastes the text in, this is what fails.
+  !/How do I get an account\?/.test(appCode) &&
+  !/Never share it/.test(appCode),
+  'answer text found in app.js');
+
+ok('the pane is a fifth sibling, empty in the markup, filled at runtime',
+  /<div id="faq-view">/.test(indexCode) &&
+  /<div id="faq-body" class="faq-body"><\/div>/.test(indexHtml) &&
+  // The nine sections are what the shell suites count by this literal, and the pane
+  // is not one of them.
+  !/id="faq-view"[\s\S]{0,300}section-content/.test(indexHtml), 'pane markup');
+
+ok('the route exists, and resolves to the pane rather than the list fallthrough',
+  /if \(parts\[0\] === 'faq'\) return \{ name: 'faq' \};/.test(appCode));
+
+ok('renderLayout gives it the screen and the list fold, like the other two panes',
+  /const faq\s+= currentView === 'faq';/.test(appCode) &&
+  /const full\s+= detail \|\| insights \|\| log \|\| faq;/.test(appCode) &&
+  /faqView\.style\.display = faq \? 'flex' : 'none';/.test(appCode) &&
+  /classList\.toggle\('view-faq', faq\)/.test(appCode));
+
+ok('the nav marks it active, so the pane is not a dead tap',
+  /\['nav-faq', 'faq'\]/.test(appCode), 'markActiveNav');
+
+// The one way this view could break the router: a jump link written as an anchor.
+// `href="#getting-in"` is not a scroll inside a hash-routed app — it is a ROUTE, and
+// the unknown-hash fallthrough would throw the reader back to the IR list. The jump
+// strip is buttons for that reason, and this is the assertion that keeps it so.
+ok('the jump strip is buttons, never anchors — an href would be read as a ROUTE',
+  /data-faq-jump=/.test(appCode) &&
+  /jumpToFaqSection\(jump\.dataset\.faqJump\)/.test(appCode) &&
+  !/faq-jump-item[^`]*href=/.test(appCode), 'jump wiring');
+
+ok('the in-app view never links back out to the standalone page',
+  /href="index\\\.html"\/g, 'href="#\/tickets"'/.test(appCode) &&
+  !/faq\.html/.test(appCode), 'no link out');
+
+ok('it says so, not nothing, if the content file is missing',
+  /The Help &amp; FAQ content did not load\./.test(appCode), 'empty state');
+
+// The trap that actually fired. base.css's topbar is `#workspace header` — a
+// DESCENDANT selector, scoped that way after the landing page's own <header> silently
+// became a white sticky 56px band. This pane is inside #workspace, so a <header> in
+// the FAQ markup inherits the same band: the first build of this view rendered as a
+// 56px sticky white strip with the standfirst spilling out of it. Measured, not
+// guessed — and this is the assertion that keeps it from coming back, because nothing
+// else in the app would notice a markup element inheriting a container's chrome.
+ok('the FAQ head is NOT a <header> — it is inside #workspace, where that means topbar',
+  (() => {
+    // HTML comments stripped first: the comment above that <div> explains this very
+    // trap and names the element in prose, and a suite that counts its own prose is a
+    // suite that passes for the wrong reason.
+    const body = stripHtml(appCode.slice(
+      appCode.indexOf('function renderFaq()'), appCode.indexOf('faqBuilt = true;')));
+    return body.length > 400 && !/<header[\s>]/.test(body) && /<div class="faq-head">/.test(body);
+  })(), 'faq-head element');
+
+ok('...and the same for the footer, which is not a <footer> inside the analyser either',
+  /<footer class="faq-foot">/.test(appCode) && !/#workspace footer\s*\{/.test(indexCode + css),
+  'faq-foot element');
+
+ok('the footer\'s back link is re-pointed at the IR list, by the router, on the way in',
+  /const faqInAppLinks = html => String\(html\)\.replace\(\/href="index\\\.html"\/g, 'href="#\/tickets"'\)/.test(appCode) &&
+  /faqInAppLinks\(p\)/.test(appCode), 'back link');
+
+// ── faq.html is BUILT, and it is current ──────────────────────────────────────
+head('faq.html is generated from the same file, and is up to date');
+
+ok('faq.html carries the BUILD region, so the tool has somewhere to write',
+  faqHtml.indexOf('BUILD:FAQ:BEGIN') > -1 && faqHtml.indexOf('BUILD:FAQ:END') > -1 &&
+  // …and the tool is looking for exactly those markers.
+  /BUILD:FAQ:BEGIN/.test(buildFaq) && /BUILD:FAQ:END/.test(buildFaq), 'markers');
+
+const faqCheck = spawnSync(process.execPath,
+  [new URL('./build-faq.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), '--check'],
+  { encoding: 'utf8' });
+ok('build-faq.mjs --check exits clean, so the page matches the content file',
+  faqCheck.status === 0, (faqCheck.stdout + faqCheck.stderr).trim());
+// A check that cannot fail is not a check. This one reports what it found, so a
+// silent no-op would be visible here.
+ok('...and it is a real check, not a no-op',
+  /up to date/.test(faqCheck.stdout) && /\d+ questions/.test(faqCheck.stdout),
+  faqCheck.stdout.trim());
+
+// Every question in the content file must reach BOTH renderers. Counting them in the
+// generated page against the content file is the cheap version of "the two agree",
+// and it is the failure that would actually happen: a question added to the app and
+// not to the page, or the reverse.
+ok('every question in the content file is in the generated page',
+  (() => {
+    const C = JSON.parse(contentCode.slice(contentCode.indexOf('{'), contentCode.lastIndexOf('}') + 1));
+    const asked = C.sections.reduce((n, s) => n + s.items.length, 0);
+    const onPage = (faqCode.match(/<h3>/g) || []).length;
+    const ids = new Set((faqHtml.match(/<section id="([^"]+)"/g) || []).map(s => s.slice(13, -1)));
+    return asked === onPage && ids.size === C.sections.length &&
+      C.sections.every(s => ids.has(s.id));
+  })(), (faqCode.match(/<h3>/g) || []).length);
 
 console.log(fails ? `\n${fails} FAILED` : '\nall good');
 process.exitCode = fails ? 1 : 0;

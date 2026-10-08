@@ -7,11 +7,11 @@
 // The suite has the same two jobs it had when this slot held a two-screen prototype,
 // and neither is visible by looking at the screens:
 //
-//   1. IT CANNOT LEAK. Every rule is scoped to one of the eight roots the look owns,
+//   1. IT CANNOT LEAK. Every rule is scoped to one of the nine roots the look owns,
 //      or it is in the one sanctioned global block (the measured status/priority
 //      colour steps). If a rule escapes, a screen nobody has looked at changes under
-//      it — and the list went from six roots to eight, so the surface this guard is
-//      protecting is larger, not smaller.
+//      it — and the list has only ever grown, so the surface this guard protects is
+//      larger, not smaller.
 //   2. IT IS REMOVABLE. That is the same property stated the other way: delete the
 //      file and its one <link>, and the app is exactly what it was. That is why the
 //      whole look lives in one file, and why every rule restyles a class that already
@@ -77,16 +77,20 @@ r.ok('the Desk prototype it replaced was deleted, not left behind',
   !/desk\.css/.test(html) && !/desk\.css/.test(swJs) && !/desk\.css/.test(deployJs));
 
 // ── 2. It cannot leak ─────────────────────────────────────────────────────────
-r.head('no rule escapes the eight roots it is allowed to change');
-// The eight roots are the app's own view containers plus the two shell bands, not a
+r.head('no rule escapes the nine roots it is allowed to change');
+// The nine roots are the app's own view containers plus the two shell bands, not a
 // list of screens that happened to be reviewed. #index-view carries the IR list AND
-// the board switch; #detail-view is one IR; #insights-view and #log-view are the two
-// read-only panes. #sidebar and #workspace header are the chrome — the first is ALSO
-// the phone bottom bar, because it is the same element re-laid out, so styling it
-// covers the phone with no second rule. Widening this list is the whole cost of
-// applying the look to another screen, and the reason it is a list at all is that a
-// rule escaping it changes a screen nobody has looked at.
-const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view|#sidebar|#workspace header)\b/;
+// the board switch; #detail-view is one IR; #insights-view, #log-view and #faq-view
+// are the read-only panes. #sidebar and #workspace header are the chrome — the first
+// is ALSO the phone bottom bar, because it is the same element re-laid out, so
+// styling it covers the phone with no second rule. Widening this list is the whole
+// cost of applying the look to another screen, and the reason it is a list at all is
+// that a rule escaping it changes a screen nobody has looked at.
+//
+// #faq-view joined on 2026-10-08, when the Help & FAQ stopped being a page in another
+// tab and became a pane of the app. It is the same pane shape as the two beside it,
+// which is the test for membership: a NEW KIND of screen is an argument, not an entry.
+const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view|#faq-view|#sidebar|#workspace header)\b/;
 // The one sanctioned global block: the status and priority colour steps. Deliberately
 // NOT scoped — a pill nobody can read is a defect on every screen, and fixing it on
 // three of eight would leave the app disagreeing with itself. It is a fixed list:
@@ -158,17 +162,23 @@ r.ok('...and the primary text step it uses instead is --ink-gray-9',
 r.ok('the brand yellow is named nowhere — every mark is the accent role',
   !/--ind-yellow/.test(css), (css.match(/[^\n]*--ind-yellow[^\n]*/g) || []));
 r.ok('...and no --ind-* colour token is named at all, so the four other palettes still work',
-  !/var\(--ind-(?!ground|panel|inset|line|rule|muted|dim)/.test(css),
+  !/var\(--ind-(?!ground|panel|inset|line|rule|muted|dim|lamp-)/.test(css),
   (css.match(/var\(--ind-[a-z-]+\)/g) || []));
+r.ok('...and the lamp set is this file\'s own name, not base.css\'s palette-specific one',
+  /--ind-lamp-open:\s*var\(--accent-bar\)/.test(css) && !/--ind-accent/.test(css) &&
+  !/--ind-on-yellow/.test(css));
 r.ok('...and the accent is a real role, defined in palette.css for every preset',
   /--accent:/.test(palette) && (palette.match(/--accent:/g) || []).length >= 5);
 
-// --ind-dim is --ink-gray-5 (4.18:1 — below AA). It is allowed to be the unlit LED's
-// fill and nothing else. One use is the rule; a second means a word went grey.
+// --ind-dim is --ink-gray-5 (4.18:1 — below AA). What that number forbids is a WORD
+// in it; a fill or a hairline is read, not read out, and §1 gives it to three of those:
+// the unlit lamp, the closed lamp, and the outline that makes the legacy lamp hollow.
+// The count is pinned so a fourth use has to be argued for rather than added.
 const dimUses = (css.match(/var\(--ind-dim\)/g) || []).length;
-r.ok('--ind-dim is a FILL, used once, on the unlit LED', dimUses === 1, dimUses);
-r.ok('...and the one use is a background, never a color',
-  /background:\s*var\(--ind-dim\)/.test(css) && !/color:\s*var\(--ind-dim\)/.test(css));
+r.ok('--ind-dim is a FILL, and exactly three of them', dimUses === 3, dimUses);
+r.ok('...and never a color, which is the one thing 4.18:1 rules out',
+  !/color:\s*var\(--ind-dim\)/.test(css) &&
+  (css.match(/background:\s*var\(--ind-dim\)/g) || []).length === 1);
 
 // ── 4. The measurements, pinned ───────────────────────────────────────────────
 // Contrast values are for the pill's own tinted ground, in light / dark. They are
@@ -195,7 +205,12 @@ r.ok('every step it names is one tokens.css actually emits',
   Object.values(PILL).map(([s]) => s).filter(s => !declared.has(s)));
 
 r.head('priority and the muted grey are the AA-safe steps');
-const PRIO = { low: '--ink-gray-6', medium: '--ink-blue-8', high: '--ink-amber-8', urgent: '--ink-red-7' };
+// Priority is a gauge, and it steps the way the lamps step: muted, solid, the accent,
+// the alarm. It was grey / blue / amber / red — the same borrowed-hue problem the lamps
+// had, one line over. `--accent` is the one step that is not a fixed ink value: it is the
+// role palette.css resolves per theme and per preset, which is what makes a HIGH that is
+// readable in light mode (6.54:1) and loud in dark (11.18:1) without a rule per theme.
+const PRIO = { low: '--ink-gray-6', medium: '--ink-gray-8', high: '--accent', urgent: '--ink-red-7' };
 for (const [name, step] of Object.entries(PRIO)) {
   const set = (css.match(new RegExp(`\\.prio-${name}\\s*\\{\\s*color:\\s*var\\((--[a-z0-9-]+)\\)`)) || [])[1];
   r.ok(`.prio-${name} is ${step}`, set === step, set);
@@ -207,16 +222,31 @@ r.ok('--ind-muted is the measured step, not the one that fails',
   (css.match(/--ind-muted:[^;]*/) || [])[0]);
 
 // ── 5. The LED is lit, square, and no wider than the pill it replaced ────────
-r.head('the badge is an LED: lit from the status family, squared, and not wider');
+r.head('the badge is an LED: lit from the lamp family, squared, and not wider');
 // THE SUBTLE ONE. `--focus-*` is a box-SHADOW family; writing `background:
 // var(--focus-blue)` is not an error anywhere — the declaration is invalid, the
 // browser drops it, and every LED renders as an unlit grey square while the suite
-// stays green. Option B shipped exactly that trap once. So the colour must come from
-// `--st-*-fg`, and the assertion is on the family, not on one rule.
+// stays green. Option B shipped exactly that trap once. So the colour must come from a
+// family this file defines, and the assertion is on the family, not on one rule.
+//
+// THE FAMILY IS NOW --ind-lamp-*, NOT --st-*-fg, and the change is the point of the
+// block in §1: a lamp is a fill and may name a fill role, a word may not. Danger is the
+// one lamp that keeps a --st- step, because red is a hue no ramp stands in for.
 const ledColours = [...css.matchAll(/\.badge-[a-z]+::before[^{]*\{\s*background:\s*var\((--[a-z-]+)\)/g)]
   .map(m => m[1]);
-r.ok('the LED takes its colour from the status family, never from --focus-*',
-  ledColours.length >= 6 && ledColours.every(t => /^--st-/.test(t)), ledColours);
+r.ok('the LED takes its colour from the lamp family, never from --focus-*',
+  ledColours.length >= 5 &&
+  ledColours.every(t => /^--ind-lamp-/.test(t) || t === '--st-danger-fg'), ledColours);
+r.ok('...and every lamp in the set is a fill role declared per palette, not a ramp step',
+  /--ind-lamp-open:\s*var\(--accent-bar\)/.test(css) &&
+  [...css.matchAll(/--ind-lamp-(?:open|paused|resolved|closed):\s*var\((--[a-z0-9-]+)\)/g)]
+    .every(m => ['--accent-bar', '--ink-gray-6', '--ink-gray-7', '--ind-dim'].includes(m[1])),
+  (css.match(/--ind-lamp-[a-z]+:[^;]+/g) || []));
+// The hollow lamp is the one that is not a `background`, and it has to stay 5px wide:
+// a border would make it 7 and the row's side column cannot give back the 2px.
+r.ok('...and the legacy lamp is hollow by an inset shadow, so its box stays 5px',
+  /\.badge-legacy::before[^{]*\{[^}]*background:\s*transparent[^}]*box-shadow:\s*inset 0 0 0 1px var\(--ind-dim\)/.test(css),
+  (css.match(/\.badge-legacy::before[^{]*\{[\s\S]*?\}/) || [''])[0].slice(0, 200));
 r.ok('...and --focus- is named nowhere in the file at all', !/--focus-/.test(css));
 // The side column can never shrink, so a badge that got wider would squeeze the
 // MIDDLE of the row — the direction the owner already reported as a clipped status.
@@ -379,13 +409,19 @@ const segsRule = (css.match(/#index-view \.segments\s*\{[^}]*\}/) || [''])[0];
 r.ok('the strip wraps rather than scrolling sideways',
   /flex-wrap:\s*wrap/.test(segsRule) && /overflow:\s*visible/.test(segsRule), segsRule);
 
-// "You are here" is one pixel of brand colour on the edge, never a filled slab: a
-// yellow fill is 11.2:1 against the ink that would land on it, but the LABEL on a
-// tile is muted grey, and a filled tile would put muted grey on the loudest colour
-// on the screen.
-r.ok('the active tile is marked by an accent border, not a colour block',
-  /#index-view \.segment\.active\s*\{[^}]*border-color:\s*var\(--accent\)/.test(css),
+// "You are here" is a LIT TILE now, and it is the same tile the sign-in screen's one
+// button is. It used to be an accent border around a word, which is #7a5600 on a light
+// ground — a brown outline around a filter, which is what the owner reported on
+// 2026-10-08 as "brown colors across buttons". Filling it is only safe WITH the ink:
+// the old comment here was right that a filled tile would put muted grey on the loudest
+// colour on the screen, so the assertion is on the PAIR, and on both places the ink is
+// written — the label and the count that leads it.
+r.ok('the active tile wears the same lit fill as the sign-in button',
+  /#index-view \.segment\.active\s*\{[^}]*background:\s*var\(--btn-solid-bg\)[^}]*color:\s*var\(--btn-solid-fg\)/.test(css),
   (css.match(/#index-view \.segment\.active\s*\{[^}]*\}/) || [''])[0]);
+r.ok('...and its leading number takes that fill\'s own ink, not a muted grey',
+  /#index-view \.segment\.active \.segment-count\s*\{\s*color:\s*var\(--btn-solid-fg\)/.test(css),
+  (css.match(/#index-view \.segment\.active \.segment-count\s*\{[^}]*\}/) || [''])[0]);
 
 // The row identifies itself by one bright element. The identifier is the brand
 // yellow and the rest of the row is muted — that is the readout reading.
@@ -408,10 +444,12 @@ r.ok('...and the active nav item is marked with a 2px accent rail',
   (css.match(/#sidebar \.nav-item\.active\s*\{[^}]*\}/) || [''])[0]);
 r.ok('the header band is ruled off from the panes',
   /#workspace header\s*\{\s*border-bottom:\s*1px solid var\(--ind-line\)/.test(css));
-r.ok('the insights and log toolbars sit on the panel',
-  css.includes('#insights-view .list-toolbar') && css.includes('#log-view .list-toolbar'));
-r.ok('both read-only panes get the page ground',
-  /#insights-view,\s*\n#log-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css));
+r.ok('the three read-only panes\' toolbars sit on the panel',
+  css.includes('#insights-view .list-toolbar') && css.includes('#log-view .list-toolbar') &&
+  css.includes('#faq-view .list-toolbar'));
+r.ok('all three read-only panes get the page ground',
+  /#insights-view,\s*\n#log-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css) &&
+  /#faq-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css));
 r.ok('the detail pane gets the page ground',
   css.includes('#detail-view { background: var(--ind-ground)'));
 r.ok('...and its banner stops being the gradient',

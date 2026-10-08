@@ -57,6 +57,7 @@ const SERVED = [
   'components.css',
   'customer.html',
   'dataflash.js',
+  'faq-content.js',
   'faq.html',
   'i18n.js',
   'index.html',

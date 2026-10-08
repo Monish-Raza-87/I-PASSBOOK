@@ -685,16 +685,27 @@ r.ok('every view marks its nav item, so a tap is never a silent no-op', (() => {
            !byId.get('nav-insights').classList.contains('active');
   })();
   // The Log Analyser is a peer section of the dashboard, so it marks its own item
-  // and clears the other two — three items in the table, and all three must agree.
+  // and clears the other two — every item in the table must agree, not just the one
+  // being lit.
   const onLog = (() => {
     T.view = 'log'; T.renderLayout();
     return byId.get('nav-log').classList.contains('active') &&
            byId.get('nav-log').getAttribute('aria-current') === 'page' &&
            !byId.get('nav-insights').classList.contains('active') &&
+           !byId.get('nav-faq').classList.contains('active') &&
+           !byId.get('nav-tickets').classList.contains('active');
+  })();
+  // The Help & FAQ became a routed pane on 2026-10-08. It was a link to another page
+  // before that and lit nothing, because it was not a section of this app.
+  const onFaq = (() => {
+    T.view = 'faq'; T.renderLayout();
+    return byId.get('nav-faq').classList.contains('active') &&
+           byId.get('nav-faq').getAttribute('aria-current') === 'page' &&
+           !byId.get('nav-log').classList.contains('active') &&
            !byId.get('nav-tickets').classList.contains('active');
   })();
   T.view = 'index'; T.renderLayout();
-  return onInsights && onIndex && onTicket && onLog;
+  return onInsights && onIndex && onTicket && onLog && onFaq;
 })());
 r.ok('the empty state is suppressed over it, in both directions', (() => {
   T.view = 'insights';
@@ -711,11 +722,13 @@ r.ok('the back button answers to the pane that OWNS the screen, not the detail a
   // It used to be `(!desktop && detail)`. That was right while the dashboard kept
   // the list on a phone; once the list folds, a phone needs a way back off the
   // dashboard too. The Log Analyser is the third pane that owns the screen, for the
-  // same reason, so `full` grew a third term rather than a second flag. Desktop is
-  // still excluded — `#back-btn` is display:none !important there, because the list
-  // never leaves the screen.
+  // same reason, so `full` grew a third term rather than a second flag — and the
+  // Help & FAQ a fourth on 2026-10-08, when it stopped being a page in another tab.
+  // Each one is a term and never a second flag. Desktop is still excluded —
+  // `#back-btn` is display:none !important there, because the list never leaves the
+  // screen.
   /backBtn\.style\.display\s*=\s*\(!desktop && full\)/.test(appCode) &&
-  /const full\s*=\s*detail \|\| insights \|\| log;/.test(appCode),
+  /const full\s*=\s*detail \|\| insights \|\| log \|\| faq;/.test(appCode),
   (appCode.match(/backBtn\.style\.display[^\n]*/) || [''])[0]);
 r.ok('the pane is marked in the static shell with a non-sec id and no section class',
   /<div id="insights-view">/.test(indexCode) && !/insights-view[\s\S]{0,200}section-content/.test(indexCode));

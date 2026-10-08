@@ -24,6 +24,13 @@ node_modules/
 # tools/gen-tokens.mjs reads, so only this build output is ignored.
 tools/.cache/polish-preview.html
 
+# The same, for every other probe page written here. A probe is a fixture that renders
+# one thing at one size so a colour or a geometry can be LOOKED at; it is not a page of
+# the app, and a checked-in copy would be read as one. The generator that writes each —
+# tools/.cache/*.mjs — is ignored with them, so nothing here outlives the question it
+# was written for.
+tools/.cache/*.html
+
 # Screenshots tools/render-themes.mjs writes. They are EVIDENCE of a render, not
 # an input to one: every shot is regenerated from the current source in a few
 # seconds, and a checked-in PNG of a page that has since changed is worse than

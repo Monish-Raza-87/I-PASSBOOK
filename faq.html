@@ -140,8 +140,10 @@
     padding: 1.4rem 1.3rem;
     margin-bottom: 1rem;
   }
-  section.is-now { border-left-color: var(--accent); }
-  section.is-ask { border-left-color: var(--warn); }
+  /* There used to be `section.is-now` / `section.is-ask` here, colouring the left
+     edge of three sections. They went on 2026-10-08 with the move to one generated
+     body: a distinction only ONE of the two renderers can see is a distinction the
+     two will disagree about, and a section's heading already says what it is about. */
 
   nav.jump { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }
   nav.jump a {
@@ -196,16 +198,13 @@
 </style>
 </head>
 <body>
-
+<!-- BUILD:FAQ:BEGIN -->
 <header class="masthead">
   <div class="wrap">
     <p class="eyebrow">I-PASSBOOK</p>
     <h1>Help &amp; FAQ</h1>
     <p class="standfirst">
-      Everything on this page describes what the app actually does — nothing here is a
-      plan, a policy or a promise about the future. If an answer here disagrees with
-      what you see on screen, the screen is right and the page is out of date: tell the
-      service desk.
+      Everything on this page describes what the app actually does — nothing here is a plan, a policy or a promise about the future. If an answer here disagrees with what you see on screen, the screen is right and the page is out of date: tell the service desk.
     </p>
   </div>
 </header>
@@ -225,7 +224,7 @@
     <a href="#trouble">When something looks wrong</a>
   </nav>
 
-  <section id="getting-in" class="is-now">
+  <section id="getting-in">
     <h2>Getting in</h2>
 
     <h3>How do I get an account?</h3>
@@ -264,7 +263,7 @@
     </p>
   </section>
 
-  <section id="passwords" class="is-now">
+  <section id="passwords">
     <h2>Codes &amp; passwords</h2>
 
     <h3>How long does the emailed code last?</h3>
@@ -279,9 +278,9 @@
     <div class="callout">
       <span class="ct">Never share it</span>
       <p>
-        A sign-in code is the same thing as your signature. Nobody at the service desk
-        needs it, and nobody should ever ask for it. If you get such a request, report
-        it.
+      A sign-in code is the same thing as your signature. Nobody at the service desk
+      needs it, and nobody should ever ask for it. If you get such a request, report
+      it.
       </p>
     </div>
 
@@ -350,7 +349,7 @@
       dispatch. Each section is a form with its own Save.
     </p>
 
-    <h3>"3 of 6 sections saved" — does that mean the ticket is finished?</h3>
+    <h3>&quot;3 of 6 sections saved&quot; — does that mean the ticket is finished?</h3>
     <p>
       No, and the wording is careful about it. The count records that a section's
       <strong>Save button was pressed</strong>, not that the section was filled in
@@ -379,12 +378,14 @@
     <p>
       It depends on priority, counted from the last time its status changed:
     </p>
+
     <ul>
       <li><strong>Urgent</strong> — more than 1 day</li>
       <li><strong>High</strong> — more than 3 days</li>
       <li><strong>Medium</strong> — more than 7 days</li>
       <li><strong>Low</strong> — more than 14 days</li>
     </ul>
+
     <p>
       A ticket with no priority is treated as 14 days. Only tickets that are actually
       still open can be late — a Delivered or Closed ticket is never flagged, however
@@ -416,14 +417,14 @@
       and the two agree.
     </p>
 
-    <h3>Why is there a "No date" bar?</h3>
+    <h3>Why is there a &quot;No date&quot; bar?</h3>
     <p>
       Because some tickets genuinely have no date on them. Leaving them out would make
       the bars add up to less than the total printed above them, and a chart that
       silently disagrees with its own headline is worse than one that admits the gap.
     </p>
 
-    <h3>Why is there an "Unassigned" row under People?</h3>
+    <h3>Why is there an &quot;Unassigned&quot; row under People?</h3>
     <p>
       For the same reason. It is shown even when it is zero, so the numbers in that card
       always add up to the total rather than quietly leaving out whoever nobody has
@@ -481,9 +482,9 @@
     <div class="callout ok">
       <span class="ct">No</span>
       <p>
-        The file is opened and read entirely inside your browser, on your own device.
-        The log never leaves the machine you opened it on, and nothing about it is sent
-        to the service desk or anyone else.
+      The file is opened and read entirely inside your browser, on your own device.
+      The log never leaves the machine you opened it on, and nothing about it is sent
+      to the service desk or anyone else.
       </p>
     </div>
 
@@ -501,7 +502,7 @@
     </p>
   </section>
 
-  <section id="customer" class="is-ask">
+  <section id="customer">
     <h2>Reporting a problem</h2>
 
     <h3>I do not have an account. Can I report a fault?</h3>
@@ -509,6 +510,7 @@
       Yes. You do not need an account in this app, and nothing on the sign-in screen
       asks who you are.
     </p>
+
     <p>
       There is one thing to expect before you start. The report form is made with
       Google Forms and it records the email address you send from, so Google asks you
@@ -516,18 +518,21 @@
       comes from Google, not from this app — a device already signed in to Google goes
       straight to the form with no prompt at all.
     </p>
+
     <p>
       On the sign-in screen, <strong>Report a problem</strong> says so up front and
       gives you a single button that opens the form in a new tab, which is where that
       sign-in works.
     </p>
+
     <p>
       If you have come straight to this page and cannot get back to the sign-in screen,
       the form is here as well:
     </p>
+
     <p>
       <a href="https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform"
-         target="_blank" rel="noopener noreferrer">Open the problem report form &rarr;</a>
+      target="_blank" rel="noopener noreferrer">Open the problem report form &rarr;</a>
     </p>
 
     <h3>What can I see from there?</h3>
@@ -536,6 +541,7 @@
       name and no IR number — it is a way in, not a window. Everything else in the app
       is behind a sign-in.
     </p>
+
     <p>
       Opening it does not put the form anywhere near the app either. The form is never
       loaded into this app's own screen, so pressing that button is the first and only
@@ -594,7 +600,7 @@
       hours to make this rarer, but it can still happen.
     </p>
 
-    <h3>A save said "Not saved — press again".</h3>
+    <h3>A save said &quot;Not saved — press again&quot;.</h3>
     <p>
       The write did not reach the store, and the app is telling you rather than
       pretending. Press Save again. If it keeps happening, the connection is the
@@ -637,6 +643,7 @@
     </p>
   </footer>
 
-</div>
+</div><!-- .wrap -->
+<!-- BUILD:FAQ:END -->
 </body>
 </html>

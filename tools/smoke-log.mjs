@@ -461,7 +461,9 @@ r.ok('...and handleRoute re-reads the route after the IR-list await, like the da
   /r\.name === 'log'\)[\s\S]{0,520}currentRoute\(\)\.name !== 'log'[\s\S]{0,80}showLog\(\)/.test(appSrc));
 r.ok('renderLayout hides the list for it on a phone and hands it the back button',
   /const log\s+= currentView === 'log';/.test(appSrc) &&
-  /const full\s+= detail \|\| insights \|\| log;/.test(appSrc) &&
+  // The expression has grown a pane at a time — #faq joined on 2026-10-08 — so this
+  // pins that `log` is IN the set that takes the screen, not the exact tail of it.
+  /const full\s+= detail \|\| insights \|\| log\b/.test(appSrc) &&
   /logView\.style\.display = log \? 'flex' : 'none';/.test(appSrc) &&
   /classList\.toggle\('view-log', log\)/.test(appSrc));
 

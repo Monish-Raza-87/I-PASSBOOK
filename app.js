@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v76';
+const APP_VERSION = 'v77';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1442,6 +1442,7 @@ const indexView   = document.getElementById('index-view');
 const detailView  = document.getElementById('detail-view');
 const insightsView = document.getElementById('insights-view');
 const logView     = document.getElementById('log-view');
+const faqView     = document.getElementById('faq-view');
 const irList      = document.getElementById('ir-list');
 const searchInput = document.getElementById('search-input');
 const backBtn     = document.getElementById('back-btn');
@@ -3885,6 +3886,7 @@ function renderLayout() {
   const detail   = currentView === 'detail';
   const insights = currentView === 'insights';
   const log      = currentView === 'log';
+  const faq      = currentView === 'faq';
   // A pane that OWNS the screen on a phone. Below lg, #panes is a COLUMN, so the
   // list and the open pane are separate full screens and the open one hides the
   // list. On desktop they sit side by side, so the list hides only when the user
@@ -3900,7 +3902,7 @@ function renderLayout() {
   // Folding it is only safe because the SAME change gives Insights the back
   // button below: that is what stops the fold stranding anyone, which is the
   // worry the old comment here was trying to answer.
-  const full       = detail || insights || log;
+  const full       = detail || insights || log || faq;
   // The fold, and the two different things it means.
   //
   // DESKTOP: the list is a COLUMN beside the other panes, so folding it NARROWS
@@ -3928,6 +3930,9 @@ function renderLayout() {
   // may live in it.
   if (insightsView) insightsView.style.display = insights ? 'flex' : 'none';
   if (logView) logView.style.display = log ? 'flex' : 'none';
+  // The Help & FAQ is the same pane shape a third time, and it is folded rather
+  // than opened in a tab from 2026-10-08 — see the markup comment in index.html.
+  if (faqView) faqView.style.display = faq ? 'flex' : 'none';
   // The detail's back button goes to the list; the dashboard's does the same.
   // Both are phone-only — on desktop the list never leaves the screen.
   backBtn.style.display    = (!desktop && full) ? 'block' : 'none';
@@ -3937,6 +3942,7 @@ function renderLayout() {
   // analyser, where an "no IR selected" message is simply wrong.
   document.body.classList.toggle('view-insights', insights);
   document.body.classList.toggle('view-log', log);
+  document.body.classList.toggle('view-faq', faq);
 
   // On desktop the list stays on screen, so mark which row is open.
   if (irList) {
@@ -3947,20 +3953,20 @@ function renderLayout() {
 
   // Which section the user is in. A ticket belongs to the IRs item — it is a row
   // of that list, not a section of its own.
-  markActiveNav(insights ? 'insights' : (log ? 'log' : 'tickets'));
+  markActiveNav(insights ? 'insights' : (log ? 'log' : (faq ? 'faq' : 'tickets')));
 }
 
 // The nav never showed which section you were in: `.nav-item.active` has a rule
 // in base.css and NOTHING ever applied it, so tapping Insights produced no
 // feedback anywhere on screen and read as a dead tap — which is half of "even
-// after clicking on insight tile it is not opening". Three items now; the other
-// nav entry is not a section, because User Access opens a pane of its own rather
-// than one of the six.
+// after clicking on insight tile it is not opening". Four items now, the FAQ
+// having become a routed pane on 2026-10-08; the other nav entry is not a section,
+// because User Access opens a pane of its own rather than one of the six.
 //
 // `aria-current` rides along with the class: the highlight is colour, and colour
 // alone is not an announcement.
 function markActiveNav(name) {
-  [['nav-tickets', 'tickets'], ['nav-insights', 'insights'], ['nav-log', 'log']].forEach(([id, route]) => {
+  [['nav-tickets', 'tickets'], ['nav-insights', 'insights'], ['nav-log', 'log'], ['nav-faq', 'faq']].forEach(([id, route]) => {
     const el = document.getElementById(id);
     if (!el) return;
     const on = route === name;
@@ -3982,6 +3988,7 @@ function markActiveNav(name) {
 //   #/tickets/IR409      → that IR's passbook
 //   #/insights           → the counts dashboard
 //   #/log                → the flight-log analyser
+//   #/faq                → Help & FAQ, rendered from faq-content.js
 // showIndex()/openPassbook()/showInsights() stay the view functions; the router
 // only decides when to call them, so nothing here re-implements rendering.
 function currentRoute() {
@@ -3989,6 +3996,7 @@ function currentRoute() {
   if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
   if (parts[0] === 'insights') return { name: 'insights' };
   if (parts[0] === 'log') return { name: 'log' };
+  if (parts[0] === 'faq') return { name: 'faq' };
   // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
   // rather than on a blank pane, which is why `insights` had to be matched above.
   return { name: 'tickets' };
@@ -4013,6 +4021,11 @@ function goInsights() {
 function goLog() {
   if (location.hash === '#/log') { showLog(); return; }
   location.hash = '#/log';
+}
+
+function goFaq() {
+  if (location.hash === '#/faq') { showFaq(); return; }
+  location.hash = '#/faq';
 }
 
 async function handleRoute() {
@@ -4054,6 +4067,18 @@ async function handleRoute() {
     // Re-read the route AFTER the await, exactly as the insights branch above does.
     if (currentRoute().name !== 'log') return;
     showLog();
+    return;
+  }
+
+  if (r.name === 'faq') {
+    if (currentView === 'faq') return;
+    // No wait for allIRs here, and that is the difference between this branch and
+    // the two above it: the FAQ is static text and counts nothing, so it renders
+    // straight away. Blocking it on a list fetch would make the one screen that has
+    // to work when something is wrong downstream wait on the thing that is wrong.
+    if (!currentUser) return;                   // signed out
+    if (currentRoute().name !== 'faq') return;  // navigated away
+    showFaq();
     return;
   }
 
@@ -6603,6 +6628,132 @@ function showLog() {
   // Renders from whatever is in memory; handleRoute() is what waits for the IR
   // list. Re-rendering on every entry keeps a re-entry from showing a stale pane.
   renderLog();
+}
+
+// ─── HELP & FAQ (#/faq) ───────────────────────────────────────────────────────
+// The answers live in faq-content.js and NOWHERE else. This function is one of the
+// two renderers of that file; tools/build-faq.mjs is the other, and it regenerates
+// the standalone faq.html that the sign-in screen still needs — a person who cannot
+// get in must still be able to read why. Copying the text into either one is the
+// failure this arrangement exists to prevent.
+//
+// It used to be a link out to faq.html in a new tab. The owner's words, 2026-10-08:
+// "our FAQ page is opening in a new tab, that is not good for us. It has to be in our
+// app, as per our UI and a part of our app."
+//
+// The question list is <details>, collapsed. Forty-six answers laid out flat is a
+// scroll nobody finishes, and the first thing someone in trouble needs is to FIND
+// their question, not to read past forty-five others. <details>/<summary> gives that
+// for free: no script, keyboard-operable, and the browser's own find-in-page already
+// opens a closed one.
+// True once the pane has been filled from faq-content.js. The content cannot change
+// while the page is open, so one build is the whole lifetime — see showFaq().
+let faqBuilt = false;
+
+function showFaq() {
+  currentView = 'faq';
+  renderLayout();
+  headerTitle.textContent = 'Help & FAQ';
+  // Built once and left standing. Unlike the dashboard and the analyser, nothing
+  // here reads a store, an IR or the network, so there is no stale pane to refresh
+  // and no reason to rebuild a document the user may have scrolled down — which
+  // would also throw away which questions they had opened.
+  if (!faqBuilt) renderFaq();
+}
+
+function renderFaq() {
+  const body = document.getElementById('faq-body');
+  if (!body) return;
+  const C = window.FAQ_CONTENT;
+  if (!C || !Array.isArray(C.sections) || !C.sections.length) {
+    // Never a blank pane. If the content script failed to load, say which file is
+    // missing and where it is meant to come from — the standalone page and this
+    // view are fed by the same file, so the desk can check it in one place.
+    body.innerHTML = `<div class="empty-state"><p class="empty-title">The Help &amp; FAQ content did not load.</p>
+      <p class="empty-note">It is a single file, <code>faq-content.js</code>, loaded before the app. If you can read this, that file is missing from the deployment — it is built from this repository, not fetched.</p></div>`;
+    return;
+  }
+
+  // The one link in the content that means something different in here. The footer's
+  // "Back to I-PASSBOOK" is written as index.html because that is right on the
+  // STANDALONE page — the one a signed-out person reads. Inside the app, index.html
+  // would be a second copy of the app in another tab, which is the exact thing this
+  // change removed, so it becomes the IR list by the router.
+  //
+  // Done as a STRING substitution on the way in, and not by fixing the attribute up
+  // afterwards: the renderer has to be drivable without a live DOM, and post-hoc DOM
+  // surgery is invisible to a test that reads the markup it produced.
+  const faqInAppLinks = html => String(html).replace(/href="index\.html"/g, 'href="#/tickets"');
+
+  // One block of an answer. `html` is authored in faq-content.js and carries only a
+  // <strong> and one external link; callouts and lists are their own shapes.
+  const blocksHTML = blocks => (blocks || []).map(b => {
+    if (b.t === 'callout') {
+      return `<aside class="faq-callout${b.ok ? ' is-ok' : ''}">
+        ${b.ct ? `<span class="faq-callout-label">${escHtml(b.ct)}</span>` : ''}
+        <p>${b.html}</p></aside>`;
+    }
+    if (b.t === 'ul') {
+      return `<ul class="faq-list">${(b.items || []).map(li => `<li>${li}</li>`).join('')}</ul>`;
+    }
+    return `<p>${b.html}</p>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div class="faq-stack">
+      <!-- A <div>, NOT a <header>, and that is not a style preference. base.css's
+           topbar rule is "#workspace header" — a DESCENDANT selector, scoped that way
+           after the landing page's own <header> silently became a white sticky 56px
+           band. This pane lives inside #workspace, so a <header> here would inherit
+           the same 56px band and the same clipped overflow. Measured, not guessed:
+           the first build of this view rendered as exactly that. -->
+      <div class="faq-head">
+        <p class="faq-eyebrow">${escHtml(C.eyebrow || '')}</p>
+        <h2 class="faq-title">${escHtml(C.title || 'Help & FAQ')}</h2>
+        ${C.standfirst ? `<p class="faq-standfirst">${escHtml(C.standfirst)}</p>` : ''}
+      </div>
+
+      <nav class="faq-jump" aria-label="Jump to a section">
+        ${(C.jump || []).map(j =>
+          `<button type="button" class="faq-jump-item" data-faq-jump="${escHtml(j.id)}">${escHtml(j.title)}</button>`
+        ).join('')}
+      </nav>
+
+      ${(C.sections || []).map(sec => `
+        <section class="faq-section" id="faq-sec-${escHtml(sec.id)}">
+          <h3 class="faq-section-title">${escHtml(sec.title)}</h3>
+          ${(sec.items || []).map(item => `
+            <details class="faq-q">
+              <summary class="faq-q-label">${escHtml(item.q)}</summary>
+              <div class="faq-a">${blocksHTML(item.blocks)}</div>
+            </details>`).join('')}
+        </section>`).join('')}
+
+      ${(C.footer && C.footer.length) ? `<footer class="faq-foot">
+        ${C.footer.map(p => `<p>${faqInAppLinks(p)}</p>`).join('')}
+      </footer>` : ''}
+    </div>`;
+
+  faqBuilt = true;
+}
+
+if (faqView) {
+  faqView.addEventListener('click', e => {
+    const t = e.target;
+    if (!t || !t.closest) return;
+    const jump = t.closest('[data-faq-jump]');
+    if (jump) jumpToFaqSection(jump.dataset.faqJump);
+  });
+}
+
+function jumpToFaqSection(id) {
+  const el = document.getElementById('faq-sec-' + id);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.classList.remove('is-flash');
+  void el.offsetWidth;               // restart the flash if it is already lit
+  el.classList.add('is-flash');
+  setTimeout(() => el.classList.remove('is-flash'), 1400);
 }
 
 if (logView) {

@@ -620,7 +620,40 @@ is left is small.
 - [ ] Photo gallery view for saved file links
 - [ ] Form validation with required fields
 - [ ] Offline-first with local storage sync queue
-- [ ] Multi-language support (Hindi + English)
+- [x] Multi-language support (Hindi + English) — *built 2026-10-08, `v78`. `TABLES.hi` in
+      `i18n.js` is a real second table keyed to the same strings as English, with English
+      kept as the per-string floor; Urdu was **deleted** from the picker the same day on
+      the owner's instruction ("Keep only hindi and english"), not left untranslated. It
+      is a HALF-translation and says so: the chrome, the workflow statuses, the landing
+      page and the customer's panel are Hindi; the six section forms and every toast in
+      `app.js` are still English inside a Hindi frame. Building it found one real defect —
+      the sign-in button's label was written by `app.js` in English and overwrote whatever
+      the table put there, on both doors, in every language. `customer.html` has no
+      language layer at all and was not in scope.*
+- [ ] **Populate the IRs from the two crawled mailboxes and the legacy workbook.** The
+      owner's ask of 2026-10-08: each IR's record filled in from the email that raised it
+      and the workbook tab that investigated it. **Blocked on his data**, which lives
+      outside this repo — the `Email_Index` build and the workbook inventory. Nothing can
+      be designed against it until the exports arrive.
+- [ ] **The IR's CR primary representative, derived from its date.** The rule is the
+      owner's, given 2026-10-08, and is recorded here because it exists nowhere else in
+      the repo: **from 11 May 2026 onward, Adhik; before that, Monish Raza — except before
+      27 Aug 2023 and between 1 Apr 2024 and 16 Jun 2025, when it is Ravi Singh.** It is
+      deterministic in the IR's date, so it is a pure function and a test rather than a
+      judgement, but it has no caller until the ingest above lands. Note the open question:
+      whether this belongs in the Overview's "Customer Relations Manager" field, which is
+      per-ticket and human-editable, or in a separate read-only field of its own.
+- [ ] **"Assigned to" in the Allot panel offers no onboarded employees.** It should list
+      the real Indrones staff. **Blocked on a backend change**: the only action that
+      returns accounts is `listUsers`, which is `requireAdmin`, so this needs a narrower
+      authenticated team-directory action — an `API_VERSION` bump, and therefore a paste,
+      before any frontend work can be tested against it.
+- [ ] **The app feels laggy.** Raised 2026-10-08, not yet investigated. The two known cost
+      centres are the Drive store's per-OPERATION round trips (~0.37 s each, ~1.8 s a hop —
+      see "Storage") and any full-list re-render. **Measure before changing anything**: a
+      perceived lag is a symptom with several possible causes, and the honest first step is
+      a count of the round trips a real sign-in and a real section save make, not a guess
+      from reading the source.
 - [ ] **Erase archived IR folders.** Not built, deliberately: closing an IR moves its
       folder to `Archive IRs/` and nothing is ever deleted. The owner will watch Drive
       usage for a while and ask for this separately if space becomes an issue.

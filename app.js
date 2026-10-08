@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v77';
+const APP_VERSION = 'v78';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -42,11 +42,29 @@ paintVersion();
 // or orphaned string is a failing test in smoke-i18n.mjs, not something a user
 // should ever meet.
 //
-// Only English ships today, so every one of these returns exactly the words that
-// were here before. The point is that a second language is later a data file.
+// Only English and Hindi ship today, so every one of these returns exactly the words
+// that were here before for an English reader. The point is that the third language is
+// a data file and nothing else.
 const t          = (key, vars) => (window.I18N ? window.I18N.t(key, vars) : key);
 const tStatus    = v => (window.I18N ? window.I18N.status(v) : v);
 const tPriority  = v => (window.I18N ? window.I18N.priority(v) : v);
+
+// `t`, for a label app.js WRITES ITSELF rather than one index.html already carries.
+//
+// The distinction is load-bearing and it is the whole reason this is a second helper
+// instead of a re-use of the first. t() returns the KEY when i18n.js failed to load,
+// which is the loud, correct failure for a string that has no other copy — but wrong
+// for a button whose English is already sitting in the markup. A key on a button is
+// worse than an untranslated word, so the English is passed in here as the floor.
+//
+// ⚠ DO NOT MERGE THESE TWO INTO ONE ONE-LINER. They look like the same function and
+// they are not: this one degrades to English, t() degrades to a visible key, and
+// smoke-i18n.mjs asserts BOTH behaviours. A reader who "tidies" them together has to
+// delete a passing test to do it, which is the point.
+const tFloor = (key, english) => {
+  const s = window.I18N ? window.I18N.t(key) : '';
+  return (s && s !== key) ? s : english;
+};
 
 // The word to PRINT for a stored status, for every renderer that shows one.
 //
@@ -2796,7 +2814,7 @@ function setAuthMode(mode) {
   const hint = document.getElementById('auth-hint-text');
   if (hint) { hint.textContent = ''; hint.style.display = 'none'; }
   const signBtn = document.getElementById('auth-signin-btn');
-  if (signBtn) signBtn.textContent = pwMode ? 'Sign in' : 'Continue';
+  if (signBtn) signBtn.textContent = pwMode ? tFloor('auth.signIn', 'Sign in') : tFloor('auth.continue', 'Continue');
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
 }
@@ -2966,12 +2984,12 @@ function wireAuthForm() {
   const submitLogin = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email.'); return; }
-    setBusy(signInBtn, 'Sending…');
+    setBusy(signInBtn, tFloor('auth.sending', 'Sending…'));
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, '').then(d => {
-      setIdle(signInBtn, 'Continue');
+      setIdle(signInBtn, tFloor('auth.continue', 'Continue'));
       if (d && d.status === 'ok' && d.otpRequired) { openCodeView('employee', email, ''); return; }
       // A temp-password account gets `ok` here too, from the backend's own uniform
       // stage 1 — the refusal only lands on stage 2, and the code screen's error line
@@ -2987,12 +3005,12 @@ function wireAuthForm() {
     const email = emailOf();
     const password = (passIn && passIn.value) || '';
     if (!email || !password) { showError('Enter your email and password.'); return; }
-    setBusy(signInBtn, 'Signing in…');
+    setBusy(signInBtn, tFloor('auth.signingIn', 'Signing in…'));
     showError('');
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, password).then(d => {
-      setIdle(signInBtn, 'Sign in');
+      setIdle(signInBtn, tFloor('auth.signIn', 'Sign in'));
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
@@ -3119,11 +3137,12 @@ function wireCustomerForm() {
     // busy without the `is-busy` class the spinner and the reduced-motion guard are
     // keyed on — and the customer's Continue is the button on this screen a person is
     // most likely to press twice, because the reply is a mail they cannot see.
-    // The busy label is a literal, exactly as the employee door's is: the
-    // "…ing" line is the one string on this screen the language layer does not reach
-    // yet, on either door, and it is said so rather than left to be discovered.
-    setBusy(signBtn, 'Sending…');
-    const idle = () => setIdle(signBtn, t('cust.continue'));
+    // The busy label goes through the table like the idle one. It used to be a literal
+    // on BOTH doors, with a comment saying so rather than fixing it, and the comment was
+    // right about why that was wrong: switching the picker to हिन्दी left the one word a
+    // person sees WHILE THEY WAIT in the language they just chose to leave.
+    setBusy(signBtn, tFloor('auth.sending', 'Sending…'));
+    const idle = () => setIdle(signBtn, tFloor('cust.continue', 'Continue'));
     customerAuth('login', { email: email, password: '' }).then(d => {
       idle();
       // The address is the credential and the code is the proof. The screen that
@@ -3252,14 +3271,16 @@ function paintDoors() {
 // The owner asked for it "at bottom like in notion.app". The options are built from
 // I18N.LANGS rather than written into index.html, so a language added to that list
 // appears here with no second edit — and the label is each language's OWN name
-// ("اردو", not "Urdu"), which is the one word on the list a reader can recognise
+// ("हिन्दी", not "Hindi"), which is the one word on the list a reader can recognise
 // without already being able to read the rest of it.
 //
-// ⚠ WHAT IS BEHIND THE THREE OPTIONS IS NOT THREE TRANSLATIONS. The mechanism is real
-// and the choice is remembered on the device; today every string still resolves to
-// English through I18N's per-string fallback, because the layer holds one table. See
-// the note on the language dimension in i18n.js. The control does not pretend otherwise
-// — it changes the page's `lang`, and the strings it can translate it translates.
+// ⚠ TWO OPTIONS, AND BOTH OF THEM DO SOMETHING. English is the source table; हिन्दी has
+// its own, so choosing it really does change the words. Urdu was a third entry until
+// 2026-10-08, when the owner withdrew it — *"even in my previous command I said about
+// urdu. Keep only hindi and english"* — and it was DELETED rather than left as an option
+// that silently showed English. See the note on the language dimension in i18n.js, which
+// also records how far the Hindi table reaches: the chrome, the statuses and the landing
+// page, with the six section forms still English inside the Hindi frame.
 function buildLangSelect() {
   const sel = document.getElementById('lang-select');
   if (!sel || !window.I18N || !window.I18N.LANGS) return;
@@ -5289,7 +5310,7 @@ function signOut() {
 function showIndex() {
   currentView = 'index';
   renderLayout();
-  headerTitle.textContent = 'I-PASSBOOK';
+  headerTitle.textContent = tFloor('app.name', 'I-PASSBOOK');
 }
 
 // ─── THE CUSTOMER DOOR ────────────────────────────────────────────────────────
@@ -5963,7 +5984,7 @@ function renderInsights() {
 function showInsights() {
   currentView = 'insights';
   renderLayout();
-  headerTitle.textContent = 'Insights';
+  headerTitle.textContent = tFloor('nav.insights', 'Insights');
   // The pane renders from whatever is in memory; handleRoute() is what waits for
   // the list. Re-rendering here keeps a re-entry from showing a stale dashboard.
   renderInsights();
@@ -6624,7 +6645,7 @@ function renderLogAnalysis(fieldId, value) {
 function showLog() {
   currentView = 'log';
   renderLayout();
-  headerTitle.textContent = 'Log Analyser';
+  headerTitle.textContent = tFloor('nav.logAnalyser', 'Log Analyser');
   // Renders from whatever is in memory; handleRoute() is what waits for the IR
   // list. Re-rendering on every entry keeps a re-entry from showing a stale pane.
   renderLog();
@@ -6653,7 +6674,7 @@ let faqBuilt = false;
 function showFaq() {
   currentView = 'faq';
   renderLayout();
-  headerTitle.textContent = 'Help & FAQ';
+  headerTitle.textContent = tFloor('nav.help', 'Help & FAQ');
   // Built once and left standing. Unlike the dashboard and the analyser, nothing
   // here reads a store, an IR or the network, so there is no stale pane to refresh
   // and no reason to rebuild a document the user may have scrolled down — which

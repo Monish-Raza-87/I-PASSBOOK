@@ -184,10 +184,14 @@ const ACCESS_DEPTS = [
 
 T.accessCache = { users: ACCESS_USERS, departments: ACCESS_DEPTS, apiVersion: 8 };
 T.allIRs = [
-  { irNumber: 'IR601', customerName: 'AgriKart Pvt Ltd' },
-  { irNumber: 'IR602', customerName: 'FarmVista Solutions' },
-  { irNumber: 'IR603', customerName: 'GreenField Agri Cooperative Society' },
-  { irNumber: 'IR604', customerName: 'SkyHarvest Corp' },
+  // Two columns, as the intake form really has them: `customerName` is the person who
+  // reported it, `companyName` is where they work. The company dropdown reads the second
+  // — see knownCompanies() — so a fixture that named only the first would render an empty
+  // dropdown here and nothing would notice.
+  { irNumber: 'IR601', customerName: 'Asha Rao',      companyName: 'AgriKart Pvt Ltd' },
+  { irNumber: 'IR602', customerName: 'Vikram Shah',   companyName: 'FarmVista Solutions' },
+  { irNumber: 'IR603', customerName: 'Nisha Menon',   companyName: 'GreenField Agri Cooperative Society' },
+  { irNumber: 'IR604', customerName: 'Ravi Kulkarni', companyName: 'SkyHarvest Corp' },
 ];
 
 const accessShellTemplate = (() => {

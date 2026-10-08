@@ -517,13 +517,26 @@ user could loop it and take out password recovery for the whole company.
 
 ### The Customers tab's company picker is derived, never invented
 
-The dropdown is every company **already named on an IR** (the `customerName` column)
-plus every company an account is **already scoped to**, unioned and sorted. It is not
-a stored list, because a stored list is a second source of truth that drifts the first
-time somebody types a new customer into the support form. An **"Other company (type
-it)…"** option is always present, so the picker can never block a genuinely new
-company — and choosing it reveals a text field instead of leaving a stale hidden value
-to be submitted in place of the choice actually made.
+The dropdown is every company **already named on an IR** plus every company an account
+is **already scoped to**, unioned and sorted. It is not a stored list, because a stored
+list is a second source of truth that drifts the first time somebody types a new
+customer into the support form. An **"Other company (type it)…"** option is always
+present, so the picker can never block a genuinely new company — and choosing it reveals
+a text field instead of leaving a stale hidden value to be submitted in place of the
+choice actually made.
+
+**"Named on an IR" means the `companyName` column — Col R, "Where Do You Work?" — and
+that is not interchangeable with the column next to it.** The value an admin picks here
+becomes the only thing the backend compares rows against (`customerIRS()` →
+`companyColumnIndex()`), so the picker and the scope must read the same column or the
+customer is scoped to a string no row carries. This panel read `customerName` (Col L,
+"Who's Reporting?" — the *person* who raised the fault, with the phone split off it by
+`splitNamePhone`) until 2026-10-08. The two columns hold different things, so the
+dropdown offered staff names the scope could never match: **the invitation mailed, the
+customer signed in, and the portal was empty, with nothing on screen saying why.** The
+fix is one identifier; `tools/smoke-invite.mjs` now pins it against the backend's own
+header needles rather than against another screen, because agreeing with the Insights
+"Customer" facet was never the standard that mattered.
 
 ### A customer's row cannot be emptied by the grid
 

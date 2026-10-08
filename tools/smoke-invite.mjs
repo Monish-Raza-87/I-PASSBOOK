@@ -19,9 +19,14 @@
 //      direction — a test double inventing an API the real platform does not have.
 //      So the action names here are read back out of the POST and matched against the
 //      backend's own router map.
-//   2. IT CAN INVENT THE COMPANY LIST. The list has to come from the tickets, using the
-//      same column the Insights filter reads, or an admin is offered a company that no
-//      row will ever match and a customer who sees nothing.
+//   2. IT CAN INVENT THE COMPANY LIST. The list has to come from the tickets — and from
+//      the ONE column the backend decides access by ("Where Do You Work?", the
+//      `companyName` mapping). Not from "Who's Reporting?", which is the reporting
+//      person's name and shares nothing with it. Read the wrong column and an admin is
+//      offered a company that no row will ever match: the invitation mails, the customer
+//      signs in, and the portal is empty with nothing on screen saying why. That is not a
+//      hypothetical — it is what this panel did until 2026-10-08, and this suite was
+//      passing throughout because it pinned the same wrong column.
 //   3. IT CAN TREAT A FAILED EMAIL AS A FAILED INVITE. The account and the scope are
 //      written before the mail is attempted, so `mailed:false` means "send this link by
 //      hand", never "nothing happened". Getting this wrong sends the admin back to press
@@ -102,12 +107,17 @@ const STAFF = [
 ];
 const CUSTOMER = { email: 'ops@acme.in', name: 'Asha Rao', status: 'active', isAdmin: false, departments: [], customerOf: 'Acme Survey', lastLoginAt: '01-Oct-2026 09:12' };
 
+// The two columns are DIFFERENT ON PURPOSE, and every fixture below has both, so an
+// assertion can tell which one the panel read. A person's name in `customerName` and a
+// company in `companyName` is the real shape of the intake form ("Who's Reporting?" in
+// Col L, "Where Do You Work?" in Col R) — and a fixture that put the company in
+// `customerName` could not have caught the bug this suite now exists to catch.
 const IRS = [
-  { irNumber: 'IR107', customerName: 'Acme Survey' },
-  { irNumber: 'IR204', customerName: 'FarmVista Solutions' },
-  { irNumber: 'IR310', customerName: 'Acme Survey' },     // a repeat, and must be listed once
-  { irNumber: 'IR388', customerName: '  SkyHarvest  ' },   // leading/trailing space a human typed
-  { irNumber: 'IR389', customerName: '' },                // a row with nobody named
+  { irNumber: 'IR107', customerName: 'Asha Rao',     companyName: 'Acme Survey' },
+  { irNumber: 'IR204', customerName: 'Vikram Shah',  companyName: 'FarmVista Solutions' },
+  { irNumber: 'IR310', customerName: 'Asha Rao',     companyName: 'Acme Survey' },          // a repeat, and must be listed once
+  { irNumber: 'IR388', customerName: 'Nisha Menon',  companyName: '  SkyHarvest  ' },        // leading/trailing space a human typed
+  { irNumber: 'IR389', customerName: 'Ravi Kulkarni', companyName: '' },                     // a row with no company named
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -133,17 +143,41 @@ r.head('the company list is derived from the tickets, never invented');
   r.ok('every company named on a ticket is offered, each once, sorted, and trimmed',
     JSON.stringify(got) === JSON.stringify(['Acme Survey', 'FarmVista Solutions', 'SkyHarvest']),
     got);
+
+  // THE BUG THIS SUITE WAS BLIND TO. The panel read `customerName`, which is the person
+  // who reported the fault, so the dropdown offered staff names. Nothing failed visibly:
+  // the invite was created, the mail went out, and the customer's portal was empty. This
+  // assertion is the one that would have caught it — a person's name must never appear in
+  // a list of companies.
+  const people = IRS.map(ir => String(ir.customerName).trim()).filter(Boolean);
+  r.ok('...and NO reporting person is offered, even though every ticket names one',
+    people.length === IRS.length && !got.some(c => people.includes(c)), JSON.stringify({ got, people }));
+  r.ok('...so the person-named column and the company column cannot be confused for each other',
+    JSON.stringify(got) !== JSON.stringify([...new Set(IRS.map(ir => String(ir.customerName).trim()))].filter(Boolean).sort()));
+
   r.ok('a company a customer is already scoped to is offered even with no ticket in the list',
     (() => {
       const b = boot(STAFF.concat([CUSTOMER]), []).A.T.knownCompanies();
       return b.length === 1 && b[0] === 'Acme Survey';
     })());
-  // The field name is the join between this list and the Insights filter — two
-  // independent readings of "which company", which must never drift apart.
+
+  // The join that actually matters is with the BACKEND, not with another screen: the
+  // string an admin picks here is compared against the intake grid by customerIRS() →
+  // companyColumnIndex(), and if the two look at different columns the customer is scoped
+  // to a value no row carries. So read the app's `companyName` needle and require the
+  // backend's own needle list to contain it — the same "one name, two files" discipline
+  // the routed-action check at the top of this file uses.
   const appCode = read('../app.js');
-  r.ok('...from the same `customerName` column the Insights filter reads',
-    /if \(ir && ir\.customerName\) seen\.add\(String\(ir\.customerName\)\.trim\(\)\)/.test(appCode) &&
-    /if \(ir\.customerName\) customers\.add\(String\(ir\.customerName\)\)/.test(appCode));
+  const needle = (appCode.match(/\{\s*field:\s*'companyName'\s*,\s*needle:\s*'([^']+)'/) || [])[1] || '';
+  const needles = (backendGs.match(/function companyColumnIndex[\s\S]*?var needles = \[([^\]]*)\]/) || [])[1] || '';
+  const backendNeedles = needles.split(',').map(s => s.trim().replace(/^'|'$/g, '').toLowerCase()).filter(Boolean);
+  r.ok('the app maps a company column, and the backend header matcher was found',
+    !!needle && backendNeedles.length > 0, JSON.stringify({ needle, backendNeedles }));
+  r.ok('...and the column the panel reads is one the backend scopes by',
+    backendNeedles.includes(needle.toLowerCase()), JSON.stringify({ needle, backendNeedles }));
+  r.ok('...which the panel reaches through `companyName`, never `customerName`',
+    /if \(ir && ir\.companyName\) seen\.add\(String\(ir\.companyName\)\.trim\(\)\)/.test(appCode) &&
+    !/if \(ir && ir\.customerName\) seen\.add/.test(appCode));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -18,6 +18,7 @@
 | [[08 - Development Guide]] | How to run locally, dev mode, tests, deploying |
 | [[09 - Design System]] | Token provenance, the generator, why the palette ships twice |
 | [[10 - Auth & Access Model]] | How someone gets in, and what they may do — the canonical write-up |
+| [[11 - LetsTranzact Integration]] | Inward/dispatch compatibility: what is scoped, what is blocked, and the one export that unblocks it |
 
 ---
 

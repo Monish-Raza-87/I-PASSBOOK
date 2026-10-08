@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v70';
+const APP_VERSION = 'v71';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -4079,14 +4079,27 @@ function customerPortalLink() {
   return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html';
 }
 
-// Every company an admin might be inviting into: the ones already on a ticket (the same
-// `customerName` column the Insights filter reads, so the two lists can never disagree)
-// plus the ones a customer is already scoped to — a second contact at a company whose
-// tickets happen not to be in the loaded list is a normal thing to invite.
+// Every company an admin might be inviting into: the ones already on a ticket, plus the
+// ones a customer is already scoped to — a second contact at a company whose tickets
+// happen not to be in the loaded list is a normal thing to invite.
+//
+// THE COLUMN IS `companyName`, AND IT HAS TO BE. This list feeds the company an admin
+// picks, and that string is what the backend matches rows against — customerIRS() reads
+// the intake grid through companyColumnIndex(), whose needles are 'where do you work' /
+// 'company name' / 'company' / … — i.e. Col R, the `companyName` mapping. This function
+// used to read `customerName` instead, which is Col L "Who's Reporting", the REPORTING
+// PERSON'S name with the phone split off it (splitNamePhone). The two columns hold
+// different things, so the dropdown was offering names that could never match a row: the
+// invitation mailed fine, the customer signed in, and the portal was empty — a working
+// account scoped to nothing, with nothing on screen saying why. `companyName` is the
+// only column here that agrees with what the backend decides access by.
+//
+// A ticket with no company named is skipped rather than offered: an empty option invites
+// an admin to scope somebody to nothing.
 function knownCompanies() {
   const seen = new Set();
   (accessCache.users || []).forEach(u => { if (u.customerOf) seen.add(String(u.customerOf).trim()); });
-  (allIRs || []).forEach(ir => { if (ir && ir.customerName) seen.add(String(ir.customerName).trim()); });
+  (allIRs || []).forEach(ir => { if (ir && ir.companyName) seen.add(String(ir.companyName).trim()); });
   return [...seen].filter(Boolean).sort((a, b) => a.localeCompare(b));
 }
 
@@ -12702,13 +12715,19 @@ function closeHistoryModal() {
 // `listIRs` — app-owned state is app-owned even when it is invented. `initialStatus`
 // keeps the customer's own words, unfixed: 'In Production' and 'QC Investigation' are
 // what the Sheet says, which is the point of the field.
+//
+// `customerName` IS A PERSON AND `companyName` IS A COMPANY, because that is what the two
+// columns in the intake form actually hold — "Who's Reporting?" and "Where Do You Work?".
+// The sample used to put a company name in `customerName` and carry no `companyName` at
+// all, which taught the demo a shape the real data never has; see knownCompanies() for
+// what that cost when it was read back.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014',  dateRaised: '2025-10-01', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'AgriKart Pvt Ltd',     contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',    incidentDate: '2025-09-28' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'FarmVista Solutions', contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
-    { irNumber: 'IR407', droneId: 'S25P017',  dateRaised: '2025-09-20', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'SkyHarvest Corp',     contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',             incidentDate: '2025-09-18' },
-    { irNumber: 'IR406', droneId: 'S25P010',  dateRaised: '2025-09-15', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'GreenField Agri',     contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
-    { irNumber: 'IR405', droneId: 'S25P040',  dateRaised: '2025-09-10', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'DroneWorks India',    contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
+    { irNumber: 'IR409', droneId: 'S25P014',  dateRaised: '2025-10-01', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Sreenivas Pai', contactPhone: '7828148298', companyName: 'AgriKart Pvt Ltd', contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',    incidentDate: '2025-09-28' },
+    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Meera Iyer',     contactPhone: '9845012345', companyName: 'FarmVista Solutions', contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
+    { irNumber: 'IR407', droneId: 'S25P017',  dateRaised: '2025-09-20', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Arjun Deshpande', contactPhone: '9900112233', companyName: 'SkyHarvest Corp',     contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',             incidentDate: '2025-09-18' },
+    { irNumber: 'IR406', droneId: 'S25P010',  dateRaised: '2025-09-15', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Kavya Reddy',    contactPhone: '9765432100', companyName: 'GreenField Agri',     contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
+    { irNumber: 'IR405', droneId: 'S25P040',  dateRaised: '2025-09-10', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Imran Sheikh',   contactPhone: '9123456780', companyName: 'DroneWorks India',    contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
   ];
 }
 

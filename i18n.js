@@ -67,7 +67,6 @@
     'nav.irs':             'IRs',
     'nav.insights':        'Insights',
     'nav.logAnalyser':     'Log Analyser',
-    'nav.legacyRecords':   'Legacy Records',
     'nav.userAccess':      'User Access',
     // Named separately from the sign-in door's own label, even though the English
     // is the same string. A translator shortening a sidebar label would not want
@@ -158,6 +157,19 @@
     'auth.sso':            'Continue with Indrones’ official email',
     'auth.unlock':         'Continue with fingerprint / passkey',
     'auth.usePattern':     'Continue with pattern',
+    // Said when the button is tapped on a device that has not enrolled the method yet.
+    // The first line is the owner's own sentence, verbatim. The steps after it are the
+    // REAL path through this app and nothing else: the avatar in the top right corner is
+    // the way into the menu, and "Turn on Quick unlock" is the row's actual label (see
+    // syncQuickUnlockMenu, which owns that wording and changes it with the device's
+    // state). Guidance that sends someone looking for a control that does not exist is
+    // worse than the silence it replaced.
+    'auth.methodInactive.say':      'This login method activates after you enable it from your login.',
+    'auth.methodInactive.step1':    'Sign in to I-PASSBOOK with your email and the code we send you.',
+    'auth.methodInactive.step2':    'Tap your avatar in the top right corner of the app.',
+    'auth.methodInactive.step3':    'Choose “Turn on Quick unlock” and follow the prompt on this device. Set up your fingerprint — and a pattern as well, if you want one.',
+    'auth.methodInactive.step4':    'That is all. Come back to this screen and both methods are ready.',
+    'auth.methodInactive.dismiss':  'Got it',
     // THE TEMPORARY-PASSWORD DOOR, and it is deliberately the faintest thing on the
     // card. It is NOT a general password login — the owner removed that (see the note
     // on the code view below). It exists for exactly one account state: a person the

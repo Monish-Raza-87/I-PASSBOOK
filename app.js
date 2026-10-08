@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v75';
+const APP_VERSION = 'v76';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -2412,6 +2412,37 @@ function patternBusy(on) {
   if (title && on) title.textContent = 'Checking your pattern…';
 }
 
+// ─── "THIS METHOD IS NOT ON THIS DEVICE YET" ─────────────────────────────────
+// The two quick-unlock doors are drawn on every entry screen (setAuthMode), so on a
+// device that has never enrolled either one a tap has nothing to open. That tap is not
+// a failure and it is not silent: it says the owner's sentence and then gives the four
+// steps that turn the method on.
+//
+// The steps name the REAL controls and nothing else. "Turn on Quick unlock" is the
+// actual label of the actual row in the avatar menu — syncQuickUnlockMenu owns that
+// wording and changes it with the device's state — and the avatar really is in the top
+// right corner. Guidance that sends someone looking for a control that does not exist
+// is worse than the silence it replaced.
+//
+// It is shown IN THE PAGE and not as a toast. It is four steps long, and a toast that
+// has gone before it is read is the same as no explanation at all.
+function showMethodInactiveNote() {
+  const note = document.getElementById('auth-method-note');
+  if (!note) return;
+  note.style.display = '';
+  // `role="status"` and a focused close control, so it is announced and can be put away
+  // from a keyboard. Deliberately NOT a modal: nothing behind it is blocked, because the
+  // person may well decide to type their email instead — which is the form directly
+  // above, and the whole reason this note is a note.
+  const close = document.getElementById('auth-method-note-close');
+  if (close && typeof close.focus === 'function') { try { close.focus(); } catch (e) { /* fine */ } }
+}
+
+function hideMethodInactiveNote() {
+  const note = document.getElementById('auth-method-note');
+  if (note) note.style.display = 'none';
+}
+
 function patternHashOf(seq) {
   const bytes = new TextEncoder().encode(seq.join('-') + '|ipb-pattern');
   return crypto.subtle.digest('SHA-256', bytes).then(buf =>
@@ -2653,6 +2684,10 @@ function maybePromptQuickUnlock(email) {
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  // The "this method is not on this device yet" note belongs to the screen it was opened
+  // on and to no other. Putting it away here rather than at each of the four places that
+  // change mode means there is one place to look, and a note that cannot outlive its tap.
+  hideMethodInactiveNote();
 
   // The password is the opt-in door — visible ONLY in 'login'. Everywhere else it
   // stays hidden with the wrap that pads it, by the same explicit set the rest of
@@ -2689,21 +2724,28 @@ function setAuthMode(mode) {
   set('auth-pwd-link',      typed && !pwMode);
   // The quick-unlock pair is on the ENTRY screen now — that is the merge above — and
   // still on the pattern canvas, where the fingerprint button is the one-tap
-  // alternative to drawing. Only the doors this device can actually open: a
-  // fingerprint record with no pattern yet still offered "Use pattern", and drawing
-  // on it fell through to the email form — the door was drawn, not merely hidden.
-  // Read from the record each time rather than once at boot, because the record
-  // changes while the page stays open (the setup overlay writes it).
+  // alternative to drawing.
+  //
+  // BOTH BUTTONS ARE ALWAYS DRAWN on the entry screen, whether or not this device has
+  // the method. That is the owner's call of 2026-10-08, and it reverses an earlier one
+  // of mine (*"offering a door that opens onto nothing is worse than not offering it"*)
+  // which was wrong for the same reason it was tidy: a person who has never heard of
+  // the feature cannot miss it. What a tap does now depends on the record — see the
+  // handlers in wireAuthForm — and the note beside them is the explanation.
+  //
+  // The record is read FRESH here rather than once at boot, because it changes while
+  // the page stays open (the setup overlay writes it, and so does removal).
   const quickOn = (entry || mode === 'pattern');
   set('auth-quick',         quickOn);
-  let quickHere = false;
+  const quickNow = quickOn ? (loadUnlock() || {}) : {};
   if (quickOn) {
-    const q = loadUnlock() || {};
-    const fp = !!(q.credentialId || q.mode === 'fingerprint');
-    const pat = !!q.patternHash;
-    quickHere = fp || pat;
-    set('auth-unlock-btn',   fp);
-    set('auth-pattern-link', pat);
+    // On the pattern canvas the two are drawn for their real state: drawing already IS
+    // the pattern door, so a second "Continue with pattern" would be a control with
+    // nothing to do.
+    const fp  = !!(quickNow.credentialId || quickNow.mode === 'fingerprint');
+    const pat = !!quickNow.patternHash;
+    set('auth-unlock-btn',   mode === 'pattern' ? fp : true);
+    set('auth-pattern-link', mode === 'pattern' ? pat : true);
   }
   set('auth-pattern',       mode === 'pattern');
   // "Back to sign in" undoes the last tap, so it belongs on every screen that IS one
@@ -2738,13 +2780,13 @@ function setAuthMode(mode) {
   set('auth-google-btn',    firstStep && !!CONFIG.SSO_URL);
   // THE DIVIDER IS THE BLOCK'S, NOT GOOGLE'S. It used to be `!!CONFIG.SSO_URL` with
   // the Google button, which was right while the button was the only thing under it.
-  // It now sits above THREE alternatives, and the two lock doors do not depend on a
-  // second deployment at all — so keying it on SSO_URL would drop the line between
-  // "Continue" and the unlock pair on every device where the Google door is simply
-  // off, leaving two answers to one unasked question. It shows when there is anything
-  // below it, and is hidden when there is nothing: a lone "or" is the one thing this
-  // line must never be.
-  set('auth-or',            firstStep && (!!CONFIG.SSO_URL || quickHere));
+  // It now sits above three alternatives, and since 2026-10-08 two of them — the unlock
+  // pair — are drawn on every entry screen whether or not this device can use them. So
+  // "is there anything below me" and "is this the entry screen" are now the same
+  // question, and keying the line on SSO_URL would drop it between "Continue" and a
+  // pair that is still sitting right there. A lone "or" is the one thing this line must
+  // never be, and it now can never be one: the pair is unconditional.
+  set('auth-or',            firstStep && (!!CONFIG.SSO_URL || quickOn));
   // The notice line carries one transient sentence at a time ("Taking you to
   // Google…") and is EMPTY on every other screen — which is to say hidden, because a
   // line that reserves its own height is a gap that reads as something failing to
@@ -2978,11 +3020,30 @@ function wireAuthForm() {
   const googleBtn = document.getElementById('auth-google-btn');
   if (googleBtn) googleBtn.addEventListener('click', submitGoogleSignIn);
 
-  // Quick unlock, on the sign-in screen.
+  // Quick unlock, on the sign-in screen. The two doors are ALWAYS drawn (see
+  // setAuthMode), so a tap has two possible meanings and the record decides which: open
+  // the door, or explain how to get one. Nothing here re-reads the record from a
+  // closure captured at wiring time — `loadUnlock()` is the live value, and the setup
+  // overlay writes it while this page is open.
+  const methodReady = (which) => {
+    const q = loadUnlock() || {};
+    return which === 'fingerprint'
+      ? !!(q.credentialId || q.mode === 'fingerprint')
+      : !!q.patternHash;
+  };
   const unlockBtn = document.getElementById('auth-unlock-btn');
-  if (unlockBtn) unlockBtn.addEventListener('click', () => submitUnlock('fingerprint'));
+  if (unlockBtn) unlockBtn.addEventListener('click', () => {
+    if (!methodReady('fingerprint')) return showMethodInactiveNote();
+    submitUnlock('fingerprint');
+  });
   const patternLink = document.getElementById('auth-pattern-link');
-  if (patternLink) patternLink.addEventListener('click', () => { setAuthMode('pattern'); patternForUnlock(); });
+  if (patternLink) patternLink.addEventListener('click', () => {
+    if (!methodReady('pattern')) return showMethodInactiveNote();
+    setAuthMode('pattern');
+    patternForUnlock();
+  });
+  const noteClose = document.getElementById('auth-method-note-close');
+  if (noteClose) noteClose.addEventListener('click', hideMethodInactiveNote);
 
   // Enter submits the CURRENT mode, not always login.
   form.addEventListener('submit', ev => {
@@ -3893,8 +3954,8 @@ function renderLayout() {
 // in base.css and NOTHING ever applied it, so tapping Insights produced no
 // feedback anywhere on screen and read as a dead tap — which is half of "even
 // after clicking on insight tile it is not opening". Three items now; the other
-// two nav entries are not sections, because Legacy Records and User Access each
-// open a modal rather than a pane.
+// nav entry is not a section, because User Access opens a pane of its own rather
+// than one of the six.
 //
 // `aria-current` rides along with the class: the highlight is colour, and colour
 // alone is not an announcement.
@@ -3921,7 +3982,6 @@ function markActiveNav(name) {
 //   #/tickets/IR409      → that IR's passbook
 //   #/insights           → the counts dashboard
 //   #/log                → the flight-log analyser
-//   #/legacy             → opens the read-only legacy workbook modal
 // showIndex()/openPassbook()/showInsights() stay the view functions; the router
 // only decides when to call them, so nothing here re-implements rendering.
 function currentRoute() {
@@ -3929,7 +3989,6 @@ function currentRoute() {
   if (parts[0] === 'tickets' && parts[1]) return { name: 'ticket', irNumber: decodeURIComponent(parts[1]) };
   if (parts[0] === 'insights') return { name: 'insights' };
   if (parts[0] === 'log') return { name: 'log' };
-  if (parts[0] === 'legacy') return { name: 'legacy' };
   // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
   // rather than on a blank pane, which is why `insights` had to be matched above.
   return { name: 'tickets' };
@@ -3959,12 +4018,6 @@ function goLog() {
 async function handleRoute() {
   if (!currentUser) return;
   const r = currentRoute();
-
-  if (r.name === 'legacy') {
-    if (typeof openLegacyWorkbook === 'function') openLegacyWorkbook();
-    goIndex();
-    return;
-  }
 
   if (r.name === 'ticket') {
     // Already showing this IR — don't rebuild every section form.
@@ -4103,12 +4156,17 @@ function showApp() {
   // the stored preference is already applied, and this only narrows it.
   loadPaletteConfig();
 
-  // Set up user avatar
-  userAvatar.textContent = currentUser?.initial || '?';
+  // Set up user avatar. Keyed on the ADDRESS rather than on the name, so the mark is
+  // the person and not the spelling of their name — see the AVATARS block. The name is
+  // only the fallback for the (impossible today, cheap to be wrong about) case of a
+  // session with no address on it. The picture branch comes first and wins: an account
+  // that really has a photograph is better served by it than by any mark we could draw.
+  userAvatar.style.backgroundImage = '';
+  userAvatar.innerHTML = avatarSvg(currentUser?.email || currentUser?.name || '');
   if (currentUser?.picture) {
+    userAvatar.textContent = '';
     userAvatar.style.backgroundImage = `url(${currentUser.picture})`;
     userAvatar.style.backgroundSize  = 'cover';
-    userAvatar.textContent = '';
   }
 
   // User menu toggle
@@ -5558,6 +5616,93 @@ function initialsOf(name) {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+// ─── AVATARS ────────────────────────────────────────────────────────────────
+// The owner, 2026-10-08: *"In top right, in my login I can see it is written M, let us
+// have something better, avatars without eyes, random avatars to each one of them can
+// be given, gender neutral avatars so that you do not have to think about them if they
+// are male of female."*
+//
+// Three decisions in that, and each one rules something out.
+//
+//   1. GEOMETRY, NOT A PICTURE. A head, a pair of shoulders, a cap — shapes, and no
+//      face. A drawn person invites a judgement about who they are; a shape does not.
+//      It is also what makes "gender neutral" a property of the drawing rather than a
+//      promise about it: there is nothing in the mark to get wrong.
+//   2. NOT AN INITIAL. The "M" he is looking at is Monish's, but it is also every other
+//      Monish, every "M.", and every account whose name the app never learned — the
+//      letter is a claim about a name that cannot always be made. `initialsOf` stays
+//      where it is: the Overview's people list is a dense counts table and a two-letter
+//      chip is the right size for it. This is the mark for a PERSON, not for a row.
+//   3. DERIVED FROM THE ADDRESS, never from the row it is painted into. The same person
+//      wears the same mark in the header and in a comment, and it does not shuffle when
+//      a list re-sorts — an avatar that changed on every render reads as a different
+//      person, which is worse than a letter.
+//
+// The fields are muted and mid-toned on purpose: the silhouette is white on the field,
+// so contrast is a property of the mark itself and does not change with the theme. The
+// avatar is the same in light, cream and dark, the way a photograph would be.
+const AVATAR_FIELDS = [
+  '#7a6a4f',  // olive
+  '#5c6b73',  // slate
+  '#6e5a7a',  // plum grey
+  '#4f6e5a',  // moss
+  '#8a5a44',  // terracotta
+  '#50607a',  // denim slate
+  '#7d6a3c',  // ochre
+  '#5b5b5b',  // graphite
+];
+
+// FNV-1a, and `Math.imul` because the multiply has to stay in 32 bits. A plain
+// `h * 16777619` overflows into a double and throws away the LOW bits — which are the
+// bits the field index comes from, so the first few people would all land on one colour.
+function avatarHash(seed) {
+  const s = String(seed == null ? '' : seed).trim().toLowerCase();
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+
+// Three heads. Same silhouette, three proportions — none of them is a sex, an age or an
+// ethnicity, which is the point.
+const AVATAR_HEADS = [
+  `<circle cx="16" cy="13.4" r="5.7"/>`,
+  `<ellipse cx="16" cy="13.4" rx="4.9" ry="6.3"/>`,
+  `<rect x="10.5" y="7.4" width="11" height="12" rx="4.6"/>`,
+];
+const AVATAR_SHOULDERS = [
+  `<path d="M3.4 32c0-6.4 5.6-10.6 12.6-10.6S28.6 25.6 28.6 32z"/>`,
+  `<path d="M5.2 32v-3.6c0-3.6 4.8-6.2 10.8-6.2s10.8 2.6 10.8 6.2V32z"/>`,
+  `<path d="M7.4 32c0-5.8 3.8-9.4 8.6-9.4s8.6 3.6 8.6 9.4z"/>`,
+];
+// The cap is the SAME head shape again, larger and lifted, painted under the white one
+// — so it is a rim on every head proportion rather than a hat that only fits one. Three
+// sizes: none, a shallow rim, a taller one.
+const AVATAR_CROWNS = [
+  '',
+  `<g transform="translate(0 -1.7) translate(16 13.4) scale(1.17) translate(-16 -13.4)">%S</g>`,
+  `<g transform="translate(0 -2.8) translate(16 13.4) scale(1.24) translate(-16 -13.4)">%S</g>`,
+];
+
+// An inline SVG string, so a caller can drop it straight into a container's innerHTML.
+// `seed` is the account's email wherever one is known — the address is the identity the
+// whole app keys on — and falls back to a name only where there is no address.
+function avatarSvg(seed) {
+  const h     = avatarHash(seed);
+  // One hash, four questions, each asked of DIFFERENT bits: independent enough for a
+  // team of twenty, and there is no second hash to keep in step with the first.
+  const field = AVATAR_FIELDS[h % AVATAR_FIELDS.length];
+  const head  = AVATAR_HEADS[(h >>> 3) % AVATAR_HEADS.length];
+  const sh    = AVATAR_SHOULDERS[(h >>> 7) % AVATAR_SHOULDERS.length];
+  const crown = AVATAR_CROWNS[(h >>> 11) % AVATAR_CROWNS.length];
+  const ink   = '#f7f4ee';
+  const cap   = crown ? crown.replace('%S', `<g fill="${field}" opacity=".55">${head}</g>`) : '';
+  return `<svg class="avatar-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">`
+       + `<rect width="32" height="32" fill="${field}"/>`
+       + cap
+       + `<g fill="${ink}">${sh}${head}</g>`
+       + `</svg>`;
+}
+
 // The month axis in three letters. MONTH_LABELS above is the long form the filter
 // dropdown uses, where there is room for it; a chart column at 24px has room for
 // three characters and no more.
@@ -5777,7 +5922,11 @@ function renderInsights() {
       <div class="people-list">
         ${people.map(p => `
           <div class="person-row${p.key === UNASSIGNED_KEY ? ' is-unassigned' : ''}">
-            <span class="person-avatar" aria-hidden="true">${escHtml(initialsOf(p.name) || '?')}</span>
+            <span class="person-avatar" aria-hidden="true">${
+              p.key === UNASSIGNED_KEY
+                ? '?'
+                : avatarSvg(p.key || p.name)
+            }</span>
             <span class="person-name">${escHtml(p.name || t('insights.unassigned'))}</span>
             <span class="person-n">${p.open}</span>
             <span class="person-n${p.late ? ' is-late' : ''}">${p.late}</span>
@@ -8691,45 +8840,6 @@ function closeLegacyModal() {
 
 // The home screen's 🏛 Legacy button: the INDEX of pre-app records (IR1–IR441).
 //
-// There is no embedded workbook any more, and there never will be again — the file
-// is restricted precisely because the embed forced it to stay link-shared. So this
-// is the way in: a tappable list of the legacy IRs the backend enumerated, each one
-// opening its record read-only through getLegacyIR. The index is cheap (tab names
-// only); the content is fetched only for the record actually opened.
-function openLegacyWorkbook() {
-  const items = Object.values(legacyMap).sort((a, b) =>
-    parseInt(String(b.irNumber).replace(/\D/g, ''), 10) -
-    parseInt(String(a.irNumber).replace(/\D/g, ''), 10));
-
-  const existing = document.getElementById('legacy-modal');
-  if (existing) existing.remove();
-  const modal = document.createElement('div');
-  modal.className = 'inward-options-modal';
-  modal.id = 'legacy-modal';
-  const list = items.length
-    ? items.map(it =>
-        `<button type="button" class="legacy-index-item" data-ir="${escHtml(it.irNumber)}">` +
-          `<span class="legacy-index-ir">${escHtml(it.irNumber)}</span>` +
-          `<span class="legacy-index-label">${escHtml(it.label || '')}</span>` +
-        `</button>`).join('')
-    : `<p class="legacy-empty">No pre-app records were found in the legacy workbook.</p>`;
-  modal.innerHTML = `
-    <div class="legacy-card legacy-card-record">
-      <div class="legacy-head">
-        <div>
-          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
-          <div class="legacy-sub">${items.length} pre-app record${items.length === 1 ? '' : 's'} · read-only</div>
-        </div>
-        <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
-      </div>
-      <div class="legacy-record legacy-index">${list}</div>
-    </div>`;
-  document.body.appendChild(modal);
-  modal.addEventListener('click', e => { if (e.target === modal) closeLegacyModal(); });
-  modal.querySelectorAll('.legacy-index-item').forEach(btn =>
-    btn.addEventListener('click', () => openLegacyRecord(btn.dataset.ir)));
-}
-
 // Back button (mobile only — the desktop split pane keeps the list on screen).
 // Guarded: it and the title do the same thing, so they ask the same question. The
 // guard lives HERE and on the title, never inside goIndex() — goIndex is also the
@@ -8773,9 +8883,11 @@ const irLegacyBtn = document.getElementById('ir-legacy-btn');
 if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
   if (legacyMap[currentIR?.irNumber]) openLegacyRecord(currentIR?.irNumber);
 });
-// Home-screen "Legacy I-PASSBOOK" button — opens the whole old workbook read-only
-const legacyWorkbookBtn = document.getElementById('legacy-workbook-btn');
-if (legacyWorkbookBtn) legacyWorkbookBtn.addEventListener('click', openLegacyWorkbook);
+// The pre-app workbook index is GONE from the service desk (the owner, 2026-10-08:
+// *"Remove the Legacy Records button from the service desk (since legacy is being
+// infused into the app)"*). What stays is the per-IR read-only fallback below: an
+// old ticket with nothing in the app yet has nothing else to show, and it goes when
+// the infusion in `listLegacyIRs`/`getLegacyIR` lands, not before.
 
 // ─── DRAFT AUTO-SAVE ──────────────────────────────────────────────────────────
 // Any edit within a section is persisted as a draft (debounced), so unsaved
@@ -12865,7 +12977,6 @@ function initIcons() {
     ['#nav-tickets .nav-icon',               'ir'],
     ['#nav-insights .nav-icon',              'chart'],
     ['#nav-log .nav-icon',                   'pulse'],
-    ['#legacy-workbook-btn .nav-icon',       'legacy'],
     ['#nav-faq .nav-icon',                   'help'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],

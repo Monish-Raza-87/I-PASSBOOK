@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v74';
+const APP_VERSION = 'v75';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -107,6 +107,17 @@ const CONFIG = {
   // Local development helper. Use http://localhost:PORT/?dev=1 to inspect the app
   // without Google auth while this prototype is still being built.
   ENABLE_DEV_AUTH_BYPASS: true,
+
+  // The desk's WhatsApp chat, for the corner button on the landing page.
+  //
+  // THIS IS EMPTY ON PURPOSE AND THE BUTTON IS HIDDEN WHILE IT IS. There is no
+  // Indrones after-sales WhatsApp link anywhere in this repository, I have no way to
+  // verify one, and inventing a number would send a customer to a stranger. So the
+  // corner ships wired and dormant: paste the invite URL (the `https://wa.me/<number>`
+  // or `https://chat.whatsapp.com/<code>` form) here and the button appears on the next
+  // deploy, with no other change. An `href` of '#' that opens a blank tab is worse than
+  // no button at all, which is why the fallback is "no button".
+  WHATSAPP_URL: '',
 
   // ── NO SHEET ADDRESSES LIVE HERE ANY MORE (2026-10-03) ───────────────────────
   // The IR Repository and the legacy workbook used to be named in this file. Both
@@ -1536,12 +1547,22 @@ window.addEventListener('load', () => {
   // this handler. It only ever rewrites text that is already correct, so the order
   // is not cosmetic: doing it here means no other code in this handler has to know
   // the layer exists, and a screen that is never re-rendered later is still right.
+  //
+  // `init()` is what reads the language this device last chose, and it MUST come
+  // before applyStatic() — the other way round paints English and then paints the
+  // chosen language over it, which is the same picture a frame later and a flicker
+  // on the one screen everybody sees.
+  if (window.I18N) window.I18N.init();
   if (window.I18N) window.I18N.applyStatic();
 
-  // The customer door is wired HERE, and not inside showAuth(), because the entry
-  // lives on the sign-in screen but the modal itself is not part of that screen: a
-  // signed-in device that signs out must find the entry already alive. Wiring it
-  // costs two listeners and, with no URL configured, returns on the second line.
+  // The landing page's own furniture: the two doors, the language picker, the corner
+  // button, and the code step they lead to. Wired HERE and not inside showAuth(),
+  // because they are properties of the screen rather than of any one sign-in — and
+  // because a signed-in device that signs out must find them already alive.
+  wireLanding();
+
+  // The customer door's REPORT modal — a different thing from the door, and it needs
+  // CUSTOMER_FORM_URL before it exists at all.
   wireCustomerDoor();
 
   // Check for local file protocol (login + backend calls won't work)
@@ -1763,19 +1784,26 @@ function loadStoredUser() {
 }
 
 // ─── EMAIL + PASSWORD AUTH UI ────────────────────────────────────────────────
-// Four modes share one form: 'login' | 'otp' | 'forgot' | 'reset'. There is no
-// sign-up mode — accounts are provisioned by the admin — so the things a person
-// can do here are sign in, finish signing in with an emailed code, and recover a
-// forgotten password via a different emailed code.
+// Four modes share one form: 'email' | 'login' | 'unlock' | 'pattern'. There is no
+// sign-up mode — accounts are provisioned by the admin — so the things a person can do
+// here are sign in with an address, sign in with the password an admin issued, and
+// unlock a device they already registered. The emailed code used to be a mode of this
+// form; it is a screen of its own now (`#code-view`), reached only by submitting this
+// one — see openCodeView.
 let _authFormWired = false;
-let _authMode = 'login';     // 'login' | 'otp' | 'forgot' | 'reset'
-let _resetEmail = '';
-// Sign-in step 2 needs the credential from step 1, because the backend verifies
-// the password again on the second call rather than trusting a half-open
-// conversation. In memory only — same rule as _pcTemp, and for the same reason:
-// a temporary credential must not outlive the screen that asked for it.
-let _otpEmail = '';
-let _otpPassword = null;
+let _authMode = 'email';     // 'email' | 'login' | 'unlock' | 'pattern'
+
+// ─── THE CODE STEP'S STATE ────────────────────────────────────────────────────
+// Which door asked for the code, the address it was sent to, and — on the password
+// door — the password from stage 1, because the backend verifies it AGAIN on the
+// second call rather than trusting a half-open conversation.
+//
+// `_codePassword` is in memory only, for the same reason `_pcTemp` is: a credential
+// must not outlive the screen that asked for it. It is empty on the code door, where
+// there was never a password to hold.
+let _codeDoor = '';          // 'employee' | 'customer'
+let _codeEmail = '';
+let _codePassword = '';
 
 // Establish a signed-in session from a backend payload. Shared by the login form
 // and the forced password change, so both land in exactly the same state.
@@ -1799,7 +1827,7 @@ function finishAuth(email, d) {
   refreshMyAccess().then(() => { if (typeof applySectionAccessGating === 'function') applySectionAccessGating(); });
 }
 
-// ─── THE WORDMARK TYPES ITSELF, THEN THE LINE UNDER IT SPELLS IT OUT ────────
+// ─── THE WORDMARK TYPES ITSELF ────────────────────────────────────────────────
 //
 // The owner, 2026-10-08: *"where it is written I-PASSBOOK in CAPS below logo, there is
 // a in-loop animation going on of a curvy underline. Instead, can we have I-PASSBOOK
@@ -1810,10 +1838,10 @@ function finishAuth(email, d) {
 // So the flourish is gone and the heading animates instead. Three things about how:
 //
 // 1. THE MARKUP IS THE REAL COPY AND THIS IS AN ENHANCEMENT. `index.html` ships
-//    "I-PASSBOOK" and the full expansion sentence as ordinary text. This function
-//    splits them into spans only when it runs, so a reader with no JavaScript, a
-//    screen reader, and a reduced-motion visitor all get the finished words — the
-//    last of those because the CSS in base.css puts every span back on screen.
+//    "I-PASSBOOK" as ordinary text. This function splits it into spans only when it
+//    runs, so a reader with no JavaScript, a screen reader, and a reduced-motion
+//    visitor all get the finished word — the last of those because the CSS in base.css
+//    puts every span back on screen.
 // 2. THE WORD GROWS BECAUSE THE CSS HIDES UNTYPED LETTERS WITH `display`, NOT
 //    `opacity`. With `opacity` the whole word would reserve its space from the first
 //    frame and the letters would blink on inside a box that never changed — a
@@ -1832,14 +1860,19 @@ function finishAuth(email, d) {
 //    letter because inline layout puts it there, so there is nothing to recompute on
 //    resize, on a font swap, or when the language layer rewrites the words.
 //
+// ⚠ THE LINE UNDER THE WORD IS NOT TYPED, AND THAT IS A CORRECTION OF MY OWN WORK.
+// It used to spell the name out one `·`-separated term at a time, and because the terms
+// differ in length the sentence re-wrapped as it filled — so the whole landing page grew
+// and shrank underneath the doors on every pass of the loop. The owner, 2026-10-08:
+// *"the whole page below it is increasing/decreasing its height … And line
+// increasing/decreasing should not happen."* It is one static line now, and no code
+// here touches it. (The comment in index.html above it is where that line is defined.)
+//
 // Timings live here rather than in CSS: the sequence is a chain, and half of a chain
 // in each file is a chain nobody can change.
 const BT_OPEN_MS   = 240;   // beat before the first keystroke
 const BT_LETTER_MS = 105;   // per letter of I-PASSBOOK
-const BT_GAP_MS    = 360;   // beat between the word and the line under it
-const BT_TERM_MS   = 230;   // per term of the expansion
-const BT_HOLD_MS   = 3200;  // how long the finished pair is left up
-const BT_TERM_OUT_MS = 90;  // unwriting, in reverse
+const BT_HOLD_MS   = 3200;  // how long the finished word is left up
 const BT_LETTER_OUT_MS = 45;
 const BT_LOOP_MS   = 180;   // beat before it starts again
 
@@ -1850,71 +1883,37 @@ function prefersReducedMotion() {
   catch (e) { return false; }
 }
 
-// Splits the two landing elements into animatable spans. Idempotent: `_btBuilt` is
-// stamped on the elements themselves, so a re-entry cannot double the letters.
+// Splits the wordmark into animatable spans. Idempotent: `_btBuilt` is stamped on the
+// element itself, so a re-entry cannot double the letters. The line BELOW the word is
+// deliberately not touched — see the note above; it is static copy now.
 function buildBrandTyping() {
   const brand = document.getElementById('landing-brand');
-  const full  = document.getElementById('landing-full');
-  if (!brand || !full || brand.dataset.btBuilt === '1') return;
+  if (!brand || brand.dataset.btBuilt === '1') return;
 
   const word = (brand.textContent || '').replace(/\s+/g, ' ').trim();
-  if (word) {
-    brand.dataset.btBuilt = '1';
-    // The label carries the word for anyone who cannot see it: every letter span is
-    // aria-hidden, so without this the h1 would read as an empty heading.
-    brand.setAttribute('aria-label', word);
-    brand.textContent = '';
-    const frag = document.createDocumentFragment();
-    const letters = [];
-    for (const ch of word) {
-      const s = document.createElement('span');
-      s.className = 'bt-lt';
-      s.setAttribute('aria-hidden', 'true');
-      s.textContent = ch;
-      frag.appendChild(s);
-      letters.push(s);
-    }
-    const caret = document.createElement('span');
-    caret.className = 'bt-caret';
-    caret.setAttribute('aria-hidden', 'true');
-    frag.appendChild(caret);
-    brand.appendChild(frag);
-    brand._btLetters = letters;
-    brand._btCaret = caret;
+  if (!word) return;
+  brand.dataset.btBuilt = '1';
+  // The label carries the word for anyone who cannot see it: every letter span is
+  // aria-hidden, so without this the h1 would read as an empty heading.
+  brand.setAttribute('aria-label', word);
+  brand.textContent = '';
+  const frag = document.createDocumentFragment();
+  const letters = [];
+  for (const ch of word) {
+    const s = document.createElement('span');
+    s.className = 'bt-lt';
+    s.setAttribute('aria-hidden', 'true');
+    s.textContent = ch;
+    frag.appendChild(s);
+    letters.push(s);
   }
-
-  // The expansion line is split on the same `·` the markup already uses, so the copy
-  // is still the copy: no term is invented or dropped here, only revealed.
-  const sentence = (full.textContent || '').replace(/\s+/g, ' ').trim();
-  if (sentence) {
-    full.dataset.btBuilt = '1';
-    full.setAttribute('aria-label', sentence);
-    const parts = sentence.split('·').map(s => s.trim()).filter(Boolean);
-    full.textContent = '';
-    const frag = document.createDocumentFragment();
-    const terms = [];
-    parts.forEach((p, i) => {
-      // The separator is its own span so that the gaps between the terms arrive with
-      // the terms. Left as bare text it would be on screen from the first frame, and
-      // the line would start as a row of dots.
-      if (i > 0) {
-        const sep = document.createElement('span');
-        sep.className = 'bt-term';
-        sep.setAttribute('aria-hidden', 'true');
-        sep.textContent = ' · ';
-        frag.appendChild(sep);
-        terms.push(sep);
-      }
-      const s = document.createElement('span');
-      s.className = 'bt-term';
-      s.setAttribute('aria-hidden', 'true');
-      s.textContent = p;
-      frag.appendChild(s);
-      terms.push(s);
-    });
-    full.appendChild(frag);
-    full._btTerms = terms;
-  }
+  const caret = document.createElement('span');
+  caret.className = 'bt-caret';
+  caret.setAttribute('aria-hidden', 'true');
+  frag.appendChild(caret);
+  brand.appendChild(frag);
+  brand._btLetters = letters;
+  brand._btCaret = caret;
 }
 
 // Fixes the heading's width to the finished word, so the word types left to right into
@@ -1952,8 +1951,7 @@ function reserveBrandBox() {
 function startBrandTyping() {
   buildBrandTyping();
   const brand = document.getElementById('landing-brand');
-  const full  = document.getElementById('landing-full');
-  if (!brand || !full || !brand._btLetters || !full._btTerms) return;
+  if (!brand || !brand._btLetters || !brand._btLetters.length) return;
   // Before the `_btRun` guard below, so a second sign-out/sign-in re-reserves too. It
   // is synchronous and restores the letters, so calling it mid-loop is invisible.
   reserveBrandBox();
@@ -1963,7 +1961,6 @@ function startBrandTyping() {
   if (prefersReducedMotion()) return;
 
   const letters = brand._btLetters;
-  const terms   = full._btTerms;
   const caret   = brand._btCaret;
   const run = _btRun = { stop: false, timer: null, release: null };
   const wait = (ms) => new Promise(res => {
@@ -1978,7 +1975,6 @@ function startBrandTyping() {
   (async () => {
     while (!run.stop) {
       letters.forEach(l => l.classList.remove('is-on'));
-      terms.forEach(t => t.classList.remove('is-on'));
       if (caret) caret.classList.remove('is-on');
       if (!await next(BT_OPEN_MS)) return;
       if (caret) caret.classList.add('is-on');
@@ -1986,20 +1982,9 @@ function startBrandTyping() {
         l.classList.add('is-on');
         if (!await next(BT_LETTER_MS)) return;
       }
-      if (caret) caret.classList.remove('is-on');
-      if (!await next(BT_GAP_MS)) return;
-      for (const t of terms) {
-        t.classList.add('is-on');
-        if (!await next(BT_TERM_MS)) return;
-      }
       if (!await next(BT_HOLD_MS)) return;
-      // Unwritten in reverse, so the loop reads as the same sentence being typed a
+      // Unwritten in reverse, so the loop reads as the same word being typed a
       // second time rather than as the page having reloaded.
-      for (let i = terms.length - 1; i >= 0; i--) {
-        terms[i].classList.remove('is-on');
-        if (!await next(BT_TERM_OUT_MS)) return;
-      }
-      if (caret) caret.classList.add('is-on');
       for (let i = letters.length - 1; i >= 0; i--) {
         letters[i].classList.remove('is-on');
         if (!await next(BT_LETTER_OUT_MS)) return;
@@ -2020,14 +2005,12 @@ function stopBrandTyping() {
     if (run.release) { const release = run.release; run.release = null; release(); }
   }
   // The DOM is put back to "finished", which is what the signed-in app never shows
-  // and what a later sign-out must find: the landing head whole, not mid-type.
+  // and what a later sign-out must find: the landing wordmark whole, not mid-type.
   const brand = document.getElementById('landing-brand');
-  const full  = document.getElementById('landing-full');
   if (brand) {
     if (brand._btCaret) brand._btCaret.classList.remove('is-on');
     (brand._btLetters || []).forEach(l => l.classList.remove('is-on'));
   }
-  if (full) (full._btTerms || []).forEach(t => t.classList.remove('is-on'));
 }
 
 function showAuth() {
@@ -2035,6 +2018,10 @@ function showAuth() {
   warmBackend();
   authCont.style.display = 'flex';
   appCont.style.display  = 'none';
+  // The code step is a SCREEN OF ITS OWN, a sibling of this one, so every route back
+  // to the landing has to take it down — and this is the one function every route
+  // back goes through. See openCodeView/closeCodeView.
+  closeCodeView(false);
   // The landing head types itself in the moment the sign-in screen is actually on
   // screen. That is here rather than in the boot handler because the intro covers the
   // screen until it finishes — see the note above warmBackend() — so a chain started
@@ -2043,15 +2030,18 @@ function showAuth() {
   const pc = document.getElementById('password-change');
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');
-  _resetEmail = '';
-  _otpEmail = '';
-  _otpPassword = null;
+  _codeEmail = '';
+  _codePassword = '';
 
-  // Default mode: quick unlock where a registered device has one on file, and
-  // the email step for everyone else. NEVER the bare 'otp' code step — setAuthMode
-  // 2026-09-27's default once made the screen open on a code box no code had been
-  // requested for, because the passwordless door's stage 1 had not been shipped
-  // (see the 'Your sign-in timed out' dead end in submitOtp's history).
+  // Which of the two doors is open. Painted HERE and not only at wiring time, because
+  // a sign-out returns to this screen and must find the door this device left open.
+  paintDoors();
+
+  // Default mode: quick unlock where a registered device has one on file, and the
+  // typed form for everyone else. There is no longer a code STEP to default to — the
+  // code lives on its own screen now (openCodeView) and is only ever reached from a
+  // form that was actually submitted, which is a stronger guarantee than the old
+  // "never default to 'otp'" rule it replaces.
   const quick = loadUnlock();
   // A fingerprint record opens on the fingerprint door; a pattern-only record on
   // the pattern canvas. Both still offer the email door one tap away.
@@ -2075,7 +2065,7 @@ function showAuth() {
   }
 
   // Change: Removed 'auth-email' from clearing list so pre-fill persists
-  ['auth-password', 'auth-code', 'auth-new-password', 'auth-login-code'].forEach(id => {
+  ['auth-password'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
 
@@ -2103,30 +2093,34 @@ function submitGoogleSignIn() {
   if (btn) btn.disabled = true;
   setAuthError('');
   const hint = document.getElementById('auth-hint-text');
-  if (hint) hint.textContent = 'Taking you to Google — choose your indrones.com account.';
-  // Started here rather than left to the sign-in screen's own call, and keepalive
-  // because the next statement unloads nothing — but the round trip to Google is
-  // still the stretch the exchange would otherwise spend waiting for this
-  // deployment to wake up.
+  if (hint) hint.textContent  = 'Taking you to Google — choose your indrones.com account.';
+  // The notice line is `display:none` until it has something to say; a message
+  // nobody can see is not a message. It is put back to empty by setAuthMode.
+  if (hint) hint.style.display = '';
+  // Started here, and keepalive because the very next statement unloads the page.
+  // Without it the browser is free to cancel this request as we leave — and it is
+  // precisely the request whose whole job is to be still in flight while the person
+  // is over at Google picking an account.
   warmBackend({ keepalive: true });
-  // A NEW TAB, deliberately location.href. On the phone the app runs as an
-  // installed PWA (standalone window), and a top-level navigation from that
-  // window reaches Google with no usable Google session/cookie context — the
-  // reported failure was Google's own "unable to open the file at present" page.
-  // Opening the chooser in a real browser tab puts the request in Chrome's cookie
-  // jar, which is where the account picker needs its answer to come from. The
-  // door's last hop is still a top-level navigation back to APP_URL#sso=, which
-  // hands the code to the original app window as before.
-  // window.open guarded: it is the one call in this flow that a stripped window
-  // (a test harness, an odd in-app browser) may not offer, and the fallback keeps
-  // the door working rather than throwing on a screen with no buttons left.
-  if (typeof window.open === 'function') {
-    window.open(googleStartUrl(), '_blank');
-    if (btn) btn.disabled = false;
-    if (hint) hint.textContent = 'Continue at Google — the sign-in opens in a new tab.';
-  } else {
-    location.href = googleStartUrl();
-  }
+  // ⚠ A SAME-TAB NAVIGATION, and this is the owner's correction of my own work.
+  // 2026-10-08: *"I can see in vercel.com/login that when I clicked continue with
+  // google it did not opened me another tab to login but in the same tab took me to
+  // next screen … opposite to ours where we have another tab open for us to select
+  // email ID and wait a long time to get it, its sooooo piss-off signin method of
+  // ours, we need to be like vercel."*
+  //
+  // The old code opened a SECOND TAB and was defended at length, on the theory that a
+  // standalone PWA window has no cookie context for Google. That theory was wrong
+  // about the mechanism, and the cost of being wrong was the thing he actually
+  // reported: two tabs, two waits, and the app's own wait screen never seen because
+  // the person was looking at the other tab. The door's own round trip is a
+  // NAVIGATION either way (see the GOOGLE SIGN-IN block and docs/10), and a
+  // navigation is not something a second window improves.
+  //
+  // This is a top-level navigation, so the wait screen index.html raises for a
+  // `#sso=` return is the only screen the person sees until the exchange lands —
+  // which is the shape he asked for.
+  location.href = googleStartUrl();
   return Promise.resolve();
 }
 
@@ -2316,8 +2310,30 @@ async function submitUnlock(method, patternSeq) {
         : 'No quick unlock is set up on this device — sign in with your email and code.');
       return;
     }
+    // ── THE LEAD TIME, AND WHERE IT ACTUALLY GOES ──────────────────────────────
+    // The owner asked for this method to be quicker, and the honest answer is that
+    // most of its time is not in the gesture. `patternHashOf` is one SHA-256, and the
+    // draw itself is a finger on glass; the halt is the round trip to Apps Script,
+    // which is cold after ~5 minutes and can spend seconds waking up. So the two things
+    // that are actually ours to fix:
+    //
+    //   1. The ping goes out NOW, BEFORE the hash. It is the same warm-up the sign-in
+    //      screen already sends, coalesced to one per 15s — so this only fires on a
+    //      screen that has been open longer than that, which is exactly the screen where
+    //      the container is most likely to have gone cold. It costs one request and it
+    //      overlaps the hash and the draw instead of queueing behind them.
+    //   2. The busy state goes up NOW, not after the await. It used to be set below,
+    //      after `await patternHashOf(...)` — so the "Checking your pattern…" line
+    //      arrived a tick late, and that gap is precisely the "long halt and meanwhile
+    //      nothing shows on screen" the owner reported. See patternBusy().
+    warmBackend();
+    patternBusy(true);
     const drawn = await patternHashOf(patternSeq);
-    if (drawn !== rec.patternHash) { setAuthError('Wrong pattern — try again.'); resetPatternCanvas(); return; }
+    if (drawn !== rec.patternHash) {
+      setAuthError('Wrong pattern — try again.');
+      resetPatternCanvas();
+      return;
+    }
   } else {
     if (!rec || !rec.deviceToken || !rec.email) { clearUnlock(); setAuthMode('email'); return; }
   }
@@ -2343,9 +2359,9 @@ async function submitUnlock(method, patternSeq) {
   // here until the answer is in, the canvas refuses new strokes and the line under it
   // reads "Checking your pattern…" — see patternBusy() for why that pair is one fix
   // and not two. The matching `resetPatternCanvas()` below is the ONLY way back, and
-  // it is on both exits.
+  // it is on both exits. (A pattern's busy state went up above, next to the hash it
+  // belongs with; nothing is left to set here.)
   const patternish = (method === 'pattern');
-  if (patternish) patternBusy(true);
 
   postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel(), version: APP_VERSION }).then(d => {
     if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
@@ -2621,11 +2637,19 @@ function maybePromptQuickUnlock(email) {
 }
 
 //
-// Modes: 'email' (stage 1 — email earns the code, the daily door), 'otp'
-// (stage 2 — the code), 'login' (the password door: legacy shells + the
-// temp-password first login, which changePassword can only ever take from a
-// typed admin-issued password), 'unlock' / 'pattern' (quick unlock on a
-// registered device), 'forgot' / 'reset' (unchanged).
+// Modes, and there are FOUR — one per door on the employee's list, plus the two
+// quick-unlock screens. 'email' is the entry screen (address + Continue), which is
+// also where the quick-unlock pair lives; 'login' is the password field, revealed in
+// place for the ONE account state that has a password to type and no other way in; and
+// 'unlock' / 'pattern' are the two local gestures on a registered device.
+//
+// THE THREE RECOVERY MODES ARE GONE. 'otp', 'forgot' and 'reset' all lived in this
+// switch and none of them is a screen any more: the code step is now a SCREEN OF ITS
+// OWN outside this form (`#code-view`, driven by openCodeView), and the password-reset
+// flow behind "Forgot password?" was deleted with the control the owner removed —
+// "there is no space for forgot password now because we are not having any password
+// based login anyfurther." What survives of it is `showPasswordChange`, which is the
+// forced first-login change and a different thing wearing similar clothes.
 function setAuthMode(mode) {
   _authMode = mode;
   const set = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
@@ -2651,16 +2675,18 @@ function setAuthMode(mode) {
   const typed = (entry || pwMode);
 
   set('auth-signin-btn',    typed);
-  set('auth-forgot-link',   typed);
   // The password door's own way in, on the entry screen and nowhere else: on the
   // password screen it would point at itself. Until this existed the door had NO
   // entry point at all — the only caller of `setAuthMode('login')` was the end of the
   // reset flow — so an account still on the password the admin issued had no way to
   // type it from this screen.
+  //
+  // ⚠ IT IS ALSO THE ONE THING THAT KEEPS A BRAND-NEW HIRE ABLE TO SIGN IN. The
+  // backend REFUSES the emailed code to a temp-password account on purpose, and its
+  // own refusal message points at the password door — so this faint last line is not
+  // the general password login the owner removed, it is the only door that account
+  // has. See the note at the markup, and the two honest fixes on his side.
   set('auth-pwd-link',      typed && !pwMode);
-  set('auth-login-code-wrap', mode === 'otp');
-  set('auth-forgot-wrap',   mode === 'forgot');
-  set('auth-reset-wrap',    mode === 'reset');
   // The quick-unlock pair is on the ENTRY screen now — that is the merge above — and
   // still on the pattern canvas, where the fingerprint button is the one-tap
   // alternative to drawing. Only the doors this device can actually open: a
@@ -2670,17 +2696,14 @@ function setAuthMode(mode) {
   // changes while the page stays open (the setup overlay writes it).
   const quickOn = (entry || mode === 'pattern');
   set('auth-quick',         quickOn);
+  let quickHere = false;
   if (quickOn) {
     const q = loadUnlock() || {};
-    set('auth-unlock-btn',   !!(q.credentialId || q.mode === 'fingerprint'));
-    set('auth-pattern-link', !!q.patternHash);
-    // "Use email (OTP) based login method" is the way OFF this block and back to the
-    // typed form — which is the pattern canvas and ONLY the pattern canvas. It used
-    // to be needed on the old quick-unlock screen, where there was no form; now that
-    // the pair lives on the entry screen with the form directly above it, the link
-    // points at what the person is already looking at. Four methods in one box, and
-    // this is the fifth control that would have described one of them.
-    set('auth-quick-out',    mode === 'pattern');
+    const fp = !!(q.credentialId || q.mode === 'fingerprint');
+    const pat = !!q.patternHash;
+    quickHere = fp || pat;
+    set('auth-unlock-btn',   fp);
+    set('auth-pattern-link', pat);
   }
   set('auth-pattern',       mode === 'pattern');
   // "Back to sign in" undoes the last tap, so it belongs on every screen that IS one
@@ -2696,27 +2719,12 @@ function setAuthMode(mode) {
   set('auth-back-link',     !entry);
   const backOut = document.getElementById('auth-back-link');
   if (backOut) backOut.textContent = pwMode ? 'Use an email code instead' : 'Back to sign in';
-  // THE OTHER DIRECTION. Until this existed the screen only pointed ONE way: quick
-  // unlock could be left for the email door, and the email door had no way back — so
-  // a device with a registered fingerprint offered it once and then never again.
-  // `#auth-quick-in` is the way back. It used to live on 'email'/'login'; both of
-  // those now carry the quick-unlock PAIR itself, so a second control for the same
-  // two doors would be noise. It is offered instead on the steps where the pair is
-  // NOT on screen — the emailed code and the two recovery steps — which are also the
-  // steps a person reaches for a quicker door from.
-  //
-  // Gated on the record actually existing, for the same reason `#auth-unlock-btn`
-  // is: a link to a door this device cannot open is worse than no link.
-  const qIn = loadUnlock() || {};
-  const canQuick = !!((qIn.deviceToken && qIn.email) && (qIn.credentialId || qIn.mode === 'fingerprint' || qIn.patternHash));
-  set('auth-quick-in',      canQuick && (mode === 'otp' || mode === 'forgot' || mode === 'reset'));
   // The email field feeds every typed door. Only the pattern canvas has none: that
   // screen knows the email from the device's own record.
   set('auth-email',         mode !== 'pattern');
-  // The Google door belongs to the FIRST step and nowhere else. Left visible on
-  // the code step it would offer a second way in beside a form that is mid-way
-  // through the first — and it is the one control on this screen that ignores
-  // everything typed above it.
+  // The Google door belongs to the typed screens and nowhere else. It is the one
+  // control on this screen that ignores everything typed above it, so it must not sit
+  // beside the pattern canvas, where there is no form for it to ignore.
   //
   // Visibility is now just "is a second deployment configured". It used to depend on
   // a silent probe's answer, which had to go: the probe was a background call, and
@@ -2726,57 +2734,28 @@ function setAuthMode(mode) {
   // a sentence Google writes, before our code is reached. An absent button would
   // have been tidier and less honest: it would tell a person the feature does not
   // exist when the truth is that they are not signed in.
-  //
-  // It belongs to the same screens as the typed form, which is now `typed` rather
-  // than "the first step": the entry screen carries all four methods, so the Google
-  // door is one of them and not a step of its own above them.
   const firstStep = typed;
   set('auth-google-btn',    firstStep && !!CONFIG.SSO_URL);
-  set('auth-or',            firstStep && !!CONFIG.SSO_URL);
+  // THE DIVIDER IS THE BLOCK'S, NOT GOOGLE'S. It used to be `!!CONFIG.SSO_URL` with
+  // the Google button, which was right while the button was the only thing under it.
+  // It now sits above THREE alternatives, and the two lock doors do not depend on a
+  // second deployment at all — so keying it on SSO_URL would drop the line between
+  // "Continue" and the unlock pair on every device where the Google door is simply
+  // off, leaving two answers to one unasked question. It shows when there is anything
+  // below it, and is hidden when there is nothing: a lone "or" is the one thing this
+  // line must never be.
+  set('auth-or',            firstStep && (!!CONFIG.SSO_URL || quickHere));
+  // The notice line carries one transient sentence at a time ("Taking you to
+  // Google…") and is EMPTY on every other screen — which is to say hidden, because a
+  // line that reserves its own height is a gap that reads as something failing to
+  // load. It is written by submitGoogleSignIn and put away by every mode change,
+  // which is this line and only this line.
   const hint = document.getElementById('auth-hint-text');
-  if (hint) {
-    hint.textContent = mode === 'forgot'
-      ? 'Enter your email and we’ll send you a reset code.'
-      : mode === 'reset'
-        ? 'Enter the code from your email and choose a new password.'
-        : mode === 'otp'
-          ? 'One more step. Enter the code we emailed you.'
-          // EMPTY on the pattern canvas, on the owner's instruction: he asked for the
-          // sentence that told a person they were on a registered device to be
-          // removed. It was true and it was still the wrong thing to say — somebody
-          // drawing a pattern does not need telling which kind of device they are
-          // holding, and the canvas and the button under it say everything else.
-          // (The exact wording is deliberately not quoted here; smoke-shell asserts
-          // it no longer appears in this file, comments included, so that a phrase
-          // cannot survive as a comment and quietly come back as a string.) Leaving
-          // the line blank rather than removing the element keeps every mode one
-          // element wide, so nothing after the hint jumps as modes change.
-          : mode === 'pattern'
-            ? ''
-            : pwMode
-              ? 'Sign in with the credentials your admin gave you.'
-              // THE ENTRY SCREEN'S ONE LINE — and it is one line for BOTH modes that
-              // render that screen. It used to differ: 'email' had a sentence and
-              // 'unlock' had none, which was right when they were two screens and is
-              // a screen silently changing its own heading now that they are one. It
-              // adapts to what the device can actually do instead, so the second half
-              // is only offered where there is a second half to offer.
-              : (canQuick
-                  ? 'Sign in with your email, or unlock this device.'
-                  : 'We’ll email you a 6-digit sign-in code.');
-  }
-  // The stage-1 button reads differently per door it opens: the email step
-  // requests a code, the password step signs in.
+  if (hint) { hint.textContent = ''; hint.style.display = 'none'; }
   const signBtn = document.getElementById('auth-signin-btn');
-  if (signBtn) signBtn.textContent = pwMode ? 'Sign in' : 'Send me a code';
+  if (signBtn) signBtn.textContent = pwMode ? 'Sign in' : 'Continue';
   const err = document.getElementById('auth-error');
   if (err) { err.textContent = ''; err.style.display = 'none'; }
-  if (mode === 'otp') {
-    const first = document.getElementById('auth-login-code');
-    // Focused on the next tick, not now: the wrap is only just display:'' and a
-    // focus() on a node the browser has not laid out yet is silently dropped.
-    if (first) setTimeout(() => first.focus(), 60);
-  }
 }
 
 // ─── SHOW / HIDE A PASSWORD ──────────────────────────────────────────────────
@@ -2858,6 +2837,9 @@ function showPasswordChange(email, forced, tempPassword) {
   _pcEmail = (email || '').toLowerCase().trim();
   if (forced) _pcTemp = tempPassword || _pcTemp;
   else _pcTemp = null;
+  // The code step is a third full-screen sibling; all three are mutually exclusive, and
+  // each one takes the other two down rather than trusting the route that reached it.
+  closeCodeView(false);
   authCont.style.display = 'none';
   appCont.style.display  = 'none';
   document.body.classList.remove('view-detail');
@@ -2926,24 +2908,18 @@ function wireAuthForm() {
 
   const emailIn    = document.getElementById('auth-email');
   const passIn     = document.getElementById('auth-password');
-  const codeIn     = document.getElementById('auth-code');
-  const newIn      = document.getElementById('auth-new-password');
-  const otpIn      = document.getElementById('auth-login-code');
   const signInBtn  = document.getElementById('auth-signin-btn');
-  const otpBtn     = document.getElementById('auth-login-code-btn');
-  const forgotBtn  = document.getElementById('auth-forgot-btn');
-  const resetBtn   = document.getElementById('auth-reset-btn');
-  const resendLink = document.getElementById('auth-resend-link');
   // The same line the Google door writes to — one definition, so a refusal from
   // either door appears in one place and in one style.
   const showError  = setAuthError;
   const emailOf    = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
 
   // STAGE 1 of the daily door (mode 'email'): the email alone earns the code.
-  // There is no password here and none is sent; the response is the backend's
-  // own sentence — uniform in shape whether an account received a code or not,
-  // which is what keeps this step from being an oracle — and it is shown to the
-  // user as the note on the code step, not recomposed locally.
+  // There is no password here and none is sent; the response is the backend's own
+  // sentence — uniform in shape whether an account received a code or not, which is
+  // what keeps this step from being an oracle — and the ONLY thing this function does
+  // with `otpRequired` is move to the code screen. It does not repeat the message:
+  // the code screen's own sub-line says what was sent and where, in the owner's words.
   const submitLogin = () => {
     const email = emailOf();
     if (!email) { showError('Enter your email.'); return; }
@@ -2952,16 +2928,11 @@ function wireAuthForm() {
     currentUser = currentUser || {};
     currentUser.email = email;
     loginBackend(email, '').then(d => {
-      setIdle(signInBtn, 'Send me a code');
-      if (d && d.status === 'ok' && d.otpRequired) {
-        _otpEmail = email;
-        _otpPassword = '';
-        if (otpIn) otpIn.value = '';
-        setAuthMode('otp');
-        const note = document.getElementById('auth-login-code-note');
-        if (note && d && d.message) note.textContent = d.message;
-        return;
-      }
+      setIdle(signInBtn, 'Continue');
+      if (d && d.status === 'ok' && d.otpRequired) { openCodeView('employee', email, ''); return; }
+      // A temp-password account gets `ok` here too, from the backend's own uniform
+      // stage 1 — the refusal only lands on stage 2, and the code screen's error line
+      // is where it is said. So the only thing reachable here is a real failure.
       showError((d && d.message) || 'Could not send a sign-in code.');
     });
   };
@@ -2982,137 +2953,26 @@ function wireAuthForm() {
       // A temporary password is correct but not yet a session — the change is the
       // only way forward, and the password just typed is the credential for it.
       if (d && d.mustChangePassword) { showPasswordChange(email, true, password); return; }
-      // Stage 1 of two: the password is right and a code is on its way. Hold the
-      // password for stage 2 and move the form on rather than reporting success —
-      // there is no session yet, and pretending otherwise would sign nobody in.
-      if (d && d.status === 'ok' && d.otpRequired) { gotoOtpStep(email, password, d); return; }
+      // Stage 1 of two: the password is right and a code is on its way. The password
+      // rides along to the code screen, because the backend checks it again there.
+      if (d && d.status === 'ok' && d.otpRequired) { openCodeView('employee', email, password); return; }
       if (d && d.status === 'ok' && d.sessionToken) finishAuth(email, d);
       else showError((d && d.message) || 'Sign in failed.');
-    });
-  };
-
-  // Move to the code step, holding the credential from stage 1 in memory.
-  const gotoOtpStep = (email, password, d) => {
-    _otpEmail = email;
-    _otpPassword = password;
-    if (otpIn) otpIn.value = '';
-    setAuthMode('otp');
-    const note = document.getElementById('auth-login-code-note');
-    if (note) {
-      // codeSent:false means the backend REUSED the code it already emailed today,
-      // so claiming to have just sent one would send the user looking for a mail
-      // that is not there. Both branches name the address and state the lifetime as
-      // a DURATION — never "end of the day", which is false for anyone whose first
-      // sign-in was after lunch: the window is 8h30m from the SEND.
-      note.textContent = (d && d.codeSent === false)
-        ? 'A 6-digit code was sent to ' + email + ' earlier. It is valid for 8:30 hours from when it was sent.'
-        : 'A 6-digit code is sent to ' + email + '. It is valid for 8:30 hours.';
-    }
-    // Deliberately NO toast here. There used to be one — "Use the code from
-    // earlier today" — and it said the same thing the note above it already says,
-    // in less detail, from the bottom of the screen where it covered the code box
-    // and the Verify button. Reported from the field as the notice "hiding the
-    // screen", appearing over and over, because every retry of a slow sign-in
-    // raised it again. A message that duplicates the one already on screen and
-    // covers the control the user is reaching for is a net loss; the note stays.
-  };
-
-  // Stage 2: the code from the email — from the passwordless door (no password
-  // held) or the password door's stage 1 (password held). Both close the same
-  // way; the password, when there is one, rides along so the backend's legacy
-  // stage can verify it again.
-  const submitOtp = () => {
-    const code = ((otpIn && otpIn.value) || '').trim();
-    if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
-    if (!_otpEmail) { showError('Enter your email first.'); setAuthMode('email'); return; }
-    setBusy(otpBtn, 'Verifying…');
-    showError('');
-    loginBackend(_otpEmail, _otpPassword || '', code).then(d => {
-      setIdle(otpBtn, 'Verify code');
-      if (d && d.status === 'ok' && d.sessionToken) {
-        _otpPassword = null;
-        finishAuth(_otpEmail, d);
-        return;
-      }
-      // The code is consumed by nothing, so a mistyped one can simply be retyped.
-      // Do not clear the field: the user is comparing it with their email.
-      showError((d && d.message) || 'Could not verify the code.');
-    });
-  };
-
-  const submitForgot = () => {
-    const email = emailOf();
-    if (!email) { showError('Enter your email first.'); return; }
-    setBusy(forgotBtn, 'Sending…');
-    showError('');
-    forgotPasswordBackend(email).then(d => {
-      setIdle(forgotBtn, 'Email me a code');
-      // The backend answers identically whether or not the account exists, so the
-      // UI must not imply otherwise — always move on to the code step.
-      _resetEmail = email;
-      setAuthMode('reset');
-      const note = document.getElementById('auth-reset-note');
-      if (note) note.textContent = 'If ' + email + ' has an account, a 6-digit code is on its way.';
-      showToast((d && d.message) || 'Check your inbox for the reset code');
-    });
-  };
-
-  const submitReset = () => {
-    const email = _resetEmail || emailOf();
-    const code  = ((codeIn && codeIn.value) || '').trim();
-    const pw    = (newIn && newIn.value) || '';
-    if (!code) { showError('Enter the 6-digit code from your email.'); return; }
-    if (pw.length < 8) { showError('New password must be at least 8 characters.'); return; }
-    setBusy(resetBtn, 'Setting…');
-    showError('');
-    resetPasswordBackend(email, code, pw).then(d => {
-      setIdle(resetBtn, 'Set new password');
-      if (d && d.status === 'ok') {
-        // No token is returned on purpose: signing in with the new password is
-        // what proves it was typed the way the user meant.
-        if (codeIn) codeIn.value = '';
-        if (newIn) newIn.value = '';
-        if (emailIn) emailIn.value = email;
-        setAuthMode('login');
-        showError('');
-        showToast('Password set — sign in with your new password');
-      } else {
-        showError((d && d.message) || 'Could not reset the password.');
-      }
-    });
-  };
-
-  const resend = () => {
-    if (!resendLink) return;
-    resendLink.textContent = 'Sending…';
-    resendLink.style.pointerEvents = 'none';
-    forgotPasswordBackend(_resetEmail || emailOf()).then(d => {
-      resendLink.textContent = 'Resend code';
-      resendLink.style.pointerEvents = '';
-      showToast((d && d.message) || 'If that account exists, a new code is on its way');
     });
   };
 
   // The password door has its own submit call: same handler for a click and for
   // Enter, so the two doors cannot drift apart later.
   if (signInBtn) signInBtn.addEventListener('click', () => (_authMode === 'login' ? submitPwd() : submitLogin()));
-  if (otpBtn)     otpBtn.addEventListener('click', submitOtp);
-  if (forgotBtn)  forgotBtn.addEventListener('click', submitForgot);
-  if (resetBtn)   resetBtn.addEventListener('click', submitReset);
-  if (resendLink) resendLink.addEventListener('click', resend);
-  const forgotLink = document.getElementById('auth-forgot-link');
-  if (forgotLink) forgotLink.addEventListener('click', () => setAuthMode('forgot'));
-  // The password door is now a door INSIDE the one entry screen rather than a screen
+  // The password door is a door INSIDE the one entry screen rather than a screen
   // of its own — one line at the foot of the card, and `setAuthMode('login')` reveals
   // the password box in place. It exists for the one account that has a password to
   // type and no other way in: a new hire still holding the password their admin
-  // issued, who has not yet been through the reset flow that replaces it.
+  // issued, who has not yet been through the change that replaces it.
   const pwdLink = document.getElementById('auth-pwd-link');
   if (pwdLink) pwdLink.addEventListener('click', () => setAuthMode('login'));
-  // The back door exists in every sub-mode: unlock, pattern, code, forgot,
-  // reset — and from the password door too. 'email' is the screen every one of
-  // those is a variation of, so 'login' as the target was wrong once email mode
-  // became the default.
+  // The back door exists in every sub-mode: unlock, pattern, and the password field.
+  // 'email' is the screen every one of those is a variation of.
   const backLink = document.getElementById('auth-back-link');
   if (backLink) backLink.addEventListener('click', () => setAuthMode('email'));
   const googleBtn = document.getElementById('auth-google-btn');
@@ -3123,26 +2983,11 @@ function wireAuthForm() {
   if (unlockBtn) unlockBtn.addEventListener('click', () => submitUnlock('fingerprint'));
   const patternLink = document.getElementById('auth-pattern-link');
   if (patternLink) patternLink.addEventListener('click', () => { setAuthMode('pattern'); patternForUnlock(); });
-  const quickOut = document.getElementById('auth-quick-out');
-  if (quickOut) quickOut.addEventListener('click', () => setAuthMode('email'));
-  // …and the way back IN, which is what makes the pair bi-directional. It returns
-  // to the same door `showAuth` would have opened on: the fingerprint where there is
-  // a credential, the pattern canvas where there is only a drawn pattern.
-  const quickIn = document.getElementById('auth-quick-in');
-  if (quickIn) quickIn.addEventListener('click', () => {
-    const q = loadUnlock() || {};
-    const target = (q.credentialId || q.mode === 'fingerprint') ? 'unlock' : 'pattern';
-    setAuthMode(target);
-    if (target === 'pattern') patternForUnlock();
-  });
 
   // Enter submits the CURRENT mode, not always login.
   form.addEventListener('submit', ev => {
     ev.preventDefault();
-    if (_authMode === 'forgot') submitForgot();
-    else if (_authMode === 'reset') submitReset();
-    else if (_authMode === 'otp') submitOtp();
-    else if (_authMode === 'login') submitPwd();
+    if (_authMode === 'login') submitPwd();
     else if (_authMode === 'unlock') submitUnlock('fingerprint');
     else submitLogin();
   });
@@ -3170,10 +3015,78 @@ function wireAuthForm() {
 // The flow is the backend's, not ours. A password is checked and then still needs the
 // emailed code (second factor, backend.gs's doLoginPassword); no password at all IS
 // the code door. So both routes end in the same place: a code box, then a session.
-let _custStage = 'form';   // 'form' | 'code'
 
 function customerAuth(action, fields) {
   return postAuth(action, Object.assign({ device: deviceLabel(), version: APP_VERSION }, fields));
+}
+// The customer's state is now ONE state. There used to be `_custStage` ('form' |
+// 'code') and a code block inside this panel; the code lives on its own screen now
+// (#code-view), shared with the employee's door, and this form's only job is to ask
+// for an address and hand over to it. `_codeDoor` on that screen remembers which door
+// asked, so the way back lands on the right one.
+function wireCustomerForm() {
+  const form    = document.getElementById('cust-form');
+  if (!form || form.dataset.wired === '1') return;
+  form.dataset.wired = '1';
+
+  const emailIn = document.getElementById('cust-email');
+  const signBtn = document.getElementById('cust-signin-btn');
+  const errEl   = document.getElementById('cust-error');
+
+  const showError = (m) => {
+    if (!errEl) return;
+    errEl.textContent = m || '';
+    errEl.style.display = m ? '' : 'none';
+  };
+  const emailOf = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
+
+  // THE CUSTOMER'S ONE AND ONLY DOOR: an email address, and a code we mail to it.
+  //
+  // There is no password field on this card by the owner's instruction — "for
+  // customers as well, there is no password method like of employee's, it is only
+  // email OTP based login" — so this button does what the customer can actually do.
+  // `password: ''` is not an empty password: the backend reads the ABSENCE of a real
+  // one as the passwordless door, which is why the key is present and empty rather
+  // than missing (doLoginPassword's other branch would reject a blank string).
+  const requestCustomerCode = () => {
+    const email = emailOf();
+    if (!email) { showError('Enter your email address.'); return; }
+    showError('');
+    // THROUGH THE ONE HELPER, not by hand. This button used to set `.disabled` and
+    // `textContent` itself, which made it the one auth button on the page that went
+    // busy without the `is-busy` class the spinner and the reduced-motion guard are
+    // keyed on — and the customer's Continue is the button on this screen a person is
+    // most likely to press twice, because the reply is a mail they cannot see.
+    // The busy label is a literal, exactly as the employee door's is: the
+    // "…ing" line is the one string on this screen the language layer does not reach
+    // yet, on either door, and it is said so rather than left to be discovered.
+    setBusy(signBtn, 'Sending…');
+    const idle = () => setIdle(signBtn, t('cust.continue'));
+    customerAuth('login', { email: email, password: '' }).then(d => {
+      idle();
+      // The address is the credential and the code is the proof. The screen that
+      // takes the code is the SAME one the employee's email door leads to: an
+      // employee at this step and a customer at this step are in one state.
+      if (d && d.status === 'ok' && d.otpRequired) { openCodeView('customer', email, ''); return; }
+      // A brand-new invitee is on a temporary password, and the backend will not mint
+      // a login code for one. Saying "we emailed you a code" here would send them to
+      // an inbox that is empty and keep them there — customer.html learned the same
+      // lesson and says the same thing. The way out is the sentence already printed
+      // under this button: contact the desk. That address is on the panel for exactly
+      // this case as well as for someone who never onboarded at all.
+      if (d && d.status === 'ok' && d.mustChangePassword) {
+        showError(t('cust.tempPasswordNoCode'));
+        return;
+      }
+      showError((d && d.message) || 'Could not send a sign-in code.');
+    });
+  };
+
+  if (signBtn) signBtn.addEventListener('click', requestCustomerCode);
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    requestCustomerCode();
+  });
 }
 
 // The session lands in localStorage and the customer is handed to the portal, which
@@ -3190,119 +3103,6 @@ function finishCustomerAuth(email, d) {
   location.href = 'customer.html';
 }
 
-function wireCustomerForm() {
-  const form    = document.getElementById('cust-form');
-  if (!form || form.dataset.wired === '1') return;
-  form.dataset.wired = '1';
-
-  const emailIn = document.getElementById('cust-email');
-  const codeIn  = document.getElementById('cust-code');
-  const signBtn = document.getElementById('cust-signin-btn');
-  const codeBtn = document.getElementById('cust-code-btn');
-  const backLink = document.getElementById('cust-back-link');
-  const codeWrap = document.getElementById('cust-code-wrap');
-  const errEl   = document.getElementById('cust-error');
-
-  const showError = (m) => {
-    if (!errEl) return;
-    errEl.textContent = m || '';
-    errEl.style.display = m ? '' : 'none';
-  };
-  const emailOf = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
-
-  // 'form' and 'code' are the whole state machine. Everything the customer can see is
-  // a function of which one is up, so nothing can be left showing from the other.
-  const setStage = (stage) => {
-    _custStage = stage;
-    if (codeWrap) codeWrap.style.display = (stage === 'code') ? '' : 'none';
-    // The back link is the inverse of the code step, so the two are never up together.
-    // It used to have a partner — the "use email (OTP)" link that was a way INTO the
-    // code step — and that link is gone with the password field, because on an
-    // OTP-only door the code step is not an alternative, it is the whole route.
-    if (backLink) backLink.style.display = (stage === 'code') ? '' : 'none';
-    showError('');
-  };
-
-  // THE CUSTOMER'S ONE AND ONLY DOOR: an email address, and a code we mail to it.
-  //
-  // There is no password field on this card by the owner's instruction — "for
-  // customers as well, there is no password method like of employee's, it is only
-  // email OTP based login" — so this button does what the customer can actually do.
-  // `password: ''` is not an empty password: the backend reads the ABSENCE of a real
-  // one as the passwordless door, which is why the key is present and empty rather
-  // than missing (doLoginPassword's other branch would reject a blank string).
-  const requestCustomerCode = () => {
-    const email = emailOf();
-    if (!email) { showError('Enter your email address.'); return; }
-    showError('');
-    if (signBtn) { signBtn.disabled = true; signBtn.textContent = 'Sending…'; }
-    const idle = () => { if (signBtn) { signBtn.disabled = false; signBtn.textContent = 'Sign in'; } };
-    customerAuth('login', { email: email, password: '' }).then(d => {
-      idle();
-      if (d && d.status === 'ok' && d.otpRequired) {
-        if (codeIn) codeIn.value = '';
-        setStage('code');
-        showCustomerCodeNote(d, email);
-        if (codeIn) setTimeout(() => codeIn.focus(), 60);
-        return;
-      }
-      // A brand-new invitee is on a temporary password, and the backend will not mint
-      // a login code for one. Saying "we emailed you a code" here would send them to
-      // an inbox that is empty and keep them there — customer.html learned the same
-      // lesson and says the same thing. The way out is now the "Forgot password?"
-      // link beside this button, which is where a customer replaces that password.
-      if (d && d.status === 'ok' && d.mustChangePassword) {
-        showError('No code was sent. Your account is still on the password Indrones issued — use “Forgot password?” to choose your own.');
-        return;
-      }
-      showError((d && d.message) || 'Could not send a sign-in code.');
-    });
-  };
-
-  const showCustomerCodeNote = (d, email) => {
-    const note = document.getElementById('cust-code-note');
-    if (!note) return;
-    // codeSent:false means an unspent code from earlier today was reused, so claiming
-    // a fresh mail would send them looking for one that does not exist. "has already
-    // been sent", not "was already sent" — the owner's correction, and he is right:
-    // the code is still in the inbox and still valid, so the perfect tense is the
-    // true one. It is the same sentence the staff card shows for the same reason.
-    note.textContent = (d && d.codeSent === false)
-      ? 'A 6-digit code has already been sent to ' + email + ' today. It is valid for 8:30 hours from when it was sent.'
-      : 'A 6-digit code is on its way to ' + email + '. It is valid for 8:30 hours.';
-  };
-
-  // STAGE 2: the code. There is one code box, so there is one place a code can be
-  // typed and one place it can be wrong.
-  const submitCustomerCode = () => {
-    const email = emailOf();
-    const code = ((codeIn && codeIn.value) || '').trim();
-    if (!email) { showError('Enter your email address.'); setStage('form'); return; }
-    if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
-    if (codeBtn) { codeBtn.disabled = true; codeBtn.textContent = 'Verifying…'; }
-    const idle = () => { if (codeBtn) { codeBtn.disabled = false; codeBtn.textContent = 'Verify code'; } };
-    customerAuth('login', { email: email, password: '', code: code }).then(d => {
-      idle();
-      if (d && d.status === 'ok' && d.sessionToken) { finishCustomerAuth(email, d); return; }
-      showError((d && d.message) || 'Could not verify the code.');
-    });
-  };
-
-  if (signBtn) signBtn.addEventListener('click', requestCustomerCode);
-  if (codeBtn) codeBtn.addEventListener('click', submitCustomerCode);
-  if (backLink) backLink.addEventListener('click', () => setStage('form'));
-  form.addEventListener('submit', ev => {
-    ev.preventDefault();
-    (_custStage === 'code') ? submitCustomerCode() : requestCustomerCode();
-  });
-  // Enter inside the code box submits the code even if the form's own submit is
-  // swallowed by the browser's implicit-submission rules for a multi-button form.
-  if (codeIn) codeIn.addEventListener('keydown', ev => {
-    if (ev.key === 'Enter') { ev.preventDefault(); submitCustomerCode(); }
-  });
-  setStage('form');
-}
-
 // Which of the customer card's two faces is up: the form, or the way in for someone
 // who is already signed in on this device. Read from the CUSTOMER's key, never the
 // staff one — a staff session on this machine must not open the customer's door, and
@@ -3316,6 +3116,331 @@ function paintCustomerDoor() {
   form.style.display = has ? 'none' : '';
   session.style.display = has ? '' : 'none';
   if (!has) wireCustomerForm();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+//   THE LANDING PAGE'S OWN FURNITURE — the two doors, the language picker, the
+//   corner button. Wired once, from the load handler, because they are properties
+//   of the SCREEN and not of any one sign-in flow.
+// ════════════════════════════════════════════════════════════════════════════════
+
+// ─── THE TWO DOORS ────────────────────────────────────────────────────────────
+// The owner, 2026-10-08: *"First, let us have both employee login and customer login
+// option arranged vertically aligned, one above another. each condensed, i.e.,
+// collapsible, so whichever the person wants to access will click on/arrow and expand
+// it."*
+//
+// EXCLUSIVE, LIKE A SET OF RADIOS. Opening one closes the other, and pressing the bar
+// that is already open keeps it open rather than shutting it — so there is no "both
+// shut" state for the page to fall into. That is not a limitation but the reason the
+// shape works: two open panels put the employee's four mechanisms and the customer's
+// three above each other, which is exactly the clutter he was describing, only taller.
+//
+// THE CHOICE IS REMEMBERED PER DEVICE. Somebody who opens this screen twice in a day is
+// almost always the same kind of person twice, and a bar that reopens on the wrong door
+// costs a click from every one of them.
+const DOOR_KEY = 'ipb_door';
+const DOORS = ['employee', 'customer'];
+
+let _doorsWired = false;
+
+function wireDoors() {
+  if (_doorsWired) return;
+  if (!document.getElementById('door-employee')) return;
+  _doorsWired = true;
+  DOORS.forEach(which => {
+    const bar = document.getElementById('door-' + which + '-toggle');
+    if (bar) bar.addEventListener('click', () => setDoor(which));
+  });
+}
+
+// Opens `which` and closes the other. No argument closes nothing: it is not a toggle,
+// it is a choice — see the note above.
+function setDoor(which) {
+  const want = DOORS.indexOf(which) >= 0 ? which : 'employee';
+  DOORS.forEach(w => {
+    const sec  = document.getElementById('door-' + w);
+    const bar  = document.getElementById('door-' + w + '-toggle');
+    const body = document.getElementById('door-' + w + '-body');
+    if (!sec || !bar || !body) return;
+    const on = (w === want);
+    // `data-open` drives the chevron's rotation, `hidden` is what actually folds the
+    // panel, and `aria-expanded` is what a screen reader is told. Three statements of
+    // one fact, which is one more than is comfortable — but `hidden` alone leaves the
+    // arrow pointing down inside a shut panel, and a class alone leaves a keyboard user
+    // tabbing through fields they cannot see.
+    sec.dataset.open = on ? '1' : '0';
+    bar.setAttribute('aria-expanded', on ? 'true' : 'false');
+    body.hidden = !on;
+  });
+  try { if (which) localStorage.setItem(DOOR_KEY, want); } catch (e) { /* storage blocked */ }
+}
+
+// Which door opens on arrival: the one this device used last, the Employee's by
+// default. NEVER both shut — the line under the pair ("By continuing, you acknowledge…")
+// would then be acknowledging a tap nobody was offered.
+function paintDoors() {
+  wireDoors();
+  let want = '';
+  try { want = localStorage.getItem(DOOR_KEY) || ''; } catch (e) { want = ''; }
+  setDoor(DOORS.indexOf(want) >= 0 ? want : 'employee');
+}
+
+// ─── THE LANGUAGE PICKER ───────────────────────────────────────────────────────
+// The owner asked for it "at bottom like in notion.app". The options are built from
+// I18N.LANGS rather than written into index.html, so a language added to that list
+// appears here with no second edit — and the label is each language's OWN name
+// ("اردو", not "Urdu"), which is the one word on the list a reader can recognise
+// without already being able to read the rest of it.
+//
+// ⚠ WHAT IS BEHIND THE THREE OPTIONS IS NOT THREE TRANSLATIONS. The mechanism is real
+// and the choice is remembered on the device; today every string still resolves to
+// English through I18N's per-string fallback, because the layer holds one table. See
+// the note on the language dimension in i18n.js. The control does not pretend otherwise
+// — it changes the page's `lang`, and the strings it can translate it translates.
+function buildLangSelect() {
+  const sel = document.getElementById('lang-select');
+  if (!sel || !window.I18N || !window.I18N.LANGS) return;
+  sel.textContent = '';
+  window.I18N.LANGS.forEach(l => {
+    const o = document.createElement('option');
+    o.value = l.code;
+    o.textContent = l.label;
+    sel.appendChild(o);
+  });
+  sel.value = window.I18N.lang();
+  sel.addEventListener('change', () => {
+    if (!window.I18N.setLang(sel.value)) { sel.value = window.I18N.lang(); return; }
+    // setLang() repaints every `data-i18n` element, and the door bars carry their role
+    // word that way. The accordion's own state is an attribute pair, not text, so it is
+    // untouched — but repainting it is one line and keeps this handler from having to
+    // know which of the two facts changed.
+    paintDoors();
+  });
+  // The label on a <select> is the page's own word for "Language", so it is repainted
+  // by setLang's applyStatic pass like every other static string.
+}
+
+// ─── THE CORNER BUTTON ─────────────────────────────────────────────────────────
+// Where every site in this shape puts "Sign Up", and this one cannot, because there is
+// no sign-up: an admin provisions every account. So the corner holds the thing a person
+// who cannot get in actually needs instead — the desk.
+//
+// HIDDEN WHILE CONFIG.WHATSAPP_URL IS EMPTY, and that is the honest state rather than an
+// unfinished one. A button that opens an empty tab is worse than no button, and there is
+// no Indrones after-sales WhatsApp link I can verify from here. See the note on that key
+// in CONFIG: paste the URL and this appears, with no other change.
+function wireWhatsApp() {
+  const btn = document.getElementById('whatsapp-btn');
+  if (!btn) return;
+  const url = CONFIG.WHATSAPP_URL;
+  if (!url) { btn.style.display = 'none'; return; }
+  btn.href = url;
+  btn.style.display = '';
+}
+
+function wireLanding() {
+  buildLangSelect();
+  wireWhatsApp();
+  wireDoors();
+  wireCodeView();
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+//   THE CODE STEP — "Check your email", one box per digit
+// ════════════════════════════════════════════════════════════════════════════════
+//
+// ONE SCREEN FOR BOTH DOORS. The owner, 2026-10-08: *"it lands in next screen totally
+// blank and in center it says 'Check your email' in big heading and below it is 'If you
+// have a indrones after sales account, we sent a code to <that email id>.' in normal
+// text size. then equivant number of boxes below that line to fill the code. and a
+// button below boxes saying 'Use a different account'. clicking this button will land
+// back to initial login page."*
+//
+// An employee at this step and a customer at this step are in the SAME STATE — an
+// address that has been mailed a 6-digit code — so there is one screen and not two, and
+// `_codeDoor` is the only thing that differs. The two blocks this replaced
+// (#auth-login-code-wrap inside the employee's form, #cust-code-wrap inside the
+// customer's) were two copies of one idea, free to drift.
+//
+// ⚠ THE BOXES ARE SIX REAL INPUTS, NOT ONE FIELD WITH A SIX-CELL BACKGROUND. That is
+// what opens the phone's numeric keypad on the first box and lets the OS offer the code
+// straight from the mail. The cost is that app.js owns the caret, the paste and the
+// submit — which is the rest of this block.
+
+let _codeWired = false;
+
+function codeBoxes() {
+  const wrap = document.getElementById('code-boxes');
+  return wrap ? Array.prototype.slice.call(wrap.querySelectorAll('.code-box')) : [];
+}
+function codeValue() {
+  return codeBoxes().map(b => b.value.replace(/\D/g, '')).join('');
+}
+function setCodeError(message) {
+  const el = document.getElementById('code-error');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.display = message ? '' : 'none';
+}
+
+// Show the step. `door` is 'employee' | 'customer' (only for the way back and for which
+// request to make); `password` is the stage-1 credential on the password door, and ''
+// everywhere else.
+function openCodeView(door, email, password) {
+  _codeDoor = (door === 'customer') ? 'customer' : 'employee';
+  _codeEmail = (email || '').trim().toLowerCase();
+  _codePassword = password || '';
+  const em = document.getElementById('code-email');
+  if (em) em.textContent = _codeEmail;
+  setCodeError('');
+  codeBoxes().forEach(b => { b.value = ''; b.disabled = false; });
+  const cv = document.getElementById('code-view');
+  if (cv) { cv.dataset.open = '1'; cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); }
+  // The landing page goes away ENTIRELY — head, both doors, the terms line, the
+  // language picker — which is what makes this read as the blank centred page he asked
+  // for. `stopBrandTyping()` is part of that and not an optimisation: the head's chain
+  // would otherwise keep typing into a screen that is not on screen.
+  authCont.style.display = 'none';
+  appCont.style.display  = 'none';
+  stopBrandTyping();
+  const pc = document.getElementById('password-change');
+  if (pc) pc.style.display = 'none';
+  document.body.classList.remove('view-detail');
+  const boxes = codeBoxes();
+  // Focused on the next tick, not now: the screen has only just been shown and a
+  // focus() on a node the browser has not laid out yet is silently dropped.
+  if (boxes[0]) setTimeout(() => boxes[0].focus(), 60);
+}
+
+// "Use a different account" — and every other route off this screen — lands back on the
+// landing page with the door that asked OPEN and the address still in the box. Not the
+// employee's door by default: a customer who mistyped their address and is put back on
+// the wrong panel has lost their place.
+function closeCodeView(restore) {
+  const cv = document.getElementById('code-view');
+  if (cv) { cv.dataset.open = '0'; cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); }
+  if (restore === false) return;
+  showAuth();
+  setDoor(_codeDoor === 'customer' ? 'customer' : 'employee');
+  const field = document.getElementById(_codeDoor === 'customer' ? 'cust-email' : 'auth-email');
+  if (field && _codeEmail) field.value = _codeEmail;
+}
+
+// Spread a run of digits across the boxes, starting at `from` — except a FULL code,
+// which always starts at the first box however it arrived. That exception is the whole
+// reason this exists as a function: the OS's one-time-code autofill can deliver all six
+// digits into whichever box has focus, and filling them from that box would leave the
+// first ones empty and submit a code assembled in the wrong order.
+function distributeCode(digits, from) {
+  const boxes = codeBoxes();
+  if (!boxes.length) return;
+  const start = (digits.length >= boxes.length) ? 0 : Math.max(0, Math.min(from, boxes.length - 1));
+  for (let i = 0; i < boxes.length; i++) boxes[i].value = '';
+  for (let i = 0; i < digits.length && start + i < boxes.length; i++) boxes[start + i].value = digits.charAt(i);
+  const next = boxes[Math.min(start + digits.length, boxes.length - 1)];
+  if (next) next.focus();
+  if (codeValue().length === boxes.length) submitCode();
+}
+
+function wireCodeView() {
+  if (_codeWired) return;
+  const form = document.getElementById('code-form');
+  if (!form) return;
+  _codeWired = true;
+  const boxes = codeBoxes();
+
+  boxes.forEach((box, i) => {
+    box.addEventListener('input', () => {
+      const digits = box.value.replace(/\D/g, '');
+      // More than one digit arriving at once is a paste or the OS's autofill, never a
+      // keystroke — `maxlength="1"` means a person cannot type two. Handing it to
+      // distributeCode() is what makes autofill fill all six rather than keep the last.
+      if (digits.length > 1) { distributeCode(digits, i); return; }
+      box.value = digits;
+      if (digits && i < boxes.length - 1) boxes[i + 1].focus();
+      if (codeValue().length === boxes.length) submitCode();
+    });
+    box.addEventListener('keydown', ev => {
+      // Backspace at an EMPTY box steps back a box, which is what a thumb expects and
+      // what a single six-character field can never do. It is prevented because the
+      // default on an empty box is nothing at all, and the point is that something
+      // should happen.
+      if (ev.key === 'Backspace' && !box.value && i > 0) {
+        ev.preventDefault();
+        boxes[i - 1].value = '';
+        boxes[i - 1].focus();
+        return;
+      }
+      if (ev.key === 'ArrowLeft' && i > 0) { ev.preventDefault(); boxes[i - 1].focus(); }
+      if (ev.key === 'ArrowRight' && i < boxes.length - 1) { ev.preventDefault(); boxes[i + 1].focus(); }
+    });
+    // Select on focus, so typing over a box replaces its digit rather than being
+    // swallowed by `maxlength`. Without this, correcting the second digit of a code
+    // means backspace-then-type, which is two gestures to do one thing.
+    box.addEventListener('focus', () => { try { box.select(); } catch (e) { /* fine */ } });
+    box.addEventListener('paste', ev => {
+      const clip = ev.clipboardData || window.clipboardData;
+      const raw = clip ? (clip.getData('text') || '') : '';
+      const digits = raw.replace(/\D/g, '');
+      if (!digits) return;
+      // The browser's own paste would put the whole string into one box whose
+      // maxlength is 1 — which, by browser, either truncates it to the first digit or
+      // does nothing. Neither is the code.
+      ev.preventDefault();
+      distributeCode(digits, i);
+    });
+  });
+
+  form.addEventListener('submit', ev => { ev.preventDefault(); submitCode(); });
+  const diff = document.getElementById('code-different');
+  if (diff) diff.addEventListener('click', () => closeCodeView(true));
+  if (boxes[0]) setTimeout(() => boxes[0].focus(), 60);
+}
+
+// Verify. WHICH REQUEST IS MADE IS THE ONLY THING THE DOOR CHANGES: a customer's code is
+// checked by the same backend action the staff door uses (`login` with no password IS
+// the OTP door), but a customer's session must be written under the CUSTOMER's keys and
+// hand off to customer.html — which is finishCustomerAuth's job and not finishAuth's.
+function submitCode() {
+  const code = codeValue();
+  if (!/^\d{6}$/.test(code)) { setCodeError('Enter the 6-digit code from your email.'); return; }
+  const cv = document.getElementById('code-view');
+  // Busy as an ATTRIBUTE rather than as disabled boxes: the boxes are what the answer's
+  // arrival will focus, and disabling the field the person is looking at moves the
+  // screen under them. `data-busy` dims the group and refuses further input in CSS, and
+  // this guard is what stops a second submit from the form's own submit event.
+  if (cv && cv.dataset.busy === '1') return;
+  if (cv) { cv.dataset.busy = '1'; cv.setAttribute('aria-busy', 'true'); }
+  setCodeError('');
+  const idle = () => { if (cv) { cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); } };
+  const done = (d) => {
+    idle();
+    if (d && d.status === 'ok' && d.sessionToken) {
+      if (_codeDoor === 'customer') finishCustomerAuth(_codeEmail, d);
+      else finishAuth(_codeEmail, d);
+      return;
+    }
+    // A rejected code CLEARS the boxes, and that is not cosmetic — it is the only way
+    // to retype one. Six boxes full IS the submit (see wireCodeView), so leaving the
+    // refused code in place means the first correction the person makes fills the row
+    // again and fires a submit of a HYBRID — half the old code, half the new — which is
+    // rejected again, and again for every further digit. Measured in a real browser on
+    // 2026-10-08: typing the right code over a wrong one submitted "420000" and never
+    // reached the last box.
+    //
+    // Nothing is lost by clearing: the digits that were refused are named in the error
+    // line below and are in the person's inbox, and the caret goes back to the first box
+    // so the retype is the same gesture as the first attempt.
+    codeBoxes().forEach(b => { b.value = ''; });
+    setCodeError((d && d.message) || 'Could not verify the code.');
+    const first = codeBoxes()[0];
+    if (first) first.focus();
+  };
+  const req = (_codeDoor === 'customer')
+    ? customerAuth('login', { email: _codeEmail, password: '', code: code })
+    : loginBackend(_codeEmail, _codePassword, code);
+  req.then(done);
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────
@@ -3926,6 +4051,10 @@ function showApp() {
   // payer. stopBrandTyping() also puts the words back to "finished", which is what a
   // later sign-out has to find.
   stopBrandTyping();
+  // …and the code step goes with it. Every route into the shell — the emailed code, the
+  // password door, a Google handoff — passes through here, so hiding it here is what
+  // makes "signed in" and "still looking at a code box" impossible at the same time.
+  closeCodeView(false);
   // Guard: an account still holding a temporary password must never reach the
   // shell. This is belt-and-braces — the backend mints no session in that state,
   // so finishAuth() cannot be reached with mustChangePassword set — but a guard

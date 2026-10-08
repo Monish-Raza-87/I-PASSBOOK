@@ -426,43 +426,73 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   }
 }
 
-/* ── The landing page: two doors on one link ────────────────────
+/* ── The landing page: two doors, STACKED AND CONDENSED ─────────────────────────
    One address serves both audiences, so the sign-in screen is a LANDING page with
-   two cards on it rather than one card with a link beside it — and each card says
-   which audience it is for before it shows a single control. `auto-fit` gives a
-   phone one column and a desktop two with no media query, so the two arrangements
-   cannot drift apart. */
+   two doors on it rather than one door with a link beside it.
+
+   STACKED, NOT SIDE BY SIDE, and each one SHUT until it is chosen — the owner's
+   instruction of 2026-10-08, quoted in full at the markup. Two columns of unequal
+   content are read against each other and the shorter always reads as incomplete;
+   one above the other, each is read against the page. That is the whole reason this
+   is a single column and not `auto-fit`. */
 .doors {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   width: 100%;
-  max-width: 860px;
-  /* `start`, NOT the grid default of `stretch`. Measured on the rendered page
-     (2026-10-08): the employee door carries six controls and the customer door
-     three, so a stretch gave the customer card a ~155px blank hole below its
-     "Forgot password?" — a void that reads as a control that failed to load.
-     Each card is now the size of what is actually in it. The owner's ask was that
-     the elements be PLACED alike, which they are — same chip, same hint line, same
-     field, same primary, same forgot-password control, in that order — and equal
-     outlines were never the thing that made them read as a pair. */
-  align-items: start;
+  max-width: 420px;
+  /* `stretch` is the flex default and it is what is wanted here: both bars are the
+     same width, which is the alignment the two doors did not have as a grid. */
+  align-items: stretch;
 }
 
-/* A door IS a glass card (`<section class="door glass-card">`), so the Desk skin's
+/* A door IS a glass card (`<section class="door glass-card">`), so the skin's
    `#auth-container .glass-card` rule dresses both without a second rule — and this
-   one only has to undo the card's own single-card width. */
+   one takes the card's own padding away, because the BAR has to reach the card's
+   edges while the PANEL keeps its inset. That padding is applied to `.door-body`
+   instead, below. */
 .door {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0;
   min-width: 0;
   max-width: none;
+  padding: 0;
+  overflow: hidden;
 }
+
+/* ── The bar: the whole of a door while it is shut ────────────────────────────
+   56px — the same height as the app's topbar, and 40px of it is touch target once the
+   card's own border is taken off. A chevron that turns over is the entire state
+   display; the panel below it is either there or not, which is more legible than any
+   colour. */
+.door-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 56px;
+  padding: 0.5rem 1.1rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.door-bar:hover { background: var(--surface-alpha-gray-2); }
+/* The focus ring has to be drawn INSIDE: the section clips (`overflow: hidden`) so a
+   ring on the bar's own box would be cut off at the card's edge on the top and sides. */
+.door-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* "Which of these two am I?" is the only question this screen has to answer, so the
-   answer is a chip and it is FIRST on the card. */
+   answer is a chip and it is FIRST on the bar. It is a <span> inside the bar's
+   <button>, not a <p> of its own, because the whole bar is the control. */
 .door-role {
-  align-self: center;
   margin: 0;
   padding: 0.2rem 0.7rem;
   border: 1px solid var(--outline-gray-2);
@@ -473,6 +503,274 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   font-weight: var(--weight-bold);
   letter-spacing: 0.09em;
   text-transform: uppercase;
+}
+
+/* The chevron: a rotated border, not a glyph, so it inherits the bar's colour and needs
+   no font to be present. It points DOWN while the door is shut and turns to point UP
+   when it opens — the state is the orientation. */
+.door-chev {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  margin-right: 0.15rem;
+  border-right: 2px solid var(--ink-gray-7);
+  border-bottom: 2px solid var(--ink-gray-7);
+  transform: rotate(45deg);
+  transition: transform 140ms ease;
+}
+.door[data-open="1"] .door-chev { transform: rotate(-135deg); }
+@media (prefers-reduced-motion: reduce) { .door-chev { transition: none; } }
+
+/* ── The panel: what is inside a door ──────────────────────────────────────────
+   `[hidden]` rather than a class, because a <div hidden> is out of the accessibility
+   tree as well as off the screen — and it is what app.js sets. The `!important` is not
+   decoration: `display: flex` on this rule would otherwise beat the user-agent's
+   `[hidden] { display: none }`, which is the classic way an accordion silently never
+   closes. */
+.door-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.25rem 1.1rem 1.25rem;
+}
+.door-body[hidden] { display: none !important; }
+
+/* ── The customer's welcome, and the helper under its field ───────────────────
+   The only prose on the landing page, and it is here because the owner asked for it
+   by name. The three lines step DOWN in size and in weight: welcome, tagline, then the
+   instruction — so a person scanning the panel reads the shape of it before reading a
+   word of it, and lands on the field. */
+.cust-welcome {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--ink-gray-9);
+  text-align: left;
+}
+.cust-tagline {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-7);
+  text-align: left;
+}
+.cust-lead {
+  margin: 0.75rem 0 0.15rem;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-6);
+  text-align: left;
+}
+/* THE HELPER LINE, "in not so highlighted way". It sits UNDER the field it is about and
+   in the quietest ink on the card — quieter than the labels, quieter than a hint. It is
+   a sentence, so it is allowed to wrap to two lines on a phone; `1.45` keeps those two
+   lines from reading as a block of their own. */
+.cust-helper {
+  margin: -0.45rem 0 0.15rem;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--ink-gray-5);
+  text-align: left;
+}
+/* The onboarding line under the divider. Same quiet ink as the helper, but it carries a
+   live address, so it is allowed to be selected and copied like the text it is. */
+.cust-unregistered {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--ink-gray-6);
+  text-align: left;
+  user-select: text;
+}
+
+/* ── The corner button ────────────────────────────────────────────────────────
+   Fixed to the top right of the SCREEN, not of the head, so it stays put while the page
+   scrolls — the same place every site in this shape puts Sign Up, which is the slot the
+   owner named. `top` clears the phone's own status bar via the inset, because a Safari
+   tab on a notched phone draws under it. */
+.wa-corner {
+  /* The WhatsApp mark, as a mask source rather than an <img> so that it can be drawn in
+     `currentColor` — see .wa-glyph below. simple-icons' WhatsApp path (CC0-1.0): the
+     recognisable mark, with no licence to carry and no binary asset to keep in step with
+     the theme. Percent-encoded rather than raw because `#` and `<` cannot appear in a
+     data: URL. */
+  --wa-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.247-.694.247-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z'/%3E%3C/svg%3E");
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
+  right: calc(env(safe-area-inset-right, 0px) + 0.85rem);
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: var(--surface-elevation-1);
+  border: 1px solid var(--outline-gray-2);
+  box-shadow: var(--elevation-md);
+  color: var(--ink-gray-7);
+}
+.wa-corner:hover { background: var(--surface-alpha-gray-2); }
+/* The glyph is a mask, not an image: it takes the button's own colour, so the corner
+   needs no second asset and follows the theme with no second rule. Masking is the one
+   way to draw a shape in `currentColor` from a data URI without an inline SVG. */
+.wa-glyph {
+  width: 22px;
+  height: 22px;
+  background: currentColor;
+  -webkit-mask: var(--wa-mask) center / contain no-repeat;
+  mask: var(--wa-mask) center / contain no-repeat;
+}
+
+/* ── The foot of the landing page ──────────────────────────────────────────────
+   The acknowledgement and the language selector, below BOTH doors and above the FAQ
+   line. Both are centred like everything else in the foot, and both are deliberately
+   small: a reader who wants the doors should not have to step over either. */
+.landing-terms {
+  width: 100%;
+  max-width: 420px;
+  margin: 0.35rem 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--ink-gray-5);
+  text-align: center;
+}
+.landing-lang { margin-top: 0.75rem; }
+/* A native <select>, not a styled div. It is the one control on this page that has to
+   work on a phone with a thumb, in a language this file does not speak, before anyone
+   has signed in — and the native picker is the only one that is guaranteed to be
+   readable in the reader's own language and at their own text size. */
+.landing-lang select {
+  min-height: 36px;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  background: var(--surface-elevation-1);
+  color: var(--ink-gray-7);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+/* ── THE CODE STEP ─────────────────────────────────────────────────────────────
+   "Check your email", and one box per digit. A FULL SCREEN OF ITS OWN, shared by the
+   customer path and the employee-by-email path, because a person waiting for a code
+   is in the same state whichever door they came through — and because the alternative,
+   a panel inside each door, would have been written twice and would drift.
+
+   It is a sibling of #auth-container and not a child of it. The doors, the head, the
+   terms line and the language picker all have to go away for this step to read as the
+   blank centred page the owner asked for, and hiding a whole screen is one attribute
+   on one element. */
+#code-view {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  overflow-y: auto;
+  min-height: 100dvh;
+  padding: 2rem 1rem;
+  background: var(--surface-base);
+}
+#code-view[data-open="1"] { display: flex; }
+
+/* The card is narrower than a door and its contents are CENTRED, unlike the doors:
+   this screen has one field group and one instruction, so there is no column of
+   labels for a left edge to line up with, and centring is what makes it read as a
+   single answer rather than a form. */
+.code-card {
+  max-width: 420px;
+  text-align: center;
+}
+.code-title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  color: var(--ink-gray-9);
+  text-align: center;
+}
+/* The sub-line carries a live address in the middle of a sentence. It is allowed to
+   wrap to three lines on a phone, and `1.5` keeps those lines from reading as a block.
+   `overflow-wrap: anywhere` is not decoration: an address is one long unbreakable
+   token, and a 40-character one would otherwise push this card wider than the screen. */
+.code-sub {
+  margin: 0.6rem 0 1.5rem;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--ink-gray-6);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.code-email { color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+
+/* THE BOXES. Six real <input> elements and not one field with a six-cell background:
+   six inputs are what makes the phone keypad open on the first box, what lets the OS
+   offer the one-time code it has just seen arrive in Messages, and what makes backspace
+   at an empty box step BACK a box instead of doing nothing. `inputmode="numeric"` rather
+   than `type="number"` — a number field drops a leading zero, and a code may start with
+   one. */
+.code-boxes {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+.code-box {
+  width: 100%;
+  max-width: 48px;
+  min-width: 0;
+  height: 52px;
+  padding: 0;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-4);
+  background: var(--surface-elevation-1);
+  color: var(--ink-gray-9);
+  /* The digit is the one thing on this screen that is centred when it is typed too. */
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-bold);
+  /* Tabular figures so the six digits sit on one rhythm and the boxes do not jitter as
+     a wider glyph replaces a narrower one. */
+  font-variant-numeric: tabular-nums;
+}
+.code-box:focus {
+  outline: none;
+  border-color: var(--accent);
+  /* Three concentric shadows, so the focus ring follows the radius on every engine
+     instead of drawing a square one. Only the ring is drawn; the box keeps its fill. */
+  box-shadow: 0 0 0 3px var(--accent-tint-strong);
+}
+/* An armed box is one the person is meant to be typing into, so it gets a caret even
+   when it holds a digit — the caret is the only thing that tells a thumb where the next
+   keystroke lands. */
+.code-box::selection { background: var(--accent-tint-strong); }
+
+/* The way out, under the boxes. A link and not a button: it is the second-choice exit
+   of the two, and a second button on a screen with one action is a second action. */
+#code-different {
+  margin-top: 0.25rem;
+  color: var(--ink-gray-6);
+}
+
+/* WHILE THE CODE IS BEING CHECKED. Dimmed and inert, but NOT disabled: disabling the
+   boxes would move focus off the field the person is looking at, and the request that
+   is in flight is one whose answer lands right here. Dimming says "heard you"; it does
+   not take the screen away. The submit guard lives in app.js — this is only what it
+   looks like. */
+#code-view[data-busy="1"] .code-boxes { opacity: 0.5; }
+#code-view[data-busy="1"] #code-different { opacity: 0.5; pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .code-boxes { transition: opacity 120ms ease; }
+}
+
+/* The panel's own heading — "Log in to I-PASSBOOK" on the employee's, nothing on the
+   customer's, whose welcome is its own heading. Left-aligned like every other label on
+   these panels, not centred: the fields under it are full width and a centred heading
+   over left-aligned fields reads as two designs. */
+.door-title {
+  margin: 0 0 0.15rem;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--ink-gray-9);
+  text-align: left;
 }
 
 /* ── The common head, above both doors ────────────────────────────────────────
@@ -552,29 +850,25 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   50.01%, 100% { opacity: 0; }
 }
 
-/* The expansion line. Quieter than the wordmark — it is a sentence, not a
-   headline — and it appears one term at a time, after the name has finished. */
-.landing-full { color: var(--ink-gray-5); font-size: var(--text-sm); margin: 0.3rem 0 0; }
-.landing-full .bt-term { display: none; }
-.landing-full .bt-term.is-on { display: inline; }
+/* The line under the wordmark. Quieter than it — it is a sentence, not a headline —
+   and STATIC. `.bt-term` and its two rules are gone with the per-term typing they
+   belonged to: the line is one string that never changes length, so the landing page
+   cannot grow and shrink underneath the doors on every loop of the animation. */
+.landing-full {
+  color: var(--ink-gray-5);
+  font-size: var(--text-sm);
+  margin: 0.3rem 0 0;
+  /* NO min-height, and its absence is the point. The line is one fixed string, so its
+     height is fixed: there is nothing left on this page that can change it at runtime,
+     which is exactly what was asked for. Reserving a second line "just in case" would
+     buy a guarantee against a thing that can no longer happen, and pay for it with a
+     permanent gap under the head. */
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .bt-lt, .landing-full .bt-term { display: inline !important; }
+  .bt-lt { display: inline !important; }
   .bt-caret { display: none !important; }
 }
-
-/* ── The quick-unlock row, and the step under it ──────────────────────────────
-   The fingerprint and the pattern are ONE decision — open this device the way I set
-   it up — so they are one row, and the email door is the step BELOW them rather
-   than a third option beside them. `auto-fit` keeps them side by side down to a
-   narrow phone and stacks them only if the two labels genuinely cannot share a
-   line, which is the same no-media-query approach the doors grid uses. */
-.quick-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 0.75rem;
-}
-.quick-row .btn { width: 100%; }
 
 /* ── The foot, shared by both doors ───────────────────────────────────────────
    The desk's two open doors belong to the desk, not to the customer, so they sit

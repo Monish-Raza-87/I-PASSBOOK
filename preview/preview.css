@@ -1520,12 +1520,28 @@ html { -webkit-text-size-adjust: 100%; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
 .pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
 .pv-app .landing-mark { width: 40px; height: 40px; }
-.pv-app .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; width: 100%; max-width: 640px; align-items: start; }
-.pv-app .doors .glass-card { max-width: none; }
-.pv-app .door-role { text-align: center; }
-.pv-app .quick-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; }
-.pv-app .quick-row .btn { width: 100%; }
+/* Stacked, not side by side, and the collapsed door is a bar rather than a hidden
+   card — this is the whole shape the owner asked for on 2026-10-08. */
+.pv-app .doors { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; max-width: 420px; }
+.pv-app .doors .glass-card { max-width: none; gap: 0; }
+.pv-app .door-bar { display: flex; align-items: center; gap: 0.6rem; min-height: 56px; }
+.pv-app .door-role { flex: 1 1 auto; text-align: left; }
+.pv-app .door-body { display: flex; flex-direction: column; gap: 0.7rem; padding-top: 0.9rem; }
+.pv-app .door[data-open="0"] .door-body { display: none; }
 .pv-app .landing-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
+.pv-app .landing-terms { max-width: 420px; text-align: center; }
+.pv-app .landing-lang { display: flex; justify-content: center; }
+.pv-app .cust-welcome, .pv-app .cust-tagline, .pv-app .cust-lead,
+.pv-app .cust-helper, .pv-app .cust-unregistered { text-align: left; }
+/* The corner, drawn in the preview at the size it is on a phone. */
+.pv-app .wa-corner { position: absolute; top: 0.85rem; right: 0.85rem; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
+.pv-app .wa-glyph { width: 22px; height: 22px; }
+.pv-app .auth-wrap { position: relative; }
+/* THE CODE STEP, full screen inside the mock. */
+.pv-app #code-view { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+.pv-app .code-card { max-width: 420px; text-align: center; }
+.pv-app .code-boxes { display: flex; gap: 0.4rem; justify-content: center; }
+.pv-app .code-box { width: 100%; max-width: 48px; min-width: 0; height: 52px; text-align: center; }
 
 /* ── the IR list ── */
 .pv-app .list-toolbar { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.85rem 0.9rem 0.7rem; }

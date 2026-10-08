@@ -24,7 +24,7 @@ const NOW = Date.now();
 
 const { T, byId } = loadApp(`
   insightsMatches, insightsSummary, monthCounts, sparkPoints, assigneeCounts,
-  initialsOf, UNASSIGNED_KEY, MONTH_ABBR, MONTH_LABELS,
+  initialsOf, avatarSvg, UNASSIGNED_KEY, MONTH_ABBR, MONTH_LABELS,
   IR_CATEGORIES, SEGMENT_LABELS, CATEGORY_BADGE,
   INSIGHTS_ALL, UNCATEGORISED, renderInsights,
   statusCategory, irOverdue, irFiscalYear, irMonthNumber,
@@ -340,11 +340,26 @@ r.ok('...and the People rows count every filtered IR, matching the headline',
     return total === sum.matched && rendered.length === 2 * T.assigneeCounts(FIXTURE, noFilter(), NOW).length;
   })());
 
-r.ok('an avatar renders the initials, and the Unassigned row gets the question mark',
-  (html.match(/<span class="person-avatar" aria-hidden="true">[^<]+<\/span>/g) || []).length ===
+// Every named person gets a drawn mark, and ONLY the Unassigned row keeps the "?".
+// The row count is the same check as before; what changed is what is inside it.
+r.ok('every named person carries a generated avatar, and Unassigned keeps the question mark',
+  (html.match(/<span class="person-avatar" aria-hidden="true">[\s\S]*?<\/span>/g) || []).length ===
   T.assigneeCounts(FIXTURE, noFilter(), NOW).length &&
-  /person-avatar" aria-hidden="true">RS</.test(html) &&
+  !/person-avatar" aria-hidden="true">RS</.test(html) &&
   /class="person-row is-unassigned"[\s\S]{0,120}person-avatar" aria-hidden="true">\?</.test(html));
+// The mark is a function of the ADDRESS, so the same person wears the same one in the
+// header and in the list, and two different people do not wear the same one.
+r.ok('the mark is derived from the address, not from the row it sits in',
+  T.avatarSvg('ravi@indrones.com') === T.avatarSvg('RAVI@indrones.com ') &&
+  T.avatarSvg('ravi@indrones.com') !== T.avatarSvg('adhik.nair@indrones.com') &&
+  /<svg class="avatar-mark" viewBox="0 0 32 32"/.test(T.avatarSvg('ravi@indrones.com')));
+// "Avatars without eyes" is the owner's own wording, so it is asserted as an ABSENCE:
+// no glyphs at all, and a silhouette group holding exactly two shapes — one pair of
+// shoulders and one head. Anything else in there is a feature added to a face.
+r.ok('the mark carries no glyphs and no facial features — a bust and nothing more',
+  !/<text|stroke=|<use/.test(T.avatarSvg('ravi@indrones.com')) &&
+  (T.avatarSvg('ravi@indrones.com').match(/<g fill="#f7f4ee">([\s\S]*?)<\/g>/) || ['', ''])[1]
+    .match(/<(circle|ellipse|rect|path)\b/g).length === 2);
 
 r.ok('the stat row reads the same four numbers the rest of the page does',
   (() => {

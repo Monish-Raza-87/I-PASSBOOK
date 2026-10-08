@@ -888,7 +888,18 @@ r.ok('every lowercase survivor is a deliberate identifier', (() => {
 // answers a table with sideways scrolling), and the dead iframe machinery must not
 // survive anywhere in the app.
 r.head('the legacy record is rendered read-only from the backend, never embedded');
-const L = loadApp(`legacyGridHtml, openLegacyRecord, openLegacyWorkbook, closeLegacyModal`);
+const L = loadApp(`legacyGridHtml, openLegacyRecord, closeLegacyModal`);
+// The service desk no longer offers the workbook. The owner, 2026-10-08: *"Remove the
+// Legacy Records button from the service desk (since legacy is being infused into the
+// app)."* Asserted over BOTH files, because a button is markup and its binding is code,
+// and leaving either behind leaves a nav row that does nothing.
+r.ok('the Legacy Records button is gone from the desk, markup and binding alike',
+  !/legacy-workbook-btn/.test(indexSrc) && !/legacy-workbook-btn/.test(appSrc) &&
+  !/openLegacyWorkbook/.test(appSrc) && !/name === 'legacy'|parts\[0\] === 'legacy'/.test(appCode),
+  (appSrc.match(/[^\n]*openLegacyWorkbook[^\n]*/) || ['none'])[0]);
+r.ok('...and its label went with the key that named it',
+  !/nav\.legacyRecords/.test(indexSrc) &&
+  !/nav\.legacyRecords/.test(fs.readFileSync(new URL('../i18n.js', import.meta.url), 'utf8')));
 r.ok('there is no iframe and no embed URL left anywhere in the app',
   !/<iframe/.test(appCode) && !/embedUrl/.test(appCode) && !/rm=minimal/.test(appCode),
   (appCode.match(/[^\n]*iframe[^\n]*/g) || ['none'])[0]);
@@ -916,9 +927,9 @@ r.ok('a slow record read is abandoned rather than left spinning forever',
   /setTimeout\(\(\) => controller\.abort\(\), 12000\)/.test(appCode));
 r.ok('closing bumps the sequence, so an in-flight fetch cannot paint into a closed card',
   /_legacyReq\+\+/.test(appCode) && /if \(req !== _legacyReq\)/.test(appCode));
-r.ok('the index is built from legacyMap and every row opens its own record',
-  /Object\.values\(legacyMap\)/.test(appCode) && /legacy-index-item/.test(appCode) &&
-  /openLegacyRecord\(btn\.dataset\.ir\)/.test(appCode));
+r.ok('the per-ticket fallback still opens its own record off legacyMap',
+  /const legacy = legacyMap\[irNumber\]/.test(appCode) &&
+  /openLegacyRecord\(currentIR\?\.irNumber\)/.test(appCode));
 r.ok('the spinner is the app\'s own spin animation, so reduced-motion already covers it',
   /\.legacy-spinner \{[\s\S]{0,220}?animation: spin /.test(componentsCode) &&
   /@keyframes spin/.test(fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8')));
@@ -1641,6 +1652,22 @@ r.ok('the healthy and unknown colours are defined in views.css, from tokens',
   /\.access-backup-ok\s*\{[^}]*var\(--ink-green/.test(viewsCode) &&
   /\.access-backup-bad\s*\{[^}]*var\(--ink-red/.test(viewsCode),
   (viewsCode.match(/\.access-backup-(?:ok|bad)\s*\{[^}]*\}/g) || []).join(' | '));
+
+// ── The avatar mark ───────────────────────────────────────────────────────────
+// The owner, 2026-10-08: *"avatars without eyes, random avatars to each one of them …
+// gender neutral avatars so that you do not have to think about them if they are male
+// of female."* The drawing itself is pinned in smoke-insights-charts (where the mark is
+// rendered); what is pinned HERE is the box it is dropped into, because a square SVG in
+// a round box fails silently — it looks like a design choice, not a bug.
+r.head('the generated avatar is sized by its box, and clipped by it');
+r.ok('one drawing, two sizes — the header square and the Overview circle',
+  /\.avatar-mark \{[^}]*width: 100%[^}]*height: 100%/.test(baseSrc));
+r.ok('both boxes clip the SVG\'s corners instead of painting over their own radius',
+  /#user-avatar \{[^}]*overflow: hidden[^}]*\}/.test(baseSrc) &&
+  /\.person-avatar \{[^}]*overflow: hidden[^}]*\}/.test(viewsCode));
+r.ok('no monogram is left in the header — the mark replaced it, and the "?" went with it',
+  !/userAvatar\.textContent = currentUser\?\.initial/.test(appSrc) &&
+  /userAvatar\.innerHTML = avatarSvg\(/.test(appSrc));
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

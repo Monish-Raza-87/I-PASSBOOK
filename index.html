@@ -347,14 +347,34 @@
                same thing in markup. -->
           <button type="button" class="btn btn-secondary" id="auth-google-btn" style="display:none" data-i18n="auth.sso">Continue with Indrones’ official email</button>
 
-          <!-- THE QUICK-UNLOCK PAIR. `#auth-quick` wraps both and is shown only when this
-               device actually holds a registered unlock — offering a door that opens onto
-               nothing is worse than not offering it. Each button is then shown or hidden
-               on its own, because a device may have a fingerprint and no pattern, or the
-               other way round, and only the door that can open is drawn. -->
+          <!-- THE QUICK-UNLOCK PAIR, AND IT IS ALWAYS DRAWN.
+               It used to be shown only on a device that already held a registered
+               unlock, on the reasoning that a door opening onto nothing is worse than
+               no door. The owner, 2026-10-08, overruled that with a better one: *"to
+               the users who have not so far activated fingerprint/passkey and pattern
+               method, it would still show it to them but when they try to click on it
+               and use that method it would say to them that 'This login method
+               activates after you enable it from your login.'"*
+               A person who has never heard of the feature cannot miss it, and the
+               sign-in screen is the only place they will ever look. So both buttons
+               are always here; what changes is what a tap does, and the note below is
+               what it does when the method is not on this device yet. -->
           <div id="auth-quick" style="display:none">
             <button type="button" class="btn btn-secondary" id="auth-unlock-btn" data-i18n="auth.unlock">Continue with fingerprint / passkey</button>
             <button type="button" class="btn btn-secondary" id="auth-pattern-link" data-i18n="auth.usePattern">Continue with pattern</button>
+            <!-- The explanation, IN THE PAGE rather than in a tooltip or a toast: it
+                 is four steps long, and a toast that has gone before it is read is the
+                 same as no explanation at all. -->
+            <div class="method-note" id="auth-method-note" style="display:none" role="status">
+              <p class="method-note-say" id="auth-method-note-say" data-i18n="auth.methodInactive.say">This login method activates after you enable it from your login.</p>
+              <ol class="method-note-steps">
+                <li data-i18n="auth.methodInactive.step1">Sign in to I-PASSBOOK with your email and the code we send you.</li>
+                <li data-i18n="auth.methodInactive.step2">Tap your avatar in the top right corner of the app.</li>
+                <li data-i18n="auth.methodInactive.step3">Choose “Turn on Quick unlock” and follow the prompt on this device. Set up your fingerprint — and a pattern as well, if you want one.</li>
+                <li data-i18n="auth.methodInactive.step4">That is all. Come back to this screen and both methods are ready.</li>
+              </ol>
+              <button type="button" class="link-btn link-sm" id="auth-method-note-close" data-i18n="auth.methodInactive.dismiss">Got it</button>
+            </div>
           </div>
 
           <!-- The pattern canvas, for the unlock gesture AND the two-draw setup.
@@ -639,14 +659,6 @@
           <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label" data-i18n="nav.logAnalyser">Log Analyser</span>
         </a>
-
-        <!-- Opens the read-only index of pre-app records. The id is load-bearing:
-             app.js binds openLegacyWorkbook() to it. -->
-        <button type="button" class="nav-item" id="legacy-workbook-btn"
-                title="Old I-PASSBOOK records (kept until app go-live)">
-          <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label" data-i18n="nav.legacyRecords">Legacy Records</span>
-        </button>
 
         <!-- The FAQ, from inside the app. A plain link, like the three above it —
              no JS binding, and a NEW TAB so leaving for a question never costs

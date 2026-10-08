@@ -2093,6 +2093,10 @@
   width: 30px;
   height: 30px;
   border-radius: 50%;
+  /* The generated mark is a SQUARE svg; the circle comes from this radius, so the
+     corners have to be cut off here or the avatar reads as a square chip with a circle
+     drawn inside it. The Unassigned row is the one that keeps its "?" and its dashes. */
+  overflow: hidden;
   background: var(--surface-gray-3);
   color: var(--ink-gray-8);
   font-size: var(--text-2xs);
@@ -2249,6 +2253,22 @@
    door — see the note in index.html. Leaving the rule here would be a selector three
    suites still name and nothing on screen carries. */
 #auth-quick .btn { min-height: 40px; }
+/* The "this method is not on this device yet" note. It appears between the two
+   buttons and the form below them, so it borrows the card's own surface rather than
+   inventing a second one: a raised panel inside a raised panel reads as a dialog the
+   person is expected to answer, and this is not one. The left rule is the accent,
+   which is the same mark the app already uses for "this is the thing to read". */
+.method-note {
+  text-align: left;
+  border-left: 3px solid var(--accent);
+  padding: 10px 12px;
+  background: var(--surface-gray-2);
+  border-radius: var(--radius-4);
+}
+.method-note-say { margin: 0; font-size: var(--text-sm); color: var(--ink-gray-9); }
+.method-note-steps { margin: 8px 0 0; padding-left: 1.15rem; display: grid; gap: 6px; }
+.method-note-steps li { font-size: var(--text-sm); color: var(--ink-gray-7); line-height: 1.45; }
+#auth-method-note-close { margin-top: 8px; }
 #auth-pattern { display: block; }
 #pattern-canvas,
 #pattern-setup-canvas {          /* the sign-in canvas and the setup overlay's */

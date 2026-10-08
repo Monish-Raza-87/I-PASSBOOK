@@ -114,7 +114,7 @@ function canvasEl() {
 function drive(record, counters, fetchImpl) {
   const T = loadApp(`
     submitUnlock, saveUnlock, loadUnlock, clearUnlock, localStorage, UNLOCK_KEY,
-    setAuthMode, patternHashOf,
+    setAuthMode, patternHashOf, showMethodInactiveNote, hideMethodInactiveNote,
     getMode: () => _authMode,
   `, {
     capture: true,
@@ -273,8 +273,14 @@ r.ok('...and the token, not a pattern or a hash of one',
   !JSON.stringify(c5.last.entries()).includes(hashOf([1, 2, 3, 4])),
   fieldOf(c5.last, 'deviceToken'));
 
-// ── 5. No door is drawn that cannot open ─────────────────────────────────────
-r.head('the sign-in screen offers only the doors this device can open');
+// ── 5. Both doors are drawn; the tap is what knows ───────────────────────────
+// This whole block used to read "the sign-in screen offers only the doors this device can
+// open". The owner reversed that on 2026-10-08 — *"it would still show it to them but when
+// they try to click on it and use that method it would say to them that 'This login method
+// activates after you enable it from your login.'"* — so what is pinned now is that the
+// ENTRY SCREEN always offers both, and that the PATTERN CANVAS still offers only what
+// exists, because there the canvas IS the pattern door and a second one would do nothing.
+r.head('the entry screen always offers both unlock doors, and says how to get one');
 r.ok('the ids app.js switches are the ids the markup carries',
   /id="auth-pattern-link"/.test(indexSrc) && /id="auth-unlock-btn"/.test(indexSrc) &&
   /id="auth-quick"/.test(indexSrc));
@@ -283,14 +289,29 @@ const shown = (byId, id) => (byId.get(id) || { style: {} }).style.display !== 'n
 const D = drive(FP_ONLY, { calls: 0 });
 D.T.setAuthMode('unlock');
 r.ok('a fingerprint-only device shows the fingerprint button', shown(D.byId, 'auth-unlock-btn'));
-r.ok('...and NOT "Use pattern" — the door that led nowhere',
-  !shown(D.byId, 'auth-pattern-link'),
+r.ok('...and "Continue with pattern" TOO, which this device has not enrolled',
+  shown(D.byId, 'auth-pattern-link'),
   (D.byId.get('auth-pattern-link') || {}).style);
 
 const E = drive(Object.assign({}, FP_ONLY, { patternHash: hashOf([1, 2, 3, 4]) }), { calls: 0 });
 E.T.setAuthMode('unlock');
 r.ok('a device with both shows both',
   shown(E.byId, 'auth-unlock-btn') && shown(E.byId, 'auth-pattern-link'));
+
+// The device that has NEITHER is the case the owner was describing — the one that used to
+// see no buttons at all. It now sees both, and the note is what a tap opens.
+const N = drive({ email: 'monish.raza@indrones.com' }, { calls: 0 });
+N.T.setAuthMode('unlock');
+r.ok('a device with neither still sees both doors',
+  shown(N.byId, 'auth-unlock-btn') && shown(N.byId, 'auth-pattern-link'));
+const noteOf = (d) => d.byId.get('auth-method-note');
+r.ok('the explanation ships hidden, and a tap on either door opens it',
+  noteOf(N).style.display === 'none' &&
+  (N.byId.get('auth-method-note') || {}).children !== undefined &&
+  N.T.showMethodInactiveNote() === undefined && noteOf(N).style.display === '',
+  noteOf(N).style);
+r.ok('...and switching to another door puts it away again, so it cannot outlive its tap',
+  (N.T.setAuthMode('email'), noteOf(N).style.display === 'none'));
 
 const F = drive({ email: 'monish.raza@indrones.com', mode: 'pattern',
                   deviceToken: 'b'.repeat(32), patternHash: hashOf([4, 3, 2, 1]) }, { calls: 0 });

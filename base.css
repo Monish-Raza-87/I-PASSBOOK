@@ -1346,6 +1346,10 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The generated mark is an inline <svg>, and a square one inside a rounded box needs
+     this: without it the SVG's corners paint over the border-radius and the avatar reads
+     as a square with the app's own outline drawn around it. */
+  overflow: hidden;
   font-size: var(--text-xs);
   font-weight: var(--weight-semibold);
   color: var(--ink-base);
@@ -1353,6 +1357,9 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   flex: 0 0 auto;
   border: 1px solid var(--outline-gray-2);
 }
+/* The avatar SVG fills whatever box it is dropped into, so the header's 28px square and
+   the Overview's 30px circle are one drawing at two sizes rather than two drawings. */
+.avatar-mark { display: block; width: 100%; height: 100%; }
 #user-avatar:hover { border-color: var(--outline-gray-4); }
 
 .nudge-bell {

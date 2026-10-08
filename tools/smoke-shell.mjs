@@ -1016,12 +1016,12 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     empForm.indexOf('id="auth-signin-btn"') < empForm.indexOf('id="auth-or"') &&
     empForm.indexOf('id="auth-or"') < empForm.indexOf('id="auth-google-btn"'));
   // THE DIVIDER IS THE BLOCK'S, NOT GOOGLE'S. It used to be keyed on `!!CONFIG.SSO_URL`
-  // from when the Google button was the only thing under it. It now sits above THREE
-  // alternatives, two of which do not depend on a second deployment at all — so keying it
-  // on SSO_URL would drop the line between "Continue" and the unlock pair on every device
-  // where the Google door is simply off.
+  // from when the Google button was the only thing under it. It sits above three
+  // alternatives, and since 2026-10-08 two of them — the unlock pair — are drawn on every
+  // entry screen whether or not this device can use them, so "is there anything below me"
+  // and "is this the entry screen" are the same question.
   ok('...and the divider is shown for the whole alternatives block, not for Google alone',
-    /set\('auth-or',\s*firstStep && \(!!CONFIG\.SSO_URL \|\| quickHere\)\)/.test(appCode));
+    /set\('auth-or',\s*firstStep && \(!!CONFIG\.SSO_URL \|\| quickOn\)\)/.test(appCode));
   ok('...and it ships hidden, so a JS-off page never shows a lone "or"',
     /<div class="auth-or" id="auth-or" style="display:none">/.test(empForm));
   // ── FOUR ANSWERS TO ONE QUESTION, AND ONE OF THEM IS THE ACCENT ───────────────
@@ -1040,15 +1040,39 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /data-i18n="auth\.sso">Continue with Indrones’ official email<\/button>/.test(empForm) &&
     /data-i18n="auth\.unlock">Continue with fingerprint \/ passkey<\/button>/.test(empForm) &&
     /data-i18n="auth\.usePattern">Continue with pattern<\/button>/.test(empForm));
-  // The quick-unlock pair is ONE BLOCK, shown only when this device actually holds a
-  // registration — an offer that opens onto nothing is worse than no offer. Each then shows
-  // on its own, because a device may have a fingerprint and no pattern, or the other way
-  // round, and only the door that can open is drawn.
-  ok('...and the pair is one block, so neither door is offered onto nothing',
+  // BOTH DOORS ARE ALWAYS OFFERED ON THE ENTRY SCREEN. The owner, 2026-10-08: *"to the users
+  // who have not so far activated fingerprint/passkey and pattern method, it would still
+  // show it to them but when they try to click on it and use that method it would say to
+  // them that 'This login method activates after you enable it from your login.'"* — which
+  // reverses the earlier "an offer that opens onto nothing is worse than no offer", and is
+  // a better rule for the same reason the old one was tidy: a person who has never heard of
+  // the feature cannot miss it. What a tap does is what the record decides.
+  ok('...and the pair is one block, and both doors are drawn whether or not this device has them',
     /<div id="auth-quick" style="display:none">[\s\S]*?id="auth-unlock-btn"[\s\S]*?id="auth-pattern-link"[\s\S]*?<\/div>/.test(empForm) &&
     /const quickOn = \(entry \|\| mode === 'pattern'\);/.test(appCode) &&
-    /const fp = !!\(q\.credentialId \|\| q\.mode === 'fingerprint'\);/.test(appCode) &&
-    /const pat = !!q\.patternHash;/.test(appCode));
+    /set\('auth-unlock-btn',\s*mode === 'pattern' \? fp : true\);/.test(appCode) &&
+    /set\('auth-pattern-link',\s*mode === 'pattern' \? pat : true\);/.test(appCode));
+  // …and the tap that has nothing to open explains itself, in the owner's sentence plus the
+  // four steps that turn the method on. Asserted on BOTH halves: a note with no steps is the
+  // sentence he already had, and steps that do not reach a real control are worse than none.
+  ok('...and tapping a door this device has not got explains how to get it, in four steps',
+    /function showMethodInactiveNote\(\)/.test(appCode) &&
+    /if \(!methodReady\('fingerprint'\)\) return showMethodInactiveNote\(\);/.test(appCode) &&
+    /if \(!methodReady\('pattern'\)\) return showMethodInactiveNote\(\);/.test(appCode) &&
+    (empForm.match(/data-i18n="auth\.methodInactive\.step[1-4]"/g) || []).length === 4 &&
+    /data-i18n="auth\.methodInactive\.say">This login method activates after you enable it from your login\.<\/p>/.test(empForm));
+  // The guidance is only worth having if it points at controls that exist. So the label
+  // is read OUT OF the menu that owns it — syncQuickUnlockMenu changes that row's wording
+  // with the device's state — and the note is then required to say the same words. A note
+  // that sends someone looking for a row that is called something else is worse than the
+  // silence it replaced, and this is the assertion that keeps the two spellings married.
+  ok('...and the steps name the controls the app actually has',
+    (() => {
+      const rowLabel = (appCode.match(/btn\.textContent = '(Turn on Quick unlock)';/) || [])[1];
+      return !!rowLabel && i18nCode.includes(rowLabel) &&
+        /id="auth-method-note-close"/.test(empForm) &&
+        /hideMethodInactiveNote\(\);/.test(appCode);
+    })());
   // `.btn-quick` was the fingerprint button's own class and it is GONE, not dormant: three
   // suites used to name it and nothing on screen carries it any more.
   ok('...and the retired .btn-quick class is gone from the markup and from the stylesheet',

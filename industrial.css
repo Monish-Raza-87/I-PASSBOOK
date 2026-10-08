@@ -278,34 +278,41 @@
    So this rule gives the doors' actions the accent's solid pair. It is written with
    :not() rather than by adding a class to the markup on purpose: a look that needs
    markup cannot be undone by deleting one file, and the whole claim of this
-   stylesheet is that deleting it changes nothing else. The four variants are named
-   back OUT because this file loads after components.css and would otherwise repaint
-   all four of them — `.btn-quick` (the fingerprint door), `.btn-ghost`, `.btn-google`
-   and `.btn-secondary` each carry their own meaning and their own colour.
+   stylesheet is that deleting it changes nothing else. The variants are named back
+   OUT because this file loads after components.css and would otherwise repaint
+   them — `.btn-quick` (the fingerprint door), `.btn-ghost` and `.btn-secondary` each
+   carry their own meaning and their own colour.
+
+   `.btn-google` used to be named here too, for the white "Sign in with Google" pill.
+   That pill is gone — the owner asked for it to be "in yellow instead of black", so
+   the button is a plain `.btn` and takes this rule like every other action on the
+   card. Nothing here mentions it now, which means if that class ever came back
+   without its own stylesheet behind it, it would come back accent-coloured and
+   visible rather than silently white.
 
    The three states are restated because `:not()` chains make this selector far more
    specific than `.btn-primary:hover`; leaving them out would give a yellow button
    that turns back to neutral grey under the pointer. */
-#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick),
-#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick) {
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick),
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick) {
   background: var(--btn-solid-bg);
   color: var(--btn-solid-fg);
   border-color: transparent;
 }
-#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):hover,
-#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):hover {
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick):hover,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick):hover {
   background: var(--btn-solid-bg-hover);
 }
-#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):active,
-#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):active {
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick):active,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick):active {
   background: var(--btn-solid-bg-active);
 }
 /* A busy door keeps its own colour rather than flashing amber: the wait is the same
    wait, and a button that changes colour when pressed reads as a failure. */
-#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).saving,
-#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).is-busy,
-#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).saving,
-#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).is-busy {
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick).saving,
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick).is-busy,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick).saving,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick).is-busy {
   background: var(--btn-solid-bg-hover);
   color: var(--btn-solid-fg);
 }

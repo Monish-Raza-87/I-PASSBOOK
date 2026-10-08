@@ -291,15 +291,29 @@ r.ok('...and the auth buttons are raised, on a phone, to 44px',
 // --surface-gray-10, near-black in light and near-white in dark. Nothing on the
 // landing page asks for .btn-primary, so the two "Sign in" buttons shipped WHITE on a
 // dark ground, which is what a screenshot caught. The rule that fixes it has to name
-// the four variants back out, or it repaints the fingerprint door, the ghost, the
-// Google button and the sign-out; and it has to restate hover/active, because a
-// :not() chain out-specifies `.btn-primary:hover`.
+// the OTHER variants back out, or it repaints the fingerprint door, the ghost and the
+// sign-out; and it has to restate hover/active, because a :not() chain out-specifies
+// `.btn-primary:hover`.
 r.head('the doors wear the accent, and only the doors, and only their one action');
-const doorBtn = '#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick)';
-for (const v of ['btn-ghost', 'btn-secondary', 'btn-google', 'btn-quick']) {
+const doorBtn = '#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick)';
+for (const v of ['btn-ghost', 'btn-secondary', 'btn-quick']) {
   r.ok(`...and .${v} is named back out, in markup and here`,
     new RegExp(`class="btn ${v}"`).test(html) && new RegExp(`:not\\(\\.${v}\\)`).test(css));
 }
+// `.btn-google` is the one that left, and its absence is now the assertion. The owner,
+// 2026-10-08: "if buttons are yellow mostly then even signin with indrones email also
+// has to be in yellow instead of black." The white Google pill was standing in the way
+// of that from two files at once — base.css drew the pill, and this rule had to exempt
+// it — so the class is gone from BOTH. Checking both halves matters: leaving it named
+// in this :not() chain after deleting its stylesheet would be a selector guarding a
+// rule that no longer exists, and the day someone re-adds the class it would come back
+// invisible instead of accent-coloured.
+r.ok('...and .btn-google is gone from the markup AND from this file\'s :not() chain',
+  !/class="btn btn-google"/.test(html) && !/btn-google/.test(css) && !/google-mark/.test(html),
+  (html.match(/[^\n]*btn-google[^\n]*/) || [''])[0]);
+r.ok('...so the Indrones-email door is a plain .btn and takes the accent like the rest',
+  /class="btn" id="auth-google-btn"/.test(html),
+  (html.match(/[^\n]*auth-google-btn[^\n]*/) || [''])[0]);
 const doorRule = (css.match(new RegExp(doorBtn.replace(/[.()]/g, '\\$&') + ',\\n[\\s\\S]{0,200}?\\{([^}]*)\\}')) || [])[1] || '';
 r.ok('the door action takes the accent solid fill, not --surface-gray-10',
   /background:\s*var\(--btn-solid-bg\)/.test(doorRule) &&

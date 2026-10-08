@@ -40,7 +40,18 @@
 
     // ── The app itself ───────────────────────────────────────────────────────
     'app.name':            'I-PASSBOOK',
-    'app.fullName':        'Indrones Product After-Sales Summary Book',
+    // THE EXPANSION OF THE NAME, and it is a sentence rather than a strapline because
+    // of what it is for: the landing head TYPES "I-PASSBOOK" and then spells it out,
+    // term by term, one term per letter — the owner's instruction of 2026-10-08. It
+    // replaces "Indrones Product After-Sales Summary Book", which was the same
+    // information with the mechanism thrown away.
+    //
+    // ⚠ The `·` separators are part of the data, not decoration. app.js's
+    // buildBrandTyping() splits this string ON THEM to make the terms, and index.html
+    // ships it written out — so a term added here, or a separator dropped, changes
+    // both what is typed and what the script animates, with no third place to update.
+    // Six terms, one per letter of I-PASSBOOK bar the hyphen.
+    'app.fullName':        'INDRONES FROM I · PRODUCT FROM P · AFTER FROM A · SALES FROM S · SUMMARY FROM S · BOOK AS IT IS',
 
     // ── Navigation ───────────────────────────────────────────────────────────
     'nav.serviceDesk':     'Service Desk',
@@ -113,8 +124,23 @@
     'priority.low':        'Low',
 
     // ── Signing in ───────────────────────────────────────────────────────────
-    'auth.hint':           'Sign in with the credentials your admin gave you.',
+    // The step line. app.js rewrites it on every mode change, so what stands here is
+    // the value for the screen as it FIRST paints, and that screen is now the entry
+    // screen with all four methods on it. It used to be the admin-credentials
+    // sentence, which described a door that is now one small link at the foot of the
+    // card — true, and about the wrong screen.
+    'auth.hint':           'We’ll email you a 6-digit sign-in code.',
     'auth.email':          'you@indrones.com',
+    // THE GOOGLE DOOR, RENAMED. The owner, 2026-10-08: "instead of signin with google,
+    // it should be sign in with Indrones email." That is not a cosmetic rewording: it
+    // is what the door actually does here — Google's own picker is the first screen,
+    // and it will offer whatever account that browser holds. Naming Indrones is how
+    // the button tells a person which account to use before they tap it.
+    'auth.sso':            'Sign in with Indrones email',
+    // The divider under it. It replaced "or continue with", which described a
+    // two-way choice between one thing and a vague rest.
+    'auth.or':             'or get a code by email',
+    'auth.usePassword':    'Sign in with a password',
     'auth.password':       'Password',
     'auth.newPassword':    'New password',
     'auth.newPasswordLong':'New password (at least 8 characters)',
@@ -181,16 +207,28 @@
 
     // ── The customer's sign-in form ──────────────────────────────────────────
     // Two doors, same two words as the employee's — and that is the point: the two
-    // doors ask for the same thing in the same way, so nothing about the customer's
+    // doors ask for the same thing in the same way, so nothing about the customer’s
     // box needs explaining.
     //
-    // cust.hint says "the email address we invited you at" for one real reason: the
-    // account was created by the desk, not by the customer, so a customer who has a
-    // personal address and a work one has no way of knowing which one to type. The
-    // invitation went to one of them and the other will be refused.
-    'cust.hint':          'Sign in with the email address we invited you at.',
+    // cust.hint REPLACED "Sign in with the email address we invited you at." on the
+    // owner's instruction, 2026-10-08. The old sentence was written to answer a real
+    // question — a customer with a personal address and a work one cannot know which
+    // one the invitation went to — and it answered it by asking them to remember
+    // which address the desk used, on the one screen where they are least able to.
+    // "we invited you at" also quietly describes the desk's process rather than the
+    // thing in front of them. The new line says what the product is for instead, and
+    // the answer to the old question arrives anyway the moment the code does or does
+    // not arrive.
+    //
+    // It is a SENTENCE with a full stop, unlike every other hint on these cards: it
+    // is the one line on the landing page that is about the product and not about the
+    // next tap.
+    'cust.hint':          'Login to I-PASSBOOK, your after-sales companion.',
     'cust.email':         'you@company.com',
-    'cust.useOtp':        'Use email (OTP) based login method',
+    // The employee's own words for the same control, on purpose: the owner asked for
+    // the customer's recovery entry to BE the employee's, and a sentence that differed
+    // would be the first thing to break the two cards reading alike.
+    'cust.forgot':        'Forgot password?',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
     // The app's second open door. These strings are read on the sign-in screen,

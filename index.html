@@ -54,14 +54,13 @@
       // This list must stay in step with THEME_VALUES in app.js: a value known to
       // one and not the other is a bug, and smoke-theme.mjs asserts they agree.
       try {
-        // DEFAULT DARK. The app's look is the Indrones Industrial panel the owner
-        // chose on 2026-10-08, and it is dark by design; a device that has never
-        // been asked gets that rather than its own operating system's answer.
-        // 'system' is still a value someone can choose — it is simply no longer
-        // what an absent value means. Mirrors storedTheme() in app.js.
+        // DEFAULT LIGHT, the owner's instruction of 2026-10-08. A device that has
+        // never been asked gets the light mode, not its operating system's answer;
+        // 'system' is still a value someone can choose — it is simply not what an
+        // absent value means. Mirrors storedTheme() in app.js.
         var THEMES = ['light', 'cream', 'dark'];
         var CHROME = { light: '#fdfdfd', cream: '#fdf9ef', dark: '#1a1713' };
-        var p = localStorage.getItem('theme') || 'dark';
+        var p = localStorage.getItem('theme') || 'light';
         var t = THEMES.indexOf(p) >= 0 ? p
               : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         if (t !== 'light') document.documentElement.setAttribute('data-theme', t);
@@ -192,10 +191,19 @@
   <div id="auth-container">
 
     <!-- THE COMMON HEAD. Above the doors, centred, shared — so the two cards below
-         carry a role and a form and nothing else. The stroke under the wordmark is
-         the cursive flourish: it writes itself and loops (see base.css's
-         `brandWrite`). It is decorative and marked aria-hidden, so nothing about the
-         brand is carried by the animation alone. -->
+         carry a role and a form and nothing else. There is no decoration under the
+         wordmark any more; the wordmark IS the animation. app.js's
+         buildBrandTyping() splits the two lines below into one span per letter and
+         one per term, and its loop types the name out, lets the expansion line
+         follow it, holds, and takes it back down again.
+
+         THE PLAIN TEXT IN THE MARKUP IS THE REAL COPY, and that is not a
+         fallback of convenience: it is what paints with JS off, what a screen
+         reader is given (the spans are aria-hidden and the element carries the
+         sentence as its aria-label), and what `prefers-reduced-motion` leaves on
+         screen. So the sentence is written ONCE, here, and the animation is a
+         reading of it rather than a second copy of it. `app.fullName` is the
+         expansion line — see the note on that key in i18n.js. -->
     <header class="landing-head">
       <!-- alt="" on purpose: the brand name is the next line down, so this is the
            same information twice and the text is the accessible copy. The borderless
@@ -203,16 +211,9 @@
            as a tile sitting on the page (tools/make-icons.ps1 keyed it out). -->
       <img class="landing-mark" src="assets/icon-mark.png" alt="" />
       <div class="landing-wordmark">
-        <h1 class="landing-brand" data-i18n="app.name">I-PASSBOOK</h1>
-        <svg class="brand-stroke" viewBox="0 0 320 22" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-          <!-- pathLength="1" normalises the path, so the dash animation needs no
-               measured length, and non-scaling-stroke keeps the nib the same weight
-               however wide the wordmark ends up on a phone or a desktop. -->
-          <path class="brand-stroke-path" pathLength="1" vector-effect="non-scaling-stroke"
-                d="M3 15 C 42 3, 78 4, 112 13 C 143 21, 174 21, 205 12 C 232 4, 262 5, 290 13 C 300 16, 310 16, 317 11" />
-        </svg>
+        <h1 class="landing-brand" id="landing-brand" data-i18n="app.name">I-PASSBOOK</h1>
       </div>
-      <p class="landing-full" data-i18n="app.fullName">Indrones Product After-Sales Summary Book</p>
+      <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES FROM I &middot; PRODUCT FROM P &middot; AFTER FROM A &middot; SALES FROM S &middot; SUMMARY FROM S &middot; BOOK AS IT IS</p>
     </header>
 
     <div class="doors">
@@ -230,43 +231,33 @@
         <div class="update-banner" id="update-banner-auth" style="display:none"></div>
         <form id="auth-form" autocomplete="on">
           <!-- The step line. It carries the instruction for whichever mode is up, and
-               is EMPTY on the quick-unlock screen — a registered device needs no
-               sentence telling it that it is one. -->
-          <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">Sign in with the credentials your admin gave you.</p>
+               app.js rewrites it on every mode change. The words standing here are the
+               entry screen's — the screen this card opens on — and they are the same
+               words i18n.js holds under auth.hint for the same reason. -->
+          <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">We’ll email you a 6-digit sign-in code.</p>
 
-          <!-- QUICK UNLOCK: shown only when this device holds a registered token
-               (ipb_unlock). The fingerprint and the pattern sit on ONE row because
-               they are the same decision — open this device the way I set it up —
-               and the email door is the step BELOW them, not a third option beside
-               them. The way back is `#auth-quick-in`, on the email screen itself, so
-               the two doors point at each other. -->
-          <div id="auth-quick" style="display:none">
-            <div class="quick-row">
-              <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
-              <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
-            </div>
-            <button type="button" id="auth-quick-out" class="link-btn" data-i18n="auth.useEmailOtp">Use email (OTP) based login method</button>
-          </div>
+          <!-- ── ALL FOUR METHODS, ON ONE SCREEN ──
+               The owner's instruction, 2026-10-08: "instead of having two screens,
+               one for email based login and another for other options such as
+               fingerprint etc, can we not have one?" So the entry screen is the
+               whole door. It offers, top to bottom:
+                 · Sign in with Indrones email — the Google door, a NAVIGATION, not a
+                   background call: clicking it leaves the page for about a second and
+                   comes straight back with a one-time code. See app.js's GOOGLE
+                   SIGN-IN block for why that is the only way it can work. It is a
+                   plain `.btn` on purpose — the owner asked for it in the same
+                   yellow as the rest, and there is no Google mark on it any more
+                   because it no longer says Google.
+                 · the emailed code — type an address, press "Send me a code"
+                 · the fingerprint — `#auth-unlock-btn`
+                 · the pattern — `#auth-pattern-link`, which opens the canvas in place
+               The quick-unlock pair lives in `#auth-quick`, and app.js shows that
+               block on THIS screen and not only on a separate one. -->
 
-          <!-- The pattern canvas, for the unlock gesture AND the two-draw setup. -->
-          <div id="auth-pattern" style="display:none">
-            <p id="pattern-title" class="auth-hint"></p>
-            <canvas id="pattern-canvas" width="240" height="240"></canvas>
-          </div>
+          <!-- Shown only when a second deployment is configured (CONFIG.SSO_URL). -->
+          <button type="button" class="btn" id="auth-google-btn" style="display:none" data-i18n="auth.sso">Sign in with Indrones email</button>
+          <div class="auth-or" id="auth-or" style="display:none"><span data-i18n="auth.or">or get a code by email</span></div>
 
-          <!-- The Google door, shown when a second deployment is configured. It is
-               FIRST because for most people on most days it is the whole sign-in: one
-               click, no password and no emailed code. The password form below is not a
-               lesser fallback — it is the door for a shared machine with no Google
-               session, and the only door for an account outside the company domain.
-
-               It is a NAVIGATION, not a background call: clicking it leaves the page
-               for about a second and comes straight back with a one-time code. See
-               app.js's GOOGLE SIGN-IN block for why that is the only way it can work. -->
-          <button type="button" class="btn btn-google" id="auth-google-btn" style="display:none">
-            <span class="google-mark" aria-hidden="true"></span>Sign in with Google
-          </button>
-          <div class="auth-or" id="auth-or" style="display:none"><span>or use your email</span></div>
           <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required data-i18n-placeholder="auth.email" />
           <div class="pw-wrap">
             <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required data-i18n-placeholder="auth.password" />
@@ -275,7 +266,39 @@
             </button>
           </div>
           <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
+
+          <!-- QUICK UNLOCK: shown only when this device holds a registered token
+               (ipb_unlock), and shown on the entry screen itself — that is the merge
+               above. The fingerprint and the pattern sit on ONE row because they are
+               the same decision: open this device the way I set it up. On the
+               pattern screen `#auth-quick-out` is the way back to the email form,
+               which is the only screen it is needed on, because everywhere else the
+               form is already in front of you. -->
+          <div id="auth-quick" style="display:none">
+            <div class="quick-row">
+              <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
+              <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
+            </div>
+            <button type="button" id="auth-quick-out" class="link-btn" data-i18n="auth.useEmailOtp">Use email (OTP) based login method</button>
+          </div>
+
+          <!-- The pattern canvas, for the unlock gesture AND the two-draw setup.
+               `aria-live` because this line is not only an instruction any more: it
+               is where "Checking your pattern…" and "That pattern did not match" are
+               said, and a status nobody can hear is a status only half given. -->
+          <div id="auth-pattern" style="display:none">
+            <p id="pattern-title" class="auth-hint" aria-live="polite"></p>
+            <canvas id="pattern-canvas" width="240" height="240"></canvas>
+          </div>
+
           <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
+          <!-- THE OPT-IN DOOR. It is a small link, not a button, because the daily
+               sign-in is the emailed code and a password is the exception. It exists
+               for exactly two accounts: a shared machine with no Google session, and
+               an account still on the password the admin issued — which is the one
+               account that CANNOT get in the other way round, and which until this
+               link existed had no way in from this screen at all. -->
+          <button type="button" id="auth-pwd-link" class="link-btn link-sm" data-i18n="auth.usePassword">Sign in with a password</button>
 
           <!-- Sign-in step 2: the code emailed for the working day. Its own input
                rather than a share of #auth-code, because reset and sign-in can be
@@ -315,6 +338,11 @@
                registered unlock to return to — offering a door that opens onto
                nothing is worse than not offering it.
 
+               It is now offered on the steps where the quick-unlock pair is NOT
+               already on screen — the code and the two recovery steps — and no
+               longer on the entry screen, where the pair itself is visible and a
+               second control for the same two doors would be noise.
+
                `#auth-back-link` is text-only now, and smaller: it was a boxed button
                competing for attention with the field above it, when all it does is
                undo the last tap. -->
@@ -330,11 +358,19 @@
 
            It SIGNS IN, here, because the owner asked for one page with two doors on
            it — and a door that hands you to another page to be opened is not one
-           door. The form is deliberately small: an email, a password, or an emailed
+           door. The form is deliberately small: an email, a button that emails a
            code, and nothing else. The prose that used to be here ("Customer Space",
            the two-line pitch, the invitation blurb) is gone on the owner's own
            instruction: the role chip says which door this is, and the common head
            above already says whose app it is.
+
+           THERE IS NO PASSWORD FIELD, on the owner's instruction of 2026-10-08: "for
+           customers as well, there is no password method … it is only email OTP
+           based login." The address IS the credential and the code is the proof,
+           which is also what makes this card the same shape as the employee's: one
+           field, one button, one "Forgot password?" under them. The button is the
+           SAME control as the employee's — same class, same position, same words —
+           while the flow behind it is not, for the reason given at it below.
 
            Everything it does is done by the SAME backend action the staff door uses.
            `login` with no password IS the OTP door (backend.gs's `doLoginPassword`
@@ -355,26 +391,23 @@
         </div>
 
         <form id="cust-form" autocomplete="on">
-          <p class="auth-hint" id="cust-hint" data-i18n="cust.hint">Sign in with the email address we invited you at.</p>
+          <p class="auth-hint" id="cust-hint" data-i18n="cust.hint">Login to I-PASSBOOK, your after-sales companion.</p>
           <input class="form-input" type="email" id="cust-email" placeholder="you@company.com" autocomplete="email" required data-i18n-placeholder="cust.email" />
-          <div class="pw-wrap">
-            <!-- NOT `required`, unlike the staff password field: the OTP door below
-                 is a real door, and a field that has to be filled before a
-                 passwordless sign-in can be used is not passwordless. -->
-            <input class="form-input" type="password" id="cust-password" placeholder="Password" autocomplete="current-password" data-i18n-placeholder="auth.password" />
-            <button type="button" class="pw-toggle" id="eye-cust-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
-              <span class="pw-toggle-icon" aria-hidden="true"></span>
-            </button>
-          </div>
           <button type="submit" class="btn" id="cust-signin-btn">Sign in</button>
-          <!-- A real LINK, not a button with a handler: choosing a password is a
-               flow customer.html already has built and tested (forgotPassword, then
-               resetPassword, then sign in), and reproducing it here would be a
-               second copy of one flow, free to drift from the first. So this hands
-               the customer to the page that owns it, rather than rebuilding it. -->
-          <a class="link-btn link-sm" id="cust-forgot-link" href="customer.html#signin">First time here, or forgot your password?</a>
+          <!-- THE SAME CONTROL AS THE EMPLOYEE'S, deliberately: same class, same
+               full-width bar, same words, same place under the primary button. The
+               owner asked for the two cards to read alike, and a recovery entry that
+               looked different on each card would be the first thing to break that.
 
-          <button type="button" id="cust-otp-link" class="link-btn" data-i18n="cust.useOtp">Use email (OTP) based login method</button>
+               What is behind it is NOT the same, and that is honest rather than
+               lazy. The employee's runs in this card (forgotPassword, then
+               resetPassword) because an employee can end up with a password. A
+               customer's reset is a flow customer.html already owns and tests, and
+               this card has no password field left to set one from — so it is a real
+               LINK to the page that owns it rather than a second copy of one flow,
+               free to drift from the first. -->
+          <a class="link-btn" id="cust-forgot-link" href="customer.html#signin" data-i18n="cust.forgot">Forgot password?</a>
+
           <div id="cust-code-wrap" style="display:none">
             <p id="cust-code-note" class="auth-hint"></p>
             <input class="form-input" type="text" id="cust-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"

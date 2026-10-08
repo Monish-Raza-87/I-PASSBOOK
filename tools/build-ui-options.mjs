@@ -161,30 +161,29 @@ const screenSignIn = () => `
         <header class="landing-head">
           <span class="landing-mark" aria-hidden="true"></span>
           <div class="landing-brand">I-PASSBOOK</div>
-          <p class="landing-full">Indrones Product After-Sales Summary Book</p>
+          <p class="landing-full">INDRONES FROM I &middot; PRODUCT FROM P &middot; AFTER FROM A &middot; SALES FROM S &middot; SUMMARY FROM S &middot; BOOK AS IT IS</p>
         </header>
         <div class="doors">
           <div class="glass-card">
             <p class="door-role">Employee</p>
-            <p class="auth-hint">Sign in with the credentials your admin gave you.</p>
+            <p class="auth-hint">Sign in with your email, or unlock this device.</p>
+            <button type="button" class="btn">Sign in with Indrones email</button>
+            <div class="auth-or"><span>or get a code by email</span></div>
+            <input class="form-input" type="email" value="raza@indrones.com" readonly />
+            <button type="button" class="btn">Send me a code</button>
             <div class="quick-row">
               <button type="button" class="btn btn-secondary">Unlock with fingerprint</button>
               <button type="button" class="btn btn-ghost">Use pattern</button>
             </div>
-            <button type="button" class="link-btn">Use email (OTP) based login method</button>
-            <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
-            <div class="auth-or"><span>or use your email</span></div>
-            <input class="form-input" type="email" value="raza@indrones.com" readonly />
-            <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
-            <button type="button" class="btn">Sign in</button>
+            <button type="button" class="link-btn">Forgot password?</button>
+            <button type="button" class="link-btn link-sm">Sign in with a password</button>
           </div>
           <div class="glass-card">
             <p class="door-role">Customer</p>
-            <p class="auth-hint">Sign in with the email address we invited you at.</p>
+            <p class="auth-hint">Login to I-PASSBOOK, your after-sales companion.</p>
             <input class="form-input" type="email" value="you@company.com" readonly />
-            <input class="form-input" type="password" value="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" readonly />
             <button type="button" class="btn">Sign in</button>
-            <button type="button" class="link-btn">Use email (OTP) based login method</button>
+            <button type="button" class="link-btn">Forgot password?</button>
           </div>
         </div>
         <p class="landing-foot">
@@ -624,10 +623,9 @@ const OPTIONS = [
 .pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-base); }
 .pv-app .form-label { font-size: var(--text-xs); color: var(--ink-gray-7); font-weight: var(--weight-medium); }
 .pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ink-gray-9); border-radius: var(--radius-2); background: var(--ink-gray-9); color: var(--surface-base); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
+.pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-2); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
 .pv-app .btn-ghost { border-color: transparent; }
 .pv-app .link-btn { border: 0; background: none; color: var(--ink-gray-7); font-size: var(--text-xs); text-decoration: underline; }
-.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.4rem; border: 1px solid var(--outline-gray-3); border-radius: 50%; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); }
 .pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
 
@@ -764,10 +762,9 @@ const OPTIONS = [
 .pv-app .form-input { padding: 0.45rem 0.6rem; border: 1px solid var(--outline-gray-8); background: var(--surface-gray-10); color: var(--ink-gray-1); font-size: var(--text-base); }
 .pv-app .form-label { font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-4); }
 .pv-app .btn { padding: 0.45rem 0.9rem; border: 1px solid var(--ind-yellow); background: var(--ind-yellow); color: var(--ind-ink-on-yellow); font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; font-weight: var(--weight-semibold); }
-.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-8); background: transparent; color: var(--ink-gray-2); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
+.pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.4rem 0.8rem; border: 1px solid var(--outline-gray-8); background: transparent; color: var(--ink-gray-2); font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; }
 .pv-app .btn-ghost { border-color: var(--outline-gray-9); color: var(--ink-gray-4); }
 .pv-app .link-btn { border: 0; background: none; color: var(--ink-gray-5); font-size: var(--text-xs); text-decoration: underline; }
-.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.4rem; border: 1px solid var(--outline-gray-7); font-family: var(--font-mono); }
 .pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-family: var(--font-mono); font-size: var(--text-2xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-gray-6); }
 .pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-9); }
 
@@ -893,10 +890,9 @@ const OPTIONS = [
 .pv-app .form-input { padding: 0.55rem 0.75rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-9); font-size: var(--text-base); }
 .pv-app .form-label { font-size: var(--text-xs); color: var(--ink-gray-7); font-weight: var(--weight-medium); }
 .pv-app .btn { padding: 0.55rem 1rem; border: 1px solid var(--btn-solid-bg); border-radius: var(--radius-4); background: var(--btn-solid-bg); color: var(--btn-solid-fg); font-size: var(--text-sm); font-weight: var(--weight-medium); }
-.pv-app .btn-google, .pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
+.pv-app .btn-secondary, .pv-app .btn-ghost { padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-4); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-sm); }
 .pv-app .btn-ghost { border-color: transparent; background: transparent; }
 .pv-app .link-btn { border: 0; background: none; color: var(--accent); font-size: var(--text-xs); }
-.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.45rem; border: 1px solid var(--outline-gray-3); border-radius: 50%; font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); }
 .pv-app .auth-or::before, .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }
 
@@ -1083,7 +1079,6 @@ const OPTIONS = [
 /* ── buttons: 40px, because that is Tabler's own height AND the app's tap rule,
    so the densest option here is not allowed to make the controls small. ── */
 .pv-app .btn { min-height: 40px; padding: 0.5rem 1rem; border: 1px solid var(--btn-solid-bg); border-radius: var(--radius-3); background: var(--btn-solid-bg); color: var(--btn-solid-fg); font-size: var(--text-base); font-weight: var(--weight-medium); }
-.pv-app .btn-google,
 .pv-app .btn-secondary { min-height: 40px; padding: 0.5rem 0.9rem; border: 1px solid var(--outline-gray-2); border-radius: var(--radius-3); background: var(--surface-base); color: var(--ink-gray-8); font-size: var(--text-base); }
 .pv-app .btn-ghost { min-height: 40px; padding: 0.5rem 0.8rem; border: 1px solid transparent; border-radius: var(--radius-3); background: transparent; color: var(--ink-gray-7); font-size: var(--text-base); }
 .pv-app .btn-ghost:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
@@ -1099,7 +1094,6 @@ const OPTIONS = [
 /* A label is a label, not a sentence: 11px uppercase and tracked, so it can
    never be mistaken for the value sitting under it. */
 .pv-app .form-label { color: var(--ink-gray-6); font-size: var(--text-2xs); font-weight: var(--weight-medium); letter-spacing: 0.04em; text-transform: uppercase; }
-.pv-app .google-mark { display: inline-grid; place-items: center; width: 16px; height: 16px; margin-right: 0.45rem; border: 1px solid var(--outline-gray-3); border-radius: var(--radius-1); font-size: var(--text-2xs); font-weight: var(--weight-semibold); }
 .pv-app .auth-or { display: flex; align-items: center; gap: 0.5rem; font-size: var(--text-2xs); color: var(--ink-gray-5); letter-spacing: 0.04em; text-transform: uppercase; }
 .pv-app .auth-or::before,
 .pv-app .auth-or::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--outline-gray-1); }

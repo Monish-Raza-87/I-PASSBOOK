@@ -243,8 +243,18 @@ ok('and no blur or darkening rule is left in the splash styles',
 // by the same words turning up in a card later.
 const landingHead = (html.match(/<header class="landing-head">[\s\S]*?<div class="doors">/) || [''])[0];
 ok('the product name moved to the common head, above both doors',
-  landingHead.length > 0 && /Indrones Product After-Sales Summary Book/.test(landingHead),
+  landingHead.length > 0 && /INDRONES FROM I/.test(landingHead) && /BOOK AS IT IS/.test(landingHead),
   landingHead.replace(/\s+/g, ' ').slice(0, 160));
+// The sentence that used to stand there, asserted as a string that is GONE. It was
+// "Indrones Product After-Sales Summary Book" — the same information with the
+// mechanism thrown away, and the owner replaced it on 2026-10-08 with the name's own
+// expansion, one term per letter of I-PASSBOOK. The check is on the head and on the
+// language table's VALUE, not on the whole repo: i18n.js's comment quotes the old line
+// on purpose, and index.html's <meta name="description"> is a sentence for a search
+// engine rather than a name on a screen.
+ok('...and the strapline it replaced is gone from the head and from the language table',
+  !/Indrones Product After-Sales Summary Book/.test(landingHead) &&
+  !/'app\.fullName':\s*'Indrones Product After-Sales Summary Book'/.test(read('../i18n.js')));
 
 // The topbar's chrome must not dress the landing head, and it did. base.css's
 // topbar rule was a bare `header` element selector, so `<header class="landing-head">`
@@ -748,15 +758,88 @@ head('the landing page offers two doors, and names them');
   ok('...with the mark, once, and no second copy inside either card',
     (headBlock.match(/class="landing-mark"/g) || []).length === 1 &&
     !/auth-logo|landing-mark/.test(doorsBlock));
-  // The cursive flourish: an SVG stroke in the head, decorative, and animated by a
-  // dash offset against the normalised path — not by JS and not by a measured length.
-  ok('...and the cursive stroke is inline SVG, decorative, and dash-animated',
-    /<svg class="brand-stroke"[^>]*aria-hidden="true"/.test(headBlock) &&
-    /class="brand-stroke-path"[^>]*pathLength="1"/.test(headBlock) &&
-    /@keyframes brandWrite/.test(read('../base.css')) &&
-    /stroke-dasharray:\s*1/.test(read('../base.css')));
-  ok('...and the loop stops for anyone who has asked for less motion',
-    /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.brand-stroke-path\s*\{[^}]*animation:\s*none/.test(read('../base.css')));
+  // ── The head TYPES ITSELF, and then spells the name out ─────────────────────
+  // The owner, 2026-10-08: "I-PASSBOOK itself in-loop animation where I-PASSBOOK
+  // appears as if being typed and then in below line … INDRONES ORIGINATES FROM I,
+  // PRODUCT ORIGINATES FROM P …". This pair of assertions replaces the cursive
+  // stroke's, and the stroke is asserted GONE rather than merely un-asserted.
+  const baseCssRaw = read('../base.css');
+  ok('...and the cursive stroke and its dash animation are gone',
+    !/brand-stroke/.test(html) && !/brandWrite/.test(baseCssRaw) &&
+    !/stroke-dasharray/.test(baseCssRaw));
+  // The words are the MARKUP's, and that is what makes the animation possible: app.js
+  // splits text that is already on the page. A head that shipped empty and filled
+  // itself in from script would leave a JS-off reader, a screen reader and a
+  // reduced-motion visitor with nothing at all.
+  ok('...and the finished words are in the markup, not typed in by script',
+    /<h1 class="landing-brand"[^>]*>I-PASSBOOK<\/h1>/.test(headBlock) &&
+    /data-i18n="app\.fullName"[^>]*>INDRONES FROM I/.test(headBlock));
+  // `display`, NOT `opacity`. Hiding an untipped letter with opacity leaves it
+  // occupying its own width, so the wordmark would be full width from the first frame
+  // and the letters would fade in — a fade, never a type. This is the one declaration
+  // that decides which of the two effects the owner gets.
+  ok('...and an untipped letter is hidden with display, so the word grows as it is typed',
+    /\.bt-lt \{ display: none; \}/.test(baseCssRaw) &&
+    /\.bt-lt\.is-on \{ display: inline; \}/.test(baseCssRaw) &&
+    !/\.bt-lt[^{]*\{[^}]*opacity/.test(baseCssRaw));
+  ok('...and the caret follows the last letter, with no measured position',
+    /\.bt-caret\.is-on \{ display: inline-block; animation: btBlink/.test(baseCssRaw));
+  // The reduced-motion block is not a courtesy: if app.js never runs or dies part-way,
+  // this paints the whole sentence anyway, and the markup has it to paint.
+  ok('...and every part is shown, with teeth, for anyone who has asked for less motion',
+    /@media \(prefers-reduced-motion: reduce\) \{[\s\S]{0,200}?\.bt-lt, \.landing-full \.bt-term \{ display: inline !important; \}/.test(baseCssRaw) &&
+    /prefersReducedMotion\(\)/.test(appJs));
+  // …and the timings are NOT in the stylesheet. Half a chain in each file is a chain
+  // nobody can change.
+  ok('...and the sequence lives in one place, in app.js',
+    /function buildBrandTyping\(\)/.test(appJs) &&
+    /function startBrandTyping\(\)/.test(appJs) &&
+    /function stopBrandTyping\(\)/.test(appJs) &&
+    /BT_LETTER_MS/.test(appJs) &&
+    !/animation-duration/.test((baseCssRaw.match(/\.bt-[^{]*\{[^}]*\}/g) || []).join('\n')));
+  // The loop is started when the landing screen is actually put on screen and stopped
+  // when it is taken away — NOT at parse time. The intro covers the screen until it
+  // finishes, so a chain started at parse time would be seconds into its loop before
+  // anybody could see it.
+  ok('...and it runs only while the sign-in screen is the one on screen',
+    /function showAuth\(\) \{[\s\S]{0,900}?startBrandTyping\(\)/.test(appJs) &&
+    /function showApp\(\) \{[\s\S]{0,900}?stopBrandTyping\(\)/.test(appJs));
+  // ── …and the letters DO NOT SLIDE ───────────────────────────────────────────
+  // Hiding an untipped letter is necessary but not sufficient, and the first cut of
+  // this shipped with only that half: a heading centred on whatever is on screen is
+  // re-laid-out on every keystroke, so every letter already placed drifts outward as
+  // the next one arrives. Measured in a real browser on 2026-10-08: the finished word
+  // is 155px wide, so the "I" travelled 79px to the left over the first second of every
+  // loop — an unfolding, not a typewriter, and not what "appears as if being typed"
+  // means. The fix is a box reserved to the finished word's width with the text
+  // left-aligned inside it.
+  //
+  // The three parts are asserted together because any one alone does nothing: without
+  // the stamp the box shrinks and the word re-centres every keystroke; without the
+  // left alignment a fixed box just holds a centred word in the middle of itself. Same
+  // probe afterwards: the "I" moved 523 → 521, i.e. 2px of sub-pixel rounding.
+  ok('...and the word is typed into a box of the FINISHED width, so no letter slides',
+    /function reserveBrandBox\(\)/.test(appJs) &&
+    /if \(width > 0\) box\.style\.minWidth = Math\.ceil\(width\) \+ 'px'/.test(appJs) &&
+    /\.landing-wordmark \{[^}]*text-align: left/.test(baseCssRaw));
+  // The reserve must sit BEFORE startBrandTyping()'s `_btRun` guard. Behind it, a
+  // sign-out/sign-in would find the chain already looping and skip the measure — and
+  // the second visit to the landing page is exactly when a zero-width first measure
+  // (the screen not yet laid out) would still need repairing.
+  ok('...measured on every entry to the landing screen, not only the first',
+    /reserveBrandBox\(\);\s*[\s\S]{0,400}?if \(_btRun\) return;/.test(appJs));
+  // ── The two cards are sized by what is IN them, not by each other ───────────
+  // "I would be intested to see if both boxes can appear similar in appearance in
+  // terms of placement of elements." They do: same chip, same hint line, same field,
+  // same primary, same "Forgot password?" control, in that order. What they do NOT
+  // have is the same number of controls — six against three — and the grid's default
+  // `align-items: stretch` therefore handed the customer card a ~155px blank hole
+  // below its last control, measured on the rendered page on 2026-10-08. A void that
+  // size reads as a control that failed to load, which is the opposite of the
+  // reassurance he was asking for. `start` is what removes it.
+  ok('...and each door is the height of its own contents, with no blank hole in the shorter one',
+    /\.doors \{[\s\S]{0,1200}?align-items: start;/.test(baseCssRaw) &&
+    !/\.doors \{[^}]*align-items: stretch/.test(baseCssRaw));
 
   // ── The customer door SIGNS IN, here ───────────────────────────────────────
   // REVERSED ON THE OWNER'S INSTRUCTION, 2026-10-08. This used to assert the exact
@@ -769,12 +852,43 @@ head('the landing page offers two doors, and names them');
   const custCard = (doorsBlock.match(/<section class="door [^"]*" id="door-customer"[\s\S]*?<\/section>/) || [''])[0];
   ok('the customer door carries its own sign-in form',
     /<form id="cust-form"/.test(custCard));
-  ok('...offering email, a password, and the named (OTP) method',
-    /id="cust-email"/.test(custCard) && /id="cust-password"/.test(custCard) &&
-    /id="cust-otp-link"[^>]*data-i18n="cust\.useOtp"/.test(custCard));
-  ok('...with the password field NOT required, or the OTP door is unreachable',
-    /<input class="form-input" type="password" id="cust-password"[^>]*\/>/.test(custCard) &&
-    !/id="cust-password"[^>]*required/.test(custCard));
+  // NO PASSWORD FIELD, and the two controls it shared a card with are gone with it.
+  // The owner, 2026-10-08: "for customers as well, there is no password method like of
+  // employee's, it is only email OTP based login." So this card is now one field, one
+  // button, one recovery link — which is also what makes it the same SHAPE as the
+  // employee's, which is the other half of what he asked for.
+  ok('...offering the email address and the emailed code, and no password at all',
+    /id="cust-email"/.test(custCard) &&
+    !/id="cust-password"/.test(custCard) &&
+    !/id="cust-otp-link"/.test(custCard) &&
+    /id="cust-signin-btn"/.test(custCard) && /id="cust-code"/.test(custCard));
+  // …and the app.js side of the same decision: one stage-1 request, and it is the
+  // passwordless one. `password: ''` is not an empty password — the backend reads the
+  // ABSENCE of a real one as the OTP door — so a revert to a password route would have
+  // to change this line, and would fail here.
+  ok('...and its one request is the passwordless door, with no password branch left',
+    /customerAuth\('login', \{ email: email, password: '' \}\)/.test(appJs) &&
+    !/function submitCustomerPassword/.test(appJs) &&
+    !/cust-password/.test(appJs));
+  // THE SAME CONTROL AS THE EMPLOYEE'S: same class, same words, same place under the
+  // primary button. The owner asked for it by name — "instead we can have same forgot
+  // password button in customer box as in employee's" — and a recovery entry that
+  // looked different on each card would be the first thing to break the two reading
+  // alike. What is BEHIND it differs on purpose, and that is the next assertion.
+  ok('...with the same "Forgot password?" control the employee card carries',
+    /<a class="link-btn" id="cust-forgot-link" href="customer\.html#signin" data-i18n="cust\.forgot">Forgot password\?<\/a>/.test(custCard) &&
+    /<button type="button" id="auth-forgot-link" class="link-btn">Forgot password\?<\/button>/.test(doorsBlock));
+  ok('...which hands over to the page that owns a customer\'s reset, rather than a second copy of it',
+    /id="cust-forgot-link" href="customer\.html#signin"/.test(custCard));
+  ok('...and its hint is the owner\'s own line, in the markup and in the table',
+    /data-i18n="cust\.hint"[^>]*>Login to I-PASSBOOK, your after-sales companion\.<\/p>/.test(custCard) &&
+    /'cust\.hint':\s*'Login to I-PASSBOOK, your after-sales companion\.'/.test(read('../i18n.js')));
+  // The two strings the owner struck out, asserted as GONE. Prose comes back by
+  // accretion, and both of these were sentences somebody once had a good reason for.
+  ok('...and the invitation sentence and its "first time here" twin are both gone',
+    !/email address we invited you at/.test(html) &&
+    !/First time here/.test(html) &&
+    !/cust\.useOtp/.test(html) && !/cust\.useOtp/.test(read('../i18n.js')));
   // The prose the owner asked to be removed — "just employee and just customer on
   // each boxes". Asserted as an absence, because prose comes back by accretion.
   ok('...and the marketing copy is gone from the card',
@@ -817,7 +931,7 @@ head('the landing page offers two doors, and names them');
   ok('...and the email method has a way BACK to quick unlock',
     /id="auth-quick-in"[^>]*data-i18n="auth\.useQuick"/.test(empForm));
   ok('...offered only against a registered record, never as a door onto nothing',
-    /set\('auth-quick-in',\s*canQuick && \(mode === 'email' \|\| mode === 'login'\)\)/.test(appJs) &&
+    /set\('auth-quick-in',\s*canQuick && \(mode === 'otp' \|\| mode === 'forgot' \|\| mode === 'reset'\)\)/.test(appJs) &&
     /const canQuick = .*qIn\.credentialId/.test(appJs));
   // The fingerprint and the pattern are ONE row, and the email door is the step
   // BELOW them rather than a third option beside them.

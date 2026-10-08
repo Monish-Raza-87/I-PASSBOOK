@@ -87,15 +87,31 @@ r.head('drawing a pattern with no pattern set explains itself');
 // nothing here invents an API the browser lacks; the drawing itself is not what
 // these assertions are about, which is which BRANCH runs with which record.
 function canvasEl() {
-  return {
+  const el = {
     width: 240, height: 240, dataset: {}, style: {},
     getContext: () => new Proxy({}, { get: () => () => {}, set: () => true }),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 240, height: 240 }),
     addEventListener() {}, setPointerCapture() {},
   };
+  // `classList` is not an invention: it is on every real element, and app.js now
+  // writes `.is-busy` on the canvas for the whole of a verification (the visible half
+  // of the "nothing shows on screen on what is happening" fix). The stub is a poor
+  // stand-in for an element, so it is given the one member the app has started using
+  // rather than the app being made defensive about a browser API that always exists.
+  const set = new Set();
+  el.classList = {
+    add:    (n) => { set.add(n); },
+    remove: (n) => { set.delete(n); },
+    toggle: (n, on) => { (on === undefined ? !set.has(n) : !!on) ? set.add(n) : set.delete(n); },
+    contains: (n) => set.has(n),
+  };
+  return el;
 }
 
-function drive(record, counters) {
+// `fetchImpl` is optional and defaults to the suite's standing "no network in test".
+// The busy-state tests pass a fetch that is deliberately slow instead — the one thing
+// a synchronous stub cannot express.
+function drive(record, counters, fetchImpl) {
   const T = loadApp(`
     submitUnlock, saveUnlock, loadUnlock, clearUnlock, localStorage, UNLOCK_KEY,
     setAuthMode, patternHashOf,
@@ -107,7 +123,7 @@ function drive(record, counters) {
     // only the genuinely non-V8 ones). webcrypto is the platform's own WebCrypto,
     // not a stand-in, so the SHA-256 the app computes here is the real one.
     globals: { crypto: webcrypto, TextEncoder },
-    fetch: (url, init) => { counters.calls++; counters.last = init && init.body; return Promise.reject(new Error('no network in test')); },
+    fetch: fetchImpl || ((url, init) => { counters.calls++; counters.last = init && init.body; return Promise.reject(new Error('no network in test')); }),
   });
   T.byId.set('pattern-canvas', canvasEl());
   if (record) T.T.saveUnlock(record);
@@ -159,6 +175,69 @@ r.ok('the mode does not change', W.T.getMode() === 'pattern', W.T.getMode());
 r.ok('the message is the wrong-pattern one', /Wrong pattern/.test(errorText(W.byId)), errorText(W.byId));
 r.ok('...and the token never reaches the server — a wrong gesture cannot be a guess',
   c4.calls === 0, c4.calls);
+
+// ── 4b. The wait after a draw says what it is doing, and refuses a second draw ─────
+// The owner, 2026-10-08: "pattern functionality works ambigously, as in once we enter
+// pattern it takes a long halt and meanwhile nothing shows on screen on what is
+// happening and I can enter as many times pattern as I want over that." Both halves of
+// that sentence are one bug: the canvas went on accepting pointer input and drawing for
+// the whole of a round trip that is ~1.8s of store hops, and nothing on the card changed
+// while it did. So the fix is a busy flag the canvas reads on the way IN and that every
+// exit path clears on the way OUT — and the second half is the one that bites, because a
+// flag left set is a canvas that never draws again.
+//
+const busyCanvas = (byId) => byId.get('pattern-canvas');
+const titleOf = (byId) => ((byId.get('pattern-title') || {}).textContent || '');
+const isBusy = (byId) => busyCanvas(byId).classList.contains('is-busy') === true;
+// "During the wait" has to be a state this suite can STAND INSIDE rather than a race
+// it tries to win: the pattern is hashed with real WebCrypto before the request goes
+// out, so there is an await in front of the flag and a busy flag read synchronously
+// after the call would still be false. Instead the request is held open — a fetch that
+// never settles — and the test waits for the flag to appear. Nothing is invented: this
+// is the one promise the app would have got from a backend that is slow to answer.
+const settle = async (fn, tries = 200) => {
+  for (let i = 0; i < tries; i++) { if (fn()) return true; await new Promise(res => setTimeout(res, 0)); }
+  return false;
+};
+
+let cBusy = { calls: 0 };
+const BUSY = drive(Object.assign({}, FP_ONLY, { patternHash: hashOf([1, 2, 3, 4]) }), cBusy,
+                   () => new Promise(() => {}));
+BUSY.T.setAuthMode('pattern');
+const pending = BUSY.T.submitUnlock('pattern', [1, 2, 3, 4]);
+r.ok('the canvas locks itself for the whole of the wait',
+  await settle(() => isBusy(BUSY.byId)), { busy: isBusy(BUSY.byId) });
+r.ok('...and the line under it stops asking for a pattern and says what is happening',
+  titleOf(BUSY.byId) === 'Checking your pattern…', titleOf(BUSY.byId));
+r.ok('...and it is the same canvas, not a second one drawn over it',
+  busyCanvas(BUSY.byId) === BUSY.byId.get('pattern-canvas'));
+pending.catch(() => {});
+
+// Both ways OUT clear it. The failure path first.
+let cFail = { calls: 0 };
+const FAIL = drive(Object.assign({}, FP_ONLY, { patternHash: hashOf([1, 2, 3, 4]) }), cFail);
+FAIL.T.setAuthMode('pattern');
+await FAIL.T.submitUnlock('pattern', [1, 2, 3, 4]);
+// submitUnlock() deliberately does NOT await the answer — it hands the request off
+// and returns — so the flag clears in the promise's own turn, one turn after that
+// call. Polling for it is what keeps this assertion about the CLEARING rather than
+// about how many microtasks the chain happens to take.
+r.ok('a backend that cannot be reached leaves the canvas drawable again',
+  await settle(() => !isBusy(FAIL.byId)) &&
+  titleOf(FAIL.byId) === 'Draw your pattern to unlock.',
+  isBusy(FAIL.byId) + ' / ' + titleOf(FAIL.byId));
+
+// And the way out that never reaches the backend at all — the flag is set after the
+// hash, so a wrong draw that returns before the request is the one path that could
+// skip the busy state entirely and leave the canvas looking stuck if it ever moved.
+let cWrong = { calls: 0 };
+const WRONG = drive(Object.assign({}, FP_ONLY, { patternHash: hashOf([1, 2, 3, 4]) }), cWrong);
+WRONG.T.setAuthMode('pattern');
+await WRONG.T.submitUnlock('pattern', [1, 2, 3, 5]);
+r.ok('a wrong draw never reaches the backend, and leaves the canvas drawable too',
+  !isBusy(WRONG.byId) && titleOf(WRONG.byId) === 'Draw your pattern to unlock.' &&
+  cWrong.calls === 0,
+  isBusy(WRONG.byId) + ' / calls ' + cWrong.calls);
 
 // And the honest draw gets through to the server, carrying the device credential.
 // This is the half that proves the two tests above are not passing because the

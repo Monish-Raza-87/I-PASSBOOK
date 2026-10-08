@@ -2257,6 +2257,15 @@
   touch-action: none;      /* the draw is a pointer gesture, not a page scroll */
   border-radius: 12px;
 }
+/* WHILE A PATTERN IS BEING CHECKED (2026-10-08). app.js puts `.is-busy` on the canvas
+   for the whole of a verification and refuses `pointerdown` on it, while the line
+   above it stops being the instruction and becomes the status. This is the visible
+   half of that pair, and it is not decoration: without it the canvas looks exactly as
+   drawable as it did a moment ago, and a gesture that is silently ignored is the same
+   complaint the fix was written for — "nothing shows on screen on what is happening".
+   `progress` rather than `wait`: the pointer may move, the device is simply not
+   taking a new pattern until this one has an answer. */
+#pattern-canvas.is-busy { cursor: progress; opacity: 0.5; }
 .pattern-setup-overlay {
   position: fixed; inset: 0; z-index: 90;
   display: flex; align-items: center; justify-content: center;

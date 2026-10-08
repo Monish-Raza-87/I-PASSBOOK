@@ -1,9 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// I-PASSBOOK — THE ENGLISH LANGUAGE LAYER
+// I-PASSBOOK — THE LANGUAGE LAYER (ENGLISH AND HINDI)
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// Only English ships. This file exists so that a SECOND language is later a data
-// file rather than a refactor, and that is the whole of its purpose today.
+// TWO languages ship, and the second one arrived the way the first paragraph of this
+// file always said it would: as a DATA TABLE, with no change to any call site. `STRINGS`
+// is English and is also the floor; `TABLES.hi` is Hindi. The owner asked for exactly
+// this pair on 2026-10-08 — *"These throretical things has to be in hindi and english.
+// even in my previous command I said about urdu. Keep only hindi and english"* — so
+// Urdu is GONE from LANGS, not merely untranslated. A language that is offered and then
+// does nothing is worse than a language that is not offered.
 //
 // A plain script, in the same style as dataflash.js, and for the same reason:
 // app.js is an end-of-body plain script with no module system, so anything it
@@ -15,8 +20,17 @@
 //
 // The static chrome (nav, headings, buttons, placeholders), the workflow status
 // words, and every string the board and the customer door add. NOT the ~10,000
-// lines of section forms and validation copy in app.js — that sweep is staged, and
-// until it happens a second language would leave those in English.
+// lines of section forms and validation copy in app.js — that sweep has not
+// happened, and IT IS THE SENTENCE THAT MATTERS TO A HINDI READER: choosing हिन्दी
+// today translates the frame and leaves the body English.
+//
+// That is a real half-translation and it should be described that way rather than
+// dressed up. It is also the honest shape of the work: the layer's job was to make a
+// second language a data file, and that is now true and proven by the second table
+// existing. Filling the remaining sections is the sweep, not a rewrite — but it is a
+// sweep, and until it is done the app in Hindi reads as an Indian office's app reads,
+// English terms inside a Hindi frame, which is a shape every reader here recognises
+// rather than one they will call broken.
 //
 // ── Why the English text ALSO stays in index.html ────────────────────────────
 //
@@ -147,6 +161,15 @@
     'auth.loginTitle':     'Log in to I-PASSBOOK',
     'auth.email':          'you@indrones.com',
     'auth.continue':       'Continue',
+    // The same button in its other two states, and both are written by app.js rather
+    // than by the markup — which is why neither was translated until 2026-10-08 and why
+    // they are called out here. `auth.signIn` is the password door's label; the other two
+    // are the pair of busy labels the button wears while it waits. They came through
+    // `tFloor` in app.js, not `t`, so a device where i18n.js never loaded still reads
+    // "Continue" instead of a dotted key.
+    'auth.signIn':         'Sign in',
+    'auth.sending':        'Sending…',
+    'auth.signingIn':      'Signing in…',
     // The divider. It replaced "or get a code by email", which named the thing ABOVE
     // it rather than the fork between the two halves of the list.
     'auth.or':             'or',
@@ -337,8 +360,8 @@
     // the moment those pages exist. A link to a 404 would be worse than the sentence.
     'landing.terms':      'By continuing, you acknowledge that you understand and agree to the Terms & Conditions and Privacy Policy',
     // The language selector's accessible name. Its OPTIONS are language endonyms and are
-    // NOT translated — a person looking for Urdu is looking for the word اردو, not for
-    // the word "Urdu" in English.
+    // NOT translated — a person looking for Hindi is looking for the word हिन्दी, not for
+    // the word "Hindi" in English.
     'landing.language':   'Language',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
@@ -383,6 +406,220 @@
     'insights.colLate':        'Late',
   };
 
+  // ── हिन्दी ───────────────────────────────────────────────────────────────────
+  //
+  // The second table, and the whole of the work the paragraph at the head of this file
+  // promised. It is keyed by the SAME keys as STRINGS and by no others: a key here that
+  // English does not have is a word nothing can ever ask for, and smoke-i18n.mjs fails on
+  // one, because a translation drifting out of step with the app it describes is the
+  // exact failure this table is most likely to have.
+  //
+  // ── WHAT IS DELIBERATELY NOT IN DEVANAGARI ───────────────────────────────────
+  //
+  // Four kinds of thing stay exactly as they are, and none of them is laziness:
+  //
+  //   · BRANDS AND PRODUCTS — I-PASSBOOK, Indrones, Google, WhatsApp, Maps, PDI, IQC,
+  //     CRM, REPAIR. Transliterating a name makes it harder to match against the thing
+  //     it names, not easier: the row a person is hunting for says Google.
+  //   · IDENTIFIERS AND CODES — the IR number, the drone ID, the two email addresses,
+  //     the phone-number mask, the `{letter}` of a section tab. These are strings the
+  //     backend compares and the store holds; they are data wearing a label's clothes.
+  //     The section tab is the sharpest case — the button says "Section B" and the tab
+  //     above it says B, so the letter must survive translation or the label points at
+  //     something that is not on screen.
+  //   · THE EXPANSION OF THE NAME — 'app.fullName' is the answer to "what does
+  //     I-PASSBOOK stand for", and it only answers that in the alphabet the acronym is
+  //     spelled in. Translated, it stops being an expansion and becomes a sentence.
+  //   · ONE QUOTED CONTROL — step 3 of the unlock guidance quotes "Turn on Quick unlock"
+  //     between curly quotes, because that is the literal English text of the button in
+  //     app.js's own menu (see syncQuickUnlockMenu; that label is a literal, not a key).
+  //     A person told to look for an English row must be shown the English row.
+  //
+  // Everything else is translated, including the owner's own landing-page prose — those
+  // sentences are his, and a Hindi reader is owed them in Hindi rather than in a
+  // language the selector just offered to leave.
+  //
+  // ── HOW TO READ THIS TABLE ───────────────────────────────────────────────────
+  //
+  // Same order as STRINGS, so the two can be read side by side down the page. Every
+  // `{slot}` is preserved exactly; a dropped `{n}` would render a code with no digit.
+  const HINDI = {
+
+    // ── The app itself ───────────────────────────────────────────────────────
+    'app.name':            'I-PASSBOOK',
+    'app.fullName':        'INDRONES-AFTER SALES SERVICE BOOK',
+
+    // ── Navigation ───────────────────────────────────────────────────────────
+    'nav.serviceDesk':     'सेवा डेस्क',
+    'nav.administration':  'प्रशासन',
+    'nav.irs':             'IR',
+    'nav.insights':        'इनसाइट्स',
+    'nav.logAnalyser':     'लॉग विश्लेषक',
+    'nav.userAccess':      'उपयोगकर्ता पहुँच',
+    'nav.help':            'सहायता और FAQ',
+
+    // ── The IR list, and the board it draws the same rows as ─────────────────
+    'list.title':          'IR',
+    'list.search':         'IR नंबर या ड्रोन ID से खोजें…',
+    'list.viewList':       'सूची',
+    'list.viewBoard':      'सूची या बोर्ड',
+    'list.viewBoardBtn':   'बोर्ड',
+    'list.emptyFiltered':  'इस फ़िल्टर से कोई IR मेल नहीं खाता।',
+    'list.emptyNone':      'कोई IR नहीं मिला। ग्राहक फ़ॉर्म से एक बनाएँ।',
+    'board.label':         'IR बोर्ड',
+    'board.emptyNone':     'कोई IR नहीं मिला।',
+    'board.notStarted':    'शुरू नहीं हुआ',
+    'board.paused':        'रुका हुआ',
+    'board.finished':      'पूरा हुआ',
+    'board.more':          '+{n} और — सूची देखें',
+
+    // ── Moving a card on, by hand ────────────────────────────────────────────
+    'move.to':             '{column} पर ले जाएँ →',
+    'move.hint':           'स्थिति {stage} करता है और उसकी घड़ी शुरू करता है',
+
+    // ── Sections, as they are titled and as their tabs name them ─────────────
+    // The single Latin letter after "सेक्शन" is the section's own tab label, not an
+    // English word — see the note above the table.
+    'section.clientReport': 'ग्राहक की मूल रिपोर्ट',
+    'section.overview':     'अवलोकन',
+    'section.b':            'सेक्शन B — इनवर्ड चेकलिस्ट (इन्वेंटरी)',
+    'section.c':            'सेक्शन C — IQC दृश्य निरीक्षण',
+    'section.d':            'सेक्शन D — जाँच',
+    'section.e':            'सेक्शन E — उत्पादन (रिवर्क)',
+    'section.f':            'सेक्शन F — गुणवत्ता परीक्षण रिपोर्ट',
+    'section.g':            'सेक्शन G — PDI रिपोर्ट / डिस्पैच रिकॉर्ड',
+    'section.close':        'सेक्शन {letter} को पूर्ण चिह्नित करें',
+    'section.closed':       'सेक्शन बंद',
+
+    // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
+    // Read through status(), so these are the words on every badge, pill and board
+    // column. The retired Sheet words in STATUS_KEYS point at these same keys, which
+    // is why an old ticket reads as its stage here too and not as its stored word.
+    'status.open':          'खुला',
+    'status.inward':        'इनवर्ड',
+    'status.inspection':    'निरीक्षण',
+    'status.investigation': 'जाँच',
+    'status.production':    'उत्पादन',
+    'status.qualityTest':   'गुणवत्ता परीक्षण',
+    'status.pdiDispatch':   'PDI/डिस्पैच',
+    'status.delivered':     'डिलीवर',
+    'status.onHold':        'होल्ड पर',
+    'status.remoteSupport': 'रिमोट सहायता',
+    'status.other':         'अन्य',
+
+    // ── Priority ─────────────────────────────────────────────────────────────
+    'priority.urgent':     'अत्यावश्यक',
+    'priority.high':       'उच्च',
+    'priority.medium':     'मध्यम',
+    'priority.low':        'निम्न',
+
+    // ── Signing in ───────────────────────────────────────────────────────────
+    'auth.loginTitle':     'I-PASSBOOK में लॉग इन करें',
+    'auth.email':          'you@indrones.com',
+    'auth.continue':       'जारी रखें',
+    'auth.signIn':         'साइन इन करें',
+    'auth.sending':        'भेजा जा रहा है…',
+    'auth.signingIn':      'साइन इन हो रहा है…',
+    'auth.or':             'या',
+    'auth.sso':            'Indrones के आधिकारिक ईमेल से जारी रखें',
+    'auth.unlock':         'फ़िंगरप्रिंट / पासकी से जारी रखें',
+    'auth.usePattern':     'पैटर्न से जारी रखें',
+    'auth.methodInactive.say':     'यह लॉगिन तरीका तब चालू होता है जब आप इसे अपने लॉगिन से सक्षम करते हैं।',
+    'auth.methodInactive.step1':   'अपने ईमेल और हमारे भेजे कोड से I-PASSBOOK में साइन इन करें।',
+    'auth.methodInactive.step2':   'ऐप के ऊपर दाएँ कोने में अपने अवतार पर टैप करें।',
+    // "Turn on Quick unlock" stays in English inside the quotes, and it must: that is
+    // the literal text of the menu row in app.js, which is not a key and is not
+    // translated. Sending someone to look for a row labelled in Hindi that is labelled
+    // in English is worse than the silence this note replaced.
+    'auth.methodInactive.step3':   '“Turn on Quick unlock” चुनें और इस डिवाइस पर दिए निर्देश का पालन करें। अपना फ़िंगरप्रिंट सेट करें — और चाहें तो पैटर्न भी।',
+    'auth.methodInactive.step4':   'बस इतना ही। इस स्क्रीन पर वापस आएँ और दोनों तरीके तैयार हैं।',
+    'auth.methodInactive.dismiss': 'समझ गया',
+    'auth.usePassword':    'अस्थायी पासवर्ड से पहली साइन-इन',
+    'auth.password':       'पासवर्ड',
+    'auth.newPasswordLong':'नया पासवर्ड (कम से कम 8 अक्षर)',
+    'auth.repeatPassword': 'नया पासवर्ड दोहराएँ',
+    'auth.showPassword':   'पासवर्ड दिखाएँ',
+    'auth.back':           'वापस',
+    'auth.signOut':        'साइन आउट',
+
+    // ── The Overview panel's own fields ──────────────────────────────────────
+    'overview.crmOwner':        'ग्राहक संबंध प्रबंधक',
+    'overview.contactPhone':   'ग्राहक का फ़ोन',
+    'overview.siteLocation':    'साइट का स्थान',
+    'overview.readOnlyNote':    'इन्हें केवल कस्टमर रिलेशंस और प्रबंधन बदल सकते हैं। बाकी सब पढ़ सकते हैं।',
+    'overview.crmOwnerHint':    'CRM व्यक्ति का नाम',
+    'overview.phoneHint':       '+91 XXXXX XXXXX',
+    'overview.siteHint':        'क्षेत्र, शहर — या अक्षांश, देशांतर',
+    'overview.sectionsSaved':   '{m} में से {n} सेक्शन सहेजे गए',
+
+    // ── Words the app uses everywhere ────────────────────────────────────────
+    'common.saved':        'सहेजा गया',
+    'common.saving':       'सहेजा जा रहा है…',
+    'common.notSaved':     'सहेजा नहीं गया — फिर दबाएँ',
+    'common.retrying':     'सहेजा नहीं गया — फिर कोशिश हो रही है',
+    'common.unassigned':   'अनिर्धारित',
+    'common.overdue':      'अतिदेय',
+    'common.openInMaps':   'Maps में खोलें →',
+
+    // ── The two doors on the landing page ────────────────────────────────────
+    'door.employee':      'कर्मचारी',
+    'door.customer':      'ग्राहक',
+    'door.openSpace':     'कस्टमर स्पेस खोलें',
+    'door.expand':        '{role} साइन-इन दिखाएँ',
+    'door.whatsapp':      'WhatsApp पर हमसे बात करें',
+
+    // ── The customer's panel ─────────────────────────────────────────────────
+    'cust.welcome':       'स्वागत है! यह I-PASSBOOK है',
+    'cust.tagline':       'इंड्रोन्स के बिक्री-पश्चात हर काम के लिए',
+    'cust.login':         'अपने I-PASSBOOK खाते में लॉग इन करें।',
+    'cust.email':         'you@company.com',
+    'cust.emailHelper':   'वही आधिकारिक ईमेल इस्तेमाल करें जो ग्राहक के रूप में ऑनबोर्डिंग के समय हमारे पास पंजीकृत था',
+    'cust.continue':      'जारी रखें',
+    'cust.or':            'या',
+    // ⚠ The mail address is NOT translated and must not be: it is the address a person
+    // types, and it is asserted ABSENT from app.js (smoke-access.mjs) precisely because
+    // it must only ever reach a reader through this table.
+    'cust.unregistered':  'अगर आपने अभी तक हमारे साथ पंजीकरण नहीं कराया है, तो ऑनबोर्डिंग के लिए customer.relations@indrones.com पर संपर्क करें। वहीं मिलते हैं!',
+    'cust.tempPasswordNoCode': 'कोई कोड नहीं भेजा गया। आपका खाता अब भी उस पासवर्ड पर है जो Indrones ने जारी किया था — उसे रीसेट कराने के लिए customer.relations@indrones.com पर संपर्क करें।',
+
+    // ── THE CODE STEP — one screen, shared by both doors ─────────────────────
+    'code.title':         'अपना ईमेल देखें',
+    'code.sub':           'अगर आपका indrones after sales खाता है, तो हमने कोड भेजा है',
+    'code.different':     'कोई दूसरा खाता इस्तेमाल करें',
+    'code.digit':         'कोड का अंक {n}',
+
+    // ── The foot of the landing page ──────────────────────────────────────────
+    'landing.terms':      'जारी रखने पर आप स्वीकार करते हैं कि आपने Terms & Conditions और Privacy Policy को समझा और माना है',
+    'landing.language':   'भाषा',
+
+    // ── The customer door, and the FAQ behind it ─────────────────────────────
+    'door.report':      'समस्या बताएँ',
+    'door.faq':         'सहायता और FAQ',
+    'door.close':       'बंद करें',
+    'door.lede':        'सेवा डेस्क को बताएँ कि क्या गड़बड़ हुई। यहाँ खाते की ज़रूरत नहीं, और इस स्क्रीन पर कहीं भी आपसे नाम नहीं पूछा जाता।',
+    'door.signInHint':  'यह फ़ॉर्म Google Forms से बना है। अगर इस डिवाइस पर पहले से Google खाता साइन-इन नहीं है, तो Google फ़ॉर्म दिखाने से पहले साइन-इन माँगेगा — वह Google माँग रहा है, यह ऐप नहीं।',
+    'door.openForm':    'रिपोर्ट फ़ॉर्म खोलें',
+    'door.escape':      'यह नए टैब में खुलता है, इसलिए लौटने पर यह पेज यहीं रहेगा।',
+    'door.note':        'यह फ़ॉर्म Google होस्ट करता है और आपके जवाब सीधे सेवा डेस्क तक जाते हैं। जब तक आप बटन नहीं दबाते, Google से कुछ भी लोड नहीं होता — और अगर आप कभी नहीं दबाते, तो कुछ भी नहीं।',
+
+    // ── The Insights dashboard ───────────────────────────────────────────────
+    'insights.raised':         'दर्ज',
+    'insights.openNow':        'अभी खुले',
+    'insights.lateNow':        'अभी विलंबित',
+    'insights.perMonth':       'पिछले 12 महीने',
+    'insights.raisedPerMonth': 'प्रति माह दर्ज',
+    'insights.undatedBucket':  'तारीख नहीं',
+    'insights.statusMix':      'स्थिति का मिश्रण',
+    // REPAIR is a value the store holds, not a word this table owns — it is the
+    // sub-category the chart is cut by, so it stays spelled the way the data spells it.
+    'insights.repairBySub':    'REPAIR — उप-श्रेणी के अनुसार',
+    'insights.noCategory':     'श्रेणी नहीं',
+    'insights.people':         'लोग',
+    'insights.unassigned':     'अनिर्धारित',
+    'insights.colOpen':        'खुले',
+    'insights.colLate':        'विलंबित',
+  };
+
   // The workflow stages, keyed the way the app stores them. app.js already has ONE
   // list of what a stage may be (IR_STATUS_VALUES); this maps those same values to
   // their keys, so translating a status never means transliterating it — and
@@ -422,35 +659,39 @@
     'medium': 'priority.medium', 'low': 'priority.low',
   };
 
-  // ── THE LANGUAGE DIMENSION — and what it honestly is today ─────────────────
+  // ── THE LANGUAGE DIMENSION — and what it honestly is ────────────────────────
   // The landing page carries a language selector (the owner's instruction of
-  // 2026-10-08, "like in notion.app where english, urdu, hindi has to be there in
-  // selectible dropdown"), so the layer needs somewhere for a second language to go.
-  // This is that somewhere, and nothing more.
+  // 2026-10-08, "like in notion.app where english, hindi has to be there in
+  // selectible dropdown"), and there are two entries in it: English and हिन्दी.
   //
-  // ⚠ IT SHIPS ENGLISH ONLY, AND THE SELECTOR IS HONEST ABOUT IT BY BEHAVING LIKE A
-  // HALF-TRANSLATED APP RATHER THAN BY SAYING SO. What is behind the other two options
-  // today is the ENGLISH table, through the per-string fallback below — which is exactly
-  // what a partially translated app does, and what the reader will conclude. The count
-  // is the reason to say it plainly here: STRINGS holds 118 strings, and the app's real
-  // translatable surface is on the order of a thousand distinct strings across seven
-  // files, every one of the six section forms, every toast and confirm in app.js, plus a
-  // right-to-left layout pass for Urdu. That is a project, not a dropdown.
+  // ⚠ URDU WAS HERE AND IS NOT ANY MORE. He first asked for three ("english, urdu,
+  // hindi"), then withdrew it in the same day's queue — *"even in my previous command I
+  // said about urdu. Keep only hindi and english."* Deleting the entry rather than
+  // leaving it untranslated is the point: an option that is offered and then does
+  // nothing is a lie about the app, and the RTL layout pass Urdu would need was a
+  // project on its own. A stored 'ur' in someone's localStorage is not stranded — it is
+  // reconciled to English by `_langOf` below, silently, which is the right outcome for a
+  // language that no longer exists here.
   //
-  // So: a second language is now a DATA FILE (`TABLES.ur = { … }`) rather than a
-  // refactor — which was the whole of this file's stated purpose from the first line —
-  // and the selector, the persistence and the fallback are already wired and tested.
+  // ⚠ AND WHAT IS BEHIND हिन्दी IS A REAL TABLE, NOT THE ENGLISH ONE. `TABLES.hi` is
+  // translated — every one of these strings, with the English table kept as the per-string
+  // floor so a key a translator has not reached reads in English rather than blank. The
+  // size of the job is worth stating plainly, because "Hindi is done" would be false: the
+  // table covers the chrome, the statuses and the landing page, and the six section forms
+  // and every toast in app.js are still English inside a Hindi frame. See the note at the
+  // head of this file.
   const LANGS = [
-    // The endonyms, NOT their English names. Someone looking for Urdu is looking for
-    // the word اردو on the list; "Urdu" is the word for it in the language they are
+    // The endonyms, NOT their English names. Someone looking for Hindi is looking for
+    // the word हिन्दी on the list; "Hindi" is the word for it in the language they are
     // trying to leave. The same reason a country picker shows Deutschland.
     { code: 'en', label: 'English', dir: 'ltr' },
-    { code: 'ur', label: 'اردو',    dir: 'rtl' },
     { code: 'hi', label: 'हिन्दी',   dir: 'ltr' },
   ];
-  // Only English has a table. An entry added here for 'ur' or 'hi' is picked up with no
-  // other change anywhere — that is the test smoke-i18n.mjs holds.
-  const TABLES = { en: STRINGS };
+  // `TABLES.hi` is defined below, directly under the English table it mirrors. An entry
+  // added to LANGS with no table is picked up with no other change anywhere — it simply
+  // falls through to English for every string — and smoke-i18n.mjs holds both halves of
+  // that: the list, and the table behind each entry that has one.
+  const TABLES = { en: STRINGS, hi: HINDI };
   const LANG_KEY = 'ipb_lang';
   let _lang = 'en';
 
@@ -542,12 +783,14 @@
 
   // ── Choosing a language ─────────────────────────────────────────────────────
   //
-  // `dir` is set on the document ONLY for a language that actually has a table. Without
-  // that guard, picking اردو today would mirror the whole page — English words, laid out
-  // right-to-left — which is not a half-translation, it is a broken screen, and it would
-  // be the first thing anyone tried. A language with no table still REMEMBERS the choice
-  // and still sets `lang`, so the preference is already stored for the day the table
-  // arrives.
+  // `dir` is set on the document ONLY for a language that actually has a table. Neither
+  // language here is right-to-left, so nothing in this app turns the guard on today —
+  // and it stays because the alternative is a rule that mirrors the whole page for a
+  // language that has no words to put in it. English words laid out right-to-left is not
+  // a half-translation, it is a broken screen, and Urdu is exactly where that would have
+  // happened had the entry not been withdrawn. A language with no table still REMEMBERS
+  // the choice and still sets `lang`, so the preference is already stored for the day a
+  // table arrives.
   function ready(code) {
     return !!TABLES[code] && Object.keys(TABLES[code]).length > 0;
   }

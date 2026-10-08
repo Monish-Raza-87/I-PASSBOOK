@@ -44,7 +44,7 @@ const outFile = path.join(outDir, 'app.html');
 
 const DAY = 86400000, NOW = Date.now();
 const { T, byId } = loadApp(`
-  renderInsights, renderIRList, renderBannerMeta,
+  renderInsights, renderIRList, renderBannerMeta, renderOverviewFacts,
   INSIGHTS_ALL, SECTION_IDS, sectionProgress,
   get allIRs(){return allIRs;}, set allIRs(v){allIRs=v;},
   get currentIR(){return currentIR;}, set currentIR(v){currentIR=v;},
@@ -91,7 +91,41 @@ const banner = byId.get('ir-banner-pills').innerHTML;
 T.renderIRList(FIXTURE);
 const list = byId.get('ir-list').innerHTML;
 
-const css = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'desk.css']
+// ── The detail pane's Overview, which is the one place a look RE-MAPS a shape ──
+// industrial.css's datagrid section rewrites `.overview-facts` from a grey block into
+// the panel's own ruled field grid. That is the single piece of real layout work in
+// that file and, until this, nothing rendered it: the app fixture carried a banner and
+// nothing under it, so the one rule that could break the pane was the one rule no
+// screenshot could show. `renderOverviewFacts()` is called here rather than the grid
+// being re-typed, so what is measured is the app's own markup.
+//
+// The panel itself is taken from index.html by DEPTH — the same reason the customer
+// door below is, and the same helper does it: the block holds nested divs, so a
+// non-greedy regex would stop at the first `</div>` and measure a third of the card.
+function sliceBlock(marker, label) {
+  const src = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const start = src.indexOf(marker);
+  if (start === -1) throw new Error(`${label} is not in index.html`);
+  let depth = 0, i = start;
+  while (i < src.length) {
+    if (src.startsWith('<div', i)) { depth++; i += 4; continue; }
+    if (src.startsWith('</div>', i)) { depth--; i += 6; if (!depth) break; continue; }
+    i++;
+  }
+  if (depth) throw new Error(`unbalanced <div> in ${label}`);
+  return src.slice(start, i);
+}
+const overviewBlock = sliceBlock('<div id="ir-overview" class="overview-panel">', 'the Overview panel');
+const tabsBlock = sliceBlock('<div class="tabs-container" id="section-tabs">', 'the section tabs');
+// The harness's stub DOM answers getElementById from one flat map, creating the element
+// on first ask — so the renderer writes into a stub node and the result is read back out
+// of it, which is how every other panel on this page is obtained.
+T.renderOverviewFacts();
+const overview = overviewBlock.replace(
+  '<div id="ir-overview-facts"></div>',
+  `<div id="ir-overview-facts">${byId.get('ir-overview-facts').innerHTML}</div>`);
+
+const css = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'industrial.css']
   .map(f => `<link rel="stylesheet" href="${pathToFileURL(path.join(ROOT, f)).href}">`).join('\n');
 
 // ── The customer door, forced open ───────────────────────────────────────────
@@ -128,7 +162,10 @@ fs.writeFileSync(outFile, `<!doctype html><html lang="en"><head><meta charset="u
 ${css}
 </head><body>
 <div id="insights-view" style="display:block"><div id="insights-body">${insights}</div></div>
-<div id="detail-view" style="display:block"><div id="ir-banner">${banner}</div></div>
+<div id="detail-view" style="display:block"><div id="ir-banner">${banner}</div>
+  <div class="section-content active">${overview}</div>
+  ${tabsBlock}
+</div>
 <div id="index-view" style="display:block"><div id="ir-list">${list}</div></div>
 <div style="padding:8px">
   <button class="btn is-busy" id="b1">Signing in…</button>

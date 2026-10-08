@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v72';
+const APP_VERSION = 'v73';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3015,8 +3015,16 @@ const THEME_KEY = 'theme';
 // below is what turns it into one.
 const THEME_VALUES = ['light', 'cream', 'dark'];
 
+// DEFAULT DARK, as of 2026-10-08. The owner chose the Indrones Industrial look and
+// it is a dark instrument panel — an unlit one is a different design, not a variant
+// of it. So a device that has never chosen gets dark rather than whatever its
+// operating system happens to be; someone who wants light still says so, and that
+// choice is honoured because it is stored.
+//
+// 'system' has NOT gone away — it is still one of THEME_CHOICES and still means
+// "ask the OS". It is simply no longer what an unanswered question resolves to.
 function storedTheme() {
-  try { return localStorage.getItem(THEME_KEY) || 'system'; } catch { return 'system'; }
+  try { return localStorage.getItem(THEME_KEY) || 'dark'; } catch { return 'dark'; }
 }
 function prefersDark() { return window.matchMedia('(prefers-color-scheme: dark)').matches; }
 
@@ -3083,8 +3091,13 @@ function paintThemeChrome(t) {
 // palette is active, and raw tokens are theme-aware so the chip is right in both
 // light and dark.
 const PALETTE_KEY = 'palette';
-const FALLBACK_PALETTE = 'blue';
+// Yellow is the brand accent and the one the app ships wearing — see the `yellow`
+// preset in palette.css and the INDRONES block in base.css. It is the fallback for
+// the same reason it is the default: a device with no stored choice should get the
+// app Indrones actually looks like, not a generic blue.
+const FALLBACK_PALETTE = 'yellow';
 const PALETTES = [
+  { value: 'yellow',   label: 'Yellow',   swatch: 'var(--ind-yellow)' },
   { value: 'blue',     label: 'Blue',     swatch: 'var(--surface-blue-9)' },
   { value: 'violet',   label: 'Violet',   swatch: 'var(--surface-violet-9)' },
   { value: 'teal',     label: 'Teal',     swatch: 'var(--surface-teal-9)' },

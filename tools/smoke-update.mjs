@@ -45,7 +45,7 @@ r.ok('a new cache is filled with bodies fetched past the HTTP cache',
   /cache\.addAll\(SHELL\.map\(u => new Request\(u, \{ cache: 'reload' \}\)\)\)/.test(SW),
   (SW.match(/[^\n]*addAll[^\n]*/) || [''])[0]);
 // ...but SHELL itself stays an array of plain strings: five other suites regex
-// that literal (`smoke-desk`, `smoke-palette`, `smoke-polish`, `smoke-export`,
+// that literal (`smoke-industrial`, `smoke-palette`, `smoke-polish`, `smoke-export`,
 // `smoke-shell`), so wrapping each entry in a Request at the call site is what
 // keeps the freshness fix from being a five-suite change.
 r.ok('...and SHELL is left as plain strings, so every other suite can still read it',

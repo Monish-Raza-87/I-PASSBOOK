@@ -86,6 +86,39 @@ function tokenHex(token, mode) {
   return toHex(raw);
 }
 
+// ── The brand names ──────────────────────────────────────────────────────────
+// palette.css's `yellow` preset points at --ind-* names instead of at ramp steps,
+// because there IS no yellow ramp: Frappe's nearest family is `amber`, a brown-
+// orange. Those names are declared in base.css's INDRONES block, one value per mode
+// for the three that have to move between light and dark.
+//
+// So they are read from the real file and resolved the same way everything else is
+// — measured, never restated. A name that base.css stops declaring throws here for
+// exactly the reason an unknown ramp token does: in a browser it would silently
+// resolve to nothing and the accent would disappear.
+//
+// Comments are stripped FIRST. Without that the block regex would swallow the long
+// INDRONES header into the following selector, and the hexes quoted inside it would
+// be read as declarations.
+const baseCssRaw = read('../base.css');
+const baseCssScannable = baseCssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
+const brand = { light: new Map(), dark: new Map() };
+for (const m of baseCssScannable.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  const bucket = /\[data-theme="dark"\]/.test(m[1]) ? brand.dark : brand.light;
+  for (const d of m[2].matchAll(/(--ind-[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g)) {
+    bucket.set(d[1], d[2]);
+  }
+}
+const isBrand = t => /^--ind-/.test(t);
+function brandHex(token, mode) {
+  const v = (mode === 'dark' && brand.dark.get(token)) || brand.light.get(token);
+  if (!v) throw new Error('base.css declares no ' + token);
+  return v;
+}
+// Everything below goes through this one hop, so a role resolves whichever way it
+// was written — through Frappe's table, or through the brand block.
+const anyHex = (token, mode) => isBrand(token) ? brandHex(token, mode) : tokenHex(token, mode);
+
 // ── Parse palette.css ────────────────────────────────────────────────────────
 head('palette.css structure');
 
@@ -109,9 +142,18 @@ const paletteNames = blocks.map(b => {
 }).filter(Boolean);
 
 ok('every preset has a [data-palette] block',
-  ['blue', 'violet', 'teal', 'graphite'].every(n => paletteNames.includes(n)), paletteNames);
-ok('blue is also declared on :root, so it survives an unreadable localStorage',
-  blocks.some(b => paletteNames.includes('blue') && /(^|,)\s*:root\s*(,|$)/.test(b.sel)), paletteNames);
+  ['yellow', 'blue', 'violet', 'teal', 'graphite'].every(n => paletteNames.includes(n)), paletteNames);
+
+// The preset declared on :root is the one that applies before the pre-paint script
+// has run and when localStorage is unreadable, so it must BE the default — not some
+// other preset that happens to be first in the file. The default is read out of
+// app.js rather than restated, so the three places that name it cannot drift.
+const jsFallback = (appJs.match(/const FALLBACK_PALETTE = '([a-z]+)'/) || [])[1];
+ok('the default preset is also declared on :root, so it survives an unreadable localStorage',
+  !!jsFallback && blocks.some(b =>
+    paletteNames.includes(jsFallback) && new RegExp('(^|,)\\s*:root\\s*(,|$)').test(b.sel) &&
+    b.sel.includes(`[data-palette="${jsFallback}"]`)),
+  { default: jsFallback, blocks: blocks.map(b => b.sel) });
 
 // app.js and palette.css must agree. A name in one and not the other is a menu
 // entry that does nothing, which is invisible until someone picks it.
@@ -143,12 +185,12 @@ for (const block of blocks) {
   const missing = ROLES.filter(r => !decls.has(r));
   ok(`${name}: declares all ${ROLES.length} roles`, missing.length === 0, missing);
 
-  const unemitted = [...decls.values()].filter(t => !emitted.has(t));
+  const unemitted = [...decls.values()].filter(t => !isBrand(t) && !emitted.has(t));
   ok(`${name}: points only at tokens tokens.css emits`, unemitted.length === 0, unemitted);
 
   const unresolved = [];
   for (const [role, token] of decls) {
-    try { tokenHex(token, 'light'); tokenHex(token, 'dark'); }
+    try { anyHex(token, 'light'); anyHex(token, 'dark'); }
     catch (e) { unresolved.push(role + ' → ' + token + ': ' + e.message); }
   }
   ok(`${name}: every token resolves in both themes`, unresolved.length === 0, unresolved);
@@ -175,12 +217,12 @@ for (const block of blocks) {
   for (const mode of ['light', 'dark']) {
     let bg, fg, accent, page, hover, active;
     try {
-      bg = tokenHex(decls.get('--btn-solid-bg'), mode);
-      fg = tokenHex(decls.get('--btn-solid-fg'), mode);
-      accent = tokenHex(decls.get('--accent'), mode);
+      bg = anyHex(decls.get('--btn-solid-bg'), mode);
+      fg = anyHex(decls.get('--btn-solid-fg'), mode);
+      accent = anyHex(decls.get('--accent'), mode);
       page = tokenHex('--surface-base', mode);
-      hover = tokenHex(decls.get('--btn-solid-bg-hover'), mode);
-      active = tokenHex(decls.get('--btn-solid-bg-active'), mode);
+      hover = anyHex(decls.get('--btn-solid-bg-hover'), mode);
+      active = anyHex(decls.get('--btn-solid-bg-active'), mode);
     } catch (e) {
       ok(`${name}/${mode}: contrast measurable`, false, e.message);
       continue;
@@ -231,24 +273,60 @@ const NEUTRAL_EXCEPTIONS = {
   },
 };
 
+// Yellow is the other exception, and its deviation is a different KIND from
+// graphite's: graphite keeps the shared shape and only moves up its own ramp, while
+// yellow leaves the ramps altogether. It has to. There is no `yellow` family in
+// Frappe's table — the assertion below pins that fact rather than trusting it — so
+// there is no `--ink-yellow-7` for the shared shape to name. Its eight roles point at
+// the INDRONES names in base.css instead.
+//
+// The exception must be TOTAL, for the same reason graphite's button exception must
+// be: a half-applied one would leave, say, the button on a ramp the palette no longer
+// uses. And it is measured identically — the contrast block below resolves these
+// names and fails the suite if any pair drops under AA. Sourcing a value elsewhere is
+// not the same as being exempt from the gate.
+const BRAND_EXCEPTIONS = {
+  yellow: {
+    '--accent': '--ind-accent-ink',
+    '--accent-soft': '--ind-accent-soft',
+    '--accent-soft-line': '--ind-accent-line',
+    '--accent-bar': '--ind-yellow',
+    '--btn-solid-bg': '--ind-yellow',
+    '--btn-solid-bg-hover': '--ind-yellow-hi',
+    '--btn-solid-bg-active': '--ind-yellow-lo',
+    '--btn-solid-fg': '--ind-on-yellow',
+  },
+};
+
 for (const block of blocks) {
   const name = (block.sel.match(/\[data-palette="([a-z]+)"\]/) || [, 'blue'])[1];
   const fam = famOf(name);
-  const exceptions = NEUTRAL_EXCEPTIONS[name] || {};
+  const exceptions = NEUTRAL_EXCEPTIONS[name] || BRAND_EXCEPTIONS[name] || {};
   const decls = new Map([...block.body.matchAll(/(--[a-z0-9-]+):\s*var\((--[a-z0-9-]+)\)/g)]
     .map(m => [m[1], m[2]]));
-  const wrong = Object.entries(SHAPE)
-    .filter(([role, expect]) => decls.get(role) !== (exceptions[role] || expect(fam)))
-    .map(([role, expect]) => `${role}: ${decls.get(role)} ≠ ${exceptions[role] || expect(fam)}`);
+  const brandPreset = !!BRAND_EXCEPTIONS[name];
+  const wrong = brandPreset
+    // A brand preset is checked against its own declared set, in full. The shared
+    // SHAPE table is not consulted, because it is a statement about ramps.
+    ? ROLES.filter(r => decls.get(r) !== BRAND_EXCEPTIONS[name][r])
+        .map(r => `${r}: ${decls.get(r)} ≠ ${BRAND_EXCEPTIONS[name][r]}`)
+    : Object.entries(SHAPE)
+        .filter(([role, expect]) => decls.get(role) !== (exceptions[role] || expect(fam)))
+        .map(([role, expect]) => `${role}: ${decls.get(role)} ≠ ${exceptions[role] || expect(fam)}`);
   // A button exception must be complete — a half-applied one would leave hover
   // pointing at a hue the palette no longer uses.
-  if (exceptions['--btn-solid-bg']) {
+  if (exceptions['--btn-solid-bg'] && !brandPreset) {
     const b = ['--btn-solid-bg', '--btn-solid-bg-hover', '--btn-solid-bg-active'];
     const partial = b.filter(r => decls.get(r) !== exceptions[r]);
     if (partial.length) wrong.push('incomplete neutral button exception: ' + partial.join(', '));
   }
   ok(`${name}: follows the shared role pattern`, wrong.length === 0, wrong);
 }
+
+// The premise the yellow exception rests on, asserted rather than assumed: if a
+// yellow ramp is ever added to tokens.css, this fails and the exception should go.
+ok('there really is no yellow ramp, which is why yellow deviates',
+  !/--(surface|ink|outline)-yellow-/.test(tokensCss), null);
 
 const graphite = blocks.find(b => (b.sel.match(/\[data-palette="([a-z]+)"\]/) || [])[1] === 'graphite');
 ok('graphite is the neutral: its solid button is the grayscale ramp',

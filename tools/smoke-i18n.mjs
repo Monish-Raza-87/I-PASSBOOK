@@ -70,7 +70,7 @@ ok('...and it is not a module, which app.js could not wait for',
 // 2026-10-03 theme.css legitimately took the list from six to seven.
 // The Google Fonts link is not part of it — that is the one third-party stylesheet,
 // and it is loaded from a CDN, not from this repo.
-const CASCADE = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'desk.css'];
+const CASCADE = ['tokens.css', 'palette.css', 'theme.css', 'base.css', 'components.css', 'views.css', 'industrial.css'];
 const localSheets = [...html.matchAll(/<link[^>]+rel="stylesheet"[^>]*>/g)]
   .map(m => m[0]).filter(tag => !/^https?:/i.test((tag.match(/href="([^"]+)"/) || [])[1] || ''));
 ok('it adds no local stylesheet — i18n brings words, not another sheet',

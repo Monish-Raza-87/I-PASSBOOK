@@ -1,0 +1,759 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   industrial.css — the app's look. INDRONES INDUSTRIAL.
+
+   WHAT THIS IS
+   The owner chose "Indrones Industrial" on 2026-10-08: a dark instrument panel
+   in the brand yellow, with keys and numbers set in the monospace face, sections
+   numbered like a series index, corners cut square, and status reading as a small
+   LED rather than a soft pill. It replaces the ERPNext Desk look, which held this
+   same slot until then and is now GONE — the file is deleted, not dormant, so there
+   is exactly one look and no second one to disagree with it.
+
+   IT IS STILL ONE FILE, AND STILL LAST. Deleting this file and its single <link> in
+   index.html still returns the app to what it was — that property is what makes a
+   whole-look change reviewable, and it is why none of this is scattered through the
+   other five stylesheets.
+
+   WHY IT LOADS LAST
+   index.html links it after views.css, which is where the `POLISH — level:
+   NOTICEABLE` block lives. That block is last-in-the-last-file on purpose and wins
+   by cascade order alone. This file therefore OVERRIDES it wherever the two
+   disagree, and leaves it governing everything not listed below.
+
+   THE COLOUR IS NOT HERE, AND IT IS NOT `--ind-yellow` EITHER. #ffc400 is Indrones'
+   own brand yellow and it is declared once, in base.css's INDRONES block, because
+   there is no yellow ramp in Frappe's token table for palette.css to point at.
+
+   This file names exactly two sources of colour, and neither is the brand yellow.
+   `var(--accent)` carries every mark and every accent-coloured word, and the
+   `--st-*-fg` steps carry the status LEDs. That is not fastidiousness — it is the
+   fix for a measured defect. The brand yellow is legible as text on the dark ground
+   (11.18:1) and unreadable on a light one (~1.4:1), so a file that named it would be
+   a file that only worked in one theme. `--accent` is the role palette.css already
+   resolved to #7a5600 in light and cream and #ffc400 in dark — the same brand colour
+   where it can be read, a readable one where it cannot — and it also carries the
+   other four palettes for free.
+
+   Nothing below invents a colour. Every value is one somebody has already measured.
+
+   WHAT IS DELIBERATELY NOT HERE
+   The modals (triage, user access), the toast, the comments panel and the user menu
+   are not in the scope list. They float ABOVE the six roots, they are the app's own
+   chrome rather than its instrument panel, and restyling them would mean either
+   reaching outside the scopes or restating shapes nobody asked to change. The phone
+   bottom bar needs nothing beyond what `#sidebar` already gets: it IS the sidebar,
+   re-laid out. And no tap target is made smaller anywhere — this is a phone in a
+   hangar, and the app's own 40px/16px floors still hold.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════════════
+   1 · TOKENS
+   Every value is an existing app token or a brand name from base.css. Two
+   exceptions, both structural rather than colour: zero, for the corners, and the
+   one shadow, which is a hairline rather than an elevation.
+   ══════════════════════════════════════════════════════════════ */
+:root {
+  /* The page and the panel on it. Not simply "dark page, lighter card": in light
+     mode the white-card reading inverts — the page is already light — so the panel
+     has to be the LIGHTER of the two, or it reads as a hole punched in the screen.
+     Hence a pair per theme, restated under [data-theme="dark"] just below. */
+  --ind-ground: var(--surface-gray-1);
+  --ind-panel:  var(--surface-base);
+  --ind-inset:  var(--surface-gray-2);
+  --ind-line:   var(--outline-gray-2);
+  --ind-rule:   var(--outline-gray-1);
+
+  /* ── TWO STEPS, AND NEITHER OF THEM IS A TEXT COLOUR BY ACCIDENT ─────────────
+     THE INK RAMP INVERTS. tokens.css declares --ink-gray-1 as #ededed in light and
+     --ink-gray-1 as #242424 in dark — the numbers count AWAY from the surface, so
+     "-1" is nearly the page in one theme and nearly the type in the other. The step
+     that is primary text in BOTH themes is --ink-gray-9 (#0f0f0f light, #f8f8f8
+     dark), and that is why nothing below says -1, -2 or -3: on a light ground they
+     vanish, and on a dark ground they are the only ones that read. There is no step
+     that is "a bit darker than the text" in both; asking for one is asking for the
+     bug this file had on its first render.
+
+     --ind-muted is the SECOND step, and it is measured rather than picked:
+     --ink-gray-5 is 4.18:1 on the page and 3.76:1 on a hovered row, so it failed AA
+     everywhere this file put it; --ink-gray-6 is 7.80:1 and 6.29:1 on the same two
+     grounds. Every secondary word in this file — labels, meta, the row's assignee
+     and age — is this one step.
+     -------------------------------------------------------------------------- */
+  --ind-muted:  var(--ink-gray-6);
+  /* FILLS ONLY. NEVER TEXT. --ink-gray-5 is the unlit LED's 5px square and nothing
+     else: it is a piece of an object, read at a glance against its neighbours, and
+     it is not a sentence anybody has to read. The moment it colours a word — a
+     section label, a separator, a placeholder — that word is below AA and this
+     comment has been ignored. */
+  --ind-dim:    var(--ink-gray-5);
+}
+
+/* ── THE SCREEN SET, and the corners ──────────────────────────────────────────
+   This list is the whole blast radius of this file: eight roots, and nothing
+   outside them is touched by anything below. It is written ONCE, here, because the
+   corner rule genuinely applies to all eight and a second copy would be a list that
+   could silently disagree with the one the smoke suite pins.
+
+   Square is the language — an instrument panel has corners — and it is the single
+   biggest visual move in this file. It is done by re-pointing the radius scale
+   inside these subtrees rather than by a `border-radius: 0` on every rule, because
+   the app draws its corners from these eight tokens in ninety-odd places and
+   squaring the tokens squares all of them at once.
+
+   --radius-9 is deliberately NOT in the list. It is 999px — the ROUND family, the
+   status light and the dot and the avatar — and a circle is a circle. The LED in §4
+   is squared by its own rule, which is the one place it should be. */
+#auth-container,
+#password-change,
+#index-view,
+#detail-view,
+#insights-view,
+#log-view,
+#sidebar,
+#workspace header {
+  --radius-1: 0px;
+  --radius-2: 0px;
+  --radius-3: 0px;
+  --radius-4: 0px;
+  --radius-5: 0px;
+  --radius-6: 0px;
+  --radius-7: 0px;
+  --radius-8: 0px;
+}
+
+[data-theme="dark"] {
+  --ind-ground: var(--surface-base);
+  --ind-panel:  var(--surface-elevation-1);
+}
+
+/* ── The status and priority colour steps — a legibility fix, applied everywhere ─
+   Outside the screen scopes on purpose, and it is the one block that is. It was a
+   measured defect before it was anything else: five of the six status pills failed
+   WCAG AA in BOTH themes on their own tinted ground, and a pill nobody can read is
+   a bug rather than a design direction. It stays global because the alternative is
+   the detail screen's pills disagreeing with the list's.
+
+   These restate six token names, so every pill and every priority word in the app
+   moves at once. The steps are repeated here from the table below, and from the
+   assertion in tools/smoke-industrial.mjs, which is where they are actually held.
+
+                shipped            light    dark     →   here           light  dark
+     Open       --ink-blue-5         3.01 ✗   3.24 ✗      --ink-blue-8    5.97   8.56
+     Paused     --ink-amber-6        2.93 ✗   3.89 ✗      --ink-amber-8   6.48   8.31
+     Resolved   --ink-green-6        3.85 ✗   3.73 ✗      --ink-green-8   7.20   9.36
+     Closed     --ink-gray-6         7.03 ✓   5.11 ✓      --ink-gray-7   10.55   6.63
+     Legacy     --ink-violet-5       4.03 ✗   2.32 ✗      --ink-violet-7   7.01   6.35
+     Overdue    --ink-red-6          4.44 ✗   3.38 ✗      --ink-red-7      5.68   4.81
+   ────────────────────────────────────────────────────────────────────────────── */
+:root {
+  --st-open-fg:     var(--ink-blue-8);     /* 5.97 light / 8.56 dark */
+  --st-paused-fg:   var(--ink-amber-8);    /* 6.48 / 8.31 */
+  --st-resolved-fg: var(--ink-green-8);    /* 7.20 / 9.36 */
+  --st-closed-fg:   var(--ink-gray-7);     /* 10.55 / 6.63 */
+  --st-legacy-fg:   var(--ink-violet-7);   /* 7.01 / 6.35 */
+  --st-danger-fg:   var(--ink-red-7);      /* 5.68 / 4.81 */
+}
+.prio-low    { color: var(--ink-gray-6);  /* 7.80 / 6.29 */ }
+.prio-medium { color: var(--ink-blue-8);  /* 6.69 / 11.36 */ }
+.prio-high   { color: var(--ink-amber-8); /* 7.12 / 10.87 */ }
+.prio-urgent { color: var(--ink-red-7);   /* 6.69 / 6.87  — already AA, unchanged */ }
+
+/* ══════════════════════════════════════════════════════════════
+   2 · THE SHELL — the sidebar, the phone bottom bar, and the header
+   The panel an instrument panel is drawn on. Everything here is type and a rule;
+   the one colour is the accent rail that marks where you are.
+   ══════════════════════════════════════════════════════════════ */
+#sidebar {
+  background: var(--ind-ground);
+  border-right: 1px solid var(--ind-line);
+}
+/* base.css paints the dark sidebar --surface-base by its own rule; this file loads
+   later and wins, and both end at the same value in dark. Stated rather than left
+   to the cascade so a change to --ind-ground cannot silently diverge from it. */
+[data-theme="dark"] #sidebar { background: var(--ind-ground); }
+
+#sidebar .sidebar-brand { border-bottom: 1px solid var(--ind-line); }
+/* The wordmark is a technical label here, not a wordmark: it is set as the face the
+   app's keys and numbers are set in, which is what makes the whole shell read as one
+   instrument. The mark keeps base.css's keyed-out artwork and its invert() in dark —
+   no plate is put behind it, because a yellow tile under a two-tone disc is two
+   brands arguing on 26 pixels. */
+#sidebar .brand-text {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+
+#sidebar .nav-item {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+#sidebar .nav-item:hover { background: var(--ind-inset); color: var(--ink-gray-9); }
+/* The rail. A 2px inset bar on the inline-start edge: the accent used as a MARK
+   rather than as a word. It is the accent and not the brand yellow, for the reason
+   given in the header — 2px of #ffc400 on a cream ground is invisible, and the one
+   row that says where you are cannot be the one row you cannot find. */
+#sidebar .nav-item.active {
+  background: var(--ind-inset);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+/* The icon is a glyph from ICON_PATHS, drawn in currentColor, so the active row's
+   accent carries into it with no rule of its own. Only the count needs settling. */
+#sidebar .nav-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ind-muted);
+  background: transparent;
+  padding: 0;
+}
+#sidebar .nav-item.active .nav-count { background: transparent; color: var(--accent); }
+#sidebar .sidebar-section-label { letter-spacing: 0.14em; color: var(--ind-muted); }
+
+/* The header band. A band, not a toolbar: it is separated from the panes by one
+   hairline and it wears no shadow, because nothing on this screen floats. */
+#workspace header { border-bottom: 1px solid var(--ind-line); }
+#workspace header #header-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+/* The avatar draws from --radius-9 (999px), which the screen set deliberately leaves
+   round, so it is the one control in the header that has to be squared by hand. It
+   also takes the accent as its edge — the second and last place the accent is a mark
+   rather than a word. (.nudge-bell draws from --radius-3 and is
+   already square; it needs no rule.) */
+#workspace header #user-avatar {
+  border-radius: 0;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   3 · THE DOORS — sign in and password change
+   The landing page keeps the liquid glass the owner asked for on 2026-10-08. Only
+   four things change: the corners go square, the pane takes an accent rule across
+   its head, the type goes technical, and the one action on each door wears the
+   accent's solid pair instead of the neutral slab that a bare `.btn` ships with.
+   A change of finish, not of material — the fill, the blur and the 72% alpha that
+   carries the legibility argument are untouched, and the blur still needs the
+   ambient field behind it to be visible.
+   ══════════════════════════════════════════════════════════════ */
+#auth-container,
+#password-change { background: var(--ind-ground); }
+
+#auth-container .glass-card,
+#password-change .glass-card {
+  border: 1px solid var(--ind-line);
+  border-top: 2px solid var(--accent);
+  box-shadow: none;
+}
+/* The pane's corners are already square: .glass-card is rounded with --radius-6 and
+   .form-input with --radius-4, both on the scale the screen set zeroes. Exactly four
+   rules in this file DO write `border-radius: 0` by hand, and each one is a corner the
+   token scale cannot reach: the two LED rules draw from --radius-9, the avatar from
+   --radius-9, and .door-role from a literal `999px` in base.css. Nothing else here
+   names a radius at all, which is what keeps "square" a property of the scale rather
+   than a property of this file's diligence. */
+
+/* ── THE ONE ACTION ON EACH DOOR ────────────────────────────────────────────────
+   A bare `.btn` is the app's NEUTRAL button: components.css:14 fills it with
+   --surface-gray-10, which reads near-black in light mode and near-white in dark. It
+   is the right default for a dialog's Cancel and the wrong one for a door's only
+   action — and, measured, it is the reason the landing page shipped two WHITE "Sign
+   in" buttons on a dark ground in the first place. The brand-coloured button is
+   `.btn-primary`, and none of the landing markup asks for it.
+
+   So this rule gives the doors' actions the accent's solid pair. It is written with
+   :not() rather than by adding a class to the markup on purpose: a look that needs
+   markup cannot be undone by deleting one file, and the whole claim of this
+   stylesheet is that deleting it changes nothing else. The four variants are named
+   back OUT because this file loads after components.css and would otherwise repaint
+   all four of them — `.btn-quick` (the fingerprint door), `.btn-ghost`, `.btn-google`
+   and `.btn-secondary` each carry their own meaning and their own colour.
+
+   The three states are restated because `:not()` chains make this selector far more
+   specific than `.btn-primary:hover`; leaving them out would give a yellow button
+   that turns back to neutral grey under the pointer. */
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick),
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick) {
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
+  border-color: transparent;
+}
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):hover,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):hover {
+  background: var(--btn-solid-bg-hover);
+}
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):active,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick):active {
+  background: var(--btn-solid-bg-active);
+}
+/* A busy door keeps its own colour rather than flashing amber: the wait is the same
+   wait, and a button that changes colour when pressed reads as a failure. */
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).saving,
+#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).is-busy,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).saving,
+#password-change .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-google):not(.btn-quick).is-busy {
+  background: var(--btn-solid-bg-hover);
+  color: var(--btn-solid-fg);
+}
+
+/* The ambient field, restated for this ground. Desk put one here and desk.css is
+   gone; a blur over a flat colour is invisible, so if this were dropped with the
+   file the glass would silently stop being glass. */
+#auth-container {
+  background:
+    radial-gradient(52rem 32rem at 12% -8%,  var(--accent-tint-strong), transparent 62%),
+    radial-gradient(46rem 30rem at 92% 108%, var(--accent-tint),        transparent 60%),
+    var(--ind-ground);
+}
+
+/* The common head. The wordmark is the same face as the shell's, at the one place
+   in the app where it is allowed to be large. */
+#auth-container .landing-brand {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+#auth-container .landing-full {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+/* The two role chips. A label on a panel: outlined, letterspaced, one size, and
+   identical on both doors so neither reads as the real one.
+
+   Square by hand, and it is the one chip that has to be. base.css:461 rounds it with
+   a literal `999px` rather than with a radius token, so the screen set below cannot
+   reach it — the same reason the LED and the avatar need their own `border-radius: 0`.
+   Left as a pill it would be the only curve on the doors. */
+#auth-container .door-role {
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+#auth-container .auth-hint,
+#password-change .auth-hint { color: var(--ind-muted); }
+#auth-container .auth-or { letter-spacing: 0.14em; color: var(--ind-muted); }
+#auth-container .auth-or::before,
+#auth-container .auth-or::after { background: var(--ind-rule); }
+#auth-container .form-label { letter-spacing: 0.12em; color: var(--ind-muted); }
+#auth-container .link-btn,
+#password-change .link-btn { color: var(--ind-muted); }
+#auth-container .link-btn:hover,
+#password-change .link-btn:hover { color: var(--accent); }
+
+/* The failure line: a ruled block rather than a centred sentence, in the same
+   tokens .badge-danger uses so it cannot drift from the meaning it carries. */
+#auth-container .auth-error,
+#password-change .auth-error {
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--st-danger-bd);
+  border-left: 2px solid var(--st-danger-fg);
+  background: var(--st-danger-bg);
+  color: var(--st-danger-fg);
+  font-size: var(--text-xs);
+  text-align: left;
+}
+
+/* Phones: the doors on this screen are the only things to press on it, and this is
+   the one place the app's own 32px control height is deliberately not kept. */
+@media (max-width: 639px) {
+  #auth-container .btn,
+  #password-change .btn { height: 44px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4 · THE IR LIST — a readout, not a set of cards
+   Scoped to #index-view, which wraps the toolbar, the sync line and the list — and
+   nothing else (the detail banner at #ir-banner is a sibling pane, so the polish
+   gradient stays on it). Not behind a media query: this is ONE component that
+   renders in the phone pane and in the desktop split pane, and a list that changed
+   character at a breakpoint would be two lists.
+   ══════════════════════════════════════════════════════════════ */
+#index-view { background: var(--ind-ground); }
+
+#index-view .list-toolbar {
+  background: var(--ind-panel);
+  border-bottom: 1px solid var(--ind-line);
+}
+/* The series index. "01 /" is the panel's own numbering, and it is a ::before rather
+   than a markup change for the same reason the rest of this file is: a look that
+   needs markup cannot be reverted by deleting one file. */
+#index-view .list-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+#index-view .list-title::before { content: "01 / "; color: var(--accent); }
+#index-view .list-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+#index-view #sync-status,
+#index-view #sync-status .sync-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+
+/* The search field. 16px on a phone is not a style choice — iOS zooms the viewport
+   for any focused field under 16px, and this is the field with the most to type in.
+   The same rule already exists in components.css for .form-input; .search-bar is a
+   different class and was missed. */
+@media (max-width: 639px) {
+  #index-view .search-bar { font-size: 16px; }
+}
+#index-view .search-bar {
+  border: 1px solid var(--ind-line);
+  background: var(--ind-inset);
+  color: var(--ink-gray-9);
+}
+/* A placeholder is text, so it takes the text step like every other quiet word in
+   this file. It still reads as a placeholder: the value a user types is --ink-gray-9,
+   three steps away. */
+#index-view .search-bar::placeholder { color: var(--ind-muted); }
+
+/* The filters. A chip is a small tile here, and the strip wraps rather than
+   scrolling sideways: overflow-x: auto is still in views.css and would come back
+   with the strip if this rule were dropped, hiding half the statuses off the right
+   edge — a defect the owner has reported more than once. */
+#index-view .segments {
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  overflow: visible;
+  margin: 0;
+  padding: 0;
+}
+#index-view .segments-cat {
+  margin-top: 0.6rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--ind-rule);
+}
+#index-view .segment {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  min-width: 4rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--ind-line);
+  background: var(--ind-panel);
+  color: var(--ind-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* The tiles take up the slack on the row they land on, so a strip never ends in a
+     rag of dead space. Basis is `auto`, not `0`, so a tile is never narrower than its
+     own label; the cap is only reached by a LONE tile on a last row. */
+  flex: 1 1 auto;
+  max-width: 11rem;
+}
+#index-view .segment:hover { background: var(--ind-inset); border-color: var(--ind-line); color: var(--ink-gray-9); }
+/* "You are here" is an accent edge, not a colour block. One pixel of it, so the tile
+   still says where you are without turning into a slab with unreadable text on it. */
+#index-view .segment.active {
+  background: var(--ind-panel);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* The number leads, and it is the only thing on the tile allowed to be bright: the
+   word underneath is a label, and labels are muted. */
+#index-view .segment-count {
+  order: -1;
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  line-height: 1.1;
+  color: var(--ink-gray-9);
+}
+#index-view .segment.active .segment-count { color: var(--accent); }
+/* A tile is a 44px-class target on a phone, not a 28px one: this is the strip that
+   changes what the list shows, and it is the first thing a thumb reaches. */
+@media (max-width: 639px) {
+  #index-view .segment { padding: 0.4rem 0.6rem; min-height: 44px; }
+}
+
+/* The row. A hairline between rows and no card around them, which is what .ir-card
+   already is — so this states the ground and switches off the hover slide: a row
+   answers the pointer by lighting up, it does not move. */
+#index-view .ir-card {
+  padding: 0.5rem 0.9rem;
+  background: var(--ind-panel);
+  transition: background 0.1s var(--ease);
+}
+#index-view .ir-card:hover { background: var(--ind-inset); }
+#index-view .ir-card:active { background: var(--surface-gray-3); }
+@media (prefers-reduced-motion: no-preference) {
+  #index-view .ir-card:hover { transform: none; }
+}
+#index-view .ir-card.is-selected {
+  background: var(--ind-inset);
+  box-shadow: inset 2px 0 0 0 var(--accent);
+}
+
+/* Row text. The identifier is the one thing on the row in the brand colour: it is
+   what the desk reads out loud, and making it the only bright element is what turns
+   a list of cards into a readout. */
+#index-view .ir-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+#index-view .ir-assignee,
+#index-view .ir-meta,
+#index-view .ir-card-hover,
+#index-view .ir-progress-text,
+#index-view .ir-age { color: var(--ind-muted); }
+/* Overdue answers in the danger colour, and it is the one place on a row where a
+   coloured word is right. --st-danger-fg is re-pointed in §1, so this needs no rule
+   of its own — only the note that it moved with the pills. */
+#index-view .ir-age.is-late { color: var(--st-danger-fg); }
+#index-view .ir-dot { color: var(--ind-muted); }
+
+/* ── THE LED ──────────────────────────────────────────────────────────────────
+   Status stops being a rounded pill and becomes a small lit block. The corner is
+   the language: everything else in this file is square, so a fully-round pill would
+   be the only curve on the screen.
+
+   THE COLOUR COMES FROM --st-*-fg AND NOT FROM --focus-*. The focus family is a
+   box-shadow, so `background: var(--focus-blue)` would render as nothing at all —
+   a lit LED that is not lit is worse than the pill it replaced. The status family is
+   the app's own semantic set, so if a status colour is ever retuned, every LED
+   follows it.
+
+   IT IS NOT ALLOWED TO GET WIDER. The row's side column can never shrink (see
+   .ir-card-side in views.css — the owner's "AN overlapping Open"), so a pill that
+   grew would squeeze the MIDDLE of the row. The visible border costs 2px and the
+   padding gives back 3. */
+#index-view .badge,
+#detail-view .badge,
+#insights-view .badge {
+  gap: 0.3rem;
+  padding: 1px 6px;
+  border: 1px solid var(--ind-line);
+  border-radius: 0;
+  background: var(--ind-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+#index-view .badge::before,
+#detail-view .badge::before,
+#insights-view .badge::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 0;
+  background: var(--ind-dim);
+}
+#index-view .badge-open::before,     #detail-view .badge-open::before,     #insights-view .badge-open::before     { background: var(--st-open-fg); }
+#index-view .badge-pending::before,  #detail-view .badge-pending::before,  #insights-view .badge-pending::before  { background: var(--st-paused-fg); }
+#index-view .badge-resolved::before, #detail-view .badge-resolved::before, #insights-view .badge-resolved::before { background: var(--st-resolved-fg); }
+#index-view .badge-closed::before,   #detail-view .badge-closed::before,   #insights-view .badge-closed::before   { background: var(--st-closed-fg); }
+#index-view .badge-legacy::before,   #detail-view .badge-legacy::before,   #insights-view .badge-legacy::before   { background: var(--st-legacy-fg); }
+/* Danger keeps its own colour ON the LED and on the text — it is the one badge that
+   has to shout, and a red LED in a grey block says something a grey LED cannot. */
+#index-view .badge-danger,   #detail-view .badge-danger,   #insights-view .badge-danger   { border-color: var(--st-danger-bd); color: var(--st-danger-fg); }
+#index-view .badge-danger::before, #detail-view .badge-danger::before, #insights-view .badge-danger::before { background: var(--st-danger-fg); }
+
+#index-view .prio {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   5 · ONE IR — the detail pane
+   The pane holds four things: the identity banner, the Overview panel, the section
+   tabs and the section body. Desk's shapes for those were a flat band and a panel
+   with a lift; this one's are a flat band and a panel with a RULE, because nothing
+   in an instrument panel floats.
+   ══════════════════════════════════════════════════════════════ */
+#detail-view { background: var(--ind-ground); }
+
+#detail-view #ir-banner {
+  background: var(--ind-panel);
+  border-bottom: 1px solid var(--ind-line);
+}
+/* The identifier, at the size a part number is set. This is the loudest single
+   thing in the app and it is meant to be. */
+#detail-view #ir-banner-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-xl);
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+#detail-view #ir-banner-sub {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+
+#detail-view .overview-panel {
+  background: var(--ind-panel);
+  border: 1px solid var(--ind-line);
+  box-shadow: none;
+}
+#detail-view .overview-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* ── THE DATAGRID — the Overview's facts ───────────────────────────────────────
+   This is a RE-MAP, not a rebuild, and it is the one place in this file where the
+   shapes had to be redrawn rather than restyled. The markup is `.overview-facts`
+   holding `.overview-fact` cells that each contain a label and a value
+   (app.js, renderOverviewFacts), laid out as a grid on a grey block.
+
+   It becomes the panel's own field grid: no grey block, one hairline under each
+   cell so the columns read as a grid rather than as a wall of text, and wider
+   tracks. 15rem is chosen against this panel, not copied: at the narrowest desktop
+   pane (1024 − 232 − 400 = 392px, measured) it still yields one column, and two
+   columns appear only once the pane passes ~500px. So a phone and a split pane both
+   get a single readable column, and a wide window gets the grid. */
+#detail-view .overview-facts {
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+#detail-view .overview-fact {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--ind-rule);
+}
+#detail-view .overview-fact-label {
+  font-family: var(--font-mono);
+  letter-spacing: 0.1em;
+  color: var(--ind-muted);
+}
+#detail-view .overview-fact-value { color: var(--ink-gray-9); }
+
+/* The section tabs already are underline tabs — views.css draws a 2px transparent
+   bottom border that .active colours — so they need type and a colour, nothing
+   structural. */
+#detail-view .tabs-container { background: var(--ind-panel); border-bottom: 1px solid var(--ind-line); }
+#detail-view .tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+}
+#detail-view .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+#detail-view .section-content { background: var(--ind-panel); }
+#detail-view .section-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+
+/* ══════════════════════════════════════════════════════════════
+   6 · THE TWO READ-ONLY PANES
+   Insights and the Log Analyser. Both are a toolbar over a body of results, so both
+   take the ground. The log's own frame and the reader's output are left alone — that
+   pane's shapes are the analyser's, not a list's, and nothing here should reach into
+   them.
+   ══════════════════════════════════════════════════════════════ */
+#insights-view,
+#log-view { background: var(--ind-ground); }
+
+#insights-view .list-toolbar,
+#log-view .list-toolbar {
+  background: var(--ind-panel);
+  border-bottom: 1px solid var(--ind-line);
+}
+#insights-view .list-title,
+#log-view .list-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+#insights-view .list-count,
+#log-view .list-count { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); }
+
+/* ══════════════════════════════════════════════════════════════
+   7 · INSIGHTS — the dashboard
+   Stat cards, the category mixes and the status mix, in the same language: a ruled
+   panel, a number that leads, a label in the mono face, and the accent edge that
+   marks the one card the numbers below belong to.
+   ══════════════════════════════════════════════════════════════ */
+#insights-view .insights-card {
+  background: var(--ind-panel);
+  border: 1px solid var(--ind-line);
+  border-left: 2px solid var(--ind-rule);
+  box-shadow: none;
+}
+/* The active card keeps the accent — as a LEFT EDGE, not a fill. One card of twelve
+   being the one the numbers belong to is exactly the "you are here" the accent is
+   for, and 2px of it is the smallest way to say so. */
+#insights-view .insights-card.active { border-left-color: var(--accent); }
+#insights-view .insights-card-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-gray-9);
+}
+#insights-view .insights-card-label,
+#insights-view .insights-stat-label { letter-spacing: 0.1em; color: var(--ind-muted); }
+#insights-view .insights-stat-n {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-gray-9);
+}
+#insights-view .insights-total { letter-spacing: 0.08em; color: var(--ind-muted); }
+#insights-view .insights-total strong { font-family: var(--font-mono); color: var(--accent); }
+#insights-view .insights-h {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+#insights-view .insights-subcat {
+  border: 1px solid var(--ind-line);
+  background: var(--ind-inset);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-9);
+}
+#insights-view .insights-subcat.is-others { border-style: dashed; color: var(--ind-muted); }
+#insights-view .insights-subcat-n { font-variant-numeric: tabular-nums; color: var(--accent); }
+#insights-view .insights-mix-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); }
+#insights-view .insights-note { color: var(--ind-muted); }

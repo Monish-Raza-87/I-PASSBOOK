@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v78';
+const APP_VERSION = 'v79';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1184,10 +1184,12 @@ async function loadIRState() {
 function setAllIRs(records) {
   allIRs = Array.isArray(records) ? records : [];
   applyIRStateToAllIRs();
-  // The dashboard counts these same rows, so every fetch path repaints it here —
-  // the Sheet read, the GAS fallback, the demo fallback and an in-page re-login.
-  // It is a no-op while the pane is not showing, and it re-emits the skeleton when
-  // the list is empty, so a failed fetch cannot leave yesterday's numbers standing.
+  // The dashboard counts these same rows, so every fetch path offers it a repaint
+  // here — the Sheet read, the GAS fallback, the demo fallback and an in-page
+  // re-login. renderInsights() is what decides whether that costs anything: while
+  // another pane owns the screen it returns without touching the DOM, and when the
+  // list is empty it re-emits the skeleton rather than leaving yesterday's numbers
+  // standing. See its header for why an early return cannot leave the pane stale.
   renderInsights();
   return allIRs;
 }
@@ -5755,12 +5757,31 @@ function avatarSvg(seed) {
 const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// SYNCHRONOUS, IDEMPOTENT and safe with an empty list. Those three properties are
-// what let four different callers use it with no sequence token: setAllIRs() (every
-// fetch path, including the demo fallback and an in-page re-login), loadIRState()
-// (the app-owned overlay, which lands after the list), refreshIRList() (the header
-// Refresh) and showInsights() itself.
+// SYNCHRONOUS, IDEMPOTENT, VISIBILITY-GATED and safe with an empty list. Those four
+// properties are what let four different callers use it with no sequence token:
+// setAllIRs() (every fetch path, including the demo fallback and an in-page
+// re-login), loadIRState() (the app-owned overlay, which lands after the list),
+// refreshIRList() (the header Refresh) and showInsights() itself.
+//
+// The visibility gate is the fourth property and it was the missing one. The
+// `#insights-body` element is STATIC markup in index.html, so it exists whether or
+// not the dashboard is the pane on screen — and two of those four callers land during
+// BOOT, while the IR list owns the screen. Rebuilding a pane nobody is looking at is
+// a full pass over allIRs plus a large innerHTML parse (measured at ~21ms for 600
+// IRs, twice per boot) whose only visible effect is on the frame budget. This header
+// used to claim the function was "a no-op while the pane is not showing" while
+// having no such guard.
+//
+// Nothing can go stale by returning early. The gate is the SAME predicate
+// renderLayout() uses to decide whether `#insights-view` is on screen at all, so a
+// pane that is visible always has currentView === 'insights' and always renders —
+// the two cannot disagree by construction. showInsights() then repaints
+// unconditionally on entry, and handleRoute() only reaches it after `_irsReady` has
+// settled, so the pane is always painted from a list that has already arrived. The
+// stale-filter reset below simply happens when the pane is shown rather than while it
+// is hidden, which is the moment it can be seen at all.
 function renderInsights() {
+  if (currentView !== 'insights') return;
   const body = document.getElementById('insights-body');
   if (!body) return;
   if (!allIRs.length) { body.innerHTML = INSIGHTS_SKELETON; return; }
@@ -7973,8 +7994,54 @@ function applyListFilters() {
   else renderIRList(rows);
 }
 
-// Search / segment filter
-searchInput.addEventListener('input', applyListFilters);
+// Search / segment filter.
+//
+// The search box repaints the WHOLE list, and the list is the one piece of this app
+// whose cost is proportional to the data. Measured in a real browser (390x844, the
+// app's own bundle, synthetic rows shaped like `listIRs` returns): ~0.1ms per row —
+// 21ms at 100 IRs, 64ms at 600, 122ms at 1200. Nothing else measured came close:
+// the segment strips are ~1ms, renderBoard 4.5ms, renderLayout under 2ms, the
+// comment-bell sweep 1.7ms at 46 buttons. So typing five characters into search was
+// ~0.3s of main-thread work at the desk's scale, and it is the largest single cost
+// the app pays on a human-scale interaction.
+//
+// The fix is to rate-limit the LISTENER rather than to make the render cleverer: the
+// expensive part is inherent to putting N cards on screen, and a debounce cannot make
+// the cards cheaper, only rarer. Leading edge AND trailing: the first keystroke
+// repaints immediately (so typing never feels dead), the following 150ms of
+// keystrokes are absorbed, and the LAST state is always the one painted — including
+// the empty state, so the list can never be left showing a filter the box no longer
+// holds.
+//
+// Only this listener is throttled. `applyListFilters()` itself stays immediate, because
+// the segment strip, the category strip, loadIRState() and patchIRState() all call it
+// directly and each must land on the tick it was asked for.
+const LIST_FILTER_MIN_MS = 150;
+
+// Leading + trailing rate limit. `pending` holds the newest arguments so the trailing
+// call always carries the final state rather than the one that opened the window.
+function throttleTrailing(fn, ms) {
+  let last = 0;
+  let timer = null;
+  let pending = null;
+  return function throttled() {
+    pending = arguments;
+    const wait = ms - (Date.now() - last);
+    if (wait <= 0) {
+      if (timer) { clearTimeout(timer); timer = null; }
+      last = Date.now();
+      fn.apply(this, pending);
+    } else if (!timer) {
+      timer = setTimeout(() => {
+        timer = null;
+        last = Date.now();
+        fn.apply(this, pending);
+      }, wait);
+    }
+  };
+}
+
+searchInput.addEventListener('input', throttleTrailing(applyListFilters, LIST_FILTER_MIN_MS));
 
 if (listSegments) {
   listSegments.addEventListener('click', e => {

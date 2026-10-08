@@ -31,7 +31,15 @@ const { T, byId } = loadApp(`
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
   get insightsFilters() { return insightsFilters; }, set insightsFilters(v) { insightsFilters = v; },
   get _dataIsDemo() { return _dataIsDemo; }, set _dataIsDemo(v) { _dataIsDemo = v; },
+  set currentView(v) { currentView = v; },
 `, { capture: true });
+
+// The pane is VISIBILITY-GATED (see renderInsights' header in app.js): `#insights-body`
+// is static markup, so it exists on every route, and the render returns without
+// painting unless the dashboard is the pane on screen. Every assertion below reads
+// the pane's own innerHTML, so the pane has to be showing — which is what
+// handleRoute()'s `#/insights` branch guarantees in the app.
+T.currentView = 'insights';
 
 const ALL = T.INSIGHTS_ALL;
 const noFilter = () => ({ fy: ALL, month: ALL, status: ALL, category: ALL, customer: ALL, drone: ALL });

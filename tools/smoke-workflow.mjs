@@ -71,6 +71,7 @@ const { T, byId } = loadApp(`
   openTriageModal, applyTriage,
   renderIRList, renderBannerMeta, renderBoard, renderInsights, statusLabel, t,
   setUser: u => { currentUser = u; },
+  set currentView(v) { currentView = v; },
   set allIRs(v) { allIRs = v; }, get allIRs() { return allIRs; },
   set irState(v) { irState = v; }, get irState() { return irState; },
   set currentIR(v) { currentIR = v; }, get currentIR() { return currentIR; },
@@ -518,6 +519,10 @@ ok('the BOARD puts it in the Open column, and counts 1',
   !!startCol && /class="kb-col-count">\s*1\s*</.test(startCol) && startCol.includes('IR730'),
   startCol && startCol.replace(/\s+/g, ' ').slice(0, 240));
 
+// The pane must be the one on screen for renderInsights() to paint at all — it is
+// visibility-gated (see its header in app.js), so the suite has to honour the same
+// precondition the app does: handleRoute() shows the pane before it asks for a paint.
+T.currentView = 'insights';
 T.renderInsights();
 const stats = [...byId.get('insights-body').innerHTML.matchAll(
   /insights-stat-n">(\d+)<\/span>\s*<span class="insights-stat-label">([^<]*)</g)]

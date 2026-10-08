@@ -740,13 +740,19 @@ r.ok('its icon span ships EMPTY, like every other static glyph',
 r.head('the dashboard paints a skeleton, never a page of zeroes');
 // A dashboard of zeroes is not "loading" — it is the answer "nothing was raised",
 // and it is the wrong one. renderInsights() is called from four places with no
-// sequence token, so it has to be safe with an empty list at any of them.
+// sequence token, so it has to be safe with an empty list at any of them. It is also
+// visibility-gated (see its header in app.js): the element is static markup, so it
+// exists on every route, and the pane has to be the one on screen before a paint is
+// worth anything. Both properties are asserted below — the second one in
+// smoke-insights, which owns the pane.
 r.ok('an empty list leaves the skeleton and no cards', (() => {
   const { T: I, byId: iById } = loadApp(`
     renderInsights, INSIGHTS_SKELETON,
     set allIRs(v) { allIRs = v; },
+    set currentView(v) { currentView = v; },
   `, { capture: true });
   I.allIRs = [];
+  I.currentView = 'insights';
   I.renderInsights();
   const h = iById.get('insights-body').innerHTML;
   return h.includes('insights-skeleton') && !/insights-card/.test(h) && h.trim() === I.INSIGHTS_SKELETON.trim();

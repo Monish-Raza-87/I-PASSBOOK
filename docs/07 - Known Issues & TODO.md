@@ -648,12 +648,62 @@ is left is small.
       returns accounts is `listUsers`, which is `requireAdmin`, so this needs a narrower
       authenticated team-directory action — an `API_VERSION` bump, and therefore a paste,
       before any frontend work can be tested against it.
-- [ ] **The app feels laggy.** Raised 2026-10-08, not yet investigated. The two known cost
-      centres are the Drive store's per-OPERATION round trips (~0.37 s each, ~1.8 s a hop —
-      see "Storage") and any full-list re-render. **Measure before changing anything**: a
-      perceived lag is a symptom with several possible causes, and the honest first step is
-      a count of the round trips a real sign-in and a real section save make, not a guess
-      from reading the source.
+- [x] **The app feels laggy.** Raised 2026-10-08. **Measured 2026-10-08**, in a real
+      browser (headless Chrome, 390×844, the app's own bundle served locally, rows shaped
+      like what `listIRs` returns) rather than read off the source — the whole point of
+      the exercise, because static reading ranked the suspects in an order the clock did
+      not agree with.
+      **What the clock said** (N = the number of IRs in the list):
+
+      | Work | 100 | 300 | 600 | 1200 |
+      |---|---|---|---|---|
+      | one full `renderIRList` | 21 ms | 42 ms | 60 ms | 91–122 ms |
+      | one `renderInsights` (dashboard) | 7 ms | 11 ms | 21 ms | 28 ms |
+      | `renderBoard` (capped at 25 cards) | — | — | 4.5 ms | — |
+      | `renderLayout`, `renderSegments`, `renderCategorySegments`, `applyIRStateToAllIRs`, `refreshCommentCounts` (46 buttons), `buildTimeline` | | | **all under 2 ms** | |
+
+      So there is exactly **one** cost in this app proportional to the data — putting N
+      cards on screen at ~0.06–0.1 ms each — and everything else a static read flags
+      (layout walks, state overlays, the comment-bell sweep) is noise. `buildSectionForms`
+      is a single ~22 ms hit per ticket open.
+
+      **Two things were paid for nothing, and both are fixed:**
+      1. The search box repainted the entire list **once per keystroke**. Five characters
+         was ~5 × 60 ms = ~300 ms of main-thread work at 600 IRs. The listener is now
+         leading+trailing rate-limited at 150 ms (`throttleTrailing`) — one rebuild per
+         burst, and the *last* state is always the one painted. Measured after: **41 ms
+         for the same five keystrokes**. `applyListFilters()` itself is untouched, so the
+         segment strips, `loadIRState()` and `patchIRState()` still land on the tick they
+         are asked for.
+      2. `renderInsights()` rebuilt the whole dashboard **while it was hidden**, twice per
+         boot. Its own header claimed it was "a no-op while the pane is not showing" and
+         it had no such guard: `#insights-body` is static markup in `index.html`, so it
+         exists on every route. Now gated on `currentView`, with `showInsights()`
+         repainting on entry and `handleRoute()` only reaching it after `_irsReady` — so
+         nothing can go stale. Measured after: **0 ms while hidden**, unchanged 10–21 ms
+         when shown.
+
+      **Still unmeasured, and it is the honest remaining question.** Everything above is
+      CPU. The network half cannot be measured from this environment, and the code proves
+      **two backend round trips per section save** (`saveSection` POST, then an
+      `getAuditLog&limit=400` GET from `loadActivityLog`) and **two per IR open**
+      (`getPassbook`, then the same audit GET). At the store's measured ~0.37 s per
+      operation that is ~0.7 s per save and ~0.7 s per ticket, and a section save fires
+      1.5 s after you stop typing. **The next step is his, and it is a count, not a guess:**
+      open the browser's Network tab, type one character into any section, wait for
+      "Saved", and count the requests. If it reads 2, the next release should fold the
+      audit entries into the `getPassbook` reply (a backend change, so a paste) or skip the
+      post-save audit refetch when the save wrote no diff.
+
+      **How to re-measure these numbers** (they are the app's own bundle in a real
+      browser, not a reading of the source, and they do drift with N):
+      `node tools/serve-local.mjs 3111`, then
+      `node tools/render-themes.mjs http://127.0.0.1:3111/index.html --width 390 --height 844 --themes light --settle 2500 --eval "<js>"`,
+      where the eval builds N synthetic rows, calls `setAllIRs(rows)`, times
+      `renderIRList(allIRs)` and `renderInsights()` with `performance.now()`, and returns
+      `JSON.stringify(...)` — the harness prints whatever the eval returns. The probes are
+      scratch files under `tools/.cache/` (gitignored, like every other one-off fixture),
+      so the recipe above is the durable part.
 - [ ] **Erase archived IR folders.** Not built, deliberately: closing an IR moves its
       folder to `Archive IRs/` and nothing is ever deleted. The owner will watch Drive
       usage for a while and ask for this separately if space becomes an issue.

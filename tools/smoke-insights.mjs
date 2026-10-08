@@ -38,6 +38,7 @@ const { T, byId } = loadApp(`
   get insightsFilters() { return insightsFilters; }, set insightsFilters(v) { insightsFilters = v; },
   get activeCategory() { return activeCategory; },
   get currentView() { return currentView; }, set currentView(v) { currentView = v; },
+  showInsights, throttleTrailing,
   set dataIsDemo(v) { _dataIsDemo = v; },
   searchInput, irList,
 `, { capture: true });
@@ -277,6 +278,13 @@ r.ok('...and disappears once every IR is categorised',
 
 // ── The pane ──────────────────────────────────────────────────────────────────
 r.head('the dashboard never presents a wait as an answer');
+// The pane is VISIBILITY-GATED: `#insights-body` is static markup in index.html, so
+// it exists on every route, and renderInsights() returns without painting unless the
+// dashboard is the pane on screen — which is what stops the two boot-time callers
+// from rebuilding a hidden pane. Everything below asserts what the dashboard PAINTS,
+// so the pane has to be showing, exactly as handleRoute()'s `#/insights` branch makes
+// it. The gate itself is asserted at the bottom of this file.
+T.currentView = 'insights';
 // A dashboard of zeroes is not "loading" — it is the answer "nothing was raised",
 // and it is the wrong one. This is also the cold-deep-link frame: showApp() paints
 // #/insights before fetchIRs() has even been called.
@@ -382,5 +390,87 @@ r.ok('TICKET_TYPES is not defined anywhere', !/TICKET_TYPES/.test(code));
 r.ok('nothing reads a record\'s `type` any more',
   !/\bir\.type\b|currentIR\.type|st\.type|s\.type/.test(code),
   (code.match(/[^\n]*\b(ir|currentIR|st|s)\.type\b[^\n]*/) || [''])[0]);
+
+// ── The two things that keep the pane and the list off the frame budget ───────
+r.head('a hidden dashboard is not rebuilt, and showing it always repaints');
+
+// The gate exists because `#insights-body` is static markup: it is in the DOM on
+// every route, so without this check the two boot-time callers rebuilt the whole
+// dashboard — a full pass over allIRs plus a large innerHTML parse, measured at ~21ms
+// for 600 IRs — while the IR list owned the screen. Asserted by OUTCOME, not by
+// reading the source: the pane is emptied, the render is called while another pane
+// owns the screen, and the empty body is what proves nothing was painted.
+{
+  T.allIRs = FIXTURE;
+  T.insightsFilters = Object.assign({}, ALL_ON);
+  T.currentView = 'insights';
+  T.renderInsights();
+  const painted = byId.get('insights-body').innerHTML;
+  T.currentView = 'index';
+  byId.get('insights-body').innerHTML = 'CANARY';
+  T.renderInsights();
+  r.ok('while another pane owns the screen the body is untouched',
+    byId.get('insights-body').innerHTML === 'CANARY',
+    byId.get('insights-body').innerHTML.slice(0, 120));
+  r.ok('and it really had something to paint',
+    painted.includes('insights-card') || painted.includes('insights-filters'),
+    painted.slice(0, 120));
+
+  // The gate is only safe because it is the SAME predicate renderLayout() uses to
+  // decide whether the pane is on screen. Pin the two together: if the layout ever
+  // starts showing #insights-view on some other condition, the gate would silently
+  // start hiding a pane the user is looking at.
+  const laySrc = code.slice(code.indexOf('function renderLayout()'));
+  r.ok('renderLayout decides the pane is on screen on the same predicate the gate uses',
+    /const insights = currentView === 'insights'/.test(laySrc) &&
+    /insightsView\.style\.display = insights \?/.test(laySrc.slice(0, 4000)),
+    (laySrc.match(/[^\n]*insightsView\.style\.display[^\n]*/) || [''])[0]);
+
+  // Showing it again is what makes the gate safe: showInsights() repaints
+  // unconditionally, so the pane can never be left showing a stale body.
+  T.showInsights();
+  r.ok('showing the pane repaints it from the list already in memory',
+    byId.get('insights-body').innerHTML !== 'CANARY' &&
+    byId.get('insights-body').innerHTML.includes('insights-filters'),
+    byId.get('insights-body').innerHTML.slice(0, 120));
+}
+
+r.head('the search box is rate-limited, and the last keystroke is the one that paints');
+// Typing used to repaint the whole list once per keystroke — ~64ms of main-thread
+// work per character at 600 IRs, the largest measured cost on any human-scale
+// interaction. The listener is now leading+trailing throttled. What matters, and what
+// these assert, is the pair of properties that make that safe: the FIRST input is
+// immediate, and the LAST state is always the one painted.
+{
+  T.currentView = 'insights';   // the count label lives on the list, but the render does not care
+  const seen = [];
+  const spy = T.throttleTrailing(() => seen.push(T.searchInput.value), 60);
+  T.searchInput.value = 'i';
+  spy(); T.searchInput.value = 'ir'; spy();
+  T.searchInput.value = 'ir4'; spy(); T.searchInput.value = 'ir41'; spy();
+  r.ok('the first call is immediate, not deferred', seen.length === 1 && seen[0] === 'i', seen);
+  await new Promise(res => setTimeout(res, 140));
+  r.ok('and exactly one trailing call follows, carrying the LAST value',
+    seen.length === 2 && seen[1] === 'ir41', seen);
+  await new Promise(res => setTimeout(res, 140));
+  r.ok('with no further calls once the keyboard is still', seen.length === 2, seen);
+
+  // The throttle is on the LISTENER only. The render itself must stay immediate,
+  // because the segment strip, the category strip, loadIRState() and patchIRState()
+  // all call applyListFilters() directly and each must land on the tick it was asked.
+  T.currentView = 'insights';
+  T.allIRs = FIXTURE;
+  T.searchInput.value = 'ird';
+  T.applyListFilters();
+  r.ok('applyListFilters() still paints on the tick it is called',
+    byId.get('ir-list').innerHTML.includes('IRd') &&
+    !byId.get('ir-list').innerHTML.includes('IRa'),
+    byId.get('ir-list').innerHTML.slice(0, 160));
+  T.searchInput.value = '';
+  T.applyListFilters();
+  r.ok('the source wires the listener through throttleTrailing, not straight to the render',
+    /searchInput\.addEventListener\('input',\s*throttleTrailing\(applyListFilters/.test(code),
+    (code.match(/searchInput\.addEventListener\([^\n]*/) || [''])[0]);
+}
 
 r.finish();

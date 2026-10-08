@@ -45,6 +45,7 @@ tools/.cache/theme-shots/
 # globs. The *.json colour cache beside these stays tracked — tools/gen-tokens.mjs
 # reads it.
 tools/.cache/*.mjs
+tools/.cache/*.js
 tools/.cache/*.txt
 tools/.cache/*.log
 

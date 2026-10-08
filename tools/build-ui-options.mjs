@@ -83,9 +83,13 @@ const REQUIRED = [
   'ir-list', 'ir-card', 'ir-card-main', 'ir-title-row', 'ir-title', 'ir-assignee',
   'ir-meta', 'ir-sn', 'ir-dot', 'ir-cat', 'ir-date', 'ir-age', 'ir-card-side',
   'badge', 'prio',
-  'glass-card', 'landing-head', 'landing-mark', 'landing-brand', 'landing-full',
-  'doors', 'door-role', 'quick-row', 'landing-foot', 'auth-hint',
-  'form-input', 'btn', 'btn-ghost', 'btn-secondary', 'link-btn', 'auth-or',
+  'glass-card', 'landing-head', 'landing-mark', 'landing-wordmark', 'landing-brand',
+  'landing-full', 'wa-corner', 'wa-glyph',
+  'doors', 'door', 'door-bar', 'door-role', 'door-chev', 'door-body', 'door-title',
+  'landing-terms', 'landing-lang', 'landing-foot', 'auth-hint',
+  'cust-welcome', 'cust-tagline', 'cust-lead', 'cust-helper', 'cust-unregistered',
+  'code-card', 'code-title', 'code-sub', 'code-email', 'code-boxes', 'code-box',
+  'form-input', 'btn', 'btn-ghost', 'btn-secondary', 'link-btn', 'link-sm', 'auth-or',
   'banner-main', 'banner-pills', 'banner-actions',
   'tabs-container', 'tab', 'section-content', 'section-title',
   'ir-progress', 'ir-progress-bar', 'ir-progress-text',
@@ -155,42 +159,76 @@ const chromeAfter = `
       </div>
     </div>`;
 
+// The landing screen, redrawn to the markup index.html actually ships: one head over
+// two STACKED doors, each one an accordion, then the acknowledgement and the language
+// selector, then the shared foot. The old mock-up here was two cards side by side with
+// a `quick-row` and a "Forgot password?" — a design that no longer exists anywhere, and
+// a preview that shows a screen the app does not have is worse than no preview.
+const doorBar = (role, open) => `
+            <div class="door-bar"${open ? ' data-open="1"' : ''}>
+              <span class="door-role">${role}</span><span class="door-chev"></span>
+            </div>`;
 const screenSignIn = () => `
     <div class="pv-app is-auth">
+      <a class="wa-corner" aria-label="Chat with us on WhatsApp"><span class="wa-glyph"></span></a>
       <div class="auth-wrap">
         <header class="landing-head">
           <span class="landing-mark" aria-hidden="true"></span>
-          <div class="landing-brand">I-PASSBOOK</div>
-          <p class="landing-full">INDRONES FROM I &middot; PRODUCT FROM P &middot; AFTER FROM A &middot; SALES FROM S &middot; SUMMARY FROM S &middot; BOOK AS IT IS</p>
+          <div class="landing-wordmark"><div class="landing-brand">I-PASSBOOK</div></div>
+          <p class="landing-full">INDRONES-AFTER SALES SERVICE BOOK</p>
         </header>
         <div class="doors">
-          <div class="glass-card">
-            <p class="door-role">Employee</p>
-            <p class="auth-hint">Sign in with your email, or unlock this device.</p>
-            <button type="button" class="btn">Sign in with Indrones email</button>
-            <div class="auth-or"><span>or get a code by email</span></div>
-            <input class="form-input" type="email" value="raza@indrones.com" readonly />
-            <button type="button" class="btn">Send me a code</button>
-            <div class="quick-row">
-              <button type="button" class="btn btn-secondary">Unlock with fingerprint</button>
-              <button type="button" class="btn btn-ghost">Use pattern</button>
+          <section class="door glass-card">
+            ${doorBar('Employee', true)}
+            <div class="door-body">
+              <h2 class="door-title">Log in to I-PASSBOOK</h2>
+              <input class="form-input" type="email" value="raza@indrones.com" readonly />
+              <button type="button" class="btn">Continue</button>
+              <div class="auth-or"><span>or</span></div>
+              <button type="button" class="btn btn-secondary">Continue with Indrones&rsquo; official email</button>
+              <button type="button" class="btn btn-secondary">Continue with fingerprint / passkey</button>
+              <button type="button" class="btn btn-secondary">Continue with pattern</button>
+              <button type="button" class="link-btn link-sm">First sign-in with a temporary password</button>
             </div>
-            <button type="button" class="link-btn">Forgot password?</button>
-            <button type="button" class="link-btn link-sm">Sign in with a password</button>
-          </div>
-          <div class="glass-card">
-            <p class="door-role">Customer</p>
-            <p class="auth-hint">Login to I-PASSBOOK, your after-sales companion.</p>
-            <input class="form-input" type="email" value="you@company.com" readonly />
-            <button type="button" class="btn">Sign in</button>
-            <button type="button" class="link-btn">Forgot password?</button>
-          </div>
+          </section>
+          <section class="door glass-card">
+            ${doorBar('Customer', false)}
+            <div class="door-body">
+              <p class="cust-welcome">Welcome! This is I-PASSBOOK</p>
+              <p class="cust-tagline">For Everything Related To Indrones&rsquo; After-Sales</p>
+              <p class="cust-lead">Log in to your I-PASSBOOK account.</p>
+              <input class="form-input" type="email" value="you@company.com" readonly />
+              <p class="cust-helper">Use your official email registered with us while onboarding as a customer</p>
+              <button type="button" class="btn">Continue</button>
+              <div class="auth-or"><span>or</span></div>
+              <p class="cust-unregistered">if you are not registered with us so far, contact customer.relations@indrones.com for onboarding. See you there!</p>
+            </div>
+          </section>
         </div>
+        <p class="landing-terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy</p>
+        <div class="landing-lang"><select aria-label="Language"><option>English</option><option>&#1575;&#1585;&#1583;&#1608;</option><option>&#2361;&#2367;&#2306;&#2342;&#2368;</option></select></div>
         <p class="landing-foot">
           <span class="link-btn">Report a problem</span>
           <span class="link-btn">Help &amp; FAQ</span>
         </p>
         <p class="pv-version">${esc(APP_VERSION)}</p>
+      </div>
+    </div>`;
+
+// The code step, which is a screen of its own — a sibling of the landing page, not a
+// block inside either door, exactly as index.html has it. It is here because it is now
+// the screen EVERY door passes through, so a design comparison that stopped at the
+// landing page would be comparing the one screen nobody stays on.
+const screenCode = () => `
+    <div class="pv-app is-auth">
+      <div id="code-view" data-open="1">
+        <div class="glass-card code-card">
+          <h2 class="code-title">Check your email</h2>
+          <p class="code-sub"><span>If you have a indrones after sales account, we sent a code to</span>
+            <strong class="code-email">raza@indrones.com</strong><span>.</span></p>
+          <div class="code-boxes">${[0,1,2,3,4,5].map(() => '<input class="code-box" type="text" inputmode="numeric" maxlength="1" />').join('')}</div>
+          <button type="button" class="link-btn">Use a different account</button>
+        </div>
       </div>
     </div>`;
 
@@ -341,7 +379,8 @@ const screenInsights = () => `
     ${chromeAfter}`;
 
 const SCREENS = [
-  { id: 'signin',   label: 'Sign-in',   note: 'the first thing anyone sees',        html: screenSignIn },
+  { id: 'signin',   label: 'Sign-in',   note: 'two stacked doors, one of them open', html: screenSignIn },
+  { id: 'code',     label: 'Code step', note: 'the screen both doors pass through',  html: screenCode },
   { id: 'list',     label: 'IR list',   note: '412 rows, filtered by status and category', html: screenList },
   { id: 'ticket',   label: 'Ticket',    note: 'banner, overview, tab strip, a section form', html: screenTicket },
   { id: 'insights', label: 'Insights',  note: 'the screen that does not open today', html: screenInsights },
@@ -402,12 +441,28 @@ html { -webkit-text-size-adjust: 100%; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
 .pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
 .pv-app .landing-mark { width: 40px; height: 40px; }
-.pv-app .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; width: 100%; max-width: 640px; align-items: start; }
-.pv-app .doors .glass-card { max-width: none; }
-.pv-app .door-role { text-align: center; }
-.pv-app .quick-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; }
-.pv-app .quick-row .btn { width: 100%; }
+/* Stacked, not side by side, and the collapsed door is a bar rather than a hidden
+   card — this is the whole shape the owner asked for on 2026-10-08. */
+.pv-app .doors { display: flex; flex-direction: column; gap: 0.6rem; width: 100%; max-width: 420px; }
+.pv-app .doors .glass-card { max-width: none; gap: 0; }
+.pv-app .door-bar { display: flex; align-items: center; gap: 0.6rem; min-height: 56px; }
+.pv-app .door-role { flex: 1 1 auto; text-align: left; }
+.pv-app .door-body { display: flex; flex-direction: column; gap: 0.7rem; padding-top: 0.9rem; }
+.pv-app .door[data-open="0"] .door-body { display: none; }
 .pv-app .landing-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
+.pv-app .landing-terms { max-width: 420px; text-align: center; }
+.pv-app .landing-lang { display: flex; justify-content: center; }
+.pv-app .cust-welcome, .pv-app .cust-tagline, .pv-app .cust-lead,
+.pv-app .cust-helper, .pv-app .cust-unregistered { text-align: left; }
+/* The corner, drawn in the preview at the size it is on a phone. */
+.pv-app .wa-corner { position: absolute; top: 0.85rem; right: 0.85rem; display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; }
+.pv-app .wa-glyph { width: 22px; height: 22px; }
+.pv-app .auth-wrap { position: relative; }
+/* THE CODE STEP, full screen inside the mock. */
+.pv-app #code-view { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 2rem 1rem; }
+.pv-app .code-card { max-width: 420px; text-align: center; }
+.pv-app .code-boxes { display: flex; gap: 0.4rem; justify-content: center; }
+.pv-app .code-box { width: 100%; max-width: 48px; min-width: 0; height: 52px; text-align: center; }
 
 /* ── the IR list ── */
 .pv-app .list-toolbar { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.85rem 0.9rem 0.7rem; }

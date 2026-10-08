@@ -9,7 +9,7 @@
      serves same-origin subresources stale-while-revalidate, so without it a
      rebuilt preview.css would be answered from the cache once and the review
      would be of the previous build. A new hash is a new URL. -->
-<link rel="stylesheet" href="preview.css?v=95361b45" />
+<link rel="stylesheet" href="preview.css?v=d32a383f" />
 <style>
 
 /* The only colour here that is not already in the app's token set. It is the
@@ -149,43 +149,72 @@
   <div class="pv-screens">
     
     <div class="pv-shot">
-      <div class="pv-shot-cap"><b>Sign-in</b><span>the first thing anyone sees</span></div>
+      <div class="pv-shot-cap"><b>Sign-in</b><span>two stacked doors, one of them open</span></div>
       <div class="pv-phone">
     <div class="pv-app is-auth">
+      <a class="wa-corner" aria-label="Chat with us on WhatsApp"><span class="wa-glyph"></span></a>
       <div class="auth-wrap">
         <header class="landing-head">
           <span class="landing-mark" aria-hidden="true"></span>
-          <div class="landing-brand">I-PASSBOOK</div>
-          <p class="landing-full">INDRONES FROM I &middot; PRODUCT FROM P &middot; AFTER FROM A &middot; SALES FROM S &middot; SUMMARY FROM S &middot; BOOK AS IT IS</p>
+          <div class="landing-wordmark"><div class="landing-brand">I-PASSBOOK</div></div>
+          <p class="landing-full">INDRONES-AFTER SALES SERVICE BOOK</p>
         </header>
         <div class="doors">
-          <div class="glass-card">
-            <p class="door-role">Employee</p>
-            <p class="auth-hint">Sign in with your email, or unlock this device.</p>
-            <button type="button" class="btn">Sign in with Indrones email</button>
-            <div class="auth-or"><span>or get a code by email</span></div>
-            <input class="form-input" type="email" value="raza@indrones.com" readonly />
-            <button type="button" class="btn">Send me a code</button>
-            <div class="quick-row">
-              <button type="button" class="btn btn-secondary">Unlock with fingerprint</button>
-              <button type="button" class="btn btn-ghost">Use pattern</button>
+          <section class="door glass-card">
+            
+            <div class="door-bar" data-open="1">
+              <span class="door-role">Employee</span><span class="door-chev"></span>
             </div>
-            <button type="button" class="link-btn">Forgot password?</button>
-            <button type="button" class="link-btn link-sm">Sign in with a password</button>
-          </div>
-          <div class="glass-card">
-            <p class="door-role">Customer</p>
-            <p class="auth-hint">Login to I-PASSBOOK, your after-sales companion.</p>
-            <input class="form-input" type="email" value="you@company.com" readonly />
-            <button type="button" class="btn">Sign in</button>
-            <button type="button" class="link-btn">Forgot password?</button>
-          </div>
+            <div class="door-body">
+              <h2 class="door-title">Log in to I-PASSBOOK</h2>
+              <input class="form-input" type="email" value="raza@indrones.com" readonly />
+              <button type="button" class="btn">Continue</button>
+              <div class="auth-or"><span>or</span></div>
+              <button type="button" class="btn btn-secondary">Continue with Indrones&rsquo; official email</button>
+              <button type="button" class="btn btn-secondary">Continue with fingerprint / passkey</button>
+              <button type="button" class="btn btn-secondary">Continue with pattern</button>
+              <button type="button" class="link-btn link-sm">First sign-in with a temporary password</button>
+            </div>
+          </section>
+          <section class="door glass-card">
+            
+            <div class="door-bar">
+              <span class="door-role">Customer</span><span class="door-chev"></span>
+            </div>
+            <div class="door-body">
+              <p class="cust-welcome">Welcome! This is I-PASSBOOK</p>
+              <p class="cust-tagline">For Everything Related To Indrones&rsquo; After-Sales</p>
+              <p class="cust-lead">Log in to your I-PASSBOOK account.</p>
+              <input class="form-input" type="email" value="you@company.com" readonly />
+              <p class="cust-helper">Use your official email registered with us while onboarding as a customer</p>
+              <button type="button" class="btn">Continue</button>
+              <div class="auth-or"><span>or</span></div>
+              <p class="cust-unregistered">if you are not registered with us so far, contact customer.relations@indrones.com for onboarding. See you there!</p>
+            </div>
+          </section>
         </div>
+        <p class="landing-terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy</p>
+        <div class="landing-lang"><select aria-label="Language"><option>English</option><option>&#1575;&#1585;&#1583;&#1608;</option><option>&#2361;&#2367;&#2306;&#2342;&#2368;</option></select></div>
         <p class="landing-foot">
           <span class="link-btn">Report a problem</span>
           <span class="link-btn">Help &amp; FAQ</span>
         </p>
-        <p class="pv-version">v74</p>
+        <p class="pv-version">v75</p>
+      </div>
+    </div></div>
+    </div>
+    <div class="pv-shot">
+      <div class="pv-shot-cap"><b>Code step</b><span>the screen both doors pass through</span></div>
+      <div class="pv-phone">
+    <div class="pv-app is-auth">
+      <div id="code-view" data-open="1">
+        <div class="glass-card code-card">
+          <h2 class="code-title">Check your email</h2>
+          <p class="code-sub"><span>If you have a indrones after sales account, we sent a code to</span>
+            <strong class="code-email">raza@indrones.com</strong><span>.</span></p>
+          <div class="code-boxes"><input class="code-box" type="text" inputmode="numeric" maxlength="1" /><input class="code-box" type="text" inputmode="numeric" maxlength="1" /><input class="code-box" type="text" inputmode="numeric" maxlength="1" /><input class="code-box" type="text" inputmode="numeric" maxlength="1" /><input class="code-box" type="text" inputmode="numeric" maxlength="1" /><input class="code-box" type="text" inputmode="numeric" maxlength="1" /></div>
+          <button type="button" class="link-btn">Use a different account</button>
+        </div>
       </div>
     </div></div>
     </div>

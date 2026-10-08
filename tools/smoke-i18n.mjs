@@ -219,8 +219,20 @@ ok('...and app.js really does guard its three handles that way',
   /window\.I18N \? window\.I18N\.t\(key, vars\) : key/.test(appJs) &&
   /window\.I18N \? window\.I18N\.status\(v\) : v/.test(appJs) &&
   /window\.I18N \? window\.I18N\.priority\(v\) : v/.test(appJs));
+// The claim is not "within N characters of the handler's first line" — that was a
+// stand-in for the real one, and it broke the moment the handler grew an honest
+// comment above the call. The claim is that the paint comes BEFORE any way out of the
+// handler, so a device that takes an early return (an already-signed-in session, a
+// Google return, a brief splash) still gets its chrome in the chosen language.
 ok('...and the load handler paints the static chrome, above every early return',
-  /window\.addEventListener\('load'[\s\S]{0,400}?window\.I18N\.applyStatic\(\)/.test(appJs));
+  (() => {
+    const start = appJs.indexOf("window.addEventListener('load'");
+    if (start < 0) return false;
+    const head = appJs.slice(start, start + 2000);
+    const paint = head.indexOf('window.I18N.applyStatic()');
+    const exit = head.indexOf('return');
+    return paint > 0 && (exit < 0 || paint < exit);
+  })());
 
 // applyStatic, driven against a stand-in DOM.
 //

@@ -123,7 +123,17 @@ function drive(record, counters, fetchImpl) {
     // only the genuinely non-V8 ones). webcrypto is the platform's own WebCrypto,
     // not a stand-in, so the SHA-256 the app computes here is the real one.
     globals: { crypto: webcrypto, TextEncoder },
-    fetch: fetchImpl || ((url, init) => { counters.calls++; counters.last = init && init.body; return Promise.reject(new Error('no network in test')); }),
+    // THE WARM-UP PING IS NOT A SERVER CALL IN THE SENSE THESE ASSERTIONS MEAN. It has
+    // no credential, no email and no device token on it, and the app sends it from the
+    // top of the pattern branch so that the round trip it is about to make does not pay
+    // for a cold Apps Script start. Counting it here would fail "a wrong gesture cannot
+    // be a guess" on a request that could not carry a guess — a probe measuring the
+    // wrong thing, which is the failure this file exists to be honest about.
+    fetch: fetchImpl || ((url, init) => {
+      // The ping is not a server call: a URL carrying action=ping, as a whole param.
+      if (!/[?&]action=ping(&|$)/.test(String(url))) { counters.calls++; counters.last = init && init.body; }
+      return Promise.reject(new Error('no network in test'));
+    }),
   });
   T.byId.set('pattern-canvas', canvasEl());
   if (record) T.T.saveUnlock(record);

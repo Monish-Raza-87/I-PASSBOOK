@@ -79,11 +79,28 @@ const ROW = [
 // had to go, and why the wire carries a grid rather than finished records.
 const FIXTURE_PATH = '/__sheet-fixture.html';
 const STUB = `<script>
-  window.fetch = function (url) {
-    if (String(url).indexOf('action=listIRs') >= 0) {
-      return Promise.resolve(new Response(
-        JSON.stringify({ status: 'ok', grid: ${JSON.stringify([HEADERS, ROW])} }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  function __json(o) {
+    return Promise.resolve(new Response(JSON.stringify(o),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }
+  window.fetch = function (url, init) {
+    var u = String(url);
+    var b = init && init.body;
+    var act = (b && typeof b.get === 'function' && b.get('action')) || '';
+    if (u.indexOf('action=listIRs') >= 0 || act === 'listIRs') {
+      return __json({ status: 'ok', grid: ${JSON.stringify([HEADERS, ROW])} });
+    }
+    // The two steps of the sign-in, so the probe can drive the real code screen. The
+    // action rides the POST body — postAuth builds a FormData — so it is read from
+    // there and not from the URL, which carries nothing but the deployment address.
+    if (act === 'login') {
+      var code = (b.get('code') || '');
+      if (!code) return __json({ status: 'ok', otpRequired: true });
+      if (code !== '424242') {
+        return __json({ status: 'error', message: 'That code is not right. 2 attempt(s) left.' });
+      }
+      return __json({ status: 'ok', sessionToken: 'tok-from-the-code',
+                      access: { role: 'member', permissions: {}, departments: [] } });
     }
     return Promise.reject(new Error('blocked in test'));
   };
@@ -220,7 +237,16 @@ const AUTH_DRIVER = `<script>
   }
   function log(k, v) { out[k] = v; out.steps.push(k); post(); }
   function el(id) { return document.getElementById(id); }
-  function shown(id) { var e = el(id); return !!e && e.style.display !== 'none'; }
+  // COMPUTED, not the inline style. #code-view is hidden by a stylesheet RULE
+  // (base.css: display:none, display:flex under [data-open="1"]), so it carries no
+  // inline style to read: a probe asking only about style.display calls it visible
+  // from the moment the document parses and then measures the empty screen it has
+  // not left yet.
+  function shown(id) {
+    var e = el(id);
+    if (!e) return false;
+    return window.getComputedStyle(e).display !== 'none';
+  }
   function waitFor(fn, ms) {
     return new Promise(function (res, rej) {
       var t0 = Date.now();
@@ -265,34 +291,61 @@ const AUTH_DRIVER = `<script>
     log('typeBack', pass.type);
     log('pressedBack', eye.getAttribute('aria-pressed'));
 
-    // ── step 1: password only ──
+    // ── step 1: an address, and no session yet ──
     el('auth-signin-btn').click();
-    await waitFor(function () { return shown("auth-login-code-wrap"); }, 15000);
+    await waitFor(function () { return shown('code-view'); }, 15000);
     log('codeStepShown', true);
-    log('codeNote', el('auth-login-code-note').textContent);
-    log('passwordHiddenAtStep2', !shown('auth-password'));
-    log('signInBtnHiddenAtStep2', !shown('auth-signin-btn'));
+    log('codeEmail', el('code-email').textContent);
+    // The landing page goes away WHOLE — head, both doors, the terms line, the language
+    // picker. That is what makes this read as the blank centred page the owner asked for,
+    // and it is a property of the markup (#code-view is a SIBLING of #auth-container).
+    log('landingGoneAtStep2', !shown('auth-container'));
     log('stillNoSession', localStorage.getItem('ipb_session') === null);
 
     // ── step 2a: a wrong code ──
-    var cin = el('auth-login-code');
-    cin.value = '000000';
-    el('auth-login-code-btn').click();
+    var boxes = document.querySelectorAll('#code-boxes .code-box');
+    // Filled the way the input handler expects: one digit per box, each announced. The
+    // LAST box is what trips the submit — six boxes full is the code — which is also how
+    // a person filling the sixth box submits without reaching for a button.
+    function typeCode(s) {
+      for (var i = 0; i < boxes.length; i++) {
+        boxes[i].value = s.charAt(i);
+        boxes[i].dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    typeCode('000000');
     await waitFor(function () {
-      var e = el('auth-error');
+      var e = el('code-error');
       return !!e && e.style.display !== 'none' && /attempt/.test(e.textContent);
     }, 15000);
-    log('wrongCodeError', el('auth-error').textContent);
-    log('stillOnCodeStep', shown('auth-login-code-wrap'));
+    log('wrongCodeError', el('code-error').textContent);
+    log('stillOnCodeStep', shown('code-view'));
     log('stillNoSessionAfterWrongCode', localStorage.getItem('ipb_session') === null);
 
     // ── step 2b: the right code ──
-    cin.value = '424242';
-    el('auth-login-code-btn').click();
-    await waitFor(function () { return shown("app-container"); }, 15000);
+    log('boxCount', boxes.length);
+    typeCode('424242');
+    // Read SYNCHRONOUSLY, in the same turn as the last keystroke, before any reply can
+    // arrive: submitCode() flips data-busy to '1' and only the answer flips it back, so
+    // this one value says whether the sixth digit reached the submit at all.
+    log('busyRightAfterTypingRight', el('code-view').dataset.busy);
+    log('boxesRightAfterTyping', Array.prototype.map.call(boxes, function (b) { return b.value; }).join('|'));
+    var signedIn = false;
+    try { await waitFor(function () { return shown("app-container"); }, 15000); signedIn = true; }
+    catch (e) { signedIn = false; }
+    // Logged on BOTH outcomes: a bare timeout says only that something did not
+    // happen, and the four things that decide it — the code as the boxes hold it, the
+    // busy flag that would refuse a second submit, the error line, and whether the
+    // request went out at all — are what make the failure answerable.
+    log('signedInAfterRightCode', signedIn);
+    log('boxesAfterRightCode', Array.prototype.map.call(boxes, function (b) { return b.value; }).join(''));
+    log('busyAfterRightCode', el('code-view').dataset.busy);
+    log('codeErrorAfterRightCode', el('code-error').textContent);
+    if (!signedIn) throw new Error('timeout waiting for the shell after the right code');
     log('signedIn', true);
     log('token', localStorage.getItem('ipb_session'));
     log('authGone', !shown('auth-container'));
+    log('codeViewGoneAfterSignIn', !shown('code-view'));
   } catch (e) {
     log('failedAt', out.steps[out.steps.length - 1] || 'start');
     log('error', String((e && e.message) || e));
@@ -665,9 +718,15 @@ ok('no deleted auth control remains in the DOM',
   gone.filter(id => adom.includes('id="' + id + '"')));
 
 head('the new sign-in path is present');
-['auth-form', 'auth-email', 'auth-password', 'auth-signin-btn',
- 'auth-forgot-link', 'auth-forgot-wrap', 'auth-reset-wrap',
- 'auth-code', 'auth-new-password', 'pc-form', 'pc-new', 'pc-confirm']
+// The ids the two doors and the shared code step are built from. The retired ones —
+// `auth-forgot-link`, `auth-reset-wrap`, `auth-code`, `auth-new-password` — are asserted
+// GONE in the head above, and `auth-login-code-*` no longer exists at all: the code moved
+// to a screen of its own, which is why the list now names that screen instead.
+['auth-form', 'auth-email', 'auth-password', 'auth-signin-btn', 'auth-pwd-link',
+ 'cust-form', 'cust-email', 'cust-signin-btn', 'auth-or', 'auth-quick',
+ 'code-view', 'code-form', 'code-boxes', 'code-email', 'code-different',
+ 'lang-select', 'door-employee-toggle', 'door-customer-toggle',
+ 'pc-form', 'pc-new', 'pc-confirm']
   .forEach(id => ok('#' + id + ' exists', adom.includes('id="' + id + '"')));
 
 head('no javascript errors on the signed-out path');
@@ -706,7 +765,7 @@ if (process.env.PROBE_DEBUG) {
 ok('the probe ran and reported back', !!probe,
   ap.timedOut ? 'no report within 60s' : (ap.log || '').slice(-400) || 'no report');
 ok('it reached the end without failing', probe && !probe.error,
-  probe ? { failedAt: probe.failedAt, error: probe.error, steps: probe.steps } : null);
+  probe ? JSON.stringify(probe) : null);
 
 if (probe && !probe.error) {
   head('the reveal toggle flips the field, in a real engine');
@@ -723,24 +782,20 @@ if (probe && !probe.error) {
   ok('and un-presses the button', probe.pressedBack === 'false', probe.pressedBack);
 
   head('step 1 buys no session, only a code');
-  ok('the code step appeared', probe.codeStepShown === true, probe.steps);
-  ok('the password field is hidden at step 2', probe.passwordHiddenAtStep2 === true);
-  ok('so is the Sign in button', probe.signInBtnHiddenAtStep2 === true);
-  ok('the note names the address the code went to',
-    /asha@indrones\.com/.test(probe.codeNote || ''), probe.codeNote);
-  ok('and it gives the lifetime as a duration, not "end of the day"',
-    /valid for 8:30 hours/.test(probe.codeNote || '') &&
-    !/all day|end of the day|every sign-in today/i.test(probe.codeNote || ''), probe.codeNote);
-  // The whole point of the two-step split: a correct password alone must not
-  // produce a session token. Asserting on the real localStorage is the only check
-  // here that a stubbed DOM could not make.
-  ok('NO token was stored after the password step', probe.stillNoSession === true,
+  ok('the code screen appeared, and the landing page went with it',
+    probe.codeStepShown === true && probe.landingGoneAtStep2 === true, JSON.stringify(probe));
+  ok('and it names the address the code was sent to',
+    /asha@indrones\.com/.test(probe.codeEmail || ''), probe.codeEmail);
+  // The whole point of the two-step split: an address alone must not produce a session
+  // token. Asserting on the real localStorage is the only check here that a stubbed DOM
+  // could not make.
+  ok('NO token was stored after the address step', probe.stillNoSession === true,
     probe.token);
 
   head('step 2 refuses a wrong code and accepts the right one');
   ok('the backend error is surfaced verbatim',
     /attempt\(s\) left/.test(probe.wrongCodeError || ''), probe.wrongCodeError);
-  ok('a wrong code leaves you on the code step', probe.stillOnCodeStep === true);
+  ok('a wrong code leaves you on the code screen', probe.stillOnCodeStep === true);
   ok('and stores no token', probe.stillNoSessionAfterWrongCode === true);
   ok('the right code signs in', probe.signedIn === true, probe.steps);
   ok('the token is now in localStorage', probe.token === 'tok-from-probe', probe.token);

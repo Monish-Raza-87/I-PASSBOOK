@@ -2244,9 +2244,11 @@
    restated by nothing, above or below, so their position in the cascade is not
    what makes them apply. */
 #auth-quick { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
-.btn-quick { min-height: 40px; font-weight: 600; }
-#auth-quick .btn-ghost,
-#auth-quick .link-btn { min-height: 40px; }
+/* `.btn-quick` is GONE, not dormant. It was the fingerprint button's own class, and
+   the quick-unlock pair is now two neutral buttons in the same list as the address
+   door — see the note in index.html. Leaving the rule here would be a selector three
+   suites still name and nothing on screen carries. */
+#auth-quick .btn { min-height: 40px; }
 #auth-pattern { display: block; }
 #pattern-canvas,
 #pattern-setup-canvas {          /* the sign-in canvas and the setup overlay's */

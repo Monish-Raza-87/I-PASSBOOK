@@ -295,25 +295,34 @@ r.ok('...and the auth buttons are raised, on a phone, to 44px',
 // sign-out; and it has to restate hover/active, because a :not() chain out-specifies
 // `.btn-primary:hover`.
 r.head('the doors wear the accent, and only the doors, and only their one action');
-const doorBtn = '#auth-container .btn:not(.btn-ghost):not(.btn-secondary):not(.btn-quick)';
-for (const v of ['btn-ghost', 'btn-secondary', 'btn-quick']) {
-  r.ok(`...and .${v} is named back out, in markup and here`,
-    new RegExp(`class="btn ${v}"`).test(html) && new RegExp(`:not\\(\\.${v}\\)`).test(css));
+// `.btn-quick` has LEFT this chain, and its absence is now asserted below. The owner's
+// list of four doors (2026-10-08) put the fingerprint and pattern buttons in the SAME
+// list as the address door, under one divider — and four accent-filled buttons stacked
+// is a hierarchy of none. It is also not what the page he pointed at does: vercel.com
+// is one filled "Continue with Email" over four neutral alternatives. So both
+// alternatives carry `.btn-secondary`, which this chain already names back out, and
+// `.btn-quick` is now a class nothing on screen carries.
+const doorBtn = '#auth-container .btn:not(.btn-ghost):not(.btn-secondary)';
+for (const v of ['btn-ghost', 'btn-secondary']) {
+  // Matched with indexOf rather than a built RegExp: escaping a class name into a
+  // pattern is one more place for the test to be wrong about its own subject.
+  const carried = ['class="btn ' + v + '"', 'class="' + v + '"'].some(f => html.indexOf(f) >= 0);
+  r.ok('...and .' + v + ' is named back out, and markup still carries it',
+    css.indexOf(':not(.' + v + ')') >= 0 && carried,
+    (html.match(new RegExp('[^\\n]*' + v + '[^\\n]*')) || [''])[0]);
 }
-// `.btn-google` is the one that left, and its absence is now the assertion. The owner,
-// 2026-10-08: "if buttons are yellow mostly then even signin with indrones email also
-// has to be in yellow instead of black." The white Google pill was standing in the way
-// of that from two files at once — base.css drew the pill, and this rule had to exempt
-// it — so the class is gone from BOTH. Checking both halves matters: leaving it named
-// in this :not() chain after deleting its stylesheet would be a selector guarding a
-// rule that no longer exists, and the day someone re-adds the class it would come back
-// invisible instead of accent-coloured.
-r.ok('...and .btn-google is gone from the markup AND from this file\'s :not() chain',
-  !/class="btn btn-google"/.test(html) && !/btn-google/.test(css) && !/google-mark/.test(html),
-  (html.match(/[^\n]*btn-google[^\n]*/) || [''])[0]);
-r.ok('...so the Indrones-email door is a plain .btn and takes the accent like the rest',
-  /class="btn" id="auth-google-btn"/.test(html),
-  (html.match(/[^\n]*auth-google-btn[^\n]*/) || [''])[0]);
+// A `:not()` naming a class nothing carries reads as load-bearing and is not. Checked
+// on both halves for the same reason `.btn-google` was before it: the day someone
+// re-adds the class, a stale exemption would quietly make it neutral again.
+r.ok('...and .btn-quick is gone from the markup AND from this file\'s :not() chain',
+  !/class="[^"]*\bbtn-quick\b/.test(html) && !/:not\(\.btn-quick\)/.test(css),
+  (html.match(/[^\n]*btn-quick[^\n]*/) || [''])[0]);
+r.ok('...so the three alternatives are .btn-secondary and the door action is the only accent',
+  /class="btn btn-secondary" id="auth-google-btn"/.test(html) &&
+  /class="btn btn-secondary" id="auth-unlock-btn"/.test(html) &&
+  /class="btn btn-secondary" id="auth-pattern-link"/.test(html),
+  (html.match(/[^\n]*auth-(?:google|unlock|pattern-link)[^\n]*/g) || []));
+
 const doorRule = (css.match(new RegExp(doorBtn.replace(/[.()]/g, '\\$&') + ',\\n[\\s\\S]{0,200}?\\{([^}]*)\\}')) || [])[1] || '';
 r.ok('the door action takes the accent solid fill, not --surface-gray-10',
   /background:\s*var\(--btn-solid-bg\)/.test(doorRule) &&

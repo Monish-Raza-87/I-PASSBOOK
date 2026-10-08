@@ -190,20 +190,21 @@
        admin. -->
   <div id="auth-container">
 
-    <!-- THE COMMON HEAD. Above the doors, centred, shared — so the two cards below
+    <!-- THE COMMON HEAD. Above the doors, centred, shared — so the two panels below
          carry a role and a form and nothing else. There is no decoration under the
-         wordmark any more; the wordmark IS the animation. app.js's
-         buildBrandTyping() splits the two lines below into one span per letter and
-         one per term, and its loop types the name out, lets the expansion line
-         follow it, holds, and takes it back down again.
+         wordmark any more; the wordmark IS the animation.
 
-         THE PLAIN TEXT IN THE MARKUP IS THE REAL COPY, and that is not a
-         fallback of convenience: it is what paints with JS off, what a screen
-         reader is given (the spans are aria-hidden and the element carries the
-         sentence as its aria-label), and what `prefers-reduced-motion` leaves on
-         screen. So the sentence is written ONCE, here, and the animation is a
-         reading of it rather than a second copy of it. `app.fullName` is the
-         expansion line — see the note on that key in i18n.js. -->
+         ⚠ THE LINE UNDER IT IS READ, NOT TYPED, and that is a correction of my own
+         work rather than a new idea. app.js used to type it out a term at a time, and
+         because the terms varied in length the line re-wrapped as it filled — so the
+         whole landing page grew and shrank underneath the doors on every loop. The
+         owner, 2026-10-08: *"the whole page below it is increasing/decreasing its
+         height … And line increasing/decreasing should not happen."* It is now one
+         static line, so its height cannot change on any screen width.
+
+         THE PLAIN TEXT IN THE MARKUP IS THE REAL COPY, and that is not a fallback of
+         convenience: it is what paints with JS off, and what a screen reader is given.
+         `app.fullName` is the line — see the note on that key in i18n.js. -->
     <header class="landing-head">
       <!-- alt="" on purpose: the brand name is the next line down, so this is the
            same information twice and the text is the accessible copy. The borderless
@@ -213,143 +214,183 @@
       <div class="landing-wordmark">
         <h1 class="landing-brand" id="landing-brand" data-i18n="app.name">I-PASSBOOK</h1>
       </div>
-      <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES FROM I &middot; PRODUCT FROM P &middot; AFTER FROM A &middot; SALES FROM S &middot; SUMMARY FROM S &middot; BOOK AS IT IS</p>
+      <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES-AFTER SALES SERVICE BOOK</p>
     </header>
 
+    <!-- ── THE CORNER ──
+         Where every site in this shape puts "Sign Up", and this one cannot: there is
+         no sign-up, because every account is provisioned by an admin. So the corner
+         holds the thing a person who cannot get in actually needs instead — a way to
+         reach the desk. The owner's instruction, 2026-10-08: *"since we do not have any
+         signup options … we would have whatsapp button instead there, so that who so
+         ever wants any further help can click on that button and come to official
+         indrones after sales whatsapp chat with us ready to receive them there."*
+
+         IT IS HIDDEN UNTIL A NUMBER EXISTS. An href of '#' that opens an empty tab is
+         worse than no button, so app.js fills this in from CONFIG.WHATSAPP_URL and
+         leaves it off the screen entirely while that is empty. A glyph with no text
+         beside it, because the corner is 44px wide on a phone. -->
+    <a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"
+       style="display:none" data-i18n-aria="door.whatsapp" data-i18n-title="door.whatsapp">
+      <span class="wa-glyph" aria-hidden="true"></span>
+    </a>
+
+    <!-- ── THE TWO DOORS, STACKED AND CONDENSED ──
+         They were two cards side by side. The owner, 2026-10-08: *"In our login page,
+         currently employee login box is much lengthier than customer's, plus employee
+         one's looks cluttered. So, I went to check for options, I liked how vercel is
+         showing. First, let us have both employee login and customer login option
+         arranged vertically aligned, one above another. each condensed, i.e.,
+         collapsible, so whichever the person wants to access will click on/arrow and
+         expand it."*
+
+         STACKING IS WHAT FIXES THE LENGTH PROBLEM, and that is worth being precise about
+         because the obvious other reading — "make the two cards the same height" — does
+         not. Side by side, two cards of different content are read against each other,
+         and the shorter one reads as incomplete however it is filled. Stacked, each is
+         only ever compared with the page, and the collapsed one is a single 56px bar.
+
+         EXCLUSIVE: opening one closes the other, on the same reasoning as a set of radio
+         buttons. Two open panels would put the employee's four mechanisms and the
+         customer's three above each other, which is the clutter he was describing, only
+         taller. `.door-body` carries app.js's `hidden`, and the bar carries
+         `aria-expanded`, so the pair stays honest to a screen reader with or without JS.
+
+         ONE BAR IS OPEN ON ARRIVAL — the one this device used last, defaulting to the
+         Employee bar. Collapsing both would save 200px and cost a click from everyone,
+         and it would leave the line under them ("By continuing, you acknowledge…")
+         acknowledging a tap nobody has been offered. -->
     <div class="doors">
 
       <!-- ── THE EMPLOYEE DOOR ──
-           The form that was here before this screen had two doors. The modes still
+           The form that was here before this screen had two doors. All modes still
            share the one form and Enter still submits whichever is showing. -->
-      <section class="door glass-card animate-slide-up" id="door-employee" aria-labelledby="door-employee-role">
-        <p class="door-role" id="door-employee-role" data-i18n="door.employee">Employee</p>
+      <section class="door glass-card" id="door-employee">
+        <button type="button" class="door-bar" id="door-employee-toggle"
+                aria-expanded="false" aria-controls="door-employee-body"
+                data-i18n-aria="door.expand" data-i18n-var-role="Employee">
+          <span class="door-role" id="door-employee-role" data-i18n="door.employee">Employee</span>
+          <span class="door-chev" aria-hidden="true"></span>
+        </button>
+        <!-- NO `hidden` IN THE MARKUP, and that is the fallback rather than an
+             oversight. With JS off there are no accordions at all: a `hidden` panel
+             could never be opened again, so the JS-off page shows BOTH panels, and the
+             bar's `aria-expanded="false"` is the first frame only — app.js's first
+             paint sets the attribute honestly in the same tick it paints the doors. -->
+        <div class="door-body" id="door-employee-body">
         <!-- Update notice, sign-in slot. See the twin in #workspace for the whole
              story; the short version is that a device sitting on this screen is
              exactly the device that needs to hear about a new build, and it never
-             reaches the app's own shell. It sits on the EMPLOYEE card deliberately:
+             reaches the app's own shell. It sits on the EMPLOYEE panel deliberately:
              it reports the build of the APP, and a customer never runs the app. -->
         <div class="update-banner" id="update-banner-auth" style="display:none"></div>
         <form id="auth-form" autocomplete="on">
-          <!-- The step line. It carries the instruction for whichever mode is up, and
-               app.js rewrites it on every mode change. The words standing here are the
-               entry screen's — the screen this card opens on — and they are the same
-               words i18n.js holds under auth.hint for the same reason. -->
-          <p class="auth-hint" id="auth-hint-text" data-i18n="auth.hint">We’ll email you a 6-digit sign-in code.</p>
+          <!-- ── ONE LIST, FOUR DOORS ──
+               The owner, 2026-10-08: *"it should see all 4 login options like vercel
+               where all options are listed in a single list where at the top is 'Log in
+               to I-PASSBOOK' then is a box for entering email, below it is a button
+               'Continue', below it is a line which separates next below option which is
+               'continue with indrones' official email' then below it 'continue with
+               fingerprint/passkey' then below it 'continue with pattern'. there is no
+               space for forgot password now because we are not having any password
+               based login anyfurther."*
 
-          <!-- ── ALL FOUR METHODS, ON ONE SCREEN ──
-               The owner's instruction, 2026-10-08: "instead of having two screens,
-               one for email based login and another for other options such as
-               fingerprint etc, can we not have one?" So the entry screen is the
-               whole door. It offers, top to bottom:
-                 · Sign in with Indrones email — the Google door, a NAVIGATION, not a
-                   background call: clicking it leaves the page for about a second and
-                   comes straight back with a one-time code. See app.js's GOOGLE
-                   SIGN-IN block for why that is the only way it can work. It is a
-                   plain `.btn` on purpose — the owner asked for it in the same
-                   yellow as the rest, and there is no Google mark on it any more
-                   because it no longer says Google.
-                 · the emailed code — type an address, press "Send me a code"
-                 · the fingerprint — `#auth-unlock-btn`
-                 · the pattern — `#auth-pattern-link`, which opens the canvas in place
-               The quick-unlock pair lives in `#auth-quick`, and app.js shows that
-               block on THIS screen and not only on a separate one. -->
+               The order is his and it is a hierarchy, not a list of equals: address →
+               Continue is the door, and the divider is the fork between it and the three
+               alternatives. Every alternative then reads "Continue with …" so the four
+               are four answers to one question.
 
-          <!-- Shown only when a second deployment is configured (CONFIG.SSO_URL). -->
-          <button type="button" class="btn" id="auth-google-btn" style="display:none" data-i18n="auth.sso">Sign in with Indrones email</button>
-          <div class="auth-or" id="auth-or" style="display:none"><span data-i18n="auth.or">or get a code by email</span></div>
+               THE FORGOT-PASSWORD CONTROL IS GONE, and the password-reset flow behind it
+               is gone from app.js with it. What is NOT gone is the FIRST-LOGIN password,
+               which is a different thing wearing similar clothes — see #auth-pwd-link.
+
+               `#auth-hint-text` is now a NOTICE LINE and not a step line: it is empty
+               and hidden until app.js has something transient to say in it ("Taking you
+               to Google…"), which is why it carries no i18n key. A permanent instruction
+               would be a fifth voice on a list that already says everything. -->
+          <h2 class="door-title" id="auth-title" data-i18n="auth.loginTitle">Log in to I-PASSBOOK</h2>
+          <p class="auth-hint" id="auth-hint-text" style="display:none" aria-live="polite"></p>
 
           <input class="form-input" type="email" id="auth-email" placeholder="you@indrones.com" autocomplete="email" required data-i18n-placeholder="auth.email" />
-          <div class="pw-wrap">
-            <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" required data-i18n-placeholder="auth.password" />
+          <!-- The password field belongs to the temporary-password door only, and app.js
+               reveals it when that door is taken. `required` is set by app.js on the same
+               switch — a field that is hidden and required is an unsubmittable form. -->
+          <div class="pw-wrap" id="auth-pw-wrap" style="display:none">
+            <input class="form-input" type="password" id="auth-password" placeholder="Password" autocomplete="current-password" data-i18n-placeholder="auth.password" />
             <button type="button" class="pw-toggle" id="eye-auth-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
               <span class="pw-toggle-icon" aria-hidden="true"></span>
             </button>
           </div>
-          <button type="submit" class="btn" id="auth-signin-btn">Sign in</button>
+          <button type="submit" class="btn" id="auth-signin-btn" data-i18n="auth.continue">Continue</button>
 
-          <!-- QUICK UNLOCK: shown only when this device holds a registered token
-               (ipb_unlock), and shown on the entry screen itself — that is the merge
-               above. The fingerprint and the pattern sit on ONE row because they are
-               the same decision: open this device the way I set it up. On the
-               pattern screen `#auth-quick-out` is the way back to the email form,
-               which is the only screen it is needed on, because everywhere else the
-               form is already in front of you. -->
+          <!-- SHIPS HIDDEN, and shown by app.js only when there is something under it.
+               Both of the things below are hidden in this markup — the Google button
+               until a second deployment exists, and the unlock pair until this device
+               holds a registration — so with JS off there is nothing for this line to
+               divide, and a lone "or" over an empty space is worse than no line. app.js
+               reveals it for the alternatives block as a whole; see the note there. -->
+          <div class="auth-or" id="auth-or" style="display:none"><span data-i18n="auth.or">or</span></div>
+
+          <!-- Shown only when a second deployment is configured (CONFIG.SSO_URL). It is
+               a NAVIGATION, not a background call: it leaves the page for Google's own
+               account picker and comes straight back with a one-time code. See app.js's
+               GOOGLE SIGN-IN block — the owner asked for this to behave like the same
+               button on vercel.com, in the SAME tab, and that is what it now does.
+
+               ⚠ `.btn-secondary`, NOT a bare `.btn`, and the same for the two lock
+               buttons below. A bare `.btn` on this screen takes industrial.css's accent
+               rule, which exists so a door's ONE action reads as the door — and with four
+               bare buttons stacked in one list there is no longer one action, there are
+               four yellow buttons and a hierarchy of none. This is also what the page he
+               pointed at actually does: vercel.com's own list is one filled "Continue
+               with Email" over four neutral alternatives. The divider above them says the
+               same thing in markup. -->
+          <button type="button" class="btn btn-secondary" id="auth-google-btn" style="display:none" data-i18n="auth.sso">Continue with Indrones’ official email</button>
+
+          <!-- THE QUICK-UNLOCK PAIR. `#auth-quick` wraps both and is shown only when this
+               device actually holds a registered unlock — offering a door that opens onto
+               nothing is worse than not offering it. Each button is then shown or hidden
+               on its own, because a device may have a fingerprint and no pattern, or the
+               other way round, and only the door that can open is drawn. -->
           <div id="auth-quick" style="display:none">
-            <div class="quick-row">
-              <button type="button" class="btn btn-quick" id="auth-unlock-btn" data-i18n="auth.unlock">Unlock with fingerprint</button>
-              <button type="button" id="auth-pattern-link" class="btn btn-ghost" data-i18n="auth.usePattern">Use pattern</button>
-            </div>
-            <button type="button" id="auth-quick-out" class="link-btn" data-i18n="auth.useEmailOtp">Use email (OTP) based login method</button>
+            <button type="button" class="btn btn-secondary" id="auth-unlock-btn" data-i18n="auth.unlock">Continue with fingerprint / passkey</button>
+            <button type="button" class="btn btn-secondary" id="auth-pattern-link" data-i18n="auth.usePattern">Continue with pattern</button>
           </div>
 
           <!-- The pattern canvas, for the unlock gesture AND the two-draw setup.
                `aria-live` because this line is not only an instruction any more: it
-               is where "Checking your pattern…" and "That pattern did not match" are
-               said, and a status nobody can hear is a status only half given. -->
+               is where "Checking your pattern…" is said, and a status nobody can hear
+               is a status only half given. -->
           <div id="auth-pattern" style="display:none">
             <p id="pattern-title" class="auth-hint" aria-live="polite"></p>
             <canvas id="pattern-canvas" width="240" height="240"></canvas>
           </div>
 
-          <button type="button" id="auth-forgot-link" class="link-btn">Forgot password?</button>
-          <!-- THE OPT-IN DOOR. It is a small link, not a button, because the daily
-               sign-in is the emailed code and a password is the exception. It exists
-               for exactly two accounts: a shared machine with no Google session, and
-               an account still on the password the admin issued — which is the one
-               account that CANNOT get in the other way round, and which until this
-               link existed had no way in from this screen at all. -->
-          <button type="button" id="auth-pwd-link" class="link-btn link-sm" data-i18n="auth.usePassword">Sign in with a password</button>
+          <!-- THE WAY BACK, out of the two sub-screens that are not the list — the
+               pattern canvas and the password field. It is text-only and small: it was a
+               boxed button competing for attention with the field above it, when all it
+               does is undo the last tap. -->
+          <button type="button" id="auth-back-link" class="link-btn link-sm" style="display:none" data-i18n="auth.back">Back</button>
 
-          <!-- Sign-in step 2: the code emailed for the working day. Its own input
-               rather than a share of #auth-code, because reset and sign-in can be
-               on screen moments apart and one box would carry a half-typed code
-               from one step into the other. -->
-          <div id="auth-login-code-wrap" style="display:none">
-            <p id="auth-login-code-note" class="auth-hint"></p>
-            <input class="form-input" type="text" id="auth-login-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                   placeholder="6-digit sign-in code" autocomplete="one-time-code" />
-            <button type="button" class="btn" id="auth-login-code-btn">Verify code</button>
-          </div>
+          <!-- ── THE FIRST-LOGIN DOOR, and it is NOT the password login the owner
+               removed. ──
+               It is here for exactly one account state, and the state is not
+               hypothetical: an account the admin has just created, whose password is the
+               one the admin issued. The backend REFUSES the emailed code to that account
+               (backend.gs's passwordlessLogin, stage two, on purpose) and its own refusal
+               tells the person to use the password door — so deleting this line does not
+               migrate those accounts to the code door, it strands them with a message
+               pointing at a control that is not there.
 
-          <!-- Forgot step: ask for the email, get a 6-digit code. -->
-          <div id="auth-forgot-wrap" style="display:none">
-            <button type="button" class="btn" id="auth-forgot-btn">Email me a code</button>
-          </div>
-
-          <!-- Reset step: the code from the email + the new password. -->
-          <div id="auth-reset-wrap" style="display:none">
-            <p id="auth-reset-note" class="auth-hint"></p>
-            <input class="form-input" type="text" id="auth-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                   placeholder="6-digit code" autocomplete="one-time-code" />
-            <div class="pw-wrap">
-              <input class="form-input" type="password" id="auth-new-password" placeholder="New password" autocomplete="new-password" data-i18n-placeholder="auth.newPassword" />
-              <button type="button" class="pw-toggle" id="eye-auth-new-password" aria-label="Show password" data-i18n-aria="auth.showPassword" aria-pressed="false" tabindex="-1">
-                <span class="pw-toggle-icon" aria-hidden="true"></span>
-              </button>
-            </div>
-            <button type="button" class="btn" id="auth-reset-btn">Set new password</button>
-            <button type="button" id="auth-resend-link" class="link-btn">Resend code</button>
-          </div>
-
-          <!-- THE WAY BACK, and the reason it exists. Before this, the quick-unlock
-               screen could be left for the email screen and there was no way to
-               return: the two doors only pointed one way. `#auth-quick-in` is the
-               other direction, and it appears only when this device actually HAS a
-               registered unlock to return to — offering a door that opens onto
-               nothing is worse than not offering it.
-
-               It is now offered on the steps where the quick-unlock pair is NOT
-               already on screen — the code and the two recovery steps — and no
-               longer on the entry screen, where the pair itself is visible and a
-               second control for the same two doors would be noise.
-
-               `#auth-back-link` is text-only now, and smaller: it was a boxed button
-               competing for attention with the field above it, when all it does is
-               undo the last tap. -->
-          <button type="button" id="auth-quick-in" class="link-btn link-sm" style="display:none" data-i18n="auth.useQuick">Use fingerprint or pattern</button>
-          <button type="button" id="auth-back-link" class="link-btn link-sm" style="display:none">Back to sign in</button>
+               It is deliberately the faintest thing on the panel, last, small, and it
+               disappears the moment it is pressed. The honest fix is on the owner's side:
+               either a backend change that lets a brand-new account take a code and set
+               its password in the same step, or dropping the admin-issued password
+               entirely. Until then, this line is what keeps a new hire able to sign in. -->
+          <button type="button" id="auth-pwd-link" class="link-btn link-sm" data-i18n="auth.usePassword">First sign-in with a temporary password</button>
         </form>
         <p id="auth-error" class="auth-error" style="display:none"></p>
+        </div>
       </section>
 
       <!-- ── THE CUSTOMER DOOR ──
@@ -358,19 +399,23 @@
 
            It SIGNS IN, here, because the owner asked for one page with two doors on
            it — and a door that hands you to another page to be opened is not one
-           door. The form is deliberately small: an email, a button that emails a
-           code, and nothing else. The prose that used to be here ("Customer Space",
-           the two-line pitch, the invitation blurb) is gone on the owner's own
-           instruction: the role chip says which door this is, and the common head
-           above already says whose app it is.
+           door. The form is small on purpose: an address, a helper line, one button,
+           and a way to reach the desk.
 
-           THERE IS NO PASSWORD FIELD, on the owner's instruction of 2026-10-08: "for
-           customers as well, there is no password method … it is only email OTP
-           based login." The address IS the credential and the code is the proof,
-           which is also what makes this card the same shape as the employee's: one
-           field, one button, one "Forgot password?" under them. The button is the
-           SAME control as the employee's — same class, same position, same words —
-           while the flow behind it is not, for the reason given at it below.
+           ⚠ THE PROSE IS BACK, IN THE OWNER'S WORDS, AFTER BEING CUT IN v74. It was
+           removed on his instruction ("17 words of prose where a chip and a form would
+           do"); on 2026-10-08 he asked for it back and wrote it himself, opening with a
+           welcome. The two moves are not contradictory once the accordion is in place:
+           the prose was noise on a card sitting BESIDE the employee's, in a panel that is
+           shut until someone opens it, in the one moment they are most likely to need
+           telling what this thing is. See the note on cust.welcome in i18n.js.
+
+           THERE IS NO PASSWORD FIELD AND NO FORGOT-PASSWORD CONTROL, on the owner's
+           instruction: "for customers as well, there is no password method … it is only
+           email OTP based login." The address IS the credential and the code is the
+           proof. A customer whose account is still on an admin-issued password is a
+           different and narrower case that customer.html already owns and tests; this
+           panel says so in prose rather than with a second copy of that flow.
 
            Everything it does is done by the SAME backend action the staff door uses.
            `login` with no password IS the OTP door (backend.gs's `doLoginPassword`
@@ -381,8 +426,14 @@
            has used can never inherit, or overwrite, the staff session. Those two
            strings and the three action names are exactly the ones customer.html uses,
            and tools/smoke-portal.mjs holds the two files to each other. -->
-      <section class="door glass-card" id="door-customer" aria-labelledby="door-customer-role">
-        <p class="door-role" id="door-customer-role" data-i18n="door.customer">Customer</p>
+      <section class="door glass-card" id="door-customer">
+        <button type="button" class="door-bar" id="door-customer-toggle"
+                aria-expanded="false" aria-controls="door-customer-body"
+                data-i18n-aria="door.expand" data-i18n-var-role="Customer">
+          <span class="door-role" id="door-customer-role" data-i18n="door.customer">Customer</span>
+          <span class="door-chev" aria-hidden="true"></span>
+        </button>
+        <div class="door-body" id="door-customer-body">
 
         <!-- A customer already signed in on this device does not need a form: the
              Customer Space is one tap away. JS swaps this for the form below. -->
@@ -391,34 +442,58 @@
         </div>
 
         <form id="cust-form" autocomplete="on">
-          <p class="auth-hint" id="cust-hint" data-i18n="cust.hint">Login to I-PASSBOOK, your after-sales companion.</p>
+          <p class="cust-welcome" data-i18n="cust.welcome">Welcome! This is I-PASSBOOK</p>
+          <p class="cust-tagline" data-i18n="cust.tagline">For Everything Related To Indrones’ After-Sales</p>
+          <p class="cust-lead" data-i18n="cust.login">Log in to your I-PASSBOOK account.</p>
+
           <input class="form-input" type="email" id="cust-email" placeholder="you@company.com" autocomplete="email" required data-i18n-placeholder="cust.email" />
-          <button type="submit" class="btn" id="cust-signin-btn">Sign in</button>
-          <!-- THE SAME CONTROL AS THE EMPLOYEE'S, deliberately: same class, same
-               full-width bar, same words, same place under the primary button. The
-               owner asked for the two cards to read alike, and a recovery entry that
-               looked different on each card would be the first thing to break that.
+          <!-- THE HELPER LINE, "in not so highlighted way". It is a real element under
+               the field and NOT a placeholder, and that is the whole point of it: a
+               placeholder is gone the instant someone types, and this is the sentence
+               that has to still be readable while they are deciding which of their two
+               addresses to type into the box in front of it. -->
+          <p class="cust-helper" id="cust-hint" data-i18n="cust.emailHelper">Use your official email registered with us while onboarding as a customer</p>
 
-               What is behind it is NOT the same, and that is honest rather than
-               lazy. The employee's runs in this card (forgotPassword, then
-               resetPassword) because an employee can end up with a password. A
-               customer's reset is a flow customer.html already owns and tests, and
-               this card has no password field left to set one from — so it is a real
-               LINK to the page that owns it rather than a second copy of one flow,
-               free to drift from the first. -->
-          <a class="link-btn" id="cust-forgot-link" href="customer.html#signin" data-i18n="cust.forgot">Forgot password?</a>
+          <button type="submit" class="btn" id="cust-signin-btn" data-i18n="cust.continue">Continue</button>
 
-          <div id="cust-code-wrap" style="display:none">
-            <p id="cust-code-note" class="auth-hint"></p>
-            <input class="form-input" type="text" id="cust-code" inputmode="numeric" pattern="[0-9]*" maxlength="6"
-                   placeholder="6-digit sign-in code" autocomplete="one-time-code" />
-            <button type="button" class="btn" id="cust-code-btn">Verify code</button>
-          </div>
-          <button type="button" id="cust-back-link" class="link-btn link-sm" style="display:none">Back</button>
+          <div class="auth-or" id="cust-or"><span data-i18n="cust.or">or</span></div>
+          <!-- ⚠ A LIVE MAIL ADDRESS ON A PUBLIC PAGE, and the only one here. It is
+               written out rather than hidden behind a link because a person who is not
+               registered has no other way to find the desk, and the sentence reads as
+               one thought. See the note on cust.unregistered in i18n.js for why this
+               address may live here and must never be added to app.js. -->
+          <p class="cust-unregistered" data-i18n="cust.unregistered">if you are not registered with us so far, contact customer.relations@indrones.com for onboarding. See you there!</p>
         </form>
         <p id="cust-error" class="auth-error" style="display:none"></p>
+        </div>
       </section>
 
+    </div>
+
+    <!-- ── WHAT EVERY VISITOR PASSES, BELOW BOTH DOORS ──
+         Three things that belong to neither door and are true of both, so they are said
+         once, under the pair, in the order a person meets them.
+
+         1. THE ACKNOWLEDGEMENT. ⚠ Both phrases are PLAIN TEXT WITH NO ANCHOR, and that
+            is deliberate rather than unfinished: there is no terms.html and no
+            privacy.html in this repo, and a link to a 404 under the words "Terms &
+            Conditions" is a worse answer than no link at all. Writing those pages means
+            writing the company's legal position on its own data, which is the owner's to
+            give. The moment they exist, these two phrases become anchors here — see the
+            note on landing.terms in i18n.js.
+
+         2. THE LANGUAGE SELECTOR, where the owner asked for it ("a language select
+            option at bottom like in notion.app"). Its options are built by app.js from
+            I18N.LANGS, one per language, so a language added to that list appears here
+            with no change to this file. ⚠ The control is real and the choice is
+            remembered; what is behind two of its three options today is English text,
+            through I18N's per-string fallback. See the note on the language dimension in
+            i18n.js for the size of the job that fills them in. -->
+
+    <p class="landing-terms" data-i18n="landing.terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy</p>
+
+    <div class="landing-lang">
+      <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
     </div>
 
     <!-- ── THE FOOT, SHARED BY BOTH DOORS ──
@@ -440,6 +515,58 @@
          card to under BOTH doors when there were two of them — the page it belongs to
          is the landing page, not either sign-in. -->
     <p class="app-credit">Made with <span class="credit-heart" aria-label="love">&hearts;</span> by Mr. Raza For Indrones<span class="credit-dot">&middot;</span><span class="app-version"></span></p>
+  </div>
+
+  <!-- ========== CHECK YOUR EMAIL — THE CODE STEP, BOTH DOORS ========== -->
+  <!-- A sibling of #auth-container on purpose: while this is up, the landing page is
+       gone and this is the only thing on screen — which is the shape the owner asked
+       for, from vercel.com: *"it lands in next screen totally blank and in center it
+       says 'Check your email' in big heading."* It replaces TWO blocks that used to sit
+       inside the two doors (#auth-login-code-wrap and #cust-code-wrap), which is the
+       point rather than a saving: an employee at this step and a customer at this step
+       are in the SAME state — an address that has been mailed a 6-digit code — and two
+       screens for one state is two things free to drift.
+
+       THE BOXES ARE SIX ELEMENTS, not one field with maxlength="6". The owner asked for
+       "equivalent number of boxes below that line to fill the code", and the reason it is
+       worth six elements rather than a cosmetic six-cell background is the phone: six real
+       boxes let iOS show the numeric keypad with `inputmode="numeric"` on each and let the
+       OS fill them from the mail's one-time-code autofill. app.js owns the caret, the
+       paste and the submit — see CODE STEP in app.js. -->
+  <div id="code-view">
+    <div class="glass-card animate-slide-up code-card">
+      <h2 class="code-title" id="code-title" data-i18n="code.title">Check your email</h2>
+      <p class="code-sub">
+        <span data-i18n="code.sub">If you have a indrones after sales account, we sent a code to</span>
+        <strong class="code-email" id="code-email"></strong><span aria-hidden="true">.</span>
+      </p>
+      <form id="code-form" autocomplete="off">
+        <!-- Six boxes, written out rather than built in a loop, so that each one carries
+             its OWN accessible name in the markup and I18N.applyStatic paints them like
+             any other static element. A loop in app.js would put six unlabelled text
+             fields on the screen for a screen reader and make the labels the one part of
+             this card the language layer could not reach.
+
+             `autocomplete="one-time-code"` on the FIRST box only: it is the hint the OS
+             reads to offer the code straight from the mail, and repeating it on all six
+             makes some browsers offer it six times.
+
+             ⚠ `type="text"` with `inputmode="numeric"`, never `type="number"`. A number
+             input on a phone gives a keypad with a decimal point and a minus sign, lets
+             the value be a float, and — the one that actually bites — silently drops a
+             leading zero, which is a real digit of a real code. -->
+        <div class="code-boxes" id="code-boxes">
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" autocomplete="one-time-code" data-i18n-aria="code.digit" data-i18n-var-n="1" aria-label="Digit 1 of the code" />
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="2" aria-label="Digit 2 of the code" />
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="3" aria-label="Digit 3 of the code" />
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="4" aria-label="Digit 4 of the code" />
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="5" aria-label="Digit 5 of the code" />
+          <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="6" aria-label="Digit 6 of the code" />
+        </div>
+      </form>
+      <p id="code-error" class="auth-error" style="display:none"></p>
+      <button type="button" class="link-btn" id="code-different" data-i18n="code.different">Use a different account</button>
+    </div>
   </div>
 
   <!-- ========== FIRST-LOGIN PASSWORD CHANGE ========== -->

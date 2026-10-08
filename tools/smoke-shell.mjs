@@ -243,18 +243,48 @@ ok('and no blur or darkening rule is left in the splash styles',
 // by the same words turning up in a card later.
 const landingHead = (html.match(/<header class="landing-head">[\s\S]*?<div class="doors">/) || [''])[0];
 ok('the product name moved to the common head, above both doors',
-  landingHead.length > 0 && /INDRONES FROM I/.test(landingHead) && /BOOK AS IT IS/.test(landingHead),
+  landingHead.length > 0 && /INDRONES-AFTER SALES SERVICE BOOK/.test(landingHead),
   landingHead.replace(/\s+/g, ' ').slice(0, 160));
-// The sentence that used to stand there, asserted as a string that is GONE. It was
-// "Indrones Product After-Sales Summary Book" — the same information with the
-// mechanism thrown away, and the owner replaced it on 2026-10-08 with the name's own
-// expansion, one term per letter of I-PASSBOOK. The check is on the head and on the
-// language table's VALUE, not on the whole repo: i18n.js's comment quotes the old line
-// on purpose, and index.html's <meta name="description"> is a sentence for a search
-// engine rather than a name on a screen.
-ok('...and the strapline it replaced is gone from the head and from the language table',
+// ⚠ THE HEAD HAS HAD THREE STRAIGHTLINES, and the two that lost are asserted as GONE
+// rather than merely un-asserted, because each of them was a sentence somebody once
+// had a good reason for.
+//
+//   1. "Indrones Product After-Sales Summary Book" — the same information with the
+//      mechanism thrown away.
+//   2. "INDRONES FROM I · PRODUCT FROM P · AFTER FROM A · SALES FROM S · SUMMARY FROM
+//      S · BOOK AS IT IS" — the owner's own expansion, one term per letter, drawn a
+//      term at a time. It was replaced on 2026-10-08 by the PLAIN NAME, and his reason
+//      was not that the expansion was wrong but that it was MOVING: *"the whole page
+//      below it is increasing/decreasing its height … And line increasing/decreasing
+//      should not happen."* A per-term animation re-laid-out the head on every term,
+//      so the doors stepped up and down the page all the way through it.
+//
+// The check is on the head and on the language table's VALUE, not on the whole repo:
+// i18n.js's comment quotes both old lines on purpose, and index.html's
+// <meta name="description"> is a sentence for a search engine rather than a name on a
+// screen.
+ok('...and both superseded straplines are gone from the head and from the language table',
   !/Indrones Product After-Sales Summary Book/.test(landingHead) &&
-  !/'app\.fullName':\s*'Indrones Product After-Sales Summary Book'/.test(read('../i18n.js')));
+  !/INDRONES FROM I/.test(landingHead) &&
+  !/'app\.fullName':\s*'Indrones Product After-Sales Summary Book'/.test(read('../i18n.js')) &&
+  !/'app\.fullName':\s*'INDRONES FROM I/.test(read('../i18n.js')));
+// The line is now ONE STATIC STRING, and that is the fix for the page growing and
+// shrinking: nothing can change its height at runtime, on any screen width. The
+// per-term markup, its rules and its typing loop are gone from all three files — and
+// a `.bt-term` left behind in the stylesheet would be exactly the kind of remnant that
+// makes a deletion look like a bug.
+ok('...and the per-term expansion is gone from the markup, the stylesheet and app.js',
+  !/bt-term/.test(html) &&
+  // Comments stripped first: base.css explains AT LENGTH what left and why, and that
+  // explanation names `.bt-term`. A bare scan would fail on the note recording the
+  // deletion, which is the opposite of what this is for.
+  !/\.bt-term/.test(read('../base.css').replace(/\/\*[\s\S]*?\*\//g, '')) &&
+  !/BT_TERM_MS/.test(appJs));
+// Its height is the one thing on this page that may not depend on the content above
+// it, so the fixed string is pinned AND the animation's own re-layout is checked for:
+// app.js must not write the full-name line at all.
+ok('...and nothing types, rewrites or measures that line at runtime',
+  !/landing-full/.test(appJs) && !/_btTerms/.test(appJs));
 
 // The topbar's chrome must not dress the landing head, and it did. base.css's
 // topbar rule was a bare `header` element selector, so `<header class="landing-head">`
@@ -622,12 +652,27 @@ ok('...and that rule is scoped, so the sidebar footer keeps its single line',
   })(), [...baseCss.matchAll(/([^{}]*?)\.app-version\s*\{([^}]*)\}/g)].map(m => m[1].trim()));
 ok('...and the middot that joined the two halves is gone with it, so nothing dangles',
   /#auth-container \.credit-dot\s*\{[^}]*display:\s*none/.test(baseCss), 'orphan mid dot');
-// And the sign-in flow must not raise the toast that covered the code box: the
-// note under the field already states both cases in full, so the toast was a
-// duplicate that sat over the very controls the user was reaching for.
-const otpStep = (appJs.match(/const gotoOtpStep = \([\s\S]*?\n  \};/) || [''])[0];
-ok('the code step sets the inline note', /auth-login-code-note/.test(otpStep));
-ok('...and raises NO toast over the code box', otpStep !== '' && !/showToast/.test(otpStep), otpStep.slice(0, 80));
+// ── THE OLD IN-FORM CODE STEP IS GONE, AND SO IS ITS TOAST ────────────────────
+// These two assertions used to drive `gotoOtpStep`, the function that folded a code field
+// open INSIDE the sign-in form and wrote a note under it. The owner moved the code to a
+// screen of its own (#code-view — see the landing block below), the function went with it,
+// and both assertions were then testing '' : `indexOf` returned -1, the slice was empty, and
+// "the code step sets the inline note" was green for a reason that had nothing to do with
+// the app. What replaces them is the claim that survives the move, and the one they were
+// really about — that no toast ever sat over the boxes.
+ok('the in-form code step and its inline note are gone with the screen they belonged to',
+  (() => {
+    // app.js's own note above the new screen NAMES the block it replaced, so the scan runs
+    // over the code with its comments off. A test that searched the raw text would fail on
+    // the prose describing the very departure it is asserting.
+    const code = appJs.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    return !/gotoOtpStep/.test(code) && !/auth-login-code-note/.test(code) &&
+           !/auth-login-code-wrap/.test(code);
+  })());
+ok('...and nothing raises a toast over the code boxes',
+  (appJs.match(/function submitCode\(\)[\s\S]*?\n\}/) || [''])[0].length > 200 &&
+  !/showToast/.test((appJs.match(/function submitCode\(\)[\s\S]*?\n\}/) || [''])[0]) &&
+  /setCodeError\(/.test(appJs));
 
 // ── The update notice: two slots, one writer, and a worker that never lies ────
 // A device parked on an old build is the argument for this existing at all. Three
@@ -714,244 +759,514 @@ ok('the appliers are still the ones the savers round-trip through',
   /saveSentinel\('__CONFIG__', 'inward-options'/.test(appJs) &&
   /saveSentinel\('__CONFIG__', 'team-directory'/.test(appJs));
 
-// ── The landing page: two doors on one link ───────────────────────────────────
-// One address serves both audiences. The employee's half is the sign-in form that
-// was always here; the customer's half is a LINK to customer.html rather than a
-// second copy of that page's sign-in — one door, one implementation. These
-// assertions exist because the whole point of the screen is that a visitor can tell
-// the two apart BEFORE typing anything, and that is a property of the markup.
-head('the landing page offers two doors, and names them');
+// ── The landing page: two doors, stacked and collapsible ──────────────────────
+// One address serves both audiences, and since 2026-10-08 the two doors are
+// ACCORDIONS stacked one above the other rather than cards side by side. The owner:
+// *"currently employee login box is much lengthier than customer's, plus employee
+// one's looks cluttered … let us have both employee login and customer login option
+// arranged vertically aligned, one above another. each condensed, i.e., collapsible,
+// so whichever the person wants to access will click on/arrow and expand it."*
+//
+// Every clause of that is a property of the MARKUP, which is why it is asserted here
+// rather than looked at. The one job of this screen is that a visitor can tell the two
+// apart BEFORE typing anything.
+head('the landing page offers two doors, stacked, each of them collapsible');
 {
-  const doorsBlock = (html.match(/<div class="doors">[\s\S]*?<!-- ========== FIRST-LOGIN PASSWORD CHANGE/) || [''])[0];
-  ok('the landing page is a .doors grid holding two cards',
+  const baseCssRaw = read('../base.css');
+  const i18nJs     = read('../i18n.js');
+  // Comments are stripped before the STRUCTURAL scans. Several of the comments in
+  // base.css and app.js name the very selectors this block asserts are GONE, because a
+  // rule that was removed is worth explaining where it stood — and a test that searched
+  // the raw text would fail on the prose describing the absence it is asserting.
+  const stripCss = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const stripJs  = js  => js.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"])\/\/.*/g, '$1');
+  const stripHtml = t => t.replace(/<!--[\s\S]*?-->/g, '');
+  const baseCss  = stripCss(baseCssRaw);
+  const appCode  = stripJs(appJs);
+  const htmlCode = stripHtml(html);
+  // i18n.js's notes QUOTE the very strings this block asserts are gone — the two retired
+  // straplines, the three deleted code-step strings — so its whole-line comments come off
+  // before any absence check. Only whole-line comments: a general stripper would have to
+  // guess at the quotes around every English sentence in the table.
+  const i18nCode = i18nJs.replace(/^\s*\/\/.*$/gm, '');
+
+  // THE BOUNDARY IS A NAMED MARKER. It used to be "the next two closing divs", and a
+  // boundary that silently resolves to '' turns every assertion below into a tautology
+  // that still prints PASS. The marker is the code step's own banner, which stands
+  // between #auth-container's close and #code-view — so this is the landing page and
+  // nothing else.
+  const doorsBlock = (html.match(/<div class="doors">[\s\S]*?<!-- ========== CHECK YOUR EMAIL/) || [''])[0];
+  ok('the landing page is a .doors column holding exactly two door sections',
     doorsBlock.length > 0 &&
     (doorsBlock.match(/<section class="door [^"]*"/g) || []).length === 2,
     (doorsBlock.match(/<section class="door [^"]*"/g) || []).length);
 
-  // Both cards carry the ROLE CHIP and it is the first child, so "which am I?" is
-  // answered above every control on the card rather than beside one of them. This
-  // matters MORE since the cards were stripped, not less: the chip is now the only
-  // thing on the card that says which audience it is for.
-  for (const [id, key, word] of [
-    ['door-employee', 'door.employee', 'Employee'],
-    ['door-customer', 'door.customer', 'Customer'],
+  // ── STACKED, AND THAT IS THE WHOLE FIX ───────────────────────────────────────
+  // Side by side, two cards of different content are read AGAINST each other and the
+  // shorter one reads as incomplete however it is filled — which was the complaint.
+  // Stacked, each is compared only with the page. A flex COLUMN with one max width, and
+  // not a grid: an `auto-fit` grid still puts them two-up on any screen wide enough,
+  // which is the very arrangement that was rejected.
+  ok('...and it is one flex column, so the two doors can never sit side by side',
+    /\.doors \{[^}]*display: flex/.test(baseCss) &&
+    /\.doors \{[^}]*flex-direction: column/.test(baseCss) &&
+    !/\.doors \{[^}]*grid-template-columns/.test(baseCss),
+    (baseCss.match(/\.doors \{[^}]*\}/) || [''])[0]);
+  // …and a column is a column at EVERY width, so there is no wide-screen arrangement left
+  // to undo and no media query is needed. What stood here was an auto-fit grid plus a
+  // query that collapsed it.
+  ok('...and nothing rearranges them at any width, so no media query is needed',
+    !/@media[^{]*\{[^@]*\.doors/.test(baseCss));
+  ok('...and a door is the width of the column, not of its own contents',
+    /\.door \{[^}]*max-width: none;/.test(baseCss) &&
+    /\.doors \{[^}]*max-width: 420px;/.test(baseCss));
+
+  // ── EACH DOOR IS AN ACCORDION, AND THE BAR IS THE CONTROL ───────────────────
+  for (const [which, key, word] of [
+    ['employee', 'door.employee', 'Employee'],
+    ['customer', 'door.customer', 'Customer'],
   ]) {
-    const card = (doorsBlock.match(new RegExp(`<section class="door [^"]*" id="${id}"[\\s\\S]*?</section>`)) || [''])[0];
-    ok(`#${id} is headed "${word}" by its own chip`,
+    const card = (doorsBlock.match(new RegExp('<section class="door [^"]*" id="door-' + which + '"[\\s\\S]*?</section>')) || [''])[0];
+    ok('#' + which + ' is a door whose whole BAR is the control',
       card.length > 0 &&
-      new RegExp(`<p class="door-role" id="${id}-role" data-i18n="${key}">${word}</p>`).test(card));
-    ok(`...and the chip is the FIRST thing on #${id}, above every control`,
-      card.replace(/^\s*<section[^>]*>/, '').trimStart().startsWith('<p class="door-role"'));
+      new RegExp('<button type="button" class="door-bar" id="door-' + which + '-toggle"').test(card));
+    ok('...and the bar says both halves of the one fact: that it is open, and what it opens',
+      new RegExp('id="door-' + which + '-toggle"[\\s\\S]{0,240}?aria-expanded=').test(card) &&
+      new RegExp('id="door-' + which + '-toggle"[\\s\\S]{0,240}?aria-controls="door-' + which + '-body"').test(card));
+    // THE ROLE CHIP IS A <span> INSIDE THE BAR, not a <p> of its own: the whole bar is
+    // the control, so "which of these two am I?" is answered by a thing that is itself
+    // pressable rather than by a label sitting beside one.
+    ok('...and "' + word + '" is a chip inside that bar, above the chevron',
+      new RegExp('<span class="door-role" id="door-' + which + '-role" data-i18n="' + key + '">' + word + '</span>').test(card) &&
+      card.indexOf('class="door-role"') > card.indexOf('class="door-bar"') &&
+      card.indexOf('class="door-role"') < card.indexOf('class="door-chev"'));
+    ok('...and a chevron is there to BE the state display',
+      new RegExp('id="door-' + which + '-toggle"[\\s\\S]{0,400}?<span class="door-chev" aria-hidden="true"></span>').test(card));
+    // THE PANEL SHIPS UNFOLDED, and that is the fallback rather than an oversight: with
+    // JS off there are no accordions at all, and a panel that shipped folded could never
+    // be opened again. Both panels show, and app.js's first paint folds the one that was
+    // not chosen in the same tick it sets the bar honestly.
+    ok('...and the panel ships unfolded, so a JS-off page still shows the door',
+      new RegExp('<div class="door-body" id="door-' + which + '-body">').test(card) &&
+      !new RegExp('<div class="door-body" id="door-' + which + '-body"[^>]*hidden').test(card));
   }
 
-  // ── The brand, said ONCE, above both doors ─────────────────────────────────
-  // The owner asked for the mark and the product name to be common to the two boxes
-  // rather than repeated inside each. That is a structural claim, so it is asserted
-  // structurally: one head, it sits above the grid, and neither card repeats it.
+  // ── ONE FACT, THREE STATEMENTS, AND NO WAY TO GET BOTH SHUT ─────────────────
+  // `data-open` turns the chevron, `hidden` folds the panel, `aria-expanded` tells a
+  // screen reader. Three statements of one fact is one more than is comfortable, and each
+  // is load-bearing: `hidden` alone leaves the arrow pointing down inside a shut panel,
+  // and a class alone leaves a keyboard user tabbing through fields they cannot see. The
+  // assertion is that ALL THREE are written, for BOTH doors, in one pass.
+  ok('setDoor writes all three statements of the one fact, for both doors',
+    /function setDoor\(which\) \{[\s\S]*?DOORS\.forEach\(w => \{/.test(appCode) &&
+    /sec\.dataset\.open = on \? '1' : '0';/.test(appCode) &&
+    /bar\.setAttribute\('aria-expanded', on \? 'true' : 'false'\);/.test(appCode) &&
+    /body\.hidden = !on;/.test(appCode));
+  // The `!important` is not decoration: `display: flex` on .door-body would otherwise beat
+  // the user agent's `[hidden] { display: none }`, which is the classic way an accordion
+  // silently never closes.
+  ok('...and the folded panel really is folded, the `!important` and all',
+    /\.door-body\[hidden\] \{ display: none !important; \}/.test(baseCss));
+  ok('...and the chevron turns over on that one attribute, with no glyph and no script',
+    /\.door\[data-open="1"\] \.door-chev \{ transform: rotate\(-135deg\); \}/.test(baseCss));
+  // EXCLUSIVE, AND THERE IS NO "BOTH SHUT". setDoor takes a CHOICE, not a toggle, and a
+  // press on the bar that is already open keeps it open. Two open panels would put the
+  // employee's four mechanisms and the customer's three above each other — the clutter he
+  // described, only taller.
+  ok('...so opening one door closes the other, and both-shut is not a state',
+    /const want = DOORS\.indexOf\(which\) >= 0 \? which : 'employee';/.test(appCode) &&
+    !/function toggleDoor/.test(appCode));
+  ok('...and the door this device used last opens on arrival, the Employee’s by default',
+    /const DOOR_KEY = 'ipb_door';/.test(appCode) &&
+    /localStorage\.getItem\(DOOR_KEY\)/.test(appCode) &&
+    /setDoor\(DOORS\.indexOf\(want\) >= 0 \? want : 'employee'\);/.test(appCode));
+  // …and it is repainted by the one function EVERY route back to the landing goes
+  // through, not only at wiring time: a sign-out returns to this screen and must find the
+  // door this device left open.
+  const showAuthBody = (appCode.match(/function showAuth\(\) \{[\s\S]*?\n\}/) || [''])[0];
+  ok('...and showAuth() paints the doors, above its own early work',
+    showAuthBody.length > 200 && /paintDoors\(\);/.test(showAuthBody));
+  ok('...and the bars are wired once, by the landing screen’s one wiring pass',
+    /function wireDoors\(\) \{/.test(appCode) && /wireLanding\(\) \{[\s\S]{0,200}?wireDoors\(\);/.test(appCode));
+
+  // ── THE BRAND, SAID ONCE, ABOVE BOTH DOORS ───────────────────────────────────
   const headBlock = (html.match(/<header class="landing-head">[\s\S]*?<\/header>/) || [''])[0];
-  ok('the mark and the wordmark are one common head, above the doors grid',
+  ok('the mark and the wordmark are one common head, above the doors',
     headBlock.length > 0 &&
     html.indexOf('<header class="landing-head">') < html.indexOf('<div class="doors">') &&
     (html.match(/class="landing-head"/g) || []).length === 1);
   ok('...and it carries the app name and the full product name',
     /data-i18n="app\.name"/.test(headBlock) && /data-i18n="app\.fullName"/.test(headBlock));
-  ok('...with the mark, once, and no second copy inside either card',
+  ok('...with the mark once, and no second copy inside either door',
     (headBlock.match(/class="landing-mark"/g) || []).length === 1 &&
-    !/auth-logo|landing-mark/.test(doorsBlock));
-  // ── The head TYPES ITSELF, and then spells the name out ─────────────────────
-  // The owner, 2026-10-08: "I-PASSBOOK itself in-loop animation where I-PASSBOOK
-  // appears as if being typed and then in below line … INDRONES ORIGINATES FROM I,
-  // PRODUCT ORIGINATES FROM P …". This pair of assertions replaces the cursive
-  // stroke's, and the stroke is asserted GONE rather than merely un-asserted.
-  const baseCssRaw = read('../base.css');
+    !/landing-mark|auth-logo/.test(doorsBlock));
+
+  // ── THE LINE UNDER THE WORDMARK IS THE PLAIN NAME, AND IT IS STATIC ─────────
+  // THREE STRAIGHTLINES HAVE STOOD THERE and the two that lost are asserted as GONE,
+  // because prose comes back by accretion and both were once somebody's good idea:
+  //   1. "Indrones Product After-Sales Summary Book".
+  //   2. *"INDRONES FROM I · PRODUCT FROM P · AFTER FROM A · SALES FROM S · SUMMARY FROM
+  //      S · BOOK AS IT IS"* — the owner's own expansion, which he wrote to explain the
+  //      acronym TO ME rather than to put on the page. It was replaced on 2026-10-08 by
+  //      the plain name, and his reason was not that the expansion was wrong but that it
+  //      MOVED: *"the whole page below it is increasing/decreasing its height … And line
+  //      increasing/decreasing should not happen."*
+  ok('the line under the wordmark is the owner’s plain name, in the markup and in the table',
+    /<p class="landing-full" id="landing-full" data-i18n="app\.fullName">INDRONES-AFTER SALES SERVICE BOOK<\/p>/.test(headBlock) &&
+    /'app\.fullName':\s*'INDRONES-AFTER SALES SERVICE BOOK'/.test(i18nJs));
+  ok('...and both superseded straplines are gone from the head and from the language table',
+    !/Indrones Product After-Sales Summary Book/.test(headBlock) &&
+    !/Indrones Product After-Sales Summary Book/.test(i18nCode) &&
+    !/INDRONES FROM I/.test(headBlock) && !/INDRONES FROM I/.test(i18nCode));
+  // ── AND IT CANNOT CHANGE THE PAGE'S HEIGHT ───────────────────────────────────
+  // Three things together make that true, and any one of them alone is not enough: the
+  // line is ONE STRING, so its height is fixed at every width; nothing types, rewrites or
+  // measures it at runtime; and NO rule reserves a second line "just in case", which would
+  // buy a guarantee against a thing that can no longer happen and pay for it with a
+  // permanent gap under the head.
+  ok('...and no rule reserves a second line, which would be a permanent gap',
+    /\.landing-full \{[^}]*\}/.test(baseCss) &&
+    !/\.landing-full \{[^}]*min-height/.test(baseCss));
+  ok('...and nothing types it, rewrites it or measures it at runtime',
+    /function buildBrandTyping\(\)/.test(appCode) &&
+    /landing-brand/.test(appCode) && !/landing-full/.test(appCode));
+  ok('...and the whole per-term expansion is gone from the markup, the stylesheet and the code',
+    !/bt-term/.test(html) && !/\.bt-term/.test(baseCss) &&
+    !/bt-term/.test(appCode) && !/BT_TERM_MS/.test(appCode));
+
+  // ── THE WORDMARK TYPES ITSELF ─────────────────────────────────────────────────
+  // The owner, 2026-10-08: "I-PASSBOOK itself in-loop animation where I-PASSBOOK appears
+  // as if being typed". It replaced a looping cursive stroke, and the stroke is asserted
+  // GONE rather than merely un-asserted.
   ok('...and the cursive stroke and its dash animation are gone',
     !/brand-stroke/.test(html) && !/brandWrite/.test(baseCssRaw) &&
     !/stroke-dasharray/.test(baseCssRaw));
-  // The words are the MARKUP's, and that is what makes the animation possible: app.js
-  // splits text that is already on the page. A head that shipped empty and filled
-  // itself in from script would leave a JS-off reader, a screen reader and a
-  // reduced-motion visitor with nothing at all.
-  ok('...and the finished words are in the markup, not typed in by script',
-    /<h1 class="landing-brand"[^>]*>I-PASSBOOK<\/h1>/.test(headBlock) &&
-    /data-i18n="app\.fullName"[^>]*>INDRONES FROM I/.test(headBlock));
-  // `display`, NOT `opacity`. Hiding an untipped letter with opacity leaves it
-  // occupying its own width, so the wordmark would be full width from the first frame
-  // and the letters would fade in — a fade, never a type. This is the one declaration
-  // that decides which of the two effects the owner gets.
+  // The word is the MARKUP's, and that is what makes the animation possible: app.js splits
+  // text that is already on the page. A head that shipped empty and filled itself in from
+  // script would leave a JS-off reader, a screen reader and a reduced-motion visitor with
+  // nothing at all.
+  ok('...and the finished word is in the markup, not typed in by script',
+    /<h1 class="landing-brand" id="landing-brand" data-i18n="app\.name">I-PASSBOOK<\/h1>/.test(headBlock));
+  // `display`, NOT `opacity`. Hiding an untipped letter with opacity leaves it occupying
+  // its own width, so the wordmark would be its full width from the first frame and the
+  // letters would fade in — a fade, never a type. Removing it from the box is what makes
+  // the word grow left to right.
   ok('...and an untipped letter is hidden with display, so the word grows as it is typed',
     /\.bt-lt \{ display: none; \}/.test(baseCssRaw) &&
     /\.bt-lt\.is-on \{ display: inline; \}/.test(baseCssRaw) &&
     !/\.bt-lt[^{]*\{[^}]*opacity/.test(baseCssRaw));
   ok('...and the caret follows the last letter, with no measured position',
     /\.bt-caret\.is-on \{ display: inline-block; animation: btBlink/.test(baseCssRaw));
-  // The reduced-motion block is not a courtesy: if app.js never runs or dies part-way,
-  // this paints the whole sentence anyway, and the markup has it to paint.
-  ok('...and every part is shown, with teeth, for anyone who has asked for less motion',
-    /@media \(prefers-reduced-motion: reduce\) \{[\s\S]{0,200}?\.bt-lt, \.landing-full \.bt-term \{ display: inline !important; \}/.test(baseCssRaw) &&
-    /prefersReducedMotion\(\)/.test(appJs));
-  // …and the timings are NOT in the stylesheet. Half a chain in each file is a chain
-  // nobody can change.
+  // The reduced-motion block is not a courtesy: if app.js never runs, or dies part-way,
+  // this paints the whole word anyway — and the markup has it to paint.
+  ok('...and every letter is shown for anyone who has asked for less motion',
+    /@media \(prefers-reduced-motion: reduce\) \{[\s\S]{0,200}?\.bt-lt \{ display: inline !important; \}/.test(baseCssRaw) &&
+    /prefersReducedMotion\(\)/.test(appCode));
+  // …and the timings are NOT in the stylesheet. Half a chain in each file is a chain nobody
+  // can change.
   ok('...and the sequence lives in one place, in app.js',
-    /function buildBrandTyping\(\)/.test(appJs) &&
-    /function startBrandTyping\(\)/.test(appJs) &&
-    /function stopBrandTyping\(\)/.test(appJs) &&
-    /BT_LETTER_MS/.test(appJs) &&
+    /function startBrandTyping\(\)/.test(appCode) &&
+    /function stopBrandTyping\(\)/.test(appCode) &&
+    /BT_LETTER_MS/.test(appCode) &&
     !/animation-duration/.test((baseCssRaw.match(/\.bt-[^{]*\{[^}]*\}/g) || []).join('\n')));
-  // The loop is started when the landing screen is actually put on screen and stopped
-  // when it is taken away — NOT at parse time. The intro covers the screen until it
-  // finishes, so a chain started at parse time would be seconds into its loop before
-  // anybody could see it.
+  // The loop runs only while the sign-in screen IS the screen: the intro covers it until it
+  // finishes, so a chain started at parse time would be seconds into its loop before anybody
+  // could see it — and a chain left running after sign-in mutates hidden DOM for the length
+  // of a session.
   ok('...and it runs only while the sign-in screen is the one on screen',
-    /function showAuth\(\) \{[\s\S]{0,900}?startBrandTyping\(\)/.test(appJs) &&
-    /function showApp\(\) \{[\s\S]{0,900}?stopBrandTyping\(\)/.test(appJs));
-  // ── …and the letters DO NOT SLIDE ───────────────────────────────────────────
-  // Hiding an untipped letter is necessary but not sufficient, and the first cut of
-  // this shipped with only that half: a heading centred on whatever is on screen is
-  // re-laid-out on every keystroke, so every letter already placed drifts outward as
-  // the next one arrives. Measured in a real browser on 2026-10-08: the finished word
-  // is 155px wide, so the "I" travelled 79px to the left over the first second of every
-  // loop — an unfolding, not a typewriter, and not what "appears as if being typed"
-  // means. The fix is a box reserved to the finished word's width with the text
-  // left-aligned inside it.
-  //
-  // The three parts are asserted together because any one alone does nothing: without
-  // the stamp the box shrinks and the word re-centres every keystroke; without the
-  // left alignment a fixed box just holds a centred word in the middle of itself. Same
-  // probe afterwards: the "I" moved 523 → 521, i.e. 2px of sub-pixel rounding.
+    /startBrandTyping\(\);/.test(showAuthBody) &&
+    /function showApp\(\) \{[\s\S]{0,900}?stopBrandTyping\(\);/.test(appCode));
+  // ── …AND THE LETTERS DO NOT SLIDE ─────────────────────────────────────────────
+  // Hiding an untipped letter is necessary but not sufficient, and the first cut of this
+  // shipped with only that half: a heading centred on whatever is on screen is re-laid out
+  // on every keystroke, so every letter already placed drifts outward as the next one
+  // arrives. Measured in a real browser on 2026-10-08: the finished word is 155px wide, so
+  // the "I" travelled 79px to the left over the first second of every loop — an unfolding,
+  // not a typewriter, and not what "appears as if being typed" means. The fix is a box
+  // reserved to the finished word's width with the text left-aligned inside it.
   ok('...and the word is typed into a box of the FINISHED width, so no letter slides',
-    /function reserveBrandBox\(\)/.test(appJs) &&
-    /if \(width > 0\) box\.style\.minWidth = Math\.ceil\(width\) \+ 'px'/.test(appJs) &&
+    /function reserveBrandBox\(\)/.test(appCode) &&
+    /if \(width > 0\) box\.style\.minWidth = Math\.ceil\(width\) \+ 'px'/.test(appCode) &&
     /\.landing-wordmark \{[^}]*text-align: left/.test(baseCssRaw));
   // The reserve must sit BEFORE startBrandTyping()'s `_btRun` guard. Behind it, a
-  // sign-out/sign-in would find the chain already looping and skip the measure — and
-  // the second visit to the landing page is exactly when a zero-width first measure
-  // (the screen not yet laid out) would still need repairing.
+  // sign-out/sign-in would find the chain already looping and skip the measure — and the
+  // second visit to the landing page is exactly when a zero-width first measure (the screen
+  // not yet laid out) would still need repairing.
   ok('...measured on every entry to the landing screen, not only the first',
-    /reserveBrandBox\(\);\s*[\s\S]{0,400}?if \(_btRun\) return;/.test(appJs));
-  // ── The two cards are sized by what is IN them, not by each other ───────────
-  // "I would be intested to see if both boxes can appear similar in appearance in
-  // terms of placement of elements." They do: same chip, same hint line, same field,
-  // same primary, same "Forgot password?" control, in that order. What they do NOT
-  // have is the same number of controls — six against three — and the grid's default
-  // `align-items: stretch` therefore handed the customer card a ~155px blank hole
-  // below its last control, measured on the rendered page on 2026-10-08. A void that
-  // size reads as a control that failed to load, which is the opposite of the
-  // reassurance he was asking for. `start` is what removes it.
-  ok('...and each door is the height of its own contents, with no blank hole in the shorter one',
-    /\.doors \{[\s\S]{0,1200}?align-items: start;/.test(baseCssRaw) &&
-    !/\.doors \{[^}]*align-items: stretch/.test(baseCssRaw));
+    /reserveBrandBox\(\);\s*[\s\S]{0,400}?if \(_btRun\) return;/.test(appCode));
 
-  // ── The customer door SIGNS IN, here ───────────────────────────────────────
-  // REVERSED ON THE OWNER'S INSTRUCTION, 2026-10-08. This used to assert the exact
-  // opposite — "the customer door carries no form of its own" — because a second
-  // implementation of one sign-in was the thing to avoid. He asked for one page with
-  // two doors on it, and a door that hands you to another page to be opened is not
-  // one door. The risk that assertion guarded against is real and is now handled
-  // differently: the form is small, it posts the SAME backend actions, and the keys
-  // it writes are pinned to customer.html's own by smoke-portal.mjs.
+  // ── THE EMPLOYEE PANEL: ONE LIST, FOUR DOORS ──────────────────────────────────
+  // The owner, 2026-10-08: *"it should see all 4 login options like vercel where all options
+  // are listed in a single list where at the top is 'Log in to I-PASSBOOK' then is a box for
+  // entering email, below it is a button 'Continue', below it is a line which separates next
+  // below option which is 'continue with indrones' official email' then below it 'continue
+  // with fingerprint/passkey' then below it 'continue with pattern'. there is no space for
+  // forgot password now because we are not having any password based login anyfurther."*
+  const empCard = (doorsBlock.match(/<section class="door [^"]*" id="door-employee"[\s\S]*?<\/section>/) || [''])[0];
+  const empForm = (empCard.match(/<form id="auth-form"[\s\S]*?<\/form>/) || [''])[0];
+  ok('the employee door still owns the one #auth-form',
+    (doorsBlock.match(/<form id="auth-form"/g) || []).length === 1 && empForm.length > 200);
+  ok('...headed by the owner’s own first line, over a field, over Continue',
+    /<h2 class="door-title" id="auth-title" data-i18n="auth\.loginTitle">Log in to I-PASSBOOK<\/h2>/.test(empForm) &&
+    /<input class="form-input" type="email" id="auth-email"/.test(empForm) &&
+    /<button type="submit" class="btn" id="auth-signin-btn" data-i18n="auth\.continue">Continue<\/button>/.test(empForm));
+  ok('...in that order, with the divider after Continue and the alternatives under it',
+    empForm.indexOf('id="auth-title"') < empForm.indexOf('id="auth-email"') &&
+    empForm.indexOf('id="auth-email"') < empForm.indexOf('id="auth-signin-btn"') &&
+    empForm.indexOf('id="auth-signin-btn"') < empForm.indexOf('id="auth-or"') &&
+    empForm.indexOf('id="auth-or"') < empForm.indexOf('id="auth-google-btn"'));
+  // THE DIVIDER IS THE BLOCK'S, NOT GOOGLE'S. It used to be keyed on `!!CONFIG.SSO_URL`
+  // from when the Google button was the only thing under it. It now sits above THREE
+  // alternatives, two of which do not depend on a second deployment at all — so keying it
+  // on SSO_URL would drop the line between "Continue" and the unlock pair on every device
+  // where the Google door is simply off.
+  ok('...and the divider is shown for the whole alternatives block, not for Google alone',
+    /set\('auth-or',\s*firstStep && \(!!CONFIG\.SSO_URL \|\| quickHere\)\)/.test(appCode));
+  ok('...and it ships hidden, so a JS-off page never shows a lone "or"',
+    /<div class="auth-or" id="auth-or" style="display:none">/.test(empForm));
+  // ── FOUR ANSWERS TO ONE QUESTION, AND ONE OF THEM IS THE ACCENT ───────────────
+  // `.btn-secondary`, NOT a bare `.btn`, on all three alternatives. industrial.css gives a
+  // bare `.btn` on this screen the accent, so that a door's ONE action reads as the door —
+  // and four bare buttons stacked in one list is four yellow buttons and a hierarchy of
+  // none. It is also what the page he pointed at does: vercel.com's own list is one filled
+  // "Continue with Email" over four neutral alternatives.
+  ok('...and the three alternatives are .btn-secondary, leaving one accent on the panel',
+    /class="btn btn-secondary" id="auth-google-btn"/.test(empForm) &&
+    /class="btn btn-secondary" id="auth-unlock-btn"/.test(empForm) &&
+    /class="btn btn-secondary" id="auth-pattern-link"/.test(empForm) &&
+    (empForm.match(/class="btn btn-secondary"/g) || []).length === 3 &&
+    (empForm.match(/class="btn"/g) || []).length === 1);
+  ok('...named as the owner named them, each one an answer to the same question',
+    /data-i18n="auth\.sso">Continue with Indrones’ official email<\/button>/.test(empForm) &&
+    /data-i18n="auth\.unlock">Continue with fingerprint \/ passkey<\/button>/.test(empForm) &&
+    /data-i18n="auth\.usePattern">Continue with pattern<\/button>/.test(empForm));
+  // The quick-unlock pair is ONE BLOCK, shown only when this device actually holds a
+  // registration — an offer that opens onto nothing is worse than no offer. Each then shows
+  // on its own, because a device may have a fingerprint and no pattern, or the other way
+  // round, and only the door that can open is drawn.
+  ok('...and the pair is one block, so neither door is offered onto nothing',
+    /<div id="auth-quick" style="display:none">[\s\S]*?id="auth-unlock-btn"[\s\S]*?id="auth-pattern-link"[\s\S]*?<\/div>/.test(empForm) &&
+    /const quickOn = \(entry \|\| mode === 'pattern'\);/.test(appCode) &&
+    /const fp = !!\(q\.credentialId \|\| q\.mode === 'fingerprint'\);/.test(appCode) &&
+    /const pat = !!q\.patternHash;/.test(appCode));
+  // `.btn-quick` was the fingerprint button's own class and it is GONE, not dormant: three
+  // suites used to name it and nothing on screen carries it any more.
+  ok('...and the retired .btn-quick class is gone from the markup and from the stylesheet',
+    !/btn-quick/.test(html) && !/btn-quick/.test(baseCss));
+  // ── AND THERE IS NO PASSWORD LOGIN LEFT TO RECOVER ────────────────────────────
+  // *"there is no space for forgot password now because we are not having any password based
+  // login anyfurther."* Asserted as an ABSENCE — in the markup, the table and the code —
+  // because a control comes back by accretion. What is NOT gone is the first-login password,
+  // which is a different thing wearing similar clothes and is the only door a brand-new
+  // account has; see #auth-pwd-link.
+  ok('there is no "Forgot password?" control anywhere on the landing page',
+    !/Forgot password/i.test(htmlCode) && !/auth-forgot/.test(htmlCode) &&
+    !/cust-forgot/.test(htmlCode) && !/auth-forgot/.test(appCode) &&
+    !/function submitCustomerPassword/.test(appCode) &&
+    !/auth\.forgot/.test(i18nJs) && !/cust\.forgot/.test(i18nJs));
+  ok('...and no password-reset flow survives anywhere either',
+    !/auth-new-password|auth-reset-wrap/.test(htmlCode) &&
+    !/auth-new-password|auth-reset-wrap/.test(appCode) &&
+    !/id="cust-password"/.test(htmlCode) && !/id="cust-password"/.test(appCode));
+
+  // ── THE CUSTOMER DOOR: THE OWNER'S OWN WORDS, AND NO PASSWORD ─────────────────
+  // It SIGNS IN, here, because the owner asked for one page with two doors on it — a door
+  // that hands you to another page to be opened is not one door. All of it is the SAME
+  // backend action the staff door uses: `login` with no password IS the OTP door.
   const custCard = (doorsBlock.match(/<section class="door [^"]*" id="door-customer"[\s\S]*?<\/section>/) || [''])[0];
+  const custForm = (custCard.match(/<form id="cust-form"[\s\S]*?<\/form>/) || [''])[0];
   ok('the customer door carries its own sign-in form',
-    /<form id="cust-form"/.test(custCard));
-  // NO PASSWORD FIELD, and the two controls it shared a card with are gone with it.
-  // The owner, 2026-10-08: "for customers as well, there is no password method like of
-  // employee's, it is only email OTP based login." So this card is now one field, one
-  // button, one recovery link — which is also what makes it the same SHAPE as the
-  // employee's, which is the other half of what he asked for.
-  ok('...offering the email address and the emailed code, and no password at all',
-    /id="cust-email"/.test(custCard) &&
-    !/id="cust-password"/.test(custCard) &&
-    !/id="cust-otp-link"/.test(custCard) &&
-    /id="cust-signin-btn"/.test(custCard) && /id="cust-code"/.test(custCard));
-  // …and the app.js side of the same decision: one stage-1 request, and it is the
-  // passwordless one. `password: ''` is not an empty password — the backend reads the
-  // ABSENCE of a real one as the OTP door — so a revert to a password route would have
-  // to change this line, and would fail here.
-  ok('...and its one request is the passwordless door, with no password branch left',
-    /customerAuth\('login', \{ email: email, password: '' \}\)/.test(appJs) &&
-    !/function submitCustomerPassword/.test(appJs) &&
-    !/cust-password/.test(appJs));
-  // THE SAME CONTROL AS THE EMPLOYEE'S: same class, same words, same place under the
-  // primary button. The owner asked for it by name — "instead we can have same forgot
-  // password button in customer box as in employee's" — and a recovery entry that
-  // looked different on each card would be the first thing to break the two reading
-  // alike. What is BEHIND it differs on purpose, and that is the next assertion.
-  ok('...with the same "Forgot password?" control the employee card carries',
-    /<a class="link-btn" id="cust-forgot-link" href="customer\.html#signin" data-i18n="cust\.forgot">Forgot password\?<\/a>/.test(custCard) &&
-    /<button type="button" id="auth-forgot-link" class="link-btn">Forgot password\?<\/button>/.test(doorsBlock));
-  ok('...which hands over to the page that owns a customer\'s reset, rather than a second copy of it',
-    /id="cust-forgot-link" href="customer\.html#signin"/.test(custCard));
-  ok('...and its hint is the owner\'s own line, in the markup and in the table',
-    /data-i18n="cust\.hint"[^>]*>Login to I-PASSBOOK, your after-sales companion\.<\/p>/.test(custCard) &&
-    /'cust\.hint':\s*'Login to I-PASSBOOK, your after-sales companion\.'/.test(read('../i18n.js')));
-  // The two strings the owner struck out, asserted as GONE. Prose comes back by
-  // accretion, and both of these were sentences somebody once had a good reason for.
-  ok('...and the invitation sentence and its "first time here" twin are both gone',
-    !/email address we invited you at/.test(html) &&
-    !/First time here/.test(html) &&
-    !/cust\.useOtp/.test(html) && !/cust\.useOtp/.test(read('../i18n.js')));
-  // The prose the owner asked to be removed — "just employee and just customer on
-  // each boxes". Asserted as an absence, because prose comes back by accretion.
-  ok('...and the marketing copy is gone from the card',
-    !/door\.customerTitle|door\.customerFull|door\.customerHint|door\.custReports|door\.custAccess/.test(html) &&
-    !/class="door-list"/.test(html));
-  // A customer who already holds a session does not get asked again.
-  ok('the customer card swaps its form for the way in when a session is already held',
-    /<div id="cust-session"[^>]*>[\s\S]*?<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(custCard));
+    custForm.length > 200);
+  ok('...opening with the three lines the owner wrote, in the markup and in the table',
+    /<p class="cust-welcome" data-i18n="cust\.welcome">Welcome! This is I-PASSBOOK<\/p>/.test(custForm) &&
+    /<p class="cust-tagline" data-i18n="cust\.tagline">For Everything Related To Indrones’ After-Sales<\/p>/.test(custForm) &&
+    /<p class="cust-lead" data-i18n="cust\.login">Log in to your I-PASSBOOK account\.<\/p>/.test(custForm) &&
+    /'cust\.welcome':\s*'Welcome! This is I-PASSBOOK'/.test(i18nJs) &&
+    /'cust\.login':\s*'Log in to your I-PASSBOOK account\.'/.test(i18nJs));
+  ok('...then the address, then the helper line UNDER it, quiet, and not a placeholder',
+    /<input class="form-input" type="email" id="cust-email"/.test(custForm) &&
+    /<p class="cust-helper" id="cust-hint" data-i18n="cust\.emailHelper">Use your official email registered with us while onboarding as a customer<\/p>/.test(custForm) &&
+    custForm.indexOf('id="cust-email"') < custForm.indexOf('id="cust-hint"') &&
+    custForm.indexOf('id="cust-hint"') < custForm.indexOf('id="cust-signin-btn"') &&
+    /'cust\.emailHelper':\s*'Use your official email registered with us while onboarding as a customer'/.test(i18nJs));
+  ok('...then Continue, then the divider, then the desk’s own address',
+    /<button type="submit" class="btn" id="cust-signin-btn" data-i18n="cust\.continue">Continue<\/button>/.test(custForm) &&
+    /<div class="auth-or" id="cust-or"><span data-i18n="cust\.or">or<\/span><\/div>/.test(custForm) &&
+    /<p class="cust-unregistered" data-i18n="cust\.unregistered">if you are not registered with us so far, contact customer\.relations@indrones\.com for onboarding\. See you there!<\/p>/.test(custForm) &&
+    /'cust\.unregistered':\s*'if you are not registered with us so far, contact customer\.relations@indrones\.com for onboarding\. See you there!'/.test(i18nJs));
+  ok('...offering the address and the mailed code, and no password at all',
+    /id="cust-email"/.test(custForm) &&
+    !/type="password"/.test(custForm) && !/type="password"/.test(custCard));
+  // …and the code itself is NOT in here. It lives on its own screen now, shared with the
+  // employee's door, because an employee at this step and a customer at this step are in the
+  // SAME state — an address that has been mailed a 6-digit code.
+  ok('...and no code block inside the door, which is what the shared screen replaced',
+    !/id="cust-code"/.test(htmlCode) && !/id="cust-code"/.test(appCode) &&
+    !/cust-code-wrap/.test(htmlCode) && !/cust-code-wrap/.test(appCode) &&
+    !/auth-login-code-wrap/.test(htmlCode) && !/auth-login-code-wrap/.test(appCode));
+  // The app.js side of the same decision: ONE stage-1 request, and it is the passwordless
+  // one. `password: ''` is not an empty password — the backend reads the ABSENCE of a real
+  // one as the OTP door — so a revert to a password route would have to change this line and
+  // would fail here.
+  ok('...and its one request is the passwordless door, handing to the shared code screen',
+    /customerAuth\('login', \{ email: email, password: '' \}\)\.then\(d => \{/.test(appCode) &&
+    /openCodeView\('customer', email, ''\); return; \}/.test(appCode));
+  // A customer who already holds a session is not asked again — and it is read from the
+  // CUSTOMER's key, never the staff one, so a staff session on this machine cannot open this
+  // door and the customer's cannot open the app's.
+  ok('...and a customer already holding a session gets the way in instead of the form',
+    /<div id="cust-session" style="display:none">[\s\S]*?<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(custCard) &&
+    /localStorage\.getItem\('ipbc_session'\)/.test(appCode) &&
+    /localStorage\.setItem\('ipbc_session'/.test(appCode) &&
+    /localStorage\.setItem\('ipbc_user'/.test(appCode));
 
-  // ── The foot, below BOTH boxes and shared ──────────────────────────────────
-  // The two entries sat INSIDE the customer's card until 2026-10-08 — which was
-  // wrong on its own terms: "Report a problem" is the desk's front door, and an
-  // employee who cannot sign in needs it exactly as much as a customer. Asserted
-  // after the LAST card's closing tag, not merely after the grid's opening one: a
-  // foot that drifted one level in would sit in a grid column, which is the failure
-  // a "comes after .doors" check would happily pass.
-  const footAt = html.indexOf('<p class="landing-foot">');
-  const doorsEnd = html.indexOf('<div class="doors">') + doorsBlock.lastIndexOf('</section>');
-  ok('Report a problem and the FAQ are one common foot, below both cards',
+  // ── THE CODE STEP: ONE SCREEN FOR BOTH DOORS ──────────────────────────────────
+  // The owner, 2026-10-08: *"it lands in next screen totally blank and in center it says
+  // 'Check your email' in big heading and below it is 'If you have a indrones after sales
+  // account, we sent a code to <that email id>.' in normal text size. then equivant number
+  // of boxes below that line to fill the code. and a button below boxes saying 'Use a
+  // different account'. clicking this button will land back to initial login page."*
+  const codeBlock = (html.match(/<div id="code-view">[\s\S]*?<!-- ========== FIRST-LOGIN PASSWORD CHANGE/) || [''])[0];
+  ok('the code step is a screen of its own, a SIBLING of the landing page',
+    codeBlock.length > 300 &&
+    html.indexOf('<div id="code-view">') > html.indexOf('<div id="auth-container">') &&
+    html.indexOf('<div id="code-view">') > html.indexOf('</section>', html.indexOf('id="door-customer"')),
+    { at: html.indexOf('<div id="code-view">') });
+  ok('...headed "Check your email" in a big heading, with the address it went to',
+    /<h2 class="code-title" id="code-title" data-i18n="code\.title">Check your email<\/h2>/.test(codeBlock) &&
+    /data-i18n="code\.sub">If you have a indrones after sales account, we sent a code to<\/span>\s*<strong class="code-email" id="code-email"><\/strong>/.test(codeBlock) &&
+    /'code\.title':\s*'Check your email'/.test(i18nJs));
+  // SIX REAL <input> ELEMENTS, not one field with a six-cell background. That is what opens
+  // the phone's numeric keypad on the first box and lets the OS offer the code straight from
+  // the mail. `inputmode="numeric"`, NEVER `type="number"`: a number field on a phone gives a
+  // keypad with a decimal point, and — the one that actually bites — silently drops a leading
+  // zero, which is a real digit of a real code. The `type="number"` scan is written as "an
+  // input with that type", because the note in the markup names the type it refuses.
+  const boxes = [...codeBlock.matchAll(/<input class="code-box"[^>]*\/>/g)].map(m => m[0]);
+  ok('...over six real boxes, each one a text field with a numeric keypad',
+    boxes.length === 6 &&
+    boxes.every(b => /type="text"/.test(b) && /inputmode="numeric"/.test(b) && /maxlength="1"/.test(b)) &&
+    !/<input[^>]*type="number"/.test(codeBlock),
+    boxes.length);
+  ok('...each carrying its OWN accessible name, so the language layer reaches all six',
+    boxes.every((b, i) => b.indexOf('data-i18n-aria="code.digit"') >= 0 &&
+                          b.indexOf('data-i18n-var-n="' + (i + 1) + '"') >= 0) &&
+    /'code\.digit':\s*'Digit \{n\} of the code'/.test(i18nJs));
+  // `autocomplete="one-time-code"` on the FIRST box only: it is the hint the OS reads to
+  // offer the code from the mail, and repeating it on all six makes some browsers offer it
+  // six times.
+  ok('...with the one-time-code hint on the first box and on no other',
+    /autocomplete="one-time-code"/.test(boxes[0]) &&
+    boxes.slice(1).every(b => !/autocomplete="one-time-code"/.test(b)));
+  ok('...and "Use a different account" is the one way out, under them',
+    /<button type="button" class="link-btn" id="code-different" data-i18n="code\.different">Use a different account<\/button>/.test(codeBlock) &&
+    codeBlock.indexOf('id="code-boxes"') < codeBlock.indexOf('id="code-different"'));
+  // NO RESEND ANYWHERE, and that is a decision rather than an omission: the owner's list for
+  // this screen is the heading, the sub-line, the boxes and that one button, and a "send it
+  // again" would be the one control here whose only possible behaviour is to send mail.
+  ok('...inside a form, with one place to say it went wrong and no resend beside it',
+    /<form id="code-form" autocomplete="off">/.test(codeBlock) &&
+    /<p id="code-error" class="auth-error" style="display:none"><\/p>/.test(codeBlock) &&
+    !/resend/i.test(codeBlock) && !/Send the code again/i.test(codeBlock) &&
+    !/code\.resent|code\.resend|code\.verifying/.test(i18nCode));
+  // ── …and the machinery app.js owns, since six boxes means owning the caret ────
+  ok('opening the step takes the WHOLE landing page down, and stops the wordmark typing',
+    /function openCodeView\(door, email, password\) \{[\s\S]{0,1800}?authCont\.style\.display = 'none';/.test(appCode) &&
+    /function openCodeView\(door, email, password\) \{[\s\S]{0,1800}?stopBrandTyping\(\);/.test(appCode));
+  ok('...and closing it puts back the door that ASKED, not the Employee’s by default',
+    /function closeCodeView\(restore\) \{[\s\S]{0,900}?setDoor\(_codeDoor === 'customer' \? 'customer' : 'employee'\);/.test(appCode));
+  ok('...and a code arriving all at once always fills from the FIRST box',
+    /const start = \(digits\.length >= boxes\.length\) \? 0 : Math\.max\(0, Math\.min\(from, boxes\.length - 1\)\);/.test(appCode));
+  // Busy as an ATTRIBUTE rather than as disabled boxes: disabling the field the person is
+  // looking at moves the screen under them, and the answer they are waiting for lands right
+  // here. `data-busy` dims the group in CSS; the guard in app.js is what stops the second
+  // submit.
+  ok('...and checking it is busy in a way that does not take the screen away',
+    /if \(cv && cv\.dataset\.busy === '1'\) return;/.test(appCode) &&
+    /cv\.dataset\.busy = '1'; cv\.setAttribute\('aria-busy', 'true'\);/.test(appCode) &&
+    /#code-view\[data-busy="1"\] \.code-boxes \{ opacity: 0\.5; \}/.test(baseCss));
+  // WHICH REQUEST IS MADE IS THE ONLY THING THE DOOR CHANGES. A customer's code is checked by
+  // the same backend action the staff door uses — `login` with no password IS the OTP door —
+  // but a customer's session must be written under the customer's keys and hand off to
+  // customer.html, which is finishCustomerAuth's job and not finishAuth's.
+  ok('...and a customer’s code is checked by the staff door’s own action, under the customer’s keys',
+    /const req = \(_codeDoor === 'customer'\)/.test(appCode) &&
+    /\? customerAuth\('login', \{ email: _codeEmail, password: '', code: code \}\)/.test(appCode) &&
+    /: loginBackend\(_codeEmail, _codePassword, code\);/.test(appCode) &&
+    /finishCustomerAuth\(_codeEmail, d\);/.test(appCode));
+
+  // ── WHAT EVERY VISITOR PASSES, BELOW BOTH DOORS ───────────────────────────────
+  const doorsEnd = html.indexOf('</section>', html.indexOf('id="door-customer"'));
+  const termsAt  = html.indexOf('<p class="landing-terms"');
+  const footAt   = html.indexOf('<p class="landing-foot">');
+  ok('the acknowledgement is one line below both doors, said once',
+    termsAt > doorsEnd && footAt > termsAt &&
+    /<p class="landing-terms" data-i18n="landing\.terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy<\/p>/.test(html) &&
+    /'landing\.terms':\s*'By continuing, you acknowledge that you understand and agree to the Terms & Conditions and Privacy Policy'/.test(i18nJs),
+    { termsAt, doorsEnd });
+  // ⚠ BOTH PHRASES ARE PLAIN TEXT WITH NO ANCHOR, and that is deliberate rather than
+  // unfinished: there is no terms.html and no privacy.html in this repo, and a link to a 404
+  // under the words "Terms & Conditions" is a worse answer than no link at all. Writing those
+  // pages means writing the company's legal position on its own data, which is the owner's to
+  // give. The moment they exist these become anchors — which is why the absence is asserted
+  // rather than left to be noticed.
+  ok('...with both phrases unlinked, because neither page exists to link to',
+    !/<a[^>]*>[^<]*(?:Terms|Privacy)/i.test(htmlCode) &&
+    !/terms\.html|privacy\.html/.test(htmlCode));
+  // The language picker, where the owner asked for it ("a language select option at bottom
+  // like in notion.app"). Its options are BUILT by app.js from I18N.LANGS, one per language, so
+  // a language added to that list appears here with no second edit.
+  ok('the language picker is a native select, filled from the language table',
+    /<div class="landing-lang">\s*<select id="lang-select" aria-label="Language" data-i18n-aria="landing\.language"><\/select>/.test(html) &&
+    /function buildLangSelect\(\) \{[\s\S]{0,700}?window\.I18N\.LANGS\.forEach\(l => \{/.test(appCode) &&
+    /LANGS:/.test(i18nJs) && /'landing\.language':\s*'Language'/.test(i18nJs));
+  // ⚠ THE CONTROL IS REAL AND THE CHOICE IS REMEMBERED; what is behind two of its three
+  // options today is English, through I18N's per-string fallback. That is said rather than
+  // implied — a picker that silently did nothing would be worse than no picker at all.
+  ok('...and the choice it makes is remembered on the device',
+    /setLang/.test(i18nJs) && /getElementById\('lang-select'\)/.test(appCode) &&
+    /addEventListener\('change'/.test(appCode));
+  // The foot: the desk's two doors, below BOTH and outside either. Anchored on the CUSTOMER
+  // section's closing tag rather than merely on the grid's, because a foot that drifted one
+  // level in would sit inside a card — which "comes after .doors" would happily pass.
+  ok('Report a problem and the Help & FAQ are one common foot, below both doors',
     footAt > doorsEnd &&
     /<p class="landing-foot">[\s\S]*?id="customer-door-open"[\s\S]*?id="auth-faq-link"[\s\S]*?<\/p>/.test(html) &&
-    !/customer-door-open|auth-faq-link/.test(custCard),
-    { footAt, doorsEnd });
-  ok('...and it is a centred line, not a card',
-    /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(read('../base.css')));
+    !/customer-door-open|auth-faq-link/.test(custCard) &&
+    !/customer-door-open|auth-faq-link/.test(empCard));
+  ok('...and it is a centred line, not a card of its own',
+    /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(baseCss));
+  // The Report button stays hidden until CUSTOMER_FORM_URL is set: an entry that opens an
+  // empty frame is worse than no entry.
+  ok('...with the report button off the screen until there is a form behind it',
+    /<button type="button" class="link-btn" id="customer-door-open" style="display:none"/.test(html) &&
+    /getElementById\('customer-door-open'\)/.test(appCode));
 
-  // The employee door still has the one form, unchanged.
-  ok('the employee door still owns the single #auth-form',
-    (doorsBlock.match(/<form id="auth-form"/g) || []).length === 1 &&
-    /<section class="door [^"]*" id="door-employee"[\s\S]*?<form id="auth-form"/.test(doorsBlock));
-
-  // ── The two doors point at EACH OTHER ──────────────────────────────────────
-  // The owner's complaint, verbatim: the email-code screen "has no method to fall
-  // back/navigate to pattern and fingerprint login method, but from there it is to
-  // come to this login method page. So it is not correct, it should be a
-  // bi-directional." One link each way, both in the employee form.
-  const empForm = (doorsBlock.match(/<form id="auth-form"[\s\S]*?<\/form>/) || [''])[0];
-  ok('the quick-unlock door has a way OUT to the email method, named as the owner named it',
-    /id="auth-quick-out"[^>]*data-i18n="auth\.useEmailOtp"/.test(empForm));
-  ok('...and the email method has a way BACK to quick unlock',
-    /id="auth-quick-in"[^>]*data-i18n="auth\.useQuick"/.test(empForm));
-  ok('...offered only against a registered record, never as a door onto nothing',
-    /set\('auth-quick-in',\s*canQuick && \(mode === 'otp' \|\| mode === 'forgot' \|\| mode === 'reset'\)\)/.test(appJs) &&
-    /const canQuick = .*qIn\.credentialId/.test(appJs));
-  // The fingerprint and the pattern are ONE row, and the email door is the step
-  // BELOW them rather than a third option beside them.
-  ok('the fingerprint and the pattern share one row',
-    /<div class="quick-row">[\s\S]*?id="auth-unlock-btn"[\s\S]*?id="auth-pattern-link"[\s\S]*?<\/div>/.test(empForm) &&
-    /\.quick-row \{[\s\S]*?display:\s*grid/.test(read('../base.css')));
-  ok('...and the email method is outside that row',
-    empForm.indexOf('id="auth-quick-out"') > empForm.indexOf('</div>', empForm.indexOf('quick-row')));
-  // "Back to sign in" is text-only and smaller now — the owner's ask.
-  ok('Back to sign in is small and unboxed',
-    /id="auth-back-link" class="link-btn link-sm"/.test(empForm) &&
-    /\.link-sm \{[\s\S]*?background:\s*none[\s\S]*?border:\s*0/.test(read('../base.css')));
-  // The line the owner asked to be removed, asserted as a string that is GONE.
-  ok('the "Registered device — unlock, or fall back below." line is gone',
-    !/Registered device — unlock/.test(appJs) && !/Registered device/.test(html));
-
-  // A two-column landing page that never stacks is a phone with a sideways scroll.
-  ok('the two doors reflow to one column without a media query',
-    /\.doors \{[\s\S]*?grid-template-columns: repeat\(auto-fit, minmax\(280px, 1fr\)\)/.test(read('../base.css')) &&
-    /\.door \{[\s\S]*?max-width: none/.test(read('../base.css')));
+  // ── THE CORNER: WHAT REPLACES "SIGN UP" ────────────────────────────────────────
+  // The owner, 2026-10-08: *"since we do not have any signup options … we would have whatsapp
+  // button instead there, so that who so ever wants any further help can click on that button
+  // and come to official indrones after sales whatsapp chat with us ready to receive them
+  // there."*
+  ok('the top-right corner holds the desk’s WhatsApp chat, and there is no sign-up',
+    /<a class="wa-corner" id="whatsapp-btn" href="#" target="_blank" rel="noopener noreferrer"/.test(html) &&
+    /<span class="wa-glyph" aria-hidden="true"><\/span>/.test(html) &&
+    /data-i18n-aria="door\.whatsapp"/.test(html) &&
+    !/sign ?up/i.test(htmlCode));
+  // HIDDEN WHILE CONFIG.WHATSAPP_URL IS EMPTY, and that is the honest state rather than an
+  // unfinished one: a button that opens an empty tab is worse than no button, and there is no
+  // Indrones after-sales WhatsApp link anybody here can verify. Paste the URL and it appears,
+  // with no other change.
+  ok('...and it is off the screen entirely until a number is configured',
+    /<a class="wa-corner" id="whatsapp-btn"[^>]*style="display:none"/.test(html) &&
+    /function wireWhatsApp\(\) \{[\s\S]{0,300}?const url = CONFIG\.WHATSAPP_URL;/.test(appCode) &&
+    /if \(!url\) \{ btn\.style\.display = 'none'; return; \}/.test(appCode));
+  // It is fixed to the SCREEN and not to the head, so it stays put while the page scrolls —
+  // and it clears the phone's own status bar via the inset, because a Safari tab on a notched
+  // phone draws under it.
+  ok('...pinned to the screen’s corner, clear of the phone’s own status bar',
+    /\.wa-corner \{[\s\S]*?position: fixed/.test(baseCss) &&
+    /\.wa-corner \{[\s\S]*?env\(safe-area-inset-top/.test(baseCss) &&
+    /\.wa-corner \{[\s\S]*?env\(safe-area-inset-right/.test(baseCss));
 }
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);

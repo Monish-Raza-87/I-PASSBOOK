@@ -71,15 +71,28 @@ r.ok('the button the ring lands in is already inline-flex with a gap, so nothing
 r.ok('the reduced-motion guard still collapses every animation to one iteration',
   /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]{0,300}?animation-duration:\s*0\.01ms\s*!important[\s\S]{0,200}?animation-iteration-count:\s*1\s*!important/.test(baseCss));
 
+// THE REGION IS THE TWO LANDING DOORS' SUBMIT HANDLERS, and it ends at
+// `finishCustomerAuth` because that is the first thing after the customer door's
+// submit that is not one of them. The old end anchor was `const submitReset`, a
+// function the password-reset flow took with it when the owner removed the
+// forgot-password control — `indexOf` returned -1 and the slice ran to the end of the
+// file, so this assertion had silently become "no `.disabled = ` anywhere in app.js"
+// while still passing on the count. It is anchored on something that exists now.
+//
+// The region really does cover BOTH doors. It did not until the customer's Continue
+// was moved onto setBusy/setIdle: it set `.disabled` and its label by hand, which made
+// it the one auth button on the page that never got `is-busy` — the class the spinner
+// and the reduced-motion guard are keyed on.
+const authRegion = appCode.slice(appCode.indexOf('const submitLogin'),
+                                appCode.indexOf('function finishCustomerAuth'));
 r.ok('every auth button that goes busy goes back to idle through the one helper',
   (() => {
-    const handlers = appCode.slice(appCode.indexOf('const submitLogin'),
-                                   appCode.indexOf('const submitReset'));
-    const busy   = (handlers.match(/set(Busy|Idle)\(/g) || []).length;
-    const manual = (handlers.match(/\.disabled\s*=\s*(true|false)/g) || []).length;
-    return busy >= 8 && busy % 2 === 0 && manual === 0;
+    const busy   = (authRegion.match(/set(Busy|Idle)\(/g) || []).length;
+    const manual = (authRegion.match(/\.disabled\s*=\s*(true|false)/g) || []).length;
+    return busy >= 6 && busy % 2 === 0 && manual === 0;
   })(),
-  { setBusyOrIdle: (appCode.slice(appCode.indexOf('const submitLogin'), appCode.indexOf('const submitReset')).match(/set(Busy|Idle)\(/g) || []).length });
+  { setBusyOrIdle: (authRegion.match(/set(Busy|Idle)\(/g) || []).length,
+    manual: (authRegion.match(/\.disabled\s*=\s*(true|false)/g) || []).length });
 
 r.ok('...and no auth button swaps its label by hand any more',
   !/signInBtn\.textContent|otpBtn\.textContent|forgotBtn\.textContent|resetBtn\.textContent/.test(appCode));

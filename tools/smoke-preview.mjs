@@ -64,9 +64,9 @@ r.ok('build-ui-options.mjs --check exits clean', check.status === 0,
 r.ok('...and it is a real check, not a no-op', /is current with the app/.test(check.stdout), check.stdout.trim());
 
 // ── 2. The comparison is fair ────────────────────────────────────────────────
-r.head('all four options render the SAME four screens');
+r.head('all four options render the SAME five screens');
 const screens = Object.entries(PAGE).map(([k, h]) => [k, h.slice(h.indexOf('<div class="pv-screens">'), h.indexOf('<div class="pv-notes">'))]);
-r.ok('each page carries four screens', screens.every(([, s]) => (s.match(/class="pv-phone"/g) || []).length === 4));
+r.ok('each page carries five screens', screens.every(([, s]) => (s.match(/class="pv-phone"/g) || []).length === 5));
 r.ok('...and the screens are byte-identical between all four pages',
   screens.every(([, s]) => s === screens[0][1]),
   screens.map(([k, s]) => `${k}:${s.length}`).join(' '));
@@ -205,9 +205,9 @@ r.ok('parts: carries option D\'s skin verbatim, then its own layer on top',
   `d=${dSkin.length} parts=${partsSkin.length}`);
 r.ok('parts: links the SAME hashed stylesheet as the four options',
   (PARTS.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1] === (PAGE.a.match(/preview\.css\?v=([0-9a-f]+)/) || [])[1]);
-// It must not grow a fifth set of the four screens: the comparison is four-way
+// It must not grow a second set of the option screens: the comparison is four-way
 // and stays four-way, which is the promise the chooser page makes.
-r.ok('parts: renders none of the four option screens',
+r.ok('parts: renders none of the option screens',
   !/class="pv-phone"/.test(PARTS) && !/class="pv-screens"/.test(PARTS));
 r.ok('parts: carries the four headed sections it promises',
   ['steps', 'charts', 'people', 'feedback'].every(id => PARTS.includes(`id="${id}"`)));

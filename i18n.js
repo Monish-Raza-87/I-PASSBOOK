@@ -122,6 +122,13 @@
     'auth.showPassword':   'Show password',
     'auth.unlock':         'Unlock with fingerprint',
     'auth.usePattern':     'Use pattern',
+    // The two labels that make the pair of doors BI-DIRECTIONAL. One is the step out
+    // of quick unlock and into the email screen; the other is the way back, and it
+    // shows only on a device that actually has a registered unlock. The owner's
+    // wording, kept verbatim — "(OTP)" is what the desk calls the emailed code, and
+    // the phrase says which mechanism the next screen will use.
+    'auth.useEmailOtp':    'Use email (OTP) based login method',
+    'auth.useQuick':       'Use fingerprint or pattern',
     'auth.signOut':        'Sign Out',
 
     // ── The Overview panel's own fields ──────────────────────────────────────
@@ -158,18 +165,32 @@
     // One address, two audiences. The chip is the whole of the identification, so
     // it is a single word each and it is the first thing on its card.
     //
-    // door.customerHint says the quiet part out loud — "nothing of anybody else's" —
-    // because it is the one thing a customer actually wants to know before typing a
-    // password, and because it is true: the backend narrows the rows on the server,
-    // not in the page.
+    // BOTH DOORS ARE NOW ONE CHIP AND ONE FORM, so the two role words are all that
+    // is left of this group on the landing page. The four strings that used to
+    // describe the customer's half — "Customer Space", the one-line pitch, the two
+    // bullets, the invitation blurb — were removed from index.html on the owner's
+    // instruction (17 words of prose where a chip and a form would do), and their
+    // entries went with them; smoke-i18n fails if a table entry has no markup using
+    // it, which is exactly how a dead key gets caught.
+    //
+    // door.openSpace survives the cut because it is not prose: it is the button a
+    // customer who is ALREADY signed in on this device taps instead of a form.
     'door.employee':      'Employee',
     'door.customer':      'Customer',
-    'door.customerTitle': 'Customer Space',
-    'door.customerFull':  'Indrones after-sales, for your aircraft',
-    'door.customerHint':  "Sign in and everything we have done for your fleet is in one place — and nothing of anybody else's.",
-    'door.custReports':   'Every request you have raised, and the stage it is at today.',
-    'door.custAccess':    'No public sign-up — we create your account when your aircraft is handed over, and email your invitation.',
     'door.openSpace':     'Open the Customer Space',
+
+    // ── The customer's sign-in form ──────────────────────────────────────────
+    // Two doors, same two words as the employee's — and that is the point: the two
+    // doors ask for the same thing in the same way, so nothing about the customer's
+    // box needs explaining.
+    //
+    // cust.hint says "the email address we invited you at" for one real reason: the
+    // account was created by the desk, not by the customer, so a customer who has a
+    // personal address and a work one has no way of knowing which one to type. The
+    // invitation went to one of them and the other will be refused.
+    'cust.hint':          'Sign in with the email address we invited you at.',
+    'cust.email':         'you@company.com',
+    'cust.useOtp':        'Use email (OTP) based login method',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
     // The app's second open door. These strings are read on the sign-in screen,

@@ -1183,6 +1183,12 @@
    app.js would offer a choice that resolves to the blue fallback.
    ============================================================ */
 
+/* The glass layer's own values are NOT here. This file is pure var() references
+   onto tokens.css by rule — tools/smoke-palette.mjs fails on any raw colour
+   function in it, which is what keeps "measure contrast once" true for all four
+   presets — and a `color-mix()` is a raw colour function. See GLASS in base.css:
+   the tint DERIVES from --accent there, so it still follows the palette. */
+
 /* ── The accent role ─────────────────────────────────────────────────────────
    Blue is the default, declared on :root so it also applies before the
    pre-paint script in index.html has run (and if localStorage is unreadable).
@@ -1451,10 +1457,22 @@ html { -webkit-text-size-adjust: 100%; }
 .pv-app .bell { width: 18px; height: 18px; }
 .pv-app .avatar { display: grid; place-items: center; width: 30px; height: 30px; font-size: var(--text-2xs); }
 .pv-app.is-auth { min-height: 0; }
-.pv-app .auth-wrap { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
+/* The min-width here is load-bearing, not tidiness. Without it this flex item's
+   automatic minimum is its MIN-CONTENT width, and the doors grid's min-content is
+   two 240px tracks plus the gap — 500px — so the wrap grew to 532 inside a 387px
+   phone mock and the customer card rendered half off the right edge, clipped by
+   .pv-phone's overflow. The grid never got the chance to collapse to one column,
+   because its container had already been forced wider than the phone. */
+.pv-app .auth-wrap { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
-.pv-app .auth-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
-.pv-app .auth-logo { width: 34px; height: 34px; }
+.pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
+.pv-app .landing-mark { width: 40px; height: 40px; }
+.pv-app .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; width: 100%; max-width: 640px; align-items: start; }
+.pv-app .doors .glass-card { max-width: none; }
+.pv-app .door-role { text-align: center; }
+.pv-app .quick-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; }
+.pv-app .quick-row .btn { width: 100%; }
+.pv-app .landing-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
 
 /* ── the IR list ── */
 .pv-app .list-toolbar { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.85rem 0.9rem 0.7rem; }

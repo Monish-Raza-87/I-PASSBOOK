@@ -8,40 +8,57 @@ old behaviour is named so a future session does not "fix" it back.
 ## One link, two doors
 
 **There is one address.** `https://monish-raza-87.github.io/I-PASSBOOK/` is what the
-owner hands to everybody, and it is the landing page for both audiences at once: the
-sign-in screen is a grid of **two cards**, chipped **Employee** and **Customer**, side
-by side on a desktop and stacked on a phone. The owner's ask was that *"both portals are
-linked/accessed via same link"*, with *"clear identification"* of which is which — and
-the chip is the whole of that identification, which is why it is the **first thing on
-each card, above every control**.
+owner hands to everybody, and it is the landing page for both audiences at once. The
+screen is a **common head over two doors**, and the owner's ask — *"both portals are
+linked/accessed via same link"*, with *"clear identification"* of which is which — is
+answered by the role chip on each door bar, which is the **first thing inside the
+control**, above every field.
 
-`#auth-container` holds a `.doors` grid of two `<section class="door glass-card">`
-elements:
+The shape has moved twice and both moves are worth knowing, because the older shapes
+are what a future session would otherwise restore:
+
+- **Two cards side by side** was the first shape. A grid of two `.door glass-card`
+  sections, stacked on a phone. It was replaced on 2026-10-08 — the owner:
+  *"employee login box is much lengthier than customer's, plus employee one's looks
+  cluttered … I liked how vercel is showing."*
+- **Two cards stacked, both open** was the middle shape, and it made the page taller
+  without answering the complaint.
+
+**What ships now is an exclusive accordion**, and stacking is what fixes the length
+problem rather than making the two panels equal: side by side, two panels of different
+content are read against each other and the shorter one reads as incomplete however it
+is filled. Stacked, each is only ever compared with the page, and the folded one is a
+single 56px bar.
+
+`#auth-container` holds a `<header class="landing-head">`, a `.doors` flex column
+(max-width 420px), the shared `.landing-terms` line, the language selector, `.landing-foot`
+and the credit.
 
 | | Employee (`#door-employee`) | Customer (`#door-customer`) |
 |---|---|---|
-| Holds | the one `#auth-form`, unchanged | a description and one **link** |
-| Primary control | the sign-in form | `<a id="customer-space-open" href="customer.html">` |
+| Holds | the one staff `#auth-form` — email → emailed code — plus the `.quick-row` (Google handoff, passkey, pattern) | its own `#cust-form`: welcome, the helper line, the address, **Continue**, `or`, and the desk's address for anyone not onboarded |
+| Already signed in | the app shell | `#cust-session` replaces the form with **Open the Customer Space** → `customer.html` |
 | Update banner | yes — it reports the *app's* build | no — a customer never runs the app |
-| "Report a problem" / "Help & FAQ" | no | yes |
 
-**The customer card opens the door; it does not copy it.** That is the one judgment
-call on this screen and it is deliberate. `customer.html` already exists, is built and
-is tested, reads that company's tickets narrowed **on the server**, and keeps its own
-`ipbc_` storage keys so a customer session can never be inherited by, or inherit, a
-staff one on a shared machine. Re-implementing its sign-in here would be a second
-implementation of one door, free to drift from the first, and it would put the
-customer's session key under a second writer. So the card is a **link-out with a
-description** — and it is not a stub: the two `.door-list` bullets say what is behind
-it and that there is no public sign-up.
+**The customer door is a real sign-in form, and `customer.html` is still what is behind
+it.** The old rule here was *"the customer card opens the door; it does not copy it"* —
+a link-out with a description and no form at all. That is no longer true and should not
+be restored: the owner asked for the customer's own form, in the shape app.notion.com
+uses, and the two doors now share only the one code step (`#code-view`) below them. What
+the old rule was protecting is still protected: `customer.html` keeps its own `ipbc_`
+storage keys, so a customer session can never be inherited by, or inherit, a staff one
+on a shared machine, and the signed-in customer gets a link rather than a second form.
 
-`tools/smoke-shell.mjs` pins all of it: two `.door` sections, each headed by its own
-`.door-role` chip as its first child, exactly one `#auth-form` (on the employee card),
-no `<form>` at all on the customer card, the customer card's control being an `<a href>`
-rather than a button, and the grid reflowing to one column with no media query. The
-employee card is not worse off for the company it keeps: `.door .auth-head` is set to
-`0.6rem` precisely so that the flex `gap` plus that margin equals the `1.5rem` the
-single-card screen always had.
+`tools/smoke-shell.mjs` pins all of it: the head appears once and above the doors, the
+mark appears once and not again inside either door, `.doors` is a flex column with no
+media query that could make it a grid, both panels ship **unfolded** in the markup (so a
+JS-off page still shows both doors — a panel that shipped folded could never be opened
+again), and `setDoor()` writes all three statements of the one fact in one pass:
+`data-open` turns the chevron, `hidden` folds the panel (with the `!important` that beats
+`display: flex`), and `aria-expanded` tells a screen reader. **Both-shut is not a state**
+— `setDoor` takes a choice, not a toggle — and `DOOR_KEY` (`ipb_door`) reopens the door
+this device used last, the Employee's by default, painted by `paintDoors()` from
+`showAuth()` so a sign-out returns to the screen the person left.
 
 ## The funnel, in two steps
 

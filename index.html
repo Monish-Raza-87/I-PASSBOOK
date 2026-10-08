@@ -505,10 +505,11 @@
          2. THE LANGUAGE SELECTOR, where the owner asked for it ("a language select
             option at bottom like in notion.app"). Its options are built by app.js from
             I18N.LANGS, one per language, so a language added to that list appears here
-            with no change to this file. ⚠ The control is real and the choice is
-            remembered; what is behind two of its three options today is English text,
-            through I18N's per-string fallback. See the note on the language dimension in
-            i18n.js for the size of the job that fills them in. -->
+            with no change to this file. ⚠ TWO languages ship, English and हिन्दी, and
+            the Hindi table is a HALF translation: it is real, but any key it does not
+            carry falls back to the English string through I18N's per-string fallback
+            rather than showing a blank or a key. See the language layer's own header in
+            i18n.js for what that fallback is for and what it is not. -->
 
     <p class="landing-terms" data-i18n="landing.terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy</p>
 

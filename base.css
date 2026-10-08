@@ -42,6 +42,62 @@
   --accent-tint-strong: color-mix(in srgb, var(--accent) 13%, transparent);
 }
 
+/* ── INDRONES — the brand yellow, and the only colour in the app that is ours ─
+   Every other colour here is a step on one of Frappe's ramps. This one is not:
+   #ffc400 is the yellow in Indrones' own logo, taken from the same asset the app
+   icon is drawn from, and it is the whole of Option B's identity — the industrial
+   panel the owner chose on 2026-10-08.
+
+   WHY IT IS A RAW LITERAL HERE AND NOWHERE ELSE. There is no yellow ramp to point
+   at. tokens.css is rewritten wholesale by tools/gen-tokens.mjs from Frappe's own
+   colour table, and that table ships exactly one yellow-ish family — `amber` —
+   whose -7 steps are #bb6f0a and #ca7e0e: a brown-orange, not this. palette.css may
+   not hold it either: that file is pure var() references BY RULE (its own header,
+   enforced by smoke-palette) precisely so that measuring contrast once stays true.
+   So the brand colour, and nothing else, is declared here — the same arrangement,
+   for the same reason, as the GLASS block directly above.
+
+   THE THREE THAT ARE NOT THE YELLOW ITSELF. #ffc400 is a light, saturated colour.
+   It is 11.2:1 on the dark ground and 1.4:1 on white — so it is right as a FILL,
+   a rule or a lit LED, and it can never be text on a light page. `--ind-accent-ink`
+   is therefore the yellow DARKENED until it clears AA as text, and it is the one
+   brand value that differs by mode: #7a5600 on the light and cream grounds (6.54:1
+   on the light page, 6.44:1 on the cream panel), and the brand yellow itself on
+   dark (11.2:1). Cream needs no compound of its own — the light value already
+   carries enough headroom, which is not true of the four ramps theme.css steps down.
+
+   THE BUTTON STATES ARE MEASURED, NOT PICKED. smoke-palette requires a hover and
+   an active step that are visibly different from rest (≥1.15:1). A saturated
+   yellow has far less lightness to spend than a ramp, and the obvious #ffd24d is
+   only 1.11:1 from #ffc400 — it FAILS, and it failed here first. These two are the
+   nearest steps that clear the gate: 1.23:1 up and 1.40:1 down. #171717 stays
+   legible on both (13.8:1 and 8.0:1), so the label never changes colour mid-press.
+
+   HOW THIS REACHES THE APP. palette.css's `yellow` preset — the fifth, and the
+   default — aliases all eight accent roles onto these names, so the accent role
+   still has exactly one implementation and the four existing presets are untouched.
+   smoke-palette resolves and MEASURES this block the same way it measures theirs. */
+:root {
+  --ind-yellow:        #ffc400;  /* the fill, the rule, the lit LED */
+  --ind-yellow-hi:     #ffe066;  /* 1.23:1 from rest — the hover step */
+  --ind-yellow-lo:     #d9a600;  /* 1.40:1 from rest — the active step */
+  --ind-on-yellow:     #171717;  /* 11.2:1 on the fill; ink on a lit surface */
+
+  /* Light and cream. See the note above for why these are not the brand value. */
+  --ind-accent-ink:    #7a5600;  /* 6.54:1 on the page */
+  --ind-accent-soft:   #fff7d9;  /* the wash behind a note */
+  --ind-accent-line:   #f0dfa8;  /* that wash's edge */
+}
+/* Dark, stamped by the pre-paint script exactly as theme.css's own dark set is —
+   which is why there is no media query on either side of this pairing: 'system'
+   is resolved to light or dark BEFORE first paint, so the attribute is always the
+   whole answer and a media-keyed copy could only ever disagree with it. */
+[data-theme="dark"] {
+  --ind-accent-ink:    #ffc400;  /* 11.2:1 on the dark ground */
+  --ind-accent-soft:   #3a2e00;
+  --ind-accent-line:   #6b5500;
+}
+
 /* ── Reset ─────────────────────────────────────────────────── */
 *,
 *::before,

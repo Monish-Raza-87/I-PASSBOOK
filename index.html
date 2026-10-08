@@ -25,12 +25,13 @@
   <link rel="stylesheet" href="base.css" />
   <link rel="stylesheet" href="components.css" />
   <link rel="stylesheet" href="views.css" />
-  <!-- desk.css must load LAST. It is the ERPNext Desk look applied to the
-       sign-in screen and the IR list, and it wins over the `POLISH — level:`
-       block at the end of views.css by cascade order alone. Moving this link
-       above views.css silently disables the prototype. See desk.css's header
-       for what it converts and what it deliberately leaves alone. -->
-  <link rel="stylesheet" href="desk.css" />
+  <!-- industrial.css must load LAST. It is the app's whole look — INDRONES
+       INDUSTRIAL, the direction the owner chose on 2026-10-08 — and it wins
+       over the `POLISH — level:` block at the end of views.css by cascade
+       order alone. Moving this link above views.css silently reverts the
+       screen to the polish block. See industrial.css's header for what it
+       converts and what it deliberately leaves alone. -->
+  <link rel="stylesheet" href="industrial.css" />
 
   <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
@@ -53,9 +54,14 @@
       // This list must stay in step with THEME_VALUES in app.js: a value known to
       // one and not the other is a bug, and smoke-theme.mjs asserts they agree.
       try {
+        // DEFAULT DARK. The app's look is the Indrones Industrial panel the owner
+        // chose on 2026-10-08, and it is dark by design; a device that has never
+        // been asked gets that rather than its own operating system's answer.
+        // 'system' is still a value someone can choose — it is simply no longer
+        // what an absent value means. Mirrors storedTheme() in app.js.
         var THEMES = ['light', 'cream', 'dark'];
         var CHROME = { light: '#fdfdfd', cream: '#fdf9ef', dark: '#1a1713' };
-        var p = localStorage.getItem('theme') || 'system';
+        var p = localStorage.getItem('theme') || 'dark';
         var t = THEMES.indexOf(p) >= 0 ? p
               : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
         if (t !== 'light') document.documentElement.setAttribute('data-theme', t);
@@ -69,9 +75,11 @@
         document.head.appendChild(m);
       } catch (e) { /* storage blocked — fall back to light */ }
       try {
-        var PALETTES = ['blue', 'violet', 'teal', 'graphite'];
-        var pal = localStorage.getItem('palette') || 'blue';
-        if (PALETTES.indexOf(pal) < 0) pal = 'blue';
+        // Yellow is the brand accent and the default; it is the first entry in
+        // PALETTES in app.js and smoke-palette holds the two lists together.
+        var PALETTES = ['yellow', 'blue', 'violet', 'teal', 'graphite'];
+        var pal = localStorage.getItem('palette') || 'yellow';
+        if (PALETTES.indexOf(pal) < 0) pal = 'yellow';
         document.documentElement.setAttribute('data-palette', pal);
       } catch (e) { /* storage blocked — palette.css's :root default applies */ }
 
@@ -170,7 +178,7 @@
            what lets each card say only WHICH AUDIENCE it is for and then get out of
            the way.
          · THE TWO CARDS ARE THE SAME CARD — same .glass-card, same .door-role. The
-           Desk skin in desk.css targets `#auth-container .glass-card`, so it dresses
+           skin in industrial.css targets `#auth-container .glass-card`, so it dresses
            both with no second rule, and there is no second place for either card's
            shape to drift from.
          · THE ROLE CHIP IS INSIDE THE CARD AND FIRST ON IT, because "which of these

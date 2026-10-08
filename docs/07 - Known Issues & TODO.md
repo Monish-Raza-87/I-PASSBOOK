@@ -541,17 +541,30 @@ is left is small.
    goes first again here, because the device label the audit records comes from
    `app.js` and an old backend simply ignores the extra field.
 
-   ✅ **A paste has landed since, and a further one is owed. The live state as of
-   2026-10-07 is `apiVersion 7`** — proven by `ping`, not by a deploy date — so
-   everything up to and including the flight-log limits is running. **What the live
-   copy does *not* hold is `API_VERSION: 8`, the customer accounts**, and that is the
-   paste now owed. It is the one that matters most of any so far: a `v7` deployment
-   does not merely lack the feature, it **answers a customer's token with the whole
-   repository**, so no customer account may be created until it is in. It rides the
-   whole committed backend at once — paste the current `backend.gs` into **both**
-   `/exec` deployments (the primary and the domain-scoped Google door) and everything
-   goes live together. The way to confirm it without opening anything is `ping`
-   answering **`apiVersion 8`**.
+   ✅ **The live state as of 2026-10-07 was `apiVersion 7`** — proven by `ping`, not by
+   a deploy date — so everything up to and including the flight-log limits was running,
+   and **what that copy did *not* hold was `API_VERSION: 8`, the customer accounts**.
+   That was the one that mattered most of any so far: a `v7` deployment does not merely
+   lack the feature, it **answers a customer's token with the whole repository**, so no
+   customer account may be created until it is in. It rides the whole committed backend
+   at once — paste the current `backend.gs` into **both** `/exec` deployments (the
+   primary and the domain-scoped Google door) and everything goes live together. The
+   way to confirm it without opening anything is `ping` answering **`apiVersion 8`**.
+
+   ✅ **THAT PASTE IS IN — 2026-10-08, `apiVersion 8` on both deployments**, and it is
+   the owner's own reading of `ping` that says so, never a deploy date or a version
+   timestamp. So the customer accounts, the server-side narrowing that keeps one
+   customer's rows away from another's, and the fifth **Customers** tab in User Access
+   are all live, and the gate that said *no customer account may be created until this
+   lands* is OPEN. **Nothing is owed on the backend half.** The two ways to read the
+   number, both of which need no tooling: inside the app, the User Access panel's own
+   status line (`Signed in as … · session ✓ · API v8`), or the deployment URL with
+   `?action=ping` appended — `ping` is in the pre-auth map, so it answers without a
+   token. The primary deployment is
+   `…/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec`
+   and the Google door's is
+   `…/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-BZIMMAgzI_71sZZhYHE9vh0We5nDtTydOSny_zZ_yQfIi0z22D7uKj/exec`;
+   a cold first tap can take 20–30 seconds, which is the warm-up and not a bad paste.
 
    **The history, kept because each line was an operational lesson, none of it now
    outstanding.** The `backup.html` verdict was proved live by exactly the mechanism
@@ -584,15 +597,16 @@ is left is small.
    `monish.raza@indrones.com`, the account that owns the Drive folder, because a
    trigger executes as whoever installed it. Each replies *already installed* if it is
    there. Until the archive sweep exists, closed IR folders are archived only by hand.
-3. ✅ **The frontend was published on 2026-10-07 at cache `v69`**, carrying the customer
-   portal and the invite panel. Publishing is `DEPLOY_SOURCE=category-insights node
-   tools/deploy-ghpages.mjs` to dry-run, then the same with `--commit --push`; it needs
-   the working tree clean, so the commits go first, and a `CACHE_NAME` bump in `sw.js`
-   or it warns that returning users keep the stale shell for a load. The deploy is
-   confirmed by reading the **served** files, never by a deploy date: `sw.js` answering
-   `ipassbook-v69` and `app.js` answering `APP_VERSION = 'v69'`. **Nothing is owed on
-   the frontend right now**; the backend paste in item 1 is the thing standing between
-   the deployed code and the committed code.
+3. ✅ **The frontend was published on 2026-10-08 at cache `v70`**, carrying the
+   two-door landing page on top of the customer portal and the invite panel (which
+   went out at `v69` the day before). Publishing is `DEPLOY_SOURCE=category-insights
+   node tools/deploy-ghpages.mjs` to dry-run, then the same with `--commit --push`; it
+   needs the working tree clean, so the commits go first, and a `CACHE_NAME` bump in
+   `sw.js` or it warns that returning users keep the stale shell for a load. The
+   deploy is confirmed by reading the **served** files, never by a deploy date:
+   `sw.js` answering `ipassbook-v70` and `app.js` answering `APP_VERSION = 'v70'`.
+   **Nothing is owed on either half right now** — the frontend and the backend paste
+   in item 1 are level with the committed code.
 
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest

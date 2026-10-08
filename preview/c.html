@@ -9,7 +9,7 @@
      serves same-origin subresources stale-while-revalidate, so without it a
      rebuilt preview.css would be answered from the cache once and the review
      would be of the previous build. A new hash is a new URL. -->
-<link rel="stylesheet" href="preview.css?v=4746de6a" />
+<link rel="stylesheet" href="preview.css?v=ba5d8cf6" />
 <style>
 
 .pv { background: var(--surface-gray-1); color: var(--ink-gray-9); }
@@ -143,21 +143,40 @@
       <div class="pv-phone">
     <div class="pv-app is-auth">
       <div class="auth-wrap">
-        <div class="glass-card">
-          <div class="auth-head">
-            <span class="auth-logo" aria-hidden="true"></span>
-            <div class="auth-brand">I-PASSBOOK</div>
-            <p class="auth-full">Indrones Product After-Sales Summary Book</p>
+        <header class="landing-head">
+          <span class="landing-mark" aria-hidden="true"></span>
+          <div class="landing-brand">I-PASSBOOK</div>
+          <p class="landing-full">Indrones Product After-Sales Summary Book</p>
+        </header>
+        <div class="doors">
+          <div class="glass-card">
+            <p class="door-role">Employee</p>
             <p class="auth-hint">Sign in with the credentials your admin gave you.</p>
+            <div class="quick-row">
+              <button type="button" class="btn btn-secondary">Unlock with fingerprint</button>
+              <button type="button" class="btn btn-ghost">Use pattern</button>
+            </div>
+            <button type="button" class="link-btn">Use email (OTP) based login method</button>
+            <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
+            <div class="auth-or"><span>or use your email</span></div>
+            <input class="form-input" type="email" value="raza@indrones.com" readonly />
+            <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
+            <button type="button" class="btn">Sign in</button>
           </div>
-          <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
-          <div class="auth-or"><span>or use your email</span></div>
-          <input class="form-input" type="email" value="raza@indrones.com" readonly />
-          <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
-          <button type="button" class="btn">Sign in</button>
-          <button type="button" class="link-btn">Use password instead</button>
+          <div class="glass-card">
+            <p class="door-role">Customer</p>
+            <p class="auth-hint">Sign in with the email address we invited you at.</p>
+            <input class="form-input" type="email" value="you@company.com" readonly />
+            <input class="form-input" type="password" value="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" readonly />
+            <button type="button" class="btn">Sign in</button>
+            <button type="button" class="link-btn">Use email (OTP) based login method</button>
+          </div>
         </div>
-        <p class="pv-version">v71</p>
+        <p class="landing-foot">
+          <span class="link-btn">Report a problem</span>
+          <span class="link-btn">Help &amp; FAQ</span>
+        </p>
+        <p class="pv-version">v72</p>
       </div>
     </div></div>
     </div>

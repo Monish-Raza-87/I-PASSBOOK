@@ -1,7 +1,46 @@
 /* ============================================================
    base.css — reset, app shell, navigation, typography
-   Load order: tokens.css → base.css → components.css → views.css
+   Load order: tokens.css → palette.css → theme.css → base.css
+               → components.css → views.css → desk.css
    ============================================================ */
+
+/* ── GLASS — the tokens every glass surface is built from ────────────────────
+   The owner asked for a liquid-glass look, and these five values are the whole of
+   it: the others are the surfaces that read them.
+
+   THEY LIVE HERE, NOT IN palette.css, AND THAT IS NOT AN OVERSIGHT. palette.css is
+   pure var() references onto tokens.css by rule — tools/smoke-palette.mjs fails on
+   any raw colour function in that file — because every one of its values has to be
+   a contrast-validated token for four palettes at once. `color-mix()` is a colour
+   function, so the derived values below cannot live there. They derive FROM the
+   accent instead, which is the next best thing and keeps the one property that
+   matters: change palette and the glass moves with it, with no second list of four
+   numbers to keep in step.
+
+   --glass-blur is written as a value rather than spelled out at each use, so that
+   the @supports feature query in four places is testing the same thing the surface
+   actually applies. */
+:root {
+  --glass-blur:         blur(18px) saturate(1.5);
+  /* The lit top edge of a pane. A literal white, not a token: a reflection is LIGHT
+     in both themes, and every ramp in tokens.css inverts (gray-1 is black in light
+     mode and white in dark), so the ramps are exactly wrong for it. In light mode it
+     lands on an already-white card as nothing at all. It earns its keep in dark. */
+  --glass-edge:         rgba(255, 255, 255, 0.5);
+  /* The pane fills. 72% is the whole safety argument: this is a change of MATERIAL,
+     not of legibility, so every label, error line and hairline on a glass surface
+     keeps the contrast it was measured with. A 30% pane is glass in a mockup and
+     unreadable in a form. Two of them because the landing page sits on the Desk
+     panel (--surface-base) and the rest of the app on the elevated surface. */
+  --glass-fill:         color-mix(in srgb, var(--surface-elevation-1) 72%, transparent);
+  --glass-fill-base:    color-mix(in srgb, var(--surface-base) 72%, transparent);
+  /* The ambient field the landing page sits its cards on. A blur over a flat colour
+     is invisible — glass only reads as glass when there is something behind it to
+     smear — so this screen gets a wash of accent-tinted light. Decoration only;
+     nothing is ever written on it. */
+  --accent-tint:        color-mix(in srgb, var(--accent) 7%, transparent);
+  --accent-tint-strong: color-mix(in srgb, var(--accent) 13%, transparent);
+}
 
 /* ── Reset ─────────────────────────────────────────────────── */
 *,
@@ -277,18 +316,40 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 }
 
 /* ══════════════════════════════════════════════════════════
-   THE LANDING PAGE (TWO DOORS) + FIRST-LOGIN PASSWORD CHANGE
+   THE LANDING PAGE (ONE HEAD, TWO DOORS) + FIRST-LOGIN PASSWORD CHANGE
    ══════════════════════════════════════════════════════════ */
 #auth-container {
   display: none;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* `safe center` and not `center`: the common head pushed this screen past one
+     screenful on a short laptop, and plain centring in an overflow container puts
+     the top of the content ABOVE the scrollable area where nothing can reach it.
+     `safe` degrades to flex-start in a browser that does not know it, which is
+     exactly the failure we want — the head lands at the top and scrolls. */
+  justify-content: safe center;
+  overflow-y: auto;
   min-height: 100dvh;
-  padding: 1rem;
+  padding: 2rem 1rem;
   background: var(--surface-base);
 }
+/* The ambient field the glass sits on is declared in desk.css, which is loaded
+   LAST: Desk gives this page a flat ground of its own, and a rule here would be
+   overwritten by it. See THE GLASS, ON THE LANDING PAGE there. */
 
+/* ── GLASS ───────────────────────────────────────────────────────────────────
+   The owner asked for a liquid-glass surface, so this is the real thing rather
+   than a lighter grey: a translucent fill over a backdrop blur, with a hairline
+   light border and a bright top edge to read as a pane catching the light.
+
+   THE FILL STAYS MOSTLY OPAQUE ON PURPOSE. A surface at 30% alpha is glass in a
+   mockup and unreadable in a form: every label and every error line here sits on
+   it, and the app's dense screens would be far worse. 72% keeps the blur visible
+   while holding the contrast the text already had, so this is a change of
+   MATERIAL and not a change of legibility.
+
+   `@supports` is the whole safety net: a browser without backdrop-filter gets the
+   solid card it has always had, never a translucent panel with nothing behind it. */
 .glass-card {
   background: var(--surface-elevation-1);
   border: 1px solid var(--outline-gray-1);
@@ -297,6 +358,16 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   padding: 1.75rem;
   width: 100%;
   max-width: 400px;
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .glass-card {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    /* The lit top edge: a 1px inner highlight, the way a pane catches a window.
+       inset 0 1px 0 draws it INSIDE the border, so it reads as thickness. */
+    box-shadow: var(--elevation-lg), inset 0 1px 0 var(--glass-edge);
+  }
 }
 
 /* ── The landing page: two doors on one link ────────────────────
@@ -324,12 +395,6 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   min-width: 0;
   max-width: none;
 }
-/* The head's own bottom margin predates the flex gap; leaving both would double the
-   one gap that was already approved on the sign-in card. 0.9 + 0.6 = the 1.5rem it
-   always had, so the employee card is unchanged and the customer card gets the same
-   rhythm between its own blocks. */
-.door .auth-head { margin-bottom: 0.6rem; }
-
 /* "Which of these two am I?" is the only question this screen has to answer, so the
    answer is a chip and it is FIRST on the card. */
 .door-role {
@@ -346,32 +411,116 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   text-transform: uppercase;
 }
 
-/* What is behind the customer door, said without opening it. Bullets from tokens,
-   never a glyph, so the marker inherits the accent like everything else. */
-.door-list {
+/* ── The common head, above both doors ────────────────────────────────────────
+   The mark, the wordmark and the product name are said ONCE, centred, shared by
+   both cards below. This is what lets each card be a role chip and a form and
+   nothing else — and it is why the two cards can never disagree about what this app
+   is called. */
+.landing-head {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  color: var(--ink-gray-6);
-  font-size: var(--text-sm);
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  margin-bottom: 1.25rem;
 }
-.door-list li { position: relative; padding-left: 1.1rem; }
-.door-list li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.5em;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--accent);
+/* Smaller than the old in-card mark (76px): it is no longer the only thing on the
+   screen doing the branding, and the head has a wordmark now. */
+.landing-mark { display: block; height: 60px; width: auto; margin-bottom: 0.35rem; }
+.landing-wordmark { position: relative; display: block; }
+.landing-brand {
+  margin: 0;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  color: var(--ink-gray-9);
+  line-height: 1.1;
 }
 
+/* ── The cursive flourish under the wordmark ─────────────────────────────────
+   A single stroke that writes itself, holds, rubs itself out and starts again.
+
+   The animation is driven by stroke-dashoffset against a pathLength of 1 (set in
+   the markup). That is the whole trick, and it matters for one practical reason: a
+   hand-written dash animation needs the path's LENGTH as a number, and any measured
+   length is wrong the moment the SVG is stretched. Normalising it in the markup
+   means `stroke-dasharray: 1` is the entire path, at any width, with no measuring
+   and no JS.
+
+   `preserveAspectRatio="none"` lets the stroke stretch with the heading, and
+   `vector-effect: non-scaling-stroke` keeps the nib its own weight while it does —
+   without it the line would fatten as the wordmark got wider. */
+.brand-stroke {
+  display: block;
+  width: 100%;
+  height: 10px;
+  margin-top: 0.1rem;
+  overflow: visible;
+}
+.brand-stroke-path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: brandWrite 4s ease-in-out infinite;
+}
+/* The hold between 35% and 70% is deliberate: a flourish that is always mid-stroke
+   reads as a loading spinner. This is a wordmark that occasionally reminds you it
+   was written by hand. */
+@keyframes brandWrite {
+  0%   { stroke-dashoffset: 1; }
+  35%  { stroke-dashoffset: 0; }
+  70%  { stroke-dashoffset: 0; }
+  88%  { stroke-dashoffset: -1; }
+  100% { stroke-dashoffset: -1; }
+}
+/* The stroke drawn but not moving. An animation that loops forever is exactly the
+   kind of decoration this setting exists to stop. */
+@media (prefers-reduced-motion: reduce) {
+  .brand-stroke-path { animation: none; stroke-dashoffset: 0; }
+}
+
+/* The product name, under the flourish. Quieter than the wordmark — it is a full
+   form, not a headline. */
+.landing-full { color: var(--ink-gray-5); font-size: var(--text-sm); margin: 0.3rem 0 0; }
+
+/* ── The quick-unlock row, and the step under it ──────────────────────────────
+   The fingerprint and the pattern are ONE decision — open this device the way I set
+   it up — so they are one row, and the email door is the step BELOW them rather
+   than a third option beside them. `auto-fit` keeps them side by side down to a
+   narrow phone and stacks them only if the two labels genuinely cannot share a
+   line, which is the same no-media-query approach the doors grid uses. */
+.quick-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+.quick-row .btn { width: 100%; }
+
+/* ── The foot, shared by both doors ───────────────────────────────────────────
+   The desk's two open doors belong to the desk, not to the customer, so they sit
+   below the pair and centred rather than inside either card. */
+.landing-foot {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 1.25rem;
+  width: 100%;
+  margin: 1.25rem 0 0;
+}
+/* The foot's own controls side by side rather than stacked, `.link-btn` being
+   `width: 100%`. The declaration itself sits with `.link-btn`, further down this
+   file, and it has to: tools/smoke-door-faq reads the first declaration of that
+   class in source order, and this one written above the class definition would be
+   read AS the definition — the assertion about the button's fill, centring and
+   40px minimum would then be testing the override instead of the button. */
+
 /* ── Auth / password-change internals ──────────────────────── */
-#auth-form, #pc-form { display: flex; flex-direction: column; gap: 0.75rem; }
+#auth-form, #cust-form, #pc-form { display: flex; flex-direction: column; gap: 0.75rem; }
 
 .auth-head { text-align: center; margin-bottom: 1.5rem; }
 /* Height, not width: the mark's aspect ratio is the artwork's (512x383), so a
@@ -491,6 +640,43 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   text-decoration: none;
 }
 
+/* ── A link that UNDOES the last tap ─────────────────────────────────────────
+   The owner's instruction about "Back to sign in" — "a bit smaller, only in text
+   and no box" — and it is the right call for every control of this kind: it was a
+   full-width bordered button sitting directly under the field it undoes, carrying
+   the same weight as the thing it is there to take back.
+
+   Declared AFTER `.link-btn` on purpose. Same specificity, one class each, so
+   source order is what makes this win — moved above it, it would silently stop
+   applying and every one of these links would grow its box back. */
+.link-sm {
+  width: auto;
+  align-self: center;
+  min-height: 0;
+  padding: 0.2rem 0.25rem;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink-gray-5);
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+.link-sm:hover {
+  background: none;
+  border: 0;
+  color: var(--ink-gray-7);
+  text-decoration: underline;
+}
+
+/* The foot's two entries side by side, not stacked. `.link-btn` is `width: 100%` —
+   every OTHER secondary action on a card is a full-width bar — so without this each
+   of the two flex children claims a whole row and the pair never sits on the one
+   line this is written for. `flex-wrap` on `.landing-foot` still applies: at phone
+   width, if they ever stop fitting, they wrap and stay centred rather than squashing
+   each other. */
+.landing-foot .link-btn { width: auto; }
+
 /* ── Show/hide a password ────────────────────────────────────
    The toggle is a SIBLING of the input inside .pw-wrap, never a child of a
    <label> — a button inside a label inherits the label's click and would both
@@ -607,7 +793,7 @@ html[data-sso="wait"] #sso-wait { display: flex; }
    the monogram disappears into the disc. Probed on the real dark surface before
    choosing, not guessed. */
 [data-theme="dark"] .brand-mark img,
-[data-theme="dark"] .auth-logo {
+[data-theme="dark"] .landing-mark {
   filter: invert(1);
 }
 .brand-text {
@@ -706,7 +892,14 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   flex-direction: column;
 }
 
-header {
+/* Scoped to the workspace ON PURPOSE. This was a bare `header` element selector
+   until the landing page grew one of its own: `<header class="landing-head">`
+   then silently became a white sticky band with a bottom border, 56px tall, with
+   the wordmark overflowing out of it — the topbar's chrome applied to a heading.
+   It rendered, every suite passed, and only the geometry probe showed it. Naming
+   the container is what makes the rule say which header it means, so the next
+   `<header>` anywhere in the app cannot inherit a topbar by accident. */
+#workspace header {
   position: sticky;
   top: 0;
   z-index: var(--z-header);

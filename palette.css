@@ -22,6 +22,12 @@
    app.js would offer a choice that resolves to the blue fallback.
    ============================================================ */
 
+/* The glass layer's own values are NOT here. This file is pure var() references
+   onto tokens.css by rule — tools/smoke-palette.mjs fails on any raw colour
+   function in it, which is what keeps "measure contrast once" true for all four
+   presets — and a `color-mix()` is a raw colour function. See GLASS in base.css:
+   the tint DERIVES from --accent there, so it still follows the palette. */
+
 /* ── The accent role ─────────────────────────────────────────────────────────
    Blue is the default, declared on :root so it also applies before the
    pre-paint script in index.html has run (and if localStorage is unreadable).

@@ -256,12 +256,17 @@ ok('...and it centres its own label, which is the half an <a> gets wrong on its 
 ok('...and it clears the touch minimum an underlined word never did',
   parseInt(linkBtn.match(/min-height:\s*(\d+)px/)?.[1], 10) >= 40,
   linkBtn.match(/min-height:[^;]*/) || 'no min-height');
-ok('...and the two public doors override its full width, or each one takes a whole row',
-  /width:\s*auto/.test(rule('.auth-doors .link-btn')), rule('.auth-doors .link-btn') || 'rule missing');
+// These two entries were `.auth-doors` — a line inside the CUSTOMER's card. They are
+// `.landing-foot` now: a line under BOTH cards, because the desk's open doors are the
+// desk's and an employee with a problem needs them exactly as much as a customer.
+// The rule moved to base.css with the rest of the landing page; the two properties
+// asserted are the same two, for the same reasons.
+ok('...and the public doors override its full width, or each one takes a whole row',
+  /width:\s*auto/.test(baseRule('.landing-foot .link-btn')), baseRule('.landing-foot .link-btn') || 'rule missing');
 ok('...and the row they override it in is a centred, wrapping flex line',
-  /display:\s*flex/.test(rule('.auth-doors')) &&
-  /justify-content:\s*center/.test(rule('.auth-doors')) &&
-  /flex-wrap:\s*wrap/.test(rule('.auth-doors')), rule('.auth-doors'));
+  /display:\s*flex/.test(baseRule('.landing-foot')) &&
+  /justify-content:\s*center/.test(baseRule('.landing-foot')) &&
+  /flex-wrap:\s*wrap/.test(baseRule('.landing-foot')), baseRule('.landing-foot'));
 
 // ── The FAQ page ─────────────────────────────────────────────────────────────
 head('faq.html is inert');
@@ -379,9 +384,12 @@ ok('the sign-in screen links to it', /id="auth-faq-link"[^>]*href="faq\.html"/.t
 ok('...and it is NOT hidden with the Report button — the FAQ needs no URL to exist',
   /id="auth-faq-link"[^>]*href="faq\.html"/.test(indexCode) &&
   !/id="auth-faq-link"[^>]*style="display:none"/.test(indexCode), 'faq link visibility');
+// Counted in base.css, not components.css: the landing page's own rules all live in
+// base.css with the rest of the landing block, and `.landing-foot` has to be declared
+// exactly once or a second declaration is a second, silently competing layout.
 ok('...and both entries sit on the same quiet line, styled',
-  /\.auth-doors\s*\{/.test(css) && (css.match(/\.auth-doors\s*\{/g) || []).length === 1,
-  (css.match(/\.auth-doors\s*\{/g) || []).length);
+  (baseCss.match(/\.landing-foot\s*\{/g) || []).length === 1,
+  (baseCss.match(/\.landing-foot\s*\{/g) || []).length);
 ok('the FAQ is in the service worker SHELL, so it opens with no signal',
   /'\.\/faq\.html'/.test(swJs), 'sw.js SHELL');
 ok('...and in the deploy list, so it is actually published',

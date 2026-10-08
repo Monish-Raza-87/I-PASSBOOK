@@ -792,10 +792,20 @@ r.ok('the call sites use it instead of the emoji',
   (appCode.match(/.*[💬🔔].*/g) || []).concat(indexCode.match(/.*[💬🔔].*/g) || []));
 r.ok('the placeholder icon is not the ticket emoji either',
   !/🎫/.test(appCode) && !/🎫/.test(indexCode));
+// The rule is "no GLYPH is hand-drawn in the markup" — index.html never runs
+// initIcons(), so an inline icon there is an icon that renders in exactly one place
+// and is invisible everywhere the app draws its own. ONE exception was added
+// 2026-10-08 and it is not a glyph: the cursive flourish under the wordmark. It
+// carries no meaning, it is aria-hidden, and it is the BRAND — which has to be
+// painted on a screen that exists to be looked at before app.js has run. So the
+// assertion is now "at most one <svg>, and it is that one", which keeps the rule's
+// teeth instead of dropping it.
 r.ok('the nav and header glyph slots are empty spans in the markup, so there is ONE icon source',
   /id="nav-tickets"[\s\S]{0,200}?class="nav-icon"[^>]*><\/span>/.test(indexCode) &&
   /id="sidebar-toggle"[\s\S]{0,200}?class="sidebar-toggle-icon"[^>]*><\/span>/.test(indexCode) &&
-  !/<svg/.test(indexCode));
+  (indexCode.match(/<svg/g) || []).length === 1 &&
+  /<svg class="brand-stroke"[^>]*aria-hidden="true"[^>]*>/.test(indexCode),
+  (indexCode.match(/<svg[^>]*>/g) || []));
 r.ok('and index.html holds no emoji for the helper to have replaced with nothing',
   !/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(indexCode),
   (indexCode.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || []));
@@ -1336,7 +1346,7 @@ r.ok('...and no width: with a px value, which is the squash itself',
 r.ok('...and it is inverted, or a dark slate disc on #0b0b0b reads as a logo with holes',
   /filter: invert\(1\);/.test(waitMarkRule), waitMarkRule);
 r.ok('...matching the dark-theme treatment the mark already gets everywhere else',
-  /\[data-theme="dark"\] \.auth-logo \{[\s\S]{0,20}?filter: invert\(1\);/.test(baseSrc));
+  /\[data-theme="dark"\] \.landing-mark \{[\s\S]{0,20}?filter: invert\(1\);/.test(baseSrc));
 r.ok('...and it sits on the splash\'s layer and ground, so the handover does not flash',
   /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc) &&
   /#sso-wait \{[\s\S]*?background: #0b0b0b/.test(baseSrc));

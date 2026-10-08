@@ -119,11 +119,21 @@ const named = withoutVars.match(
 r.ok('no named colour anywhere', !named, named);
 r.ok('...and the shadows are Desk\'s own two values', /0 1px 2px/.test(shadows), shadows);
 
+// base.css is in this list as of 2026-10-08, and it is the only addition. Desk's
+// glass surfaces read five tokens — the blur, the lit edge and the three pane fills —
+// that CANNOT live in palette.css: that file is pure var() references onto tokens.css
+// by rule (smoke-palette fails on any raw colour function in it) and all five are
+// `color-mix()` or an alpha, so they derive from --accent in base.css instead. The
+// alternative was inlining the colour functions here, which the check directly above
+// forbids for good reason. So base.css joins the list of files allowed to DECLARE a
+// token desk.css may use; every one of the five is written there once, with its
+// reasoning, and none of them is a colour desk.css could have invented on its own.
+const base = read('../base.css');
 const declared = new Set(
-  [...(tokens + palette + desk).matchAll(/(--[a-z0-9-]+)\s*:/g)].map(m => m[1]));
+  [...(tokens + palette + base + desk).matchAll(/(--[a-z0-9-]+)\s*:/g)].map(m => m[1]));
 const used = [...new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map(m => m[1]))];
 const unknown = used.filter(t => !declared.has(t));
-r.ok('every var() it uses is declared by tokens.css, palette.css or itself',
+r.ok('every var() it uses is declared by tokens.css, palette.css, base.css or itself',
   unknown.length === 0, unknown);
 
 // ── 4. The measurements, pinned ──────────────────────────────────────────────

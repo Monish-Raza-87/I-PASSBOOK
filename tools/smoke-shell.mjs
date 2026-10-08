@@ -232,20 +232,33 @@ ok('nothing is layered over the video',
   splashBlock.length > 0 &&
   !/splash-overlay|splash-logo|splash-sub|class="[^"]*overlay/.test(splashBlock),
   splashBlock.replace(/\s+/g, ' ').slice(0, 200));
-const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?THE LANDING PAGE \(TWO DOORS\)/) || [''])[0];
+const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?THE LANDING PAGE \(ONE HEAD, TWO DOORS\)/) || [''])[0];
 ok('and no blur or darkening rule is left in the splash styles',
   splashCss.length > 0 &&
   !/backdrop-filter|splash-overlay|splash-logo|splash-sub/.test(splashCss));
-// The card, not the splash, is where the full product name now lives. Sliced to the
-// EMPLOYEE door first: the customer card has a .auth-head of its own now, so a bare
-// /<div class="auth-head">/ would be a claim about whichever card happens to come
-// first rather than about the employee's. Bounded by the employee form, which is the
-// next thing after its hint paragraph.
-const employeeDoor = (html.match(/<section class="door[^"]*" id="door-employee"[\s\S]*?<form id="auth-form"/) || [''])[0];
-const authHead = (employeeDoor.match(/<div class="auth-head">[\s\S]*?id="auth-hint-text"/) || [''])[0];
-ok('the product name moved to the sign-in card',
-  employeeDoor.length > 0 && /Indrones Product After-Sales Summary Book/.test(authHead),
-  authHead.replace(/\s+/g, ' '));
+// The common head, not the splash and not either card, is where the full product name
+// now lives — the owner asked for the mark and the name to be shared ABOVE the two
+// doors rather than repeated inside each. Sliced between the head's own markers and
+// bounded by the doors grid, so this is a claim about the head and cannot be satisfied
+// by the same words turning up in a card later.
+const landingHead = (html.match(/<header class="landing-head">[\s\S]*?<div class="doors">/) || [''])[0];
+ok('the product name moved to the common head, above both doors',
+  landingHead.length > 0 && /Indrones Product After-Sales Summary Book/.test(landingHead),
+  landingHead.replace(/\s+/g, ' ').slice(0, 160));
+
+// The topbar's chrome must not dress the landing head, and it did. base.css's
+// topbar rule was a bare `header` element selector, so `<header class="landing-head">`
+// inherited `position: sticky`, a white `background`, a bottom border and a fixed
+// 56px `height` — the wordmark spilled straight out of the band it was sitting in.
+// Every suite passed; only a rendered geometry probe at 1100px showed it. The rule
+// is scoped now, and this pins BOTH halves: the scope is still named, and no bare
+// `header` rule has come back. Asserting only the absence would also pass on a file
+// where the topbar rule had been deleted, which is not the same thing at all.
+const baseCssStripped = read('../base.css').replace(/\/\*[\s\S]*?\*\//g, '');
+ok('the topbar chrome is scoped to #workspace, so no landing <header> inherits a topbar',
+  /#workspace header\s*\{[\s\S]{0,240}?position:\s*sticky/.test(baseCssStripped) &&
+  !/\n\s*header\s*\{/.test(baseCssStripped),
+  (baseCssStripped.match(/\n\s*header\s*\{[^}]*/) || [])[0]);
 
 // Read the real duration out of an MP4 header, so the timer below is checked
 // against the files rather than against a number someone typed. This is the bug
@@ -373,8 +386,11 @@ ok('index.html points at the icon set, not the old letterhead',
   /rel="icon"[^>]*assets\/icon-192\.png/.test(html) &&
   /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(html) &&
   !/assets\/logo\.png/.test(html));
-ok('the sign-in card shows the mark',
-  /class="auth-logo"/.test(html) && /assets\/icon-mark\.png/.test(authHead));
+// The mark moved out of the card and into the common head above both doors, so it is
+// asserted by its new class and against the head, not the card. It is still the ONE
+// mark on this screen: smoke-shell's landing block asserts neither card repeats it.
+ok('the common head shows the mark',
+  /class="landing-mark"/.test(html) && /assets\/icon-mark\.png/.test(landingHead));
 // The sidebar and the sign-in card show the BORDERLESS mark, while the tab, the
 // home screen and the manifest keep the square icons — an OS tile has to be
 // square, and iOS/Android mask it themselves. The two must not be swapped: the
@@ -385,7 +401,7 @@ ok('the sidebar brand mark is the borderless mark, not the square icon',
   !/class="brand-mark"[^>]*>\s*[A-Za-z]/.test(html),
   (html.match(/class="brand-mark"[\s\S]{0,140}/) || [''])[0]);
 ok('...and neither in-app mark falls back to the square icon',
-  !/class="auth-logo"[^>]*icon-192/.test(html) &&
+  !/class="landing-mark"[^>]*icon-192/.test(html) &&
   !/class="brand-mark"[^>]*icon-192/.test(html));
 // The cutout has to be regenerable and CHECKED, not just present: a mark that
 // silently kept its background looks fine on the light page and wrong everywhere
@@ -485,7 +501,7 @@ ok('the background is still transparent — the fix did not put the square back'
 // it). Both in-app marks have to be covered, or one of them stays a blank box.
 const baseCss = read('../base.css');
 ok('dark mode inverts BOTH in-app marks, so neither is a blank box on the dark page',
-  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.auth-logo\s*\{[^}]*filter:\s*invert\(1\)/.test(
+  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.landing-mark\s*\{[^}]*filter:\s*invert\(1\)/.test(
     baseCss.replace(/\s+/g, m => m.includes('\n') ? '\n' : ' ')),
   (baseCss.match(/\[data-theme="dark"\][^{]*\{[^}]*invert[^}]*\}/) || ['none — the mark is invisible in dark mode'])[0]);
 // brightness(0) invert(1) flattens the mark to a single colour, and the monogram
@@ -703,7 +719,9 @@ head('the landing page offers two doors, and names them');
     (doorsBlock.match(/<section class="door [^"]*"/g) || []).length);
 
   // Both cards carry the ROLE CHIP and it is the first child, so "which am I?" is
-  // answered above every control on the card rather than beside one of them.
+  // answered above every control on the card rather than beside one of them. This
+  // matters MORE since the cards were stripped, not less: the chip is now the only
+  // thing on the card that says which audience it is for.
   for (const [id, key, word] of [
     ['door-employee', 'door.employee', 'Employee'],
     ['door-customer', 'door.customer', 'Customer'],
@@ -716,18 +734,105 @@ head('the landing page offers two doors, and names them');
       card.replace(/^\s*<section[^>]*>/, '').trimStart().startsWith('<p class="door-role"'));
   }
 
-  // The customer's primary control is a link to the page that owns that door's
-  // sign-in — asserted as an <a href>, because a button whose label promises a door
-  // and whose handler is missing is exactly the failure this screen cannot have.
-  ok('the customer door OPENS customer.html rather than re-implementing its sign-in',
-    /<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(doorsBlock));
-  // ...and it does not carry the employee form, which would be a second sign-in.
-  ok('the customer door carries no form of its own',
-    !/<form/.test((doorsBlock.match(/<section class="door [^"]*" id="door-customer"[\s\S]*?<\/section>/) || [''])[0]));
+  // ── The brand, said ONCE, above both doors ─────────────────────────────────
+  // The owner asked for the mark and the product name to be common to the two boxes
+  // rather than repeated inside each. That is a structural claim, so it is asserted
+  // structurally: one head, it sits above the grid, and neither card repeats it.
+  const headBlock = (html.match(/<header class="landing-head">[\s\S]*?<\/header>/) || [''])[0];
+  ok('the mark and the wordmark are one common head, above the doors grid',
+    headBlock.length > 0 &&
+    html.indexOf('<header class="landing-head">') < html.indexOf('<div class="doors">') &&
+    (html.match(/class="landing-head"/g) || []).length === 1);
+  ok('...and it carries the app name and the full product name',
+    /data-i18n="app\.name"/.test(headBlock) && /data-i18n="app\.fullName"/.test(headBlock));
+  ok('...with the mark, once, and no second copy inside either card',
+    (headBlock.match(/class="landing-mark"/g) || []).length === 1 &&
+    !/auth-logo|landing-mark/.test(doorsBlock));
+  // The cursive flourish: an SVG stroke in the head, decorative, and animated by a
+  // dash offset against the normalised path — not by JS and not by a measured length.
+  ok('...and the cursive stroke is inline SVG, decorative, and dash-animated',
+    /<svg class="brand-stroke"[^>]*aria-hidden="true"/.test(headBlock) &&
+    /class="brand-stroke-path"[^>]*pathLength="1"/.test(headBlock) &&
+    /@keyframes brandWrite/.test(read('../base.css')) &&
+    /stroke-dasharray:\s*1/.test(read('../base.css')));
+  ok('...and the loop stops for anyone who has asked for less motion',
+    /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.brand-stroke-path\s*\{[^}]*animation:\s*none/.test(read('../base.css')));
+
+  // ── The customer door SIGNS IN, here ───────────────────────────────────────
+  // REVERSED ON THE OWNER'S INSTRUCTION, 2026-10-08. This used to assert the exact
+  // opposite — "the customer door carries no form of its own" — because a second
+  // implementation of one sign-in was the thing to avoid. He asked for one page with
+  // two doors on it, and a door that hands you to another page to be opened is not
+  // one door. The risk that assertion guarded against is real and is now handled
+  // differently: the form is small, it posts the SAME backend actions, and the keys
+  // it writes are pinned to customer.html's own by smoke-portal.mjs.
+  const custCard = (doorsBlock.match(/<section class="door [^"]*" id="door-customer"[\s\S]*?<\/section>/) || [''])[0];
+  ok('the customer door carries its own sign-in form',
+    /<form id="cust-form"/.test(custCard));
+  ok('...offering email, a password, and the named (OTP) method',
+    /id="cust-email"/.test(custCard) && /id="cust-password"/.test(custCard) &&
+    /id="cust-otp-link"[^>]*data-i18n="cust\.useOtp"/.test(custCard));
+  ok('...with the password field NOT required, or the OTP door is unreachable',
+    /<input class="form-input" type="password" id="cust-password"[^>]*\/>/.test(custCard) &&
+    !/id="cust-password"[^>]*required/.test(custCard));
+  // The prose the owner asked to be removed — "just employee and just customer on
+  // each boxes". Asserted as an absence, because prose comes back by accretion.
+  ok('...and the marketing copy is gone from the card',
+    !/door\.customerTitle|door\.customerFull|door\.customerHint|door\.custReports|door\.custAccess/.test(html) &&
+    !/class="door-list"/.test(html));
+  // A customer who already holds a session does not get asked again.
+  ok('the customer card swaps its form for the way in when a session is already held',
+    /<div id="cust-session"[^>]*>[\s\S]*?<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(custCard));
+
+  // ── The foot, below BOTH boxes and shared ──────────────────────────────────
+  // The two entries sat INSIDE the customer's card until 2026-10-08 — which was
+  // wrong on its own terms: "Report a problem" is the desk's front door, and an
+  // employee who cannot sign in needs it exactly as much as a customer. Asserted
+  // after the LAST card's closing tag, not merely after the grid's opening one: a
+  // foot that drifted one level in would sit in a grid column, which is the failure
+  // a "comes after .doors" check would happily pass.
+  const footAt = html.indexOf('<p class="landing-foot">');
+  const doorsEnd = html.indexOf('<div class="doors">') + doorsBlock.lastIndexOf('</section>');
+  ok('Report a problem and the FAQ are one common foot, below both cards',
+    footAt > doorsEnd &&
+    /<p class="landing-foot">[\s\S]*?id="customer-door-open"[\s\S]*?id="auth-faq-link"[\s\S]*?<\/p>/.test(html) &&
+    !/customer-door-open|auth-faq-link/.test(custCard),
+    { footAt, doorsEnd });
+  ok('...and it is a centred line, not a card',
+    /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(read('../base.css')));
+
   // The employee door still has the one form, unchanged.
   ok('the employee door still owns the single #auth-form',
     (doorsBlock.match(/<form id="auth-form"/g) || []).length === 1 &&
     /<section class="door [^"]*" id="door-employee"[\s\S]*?<form id="auth-form"/.test(doorsBlock));
+
+  // ── The two doors point at EACH OTHER ──────────────────────────────────────
+  // The owner's complaint, verbatim: the email-code screen "has no method to fall
+  // back/navigate to pattern and fingerprint login method, but from there it is to
+  // come to this login method page. So it is not correct, it should be a
+  // bi-directional." One link each way, both in the employee form.
+  const empForm = (doorsBlock.match(/<form id="auth-form"[\s\S]*?<\/form>/) || [''])[0];
+  ok('the quick-unlock door has a way OUT to the email method, named as the owner named it',
+    /id="auth-quick-out"[^>]*data-i18n="auth\.useEmailOtp"/.test(empForm));
+  ok('...and the email method has a way BACK to quick unlock',
+    /id="auth-quick-in"[^>]*data-i18n="auth\.useQuick"/.test(empForm));
+  ok('...offered only against a registered record, never as a door onto nothing',
+    /set\('auth-quick-in',\s*canQuick && \(mode === 'email' \|\| mode === 'login'\)\)/.test(appJs) &&
+    /const canQuick = .*qIn\.credentialId/.test(appJs));
+  // The fingerprint and the pattern are ONE row, and the email door is the step
+  // BELOW them rather than a third option beside them.
+  ok('the fingerprint and the pattern share one row',
+    /<div class="quick-row">[\s\S]*?id="auth-unlock-btn"[\s\S]*?id="auth-pattern-link"[\s\S]*?<\/div>/.test(empForm) &&
+    /\.quick-row \{[\s\S]*?display:\s*grid/.test(read('../base.css')));
+  ok('...and the email method is outside that row',
+    empForm.indexOf('id="auth-quick-out"') > empForm.indexOf('</div>', empForm.indexOf('quick-row')));
+  // "Back to sign in" is text-only and smaller now — the owner's ask.
+  ok('Back to sign in is small and unboxed',
+    /id="auth-back-link" class="link-btn link-sm"/.test(empForm) &&
+    /\.link-sm \{[\s\S]*?background:\s*none[\s\S]*?border:\s*0/.test(read('../base.css')));
+  // The line the owner asked to be removed, asserted as a string that is GONE.
+  ok('the "Registered device — unlock, or fall back below." line is gone',
+    !/Registered device — unlock/.test(appJs) && !/Registered device/.test(html));
 
   // A two-column landing page that never stacks is a phone with a sideways scroll.
   ok('the two doors reflow to one column without a media query',

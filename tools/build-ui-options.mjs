@@ -82,7 +82,8 @@ const REQUIRED = [
   'ir-list', 'ir-card', 'ir-card-main', 'ir-title-row', 'ir-title', 'ir-assignee',
   'ir-meta', 'ir-sn', 'ir-dot', 'ir-cat', 'ir-date', 'ir-age', 'ir-card-side',
   'badge', 'prio',
-  'glass-card', 'auth-head', 'auth-brand', 'auth-full', 'auth-hint',
+  'glass-card', 'landing-head', 'landing-mark', 'landing-brand', 'landing-full',
+  'doors', 'door-role', 'quick-row', 'landing-foot', 'auth-hint',
   'form-input', 'btn', 'btn-ghost', 'btn-secondary', 'link-btn', 'auth-or',
   'banner-main', 'banner-pills', 'banner-actions',
   'tabs-container', 'tab', 'section-content', 'section-title',
@@ -156,20 +157,39 @@ const chromeAfter = `
 const screenSignIn = () => `
     <div class="pv-app is-auth">
       <div class="auth-wrap">
-        <div class="glass-card">
-          <div class="auth-head">
-            <span class="auth-logo" aria-hidden="true"></span>
-            <div class="auth-brand">I-PASSBOOK</div>
-            <p class="auth-full">Indrones Product After-Sales Summary Book</p>
+        <header class="landing-head">
+          <span class="landing-mark" aria-hidden="true"></span>
+          <div class="landing-brand">I-PASSBOOK</div>
+          <p class="landing-full">Indrones Product After-Sales Summary Book</p>
+        </header>
+        <div class="doors">
+          <div class="glass-card">
+            <p class="door-role">Employee</p>
             <p class="auth-hint">Sign in with the credentials your admin gave you.</p>
+            <div class="quick-row">
+              <button type="button" class="btn btn-secondary">Unlock with fingerprint</button>
+              <button type="button" class="btn btn-ghost">Use pattern</button>
+            </div>
+            <button type="button" class="link-btn">Use email (OTP) based login method</button>
+            <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
+            <div class="auth-or"><span>or use your email</span></div>
+            <input class="form-input" type="email" value="raza@indrones.com" readonly />
+            <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
+            <button type="button" class="btn">Sign in</button>
           </div>
-          <button type="button" class="btn btn-google"><span class="google-mark">G</span>Sign in with Google</button>
-          <div class="auth-or"><span>or use your email</span></div>
-          <input class="form-input" type="email" value="raza@indrones.com" readonly />
-          <input class="form-input" type="text" value="4 8 2 9 1 6" readonly />
-          <button type="button" class="btn">Sign in</button>
-          <button type="button" class="link-btn">Use password instead</button>
+          <div class="glass-card">
+            <p class="door-role">Customer</p>
+            <p class="auth-hint">Sign in with the email address we invited you at.</p>
+            <input class="form-input" type="email" value="you@company.com" readonly />
+            <input class="form-input" type="password" value="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;" readonly />
+            <button type="button" class="btn">Sign in</button>
+            <button type="button" class="link-btn">Use email (OTP) based login method</button>
+          </div>
         </div>
+        <p class="landing-foot">
+          <span class="link-btn">Report a problem</span>
+          <span class="link-btn">Help &amp; FAQ</span>
+        </p>
         <p class="pv-version">${esc(APP_VERSION)}</p>
       </div>
     </div>`;
@@ -372,10 +392,22 @@ html { -webkit-text-size-adjust: 100%; }
 .pv-app .bell { width: 18px; height: 18px; }
 .pv-app .avatar { display: grid; place-items: center; width: 30px; height: 30px; font-size: var(--text-2xs); }
 .pv-app.is-auth { min-height: 0; }
-.pv-app .auth-wrap { flex: 1 1 auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
+/* The min-width here is load-bearing, not tidiness. Without it this flex item's
+   automatic minimum is its MIN-CONTENT width, and the doors grid's min-content is
+   two 240px tracks plus the gap — 500px — so the wrap grew to 532 inside a 387px
+   phone mock and the customer card rendered half off the right edge, clipped by
+   .pv-phone's overflow. The grid never got the chance to collapse to one column,
+   because its container had already been forced wider than the phone. */
+.pv-app .auth-wrap { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
-.pv-app .auth-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
-.pv-app .auth-logo { width: 34px; height: 34px; }
+.pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
+.pv-app .landing-mark { width: 40px; height: 40px; }
+.pv-app .doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; width: 100%; max-width: 640px; align-items: start; }
+.pv-app .doors .glass-card { max-width: none; }
+.pv-app .door-role { text-align: center; }
+.pv-app .quick-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; }
+.pv-app .quick-row .btn { width: 100%; }
+.pv-app .landing-foot { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
 
 /* ── the IR list ── */
 .pv-app .list-toolbar { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.85rem 0.9rem 0.7rem; }

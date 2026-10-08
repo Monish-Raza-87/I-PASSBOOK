@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v71';
+const APP_VERSION = 'v72';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1844,6 +1844,10 @@ function showAuth() {
   });
 
   wireAuthForm();
+  // The customer card's own state, which is deliberately NOT part of _authMode: the
+  // two doors are two independent sign-ins on one screen, and folding the customer's
+  // stage into the staff mode machine would let one door's step leak into the other.
+  paintCustomerDoor();
   wirePasswordToggles();
   maskAllPasswords();
 }
@@ -2370,6 +2374,18 @@ function setAuthMode(mode) {
   }
   set('auth-pattern',       mode === 'pattern');
   set('auth-back-link',     mode !== 'email' && mode !== 'login');
+  // THE OTHER DIRECTION. Until now this screen only pointed ONE way: quick unlock
+  // could be left for the email door, and the email door had no way back — so a
+  // device with a registered fingerprint offered it once and then never again.
+  // `#auth-quick-in` is the way back, and it is offered on exactly the two screens
+  // that are a beginning ('email', 'login'), never mid-flow on the code or reset
+  // steps where the person is already committed to the door they chose.
+  //
+  // Gated on the record actually existing, for the same reason `#auth-unlock-btn`
+  // is: a link to a door this device cannot open is worse than no link.
+  const qIn = loadUnlock() || {};
+  const canQuick = !!((qIn.deviceToken && qIn.email) && (qIn.credentialId || qIn.mode === 'fingerprint' || qIn.patternHash));
+  set('auth-quick-in',      canQuick && (mode === 'email' || mode === 'login'));
   // The email field feeds every typed door — except quick unlock, which knows
   // the email from its own record and shows none.
   set('auth-email',         mode !== 'unlock' && mode !== 'pattern');
@@ -2397,8 +2413,18 @@ function setAuthMode(mode) {
         ? 'Enter the code from your email and choose a new password.'
         : mode === 'otp'
           ? 'One more step. Enter the code we emailed you.'
-          : mode === 'unlock'
-            ? 'Registered device — unlock, or fall back below.'
+          // EMPTY on the quick-unlock step, on the owner's instruction: he asked for
+          // the sentence that told a person they were on a registered device to be
+          // removed. It was true and it was still the wrong thing to say — somebody
+          // looking at a fingerprint prompt does not need telling which kind of
+          // device they are holding, and the two buttons below say everything else.
+          // (The exact wording is deliberately not quoted here; smoke-shell asserts
+          // it no longer appears in this file, comments included, so that a phrase
+          // cannot survive as a comment and quietly come back as a string.) Leaving
+          // the line blank rather than removing the element keeps every mode one
+          // element wide, so nothing after the hint jumps as modes change.
+          : mode === 'unlock' || mode === 'pattern'
+            ? ''
             : pwMode
               ? 'Sign in with the credentials your admin gave you.'
               : 'We’ll email you a 6-digit sign-in code.';
@@ -2756,6 +2782,16 @@ function wireAuthForm() {
   if (patternLink) patternLink.addEventListener('click', () => { setAuthMode('pattern'); patternForUnlock(); });
   const quickOut = document.getElementById('auth-quick-out');
   if (quickOut) quickOut.addEventListener('click', () => setAuthMode('email'));
+  // …and the way back IN, which is what makes the pair bi-directional. It returns
+  // to the same door `showAuth` would have opened on: the fingerprint where there is
+  // a credential, the pattern canvas where there is only a drawn pattern.
+  const quickIn = document.getElementById('auth-quick-in');
+  if (quickIn) quickIn.addEventListener('click', () => {
+    const q = loadUnlock() || {};
+    const target = (q.credentialId || q.mode === 'fingerprint') ? 'unlock' : 'pattern';
+    setAuthMode(target);
+    if (target === 'pattern') patternForUnlock();
+  });
 
   // Enter submits the CURRENT mode, not always login.
   form.addEventListener('submit', ev => {
@@ -2767,6 +2803,202 @@ function wireAuthForm() {
     else if (_authMode === 'unlock') submitUnlock('fingerprint');
     else submitLogin();
   });
+}
+
+// ─── THE CUSTOMER'S SIGN-IN, ON THE LANDING PAGE ─────────────────────────────
+//
+// The second door signs in HERE rather than on customer.html, because the owner
+// asked for one page carrying both — and a door that hands you to another page to
+// be opened is not one door.
+//
+// IT WRITES THE CUSTOMER'S KEYS AND NEVER THE STAFF'S. `ipbc_session` / `ipbc_user`,
+// the exact strings customer.html reads, so this form and that page are one session
+// and not two. The staff keys are `ipb_session` / `ipb_user` — one different letter,
+// which is precisely the kind of thing that gets typed wrong, so the two names are
+// written once here and once there and tools/smoke-portal.mjs reads BOTH files and
+// fails if either copy moves.
+//
+// IT DOES NOT REUSE loginBackend(). That helper is not a request, it is the staff
+// SIGN-IN: it stamps `currentUser`, calls persistSession and writes the staff keys
+// as a side effect. Calling it from the customer's button would sign a customer into
+// the staff shell on the way past. What is shared is the REQUEST — postAuth, the same
+// action names, the same retry rules — and nothing above it.
+//
+// The flow is the backend's, not ours. A password is checked and then still needs the
+// emailed code (second factor, backend.gs's doLoginPassword); no password at all IS
+// the code door. So both routes end in the same place: a code box, then a session.
+let _custStage = 'form';   // 'form' | 'code'
+
+function customerAuth(action, fields) {
+  return postAuth(action, Object.assign({ device: deviceLabel(), version: APP_VERSION }, fields));
+}
+
+// The session lands in localStorage and the customer is handed to the portal, which
+// finds the token already there and boots straight into their own tickets instead of
+// asking them to sign in a second time.
+function finishCustomerAuth(email, d) {
+  try {
+    localStorage.setItem('ipbc_session', d.sessionToken);
+    localStorage.setItem('ipbc_user', JSON.stringify({
+      email: email,
+      customerOf: (d && d.access && d.access.customerOf) || '',
+    }));
+  } catch (e) { /* private mode — the redirect will ask again, which is honest */ }
+  location.href = 'customer.html';
+}
+
+function wireCustomerForm() {
+  const form    = document.getElementById('cust-form');
+  if (!form || form.dataset.wired === '1') return;
+  form.dataset.wired = '1';
+
+  const emailIn = document.getElementById('cust-email');
+  const passIn  = document.getElementById('cust-password');
+  const codeIn  = document.getElementById('cust-code');
+  const signBtn = document.getElementById('cust-signin-btn');
+  const codeBtn = document.getElementById('cust-code-btn');
+  const otpLink = document.getElementById('cust-otp-link');
+  const backLink = document.getElementById('cust-back-link');
+  const codeWrap = document.getElementById('cust-code-wrap');
+  const errEl   = document.getElementById('cust-error');
+
+  const showError = (m) => {
+    if (!errEl) return;
+    errEl.textContent = m || '';
+    errEl.style.display = m ? '' : 'none';
+  };
+  const emailOf = () => ((emailIn && emailIn.value) || '').trim().toLowerCase();
+
+  // 'form' and 'code' are the whole state machine. Everything the customer can see is
+  // a function of which one is up, so nothing can be left showing from the other.
+  const setStage = (stage) => {
+    _custStage = stage;
+    if (codeWrap) codeWrap.style.display = (stage === 'code') ? '' : 'none';
+    // The OTP entry point is a way INTO the code step, so it is gone once you are in
+    // it — and the back link is its inverse, so the two are never up together.
+    if (otpLink)  otpLink.style.display  = (stage === 'code') ? 'none' : '';
+    if (backLink) backLink.style.display = (stage === 'code') ? '' : 'none';
+    // The password field is not part of the code step. A second factor is a code, and
+    // leaving a password box on that screen invites a customer to retype it.
+    const pwWrap = form.querySelector('.pw-wrap');
+    if (passIn)  passIn.style.display  = (stage === 'code') ? 'none' : '';
+    if (pwWrap)  pwWrap.style.display  = (stage === 'code') ? 'none' : '';
+    showError('');
+  };
+
+  // STAGE 1, the password route: email + password. A correct password still earns a
+  // code, so this ends on the code step exactly like the passwordless route — and a
+  // temp-password account is refused here, because the change is a screen the APP
+  // owns and this card has no room to grow one.
+  const submitCustomerPassword = () => {
+    const email = emailOf();
+    const password = (passIn && passIn.value) || '';
+    if (!email) { showError('Enter your email address.'); return; }
+    if (!password) { showError('Enter your password, or use the email (OTP) method below.'); return; }
+    if (signBtn) { signBtn.disabled = true; signBtn.textContent = 'Signing in…'; }
+    const idle = () => { if (signBtn) { signBtn.disabled = false; signBtn.textContent = 'Sign in'; } };
+    customerAuth('login', { email: email, password: password }).then(d => {
+      idle();
+      if (d && d.status === 'ok' && d.sessionToken) { finishCustomerAuth(email, d); return; }
+      if (d && d.status === 'ok' && d.otpRequired) {
+        if (codeIn) codeIn.value = '';
+        setStage('code');
+        showCustomerCodeNote(d, email);
+        if (codeIn) setTimeout(() => codeIn.focus(), 60);
+        return;
+      }
+      if (d && d.status === 'ok' && d.mustChangePassword) {
+        showError('This account is still on the password Indrones issued. Use “First time here, or forgot your password?” below to choose your own.');
+        return;
+      }
+      showError((d && d.message) || 'Could not sign in.');
+    });
+  };
+
+  // STAGE 1, the passwordless route. This is the button the owner named — "use email
+  // (OTP) based login method" — and it carries NO password field at all: the backend
+  // reads the absence of `password` as the passwordless door.
+  const requestCustomerCode = () => {
+    const email = emailOf();
+    if (!email) { showError('Enter your email address first.'); return; }
+    showError('');
+    if (otpLink) { otpLink.textContent = 'Sending…'; otpLink.style.pointerEvents = 'none'; }
+    customerAuth('login', { email: email, password: '' }).then(d => {
+      if (otpLink) { otpLink.textContent = 'Use email (OTP) based login method'; otpLink.style.pointerEvents = ''; }
+      if (d && d.status === 'ok' && d.otpRequired) {
+        if (codeIn) codeIn.value = '';
+        setStage('code');
+        showCustomerCodeNote(d, email);
+        if (codeIn) setTimeout(() => codeIn.focus(), 60);
+        return;
+      }
+      // A brand-new invitee is on a temporary password, and the backend will not mint
+      // a login code for one. Saying "we emailed you a code" here would send them to
+      // an inbox that is empty and keep them there — customer.html learned the same
+      // lesson and says the same thing.
+      if (d && d.status === 'ok' && d.mustChangePassword) {
+        showError('No code was sent. Your account is still on the password Indrones issued — use “First time here, or forgot your password?” below to choose your own.');
+        return;
+      }
+      showError((d && d.message) || 'Could not send a sign-in code.');
+    });
+  };
+
+  const showCustomerCodeNote = (d, email) => {
+    const note = document.getElementById('cust-code-note');
+    if (!note) return;
+    // codeSent:false means an unspent code from earlier today was reused, so claiming
+    // a fresh mail would send them looking for one that does not exist.
+    note.textContent = (d && d.codeSent === false)
+      ? 'A 6-digit code was already sent to ' + email + ' today. It is valid for 8:30 hours from when it was sent.'
+      : 'A 6-digit code is on its way to ' + email + '. It is valid for 8:30 hours.';
+  };
+
+  // STAGE 2: the code. Both routes close here and there is one code box, so there is
+  // one place a code can be typed and one place it can be wrong.
+  const submitCustomerCode = () => {
+    const email = emailOf();
+    const code = ((codeIn && codeIn.value) || '').trim();
+    if (!email) { showError('Enter your email address.'); setStage('form'); return; }
+    if (!/^\d{6}$/.test(code)) { showError('Enter the 6-digit code from your email.'); return; }
+    if (codeBtn) { codeBtn.disabled = true; codeBtn.textContent = 'Verifying…'; }
+    const idle = () => { if (codeBtn) { codeBtn.disabled = false; codeBtn.textContent = 'Verify code'; } };
+    customerAuth('login', { email: email, password: '', code: code }).then(d => {
+      idle();
+      if (d && d.status === 'ok' && d.sessionToken) { finishCustomerAuth(email, d); return; }
+      showError((d && d.message) || 'Could not verify the code.');
+    });
+  };
+
+  if (signBtn) signBtn.addEventListener('click', submitCustomerPassword);
+  if (codeBtn) codeBtn.addEventListener('click', submitCustomerCode);
+  if (otpLink) otpLink.addEventListener('click', requestCustomerCode);
+  if (backLink) backLink.addEventListener('click', () => setStage('form'));
+  form.addEventListener('submit', ev => {
+    ev.preventDefault();
+    (_custStage === 'code') ? submitCustomerCode() : submitCustomerPassword();
+  });
+  // Enter inside the code box submits the code even if the form's own submit is
+  // swallowed by the browser's implicit-submission rules for a multi-button form.
+  if (codeIn) codeIn.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); submitCustomerCode(); }
+  });
+  setStage('form');
+}
+
+// Which of the customer card's two faces is up: the form, or the way in for someone
+// who is already signed in on this device. Read from the CUSTOMER's key, never the
+// staff one — a staff session on this machine must not open the customer's door, and
+// the customer's must not open the app's.
+function paintCustomerDoor() {
+  const form = document.getElementById('cust-form');
+  const session = document.getElementById('cust-session');
+  if (!form || !session) return;
+  let has = false;
+  try { has = !!localStorage.getItem('ipbc_session'); } catch (e) { has = false; }
+  form.style.display = has ? 'none' : '';
+  session.style.display = has ? '' : 'none';
+  if (!has) wireCustomerForm();
 }
 
 // ─── THEME ───────────────────────────────────────────────────────────────────

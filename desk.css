@@ -169,13 +169,50 @@
   padding: 1.5rem;
 }
 
-/* The brand line: Desk headings track tighter than the app's 0.06em, which was
-   set when the wordmark was the only thing on the card. */
-#auth-container .auth-brand { letter-spacing: 0.02em; }
+/* ── THE GLASS, ON THE LANDING PAGE ──────────────────────────────────────────
+   base.css declares the glass for .glass-card in general; this file loads LAST and
+   the rule directly above resets the fill to the Desk panel, so the landing page
+   has to state what it wants HERE, after it. Desk's border, radius, padding and
+   thickness are kept — only the MATERIAL changes: the fill goes translucent, and
+   the pane picks up a blur and a lit top edge.
 
-/* Secondary copy at the AA step. `.auth-full` and `.auth-hint` are both
-   --ink-gray-5 (4.18:1 on a white card). */
+   The ground is the other half of it, and it is not decoration. Desk makes this
+   page a flat sheet with a panel lying on it, which is right everywhere else and
+   wrong here: a blur over a flat colour is invisible, so glass would be a claim
+   with nothing behind it. The one screen allowed some depth gets an ambient field
+   of accent-tinted light — two wide radials, no image, no extra request — and the
+   cards smear it. Nothing is ever written on the ground itself.
+
+   @supports is the safety net: without backdrop-filter this block does not apply
+   and the landing page is the flat Desk panel it has been since the skin shipped,
+   never a translucent card over a busy background. */
+#auth-container {
+  background:
+    radial-gradient(52rem 32rem at 12% -8%,  var(--accent-tint-strong), transparent 62%),
+    radial-gradient(46rem 30rem at 92% 108%, var(--accent-tint),        transparent 60%),
+    var(--desk-ground);
+}
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  #auth-container .glass-card {
+    background: var(--glass-fill-base);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: var(--desk-shadow), inset 0 1px 0 var(--glass-edge);
+  }
+}
+
+/* The brand line: Desk headings track tighter than the app's 0.06em, which was
+   set when the wordmark was the only thing on the card. `.landing-brand` is that
+   wordmark now — it moved out of the card and above both doors, and the tracking
+   decision moved with it. */
+#auth-container .auth-brand,
+#auth-container .landing-brand { letter-spacing: 0.02em; }
+
+/* Secondary copy at the AA step. `.auth-full`, `.landing-full` and `.auth-hint`
+   are all --ink-gray-5 (4.18:1 on a white card). The product name moved out of the
+   card with the wordmark, so it needs saying here under its new name too. */
 #auth-container .auth-full,
+#auth-container .landing-full,
 #auth-container .auth-hint,
 #password-change .auth-hint,
 #auth-container .auth-or { color: var(--desk-muted); }

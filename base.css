@@ -1456,6 +1456,18 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   flex-direction: column;
 }
 
+/* The Help & FAQ. The same arrangement a fifth time, and it is a pane rather than a
+   link out to faq.html since 2026-10-08. `min-width: 0` is not decoration here and
+   neither is `min-height: 0`: a flex item with neither grows to its content's
+   intrinsic width, and this pane's content is forty-six rows of prose. */
+#faq-view {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
 /* Desktop-only; the media block below turns it back on. */
 #detail-placeholder { display: none; }
 

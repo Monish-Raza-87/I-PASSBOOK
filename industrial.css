@@ -24,15 +24,22 @@
    own brand yellow and it is declared once, in base.css's INDRONES block, because
    there is no yellow ramp in Frappe's token table for palette.css to point at.
 
-   This file names exactly two sources of colour, and neither is the brand yellow.
-   `var(--accent)` carries every mark and every accent-coloured word, and the
-   `--st-*-fg` steps carry the status LEDs. That is not fastidiousness — it is the
-   fix for a measured defect. The brand yellow is legible as text on the dark ground
-   (11.18:1) and unreadable on a light one (~1.4:1), so a file that named it would be
-   a file that only worked in one theme. `--accent` is the role palette.css already
-   resolved to #7a5600 in light and cream and #ffc400 in dark — the same brand colour
-   where it can be read, a readable one where it cannot — and it also carries the
-   other four palettes for free.
+   This file names FOUR sources of colour, and none of them is the brand yellow by
+   name. `var(--accent)` carries every mark and every accent-coloured word; the
+   `--st-*-fg` steps carry the status *words* outside the screens; `--accent-bar` and
+   `--btn-solid-*` carry the status *lamps* and the lit tiles, which are fills. That is
+   not fastidiousness — it is the fix for a measured defect. The brand yellow is legible
+   as text on the dark ground (11.18:1) and unreadable on a light one (~1.4:1), so a file
+   that named it would be a file that only worked in one theme. `--accent` is the role
+   palette.css already resolved to #7a5600 in light and cream and #ffc400 in dark — the
+   same brand colour where it can be read, a readable one where it cannot — and it also
+   carries the other four palettes for free.
+
+   THE FILL ROLES ARE NAMED, NOT THE RAMP STEPS, and §1 explains why at length. A fill
+   never has to be read, so it may take the brand value in both themes; that is what
+   `--accent-bar` and `--btn-solid-*` are for, and both are declared per palette in
+   palette.css. Naming a ramp step for a lamp is what put five borrowed hues on a list
+   of rows, which is the defect the owner reported on 2026-10-08.
 
    Nothing below invents a colour. Every value is one somebody has already measured.
 
@@ -89,15 +96,20 @@
 }
 
 /* ── THE SCREEN SET, and the corners ──────────────────────────────────────────
-   This list is the whole blast radius of this file: eight roots, and nothing
+   This list is the whole blast radius of this file: nine roots, and nothing
    outside them is touched by anything below. It is written ONCE, here, because the
-   corner rule genuinely applies to all eight and a second copy would be a list that
+   corner rule genuinely applies to all nine and a second copy would be a list that
    could silently disagree with the one the smoke suite pins.
+
+   #faq-view joined on 2026-10-08, when the Help & FAQ stopped being a separate page
+   in another tab and became a pane of this app — the owner's "it has to be in our
+   app, as per our UI and a part of our app". It is the same pane shape as Insights
+   and the Log Analyser, so it is the same entry, not a new kind of thing.
 
    Square is the language — an instrument panel has corners — and it is the single
    biggest visual move in this file. It is done by re-pointing the radius scale
    inside these subtrees rather than by a `border-radius: 0` on every rule, because
-   the app draws its corners from these eight tokens in ninety-odd places and
+   the app draws its corners from these nine tokens in ninety-odd places and
    squaring the tokens squares all of them at once.
 
    --radius-9 is deliberately NOT in the list. It is 999px — the ROUND family, the
@@ -109,6 +121,7 @@
 #detail-view,
 #insights-view,
 #log-view,
+#faq-view,
 #sidebar,
 #workspace header {
   --radius-1: 0px;
@@ -133,6 +146,13 @@
    a bug rather than a design direction. It stays global because the alternative is
    the detail screen's pills disagreeing with the list's.
 
+   THESE ARE TEXT STEPS, AND INSIDE THE SCREENS THEY NOW COLOUR TEXT ONLY. The lamps
+   the list and the board draw take their fill from the separate --ind-lamp-* set a few
+   lines below, and the whole reason for the split is written there. What this block
+   governs everywhere is the WORD: the badges in the modals and the toast, which sit
+   outside the eight scopes, and the pill on every screen that is not one of the three
+   the look reaches. So this table stays exactly as measured and nothing here moves.
+
    These restate six token names, so every pill and every priority word in the app
    moves at once. The steps are repeated here from the table below, and from the
    assertion in tools/smoke-industrial.mjs, which is where they are actually held.
@@ -144,7 +164,7 @@
      Closed     --ink-gray-6         7.03 ✓   5.11 ✓      --ink-gray-7   10.55   6.63
      Legacy     --ink-violet-5       4.03 ✗   2.32 ✗      --ink-violet-7   7.01   6.35
      Overdue    --ink-red-6          4.44 ✗   3.38 ✗      --ink-red-7      5.68   4.81
-   ────────────────────────────────────────────────────────────────────────────── */
+   ───────────────────────────────────────────────────────────────────────────────── */
 :root {
   --st-open-fg:     var(--ink-blue-8);     /* 5.97 light / 8.56 dark */
   --st-paused-fg:   var(--ink-amber-8);    /* 6.48 / 8.31 */
@@ -153,9 +173,53 @@
   --st-legacy-fg:   var(--ink-violet-7);   /* 7.01 / 6.35 */
   --st-danger-fg:   var(--ink-red-7);      /* 5.68 / 4.81 */
 }
+/* ── THE LAMP SET, AND WHY IT IS NOT THE PILL SET ───────────────────────────────
+   THE SIX STEPS ABOVE ARE TEXT COLOURS. They clear AA against the pill's own tinted
+   ground, and that is why the app carries five of Frappe's hue ramps for them — right
+   for a word, wrong for a lamp. On 2026-10-08 the owner read a list of rows and said:
+   "I can see there are blue dots, brown colors across buttons, so we need to be uniform
+   and even." Measured, the four LEDs were blue (oklch hue 253), orange-brown (47),
+   green (155) and grey — five families borrowed from a ramp table nobody had chosen,
+   in a skin that is otherwise one accent and a neutral ramp.
+
+   A 5px SQUARE IS NOT TEXT. It never has to be read, only seen, so it may name a FILL
+   role and needs no contrast step at all — and the app already has exactly the fill
+   roles this needs, both declared per palette in palette.css:
+
+     --accent-bar     the brand fill in BOTH themes, for every preset
+     --btn-solid-bg   the accent's solid fill, specified with --btn-solid-fg
+
+   So a lamp names a ROLE, and this whole set follows the user's palette instead of
+   pinning the yellow. The five states then read by WEIGHT, which is what an instrument
+   panel does with a row of lamps:
+
+     lit      Open      var(--accent-bar)     the desk is working this one
+     solid    Resolved  --ink-gray-7          done, and said so
+     mid      Paused    --ink-gray-6          held
+     unlit    Closed    --ind-dim             filed away — the unlit LED
+     hollow   Legacy    a 1px inset outline   imported, never this desk's own
+     alarm    Overdue   --st-danger-fg        the one state that keeps its hue
+
+   A LAMP IS THE ONLY THING THAT MOVES. Every badge's label is already --ind-muted and
+   stays there, and nothing outside the eight screen scopes is touched: the modals, the
+   toast and the insights mix bar are still drawn from --st-*-fg, so they keep the AA
+   steps this block carefully leaves in place. A hollow lamp is hollow because "this
+   record was imported" is a different kind of fact from "this record is closed", and
+   weight alone cannot say it.
+   ------------------------------------------------------------------------------ */
+:root {
+  --ind-lamp-open:     var(--accent-bar);
+  --ind-lamp-paused:   var(--ink-gray-6);
+  --ind-lamp-resolved: var(--ink-gray-7);
+  --ind-lamp-closed:   var(--ind-dim);
+}
+
 .prio-low    { color: var(--ink-gray-6);  /* 7.80 / 6.29 */ }
-.prio-medium { color: var(--ink-blue-8);  /* 6.69 / 11.36 */ }
-.prio-high   { color: var(--ink-amber-8); /* 7.12 / 10.87 */ }
+/* Priority is a GAUGE, and it steps the same way the lamps do: muted, then solid, then
+   the accent, then the alarm. It used to be blue for medium and amber for high, which
+   is the same borrowed-hue problem one line over. */
+.prio-medium { color: var(--ink-gray-8);  /* stepped up from muted */ }
+.prio-high   { color: var(--accent);      /* the accent, as a word — readable in both */ }
 .prio-urgent { color: var(--ink-red-7);   /* 6.69 / 6.87  — already AA, unchanged */ }
 
 /* ══════════════════════════════════════════════════════════════
@@ -485,12 +549,16 @@
   max-width: 11rem;
 }
 #index-view .segment:hover { background: var(--ind-inset); border-color: var(--ind-line); color: var(--ink-gray-9); }
-/* "You are here" is an accent edge, not a colour block. One pixel of it, so the tile
-   still says where you are without turning into a slab with unreadable text on it. */
+/* "YOU ARE HERE" WEARS THE SAME FILL AS THE SIGN-IN SCREEN'S ONE BUTTON. It was an
+   accent *outline* — a hairline and a word in `--accent`, which is #7a5600 on a light
+   ground. That is a brown outline around a filter, and the owner read it as exactly
+   that: "brown colors across buttons". The lit tile is the same two roles `.btn` uses,
+   so a chosen filter on this screen is filled the way Continue is filled on the way in,
+   and it follows the user's palette for free. */
 #index-view .segment.active {
-  background: var(--ind-panel);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--btn-solid-bg);
+  border-color: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
 }
 /* The number leads, and it is the only thing on the tile allowed to be bright: the
    word underneath is a label, and labels are muted. */
@@ -501,7 +569,7 @@
   line-height: 1.1;
   color: var(--ink-gray-9);
 }
-#index-view .segment.active .segment-count { color: var(--accent); }
+#index-view .segment.active .segment-count { color: var(--btn-solid-fg); }
 /* A tile is a 44px-class target on a phone, not a 28px one: this is the strip that
    changes what the list shows, and it is the first thing a thumb reaches. */
 @media (max-width: 639px) {
@@ -583,11 +651,19 @@
   border-radius: 0;
   background: var(--ind-dim);
 }
-#index-view .badge-open::before,     #detail-view .badge-open::before,     #insights-view .badge-open::before     { background: var(--st-open-fg); }
-#index-view .badge-pending::before,  #detail-view .badge-pending::before,  #insights-view .badge-pending::before  { background: var(--st-paused-fg); }
-#index-view .badge-resolved::before, #detail-view .badge-resolved::before, #insights-view .badge-resolved::before { background: var(--st-resolved-fg); }
-#index-view .badge-closed::before,   #detail-view .badge-closed::before,   #insights-view .badge-closed::before   { background: var(--st-closed-fg); }
-#index-view .badge-legacy::before,   #detail-view .badge-legacy::before,   #insights-view .badge-legacy::before   { background: var(--st-legacy-fg); }
+/* The lamps. Fills from the lamp set in §1, not the pill set — see the block there for
+   why a 5px square is allowed a value a word is not. */
+#index-view .badge-open::before,     #detail-view .badge-open::before,     #insights-view .badge-open::before     { background: var(--ind-lamp-open); }
+#index-view .badge-pending::before,  #detail-view .badge-pending::before,  #insights-view .badge-pending::before  { background: var(--ind-lamp-paused); }
+#index-view .badge-resolved::before, #detail-view .badge-resolved::before, #insights-view .badge-resolved::before { background: var(--ind-lamp-resolved); }
+#index-view .badge-closed::before,   #detail-view .badge-closed::before,   #insights-view .badge-closed::before   { background: var(--ind-lamp-closed); }
+/* Hollow, and the only one: an imported record is a different KIND of fact from a
+   closed one, and no step of a ramp can say that. The inset shadow rather than a border
+   keeps the box exactly 5px, which is the one dimension this row cannot spend. */
+#index-view .badge-legacy::before,   #detail-view .badge-legacy::before,   #insights-view .badge-legacy::before   {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--ind-dim);
+}
 /* Danger keeps its own colour ON the LED and on the text — it is the one badge that
    has to shout, and a red LED in a grey block says something a grey LED cannot. */
 #index-view .badge-danger,   #detail-view .badge-danger,   #insights-view .badge-danger   { border-color: var(--st-danger-bd); color: var(--st-danger-fg); }
@@ -748,6 +824,17 @@
 }
 #insights-view .insights-total { letter-spacing: 0.08em; color: var(--ind-muted); }
 #insights-view .insights-total strong { font-family: var(--font-mono); color: var(--accent); }
+
+/* ── THE STATUS MIX BAR FOLLOWS ITS OWN BADGES ────────────────────────────────
+   views.css chose --st-*-fg for these four segments FOR ONE REASON, written in its own
+   comment: so the bar and the pills beside it "cannot drift apart". §1 of this file has
+   just moved the pills, so the bar moves with them or that comment becomes a lie and the
+   chart reads in colours the legend below it no longer uses. Four fills and never the
+   hollow fifth: a hollow segment in a 10px stacked bar is a gap, not a category. */
+#insights-view .mix-seg.mix-open     { background: var(--ind-lamp-open); }
+#insights-view .mix-seg.mix-paused   { background: var(--ind-lamp-paused); }
+#insights-view .mix-seg.mix-resolved { background: var(--ind-lamp-resolved); }
+#insights-view .mix-seg.mix-closed   { background: var(--ind-lamp-closed); }
 #insights-view .insights-h {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
@@ -766,3 +853,94 @@
 #insights-view .insights-subcat-n { font-variant-numeric: tabular-nums; color: var(--accent); }
 #insights-view .insights-mix-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); }
 #insights-view .insights-note { color: var(--ind-muted); }
+
+/* ══════════════════════════════════════════════════════════════
+   8 · HELP & FAQ — the answers, inside the app
+
+   The FAQ stopped being a page beside the app on 2026-10-08 and became a pane of
+   it, so it wears the same language as every other read-only pane here: the ruled
+   ground, a panel for anything that is a box, the mono face for anything that
+   labels rather than speaks, and the accent used as a RULE and never as a wash.
+
+   Nothing in this block invents a colour. The two callouts take their edge from the
+   status steps the two pills the app already draws — the warning and the clearance —
+   because that is what they are saying.
+   ══════════════════════════════════════════════════════════════ */
+#faq-view { background: var(--ind-ground); }
+
+#faq-view .list-toolbar {
+  background: var(--ind-panel);
+  border-bottom: 1px solid var(--ind-line);
+}
+#faq-view .list-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+
+/* The head reads as the panel's own masthead: a small mono eyebrow, the title at
+   the size of a screen heading, then the standfirst as the one piece of running
+   prose on the screen. */
+#faq-view .faq-eyebrow { font-family: var(--font-mono); letter-spacing: 0.18em; color: var(--accent); }
+#faq-view .faq-title { color: var(--ink-gray-9); }
+#faq-view .faq-standfirst { border-left: 2px solid var(--ind-rule); padding-left: 0.8rem; color: var(--ind-muted); }
+
+/* The jump strip is the segment strip's cousin — small ruled tiles — but every one
+   of them is a CONTROL that scrolls, so they carry the panel's border and its own
+   hover rather than the lit-tile treatment the filters get. Nothing here is a
+   filter and nothing here is ever "active". */
+#faq-view .faq-jump-item {
+  background: var(--ind-panel);
+  border: 1px solid var(--ind-line);
+  color: var(--ink-gray-9);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+#faq-view .faq-jump-item:hover { background: var(--ind-inset); border-color: var(--ind-rule); color: var(--ink-gray-9); }
+#faq-view .faq-jump-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A section is headed like a group heading anywhere else in this skin, and the jump
+   target flashes with the accent RULE — the same flash the analyser's groups use, so
+   "you landed here" means one thing in this app. */
+#faq-view .faq-section-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+#faq-view .faq-section.is-flash { box-shadow: inset 2px 0 0 var(--accent); }
+
+/* One question: a ruled row with a boxed marker, so the collapsed list reads as a
+   register of lines rather than a wall of bold text. The rule is the divider and the
+   marker is the affordance — no chevron glyph, because a glyph would be a drawing
+   and this skin draws in rules and squares. */
+#faq-view .faq-q { border-top: 1px solid var(--ind-line); }
+#faq-view .faq-q-label {
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+}
+#faq-view .faq-q-label::before {
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+#faq-view .faq-q-label:hover { color: var(--accent); }
+#faq-view .faq-a { color: var(--ink-gray-9); }
+#faq-view .faq-a code { color: var(--accent); }
+#faq-view .faq-list { color: var(--ink-gray-9); }
+
+/* The two callouts, edged in the status steps that say the same thing: a warning in
+   the alarm's own hue and a clearance in the resolved one. The fill is the panel and
+   the fill NEVER the status colour — a 2px edge is the whole signal, exactly as the
+   Insights cards use the accent. */
+#faq-view .faq-callout {
+  background: var(--ind-inset);
+  border-left: 2px solid var(--st-danger-fg);
+}
+#faq-view .faq-callout.is-ok { border-left-color: var(--st-resolved-fg); }
+#faq-view .faq-callout-label { font-family: var(--font-mono); letter-spacing: 0.14em; color: var(--ind-muted); }
+
+#faq-view .faq-foot { border-top: 1px solid var(--ind-line); color: var(--ind-muted); }
+#faq-view .faq-foot a { color: var(--accent); }

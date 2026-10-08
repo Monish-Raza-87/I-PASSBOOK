@@ -1692,6 +1692,90 @@
   padding: 0.9rem 1rem 1.4rem;
 }
 
+/* ══════════════════════════════════════════════════════════
+   HELP & FAQ (#faq-view)
+
+   LAYOUT ONLY, on the same principle as the analyser above: flex, gap and the
+   app's existing tokens, so the skin in industrial.css owns how it looks. The
+   answers themselves are built at runtime from faq-content.js — nothing about
+   this pane is in index.html except an empty box.
+   ══════════════════════════════════════════════════════════ */
+.faq-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.9rem 1rem 1.4rem;
+}
+
+/* No max-width on the stack: the rules and the ruled rows have to reach the pane's
+   edge, the way the analyser's groups do. The measure is held on the PROSE instead,
+   below — the paragraphs and the standfirst — which is where a line length is
+   actually a reading problem. */
+.faq-stack { display: flex; flex-direction: column; gap: 1rem; }
+
+.faq-head { display: flex; flex-direction: column; gap: 0.35rem; }
+.faq-eyebrow { margin: 0; font-size: var(--text-xs); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-gray-6); }
+.faq-title { margin: 0; font-size: var(--text-2xl); line-height: 1.15; color: var(--ink-gray-9); text-wrap: balance; }
+.faq-standfirst { margin: 0; max-width: 62ch; color: var(--ink-gray-6); }
+
+/* The jump list. Buttons, NOT anchors: this pane lives inside the app's hash
+   router, so an href="#section" would be read as a ROUTE and throw the user back
+   to the IR list. The click handler scrolls instead — same as the analyser's. */
+.faq-jump { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.faq-jump-item {
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--surface-gray-4);
+  border-radius: var(--radius-3);
+  background: var(--surface-gray-2);
+  color: var(--ink-gray-8);
+  cursor: pointer;
+}
+.faq-jump-item:hover { background: var(--surface-gray-3); color: var(--ink-gray-9); }
+.faq-jump-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.faq-section { display: flex; flex-direction: column; gap: 0.25rem; }
+.faq-section-title { margin: 0.4rem 0 0.2rem; font-size: var(--text-lg); color: var(--ink-gray-9); text-wrap: balance; }
+
+/* One question. <details> so the list is scannable — forty-six answers laid out
+   flat is a scroll nobody finishes, and the browser's own find-in-page opens a
+   closed one, so collapsing hides nothing from a search. */
+.faq-q { border-top: 1px solid var(--surface-gray-3); }
+.faq-q-label {
+  cursor: pointer;
+  padding: 0.55rem 0 0.55rem 1.1rem;
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  text-wrap: balance;
+  position: relative;
+  list-style: none;
+}
+.faq-q-label::-webkit-details-marker { display: none; }
+.faq-q-label::before {
+  content: "+";
+  position: absolute;
+  left: 0;
+  color: var(--ink-gray-6);
+}
+.faq-q[open] > .faq-q-label::before { content: "−"; }
+.faq-q-label:hover { color: var(--accent); }
+
+.faq-a { padding: 0 0 0.7rem 1.1rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.faq-a p { margin: 0; max-width: 68ch; }
+.faq-a code { font-family: var(--font-mono); font-size: 0.92em; }
+.faq-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+
+/* The two callouts the FAQ has: one is "never share it", one is "nothing is sent
+   anywhere". The status steps are the app's own two words for those — a warning and
+   a clearance — so they are read from the shared names rather than a new pair. */
+.faq-callout { margin: 0; padding: 0.6rem 0.8rem; border-left: 2px solid var(--st-danger-fg); background: var(--surface-gray-2); }
+.faq-callout-label { display: block; font-size: var(--text-xs); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-gray-6); }
+.faq-callout.is-ok { border-left-color: var(--st-resolved-fg); }
+
+.faq-foot { border-top: 1px solid var(--surface-gray-3); padding-top: 0.8rem; display: flex; flex-direction: column; gap: 0.3rem; }
+.faq-foot p { margin: 0; color: var(--ink-gray-6); font-size: var(--text-sm); }
+
 .log-stack { display: flex; flex-direction: column; gap: 0.75rem; }
 
 /* The verdict: the answer first, and the counts beside it rather than buried. */
@@ -2139,6 +2223,7 @@
   .ir-list { padding-bottom: calc(var(--bottombar-h) + var(--safe-b)); }
   .insights-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
   .log-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
+  .faq-body { padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
 }
 
 /* ══════════════════════════════════════════════════════════

@@ -660,13 +660,15 @@
           <span class="nav-label" data-i18n="nav.logAnalyser">Log Analyser</span>
         </a>
 
-        <!-- The FAQ, from inside the app. A plain link, like the three above it —
-             no JS binding, and a NEW TAB so leaving for a question never costs
-             whatever form was half-filled behind it. It is a real <a>, never a
-             script-opened window: phones block window.open from a tap that has to
-             travel anywhere, and the sign-in screen needs the same page anyway. -->
-        <a class="nav-item" id="nav-faq" href="faq.html" target="_blank" rel="noopener"
-           title="Help &amp; FAQ" data-i18n-title="nav.help">
+        <!-- The FAQ, from inside the app — a view of this app, not a page beside
+             it. A plain hash link with no JS binding, exactly like the three above
+             it. It used to open faq.html in a new tab; on 2026-10-08 the owner
+             said what that costs — "our FAQ page is opening in a new tab, that is
+             not good for us. It has to be in our app, as per our UI and a part of
+             our app" — so the answers are a routed pane now, wearing the app's own
+             skin, and the standalone page is left to the SIGN-IN screen, which has
+             no shell to put them in. One source, two renderers: faq-content.js. -->
+        <a class="nav-item" id="nav-faq" href="#/faq" title="Help &amp; FAQ" data-i18n-title="nav.help">
           <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label" data-i18n="nav.help">Help &amp; FAQ</span>
         </a>
@@ -1058,6 +1060,28 @@
           <div id="log-body" class="log-body"></div>
         </div>
 
+        <!-- ====== HELP & FAQ VIEW ====== -->
+        <!-- A FIFTH sibling pane, on the same principle as #insights-view and
+             #log-view above: it owns the screen, the IR list keeps its place
+             beside it on desktop, and folding it into the detail pane would make
+             that pane's display stop meaning "an IR is open".
+
+             Deliberately carries no class="section-content" — the suites count
+             panes by that literal, and the nine sections are what they count.
+
+             EMPTY here: app.js fills it from window.FAQ_CONTENT on the way in. The
+             content is NOT in this markup, so there is exactly one copy of every
+             answer — see faq-content.js for why that mattered enough to build two
+             renderers rather than paste the text twice. -->
+        <div id="faq-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title" data-i18n="nav.help">Help &amp; FAQ</span>
+            </div>
+          </div>
+          <div id="faq-body" class="faq-body"></div>
+        </div>
+
       </div><!-- end panes -->
     </div><!-- end workspace -->
   </div><!-- end app-container -->
@@ -1135,6 +1159,13 @@
        already inside the element, so this file failing to load leaves the app
        reading exactly as it does today rather than showing a screen of keys. -->
   <script src="i18n.js"></script>
+  <!-- The Help & FAQ, and the ONLY copy of it. A plain script for the same reason
+       as the three above, and it must come before app.js, which renders #/faq from
+       window.FAQ_CONTENT. It is not HTML in here: the same object is also read by
+       tools/build-faq.mjs, which regenerates the standalone faq.html the signed-out
+       door still needs. Two renderers, one text — so a change to an answer can
+       never land in one of them and miss the other. -->
+  <script src="faq-content.js"></script>
   <script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on

@@ -20,7 +20,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v76';
+const CACHE_NAME = 'ipassbook-v77';
 const SHELL = [
   './',
   './index.html',
@@ -35,6 +35,7 @@ const SHELL = [
   './vendor/pdf-lib.min.js',
   './dataflash.js',   // the flight-log reader; load order must match index.html
   './i18n.js',        // the English language layer; must be in place before app.js
+  './faq-content.js', // the Help & FAQ text; app.js renders #/faq from it on load
   './app.js',
   './manifest.json',
   // The FAQ is in the SHELL because it is linked from the sign-in screen, so it is

@@ -309,6 +309,55 @@ Entries carry `source`. For a workflow line both `sectionId` is **blank** and
 and reporting that verbatim would hand back `__IRS__` — the store, not the ticket —
 and quietly make any `e.irNumber === irNumber` filter drop every status change.
 
+### `listIRThreads`
+```
+GET {BASE_URL}?action=listIRThreads&irNumber=IR409
+```
+The ticket's own email correspondence, read live from the **`Email_Index`** tab of the
+*intake* spreadsheet (`IR_REPO_SHEET_ID`) — the crawl's own table, built from two
+mailboxes and covering 370 of the 452 IRs. Returns
+`{status, messages: [...], truncated}` with one entry per message-per-mailbox:
+`threadId`, `messageId`, `date`, `from`, `to`, `subject`, `preview`, `direction`,
+`mailbox`. Capped at **300** by tail, which is the newest end because the crawl appends
+in IR order.
+
+**This is context, not content.** Nothing in the app writes this tab and nothing can:
+a ticket's mail is a record of what was said, not a field anybody edits. It is returned
+in **sheet order**, not sorted — `date` is a display string whose format is the crawl's
+business, and sorting here on a string this file cannot parse would order the list by
+an accident of formatting. The frontend parses it with the same tolerant parser the
+audit rows use, and an unreadable date sinks that row to the bottom rather than
+floating it to the top wearing today's date.
+
+The columns are matched **by header name, exactly** — `IR_No`, `Thread_Id`, `Message_Id`,
+`Date`, `From`, `To`, `Subject`, `Preview`, `Direction`, `Mailbox` — and *not* by
+position, because the crawl is not this file's code and a fixed index would silently
+shift every field by one the day a column is inserted. Exact rather than substring
+matching is the one place this differs from `irNumberColumnIndex` and
+`companyColumnIndex`: those use substrings because a Google Form's questions get
+reworded, while these names are machine-written and three of them are two to four
+characters long. A renamed column therefore answers **"no email"** instead of a wrong
+sender on every row — the direction `customerIRS` fails in, for the same reason.
+
+Rows are matched on `irKey(irNumber)`, so `IR 483` and `IR483` are one ticket. A missing
+tab, a missing IR column or a ticket with no mail all return an **empty list, never an
+error**: 82 of the 452 tickets are in exactly that state, and an exception here would
+take the whole ticket view down over a feature that is context.
+
+The read is **cached per ticket** in `CacheService` for an hour, under
+`irth:<sheetId>:<IR>`. The split is deliberate: `listIRThreads` is the wrapper the
+router calls and it answers from the cache **before the spreadsheet is opened at all**,
+while `readEmailThreadsFromSheet` is the read that pays for the open and the grid scan.
+An empty answer is cached like any other — a ticket with no mail is the common case, and
+those are exactly the reads that would otherwise scan the whole index for a known-empty
+answer. As everywhere else in this file the cache is **a speed-up and nothing else**:
+every use is in try/catch, and a failure to read *or* write it just means the next call
+does the search it would have done anyway.
+
+> ⚠️ **This endpoint is session-gated but not per-IR gated** — any signed-in user can
+> read the correspondence for any IR they know the number of, exactly as with
+> `getAuditLog` above.
+
 ### `listLegacyIRs`
 The **index** of the pre-app per-IR tabs (legacy workbook, ~IR310–IR441), so the
 master list can badge them and the 🏛 Legacy button can list them. Returns each IR's
@@ -500,7 +549,27 @@ shipped dead.
 | Branch | What the page shows | Where the primary link goes | The second link |
 |---|---|---|---|
 | `code` | `Signed in as <email>` | `CONFIG.APP_URL#sso=<32 hex>` — **Continue to I-PASSBOOK** | Google's picker, returning to this door |
-| refusal | the door's own sentence | `CONFIG.APP_URL#ssoerr=<encoded>` — **Back to sign in** | the same |
+| refusal | the door's own sentence, in a **ruled red block** | `CONFIG.APP_URL#ssoerr=<encoded>` — **Back to sign in** | the same |
+
+**It wears the app's own theme (2026-10-09).** Until that day it did not, and it was the only
+screen in the product that did not: it was written before INDRONES INDUSTRIAL existed and still
+carried the look the app had abandoned — a `#005cad` blue button and a `border-radius: 14px`
+card, a colour and a corner that appear nowhere else now. The owner was the one who could see
+it, because he is the only person who signs in through this door: *"the subsequent pages which
+we have designed for transition must also be of our current app theme, there are not so far."*
+
+It **cannot link the app's stylesheets** — it is served from `script.google.com` and the app
+from `github.io`, and a first screen that waited on the app's seven stylesheets before it could
+paint would flicker at the one moment during a sign-in when nothing may flicker. So the values
+are **literals**, each one commented in the source with the token it was copied from, which
+makes that block a second copy of those tokens. What is **not** carried over is cream mode and
+the five palette presets: both are stored preferences, and this page is on another origin with
+no storage to read. What is left is the app's default **light** look plus its dark mode under
+`prefers-color-scheme` — the one theme signal this page can actually see.
+
+**`node tools/render-doorpage.mjs`** writes both branches to disk so they can be photographed.
+This is the only page in the app that cannot be reached without a live Google account, which
+is exactly why it went three months without anyone seeing that it was wrong.
 
 **The link is built server-side** from `CONFIG.APP_URL` and reads **no request parameter**
 — that is the whole open-redirect defence, and it is structural rather than a check, because
@@ -1125,6 +1194,9 @@ Then, to prove a backup can be read back into a store:
 
 Once, to survey what the legacy workbook actually contains:
   inventoryLegacyWorkbook()
+
+Once, to find the email crawl and see what its columns are:
+  inventoryEmailIndex()
 ```
 
 There is **no cutover window any more.** The old order existed because widening a
@@ -1152,6 +1224,27 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `installBackupTrigger()` | idempotent | Creates the **daily** ~23:40 IST time-driven trigger that calls `runNightlyBackup()`. A second run does not create a second trigger. It prints, in its own output, the command to run once by hand — because an installed trigger that has never fired leaves the health line reading "never", and the only way to tell a working trigger from an untested one is to run it once |
 | `rehearseRestore(stamp?)` | **writes to a copy only** | Rebuilds a store from a dated backup folder (the newest, or the one named) into `_rehearsal/`, reads it back, and prints `REHEARSAL PASSED` or `REHEARSAL FAILED`. It resolves the backup root and nothing else, so it **cannot** touch `_store/`, and `_rehearsal` is not named for a date, so the rotation can never reach it. Run it after the first `runNightlyBackup()`, and again whenever the store's shape changes |
 | `inventoryLegacyWorkbook()` | **read-only, editor-run** | Prints the legacy workbook's contents to the execution log: every tab's name **in the workbook's own order**, its used dimensions, how many of its rows hold anything at all, and the first row that does — the header, **wherever it sits**. It exists because `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **silently skips every other tab**, so nobody knows what else is in that workbook; bringing that data into the app cannot be planned until somebody does. It is **not an action** — no route, so it adds no API surface and does not move `API_VERSION` — and it touches nothing but the workbook. It reads every cell of every tab (one `getDisplayValues()` per tab) because `getLastRow()` counts a row that was merely *formatted*; a tab over 200,000 cells is reported by dimension and left unscanned. Each line goes through `report()`, one log entry per tab, because a single entry of a thousand lines is what a copy-paste truncates |
+| `inventoryEmailIndex()` | **read-only, editor-run** | The same survey shape as the row above, aimed at the piece of the legacy data the app has **no code for**: a crawl over two mailboxes that produced **2393 rows / 646 threads covering 370 of 452 IRs**, referred to as `Email_Index`. **Run once, 2026-10-09, and it answered everything** — see the result below. Before that run neither the tab's home, its columns nor its header row was known, because the crawl was run from an editor and never committed: no `Email_Index` string, no `GmailApp` use and no column definition existed anywhere in this repository. **A reader built against a guessed schema would be `ContentService.MimeType.HTML` again**, so this answers the three questions instead of assuming them. It cannot be pointed at a fixed id, because the id is part of what is unknown: it **searches the Drive** for spreadsheets named like an index (trying `title contains` and falling back to `name contains`), then inventories each one — every tab as name, dimensions, count of rows holding anything, and the header row. It prints **the account it ran as** first, because the two mailboxes belong to different accounts and a file one can see the other frequently cannot, so a zero-result search is an answer about identity before it is about naming. **It never touches Gmail** — crawling the mailboxes again would put a `GMAIL` scope on the deployment and every account on it would have to re-authorise the whole app for a one-off survey; Drive and Sheets are scopes the app already holds. Not an action (no route, no `API_VERSION` move), and it writes nothing: no store, no Drive write, no mail. It is the sixth `SpreadsheetApp.` site, counted deliberately in `tools/smoke-backend.mjs` |
+
+**What the one run found (2026-10-09).** `Email_Index` is a **second tab in the spreadsheet
+the app already opens** — `CONFIG.IR_REPO_SHEET_ID` (`1MPcWvgZ…`), the same file whose
+`CONFIG.IR_REPO_TAB` ('Form Responses') is the client intake read on every boot. Reading it
+therefore needs **no new file, no sharing change, no new OAuth scope and no extra
+permission**: one `getSheetByName('Email_Index')` beside a call the app already makes. The
+tab is **2394 rows × 10 columns, header on row 1**:
+
+```
+IR_No | Thread_Id | Message_Id | Date | From | To | Subject | Preview | Direction | Mailbox
+```
+
+2394 including the header, so **2393 messages** — matching the count the crawl reported.
+`IR_No` attaches a message to a ticket, `Thread_Id` groups a conversation, `Direction` is
+in/out, and `Mailbox` distinguishes the two mailboxes: **one row per message-*per-mailbox***,
+so a mail delivered to both accounts is two rows with two `Message_Id`s. Everything an
+importer needs is present and nothing has to be inferred. The same run also revealed that
+the file's `Timeline 1` tab is an **object** sheet — `getRange()` on it throws *"The action
+is not supported for OBJECT sheet"* — so a reader must skip non-grid tabs rather than trust
+`getSheets()` |
 
 ### Archiving, and the hazard that had to be closed first
 

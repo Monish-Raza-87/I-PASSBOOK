@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v82';
+const APP_VERSION = 'v83';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -4148,9 +4148,6 @@ function startAppData() {
   // Fetch IRs. The promise is kept so a deep link (#/tickets/IR409) can wait
   // for the list before it opens the passbook.
   _irsReady = fetchIRs();
-  // NOTE: the token-gated legacy archive (pre-app IRs ≤ IR441) is intentionally
-  // NOT loaded — it relied on a silent Google One-Tap per call, which caused
-  // repeated sign-in pop-ups. Previous IRs are left in the old I-PASSBOOK sheet.
   // Load admin-customizable inward dropdown options (best-effort)
   loadInwardOptions();
   // Load admin-customizable IQC inspection points + result options
@@ -4171,6 +4168,23 @@ function startAppData() {
   // and loadIRState re-merges + re-renders when it lands, so either order is
   // correct.
   loadIRState();
+  // Load the LEGACY archive — the pre-app I-PASSBOOK workbook, one tab per IR
+  // (≈IR310–IR441). Read-only, and the reason it is here rather than dropped:
+  //
+  //   An earlier version of this call was REMOVED on 2026-07-08, and the note
+  //   that stood in its place said it "relied on a silent Google One-Tap per
+  //   call". That was true of the auth system of the day — a `loadLegacyIndex()`
+  //   that had to mint an identity token fired another One-Tap card. NONE OF THAT
+  //   IS TRUE NOW. The Google One-Tap machinery is gone (see the auth header: the
+  //   token is a server SESSION attached by the fetch interceptor at app.js:911),
+  //   so `loadLegacyIndex()` costs one GET and no prompt. The note outlived the
+  //   reason for it by three months, and the effect was that the archive was
+  //   unreachable: `legacyMap` stayed empty on every device, so no card was ever
+  //   badged "Legacy record" and the button that opens one was never shown.
+  //
+  // Best-effort: an old backend answers nothing and the app is exactly what it
+  // was before this line existed.
+  loadLegacyIndex();
   loadNudges();
   startNudgePolling();
 }
@@ -7186,7 +7200,6 @@ async function fetchIRsFromBackend() {
   if (Array.isArray(data.records)) return data.records;
   return [];
 }
-
 async function fetchIRs() {
   // Assumed live until a path proves otherwise. Set HERE, before any setAllIRs()
   // call, because setAllIRs() is what repaints the dashboard — a flag set after it
@@ -7211,6 +7224,12 @@ async function fetchIRs() {
     // a silent fall-through to demo data — five invented tickets shown to someone
     // whose repository is genuinely empty.
     setAllIRs(records);
+    // The Sheet read REPLACES the row set, which takes the legacy stubs with it —
+    // they are added to `allIRs`, not read from anywhere. Re-applied here so every
+    // path that re-reads the list (boot, the Refresh button, an in-page re-login)
+    // puts them back, and so the two round trips cannot be ordered wrongly. A
+    // no-op until the legacy index has arrived.
+    mergeLegacyOnlyIRs();
     writeIRListCache();
     _lastSyncAt = new Date();
     setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
@@ -7356,10 +7375,16 @@ function renderSyncBar() {
 }
 
 // ─── LEGACY I-PASSBOOK (pre-app records, ~IR310–IR441) ───────────────────────
-// Loads the INDEX of legacy per-IR tabs (token-gated via the backend) so the master
+// Loads the INDEX of legacy per-IR tabs (session-gated on the backend) so the master
 // list can badge legacy IRs and the detail view can open a record read-only. The
 // index is tab names only — a record's content is fetched one at a time, when it is
 // actually opened (getLegacyIR). Best-effort: failures just skip legacy.
+//
+// CALLED FROM startAppData(). It was NOT called from anywhere between 2026-07-08 and
+// 2026-10-09, which left every line below it dead at runtime: `legacyMap` was never
+// filled, so no card carried a "Legacy record" badge and `#ir-legacy-btn` — the only
+// way into a pre-app record — was never shown. A function with no caller is not
+// "dormant", it is a feature that is absent while its tests pass.
 async function loadLegacyIndex() {
   try {
     const controller = new AbortController();
@@ -7370,11 +7395,17 @@ async function loadLegacyIndex() {
     if (data.status === 'ok' && Array.isArray(data.records)) {
       legacyMap = {};
       data.records.forEach(r => { if (r.irNumber) legacyMap[r.irNumber] = r; });
+      // The re-render is unconditional and the merge is not, and the difference
+      // matters: mergeLegacyOnlyIRs() only appends stubs for IRs the Sheet does
+      // not have, but the "Legacy record" BADGE is read straight off `legacyMap`
+      // by the renderer — so an index whose IRs are all in the Sheet would still
+      // need this render to show them as legacy.
       mergeLegacyOnlyIRs();
-      renderIRList(allIRs);   // re-render to apply Legacy badges / appended cards
-      if (Object.keys(legacyMap).length) {
-        showToast(`🏛 Legacy archive linked — ${Object.keys(legacyMap).length} IRs`);
-      }
+      renderIRList(allIRs);
+      // NO SUCCESS TOAST. It fired on every sign-in for a load that always
+      // succeeds, which is a daily interruption announcing that nothing went
+      // wrong; the 161 legacy cards appearing in the list are the evidence. The
+      // failure toasts below stay, because those say something the person needs.
     } else {
       // Surface the real reason. "Unauthorized" = the session expired; the user
       // should sign in again from the user menu. Anything else is a backend error
@@ -7391,13 +7422,28 @@ async function loadLegacyIndex() {
 
 // Append legacy IRs that aren't already in the master list (very old IRs not in
 // the Form Responses tab) so they're still reachable from the app.
+// CALLED FROM BOTH SIDES OF A RACE, and that is deliberate. The legacy index and
+// the IR list are two independent round trips that can land in either order, and
+// the list read REPLACES `allIRs` when it lands. So this is called once when the
+// index arrives and again by fetchIRs() after every setAllIRs() — whichever lands
+// last is the one that gets the stubs in, and calling it twice adds nothing twice.
 function mergeLegacyOnlyIRs() {
+  // Only IRs the Sheet does not have. The legacy workbook and the Form Responses
+  // tab overlap at the boundary, and a stub over a real record would replace the
+  // client's own form data with an empty row.
+  let added = false;
   Object.values(legacyMap).forEach(l => {
     if (!allIRs.some(ir => ir.irNumber === l.irNumber)) {
       const drone = (l.label || '').split('|')[1]?.trim() || '';
       allIRs.push({ irNumber: l.irNumber, droneId: drone, dateRaised: '', status: 'Open', isLegacyOnly: true });
+      added = true;
     }
   });
+  // NOTHING ADDED, NOTHING MOVED. The sort below rewrites the array the list is
+  // rendered from, and renderInsights() rebuilds the dashboard's counts; doing
+  // either on a call that changed nothing is work with no payer, and it is the
+  // second call of two that would pay it on every boot.
+  if (!added) return;
   // The stubs are pushed AFTER setAllIRs() has already merged app-owned state
   // into the records it was given, so without this a legacy IR that HAS been
   // triaged in the app renders as untouched: no assignee, no category, and —
@@ -7406,6 +7452,10 @@ function mergeLegacyOnlyIRs() {
   applyIRStateToAllIRs();
   // keep latest-first ordering by IR number
   allIRs.sort((a, b) => parseInt((b.irNumber || '').replace(/\D/g, ''), 10) - parseInt((a.irNumber || '').replace(/\D/g, ''), 10));
+  // The dashboard counts these same rows, so the row set changing is its business
+  // too — the list is not the only screen that shows a number. It early-returns
+  // while another pane owns the screen, so on the boot path this costs nothing.
+  renderInsights();
 }
 
 function renderIRList(records) {
@@ -8496,6 +8546,12 @@ function applyOverviewGating() {
 // this cache with no second fetch.
 let activityLogCache = { irNumber: '', entries: [] };
 
+// The same idea for the email history, in its OWN cache because it arrives from its
+// own fetch and lands at its own time. Two caches rather than one combined record so
+// that the slower of the two cannot hold the faster one off the screen: the audit
+// rows paint as soon as they land, and the mail joins them when it lands.
+let emailLogCache = { irNumber: '', messages: [] };
+
 // The in-page log shows the newest 40; the History modal shows 400. One builder,
 // one renderer, two windows.
 const ACTIVITY_LIMIT = 40;
@@ -8503,10 +8559,24 @@ const ACTIVITY_LIMIT = 40;
 async function loadActivityLog(irNumber) {
   const el = document.getElementById('ir-timeline');
   if (!el) return;
+  // Both fired TOGETHER, and deliberately not awaited in sequence. They are two
+  // independent reads of two different stores — one from `_store/`, one from the
+  // intake spreadsheet — and the slower one is the sheet, which reads ~24,000 cells
+  // to answer for one ticket. Awaiting the audit first and the mail second would add
+  // the sheet's whole cost to a panel that already has something to show.
+  const mailPromise = fetchIRThreads(irNumber);
   const entries = await fetchAuditEntries(irNumber, 400, true);
   // A newer IR may have been opened while this was in flight.
   if (!currentIR || currentIR.irNumber !== irNumber) return;
   activityLogCache = { irNumber: irNumber, entries: entries };
+  refreshActivityLog();
+
+  // Second paint, from the same guard. `emailLogCache` is left holding the PREVIOUS
+  // IR's rows until this lands, and refreshActivityLog only merges a cache whose
+  // irNumber matches — so the stale set can never leak into another ticket's list.
+  const messages = await mailPromise;
+  if (!currentIR || currentIR.irNumber !== irNumber) return;
+  emailLogCache = { irNumber: irNumber, messages: messages };
   refreshActivityLog();
 }
 
@@ -8516,10 +8586,14 @@ function refreshActivityLog() {
   // Nothing cached for THIS IR yet — the first fetch is still in flight, and
   // rendering another IR's activity would be worse than a moment of blank.
   if (activityLogCache.irNumber !== currentIR.irNumber) return;
+  // The email half is only merged once ITS fetch has landed for THIS IR. Before that
+  // the list renders without it rather than waiting — see emailLogCache. An empty
+  // array is the common case and merges to nothing either way.
+  const mail = (emailLogCache.irNumber === currentIR.irNumber) ? emailLogCache.messages : [];
   // Build the whole list and slice it here rather than passing the limit to
   // buildTimeline, so the header count can report the TRUE total: "40 of 128" is
   // honest, a bare "40" would not be.
-  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0);
+  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0, mail);
   renderTimelineInto(el, all.slice(-ACTIVITY_LIMIT), {
     emptyText: 'No activity recorded yet for this IR.',
   });
@@ -13290,6 +13364,13 @@ const ICON_PATHS = {
   // for, and smoke-ui.mjs cross-checks every referenced name against this map —
   // because a name that is not here renders '' and leaves a silent blank button.
   comment:        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  // The email history. An envelope, and NOT the `comment` speech balloon or the
+  // `inbox` tray: in the timeline these three sit in one list, and a mail from the
+  // customer must be tellable from a colleague's comment at a glance. `inbox` is
+  // already spoken for by the empty state, so this is a fourth picture rather than a
+  // reuse — the one thing a merged timeline cannot afford is a glyph that means two
+  // different things.
+  mail:           '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.6 7.2l7.2 5.4a2 2 0 0 0 2.4 0l7.2-5.4"/>',
   dot:            '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>',
   // chrome
   chevron:        '<path d="M9 5l7 7-7 7"/>',
@@ -13431,13 +13512,25 @@ const TIMELINE_KINDS = {
   // picture for the return trip would be two icons for one idea.
   archived: { icon: 'archive',      label: 'Folder archived' },
   restored: { icon: 'archive',      label: 'Folder restored' },
+  // The ticket's own correspondence, from the email crawl's tab in the intake
+  // spreadsheet. It sits in the SAME list as the audit rows on purpose — an email and
+  // a section save are one story about one ticket, and a separate panel would be a
+  // second history to keep in step with the first. The label is the plain noun a
+  // reader already uses for it, and `by` on one of these rows is the sender.
+  email:    { icon: 'mail',         label: 'Email' },
 };
 
 // PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
 // Returns entries OLDEST FIRST, trimmed to the newest `limit` (0/absent = all).
 // The renderer reverses for display; the builder needs ascending order to trim
 // from the correct end.
-function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
+// `emailMessages` is the FIFTH parameter and is optional, appended rather than
+// inserted so that the four existing call sites and every fixture in smoke-timeline
+// keep working untouched. It is a fourth SOURCE, not a fourth kind of audit entry:
+// these rows come from a different spreadsheet, are written by a crawl this app does
+// not run, and can never be edited here — but they belong in one list with the rest,
+// which is the whole point of building the timeline rather than rendering two.
+function buildTimeline(irNumber, auditEntries, nudgeItems, limit, emailMessages) {
   const out = [];
 
   (Array.isArray(auditEntries) ? auditEntries : []).forEach(e => {
@@ -13557,16 +13650,60 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit) {
     });
   });
 
+  (Array.isArray(emailMessages) ? emailMessages : []).forEach(m => {
+    if (!m) return;
+    out.push({
+      // The crawl's `Date` is a display string whose format this file does not own,
+      // so it goes through the same tolerant parser the audit rows use. An
+      // unreadable one yields 0 and the row sinks to the bottom of the list rather
+      // than landing at the top wearing today's date — a wrong position is
+      // recoverable, a wrong date is not.
+      at: parseAuditTimestamp(m.date),
+      timestamp: m.date || '',
+      // Who wrote it. On an inbound mail that is the customer; on one we sent it is
+      // us, which is still the honest answer to "who wrote this row".
+      by: m.from || '',
+      source: 'email',
+      sectionId: '',
+      fieldId: '',
+      oldValue: '',
+      newValue: '',
+      kind: 'email',
+      subject: m.subject || '',
+      preview: m.preview || '',
+      // Both printed RAW. The sheet's own vocabulary is shown rather than mapped
+      // onto one this file invents — it is not known whether the column says
+      // `IN`/`OUT`, `in`/`out` or `Inbound`/`Outbound`, and guessing would put a
+      // confident wrong word on every row.
+      direction: m.direction || '',
+      mailbox: m.mailbox || '',
+    });
+  });
+
   out.sort((a, b) => {
     if (a.at !== b.at) return a.at - b.at;
     // One save writes a whole batch at a single timestamp. Sections before
     // workflow, so the edit that caused a state change reads before the change.
+    // Email ranks with comments — last — because it is context arriving alongside
+    // the ticket rather than an event that changed it.
     const rank = s => (s === 'section' ? 0 : s === 'workflow' ? 1 : 2);
     return rank(a.source) - rank(b.source);
   });
 
   const cap = Number(limit) > 0 ? Number(limit) : 0;
   return (cap && out.length > cap) ? out.slice(out.length - cap) : out;
+}
+
+// `someone@example.com` → `someone`. The local part only: the crawl's two mailboxes
+// share a domain, so the domain carries none of the information and printing it would
+// put a second address beside the sender's on every row. Anything that is not an
+// address comes back as it stands — the Mailbox column is not this file's to assume
+// the shape of, and a value this does not recognise must survive untouched rather than
+// be truncated into a lie.
+function shortMailbox(v) {
+  const s = String(v == null ? '' : v).trim();
+  const at = s.indexOf('@');
+  return at > 0 ? s.slice(0, at) : s;
 }
 
 // ─── PUT A VALUE BACK ─────────────────────────────────────────────────────────
@@ -13762,7 +13899,15 @@ function renderTimelineInto(el, timeline, opts) {
     // "Triage" would put a word on the row that no button in the app uses for it.
     const isArchiveEvent = it.kind === 'archived' || it.kind === 'restored';
     const srcChip = (it.source === 'workflow' && !isArchiveEvent)
-      ? '<span class="hist-src">Triage</span>' : '';
+      ? '<span class="hist-src">Triage</span>'
+      // The crawl's own Direction value, printed as it stands. It matters that the
+      // chip is here rather than in the body: an inbound mail and one we sent are
+      // otherwise identical rows, and the whole reason someone opens this list is to
+      // find out who said what to whom. It also earns its place for a duller reason —
+      // a mail delivered to BOTH mailboxes is two rows, and the mailbox on the by-line
+      // below is what stops those two looking like a rendering bug.
+      : (it.kind === 'email' && it.direction
+          ? `<span class="hist-src">${escHtml(it.direction)}</span>` : '');
 
     let body = '';
     if (it.kind === 'comment') {
@@ -13781,6 +13926,12 @@ function renderTimelineInto(el, timeline, opts) {
              `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
     } else if (it.kind === 'add') {
       body = `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
+    } else if (it.kind === 'email') {
+      // The subject carries a mail; the preview is what makes the row worth reading
+      // without opening it. Both are the CUSTOMER's words, so both are escaped like
+      // every other value here — a preview is exactly where a stray `<` would arrive.
+      if (it.subject) body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.subject))}</span></div>`;
+      if (it.preview) body += `<div class="nudge-msg">${escHtml(clip(it.preview))}</div>`;
     } else if (it.newValue) {
       body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
     }
@@ -13795,9 +13946,14 @@ function renderTimelineInto(el, timeline, opts) {
     // A comment row's own label already says "Comment" and its field chip already
     // names the field, so a third "· comment" suffix said nothing. A section row
     // still names its section, and a triage row names itself.
+    // A mail names the MAILBOX it was crawled from, in the slot where a section row
+    // names its section. It is the only place the two-mailbox duplicate is explained:
+    // the same message delivered to both accounts is two rows with two ids, and
+    // without this they read as the app having printed the same mail twice.
     const where = it.source === 'comment'
       ? ''
-      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : ''));
+      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : '')
+         || (it.kind === 'email' ? shortMailbox(it.mailbox) : ''));
     return `<div class="hist-item">
       <div class="hist-top"><span class="hist-ev">${iconSvg(meta.icon)}${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
       <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
@@ -13838,6 +13994,26 @@ async function fetchAuditEntries(irNumber, limit, quiet, fieldId) {
   } catch {
     if (!quiet) showToast('History unavailable — backend not connected yet');
   }
+  return [];
+}
+
+// ─── THE TICKET'S OWN EMAIL ────────────────────────────────────────────────────
+// The one thing here that is not the app's data. `Email_Index` is a tab of the intake
+// spreadsheet written by a crawl that lives outside this repo, so this is a READ of
+// somebody else's table: no app action writes it, and a ticket's mail is context
+// beside the audit rows rather than part of the ticket's record.
+//
+// ALWAYS QUIET, and always non-blocking. An IR with nothing in either mailbox is the
+// COMMON case — 82 of the 452 — so a failure toast here would fire on a big minority
+// of tickets over a feature nobody asked to see at that moment. A missing backend
+// action (`unknownAction` on a deployment older than v10) is exactly the same: the
+// timeline simply renders without its email rows.
+async function fetchIRThreads(irNumber) {
+  try {
+    const res  = await fetch(`${CONFIG.GAS_URL}?action=listIRThreads&irNumber=${encodeURIComponent(irNumber)}`);
+    const data = await res.json();
+    if (data.status === 'ok') return Array.isArray(data.messages) ? data.messages : [];
+  } catch { /* see above — this is context, and it fails silent by design */ }
   return [];
 }
 

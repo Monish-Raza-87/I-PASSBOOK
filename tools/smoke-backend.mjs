@@ -78,8 +78,14 @@ r.head('the owner\'s security decisions');
 // v9 = `listTeam`, the roster the Allot picker reads. Bumped for the usual reason:
 // the action set changed, and the frontend must be able to tell an old deployment
 // from a new one rather than discovering it from an empty dropdown.
-r.ok('API_VERSION is 9 — the team roster the Allot picker reads',
-  /API_VERSION:\s*9\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+//
+// v10 = `listIRThreads`, a ticket's own email correspondence, read from the crawl's
+// tab in the intake spreadsheet. The frontend asks for it on every ticket open, and
+// on a v9 deployment that request answers `unknownAction` — so the timeline would
+// render without its email rows and look like an empty history rather than a missing
+// deploy. The version is how the app tells those two apart.
+r.ok('API_VERSION is 10 — a ticket\'s own email correspondence',
+  /API_VERSION:\s*10\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -1028,21 +1034,43 @@ r.head('the positional column layout is really gone, not adapted');
 // The count going 4 → 5 is the deliberate act the number exists to force: a fifth
 // site cannot appear by accident, and the site it names here is an editor-run read
 // with no route, so the public surface is unchanged.
+//
+// 5 → 6 on 2026-10-09, the same deliberate act for the same reason. The owner asked
+// for the app to be seeded with everything the legacy database holds, and the email
+// half of that cannot be designed because nobody knows which spreadsheet carries the
+// crawl, what its tab is called, or what its columns are. `inventoryEmailIndex()` is
+// the read-only, editor-run, NOT-routed survey that answers those three. It is
+// counted here rather than exempted because a survey of an unknown file is exactly
+// the kind of thing that should not be able to appear without someone saying so.
+//
+// 6 → 7 the same day, once that survey had answered. The email history itself is a
+// ROUTED read of the crawl's tab, and it is the first SpreadsheetApp site the app
+// reaches from a request rather than from the editor. It stays an INPUT — the crawl
+// owns that tab and this only reads it — so the sentence above still holds, but the
+// number had to move for it, which is what the number is for.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly five times', ssSites.length === 5, ssSites.length);
+r.ok('SpreadsheetApp is used exactly seven times', ssSites.length === 7, ssSites.length);
+// The email reader is a PAIR: listIRThreads is the caching wrapper and the only name the
+// router knows, readEmailThreadsFromSheet is the one holding the sheet call. Both are
+// named here because either could grow the call; the wrapper must never gain one, since
+// its whole job is to answer before the spreadsheet is opened at all.
 const ssAllowed = ['intakeGrid', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
-                   'exportStoreToFolder'];
+                   'exportStoreToFolder', 'inventoryEmailIndex',
+                   'listIRThreads', 'readEmailThreadsFromSheet'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a named site (' + (owner ? owner.name : 'top level') + ')',
     !!owner && ssAllowed.indexOf(owner.name) > -1,
     { site: i + 1, fn: owner && owner.name });
 });
-r.ok('and none of them writes: both sheets are INPUTS, never stores',
+r.ok('and none of them writes: every sheet is an INPUT, never a store',
   !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('listIRs')) &&
   !/setValue|appendRow/.test(fnBody('listLegacyIRs')) &&
   !/setValue|appendRow/.test(fnBody('getLegacyIR')) &&
-  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('inventoryLegacyWorkbook')),
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('inventoryLegacyWorkbook')) &&
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('inventoryEmailIndex')) &&
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('listIRThreads')) &&
+  !/setValue|appendRow|getRange\([^)]*\)\.set/.test(fnBody('readEmailThreadsFromSheet')),
   (code.match(/[^\n]*(appendRow|\.setValue)[^\n]*/g) || ['']));
 r.ok('the backup sheet is CREATED and never opened back — an output, not a store',
   /SpreadsheetApp\.create\(/.test(fnBody('exportStoreToFolder')) &&
@@ -1051,6 +1079,30 @@ r.ok('the backup sheet is CREATED and never opened back — an output, not a sto
   (fnBody('exportStoreToFolder').match(/[^\n]*SpreadsheetApp[^\n]*/g) || ['none']));
 r.ok('...and it is MOVED into the dated backup folder, not left in My Drive',
   /moveTo\(day\)/.test(fnBody('exportStoreToFolder')));
+
+r.head('the email-index survey is a read with no way in');
+r.ok('inventoryEmailIndex exists and is NOT routed — no API surface, no version move',
+  /function inventoryEmailIndex\s*\(/.test(code) &&
+  !/\binventoryEmailIndex\b/.test(fnBody('doGet')) &&
+  !/\binventoryEmailIndex\b/.test(fnBody('doPost')),
+  (code.match(/[^\n]*inventoryEmailIndex[^\n]*/g) || []).length + ' mention(s)');
+// The reason this matters is not tidiness: reading the mailboxes again would put a
+// GMAIL scope on the deployment, and every account on it would be asked to
+// re-authorise the whole app for a one-off survey. Drive and Sheets are scopes the
+// app already holds, which is why the survey searches the Drive instead.
+r.ok('it never reaches for Gmail — a mail scope would force every account to re-authorise',
+  !/GmailApp|MailApp/.test(fnBody('inventoryEmailIndex')));
+r.ok('...and it writes nothing anywhere: no store, no Drive write, no mail',
+  !/\.setValue|appendRow|DriveApp\.createFile|createFile\(|addFile\(/.test(fnBody('inventoryEmailIndex')),
+  (fnBody('inventoryEmailIndex').match(/[^\n]*(createFile|addFile)[^\n]*/g) || ['none']));
+r.ok('it prints its own lines rather than one dump, so a long inventory cannot be folded away',
+  /lines\.forEach\(function \(line\) \{ report\(line\); \}\)/.test(fnBody('inventoryEmailIndex')));
+// The one check that the survey ran against the file the owner means: it says which
+// account it ran as. The two mailboxes are owned by different accounts and a file one
+// can see the other frequently cannot, so an empty search is an answer about identity
+// before it is an answer about naming.
+r.ok('it prints the account it ran as — a zero-result search is about identity first',
+  /Session\.getActiveUser\(\)\.getEmail\(\)/.test(fnBody('inventoryEmailIndex')));
 
 r.head('the legacy record read is one tab at a time, as the sheet displays it');
 r.ok('getLegacyIR exists and is routed behind the token gate',

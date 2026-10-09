@@ -564,4 +564,30 @@ r.ok('no sheet address hides in the demo fixtures either',
   !/spreadsheets\/d\/[A-Za-z0-9_-]{20,}/.test(appSrc),
   (appSrc.match(/[^\n]*spreadsheets\/d\/[A-Za-z0-9_-]{20,}[^\n]*/g) || ['none — correct'])[0]);
 
+// ── The legacy archive is WIRED — a different claim from "it exists" ──────────
+// loadLegacyIndex() was defined, tested and REACHABLE BY NOBODY from 2026-07-08
+// to 2026-10-09. Every assertion about the feature passed for three months: the
+// stub merge, the badge, the read-only modal, the mapper. None of it ran on a
+// device, because nothing called the function that fills `legacyMap` — so the
+// archive was absent while its tests were green, which is the exact shape of
+// failure no assertion about a function's BODY can catch. A caller is the one
+// part of a feature that cannot be unit-tested into existence, so it is pinned
+// here against the source.
+r.head('the legacy archive is actually LOADED, not merely defined');
+const fnSlice = (name) => {
+  const at = appSrc.indexOf('function ' + name + '(');
+  if (at < 0) throw new Error('smoke-list-intel: no such function — ' + name);
+  const end = appSrc.indexOf('\nfunction ', at + 1);
+  return appSrc.slice(at, end < 0 ? appSrc.length : end);
+};
+r.ok('startAppData() calls it — the boot path is what puts the archive on screen',
+  /loadLegacyIndex\(\);/.test(fnSlice('startAppData')),
+  (fnSlice('startAppData').match(/[^\n]*loadLegacyIndex[^\n]*/) || ['NOTHING CALLS IT'])[0]);
+r.ok('...and fetchIRs() re-merges after every list read, so the two round trips cannot be ordered wrongly',
+  /setAllIRs\(records\);/.test(fnSlice('fetchIRs')) &&
+  /mergeLegacyOnlyIRs\(\);/.test(fnSlice('fetchIRs')),
+  (fnSlice('fetchIRs').match(/[^\n]*mergeLegacyOnlyIRs[^\n]*/) || ['NOT RE-MERGED'])[0]);
+r.ok('...and the merge returns EARLY when it added nothing, rather than re-sorting and repainting for free',
+  /if \(!added\) return;/.test(fnSlice('mergeLegacyOnlyIRs')));
+
 r.finish();

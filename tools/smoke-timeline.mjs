@@ -22,6 +22,7 @@ const T = loadApp(`
   buildTimeline, parseAuditTimestamp, SUPPRESSED_AUDIT_FIELDS, TIMELINE_KINDS,
   renderTimelineInto, sectionDisplayName, iconSvg, ICON_PATHS,
   restoreOfferFor, fieldCurrentFrom, RESTORABLE_KINDS, VALUE_BEARING_KINDS,
+  shortMailbox,
   renderInto: (el, tl, opts) => renderTimelineInto(el, tl, opts),
 `);
 
@@ -365,9 +366,14 @@ const missing = Object.keys(T.TIMELINE_KINDS).filter(k => !T.TIMELINE_KINDS[k].i
 // The count is pinned on purpose: a kind is a thing the reader sees, and one added
 // without a thought about the wording is a row nobody can interpret. But the pin is
 // a LIST, not a number, so the failure names what appeared or disappeared.
+// `email` was added 2026-10-09 with the ticket's own correspondence — the first kind
+// whose rows the app does not write and cannot edit, arriving from the email crawl's
+// tab in the intake spreadsheet. It is a kind rather than a second list because it
+// lands in the SAME timeline as the audit rows, and it is pinned here for the reason
+// the list exists: a reader has to be able to tell a mail from a comment at a glance.
 const KINDS = ['save','add','edit','remove','status','assign','priority',
                'category','subcategory','subcatnote','upload','comment',
-               'archived','restored','revert'];
+               'archived','restored','revert','email'];
 const actual = Object.keys(T.TIMELINE_KINDS).slice().sort();
 r.ok('every kind the reader can see is complete, and none appeared unannounced',
   missing.length === 0 && actual.join(',') === KINDS.slice().sort().join(','),
@@ -623,5 +629,91 @@ const eh = renderR(evil, { restore: { irNumber: 'IR409', sectionId: 'sec-b', fie
 r.ok('the value is escaped in the button label',
   !/<img src=x/.test(eh) && /&lt;img src=x/.test(eh),
   (eh.match(/hist-restore-btn[\s\S]{0,160}/) || [''])[0]);
+
+// ── The ticket's own email ─────────────────────────────────────────────────────
+// The fourth source, and the only one whose rows the app neither writes nor can
+// edit. It is not the app's data at all: it arrives from the crawl's `Email_Index`
+// tab, which lives in the intake spreadsheet and is written by a script outside this
+// repo. What is asserted here is the CONTRACT the frontend depends on, since the
+// crawl's own code is not in this repository and cannot be tested from here.
+r.head('a mail joins the same list as an audit row, and is not a second history');
+const mailFrom = (o) => Object.assign({
+  threadId: 'th-1', messageId: 'msg-1', date: '21-Aug-2026 16:00:00',
+  from: 'spoc@customer.com', to: 'support@indrones.com', subject: 'Re: S25041 drift',
+  preview: 'The payload drifted about 2m on the last sortie.',
+  direction: 'IN', mailbox: 'customer.relations@indrones.com',
+}, o);
+const builtMail = (rows, comments, mail) => T.buildTimeline('IR409', rows || [], comments || [], 0, mail || []);
+
+r.ok('a mail builds a timeline row of its own kind, from its own source',
+  (() => { const tl = builtMail([], [], [mailFrom({})]); return tl.length === 1 && tl[0].kind === 'email' && tl[0].source === 'email'; })(),
+  JSON.stringify(builtMail([], [], [mailFrom({})]).map(x => ({ kind: x.kind, source: x.source }))));
+r.ok('the sender is the row\'s author — "who wrote this" is the question the by-line answers',
+  builtMail([], [], [mailFrom({})])[0].by === 'spoc@customer.com');
+r.ok('subject, preview, direction and mailbox all survive the build',
+  (() => { const m = builtMail([], [], [mailFrom({})])[0];
+    return m.subject === 'Re: S25041 drift' && /payload drifted/.test(m.preview) &&
+           m.direction === 'IN' && m.mailbox === 'customer.relations@indrones.com'; })());
+// The Direction value is printed RAW, whatever the sheet happens to say. This fixture
+// spells it one way; the assertion is that nothing in the app rewrites it, because the
+// crawl's vocabulary is not this file's to guess — a confident wrong word on every row
+// is worse than an unfamiliar one.
+r.ok('the direction is passed through untouched, never mapped to an invented word',
+  builtMail([], [], [mailFrom({ direction: 'Outbound' })])[0].direction === 'Outbound' &&
+  builtMail([], [], [mailFrom({ direction: '' })])[0].direction === '');
+r.ok('a missing field is an empty string, never undefined leaking into the markup',
+  (() => { const m = builtMail([], [], [{}])[0];
+    return [m.subject, m.preview, m.direction, m.mailbox, m.by, m.timestamp].every(v => typeof v === 'string'); })(),
+  JSON.stringify(builtMail([], [], [{}])[0]));
+
+// A `Date` this file cannot parse is the state the crawl can actually put it in, since
+// its format is not declared anywhere. 0 sinks the row to the BOTTOM of a newest-first
+// list — the recoverable failure — where `Date.now()` would have floated it to the top
+// wearing today's date, which is not recoverable by the reader.
+r.ok('an unparseable date sinks the row rather than dating it today',
+  (() => {
+    const tl = builtMail([sectionRow({})], [], [mailFrom({ date: 'whenever' })]);
+    return tl[0].kind === 'email' && tl[0].at === 0 && tl[1].kind === 'save';
+  })(),
+  JSON.stringify(builtMail([sectionRow({})], [], [mailFrom({ date: 'whenever' })]).map(x => [x.kind, x.at])));
+r.ok('a readable date interleaves with the audit rows by instant, not by source',
+  (() => {
+    // The save is 14:03, the mail 16:00 — the mail is the newer of the two.
+    const tl = builtMail([sectionRow({})], [], [mailFrom({})]);
+    return tl.map(x => x.kind).join(',') === 'save,email';
+  })(),
+  builtMail([sectionRow({})], [], [mailFrom({})]).map(x => x.kind).join(','));
+
+// The parameter is APPENDED, so the four call sites and every fixture above keep
+// working. This is the assertion that says so, and it is why the new source could not
+// quietly become a breaking change to a function three other suites drive.
+r.ok('the email source is optional — the old four-argument call is unchanged',
+  built([sectionRow({})], []).map(x => x.kind).join(',') === 'save');
+
+r.head('a mail renders as a mail, and its content is the CUSTOMER\'s words');
+const mrow = builtMail([], [], [mailFrom({})]);
+const mhtml = render(mrow, {});
+r.ok('the row is labelled Email and carries the mail glyph, not the comment balloon',
+  /Email/.test(mhtml) && /class="icon"/.test(mhtml) && T.TIMELINE_KINDS.email.icon === 'mail',
+  (mhtml.match(/hist-ev[\s\S]{0,120}/) || [''])[0]);
+r.ok('the direction is a chip on the row, so an inbound and an outbound mail differ at a glance',
+  /hist-src">IN</.test(mhtml), (mhtml.match(/hist-src[^<]*<[^>]*>[^<]*/g) || []).slice(0, 3));
+r.ok('the by-line names the mailbox, which is what explains a mail that appears twice',
+  /hist-by[\s\S]{0,200}customer\.relations/.test(mhtml),
+  (mhtml.match(/hist-by[\s\S]{0,200}/) || [''])[0]);
+r.ok('the subject and the preview are both shown — the preview is what saves opening it',
+  /Re: S25041 drift/.test(mhtml) && /payload drifted/.test(mhtml));
+r.ok('the mailbox is abbreviated to its local part, so a domain is not printed on every row',
+  T.shortMailbox('customer.relations@indrones.com') === 'customer.relations' &&
+  T.shortMailbox('monish.raza@indrones.com') === 'monish.raza');
+r.ok('a Mailbox value that is not an address survives untouched instead of being cut',
+  T.shortMailbox('Support') === 'Support' && T.shortMailbox('') === '');
+// A preview is free text a customer typed, and it is rendered on a screen any signed-in
+// user can open. It is the likeliest place in this whole list for a stray `<` to arrive.
+r.ok('a subject or preview cannot inject markup',
+  (() => {
+    const h = render(builtMail([], [], [mailFrom({ subject: '<img src=x onerror=alert(1)>', preview: '<script>bad()</script>' })]), {});
+    return !/<img src=x/.test(h) && !/<script>/.test(h) && /&lt;img src=x/.test(h);
+  })());
 
 r.finish();

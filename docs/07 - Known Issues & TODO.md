@@ -647,7 +647,34 @@ is left is small.
    > (`assets/Indrones Intro v2.mp4`, `assets/logo.png`) went; the live ones,
    > `assets/intro_ipassbookv2.mp4` and `_mobile.mp4`, are named in `index.html` and stay.
 
-4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
+4. ⏳ **`v83` — the transitional page and the legacy archive, in one release (2026-10-09).**
+   Two unrelated things that both answer the same complaint: *"the subsequent pages which
+   we have designed for transition must also be of our current app theme… plus, i do not
+   see that you have fed data into our app all that was gathered from my legacy database."*
+
+   **(a) The Google door's page now wears the app's theme.** `handoffPage()` in
+   `backend.gs` was still drawing the look the app abandoned — a `#005cad` blue button and
+   a `border-radius: 14px` card. It cannot link the app's stylesheets (different origin,
+   and a delayed first paint at that moment is the one thing it must not do), so the
+   values are literals, each commented with the token it came from. See
+   `docs/04 - Backend API Reference.md`. **This is a backend change and owes a paste to
+   BOTH `/exec` deployments, via New version.**
+
+   **(b) The legacy archive is loaded again, and it had been loaded by nobody since
+   2026-07-08.** `loadLegacyIndex()` lost its only caller in `d92b206`, for a reason that
+   was true then and is not true now (it had to mint a Google One-Tap identity per call;
+   the token is a server session attached by the fetch interceptor since the auth rework).
+   The stale note stood in its place for three months, and the effect was that
+   `legacyMap` stayed empty on every device — so **no card was ever badged "Legacy
+   record" and `#ir-legacy-btn`, the only way into a pre-app ticket, was never shown.**
+   Every test of that feature passed the whole time, because all of them test the
+   function's BODY and none could see that nothing called it. `smoke-list-intel.mjs` now
+   asserts the caller.
+
+   Read on the live site after the push: `sw.js` answering `ipassbook-v83` and `app.js`
+   answering `APP_VERSION = 'v83'`.
+
+5. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
    safe date; they are the only record of the old hand-assigned grants, which is the
    whole reason to wait. Deleting is right-click → Delete on each tab in the IR
@@ -668,10 +695,97 @@ is left is small.
       the table put there, on both doors, in every language. `customer.html` has no
       language layer at all and was not in scope.*
 - [ ] **Populate the IRs from the two crawled mailboxes and the legacy workbook.** The
-      owner's ask of 2026-10-08: each IR's record filled in from the email that raised it
-      and the workbook tab that investigated it. **Blocked on his data**, which lives
-      outside this repo — the `Email_Index` build and the workbook inventory. Nothing can
-      be designed against it until the exports arrive.
+      owner's ask of 2026-10-08, restated on 2026-10-09 as *"my app should be ready to fly
+      from day 1 with all previous contexts."* It is **two halves, and only one of them is
+      blocked.**
+
+      **The workbook half now works — 2026-10-09, `v83`.** All 161 pre-app IRs named like
+      one in the legacy workbook are reachable again: they appear in the master list with
+      a **Legacy record** badge, and `#ir-legacy-btn` opens the original tab read-only
+      through `getLegacyIR`, one tab at a time. What that took was **one line** — a caller
+      — because the whole feature was already built and had simply been unplugged on
+      2026-07-08 (see the checklist above). Note what this is and is not: the workbook is
+      read **live and on demand**, so a legacy ticket is *reachable*, not *copied*. The
+      app still owns no legacy row, and `sections/IR<n>.json` is written only for IRs
+      somebody works on in the app. Bringing the workbook's *contents* into the store —
+      so a legacy ticket can be triaged, assigned and counted like any other — is a
+      different and larger job, and it is still not started.
+
+      **The email half is blocked on data that is not in this repo — and the blocking
+      question is now one run away from being answered.** `Email_Index` is built and
+      complete (2393 rows / 646 threads, two mailboxes, 370 of 452 IRs) but **nothing
+      here can read it**: there is no `Email_Index` code anywhere in the repo, no
+      `GmailApp` use, and no column definition. Its build script was run from the Apps
+      Script editor and never committed, and the tab lives in one of the two mailboxes.
+
+      Three facts are needed before a line of it can be designed — **which spreadsheet
+      holds it, what its tab is called, and what its columns are** — and as of
+      2026-10-09 a function exists that answers all three in one run without anybody
+      editing anything: **`inventoryEmailIndex()`**, committed but **not yet run**. It
+      searches the Drive for spreadsheets named like an index and inventories each one's
+      tabs, header rows and row counts. It is the sibling of `inventoryLegacyWorkbook()`
+      (which is how the workbook's 170 tabs were settled), it is editor-run, it has no
+      route, and it **never touches Gmail** — a mail scope would force every account on
+      the deployment to re-authorise the whole app for a one-off survey. It prints the
+      account it ran as first, because the two mailboxes belong to different accounts and
+      a file one can see the other frequently cannot: an empty search is a statement
+      about identity before it is one about naming.
+
+      **The run happened, and it landed better than expected (2026-10-09).**
+      `inventoryEmailIndex()` was run from the editor and answered all three questions at
+      once. **`Email_Index` is a second tab in the spreadsheet the app already opens** —
+      `CONFIG.IR_REPO_SHEET_ID` (`1MPcWvgZ…`), the same file as `CONFIG.IR_REPO_TAB`
+      ('Form Responses', the client intake read on every boot). So reading it needs **no new
+      file, no sharing change, no new OAuth scope and no extra permission** — it is one
+      `getSheetByName('Email_Index')` beside a call the app already makes. Worth generalising:
+      before assuming an unknown legacy source needs access granted, check whether it already
+      lives in a file the app opens.
+
+      **The schema, header on row 1, 2394 rows including it — i.e. 2393 messages:**
+
+      ```
+      IR_No | Thread_Id | Message_Id | Date | From | To | Subject | Preview | Direction | Mailbox
+      ```
+
+      `IR_No` attaches a message to a ticket, `Thread_Id` groups a conversation, `Direction`
+      is in/out, and `Mailbox` distinguishes the two mailboxes — one row per *message-per-mailbox*,
+      so a mail delivered to both accounts is two rows with two `Message_Id`s. Everything an
+      importer needs is present; nothing has to be inferred.
+
+      **Two things the same run turned up in that file, neither previously recorded.**
+      `LS_Data` is a 455×23 normalised mirror of the response sheet with clean headers
+      (`IR_YEAR`, `IR_MONTH`, `INTERNAL_EXTERNAL`, `IR_SUB-CATEGORY`, `RESOLUTION METHOD`,
+      `UAS SN`, `CUSTOMER_NAME`) — if those are populated they are a better source than
+      re-deriving the same facts from free text, and `IR_SUB-CATEGORY` is exactly what the
+      category insights need. And `Timeline 1` is an **object** sheet (a chart or embedded
+      object), so `getRange()` on it throws *"The action is not supported for OBJECT sheet"* —
+      the survey caught that per-tab and carried on, and any reader must skip non-grid tabs
+      rather than trust `getSheets()`.
+
+      The other half of the owner's ask, the **CR representative derived from the IR's
+      date**, stays blocked on this one: it has no caller until an ingest exists.
+
+- [x] **The `Email_Index` reaches the app** — **built 2026-10-09 as `API_VERSION 10`.**
+      The tab and its 10-column schema were confirmed that day, and it lives in a file
+      the app already opens, so it needed no new access of any kind. **The owner chose
+      the placement: the activity timeline.** A ticket's mail now merges into the same
+      list as its audit rows through `buildTimeline`'s new fifth parameter — an email
+      and a section save are one story about one ticket, and a second panel would be a
+      second history to keep in step. Rows carry their own kind, glyph and label so a
+      customer's mail is never mistaken for a colleague's comment; the crawl's own
+      `Direction` value is printed raw as a chip rather than mapped onto an invented
+      vocabulary; and the mailbox rides the by-line, which is what explains a mail that
+      appears twice. **Never a section form** — nothing there writes it, and a form
+      implies an editor. See `listIRThreads` in [04](04 - Backend API Reference.md).
+
+      **Two things this deliberately still does not do.** The `Date` column's exact
+      format is not declared anywhere, so the reader parses it with the same tolerant
+      parser the audit rows use and lets an unreadable one sink to the bottom rather
+      than dating it today. And the crawl files each message **once, under the first IR
+      it matches**, so a thread can sit under a ticket only its opening message
+      concerned (the recorded example: IR013 losing a 26-message thread to IR012). The
+      owner decided on 2026-10-06 to change that to *file under every IR it mentions* —
+      that change is in the **crawl**, not in the app, and is not made.
 - [ ] **The IR's CR primary representative, derived from its date.** The rule is the
       owner's, given 2026-10-08, and is recorded here because it exists nowhere else in
       the repo: **from 11 May 2026 onward, Adhik; before that, Monish Raza — except before

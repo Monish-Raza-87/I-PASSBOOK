@@ -242,6 +242,19 @@ app.js fires a blocking `alert()` and the renderer stops answering CDP calls, so
 the `#auth-container` block out of `index.html` between two named ids and writes it to
 `%TEMP%/ipassbook-render/landing.html`; that is the page to measure and to photograph.
 
+**The sign-in chain has a third screen and a fourth camera.** Between the landing page
+and the `#sso-wait` screen sits the **transitional page the Google door ends on**
+(`handoffPage()` in `backend.gs`), served by Apps Script at `script.google.com` — a
+different origin from the app, in the middle of a sign-in, only after a real Workspace
+identity has been read. It is the one screen in the product that no smoke suite and no
+route can show you, which is how it spent three months in the app's *previous* look
+without anyone noticing. `node tools/render-doorpage.mjs` runs the real function under a
+faked Apps Script platform and writes both of its branches — the handoff and the
+refusal — to `%TEMP%/ipassbook-render/`, ready for `render-themes.mjs`. Its dark branch
+is written out separately with the media query rewritten, because that page reads
+`prefers-color-scheme` rather than the app's stored preference. See
+[04 — Backend API Reference](04 - Backend API Reference.md).
+
 ### Ticket list (`#index-view`)
 `.list-toolbar` (title, count, search, filter segments) over `.ir-list`. Rows are
 `.ir-card` — flat with dividers rather than floating cards, which holds up better
@@ -516,6 +529,37 @@ all token-based, so the design-system rule holds. Rows carry an icon from
 `ICON_PATHS` (below) and read in plain English: `Was` / `Now` rather than `old:` /
 `new:`, one timestamp format for both halves of the list, and the backend's internal
 `workflow` vocabulary never shown.
+
+**`buildTimeline` takes a fourth source, and it is the only one the app does not
+own.** `emailMessages` is the ticket's own correspondence, read from the email
+crawl's `Email_Index` tab in the *intake* spreadsheet (see `listIRThreads` in
+[04](04 - Backend API Reference.md)) — a table written by a script outside this repo
+that nothing in the app can edit. It is a **fifth, optional parameter**, appended
+rather than inserted so the four existing call sites keep working untouched, and its
+rows merge into the **same** list as the audit rows because an email and a section
+save are one story about one ticket. A separate panel would be a second history to
+keep in step with the first.
+
+Three deliberate restraints in how those rows render:
+
+- **A mail gets its own kind, glyph and label** (`email` → `mail` → "Email") rather
+  than borrowing `comment`. The three sit in one list, and a customer's mail must be
+  tellable from a colleague's comment at a glance. The envelope is a fourth picture
+  rather than a reuse of `comment`'s balloon or `inbox`'s tray, which already means
+  the empty state — the one thing a merged timeline cannot afford is a glyph that
+  means two things.
+- **The `Direction` value is printed raw**, whatever the sheet says. It is not known
+  whether that column holds `IN`/`OUT`, `in`/`out` or `Inbound`/`Outbound`, and mapping
+  it onto a vocabulary this file invented would put a confident wrong word on every
+  row. It is a **chip**, not body text, because an inbound mail and one we sent are
+  otherwise identical rows.
+- **The mailbox rides the by-line**, abbreviated to its local part. That is not
+  decoration: a mail delivered to both mailboxes is written **twice**, once per
+  `Mailbox`, and without the mailbox those two rows read as a rendering bug.
+
+An unparseable `Date` yields `at: 0` and sinks the row to the bottom of the
+newest-first list. That is the recoverable failure; dating it "today" and floating it
+to the top would not be.
 
 ### The per-field 🕓 button, and the restore row it leads to
 Every field's label carries a small 🕓 beside the 💬 comment button

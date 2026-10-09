@@ -194,6 +194,14 @@ buy one. Every standalone page (`terms.html`, `privacy.html`, `faq.html`, `backu
 tokens and the same two-lobe ambient field, because a blur over a flat colour returns
 that flat colour — the field is what makes the glass visible at all.
 
+The Google door's **transitional page** is the eighth surface, and it is the one that
+cannot even `var()` those: Apps Script serves it from `script.google.com`, another
+origin, and a first screen that waited on seven stylesheets would flicker in the middle
+of a sign-in. So its copy is **literal values, each one commented in `backend.gs` with
+the token it came from.** That makes it the only surface in the app that will *not*
+follow a token when the token moves — `node tools/render-doorpage.mjs` is how to look at
+it after one does.
+
 Two quirks preserved deliberately rather than "fixed":
 
 - Dark `--ink-gray-4` and `--ink-gray-5` are the same value. That is what the

@@ -45,6 +45,10 @@ var CONFIG = {
   // decide what each column means.
   IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_TAB:      'Form Responses',
+  // The email crawl's own tab, in the SAME spreadsheet as the intake above. Written
+  // by a script that lives OUTSIDE this repo — see listIRThreads for why that decides
+  // how its columns are matched. Read-only here, always.
+  IR_EMAIL_TAB:     'Email_Index',
 
   // ── THE APP'S OWN STORE ──────────────────────────────────────────────────────
   // There is no app spreadsheet any more. Everything the app owns — accounts,
@@ -160,7 +164,7 @@ var CONFIG = {
   // way they were not at v8: a v9 frontend meeting a v8 backend simply gets no roster
   // and keeps the directory it already has, and a v8 frontend meeting a v9 backend
   // never calls it at all.
-  API_VERSION: 9,
+  API_VERSION: 10,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -3263,7 +3267,9 @@ function handoffPage(code, email, message) {
     // leave it, and "Sign in with Google" with no explanation is the state this
     // branch exists to avoid.
     href = base + '#ssoerr=' + encodeURIComponent(String(message || 'Google sign-in failed.'));
-    body = '<p class="who">' + htmlEscape(message || 'Google sign-in failed.') + '</p>'
+    // `warn` is the ruled danger block in the stylesheet below — a refusal and a
+    // confirmation are not the same sentence and must not be drawn the same way.
+    body = '<p class="who warn">' + htmlEscape(message || 'Google sign-in failed.') + '</p>'
          + '<a class="go" target="_top" href="' + htmlEscape(href) + '">Back to sign in</a>';
   }
   // Both branches get it, and both need it for a real case: the account that
@@ -3277,31 +3283,148 @@ function handoffPage(code, email, message) {
   var alt = sw
     ? '<a class="alt" target="_top" href="' + htmlEscape(sw) + '">Not you? Choose a different account</a>'
     : '';
-  var html = '<!DOCTYPE html><html><head><meta charset="utf-8">'
-           + '<meta name="viewport" content="width=device-width,initial-scale=1">'
-           + '<title>I-PASSBOOK</title><style>'
-           + 'html,body{margin:0}'
+  // ── THE PAGE WEARS THE APP'S OWN THEME (2026-10-09) ──────────────────────────
+  //
+  // The owner, having just been through this door: *"the subsequent pages which we have
+  // designed for transition must also be of our current app theme, there are not so
+  // far."* He was right, and it was one glance to see it. This page was written before
+  // INDRONES INDUSTRIAL existed and still wore the look that came before it: a `#005cad`
+  // blue button and a `border-radius: 14px` card. Neither the colour nor the corner
+  // appears anywhere in the app now — a person tapped a blue button on a rounded card
+  // and landed in a squared-off app with an amber accent on it.
+  //
+  // IT CANNOT LINK THE APP'S STYLESHEETS. This page is served from script.google.com;
+  // the app is served from github.io. A first screen that waited on seven cross-origin
+  // stylesheets before it could paint would flicker in exactly the one place during a
+  // sign-in where nothing may flicker. So every value below is a LITERAL, and the
+  // comment beside it names the token it was copied from. That makes this block a
+  // SECOND COPY of those tokens, and a token that moves in tokens.css, theme.css or
+  // industrial.css will leave this page behind. That is the price of the theme being
+  // visible at all this early, and it is worth paying — the alternative was a stranger's
+  // blue.
+  //
+  // What is deliberately NOT carried over: the CREAM mode and the five PALETTE presets.
+  // Both are stored preferences, and this page is on another origin with no storage to
+  // read, so it cannot know which one this device chose. What is left is the app's
+  // DEFAULT light look — and its dark mode under `prefers-color-scheme`, which is the
+  // one theme signal this page can actually see.
+  //
+  // The head is the same THREE THINGS the app's own sign-in head is — the mark, the
+  // wordmark, and the line that spells the name out — so the two screens read as one
+  // product rather than as two. The expansion line carries PRODUCT, as it does
+  // everywhere else the name is written in full.
+  //
+  // No webfont is fetched. The app's Inter would be one more cross-origin request in
+  // front of a page whose entire job is one tap, and the app's own fallback stack is
+  // what paints instead — which, on a phone with Inter absent, is what the app paints
+  // too. The wordmark is monospace in the app's industrial skin anyway.
+  var mark = base
+    ? '<img class="mark" src="' + htmlEscape(base.replace(/\/?$/, '/') + 'assets/icon-mark.png') + '" alt="">'
+    : '';
+  var html = '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
+           + '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">'
+           + '<title>I-PASSBOOK | Indrones After-Sales</title>'
+           + '<meta name="theme-color" content="#fdfdfd" media="(prefers-color-scheme: light)">'
+           + '<meta name="theme-color" content="#1a1713" media="(prefers-color-scheme: dark)">'
+           + '<style>\n'
+           + ':root{\n'
+           + '  --ground:#f2f2f2;       /* --surface-gray-1   light — theme.css */\n'
+           + '  --panel:#fdfdfd;        /* --surface-base     light — theme.css */\n'
+           + '  --line:#c4c4c4;         /* --outline-gray-2   light */\n'
+           + '  --ink:#0f0f0f;          /* --ink-gray-9       light */\n'
+           + '  --muted:#525252;        /* --ink-gray-6       light — industrial.css\'s --ind-muted */\n'
+           + '  /* The ONE role that moves between the modes. The brand yellow is a fill, and\n'
+           + '     as TEXT on a light ground it is about 1.9:1 — so light takes the ink step\n'
+           + '     and dark takes the yellow itself, exactly as palette.css does. */\n'
+           + '  --accent:#7a5600;       /* --ind-accent-ink   light */\n'
+           + '  --bar:#ffc400;          /* --ind-yellow / --accent-bar — a FILL, so brand in both */\n'
+           + '  --solid:#ffc400;        /* --btn-solid-bg */\n'
+           + '  --solid-hi:#ffe066;     /* --btn-solid-bg-hover */\n'
+           + '  --solid-lo:#d9a600;     /* --btn-solid-bg-active */\n'
+           + '  --solid-fg:#171717;     /* --ind-on-yellow — 11.2:1 on the yellow, both modes */\n'
+           + '  --danger-fg:#b41d1d;    /* --ink-red-7 / --st-danger-fg     light */\n'
+           + '  --danger-fill:#ffe7e7;  /* --surface-red-2 / --st-danger-bg light */\n'
+           + '  /* --accent-tint-strong and --accent-tint, resolved to this ground. A blur over\n'
+           + '     a flat colour returns that flat colour, so these two lobes are what make\n'
+           + '     the pane below read as glass at all — industrial.css restates them for the\n'
+           + '     same reason. */\n'
+           + '  --lobe-a:rgba(122,86,0,.13);\n'
+           + '  --lobe-b:rgba(122,86,0,.07);\n'
+           + '  --glass:rgba(255,255,255,.72); /* --glass-fill: the panel at 72%, as everywhere */\n'
+           + '  --edge:rgba(255,255,255,.5);   /* --glass-edge light */\n'
+           + '  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; /* --font-mono */\n'
+           + '}\n'
+           + '@media (prefers-color-scheme: dark){:root{\n'
+           + '  --ground:#1a1713;       /* --ind-ground dark: industrial.css points it at\n'
+           + '                             --surface-base, which dark sets to the WARMED near-black */\n'
+           + '  --panel:#262119;        /* --surface-elevation-1 dark — what --ind-panel resolves to */\n'
+           + '  --line:#4a443c;         /* --outline-gray-2     dark */\n'
+           + '  --ink:#f8f8f8;          /* --ink-gray-9         dark */\n'
+           + '  --muted:#999999;        /* --ink-gray-6         dark */\n'
+           + '  --accent:#ffc400;       /* --ind-accent-ink     dark */\n'
+           + '  --danger-fg:#ff7575;    /* --ink-red-7          dark */\n'
+           + '  --danger-fill:#592222;  /* --surface-red-2      dark */\n'
+           + '  --lobe-a:rgba(255,196,0,.13);\n'
+           + '  --lobe-b:rgba(255,196,0,.07);\n'
+           + '  --glass:rgba(38,33,25,.72);\n'
+           + '  --edge:rgba(255,255,255,.14);\n'
+           + '}}\n'
+           + 'html,body{margin:0}\n'
            + 'body{display:flex;align-items:center;justify-content:center;padding:24px;'
-           + 'box-sizing:border-box;min-height:100vh;text-align:center;background:#f8f8f8;color:#0f0f0f;'
-           + 'font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}'
-           + '.card{width:100%;max-width:360px;background:#fff;border-radius:14px;'
-           + 'padding:32px 28px;box-shadow:0 1px 2px rgba(15,15,15,.08),0 8px 24px rgba(15,15,15,.06)}'
-           + '.brand{margin:0 0 18px;font-size:12px;font-weight:700;letter-spacing:.1em;color:#383838}'
-           + '.who{margin:0 0 22px;color:#383838}'
-           + '.who strong{color:#0f0f0f;word-break:break-all}'
-           + '.go{display:block;padding:14px 18px;border-radius:10px;background:#005cad;'
-           + 'color:#fff;font-weight:600;text-decoration:none}'
-           + '.go:focus-visible{outline:3px solid #005cad;outline-offset:3px}'
-           + '.alt{display:block;margin-top:16px;font-size:14px;font-weight:600;'
-           + 'color:#005cad;text-decoration:none}'
-           + '.alt:focus-visible{outline:3px solid #005cad;outline-offset:3px}'
-           + '@media (prefers-color-scheme: dark){'
-           + 'body{background:#171717;color:#f8f8f8}'
-           + '.card{background:#1f1f1f;box-shadow:none}'
-           + '.brand,.who{color:#afafaf}.who strong{color:#f8f8f8}'
-           + '.go{background:#76bef9;color:#0f0f0f}.alt{color:#76bef9}}'
+           + 'box-sizing:border-box;min-height:100vh;text-align:center;color:var(--ink);'
+           + 'font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;'
+           + '-webkit-font-smoothing:antialiased;'
+           + 'background:radial-gradient(52rem 32rem at 12% -8%,var(--lobe-a),transparent 62%),'
+           + 'radial-gradient(46rem 30rem at 92% 108%,var(--lobe-b),transparent 60%),var(--ground);'
+           + 'background-attachment:fixed}\n'
+           + '/* Square, and it is the single biggest move in industrial.css: the app re-points\n'
+           + '   the whole radius scale to 0 inside its screens rather than zeroing corners one\n'
+           + '   rule at a time. A rounded card here was the loudest thing on the page. */\n'
+           + '.card{width:100%;max-width:360px;box-sizing:border-box;padding:26px 24px 28px;'
+           + 'background:var(--panel);border:1px solid var(--line);'
+           + 'border-top:2px solid var(--bar);'   /* the accent rule across a door's head */
+           + 'box-shadow:none}\n'
+           + '@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)){\n'
+           + '  .card{background:var(--glass);'
+           + '-webkit-backdrop-filter:blur(18px) saturate(1.5);'   /* --glass-blur */
+           + 'backdrop-filter:blur(18px) saturate(1.5);'
+           + 'box-shadow:inset 0 1px 0 var(--edge)}}\n'
+           + '.mark{display:block;height:56px;width:auto;margin:0 auto 10px}\n'
+           + '/* The mark is a dark slate disc, so on the dark ground only its knocked-out\n'
+           + '   white pieces would show and it reads as a logo with holes in it — the same\n'
+           + '   reversal base.css applies to the app\'s own dark sign-in card. */\n'
+           + '@media (prefers-color-scheme: dark){.mark{filter:invert(1)}}\n'
+           + '/* The wordmark is a technical label in the industrial skin, not a wordmark:\n'
+           + '   monospace, letterspaced, uppercase. The text-indent matches the tracking,\n'
+           + '   because letter-spacing puts one more step AFTER the last letter than before\n'
+           + '   the first, which leaves a centred word visibly off-centre to the left. */\n'
+           + '.brand{margin:0;font-family:var(--mono);font-size:clamp(19px,6.4vw,24px);'
+           + 'font-weight:700;letter-spacing:.22em;text-indent:.22em;'
+           + 'text-transform:uppercase;color:var(--ink)}\n'
+           + '.full{margin:8px 0 0;font-family:var(--mono);font-size:11px;line-height:1.6;'
+           + 'letter-spacing:.14em;text-indent:.14em;text-transform:uppercase;color:var(--muted)}\n'
+           + '.who{margin:20px 0 18px;color:var(--muted)}\n'
+           + '.who strong{color:var(--ink);word-break:break-all}\n'
+           + '/* A refusal gets a ruled block rather than a quiet grey sentence, in the same\n'
+           + '   tokens .badge-danger uses — so it cannot drift from the meaning it carries.\n'
+           + '   The confirmation above stays the quiet line: one of these two is an error. */\n'
+           + '.who.warn{padding:10px 12px;border:1px solid var(--danger-fill);'
+           + 'border-left:2px solid var(--danger-fg);background:var(--danger-fill);'
+           + 'color:var(--danger-fg);font-size:14px;text-align:left}\n'
+           + '.go{display:block;padding:13px 18px;background:var(--solid);color:var(--solid-fg);'
+           + 'font-weight:600;text-decoration:none}\n'
+           + '.go:hover{background:var(--solid-hi)}\n'
+           + '.go:active{background:var(--solid-lo)}\n'
+           + '.go:focus-visible{outline:2px solid var(--accent);outline-offset:2px}\n'
+           + '.alt{display:block;margin-top:12px;padding:6px;font-size:14px;font-weight:600;'
+           + 'color:var(--muted);text-decoration:none}\n'
+           + '.alt:hover{color:var(--accent)}\n'
+           + '.alt:focus-visible{outline:2px solid var(--accent);outline-offset:2px}\n'
            + '</style></head><body><div class="card">'
-           + '<p class="brand">I-PASSBOOK</p>' + body + alt + '</div></body></html>';
+           + mark
+           + '<p class="brand">I-PASSBOOK</p>'
+           + '<p class="full">INDRONES PRODUCT AFTER SALES SERVICE BOOK</p>'
+           + body + alt + '</div></body></html>';
   return HtmlService.createHtmlOutput(html);
 }
 
@@ -3523,6 +3646,10 @@ function doGet(e) {
       listIRs:       function () { return listIRs(email); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
       getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId, email); },
+      // The ticket's own correspondence, read live from the email crawl's tab in the
+      // intake spreadsheet. Context, not content: nobody edits a mail here, so it is
+      // a plain read with no payload and no write path anywhere near it.
+      listIRThreads: function () { return listIRThreads(e.parameter.irNumber); },
       listLegacyIRs: function () { return listLegacyIRs(email); },
       getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber, email); },
       listUsers:     function () { return listUsers(email); },
@@ -4605,6 +4732,185 @@ function irNumberColumnIndex(headerRow) {
 // rows; it is applied after the company filter, never before it.
 function irKey(v) {
   return String(v == null ? '' : v).toUpperCase().replace(/\s+/g, '');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// THE EMAIL HISTORY — one ticket's correspondence, read from `Email_Index`.
+//
+// WHAT THIS IS. `Email_Index` is a tab of the SAME spreadsheet `intakeGrid` already
+// opens (`CONFIG.IR_REPO_SHEET_ID`), so this reads a file the app was already
+// reading: no new folder, no sharing change, no OAuth scope, no second permission.
+// It is the one genuinely large piece of legacy context the app had no code for —
+// 2393 messages across two mailboxes, covering 370 of the 452 tickets — and it is
+// **READ, never copied**. Nothing here writes. The tab is regenerated by its own
+// crawl, which lives outside this repo and outside this app, so the app must never
+// treat it as a store.
+//
+// THE COLUMNS ARE FOUND BY NAME, NOT BY POSITION. On 2026-10-09 the header row is
+// exactly `IR_No | Thread_Id | Message_Id | Date | From | To | Subject | Preview |
+// Direction | Mailbox`, but that is today's shape and the crawl is not this file's
+// code. A fixed index would, on the day a column is inserted, silently shift every
+// field by one — the failure app.js's INTAKE_FIELDS exists to prevent.
+//
+// **MATCHED EXACTLY, which is the one place this differs from the two header helpers
+// above.** Those use substrings because a Google Form's questions get reworded. These
+// ten names are machine-written by one script and are stable, and three of them are
+// two to four characters long — a substring rule would let a future `Last To` or
+// `From Name` column be claimed by the wrong needle, and that failure is **a wrong
+// sender on every row**, not a blank one. Exact match means a renamed column answers
+// "no email" instead of answering wrongly, which is the same direction `customerIRS`
+// fails in and for the same reason: a blank is a support call, a wrong value is a lie.
+//
+// Rows come back in SHEET ORDER, not sorted, and deliberately so: `Date` is a display
+// string whose format is not this function's to guess, and the caller already sorts
+// the merged timeline by a parsed instant. Sorting here on a string it cannot parse
+// would order the list by an accident of formatting.
+var EMAIL_THREAD_CAP = 300;
+
+// ── The email index, remembered per ticket ───────────────────────────────────────
+// The same contract as the store-id cache above, for the same reason and with the
+// same limits: a **speed-up and nothing else**. CacheService may evict at any moment
+// and may refuse to answer at all; every use here is inside try/catch and any failure
+// falls back to the sheet read it replaced. A cache that is empty, broken or missing
+// costs latency, never correctness.
+//
+// WHY IT IS WORTH ONE. Answering for ONE ticket means reading the whole ~24,000-cell
+// tab, and without this that read is paid on every single ticket open — a cost that
+// grows with the crawl, on the screen the app is used from all day. The audit side of
+// the timeline reads a ~40 KB file; this is the expensive half by an order of magnitude.
+//
+// KEYED PER TICKET, not for the whole tab, and that is forced rather than chosen: the
+// full index is roughly 400 KB of JSON and CacheService allows **100 KB per key**, so
+// the tab cannot be cached in one piece. Per ticket is also the shape the queries
+// actually take — every caller asks about one IR.
+//
+// **ONE HOUR, NOT THE HOUSE SIX.** The store-id cache above may hold an id for six hours
+// because a folder cannot move; this table is rewritten by a process outside this app,
+// and someone who has just re-run the crawl has to be able to see the result. An hour
+// still removes almost every repeat read inside a working session while keeping that
+// delay short enough to explain. The staleness is stated here because it is the only
+// way this function can be wrong.
+var EMAIL_CACHE_TTL_SECONDS = 3600;
+
+function emailThreadsKey(ticket) {
+  return 'irth:' + CONFIG.IR_REPO_SHEET_ID + ':' + ticket;
+}
+
+// The cached answer for one ticket, or null. A null covers both "not cached" and
+// "cached but unreadable": a corrupt entry must fall through to the sheet rather than
+// propagate, so the parse failure is swallowed with the miss.
+function cachedEmailThreads(ticket) {
+  try {
+    var raw = CacheService.getScriptCache().get(emailThreadsKey(ticket));
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function rememberEmailThreads(ticket, result) {
+  try {
+    CacheService.getScriptCache().put(emailThreadsKey(ticket), JSON.stringify(result), EMAIL_CACHE_TTL_SECONDS);
+  } catch (e) { /* a cache that cannot be written costs latency, never correctness */ }
+}
+
+// A ticket's own email correspondence, oldest-first like the index itself.
+//
+// The wrapper exists so that EVERY exit is remembered, including the empty ones. A
+// ticket with no threads is the COMMON case — 82 of the 452 have nothing in either
+// mailbox — and those are exactly the reads that would otherwise pay a full sheet
+// scan for a known-empty answer.
+function listIRThreads(irNumber) {
+  var want = irKey(irNumber);
+  if (!want) return { status: 'ok', messages: [], truncated: false };
+
+  // An empty answer is cached like any other. See the note below on why this is a
+  // speed-up and nothing else.
+  var hit = cachedEmailThreads(want);
+  if (hit) return hit;
+
+  var result = readEmailThreadsFromSheet(want);
+  rememberEmailThreads(want, result);
+  return result;
+}
+
+// The read itself, once the cache has missed. Never call this directly: it pays a
+// full spreadsheet open and a full grid scan, and an absent ticket is not rare.
+function readEmailThreadsFromSheet(want) {
+  var tab = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID).getSheetByName(CONFIG.IR_EMAIL_TAB);
+  // A missing tab is a real state while the crawl is being rebuilt, and it must answer
+  // "no email" rather than throw: an exception here would take the whole ticket view
+  // down over a feature that is context, not content.
+  if (!tab) return { status: 'ok', messages: [], truncated: false };
+
+  var lastRow = tab.getLastRow();
+  var lastCol = tab.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return { status: 'ok', messages: [], truncated: false };
+
+  // getDisplayValues, like intakeGrid and for the same reason: the reader wants what
+  // the sheet shows. The crawl wrote strings, and a Date object arriving through JSON
+  // in a third shape would only give the client something else to fail to parse.
+  var grid = tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  var col = emailIndexColumns(grid[0]);
+  if (col.ir < 0) return { status: 'ok', messages: [], truncated: false };
+
+  var cell = function (row, i) { return i < 0 ? '' : String(row[i] == null ? '' : row[i]); };
+
+  var out = [];
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    // irKey, not string equality: the Sheet's IR number is free text a human types,
+    // and both "IR 483" and "IR483" are the same ticket. Matching raw would drop a
+    // ticket's mail over one stray space — the caller's own reason for irKey existing.
+    if (irKey(cell(row, col.ir)) !== want) continue;
+    out.push({
+      threadId:  cell(row, col.thread),
+      messageId: cell(row, col.message),
+      date:      cell(row, col.date),
+      from:      cell(row, col.from),
+      to:        cell(row, col.to),
+      subject:   cell(row, col.subject),
+      preview:   cell(row, col.preview),
+      direction: cell(row, col.direction),
+      mailbox:   cell(row, col.mailbox),
+    });
+  }
+
+  // The crawl appends in IR order, so an IR's rows are contiguous and its LAST rows are
+  // its newest — which makes a tail slice the newest messages even though nothing here
+  // parsed a date. The cap is generous: the densest thread in the index is tens of
+  // messages, and the response rides the same hop every other action pays for.
+  var truncated = out.length > EMAIL_THREAD_CAP;
+  if (truncated) out = out.slice(out.length - EMAIL_THREAD_CAP);
+
+  return { status: 'ok', messages: out, truncated: truncated };
+}
+
+// Which column of the email index's header row holds each of the ten fields.
+//
+// EXACT (trimmed, lower-cased) matches, first column wins. See the note on
+// listIRThreads for why this is not the substring rule the intake helpers use.
+// Every field is -1 when absent, and every reader treats -1 as "this row has nothing
+// for that field" rather than falling back to a neighbour's value.
+function emailIndexColumns(headerRow) {
+  var header = headerRow || [];
+  var at = {};
+  var has = function (k) { return Object.prototype.hasOwnProperty.call(at, k); };
+  for (var c = 0; c < header.length; c++) {
+    var h = String(header[c] == null ? '' : header[c]).trim().toLowerCase();
+    if (h && !has(h)) at[h] = c;
+  }
+  var pick = function (name) { return has(name) ? at[name] : -1; };
+  return {
+    ir:        pick('ir_no'),
+    thread:    pick('thread_id'),
+    message:   pick('message_id'),
+    date:      pick('date'),
+    from:      pick('from'),
+    to:        pick('to'),
+    subject:   pick('subject'),
+    preview:   pick('preview'),
+    direction: pick('direction'),
+    mailbox:   pick('mailbox'),
+  };
 }
 
 // The IR numbers the intake sheet attributes to `company` — this customer's own
@@ -6075,6 +6381,218 @@ function legacyPeekLines(ss, tabNames) {
 
   return lines;
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// THE EMAIL INDEX — the survey that has to happen before a line of it can be read.
+//
+// WHAT IS KNOWN, and this is all of it: a crawl over TWO mailboxes was run on
+// 2026-10-06 and produced **2393 rows / 646 threads covering 370 of 452 IRs**, in a
+// place referred to as `Email_Index`. What is NOT known is which spreadsheet holds
+// it, what its columns are called, and how one row attaches to one IR. None of the
+// three can be discovered from this repository: the crawl was run from an Apps
+// Script editor and never committed, so there is no `Email_Index` string anywhere in
+// this file, no `GmailApp` use, and no column definition to read.
+//
+// The owner's ask of 2026-10-09 — *"my app should be ready to fly from day 1 with all
+// previous contexts"* — cannot start until that is answered. Writing an importer
+// against a GUESSED schema is the one mistake this file already carries a scar for:
+// the door once shipped with `ContentService.MimeType.HTML`, a member that does not
+// exist, and every test passed because the test double had invented the same member.
+// A guessed column mapping is that same mistake with more columns and more rows.
+//
+// SO: ONE RUN, ONE PASTE, AND NO EDITING. Unlike `inventoryLegacyWorkbook()`, this
+// cannot be pointed at a fixed id, because the id is part of what is unknown. It
+// searches for it and inventories what it finds, in one go — so a run either answers
+// the question outright or comes back with the list of files to choose from.
+//
+// IT IS NOT AN ACTION. No route in doGet or doPost: it adds no API surface, is
+// unreachable from the app, and moves no version. It reads and writes nothing — no
+// store, no Drive write, no mail.
+//
+// **IT DOES NOT TOUCH GMAIL, deliberately.** Crawling the mailboxes again is what the
+// original run already did, and asking for a Gmail scope would force every account on
+// this deployment to re-authorise the whole app for a one-off survey. Drive and
+// Sheets are scopes the app already holds. If the search finds nothing, the answer is
+// to open the file by hand and paste its address, not to reach for the mailboxes.
+//
+// WHAT IT PRINTS: which account it ran as — the two mailboxes belong to different
+// accounts and a file one can see the other frequently cannot — then, for each
+// spreadsheet found, every tab as `name — dimensions, rows holding anything, and the
+// header row`. That is `inventoryLegacyWorkbook()`'s exact line shape, kept the same
+// on purpose: the only check that it ran against the right file is that the tab list
+// matches what he sees when he opens the Sheet. The scan below is written out rather
+// than shared with that function — that one has already been run, its output is
+// recorded, and a shared helper would change its report to tidy a diagnostic.
+//
+// THE HEADER ROW IS THE PRIZE. `Email_Index`'s columns are what an importer has to
+// map, and the row they sit on is the second thing: a header on row 3 means a title
+// above it, which is a different kind of tab from one that starts at row 1.
+//
+//   inventoryEmailIndex()   — run from the editor; prints to the execution log
+// ──────────────────────────────────────────────────────────────────────────────
+function inventoryEmailIndex() {
+  // A file this account can see but that holds nothing readable is a line, not a
+  // failed run. Same ceiling and same reason as the workbook survey: one
+  // pathologically formatted tab must not turn a 30-second diagnostic into a timeout.
+  var MAX_CELLS = 200000;
+  var HEADER_SEARCH_ROWS = 12;
+  // Search breadth. Small on purpose — the output has to be pasted back in full, and
+  // a hundred-file dump is one the execution log folds away and a copy truncates,
+  // which is the exact failure this file's per-line reporting style exists to avoid.
+  var MAX_FILES = 12;
+  var MAX_TABS_PER_FILE = 40;
+  // Both spellings are tried: Drive's query language took `title` for years and
+  // `name` is the current field, and which one this deployment's Drive accepts is
+  // not something to guess at when a thrown query is caught and printed either way.
+  var TERMS = ['email', 'index', 'response', 'support', 'passbook'];
+
+  var lines = [];
+  var who = '(could not read)';
+  try { who = Session.getActiveUser().getEmail() || '(blank)'; } catch (e) { /* keep the placeholder */ }
+
+  lines.push('EMAIL INDEX INVENTORY — run as ' + who);
+  lines.push('');
+
+  // ── The search ───────────────────────────────────────────────────────────────
+  // Deduplicated by file id, because a file called "Customer Support Index" matches
+  // two of the terms and would otherwise be inventoried twice. The id is printed in
+  // full: it is the one thing needed to point a reader at this file later.
+  var found = [];
+  var seen = {};
+  lines.push('Spreadsheets this account can see whose name contains any of: ' +
+             TERMS.join(', ') + '  (up to ' + MAX_FILES + ')');
+  lines.push('');
+  for (var t = 0; t < TERMS.length; t++) {
+    var it = null;
+    try {
+      it = DriveApp.searchFiles("mimeType = 'application/vnd.google-apps.spreadsheet' and title contains '" + TERMS[t] + "'");
+    } catch (err1) {
+      try {
+        it = DriveApp.searchFiles("mimeType = 'application/vnd.google-apps.spreadsheet' and name contains '" + TERMS[t] + "'");
+      } catch (err2) {
+        lines.push('### the Drive search for "' + TERMS[t] + '" failed: ' +
+                   ((err2 && err2.message) ? err2.message : String(err2)));
+        continue;
+      }
+    }
+    while (it.hasNext() && found.length < MAX_FILES) {
+      var f = it.next();
+      var fid = f.getId();
+      if (seen[fid]) continue;
+      seen[fid] = true;
+      found.push(f);
+      var when = '(unknown)';
+      // The zone is the literal, not `Session.getScriptTimeZone()`: every date this
+      // file prints is IST by the literal, and a diagnostic that silently followed a
+      // project setting nobody looks at would disagree with the survey beside it.
+      try {
+        when = Utilities.formatDate(f.getLastUpdated(), 'Asia/Kolkata', 'yyyy-MM-dd');
+      } catch (e2) { /* keep the placeholder */ }
+      lines.push('  ' + f.getName() + '   ·   id ' + fid + '   ·   updated ' + when);
+    }
+  }
+  if (!found.length) {
+    lines.push('  (none found)');
+    lines.push('');
+    lines.push('>>> Nothing to inventory. Either the file belongs to the OTHER mailbox\'s');
+    lines.push('    account and is not shared with this one, or it is named something none');
+    lines.push('    of these terms matches. Open it yourself and paste its address back.');
+    lines.forEach(function (l) { report(l); });
+    return 'Email Index: search only — 0 candidate(s).';
+  }
+  lines.push('');
+  lines.push('Nothing above is written or moved. The lines below are each file\'s tabs.');
+  lines.push('');
+
+  // ── The inventory ────────────────────────────────────────────────────────────
+  for (var k = 0; k < found.length; k++) {
+    var file = found[k];
+    lines.push('════════ ' + file.getName() + '  (id ' + file.getId() + ') ════════');
+    try {
+      var ss = SpreadsheetApp.openById(file.getId());
+    } catch (err3) {
+      lines.push('### could not be opened: ' + ((err3 && err3.message) ? err3.message : String(err3)));
+      lines.push('');
+      continue;
+    }
+
+    var sheets = ss.getSheets();
+    lines.push(sheets.length + ' tab(s). Each: name — dimensions, rows holding anything, header row.');
+    if (sheets.length > MAX_TABS_PER_FILE) {
+      lines.push('(only the first ' + MAX_TABS_PER_FILE + ' are listed)');
+    }
+    for (var i = 0; i < sheets.length && i < MAX_TABS_PER_FILE; i++) {
+      var tab = sheets[i];
+      var name = '(unnamed)', dims = '?', filled = '?', header = '(none)';
+      try {
+        name = tab.getName();
+        var lastRow = tab.getLastRow();
+        var lastCol = tab.getLastColumn();
+        dims = lastRow + ' rows x ' + lastCol + ' cols';
+        if (lastRow < 1 || lastCol < 1) {
+          filled = '0';
+          header = '(empty tab)';
+        } else if (lastRow * lastCol > MAX_CELLS) {
+          filled = 'not scanned (over ' + MAX_CELLS + ' cells)';
+          var top = tab.getRange(1, 1, Math.min(lastRow, HEADER_SEARCH_ROWS), lastCol).getDisplayValues();
+          for (var q = 0; q < top.length; q++) {
+            if (top[q].join('').trim() !== '') {
+              header = 'header@r' + (q + 1) + ': ' + clipRow(top[q]);
+              break;
+            }
+          }
+        } else {
+          // Rows holding ANYTHING, deliberately not getLastRow(): a row that was
+          // merely formatted counts as the last row and holds nothing, so
+          // getLastRow() turns a stray click at row 5,000 into a "5,000-row" tab.
+          var grid = tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+          var filledRows = 0, headerRow = 0, headerCells = null;
+          for (var r2 = 0; r2 < grid.length; r2++) {
+            var row = grid[r2], holds = false;
+            for (var c = 0; c < row.length; c++) {
+              if (String(row[c]).trim() !== '') { holds = true; break; }
+            }
+            if (!holds) continue;
+            filledRows++;
+            if (!headerRow) { headerRow = r2 + 1; headerCells = row; }
+          }
+          filled = String(filledRows);
+          header = headerRow
+            ? 'header@r' + headerRow + ': ' + clipRow(headerCells)
+            : '(no content)';
+        }
+      } catch (err4) {
+        header = 'ERROR reading this tab: ' + ((err4 && err4.message) ? err4.message : String(err4));
+      }
+      lines.push('  ' + name + ' — ' + dims + ', ' + filled + ' row(s) with content, ' + header);
+    }
+    lines.push('');
+  }
+
+  lines.push('>>> Copy this back in full. The header rows are what an importer maps, and');
+  lines.push('    the tab carrying ~2393 rows is the one the crawl built.');
+
+  // ONE report() PER LINE, for the same reason the workbook survey does it: a single
+  // thousand-line log entry is what the log folds away and a paste truncates, and a
+  // truncated inventory looks like a complete one.
+  lines.forEach(function (line) { report(line); });
+  return 'Email Index: ' + found.length + ' file(s) surveyed — copy the log back in full.';
+}
+
+// One header row, printed so it stays ON ONE LINE. A 50-column form printed whole is
+// a line the execution log wraps into unreadability, and the columns are the entire
+// point of printing it — see the two surveys above.
+function clipRow(cells) {
+  var MAX_CELL = 46;
+  var out = [];
+  for (var i = 0; i < cells.length; i++) {
+    var v = String(cells[i] == null ? '' : cells[i]).replace(/\s+/g, ' ').trim();
+    if (v.length > MAX_CELL) v = v.slice(0, MAX_CELL - 1) + '…';
+    out.push(v);
+  }
+  return out.join(' | ');
+}
+
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ONE-TIME SETUP — run these from the Apps Script editor, in this order.

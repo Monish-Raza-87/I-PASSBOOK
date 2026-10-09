@@ -611,17 +611,27 @@ is left is small.
    "last backup" line: *"Backup 2026-10-09: 45 file(s) read, 20 written, 21 IR(s), 18
    account(s), rotated out 0 old folder(s)."* — 51 seconds, and `rotated out 0` is correct
    for a first run, since nothing is old enough to retire yet.
-3. ✅ **The frontend is published at cache `v80` — 2026-10-09.** It carries the team
-   roster read (`listTeam`) on top of the one-common-head two-door landing page, the
-   customer portal and the invite panel. Publishing is
+3. ✅ **The frontend is published at cache `v82` — 2026-10-09.** `v80` carried the team
+   roster read (`listTeam`); **`v82` is the release the owner asked for in full** — the
+   two doors folded on arrival and independent of each other, liquid glass on every
+   page including the two new legal ones, PRODUCT in the tagline, the desk's WhatsApp
+   button live rather than hidden, sentence-cased labels, and the darker avatar. Read on
+   the live site after the push: `sw.js` answering `ipassbook-v82`, `app.js` answering
+   `APP_VERSION = 'v82'`, `privacy.html` and `terms.html` both `200`, both door bodies
+   carrying `hidden`, and `wa.me/918655366232` in the served `app.js`. Publishing is
    `DEPLOY_SOURCE=category-insights node tools/deploy-ghpages.mjs` to dry-run, then the
    same with `--commit --push`; it needs the working tree clean, so the commits go
    first, and a `CACHE_NAME` bump in `sw.js` or it warns that returning users keep the
    stale shell for a load. The deploy is confirmed by reading the **served** files,
-   never by a deploy date: `sw.js` answering `ipassbook-v80` and `app.js` answering
-   `APP_VERSION = 'v80'`. **Both were read on the live site on 2026-10-09 and both
-   answered.** The backend half went in after it — see item 1 — so **both halves are
-   level with the committed code at `v80` / `API_VERSION 9`.**
+   never by a deploy date. The backend half went in after the `v80` frontend — see
+   item 1 — so **both halves are level with the committed code at `v82` /
+   `API_VERSION 9`.**
+
+   > **A new file needs a SERVED line, and a stale one is worse than a missing one.**
+   > `terms.html` and `privacy.html` are in `tools/deploy-ghpages.mjs`'s `SERVED` array.
+   > A file that exists in the repo but not in that array is never published; a file
+   > dropped from it is not deleted either — it lingers on `gh-pages` until it is named
+   > in `PRUNE`. The two are not symmetrical and both have been got wrong.
 
    > **Two things stopped this deploy the first time, and neither is a code fault.**
    > **(a)** `tools/deploy-ghpages.mjs` **refuses to run on a dirty tree** — it checks

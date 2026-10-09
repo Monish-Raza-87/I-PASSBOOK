@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>I-PASSBOOK | Indrones After-Sales</title>
-  <meta name="description" content="Indrones Product After-Sales Summary Book — track, manage, and resolve customer IRs end-to-end." />
+  <meta name="description" content="Indrones Product After Sales Service Book — track, manage, and resolve customer IRs end-to-end." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <!-- Inter Variable: the app relies on optical sizing and weight 420, so the
@@ -214,7 +214,7 @@
       <div class="landing-wordmark">
         <h1 class="landing-brand" id="landing-brand" data-i18n="app.name">I-PASSBOOK</h1>
       </div>
-      <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES-AFTER SALES SERVICE BOOK</p>
+      <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES PRODUCT AFTER SALES SERVICE BOOK</p>
     </header>
 
     <!-- ── THE CORNER ──
@@ -250,34 +250,42 @@
          and the shorter one reads as incomplete however it is filled. Stacked, each is
          only ever compared with the page, and the collapsed one is a single 56px bar.
 
-         EXCLUSIVE: opening one closes the other, on the same reasoning as a set of radio
-         buttons. Two open panels would put the employee's four mechanisms and the
-         customer's three above each other, which is the clutter he was describing, only
-         taller. `.door-body` carries app.js's `hidden`, and the bar carries
-         `aria-expanded`, so the pair stays honest to a screen reader with or without JS.
+         INDEPENDENT: each bar is a plain toggle with no opinion about the other. The
+         first build made the pair an accordion — opening one shut the other — and the
+         owner rejected that on 2026-10-09: *"we may open anyone or collapse anyone
+         without being dependent on other."* `.door-body` carries app.js's `hidden`, and
+         the bar carries `aria-expanded`, so the pair stays honest to a screen reader
+         with or without JS.
 
-         ONE BAR IS OPEN ON ARRIVAL — the one this device used last, defaulting to the
-         Employee bar. Collapsing both would save 200px and cost a click from everyone,
-         and it would leave the line under them ("By continuing, you acknowledge…")
-         acknowledging a tap nobody has been offered. -->
+         BOTH BARS ARE SHUT ON ARRIVAL, and nothing is remembered between visits. The
+         first build opened the Employee bar deliberately; the owner asked for both
+         shut, and then had to ask again when the first fix left one open. His words:
+         *"I asked page opens the tabs collapsed."* Two closed 56px bars is also the
+         honest first frame — it offers the choice instead of making it. -->
     <div class="doors">
 
       <!-- ── THE EMPLOYEE DOOR ──
            The form that was here before this screen had two doors. All modes still
            share the one form and Enter still submits whichever is showing. -->
-      <section class="door glass-card" id="door-employee">
+      <section class="door glass-card" id="door-employee" data-open="0">
         <button type="button" class="door-bar" id="door-employee-toggle"
                 aria-expanded="false" aria-controls="door-employee-body"
                 data-i18n-aria="door.expand" data-i18n-var-role="Employee">
           <span class="door-role" id="door-employee-role" data-i18n="door.employee">Employee</span>
           <span class="door-chev" aria-hidden="true"></span>
         </button>
-        <!-- NO `hidden` IN THE MARKUP, and that is the fallback rather than an
-             oversight. With JS off there are no accordions at all: a `hidden` panel
-             could never be opened again, so the JS-off page shows BOTH panels, and the
-             bar's `aria-expanded="false"` is the first frame only — app.js's first
-             paint sets the attribute honestly in the same tick it paints the doors. -->
-        <div class="door-body" id="door-employee-body">
+        <!-- THE PANEL SHIPS FOLDED — `hidden`, and `data-open="0"` on the section above
+             so the chevron starts the right way up. It shipped UNFOLDED until
+             2026-10-09, on the argument that a JS-off page then still showed the door.
+             That argument was wrong twice over. It cost a visible flash on EVERY visit:
+             a browser painted both panels wide open, and app.js folded them a moment
+             later, so the first thing anyone saw was the doors snapping shut — which is
+             very close to the complaint the owner had already made twice. And it was
+             never true that the `aria-expanded="false"` the markup carried was harmless:
+             it told a screen reader "collapsed" over a panel that was plainly open.
+             With JS off nothing is lost by folding: the bars are inert either way, since
+             the only thing that ever opened a panel was `toggleDoor`. -->
+        <div class="door-body" id="door-employee-body" hidden>
         <!-- Update notice, sign-in slot. See the twin in #workspace for the whole
              story; the short version is that a device sitting on this screen is
              exactly the device that needs to hear about a new build, and it never
@@ -446,14 +454,16 @@
            has used can never inherit, or overwrite, the staff session. Those two
            strings and the three action names are exactly the ones customer.html uses,
            and tools/smoke-portal.mjs holds the two files to each other. -->
-      <section class="door glass-card" id="door-customer">
+      <section class="door glass-card" id="door-customer" data-open="0">
         <button type="button" class="door-bar" id="door-customer-toggle"
                 aria-expanded="false" aria-controls="door-customer-body"
                 data-i18n-aria="door.expand" data-i18n-var-role="Customer">
           <span class="door-role" id="door-customer-role" data-i18n="door.customer">Customer</span>
           <span class="door-chev" aria-hidden="true"></span>
         </button>
-        <div class="door-body" id="door-customer-body">
+        <!-- Folded on arrival for the same reason and in the same words as its twin
+             above: the markup and app.js's first paint now agree, so nothing moves. -->
+        <div class="door-body" id="door-customer-body" hidden>
 
         <!-- A customer already signed in on this device does not need a form: the
              Customer Space is one tap away. JS swaps this for the form below. -->
@@ -463,7 +473,7 @@
 
         <form id="cust-form" autocomplete="on">
           <p class="cust-welcome" data-i18n="cust.welcome">Welcome! This is I-PASSBOOK</p>
-          <p class="cust-tagline" data-i18n="cust.tagline">For Everything Related To Indrones’ After-Sales</p>
+          <p class="cust-tagline" data-i18n="cust.tagline">For everything related to Indrones’ after-sales</p>
           <p class="cust-lead" data-i18n="cust.login">Log in to your I-PASSBOOK account.</p>
 
           <input class="form-input" type="email" id="cust-email" placeholder="you@company.com" autocomplete="email" required data-i18n-placeholder="cust.email" />
@@ -494,13 +504,13 @@
          Three things that belong to neither door and are true of both, so they are said
          once, under the pair, in the order a person meets them.
 
-         1. THE ACKNOWLEDGEMENT. ⚠ Both phrases are PLAIN TEXT WITH NO ANCHOR, and that
-            is deliberate rather than unfinished: there is no terms.html and no
+         1. THE ACKNOWLEDGEMENT, and both phrases in it are now REAL LINKS. They were
+            plain text for a long time, deliberately: there was no terms.html and no
             privacy.html in this repo, and a link to a 404 under the words "Terms &
-            Conditions" is a worse answer than no link at all. Writing those pages means
-            writing the company's legal position on its own data, which is the owner's to
-            give. The moment they exist, these two phrases become anchors here — see the
-            note on landing.terms in i18n.js.
+            Conditions" is a worse answer than no link at all. Both pages now exist
+            (terms.html, privacy.html), so the sentence is built from four i18n keys
+            with the two anchors between them — see the note on landing.termsPre in
+            i18n.js for why it is split rather than one string.
 
          2. THE LANGUAGE SELECTOR, where the owner asked for it ("a language select
             option at bottom like in notion.app"). Its options are built by app.js from
@@ -511,7 +521,7 @@
             rather than showing a blank or a key. See the language layer's own header in
             i18n.js for what that fallback is for and what it is not. -->
 
-    <p class="landing-terms" data-i18n="landing.terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy</p>
+    <p class="landing-terms"><span data-i18n="landing.termsPre">By continuing, you acknowledge that you understand and agree to the </span><a href="terms.html" data-i18n="landing.termsTos">Terms &amp; Conditions</a><span data-i18n="landing.termsAnd"> and </span><a href="privacy.html" data-i18n="landing.termsPrivacy">Privacy Policy</a></p>
 
     <div class="landing-lang">
       <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
@@ -618,7 +628,7 @@
         <button type="submit" class="btn" id="pc-save">Set password &amp; continue</button>
       </form>
       <p class="auth-hint">Use something you'll remember — at least 8 characters. Your temporary password stops working the moment this is set.</p>
-      <button class="btn btn-secondary" id="pc-signout" data-i18n="auth.signOut">Sign Out</button>
+      <button class="btn btn-secondary" id="pc-signout" data-i18n="auth.signOut">Sign out</button>
       <p id="pc-error" class="auth-error" style="display:none"></p>
     </div>
   </div>
@@ -636,7 +646,7 @@
       </div>
 
       <div class="sidebar-nav">
-        <div class="sidebar-section-label" data-i18n="nav.serviceDesk">Service Desk</div>
+        <div class="sidebar-section-label" data-i18n="nav.serviceDesk">Service desk</div>
 
         <a class="nav-item" id="nav-tickets" href="#/tickets" title="IRs" data-i18n-title="nav.irs">
           <span class="nav-icon" aria-hidden="true"></span>
@@ -656,9 +666,9 @@
              reports what went wrong with it. A plain hash link with no JS
              binding, exactly like the two above: the hashchange listener is the
              whole mechanism. -->
-        <a class="nav-item" id="nav-log" href="#/log" title="Log Analyser" data-i18n-title="nav.logAnalyser">
+        <a class="nav-item" id="nav-log" href="#/log" title="Log analyser" data-i18n-title="nav.logAnalyser">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label" data-i18n="nav.logAnalyser">Log Analyser</span>
+          <span class="nav-label" data-i18n="nav.logAnalyser">Log analyser</span>
         </a>
 
         <!-- The FAQ, from inside the app — a view of this app, not a page beside
@@ -677,7 +687,7 @@
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none" data-i18n="nav.administration">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">
           <span class="nav-icon" aria-hidden="true"></span>
-          <span class="nav-label" data-i18n="nav.userAccess">User Access</span>
+          <span class="nav-label" data-i18n="nav.userAccess">User access</span>
         </button>
       </div>
 
@@ -824,7 +834,7 @@
               <button type="button" id="ir-triage-btn" class="btn-ghost" onclick="openTriageModal()" title="Assign, prioritise and categorise this IR"><span class="btn-icon" aria-hidden="true"></span>Allot CAPS</button>
               <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
               <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>
-              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy Record</button>
+              <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy record</button>
             </div>
           </div>
 
@@ -866,7 +876,7 @@
                   <span class="overview-toggle-text">Hide</span>
                 </button>
               </div>
-              <button type="button" class="btn" id="save-overview">Save Overview</button>
+              <button type="button" class="btn" id="save-overview">Save overview</button>
             </div>
             <div id="ir-overview-facts"></div>
             <div id="ir-overview-editable"></div>
@@ -1055,7 +1065,7 @@
         <div id="log-view">
           <div class="list-toolbar">
             <div class="list-toolbar-top">
-              <span class="list-title">Log Analyser</span>
+              <span class="list-title">Log analyser</span>
             </div>
           </div>
           <div id="log-body" class="log-body"></div>

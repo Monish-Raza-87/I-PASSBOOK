@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>I-PASSBOOK Privacy Notice</title>
+<link rel="icon" href="assets/icon-192.png">
+<style>
+  /* Its own styles, loading nothing — the same rule faq.html, plan.html, inspector.html
+     and backup.html follow. A legal page must stay readable even if the app's six-file
+     cascade or its backend is the thing that is broken.
+     Every token is defined on bare :root FIRST; the two dark blocks only re-point them,
+     so a viewer whose system theme is dark is never left with a light-page token. */
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --surface-2: #eef0f5;
+    --fg: #14171f;
+    --fg-muted: #5a6273;
+    --line: #dcdfe7;
+    --accent: #2440d8;
+    --radius: 12px;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* GLASS. The same four values base.css declares, restated here rather than linked,
+       because this page loads no stylesheet at all — see the note above. The fill is a
+       step MORE opaque than the doors' 72%: this page is long-form prose, not a form, and
+       a paragraph drifting over a gradient is a paragraph being read twice. 86% keeps the
+       blur visible in the margins and the paper under the words, which is the same
+       change-of-material argument base.css makes, one step further along. */
+    --glass-fill: color-mix(in srgb, var(--surface) 86%, transparent);
+    --glass-edge: rgba(255, 255, 255, 0.5);
+    --glass-blur: blur(18px) saturate(1.5);
+    --accent-tint:        color-mix(in srgb, var(--accent) 7%, transparent);
+    --accent-tint-strong: color-mix(in srgb, var(--accent) 13%, transparent);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --bg: #0f1218; --surface: #171b24; --surface-2: #1e2431;
+      --fg: #e7eaf1; --fg-muted: #98a1b3; --line: #2a3140; --accent: #8ea2ff;
+      --glass-edge: rgba(255, 255, 255, 0.14);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1218; --surface: #171b24; --surface-2: #1e2431;
+    --fg: #e7eaf1; --fg-muted: #98a1b3; --line: #2a3140; --accent: #8ea2ff;
+    --glass-edge: rgba(255, 255, 255, 0.14);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 16px 56px;
+    color: var(--fg);
+    font-family: var(--sans); line-height: 1.6;
+    -webkit-text-size-adjust: 100%;
+    /* THE AMBIENT FIELD. A blur over a flat colour is invisible — base.css says so and
+       industrial.css restates it — so the two accent lobes the sign-in screen already
+       uses are repeated here, at the same two positions. That is what makes this page
+       the same glass as the app rather than a page that merely also uses blur. */
+    background:
+      radial-gradient(120rem 70rem at 8% -18%,  var(--accent-tint-strong), transparent 62%),
+      radial-gradient(105rem 62rem at 96% 118%, var(--accent-tint),        transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+  }
+  .wrap { max-width: 40rem; margin: 0 auto; }
+  header.top { margin-bottom: 22px; }
+  h1 { margin: 0 0 4px; font-size: 1.5rem; line-height: 1.25; }
+  .sub { margin: 0; color: var(--fg-muted); font-size: 0.9375rem; }
+  .stamp { margin: 10px 0 0; color: var(--fg-muted); font-size: 0.8125rem; }
+  section {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 18px 18px 6px; margin-bottom: 14px;
+  }
+  /* The panes, and the `@supports` guard is the whole safety net: a browser without
+     backdrop-filter keeps the solid card it can actually read, never a translucent
+     panel with nothing behind it. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    section, .note {
+      background: var(--glass-fill);
+      -webkit-backdrop-filter: var(--glass-blur);
+      backdrop-filter: var(--glass-blur);
+      box-shadow: inset 0 1px 0 var(--glass-edge);
+    }
+  }
+  h2 { margin: 0 0 10px; font-size: 1.0625rem; line-height: 1.35; }
+  h3 { margin: 16px 0 6px; font-size: 0.9375rem; }
+  p, li { font-size: 0.9375rem; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 12px; padding-left: 1.25rem; }
+  li { margin-bottom: 6px; }
+  a { color: var(--accent); }
+  strong { font-weight: 600; }
+  .note {
+    background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 12px 14px; margin: 0 0 14px;
+    font-size: 0.875rem; color: var(--fg-muted);
+  }
+  footer.end { margin-top: 22px; color: var(--fg-muted); font-size: 0.875rem; }
+  footer.end p { margin: 0 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Privacy Notice</h1>
+    <p class="sub">I-PASSBOOK — Indrones Product After Sales Service Book</p>
+    <p class="stamp">Last updated 9 October 2026</p>
+  </header>
+
+  <p class="note">
+    This notice explains what I-PASSBOOK holds about you, where it is kept and who can
+    see it. It follows Indrones Solutions Pvt. Ltd.'s published privacy policy and
+    describes only what this application actually does.
+  </p>
+
+  <section>
+    <h2>1. Who is responsible for your data</h2>
+    <p>
+      Indrones Solutions Private Limited, L-3039, Akshar Business Park, Sector 25,
+      Vashi, Navi Mumbai, Maharashtra 400703, India. For anything in this notice —
+      questions, corrections, or a request to see or remove your data — write to
+      <a href="mailto:info@indrones.com">info@indrones.com</a> or call
+      +91 9594160160.
+    </p>
+  </section>
+
+  <section>
+    <h2>2. What I-PASSBOOK holds</h2>
+    <ul>
+      <li><strong>About you:</strong> your name, work email address, telephone number,
+          the company you work for, and your role.</li>
+      <li><strong>About your aircraft and your requests:</strong> the tickets raised
+          against your machine — the fault reported, the work carried out, inspection and
+          service records, and the dates on them.</li>
+      <li><strong>Files you upload:</strong> photographs, documents and reports attached
+          to a ticket as evidence.</li>
+      <li><strong>Sign-in records:</strong> the date and time you signed in, the account
+          used, and the device label from your browser. These exist so the desk can tell
+          who did what, and to keep your account safe.</li>
+    </ul>
+    <p>
+      The application holds nothing about your private life, and nothing is bought in
+      from data brokers. It holds what the after-sales relationship needs and no more.
+    </p>
+  </section>
+
+  <section>
+    <h2>3. Where it is kept</h2>
+    <p>
+      Your data is stored in Google Drive and Google Sheets owned by Indrones, reached
+      through a private Google Apps Script service. Access to that service is
+      token-controlled: every request must carry a signed-in session.
+    </p>
+    <p>
+      I-PASSBOOK carries <strong>no third-party analytics, no advertising, and no
+      tracking pixels</strong>. Nothing about your use of it is sold, traded or passed to
+      anyone outside Indrones, except where the law requires it.
+    </p>
+  </section>
+
+  <section>
+    <h2>4. Who can see it</h2>
+    <ul>
+      <li><strong>Indrones staff</strong> signed in to the application can read the
+          tickets. This is deliberate: the whole after-sales team works from one record.</li>
+      <li><strong>A customer account</strong> is scoped to one company and can read that
+          company's tickets only — never another customer's.</li>
+      <li><strong>You</strong> can read the tickets belonging to the company your account
+          is linked to.</li>
+    </ul>
+    <p>
+      Editing is more tightly controlled than reading: it is granted by department, not
+      to everybody. The application decides what you may see and change from your own
+      signed-in account, never from anything you can type into a link.
+    </p>
+  </section>
+
+  <section>
+    <h2>5. How long it is kept</h2>
+    <p>
+      Ticket records are kept for the life of the aircraft relationship and are
+      <strong>archived, not deleted</strong>, when a ticket is closed — they may be
+      needed for warranty or regulatory reasons. The audit trail of changes is kept for
+      at least 400 days, and longer where the ticket is still open.
+    </p>
+    <p>
+      Nightly backups are taken and rotated on a daily, weekly, monthly and yearly cycle.
+      Old backups are removed automatically; your current data is not.
+    </p>
+  </section>
+
+  <section>
+    <h2>6. Cookies and storage on your device</h2>
+    <p>
+      I-PASSBOOK sets <strong>no tracking cookies</strong>. Your browser stores three
+      small things so the app works: your sign-in session, your light/dark choice, and
+      your language choice. The session lasts one working day and is never extended by
+      use. Signing out clears it.
+    </p>
+    <p>
+      If you enable quick unlock with a fingerprint or a pattern, the unlock is checked
+      on your own device, and only after it succeeds does the app contact the server.
+    </p>
+  </section>
+
+  <section>
+    <h2>7. Your choices</h2>
+    <ul>
+      <li>Ask to <strong>see</strong> what is held about you.</li>
+      <li>Ask for anything <strong>inaccurate</strong> to be corrected.</li>
+      <li>Ask for your account to be <strong>closed</strong>. Records that Indrones must
+          keep for warranty or legal reasons will be retained for that purpose, and we
+          will tell you which ones and why.</li>
+    </ul>
+    <p>
+      Write to <a href="mailto:info@indrones.com">info@indrones.com</a>, or speak to your
+      Customer Relations contact.
+    </p>
+  </section>
+
+  <section>
+    <h2>8. Changes to this notice</h2>
+    <p>
+      If this notice changes in a way that affects you, the app will show it. The date at
+      the top of this page is the version you are reading.
+    </p>
+  </section>
+
+  <footer class="end">
+    <p><a href="terms.html">Terms of Use</a> &middot; <a href="index.html">Back to I-PASSBOOK</a></p>
+    <p>
+      This page is static: it runs no scripts, sends nothing and records nothing about who
+      read it.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

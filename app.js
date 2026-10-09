@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v81';
+const APP_VERSION = 'v82';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -128,14 +128,17 @@ const CONFIG = {
 
   // The desk's WhatsApp chat, for the corner button on the landing page.
   //
-  // THIS IS EMPTY ON PURPOSE AND THE BUTTON IS HIDDEN WHILE IT IS. There is no
-  // Indrones after-sales WhatsApp link anywhere in this repository, I have no way to
-  // verify one, and inventing a number would send a customer to a stranger. So the
-  // corner ships wired and dormant: paste the invite URL (the `https://wa.me/<number>`
-  // or `https://chat.whatsapp.com/<code>` form) here and the button appears on the next
-  // deploy, with no other change. An `href` of '#' that opens a blank tab is worse than
-  // no button at all, which is why the fallback is "no button".
-  WHATSAPP_URL: '',
+  // THE OWNER SUPPLIED THE NUMBER ON 2026-10-09: *"this is the whatsapp number of
+  // Indrones Customer Relations - 8655366232"*. `wa.me` wants the country code and no
+  // punctuation, so the Indian number is 91 + 8655366232. To change the desk's chat,
+  // this is the ONE line: paste the `https://wa.me/<number>` or
+  // `https://chat.whatsapp.com/<code>` form and the button follows on the next deploy.
+  //
+  // The button was built and left hidden for a fortnight because there was no number in
+  // this repository and inventing one would have sent a locked-out customer to a
+  // stranger. It is no longer hidden: app.js reveals it only when this string is
+  // non-empty, and an empty string still means "no button" rather than a dead `href`.
+  WHATSAPP_URL: 'https://wa.me/918655366232',
 
   // ── NO SHEET ADDRESSES LIVE HERE ANY MORE (2026-10-03) ───────────────────────
   // The IR Repository and the legacy workbook used to be named in this file. Both
@@ -486,7 +489,7 @@ function applyUpdate() {
   // restoreDrafts()), but it still gets a prompt: "your entries are safe" is not
   // something anyone should have to find out afterwards.
   if (document.getElementById('access-modal') &&
-      !confirm('Discard the unsaved changes in User Access and update now?')) return;
+      !confirm('Discard the unsaved changes in User access and update now?')) return;
   if (hasAnyDraft() &&
       !confirm('Your unsaved entries are kept and restored after the restart. Update now?')) return;
 
@@ -2632,7 +2635,7 @@ async function beginQuickUnlockSetup() {
 function offerRemoveUnlock() {
   const st = loadUnlock();
   if (!st) return;
-  if (window.confirm('Remove Quick unlock from this device?')) {
+  if (window.confirm('Remove quick unlock from this device?')) {
     clearUnlock();
     if (st.deviceToken) deviceRevokeBackend(st.deviceToken);
     showToast('Quick unlock removed.');
@@ -3246,40 +3249,50 @@ function wireDoors() {
   _doorsWired = true;
   DOORS.forEach(which => {
     const bar = document.getElementById('door-' + which + '-toggle');
-    if (bar) bar.addEventListener('click', () => setDoor(which));
+    if (bar) bar.addEventListener('click', () => toggleDoor(which));
   });
 }
 
-// Opens `which` and closes the other. No argument closes nothing: it is not a toggle,
-// it is a choice — see the note above.
-function setDoor(which) {
-  const want = DOORS.indexOf(which) >= 0 ? which : 'employee';
-  DOORS.forEach(w => {
-    const sec  = document.getElementById('door-' + w);
-    const bar  = document.getElementById('door-' + w + '-toggle');
-    const body = document.getElementById('door-' + w + '-body');
-    if (!sec || !bar || !body) return;
-    const on = (w === want);
-    // `data-open` drives the chevron's rotation, `hidden` is what actually folds the
-    // panel, and `aria-expanded` is what a screen reader is told. Three statements of
-    // one fact, which is one more than is comfortable — but `hidden` alone leaves the
-    // arrow pointing down inside a shut panel, and a class alone leaves a keyboard user
-    // tabbing through fields they cannot see.
-    sec.dataset.open = on ? '1' : '0';
-    bar.setAttribute('aria-expanded', on ? 'true' : 'false');
-    body.hidden = !on;
-  });
-  try { if (which) localStorage.setItem(DOOR_KEY, want); } catch (e) { /* storage blocked */ }
+// Opens or closes ONE door, and has no opinion about the other. The pair used to be an
+// accordion — opening either shut the other — and one of the two was open on arrival.
+// The owner rewrote both halves of that on 2026-10-09: *"I asked page opens the tabs
+// collapsed, then we may open anyone or collapse anyone without being dependent on
+// other."* So the bar is a plain toggle now.
+function setDoor(which, on) {
+  const w = DOORS.indexOf(which) >= 0 ? which : 'employee';
+  const sec  = document.getElementById('door-' + w);
+  const bar  = document.getElementById('door-' + w + '-toggle');
+  const body = document.getElementById('door-' + w + '-body');
+  if (!sec || !bar || !body) return;
+  // `data-open` drives the chevron's rotation, `hidden` is what actually folds the
+  // panel, and `aria-expanded` is what a screen reader is told. Three statements of
+  // one fact, which is one more than is comfortable — but `hidden` alone leaves the
+  // arrow pointing down inside a shut panel, and a class alone leaves a keyboard user
+  // tabbing through fields they cannot see.
+  sec.dataset.open = on ? '1' : '0';
+  bar.setAttribute('aria-expanded', on ? 'true' : 'false');
+  body.hidden = !on;
+  // The last door a person actually OPENED is still recorded, because the code screen
+  // comes back to the door that asked: a customer who mistyped their address and is put
+  // back on the employee bar has lost their place. This is not the arrival state.
+  if (on) { try { localStorage.setItem(DOOR_KEY, w); } catch (e) { /* storage blocked */ } }
 }
 
-// Which door opens on arrival: the one this device used last, the Employee's by
-// default. NEVER both shut — the line under the pair ("By continuing, you acknowledge…")
-// would then be acknowledging a tap nobody was offered.
+function toggleDoor(which) {
+  const w = DOORS.indexOf(which) >= 0 ? which : 'employee';
+  const sec = document.getElementById('door-' + w);
+  setDoor(w, !(sec && sec.dataset.open === '1'));
+}
+
+// BOTH DOORS SHUT ON ARRIVAL, every time, and nothing is restored from storage. The
+// owner asked for this twice, the second time because the first fix did not do it:
+// *"still customer and employee boxes are not opened in shrink format"*, then *"I asked
+// page opens the tabs collapsed"*. The earlier code made a deliberate argument for
+// leaving one open ("collapsing both would cost a click from everyone") and kept it; the
+// argument lost to the instruction, which is the right way round.
 function paintDoors() {
   wireDoors();
-  let want = '';
-  try { want = localStorage.getItem(DOOR_KEY) || ''; } catch (e) { want = ''; }
-  setDoor(DOORS.indexOf(want) >= 0 ? want : 'employee');
+  DOORS.forEach(w => setDoor(w, false));
 }
 
 // ─── THE LANGUAGE PICKER ───────────────────────────────────────────────────────
@@ -3324,10 +3337,12 @@ function buildLangSelect() {
 // no sign-up: an admin provisions every account. So the corner holds the thing a person
 // who cannot get in actually needs instead — the desk.
 //
-// HIDDEN WHILE CONFIG.WHATSAPP_URL IS EMPTY, and that is the honest state rather than an
-// unfinished one. A button that opens an empty tab is worse than no button, and there is
-// no Indrones after-sales WhatsApp link I can verify from here. See the note on that key
-// in CONFIG: paste the URL and this appears, with no other change.
+// LIVE SINCE 2026-10-09 — the owner supplied the desk's number and it is in
+// `CONFIG.WHATSAPP_URL`, so the button is on the landing page for everyone from this
+// release on. The empty-string branch below is kept rather than deleted: it is what makes
+// "no button" the state a cleared URL produces, instead of a button that opens a blank tab.
+// An `href="#"` is the worst of the three, and it is what the markup ships with so the
+// glyph cannot be tapped in the moment before this runs.
 function wireWhatsApp() {
   const btn = document.getElementById('whatsapp-btn');
   if (!btn) return;
@@ -3420,7 +3435,7 @@ function closeCodeView(restore) {
   if (cv) { cv.dataset.open = '0'; cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); }
   if (restore === false) return;
   showAuth();
-  setDoor(_codeDoor === 'customer' ? 'customer' : 'employee');
+  setDoor(_codeDoor === 'customer' ? 'customer' : 'employee', true);
   const field = document.getElementById(_codeDoor === 'customer' ? 'cust-email' : 'auth-email');
   if (field && _codeEmail) field.value = _codeEmail;
 }
@@ -4389,7 +4404,7 @@ function openAccessModal() {
   modal.innerHTML = `
     <div class="access-card">
       <div class="inward-options-head">
-        <div class="inward-options-title">${iconSvg('users')} User Access</div>
+        <div class="inward-options-title">${iconSvg('users')} User access</div>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
       <div class="access-status" id="access-status"></div>
@@ -5257,9 +5272,9 @@ function createUserMenu() {
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
       ${buildAppearanceGroup()}
-      ${isAdmin() ? `<button class="signout-btn" id="access-admin-btn">${iconSvg('users')} User Access</button>` : ''}
+      ${isAdmin() ? `<button class="signout-btn" id="access-admin-btn">${iconSvg('users')} User access</button>` : ''}
       <button class="signout-btn" id="quick-unlock-btn">Turn on Quick unlock</button>
-      <button class="signout-btn" id="signout-btn">Sign Out</button>
+      <button class="signout-btn" id="signout-btn">Sign out</button>
     `;
     document.body.appendChild(menu);
     // Appearance rows. Delegated on the menu rather than bound per row, because
@@ -5310,7 +5325,7 @@ function syncQuickUnlockMenu() {
   const st = loadUnlock();
   if (!st) btn.textContent = 'Turn on Quick unlock';
   else if (!st.patternHash) btn.textContent = 'Add unlock pattern';
-  else btn.textContent = 'Remove Quick unlock';
+  else btn.textContent = 'Remove quick unlock';
 }
 
 function toggleUserMenu() {
@@ -5716,18 +5731,28 @@ function initialsOf(name) {
 //      a list re-sorts — an avatar that changed on every render reads as a different
 //      person, which is worse than a letter.
 //
-// The fields are muted and mid-toned on purpose: the silhouette is white on the field,
+// The fields are deep and saturated on purpose: the silhouette is white on the field,
 // so contrast is a property of the mark itself and does not change with the theme. The
 // avatar is the same in light, cream and dark, the way a photograph would be.
+//
+// ⚠ THEY WERE MUTED AND MID-TONED UNTIL 2026-10-09, AND THAT WAS THE BUG. "The
+// icon/avatar is not cool" landed on the same note as everything else in that batch,
+// and looking at what he was looking at, the eight fields were olive, slate, plum grey,
+// moss, terracotta, denim slate, ochre and graphite — eight shades of mud, six of them
+// within a few per cent of each other in luminance, so a room full of them read as one
+// grey wall with a cream bust on it. The ramp below is the same eight hues with the
+// saturation put back and the luminance pulled DOWN, which does two things at once:
+// the cream silhouette gains about a stop and a half of contrast, and the marks stop
+// looking like each other. Nothing else about the mark changed.
 const AVATAR_FIELDS = [
-  '#7a6a4f',  // olive
-  '#5c6b73',  // slate
-  '#6e5a7a',  // plum grey
-  '#4f6e5a',  // moss
-  '#8a5a44',  // terracotta
-  '#50607a',  // denim slate
-  '#7d6a3c',  // ochre
-  '#5b5b5b',  // graphite
+  '#3f5b8c',  // indigo
+  '#2f6b5f',  // teal
+  '#7a4a6b',  // mulberry
+  '#8a5a2b',  // bronze
+  '#4a5a3f',  // fern
+  '#5b4a7a',  // violet slate
+  '#2f5f7a',  // petrol
+  '#6b3f47',  // oxblood
 ];
 
 // FNV-1a, and `Math.imul` because the multiply has to stay in 32 bits. A plain
@@ -5774,8 +5799,24 @@ function avatarSvg(seed) {
   const crown = AVATAR_CROWNS[(h >>> 11) % AVATAR_CROWNS.length];
   const ink   = '#f7f4ee';
   const cap   = crown ? crown.replace('%S', `<g fill="${field}" opacity=".55">${head}</g>`) : '';
+  // ⚠ THE TILE IS A CHIP OF THE PANEL, NOT A FLAT SQUARE, and that is the owner's
+  // 2026-10-09 note — "plus the icon/avatar is not cool" — answered. The FORM is
+  // untouched: he asked for "avatars without eyes" and the bust below is still exactly
+  // two shapes with no glyphs anywhere, which the insights suite asserts. What changed
+  // is the MATERIAL, the way it changed for everything else in this app: a cast shadow
+  // across the lower right, as if the tile were lit from the top left, and the same
+  // lit 1px top edge the glass panes carry. Both are literal white/black at low alpha
+  // rather than new hues — the eight fields, the cream ink and this ink are still the
+  // only colours in the mark, which is what keeps one rule true of every person.
+  //
+  // The shadow is drawn BEFORE the cap and the bust, so the two shapes sit ON the tile
+  // rather than inside a dark corner, and it is a path rather than a gradient because a
+  // gradient needs an id and an id on a mark that is on screen twenty times at once is
+  // a collision waiting for the day two people draw the same one.
   return `<svg class="avatar-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">`
        + `<rect width="32" height="32" fill="${field}"/>`
+       + `<path d="M0 32 L32 11 L32 32 Z" fill="#000" opacity=".17"/>`
+       + `<rect width="32" height="1" fill="#fff" opacity=".30"/>`
        + cap
        + `<g fill="${ink}">${sh}${head}</g>`
        + `</svg>`;
@@ -6702,7 +6743,7 @@ function renderLogAnalysis(fieldId, value) {
 function showLog() {
   currentView = 'log';
   renderLayout();
-  headerTitle.textContent = tFloor('nav.logAnalyser', 'Log Analyser');
+  headerTitle.textContent = tFloor('nav.logAnalyser', 'Log analyser');
   // Renders from whatever is in memory; handleRoute() is what waits for the IR
   // list. Re-rendering on every entry keeps a re-entry from showing a stale pane.
   renderLog();
@@ -7430,7 +7471,7 @@ function renderIRList(records) {
         </div>
         <div class="ir-card-hover">
           <span class="ir-hover-text">${hoverBits}</span>
-          ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View Summary ↗</a>` : ''}
+          ${sumUrl ? `<a href="${escHtml(sumUrl)}" class="ir-summary-link" onclick="event.stopPropagation()" target="_blank" rel="noopener">View summary ↗</a>` : ''}
         </div>
       </div>
       <div class="ir-card-side">
@@ -8313,12 +8354,12 @@ function renderIntake() {
 //   legacy    the hand-typed activity log, read-only and labelled Legacy
 
 const OVERVIEW_FACTS = [
-  { field: 'irNumber',    label: 'IR Number',        kind: 'text' },
-  { field: 'droneId',     label: 'Drone Serial No.', kind: 'text' },
-  { field: 'dateRaised',  label: 'Date Raised',      kind: 'date' },
+  { field: 'irNumber',    label: 'IR number',        kind: 'text' },
+  { field: 'droneId',     label: 'Drone serial no.', kind: 'text' },
+  { field: 'dateRaised',  label: 'Date raised',      kind: 'date' },
   { field: 'companyName', label: 'Company',          kind: 'text' },
   { field: 'customerName',label: 'Respondent',       kind: 'text' },
-  { field: 'issueType',   label: 'Support Required', kind: 'text' },
+  { field: 'issueType',   label: 'Support required', kind: 'text' },
 ];
 
 // Read one intake value, preferring the raw Sheet cell over the parsed record.
@@ -8433,7 +8474,7 @@ function renderLegacyLog() {
        <div class="activity-table-header">
          <span class="act-col-day">#</span>
          <span class="act-col-date">Date</span>
-         <span class="act-col-activity">Activity Description</span>
+         <span class="act-col-activity">Activity description</span>
          <span class="act-col-remark">Remark</span>
        </div>
        <div class="activity-table-body">${rows.map(buildLegacyActivityRow).join('')}</div>
@@ -8582,7 +8623,7 @@ async function saveOverview() {
 
   setTimeout(() => {
     _savesInFlight.delete(OVERVIEW_KEY);
-    if (btn) { btn.textContent = label || 'Save Overview'; btn.className = 'btn'; }
+    if (btn) { btn.textContent = label || 'Save overview'; btn.className = 'btn'; }
     // Re-enabled through the Overview's own access sweep, never a bare
     // `disabled = false` — same reason as a section save.
     if (typeof applyOverviewGating === 'function') applyOverviewGating();
@@ -9278,23 +9319,23 @@ document.querySelectorAll('.tab').forEach(tab => {
 // section and has no form.
 const SECTIONS = {
   'sec-b': {
-    title: 'Section B — Inward Checklist (Inventory)',
+    title: 'Section B — inward checklist (inventory)',
     fields: [
-      { id: 'b_inwardDate', label: 'Inward Date',  type: 'date' },
-      { id: 'b_inwardBy',   label: 'Inward By (Name)', type: 'text', placeholder: 'Person who performed the inward' },
-      { id: 'b_stNo',       label: 'Stock Transfer (ST) No.', type: 'text', placeholder: 'ST number assigned by Inventory' },
-      { id: 'b_inwardTable', label: 'Particulars Received', type: 'inwardTable' },
-      { id: 'b_inwardPhotos', label: 'Inward Photos (Image or PDF)', type: 'imageEvidence' },
+      { id: 'b_inwardDate', label: 'Inward date',  type: 'date' },
+      { id: 'b_inwardBy',   label: 'Inward by (name)', type: 'text', placeholder: 'Person who performed the inward' },
+      { id: 'b_stNo',       label: 'Stock transfer (ST) no.', type: 'text', placeholder: 'ST number assigned by Inventory' },
+      { id: 'b_inwardTable', label: 'Particulars received', type: 'inwardTable' },
+      { id: 'b_inwardPhotos', label: 'Inward photos (image or PDF)', type: 'imageEvidence' },
       { id: 'b_remarks',    label: 'Remarks', type: 'textarea', placeholder: 'Condition at receiving, missing items, observations, etc.' },
     ]
   },
   'sec-c': {
-    title: 'Section C — IQC Visual Inspection',
+    title: 'Section C — IQC visual inspection',
     fields: [
-      { id: 'c_iqcDate',      label: 'Inspection Date', type: 'date' },
-      { id: 'c_iqcBy',        label: 'Inspected By',    type: 'text', placeholder: 'IQC inspector name' },
-      { id: 'c_iqcTable',     label: 'Visual Inspection Checklist', type: 'iqcTable' },
-      { id: 'c_iqcPhotos',    label: 'Inspection Photos (Image or PDF)', type: 'imageEvidence' },
+      { id: 'c_iqcDate',      label: 'Inspection date', type: 'date' },
+      { id: 'c_iqcBy',        label: 'Inspected by',    type: 'text', placeholder: 'IQC inspector name' },
+      { id: 'c_iqcTable',     label: 'Visual inspection checklist', type: 'iqcTable' },
+      { id: 'c_iqcPhotos',    label: 'Inspection photos (image or PDF)', type: 'imageEvidence' },
       { id: 'c_remarks',      label: 'Remarks', type: 'textarea', placeholder: 'Overall inspection remarks, observations, summary...' },
     ]
   },
@@ -9303,79 +9344,79 @@ const SECTIONS = {
   //  Part B. Cost Analysis (Repair Estimate & Lead Time) — signed off by the Purchase Manager.
   // The damage-report sub-section is deferred (later development).
   'sec-d': {
-    title: 'Section D — Investigation',
+    title: 'Section D — investigation',
     fields: [
       // ── Part A — Investigation ──
-      { id: 'd_partA',            label: 'Part A — Investigation',          type: 'divider' },
-      { id: 'd_analysisBy',     label: 'Analysis Performed By', type: 'text', placeholder: 'Engineer / analyst name' },
-      { id: 'd_analysisDate',   label: 'Analysis Date',         type: 'date' },
+      { id: 'd_partA',            label: 'Part A — investigation',          type: 'divider' },
+      { id: 'd_analysisBy',     label: 'Analysis performed by', type: 'text', placeholder: 'Engineer / analyst name' },
+      { id: 'd_analysisDate',   label: 'Analysis date',         type: 'date' },
       // Written ONLY by the Log Analyser's "Push to IR" — there is no input for it,
       // so it is read back from the section's own data on load and carried through
       // every save (see collectSectionValues). It sits above the free-text fields
       // because it is the evidence those fields are about.
-      { id: 'd_logAnalysis',    label: 'Flight Log Analysis',    type: 'logAnalysis' },
+      { id: 'd_logAnalysis',    label: 'Flight log analysis',    type: 'logAnalysis' },
       { id: 'd_intro',          label: '',                       type: 'analysisNote' },
-      { id: 'd_investigation',  label: 'Description of Investigation', type: 'textarea', placeholder: 'Summarise the investigation performed, logs/telemetry reviewed, tests done...' },
-      { id: 'd_evidence',       label: 'Investigation Evidence (Images)', type: 'imageEvidence' },
-      { id: 'd_rootCause',      label: 'Root Cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
-      { id: 'd_correctiveAction',  label: 'Corrective Action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
-      { id: 'd_preventiveAction',  label: 'Preventive Action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
+      { id: 'd_investigation',  label: 'Description of investigation', type: 'textarea', placeholder: 'Summarise the investigation performed, logs/telemetry reviewed, tests done...' },
+      { id: 'd_evidence',       label: 'Investigation evidence (images)', type: 'imageEvidence' },
+      { id: 'd_rootCause',      label: 'Root cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
+      { id: 'd_correctiveAction',  label: 'Corrective action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
+      { id: 'd_preventiveAction',  label: 'Preventive action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
 
       // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
-      { id: 'd_partB',              label: 'Part B — Cost Analysis (Repair Estimate &amp; Lead Time)', type: 'divider' },
-      { id: 'd_warrantyQualified',  label: 'Is This Repair Qualified For Cover Under Warranty? (Yes/No)', type: 'select', options: ['', 'Yes', 'No'] },
-      { id: 'd_repairTable',        label: 'Particulars For Repair / Replace', type: 'costTable' },
-      { id: 'd_leadTime',           label: 'Estimated Lead Time', type: 'text', placeholder: 'e.g. 7–10 working days' },
-      { id: 'd_goAhead',            label: 'Received Go Ahead By The Customer?', type: 'select', options: ['', 'Yes', 'No'] },
+      { id: 'd_partB',              label: 'Part B — cost analysis (repair estimate &amp; lead time)', type: 'divider' },
+      { id: 'd_warrantyQualified',  label: 'Is this repair qualified for cover under warranty? (yes/no)', type: 'select', options: ['', 'Yes', 'No'] },
+      { id: 'd_repairTable',        label: 'Particulars for repair / replace', type: 'costTable' },
+      { id: 'd_leadTime',           label: 'Estimated lead time', type: 'text', placeholder: 'e.g. 7–10 working days' },
+      { id: 'd_goAhead',            label: 'Received go ahead by the customer?', type: 'select', options: ['', 'Yes', 'No'] },
     ]
   },
   'sec-e': {
-    title: 'Section E — Production (Rework)',
+    title: 'Section E — production (rework)',
     fields: [
-      { id: 'e_prodDocs',     label: 'Route Card / Job Card (Image or PDF)', type: 'imageEvidence' },
-      { id: 'e_prodRemarks',  label: 'Rework Details / Remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
+      { id: 'e_prodDocs',     label: 'Route card / job card (image or PDF)', type: 'imageEvidence' },
+      { id: 'e_prodRemarks',  label: 'Rework details / remarks',    type: 'textarea', placeholder: 'Describe the rework performed, observations, notes for QC...' },
     ]
   },
   // Quality Test Report — a merge of the old QC section and the old Flight Test
   // section. Both are QC tests, so they belong on one report. The field ids keep
   // their original `f_`/`g_` prefixes (see the note above SECTIONS).
   'sec-f': {
-    title: 'Section F — Quality Test Report',
+    title: 'Section F — quality test report',
     fields: [
-      { id: 'f_qcDocs',       label: 'QC Report (Image or PDF)', type: 'imageEvidence' },
-      { id: 'f_qcRemarks',    label: 'QC Remarks',        type: 'textarea', placeholder: 'Additional observations...' },
+      { id: 'f_qcDocs',       label: 'QC report (image or PDF)', type: 'imageEvidence' },
+      { id: 'f_qcRemarks',    label: 'QC remarks',        type: 'textarea', placeholder: 'Additional observations...' },
 
       // ── Part B — Flight Test ──
-      { id: 'f_partFlight',    label: 'Flight Test', type: 'divider' },
+      { id: 'f_partFlight',    label: 'Flight test', type: 'divider' },
       // Basic + Mission are ONE field now. The id stays `g_basicReport` so the audit
       // history and every anchored comment on it survive; the saved contents of the
       // retired `g_missionReport` are folded in when this section is loaded, by the
       // imageEvidence branch of populateFieldValue().
-      { id: 'g_basicReport',   label: 'Flight Test Report (Image or PDF)', type: 'imageEvidence' },
-      { id: 'g_flightLogs',     label: 'Data Check — Flight Logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
-      { id: 'g_postProcessing', label: 'Data Check — Post-Processing', type: 'checkpointEvidence', tickLabel: 'Post-processing data check performed & verified' },
-      { id: 'g_dataCheckRemarks', label: 'Data Check Remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
+      { id: 'g_basicReport',   label: 'Flight test report (image or PDF)', type: 'imageEvidence' },
+      { id: 'g_flightLogs',     label: 'Data check — flight logs',     type: 'checkpointEvidence', tickLabel: 'Flight Logs data check performed & verified' },
+      { id: 'g_postProcessing', label: 'Data check — post-processing', type: 'checkpointEvidence', tickLabel: 'Post-processing data check performed & verified' },
+      { id: 'g_dataCheckRemarks', label: 'Data check remarks', type: 'textarea', placeholder: 'Notes on flight logs / post-processing checks...' },
     ]
   },
   // PDI Report/Dispatch Record — a merge of the old PDI section and the old
   // Logistics & Dispatch section. Inspecting the packed goods and dispatching
   // them is one handover, recorded once.
   'sec-g': {
-    title: 'Section G — PDI Report/Dispatch Record',
+    title: 'Section G — PDI report/dispatch record',
     fields: [
-      { id: 'h_pdiDocs',     label: 'PDI Report (Image or PDF)', type: 'imageEvidence' },
-      { id: 'h_pdiRemarks',  label: 'PDI Remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
-      { id: 'h_dispatchChecklist', label: 'Cross Check Particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
-      { id: 'h_pdiResult',   label: 'PDI Result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
+      { id: 'h_pdiDocs',     label: 'PDI report (image or PDF)', type: 'imageEvidence' },
+      { id: 'h_pdiRemarks',  label: 'PDI remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
+      { id: 'h_dispatchChecklist', label: 'Cross check particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
+      { id: 'h_pdiResult',   label: 'PDI result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
 
       // ── Part B — Dispatch ──
       { id: 'g_partDispatch', label: 'Dispatch', type: 'divider' },
-      { id: 'i_dispatchDate', label: 'Dispatch Date',      type: 'date' },
-      { id: 'i_courier',      label: 'Courier / Transporter', type: 'courierName', default: 'Bluedart' },
-      { id: 'i_courierTrackId', label: 'Courier Tracking ID', type: 'text', placeholder: 'AWB / docket / tracking number' },
-      { id: 'i_clientReceivedDate', label: 'Client Received the Courier Date', type: 'date' },
-      { id: 'i_dispatchPhotos', label: 'Attachments (Image or PDF)', type: 'imageEvidence' },
-      { id: 'i_remarks',      label: 'Logistics Remarks',  type: 'textarea', placeholder: 'Special instructions, insurance, etc.' },
+      { id: 'i_dispatchDate', label: 'Dispatch date',      type: 'date' },
+      { id: 'i_courier',      label: 'Courier / transporter', type: 'courierName', default: 'Bluedart' },
+      { id: 'i_courierTrackId', label: 'Courier tracking ID', type: 'text', placeholder: 'AWB / docket / tracking number' },
+      { id: 'i_clientReceivedDate', label: 'Client received the courier date', type: 'date' },
+      { id: 'i_dispatchPhotos', label: 'Attachments (image or PDF)', type: 'imageEvidence' },
+      { id: 'i_remarks',      label: 'Logistics remarks',  type: 'textarea', placeholder: 'Special instructions, insurance, etc.' },
     ]
   },
 };
@@ -9715,7 +9756,7 @@ function buildField(field, irNumber, sectionId) {
         <div class="cost-table-body" id="${id}-body">${rowsHtml}</div>
         <button type="button" class="btn-add-row" onclick="addCostRow('${escJsAttr(id)}')">+ Add Row</button>
         <div class="cost-total">
-          <span class="cost-total-label">Total Repair Cost</span>
+          <span class="cost-total-label">Total repair cost</span>
           <span class="cost-total-value">&#8377;<span id="${id}-total">0.00</span></span>
         </div>
       </div>
@@ -9759,7 +9800,7 @@ function buildField(field, irNumber, sectionId) {
       <div class="iqc-table-wrapper" id="${id}">
         <div class="iqc-table-header">
           <span>Zone / Item</span>
-          <span>Visual Checks To Perform</span>
+          <span>Visual checks to perform</span>
           <span>Result</span>
           <span>Remark</span>
         </div>
@@ -10187,14 +10228,14 @@ function openInwardOptionsModal() {
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
-        <h3>Manage Inward Dropdown Options</h3>
+        <h3>Manage inward dropdown options</h3>
         <button type="button" class="inward-options-close" onclick="closeInwardOptionsModal()">&times;</button>
       </div>
       <p class="inward-options-hint">One option per line. Changes apply to every IR's inward table and persist for all users.</p>
       <div class="inward-options-body">${fields}</div>
       <div class="inward-options-foot">
         <button type="button" class="btn" onclick="closeInwardOptionsModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="applyInwardOptions()">Save Options</button>
+        <button type="button" class="btn btn-primary" onclick="applyInwardOptions()">Save options</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -10308,7 +10349,7 @@ function openIqcConfigModal() {
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
-        <h3>Manage Inspection Points &amp; Dropdowns</h3>
+        <h3>Manage inspection points &amp; dropdowns</h3>
         <button type="button" class="inward-options-close" onclick="closeIqcConfigModal()">&times;</button>
       </div>
       <p class="inward-options-hint">Edit the Result dropdown options (one per line), then the inspection points. Changes apply to every IR's IQC table and persist for all users.</p>
@@ -12304,7 +12345,7 @@ function openTeamDirectoryModal() {
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
-        <h3>Manage Team Directory</h3>
+        <h3>Manage team directory</h3>
         <button type="button" class="inward-options-close" onclick="closeTeamDirectoryModal()">&times;</button>
       </div>
       <p class="inward-options-hint">People here appear in the @-mention suggestions across the app. Use @indrones.com emails.</p>
@@ -12313,7 +12354,7 @@ function openTeamDirectoryModal() {
       </div>
       <div class="inward-options-foot">
         <button type="button" class="btn" onclick="closeTeamDirectoryModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="applyTeamDirectory()">Save Directory</button>
+        <button type="button" class="btn btn-primary" onclick="applyTeamDirectory()">Save directory</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
@@ -13164,9 +13205,9 @@ function parseAuditTimestamp(v) {
 // and without this table every reader of this helper shows the raw storage key:
 // "a_crmOwner" on a history row is a leak of the schema into the UI.
 const OVERVIEW_FIELD_LABELS = {
-  a_crmOwner:      'Customer Relations Manager',
-  a_contactPhone:  'Customer Phone',
-  a_siteLocation:  'Site Location',
+  a_crmOwner:      'Customer relations manager',
+  a_contactPhone:  'Customer phone',
+  a_siteLocation:  'Site location',
 };
 
 // Human name for a field id, from the forms. Falls back to the raw id for a field

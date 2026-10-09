@@ -73,15 +73,15 @@
     // used to cut on are gone, so a `·` typed into this value would now be read as a
     // literal dot rather than as a term boundary. Nothing reads this string but the
     // element itself.
-    'app.fullName':        'INDRONES-AFTER SALES SERVICE BOOK',
+    'app.fullName':        'INDRONES PRODUCT AFTER SALES SERVICE BOOK',
 
     // ── Navigation ───────────────────────────────────────────────────────────
-    'nav.serviceDesk':     'Service Desk',
+    'nav.serviceDesk':     'Service desk',
     'nav.administration':  'Administration',
     'nav.irs':             'IRs',
     'nav.insights':        'Insights',
-    'nav.logAnalyser':     'Log Analyser',
-    'nav.userAccess':      'User Access',
+    'nav.logAnalyser':     'Log analyser',
+    'nav.userAccess':      'User access',
     // Named separately from the sign-in door's own label, even though the English
     // is the same string. A translator shortening a sidebar label would not want
     // to shorten the link on the sign-in card with it, and a shared key would make
@@ -208,16 +208,16 @@
     // The way back out of the two sub-screens that are not the list: the password
     // field and the pattern canvas.
     'auth.back':           'Back',
-    'auth.signOut':        'Sign Out',
+    'auth.signOut':        'Sign out',
 
     // ── The Overview panel's own fields ──────────────────────────────────────
     // The three the Triage panel hand-renders. Their LABELS live here; their
     // storage keys live on OVERVIEW_FIELD_LABELS in app.js, which is a different
     // job — that one names a field in the edit history and must not be re-worded
     // when a screen's copy changes.
-    'overview.crmOwner':        'Customer Relations Manager',
-    'overview.contactPhone':    'Customer Phone',
-    'overview.siteLocation':    'Site Location',
+    'overview.crmOwner':        'Customer relations manager',
+    'overview.contactPhone':    'Customer phone',
+    'overview.siteLocation':    'Site location',
     'overview.readOnlyNote':    'Only Customer Relations and Management can edit these. Everyone can read them.',
     // Placeholders. The site one says BOTH things it accepts, because Google's Maps
     // URL API takes a place name and a coordinate pair through the same query — and
@@ -285,7 +285,7 @@
     // welcome, because a staff member signing in for the fourth time today does not want
     // one. A customer arriving for the first time does.
     'cust.welcome':       'Welcome! This is I-PASSBOOK',
-    'cust.tagline':       'For Everything Related To Indrones’ After-Sales',
+    'cust.tagline':       'For everything related to Indrones’ after-sales',
     'cust.login':         'Log in to your I-PASSBOOK account.',
     'cust.email':         'you@company.com',
     // The helper line under the field, "in not so highlighted way" — it is a hint, so it
@@ -353,12 +353,19 @@
     // Two things every visitor passes on the way to a door, and neither belongs to
     // either door — so they sit below BOTH, said once, like the FAQ line under them.
     //
-    // ⚠ THE TERMS LINE HAS NOTHING TO LINK TO. There is no terms.html and no
-    // privacy.html in this repo, and writing either one means writing the company's
-    // legal position on its own data, which is the owner's to give and not mine to
-    // invent. So the two phrases are plain text with no anchors, and they become links
-    // the moment those pages exist. A link to a 404 would be worse than the sentence.
-    'landing.terms':      'By continuing, you acknowledge that you understand and agree to the Terms & Conditions and Privacy Policy',
+    // ⚠ THE TERMS LINE IS FOUR KEYS, NOT ONE SENTENCE, AND THAT IS THE WHOLE POINT.
+    // terms.html and privacy.html now exist, so the two phrases inside this sentence are
+    // real anchors — and a `data-i18n` attribute sets an element's textContent, which
+    // would wipe any anchor nested inside it. So the sentence is split around the two
+    // links: `…termsPre` ends on a trailing space, `…termsAnd` is the conjunction with a
+    // space on each side, and `…termsTos` / `…termsPrivacy` are the link labels
+    // themselves. Translating the four in order reassembles the sentence in any language
+    // whose word order matches; a language that needs the links in another order needs
+    // this markup changed, not a cleverer string.
+    'landing.termsPre':      'By continuing, you acknowledge that you understand and agree to the ',
+    'landing.termsTos':      'Terms & Conditions',
+    'landing.termsAnd':      ' and ',
+    'landing.termsPrivacy':  'Privacy Policy',
     // The language selector's accessible name. Its OPTIONS are language endonyms and are
     // NOT translated — a person looking for Hindi is looking for the word हिन्दी, not for
     // the word "Hindi" in English.
@@ -447,7 +454,7 @@
 
     // ── The app itself ───────────────────────────────────────────────────────
     'app.name':            'I-PASSBOOK',
-    'app.fullName':        'INDRONES-AFTER SALES SERVICE BOOK',
+    'app.fullName':        'INDRONES PRODUCT AFTER SALES SERVICE BOOK',
 
     // ── Navigation ───────────────────────────────────────────────────────────
     'nav.serviceDesk':     'सेवा डेस्क',
@@ -589,7 +596,17 @@
     'code.digit':         'कोड का अंक {n}',
 
     // ── The foot of the landing page ──────────────────────────────────────────
-    'landing.terms':      'जारी रखने पर आप स्वीकार करते हैं कि आपने Terms & Conditions और Privacy Policy को समझा और माना है',
+    'landing.termsPre':      'जारी रखने पर आप स्वीकार करते हैं कि आपने ',
+    'landing.termsAnd':      ' और ',
+    // Present so the completeness check has nothing to report, and IDENTICAL to English
+    // on purpose: these two are the NAMES of two documents at fixed addresses, and a
+    // reader who follows the link needs the words printed on the page they land on.
+    // Translating a label is how a person arrives at a page titled something else.
+    'landing.termsTos':      'Terms & Conditions',
+    'landing.termsPrivacy':  'Privacy Policy',
+    // The two link labels stay in English on purpose: they are the NAMES of two documents
+    // at fixed URLs, and a reader who wants them needs the words printed on the pages
+    // themselves. Translating the label would send them to a page titled something else.
     'landing.language':   'भाषा',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────

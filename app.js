@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v80';
+const APP_VERSION = 'v81';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -5283,7 +5283,18 @@ function createUserMenu() {
     const adminBtn = document.getElementById('access-admin-btn');
     if (adminBtn) adminBtn.addEventListener('click', () => { menu.style.display = 'none'; openAccessModal(); });
     document.addEventListener('click', (e) => {
-      if (!menu.contains(e.target) && e.target !== userAvatar) menu.style.display = 'none';
+      // `contains`, NOT an identity comparison against the avatar div. The avatar holds
+      // an inline <svg> (avatarSvg) and inside it <path> elements, so a click on the icon
+      // lands on the SVG or the path — never on the #user-avatar div itself. Testing the
+      // target for identity therefore answered "the click was outside" for every click
+      // the avatar ever received. It bit twice over: this listener is added DURING the
+      // click that opens the menu, and document is later in the bubble path, so it also
+      // fired on that very click. The menu opened and closed in the same event and could
+      // never be reached — which is what "the avatar in the top right does nothing" was.
+      // It went unnoticed because an account with a Google photo has its innerHTML
+      // cleared, so the click DOES land on the div and the menu works; only the
+      // drawn-mark accounts (everyone without a picture) were locked out of Sign Out.
+      if (!menu.contains(e.target) && !userAvatar.contains(e.target)) menu.style.display = 'none';
     });
   }
   return menu;

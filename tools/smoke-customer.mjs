@@ -585,8 +585,8 @@ r.ok('the customer actions are routed on the authed maps, never pre-auth',
   /inviteCustomer:\s*function/.test(backendGs) &&
   /getMyCustomer:\s*function/.test(backendGs) &&
   /setCustomerCompany:\s*function/.test(backendGs));
-r.ok('the version is 8, so a portal can refuse to run against an older backend',
-  /API_VERSION:\s*8\b/.test(backendGs),
+r.ok('the version is at least 8, so a portal can refuse to run against an older backend',
+  Number((backendGs.match(/API_VERSION:\s*(\d+)/) || [0, 0])[1]) >= 8,
   (backendGs.match(/API_VERSION:[^\n]*/) || [''])[0]);
 // The reason the bump is not cosmetic: an older backend does not merely lack the
 // feature, it answers a customer's token with the whole repository.

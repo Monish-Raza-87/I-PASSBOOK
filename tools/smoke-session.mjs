@@ -88,6 +88,29 @@ r.head('a missing token is the one thing that is definitely dead');
 T.setUser({ email: 'plain@indrones.com' });
 r.ok('no token → false', (await T.confirmSessionAlive()) === false);
 
+// ── The token never travels in a URL ───────────────────────────────────────────
+// GAS writes the request URL into the Executions panel, so a token in a query
+// string is a token in a log an admin can read. The request is CAPTURED and read
+// back rather than grepped: the rule is about what goes on the wire, and a regex
+// would only prove the string appears somewhere in the file.
+let seenReq = null;
+const S = loadApp('confirmSessionAlive, setUser: u => { currentUser = u; }', {
+  fetch: (url, init) => { seenReq = { url: String(url), init: init || {} }; return Promise.reject(new Error('no network in test')); },
+});
+S.setUser({ email: 'plain@indrones.com', sessionToken: 'tok-secret' });
+await S.confirmSessionAlive();
+r.ok('the probe really went out', !!seenReq);
+r.ok('it is a POST', seenReq && seenReq.init.method === 'POST', seenReq && seenReq.init.method);
+r.ok('the action stays in the QUERY, so the interceptor still calls it an auth call',
+  seenReq && /[?&]action=sessionCheck\b/.test(seenReq.url), seenReq && seenReq.url);
+r.ok('and the token is NOT in the URL',
+  seenReq && seenReq.url.indexOf('tok-secret') === -1, seenReq && seenReq.url);
+r.ok('the token is in the BODY instead',
+  seenReq && String(seenReq.init.body).indexOf('tok-secret') !== -1, seenReq && seenReq.init.body);
+r.ok('the content type is CORS-safelisted, so there is no preflight for GAS to refuse',
+  seenReq && /application\/x-www-form-urlencoded/.test(String((seenReq.init.headers || {})['Content-Type'])),
+  seenReq && seenReq.init.headers);
+
 // ── What must no longer exist ─────────────────────────────────────────────────
 r.head('the old mechanisms are gone from the source');
 // Comments are stripped first: this file documents what it replaced, and a

@@ -71,8 +71,15 @@ r.head('the owner\'s security decisions');
 // is otherwise invisible — the page would ask for an action the deployment does not
 // have. `ping` answering `apiVersion 6` is how you know the paste landed. See
 // tools/smoke-backup-pulse.mjs.
-r.ok('API_VERSION is 8 — customer accounts, and the scoped reads they forced',
-  /API_VERSION:\s*8\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v8 = CUSTOMER ACCOUNTS, and the scoped reads they forced. See the note in
+// backend.gs — this one is not cosmetic, because an older backend answers a
+// customer's token with the whole repository.
+//
+// v9 = `listTeam`, the roster the Allot picker reads. Bumped for the usual reason:
+// the action set changed, and the frontend must be able to tell an old deployment
+// from a new one rather than discovering it from an empty dropdown.
+r.ok('API_VERSION is 9 — the team roster the Allot picker reads',
+  /API_VERSION:\s*9\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -190,14 +197,40 @@ r.head('the new actions are dispatched');
 // check this number before you go looking for a missing line.
 const dispatchers = [code.slice(doPostAt, doPostAt + 4200), code.slice(doGetAt, doGetAt + 4200)].join('\n');
 ['ping', 'sessionCheck', 'login', 'logout', 'changePassword', 'forgotPassword',
- 'resetPassword', 'getMyAccess', 'getMyCustomer', 'listUsers', 'createUser',
- 'bulkCreateUsers', 'inviteCustomer', 'setCustomerCompany',
+ 'resetPassword', 'getMyAccess', 'getMyCustomer', 'listUsers', 'listTeam',
+ 'createUser', 'bulkCreateUsers', 'inviteCustomer', 'setCustomerCompany',
  'resetUserPassword', 'setUserStatus', 'saveDepartment', 'deleteDepartment',
  'setUserDepartments', 'purgeUsers', 'googleExchange', 'deviceUnlock',
  'deviceRegister', 'deviceRevoke']
   .forEach(a => r.ok('"' + a + '" is dispatched',
     new RegExp('\\b' + a + '\\s*:').test(dispatchers),
     (dispatchers.match(new RegExp('.{0,30}\\b' + a + '\\s*:')) || ['absent'])[0]));
+
+// ── The team roster ────────────────────────────────────────────────────────────
+// `listTeam` exists so the Allot panel's "Assigned to" picker can offer the real
+// staff. Its whole reason for existing is that it is NOT `listUsers`: that one is
+// requireAdmin because it carries password state and the permission matrix, and the
+// people who allot tickets are ordinary CR accounts. So what is pinned is the SHAPE
+// of what it may answer with — a name and a mailbox — which is what makes it safe to
+// put behind an ordinary session rather than an admin one.
+const lt = fnBody('listTeam');
+r.ok('listTeam exists', lt.length > 200, lt.length);
+r.ok('it never calls requireAdmin — it is the read for the people who allot tickets',
+  !/requireAdmin/.test(lt), (lt.match(/requireAdmin[^\n]*/) || ['clean'])[0]);
+r.ok('it reads the accounts and the access store, and nothing else',
+  /allUsers\(\)/.test(lt) && /accessStore\(\)/.test(lt));
+const teamPush = (lt.match(/team\.push\(\{[^}]*\}\)/) || [''])[0];
+r.ok('the record it hands out is exactly {email, name}',
+  /email:/.test(teamPush) && /name:/.test(teamPush) &&
+  !/password|salt|hash|status|permission|department|createdAt|lastLoginAt|appVersion|customerOf/.test(teamPush),
+  teamPush || 'no push found');
+r.ok('a DISABLED account is left out — a notification nobody can act on',
+  /disabled/i.test(lt), (lt.match(/[^\n]*disabled[^\n]*/) || ['absent'])[0]);
+r.ok('a CUSTOMER account is left out — a customer is not a colleague',
+  /customers/.test(lt), (lt.match(/[^\n]*customers[^\n]*/) || ['absent'])[0]);
+r.ok('...and it sits BEHIND the auth gate, never in the preAuth map',
+  code.slice(doGetAt, doGetAt + 4200).indexOf('listTeam') >
+  code.slice(doGetAt, doGetAt + 4200).indexOf('requireAuth('));
 
 // googleStart is dispatched from doGet as a BRANCH, not a map entry, and that is
 // deliberate: it must return an HtmlOutput (a redirect page), so it can never go

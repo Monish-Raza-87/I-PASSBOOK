@@ -287,7 +287,10 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **2273 cases across 16 suites**, all passing.
+`node tools/smoke-all.mjs` — **4110 cases across 36 suites**, all passing.
+(The figure in the heading is MEASURED by summing the run, never carried forward: it
+said "2273 across 16 suites" long after both numbers had stopped being true, which is
+the same drift the emoji ledger below had to be corrected for.)
 (2246 before the store's remembered file ids landed — the 27 new ones are 22 in
 `smoke-store.mjs`, which counts the Drive searches a real Google exchange performs
 (11 before, 0 warm, 4 with the cache emptied) and pins that a bad id, a missing file
@@ -558,7 +561,9 @@ is left is small.
    timestamp. So the customer accounts, the server-side narrowing that keeps one
    customer's rows away from another's, and the fifth **Customers** tab in User Access
    are all live, and the gate that said *no customer account may be created until this
-   lands* is OPEN. **Nothing is owed on the backend half.** The two ways to read the
+   lands* is OPEN. **`API_VERSION 9` — the team roster, `listTeam` — is now owed**: the
+   committed `backend.gs` is one past what the live deployments answer, and item 3
+   below says what that does and does not break. The two ways to read the
    number, both of which need no tooling: inside the app, the User Access panel's own
    status line (`Signed in as … · session ✓ · API v8`), or the deployment URL with
    `?action=ping` appended — `ping` is in the pre-auth map, so it answers without a
@@ -599,16 +604,21 @@ is left is small.
    `monish.raza@indrones.com`, the account that owns the Drive folder, because a
    trigger executes as whoever installed it. Each replies *already installed* if it is
    there. Until the archive sweep exists, closed IR folders are archived only by hand.
-3. ✅ **The frontend was published on 2026-10-08 at cache `v70`**, carrying the
-   two-door landing page on top of the customer portal and the invite panel (which
-   went out at `v69` the day before). Publishing is `DEPLOY_SOURCE=category-insights
-   node tools/deploy-ghpages.mjs` to dry-run, then the same with `--commit --push`; it
-   needs the working tree clean, so the commits go first, and a `CACHE_NAME` bump in
-   `sw.js` or it warns that returning users keep the stale shell for a load. The
-   deploy is confirmed by reading the **served** files, never by a deploy date:
-   `sw.js` answering `ipassbook-v70` and `app.js` answering `APP_VERSION = 'v70'`.
-   **Nothing is owed on either half right now** — the frontend and the backend paste
-   in item 1 are level with the committed code.
+3. ✅ **The frontend was published on 2026-10-08 at cache `v79`**, carrying the
+   one-common-head two-door landing page on top of the customer portal and the invite
+   panel (which went out at `v69` two days before). Publishing is
+   `DEPLOY_SOURCE=category-insights node tools/deploy-ghpages.mjs` to dry-run, then the
+   same with `--commit --push`; it needs the working tree clean, so the commits go
+   first, and a `CACHE_NAME` bump in `sw.js` or it warns that returning users keep the
+   stale shell for a load. The deploy is confirmed by reading the **served** files,
+   never by a deploy date: `sw.js` answering `ipassbook-v79` and `app.js` answering
+   `APP_VERSION = 'v79'`.
+   **One thing is owed on the backend half:** item 1's paste is at `API_VERSION 8` and
+   the committed `backend.gs` is now at **9** (the team roster — `listTeam`). Nothing
+   breaks until it is pasted: `loadTeamRoster()` is best-effort by design, so an
+   un-pasted backend simply leaves the hand-edited directory standing alone. It becomes
+   owed the moment anything reads the roster as the authority.
+   The **frontend** is level with the committed code at `v80`.
 
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
@@ -643,11 +653,53 @@ is left is small.
       judgement, but it has no caller until the ingest above lands. Note the open question:
       whether this belongs in the Overview's "Customer Relations Manager" field, which is
       per-ticket and human-editable, or in a separate read-only field of its own.
-- [ ] **"Assigned to" in the Allot panel offers no onboarded employees.** It should list
-      the real Indrones staff. **Blocked on a backend change**: the only action that
-      returns accounts is `listUsers`, which is `requireAdmin`, so this needs a narrower
-      authenticated team-directory action — an `API_VERSION` bump, and therefore a paste,
-      before any frontend work can be tested against it.
+- [x] **"Assigned to" in the Allot panel offers no onboarded employees.** Built
+      2026-10-09 as **`API_VERSION 9`** — a new authenticated action, `listTeam`, that
+      returns `{email, name}` for every ACTIVE account that is not a customer, and
+      nothing else. The old note called this blocked on a paste "before any frontend
+      work can be tested against it"; that turned out to be half right and the other
+      half is what made it shippable now. The frontend half is `loadTeamRoster()`, and
+      it is **best-effort by design**: a `v8` backend answers an error or an HTML page,
+      both land as a miss, and the hand-edited directory simply stands alone — which is
+      exactly what shipped before. So the frontend could be built and tested first, and
+      the paste is what turns the roster on rather than what unblocks the work.
+      **The join, and the trap it avoids.** `teamDirectory` is a MEMORY — a list an admin
+      types names into; the accounts are the FACT. The app now reads `teamPeople()` —
+      the union, keyed on the lower-cased email, with the account's own name winning —
+      and the union is never written back to `ipb_team_directory`, so the editor keeps
+      editing the admin's own document. Two silent failures drove this: a hand-typed
+      name that matches no account makes the assignment a notification nobody receives
+      while the ticket shows an owner, and a colleague who has an account but was never
+      typed in is simply unpickable. A directory row for somebody with no account yet is
+      KEPT, so an admin who wrote down a joiner does not have them vanish.
+      **A real bug fell out of testing it**: `setUserStatus` returned its new state as a
+      SECOND `status` key, which overwrote the `'ok'` that every caller in this backend
+      tests. It answered `status: 'disabled'` where everything else answers `'ok'`. Only
+      one call site reads it and it reads `.message` first, so nothing had noticed. The
+      state now travels as `userStatus`, and `smoke-store.mjs` pins it.
+
+- [x] **An ids index for the fixed-name store files, on the `sections/index.json`
+      pattern — DECIDED AGAINST, 2026-10-09, not deferred.** Read the code before
+      building it and the numbers came out the wrong way round; `smoke-store.mjs`
+      section 13 is the measurement.
+      - `rememberedStoreId` already answers from `CacheService`, which is free, and it is
+        per FILE: once a file has been looked up, its id lives for six hours regardless of
+        how many requests follow. Measured on the real store fake — a **cold** ticket open
+        pays a search; the next open pays **0**; the first save after an eviction pays one
+        search per file it opens (`sections/index.json`, `audit/IR409.jsonl`,
+        `journal/<date>.jsonl`) and every save after that pays **0**. That zero is the
+        steady state, and it is the case a person lives in — the save they make twenty
+        times a day costs no search at all.
+      - An index file would have to be found and then **read** on every request, warm or
+        cold — the same ~0.37s Drive measured for a search — to remove three searches
+        **once per six-hour window**. It is slower in the state that matters.
+      - It is also a second cache over the same facts, and it cannot do the one thing
+        `rememberStoreId` does at CREATE time: a file made in this execution is in the id
+        cache immediately, so it closes the window in which Drive's eventual consistency
+        hides a file it has just made (`findOrCreateStoreFile`). The index would not hold
+        that file until the index was rewritten.
+
+- [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 - [x] **The app feels laggy.** Raised 2026-10-08. **Measured 2026-10-08**, in a real
       browser (headless Chrome, 390×844, the app's own bundle served locally, rows shaped
       like what `listIRs` returns) rather than read off the source — the whole point of

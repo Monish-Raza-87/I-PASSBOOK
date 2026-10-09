@@ -2911,4 +2911,120 @@ r.ok('it runs daily at 23:40, so "last night" and the folder name agree',
   backupTriggers[0].hour === 23 && backupTriggers[0].minute === 40 && backupTriggers[0].days === 1,
   backupTriggers[0]);
 
+// ── 12. listTeam — the roster the Allot picker reads ──────────────────────────
+r.head('listTeam offers the real staff, and NOTHING that is not staff');
+ctx._storeMemo = {};
+ctx.createUserRow('asha@indrones.com',   'Asha Rao',      ADMIN);
+ctx.createUserRow('vikram@indrones.com', 'Vikram Shetty', ADMIN);
+ctx.createUserRow('gone@indrones.com',   'Gone Away',     ADMIN);
+ctx.createUserRow('buyer@acme.com',      'Bob Buyer',     ADMIN);
+
+// A disabled colleague, and a customer scoped to a company.
+const dis = ctx.setUserStatus({ email: 'gone@indrones.com', status: 'disabled' }, ADMIN);
+r.ok('the colleague can be disabled for the test', dis.status === 'ok', dis);
+// The account's new state is `userStatus`. It used to be a SECOND `status` key,
+// which overwrote the success word every caller tests — so the API answered
+// "disabled" where everything else in this backend answers "ok".
+r.ok('...and the reply keeps status:"ok" as the success word, with the state beside it',
+  dis.status === 'ok' && dis.userStatus === 'disabled', dis);
+const scoped = ctx.setCustomerCompany({ email: 'buyer@acme.com', company: 'Acme' }, ADMIN);
+r.ok('and the customer account is scoped to a company', scoped.status === 'ok', scoped);
+
+ctx._storeMemo = {};
+const team = ctx.listTeam();
+r.ok('the roster answers with status ok and a list', team.status === 'ok' && Array.isArray(team.team), team);
+const emails = team.team.map(t => t.email);
+r.ok('it carries the real staff', emails.includes('asha@indrones.com') && emails.includes('vikram@indrones.com'), emails);
+r.ok('A DISABLED ACCOUNT IS NOT OFFERED — nobody can act on that notification',
+  !emails.includes('gone@indrones.com'), emails);
+r.ok('A CUSTOMER IS NOT OFFERED — a customer is not a colleague',
+  !emails.includes('buyer@acme.com'), emails);
+// The keys, not a regex on the source: this is the assertion that makes it safe to
+// answer an ordinary signed-in user rather than an admin.
+r.ok('each entry is EXACTLY {email, name} — no hash, salt, status or permission',
+  team.team.length > 0 && team.team.every(t => Object.keys(t).sort().join(',') === 'email,name'),
+  team.team.slice(0, 3));
+r.ok('the name is the account\'s own name, not the empty string',
+  team.team.every(t => t.name && t.name.length > 0), team.team.slice(0, 3));
+
+// A disabled account that is RE-ENABLED comes back — the exclusion is a state, not
+// a deletion, so an admin who flips somebody back on does not have to remember this
+// list exists.
+ctx.setUserStatus({ email: 'gone@indrones.com', status: 'active' }, ADMIN);
+ctx._storeMemo = {};
+r.ok('re-enabling the account puts it back on the roster',
+  ctx.listTeam().team.map(t => t.email).includes('gone@indrones.com'),
+  ctx.listTeam().team.map(t => t.email));
+
+// ── 13. The id cache IS the index — and an index FILE would be slower ─────────
+// "Store ids index" was on the list as the last of these items: one file holding the
+// Drive id of every fixed-name store file, so a request resolves them with one read
+// instead of N name searches. Reading the code before building it settles it the other
+// way, and the numbers are measurable rather than argued:
+//
+//   · `rememberedStoreId` already answers from CacheService, which is free. A warm
+//     request pays ZERO Drive operations for ids. An index file would pay one Drive
+//     READ (~0.37s, the same figure measured for a search) on every request, warm or
+//     not, plus the search to find the index itself whenever its own id is cold.
+//   · The index would be a SECOND cache over the same facts, and the one thing it
+//     could not do is what rememberStoreId does at CREATE time: close the window in
+//     which Drive's eventual consistency hides a file that was just made
+//     (findOrCreateStoreFile). A file made this execution is in the cache; it would
+//     not be in the index until the index was rewritten.
+//
+// So the item is DECIDED, not deferred, and this block is the evidence: the cache
+// really does cover the path a person uses all day, so there is nothing left for an
+// index to remove. A regression that put a search back on the warm path fails here.
+//
+// `reexec()` + `_storeMemo = {}` on each step is what makes this a real measurement:
+// the id cache lives in the fake CacheService (survives reexec), while the read memo
+// lives in the execution's globals (does not). Clearing only one of them measures the
+// other by accident — which is how the first version of this block passed while
+// measuring nothing.
+const searchesIn = fn => { events.length = 0; fn(); return events.filter(e => e.indexOf('search:') === 0); };
+
+// The three files a SAVE alone touches. They are listed here rather than derived,
+// because the point of the assertion below is that they are exactly these — a fourth
+// would mean a store path that is not being remembered.
+const SAVE_ONLY = ['sections/index.json', 'audit/IR409.jsonl', 'journal/2026-10-09.jsonl'];
+
+cacheStore.clear(); reexec();               // a deploy, a first-ever run, or an eviction
+const coldOpen = searchesIn(() => ctx.getPassbook(ADMIN, 'IR409'));
+r.ok('a cold ticket open pays a search, so the zero below is a real zero',
+  coldOpen.length > 0, coldOpen);
+
+reexec();                                  // the same file ids, a new execution
+const warmOpen = searchesIn(() => ctx.getPassbook(ADMIN, 'IR409'));
+r.ok('a warm ticket open searches for NO store file', warmOpen.length === 0, warmOpen);
+
+// The cache is per FILE, not per execution — so the first SAVE after an eviction is
+// the only one that pays. Three files, one search each, and never again while the id
+// lives. This is the measurement the "store ids index" item turns on.
+reexec();
+const firstSave = searchesIn(() => ctx.saveSection('IR409', 'sec-b', { b_remarks: 'warm' }, [], ADMIN));
+r.ok('the first save after an eviction pays one search per file it opens',
+  firstSave.length === SAVE_ONLY.length &&
+  SAVE_ONLY.every(p => firstSave.indexOf('search:' + p.replace(/^.*\//, '')) > -1),
+  firstSave);
+r.ok('...and every one of those is a store FILE the id cache now holds for six hours',
+  [...cacheStore.keys()].filter(k => k.indexOf(':sections/index.json') > -1 ||
+                                     k.indexOf(':audit/IR409.jsonl') > -1).length === 2,
+  [...cacheStore.keys()].filter(k => k.indexOf('sfid:') === 0));
+
+reexec();
+const secondSave = searchesIn(() => ctx.saveSection('IR409', 'sec-c', { c_note: 'warm again' }, [], ADMIN));
+r.ok('THE STEADY STATE IS ZERO — the save a person makes twenty times a day costs no search at all',
+  secondSave.length === 0, secondSave);
+
+// Which is the whole reason the index file is not built. An index would have to be
+// found and READ on every request — the same ~0.37s a search costs — to save those
+// three searches ONCE per six-hour window, and it could not close the window
+// findOrCreateStoreFile closes, because a file created this execution is in the id
+// cache immediately and would not be in an index until the index was rewritten.
+r.ok('...so the item is decided rather than deferred: there is no search left for an index to remove',
+  coldOpen.length > 0 && warmOpen.length === 0 && firstSave.length > 0 && secondSave.length === 0,
+  { cold: coldOpen.length, warm: warmOpen.length, firstSave: firstSave.length, secondSave: secondSave.length });
+r.ok('the store files a sign-in and a ticket both touch are all covered by the id cache',
+  ['users.json', 'irs.json', 'sections/index.json'].every(p => ctx.storeIdKey(p).indexOf(ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) > -1));
+
 r.finish();

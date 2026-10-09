@@ -2128,14 +2128,33 @@ const ourIll = k => `<svg class="pv-ill" viewBox="0 0 96 96" aria-hidden="true" 
 // showing a state the app cannot produce would be the same failure as a test
 // double that invents an API.
 //
-// Two of the three carry a 2.5rem EMOJI (app.js:5061, 5062) and the third has no
-// mark at all (app.js:4425). The emoji is worth looking at closely: it is a
-// colour bitmap rendered by the operating system, identical in both themes, and
-// no token can touch it.
+// The two marks are read OUT of app.js's ICON_PATHS, byte for byte, through the same
+// wrapper iconSvg() emits. Re-drawing them here would be the drift this board exists
+// to catch: the page's whole claim is that it shows the app's own screen, and a second
+// hand-drawn copy is a second answer waiting to disagree with the first.
+//
+// This section used to carry a 2.5rem EMOJI and an argument against it (a colour
+// bitmap rendered by the operating system, identical in both themes, no token able to
+// touch it). The argument was acted on — the app now draws these two from ICON_PATHS —
+// so the section shows the decision rather than asking for it.
+const APP_ICON = (() => {
+  const m = appSource.match(/const ICON_PATHS = \{([\s\S]*?)\n\};/);
+  const table = {};
+  if (m) [...m[1].matchAll(/(?:'([\w-]+)'|(\b[a-z][\w-]*)):\s*'([^']*)'/g)]
+    .forEach(x => { table[x[1] || x[2]] = x[3]; });
+  return name => {
+    const body = table[name];
+    if (!body) throw new Error(`ICON_PATHS has no "${name}" — the empty-state board draws it`);
+    return '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"' +
+      ' fill="none" stroke="currentColor" stroke-width="1.75"' +
+      ' stroke-linecap="round" stroke-linejoin="round">' + body + '</svg>';
+  };
+})();
+
 const EMPTY_STATES = [
-  ['No IRs match this filter.', '\u{1F50D}', 'app.js:5061 — the list under a filter'],
-  ['No IRs found. Create one via the customer form.', '\u{1F4ED}', 'app.js:5062 — the list with nothing in it'],
-  ['The flight-log reader did not load. Reload the app and try again.', null, 'app.js:4425 — no mark at all today'],
+  ['No IRs match this filter.', APP_ICON('search'), 'app.js — the list under a filter'],
+  ['No IRs found. Create one via the customer form.', APP_ICON('inbox'), 'app.js — the list with nothing in it'],
+  ['The flight-log reader did not load. Reload the app and try again.', null, 'app.js — no mark at all today'],
 ];
 
 // The app's .empty-state, reproduced from components.css. Copied rather than
@@ -2238,10 +2257,10 @@ const emptyBoard = () => emptyJump() + `
   <section class="pv-block" id="today">
     <span class="pv-kicker">What the app shows now</span>
     <h2 class="pv-block-title">Three empty states, and one of them is blank</h2>
-    <p class="pv-block-note">Copied from the app rather than remembered: two carry a 2.5rem emoji
-    and the third carries nothing at all. The emoji is drawn by the operating system, so it is the
-    same picture in dark mode as in light and no token can reach it — which is the only real
-    argument against it.</p>
+    <p class="pv-block-note">Copied from the app rather than remembered. The two marks are the app's
+    own <b>ICON_PATHS</b> drawings, read out of <b>app.js</b> at build time and shown through the same
+    wrapper <b>iconSvg()</b> emits — so this board cannot drift from the screen it claims to show.
+    The third state carries nothing at all, and that is the app's real shape, not an omission here.</p>
 ${EMPTY_STATES.map(([text, mark, hint]) => demo(
   hint.split(' — ')[0], hint.split(' — ')[1], emptyState(mark, text), 'pv-demo-pad')).join('')}
     ${CAVEAT_EMPTY}

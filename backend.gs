@@ -150,7 +150,17 @@ var CONFIG = {
   // signed-in user may write `__IRS__`. So the frontend must never let a customer
   // account exist against a deployment answering less than 8, and the portal gates
   // its signed-in half on exactly this number.
-  API_VERSION: 8,
+  // v9 = THE TEAM ROSTER. A new read-only action, `listTeam`, answers ANY signed-in
+  // user with the active staff accounts — a name and a mailbox, and nothing else — so
+  // the Allot panel's "Assigned to" picker can offer the real staff instead of the
+  // three hand-seeded directory entries. It is deliberately NOT `listUsers`: that one
+  // is requireAdmin because it carries password state, temp-password flags and the
+  // whole permission matrix, and the people who allot tickets are ordinary CR
+  // accounts. No existing response changes, so the halves are INDEPENDENT here in a
+  // way they were not at v8: a v9 frontend meeting a v8 backend simply gets no roster
+  // and keeps the directory it already has, and a v8 frontend meeting a v9 backend
+  // never calls it at all.
+  API_VERSION: 9,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -3516,6 +3526,9 @@ function doGet(e) {
       listLegacyIRs: function () { return listLegacyIRs(email); },
       getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber, email); },
       listUsers:     function () { return listUsers(email); },
+      // The team roster for the Allot picker. Any signed-in user — see listTeam for
+      // why this is NOT a second gate on listUsers.
+      listTeam:      function () { return listTeam(); },
       // Read-only, and admins only — it re-checks inside (see getBackupHealth); the
       // gate here is only routing, exactly as the admin POST actions are.
       getBackupHealth: function () { return getBackupHealth(email); },
@@ -3936,6 +3949,41 @@ function validEmail(email) {
   return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email || '').trim());
 }
 
+// The team roster, for the Allot panel's "Assigned to" picker.
+//
+// Deliberately NOT listUsers. That action is requireAdmin because it carries password
+// state, temp-password flags and the whole permission matrix; the people who allot
+// tickets are ordinary CR accounts, so the picker needed a read they are allowed to
+// make. This one answers with TWO fields per person — a name and a mailbox — which is
+// the whole of what an assignee picker needs, and it is safe for exactly that reason.
+//
+// Two exclusions, and neither is cosmetic:
+//   · a DISABLED account is not offered, because assigning a ticket to somebody who
+//     cannot sign in sends a notification nobody can act on;
+//   · a CUSTOMER account is not offered, because a customer is not a colleague —
+//     assigning one would mail a client a notification about somebody else's repair,
+//     and a customer's token cannot read the ticket anyway.
+//
+// The caller's own address is included: allotting yourself a ticket is ordinary.
+function listTeam() {
+  var usersStore = allUsers();
+  var store = accessStore();
+  var team = [];
+  Object.keys(usersStore).forEach(function (email) {
+    var u = usersStore[email] || {};
+    if (String(userField(u, 'status') || 'active').toLowerCase() === 'disabled') return;
+    if (store.customers && store.customers[email]) return;
+    var name = userField(u, 'name');
+    team.push({ email: email, name: name || email });
+  });
+  team.sort(function (a, b) {
+    var an = a.name.toLowerCase(), bn = b.name.toLowerCase();
+    if (an !== bn) return an < bn ? -1 : 1;
+    return a.email < b.email ? -1 : (a.email > b.email ? 1 : 0);
+  });
+  return { status: 'ok', team: team, apiVersion: CONFIG.API_VERSION };
+}
+
 // GET/POST listUsers (admin) — everything the three admin tabs need, in one call.
 function listUsers(authEmail) {
   requireAdmin(authEmail);
@@ -4280,7 +4328,10 @@ function setUserStatus(params, authEmail) {
       var sess = readJsonLocked('sessions.json');
       if (sess && sess.tokens && revokeSessionsForIn(sess, email)) writeJsonLocked('sessions.json', sess);
     }
-    return { status: 'ok', email: email, status: status, message: email + ' is now ' + status + '.' };
+    // `status` is the success/failure word every caller tests — so the account's
+    // new state travels as `userStatus`, NOT as a second `status` key. A duplicate
+    // key here silently overwrote the 'ok' with 'disabled' and nothing noticed.
+    return { status: 'ok', userStatus: status, email: email, message: email + ' is now ' + status + '.' };
   });
 }
 

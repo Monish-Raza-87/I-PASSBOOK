@@ -840,12 +840,23 @@ r.ok('and index.html holds no emoji for the helper to have replaced with nothing
   (indexCode.match(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu) || []));
 
 r.head('the emoji debt is a ledger, not a licence');
-// What is left in app.js is emoji inside PROSE and inside a handful of older
-// in-panel buttons (⚠️ hints, ✓/✘ option labels, 📎/📷/📄 evidence affordances,
-// the User Access modal). Those are a separate pass — the owner asked about the
-// icons in the chrome, and rewriting customer-facing option labels is a different
-// change with a different risk. Pinning the count means it can only go DOWN: a new
-// emoji cannot be added without this test failing and someone deciding about it.
+// What is left in app.js is emoji in exactly THREE places, and none of them is an
+// oversight — each is a slot that CANNOT hold an element, which is why the pass below
+// stopped there and not earlier:
+//
+//   • a `<select>` option label. HTML forbids elements inside <option>; the parser
+//     drops them. The five packing/checklist labels are text or they are nothing.
+//   • `alert()`. It renders plain text by definition.
+//   • the toast, the sync-status line and the save-button's own label. These are
+//     written with `textContent`, which is deliberate: a toast carries server and
+//     file-name strings, and the one thing textContent cannot do is be talked into
+//     interpreting them. An icon there would mean HTML injection to gain a picture.
+//
+// Everything else — the User Access modal, the empty states, the evidence
+// affordances, the nudge panel, the meta pills — now draws from ICON_PATHS.
+//
+// Pinning the count means it can only go DOWN: a new emoji cannot be added without
+// this test failing and someone deciding about it.
 //
 // The number moved from 29 to 45 without a single emoji being added. 29 was a
 // measurement of a file with a hole in it: stripJs used to lose its place at
@@ -873,15 +884,50 @@ r.head('the emoji debt is a ledger, not a licence');
 // the copy button, exactly as "Copy all handover texts" in the Create tab has always
 // carried it. No glyph enters the app that was not already here, and the emoji the tab
 // was DRAWN with (an envelope on the Invite button) was dropped rather than added, since
-// the heading and the label already say what it does. This modal is the one place the
-// ledger's own note calls out as a separate pass; the count still only goes down.
+// the heading and the label already say what it does. This modal was the one place the
+// ledger's own note called out as a separate pass; the count still only goes down.
+//
+// 49 → 19. THE PASS ITSELF, and the largest move this ledger has ever made — the one
+// the three entries above were each deferring. Every emoji in a slot that can hold an
+// element is gone from app.js: the User Access modal, the two empty states, the
+// evidence affordances, the nudge panel, the owner pill and the legacy title. Ten
+// glyphs joined ICON_PATHS to do it (copy, alert, search, inbox, paperclip, camera,
+// file, check, settings, pin); the rest reuse users / user / pencil / legacy /
+// check-circle, which were already there.
+//
+// The 19 that remain are not debt, they are the boundary: 8 are the packing and
+// checklist `<option>` labels, 1 is the file:// alert, 9 are the toast / sync-status
+// lines, and 1 is the Save-all button's label. All four are slots where only TEXT can
+// live, and the reason is written out at the head of this section. The assertion below
+// is tightened to 19 rather than left at 49, so the next person to reach for an emoji
+// has to argue with the boundary rather than with a number that has room in it.
 const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u;
 const emojiLines = appCode.split('\n').filter(l => EMOJI.test(l));
 r.ok('no emoji is left in a slot the icon helper fills',
   !/(💬|🔔|🎫)/.test(appCode),
   emojiLines.filter(l => /💬|🔔|🎫/.test(l)));
-r.ok('the count has not grown past the recorded number', emojiLines.length <= 49,
-  { now: emojiLines.length, budget: 49, sample: emojiLines.slice(0, 5).map(l => l.trim().slice(0, 60)) });
+r.ok('the count has not grown past the recorded number', emojiLines.length <= 19,
+  { now: emojiLines.length, budget: 19, sample: emojiLines.map(l => l.trim().slice(0, 70)) });
+// The boundary is only honest if it is where it says it is. The survivors are
+// classified by NAME here, not waved through by count, so a survivor that is none of
+// these three things fails rather than being absorbed into a number with room in it.
+const TEXT_ONLY = [
+  /<option value=/,                       // 8 — elements are dropped inside <option>
+  /alert\(/,                              // 1 — plain text by definition
+  /textContent\s*=|setSyncStatus\(|showToast\(/,   // 10 — the text-only channel
+  // ...and the SAVE button's own markup, which is the same case one step removed: its
+  // label is rewritten with textContent when a save finishes, so an icon put in the
+  // markup would survive exactly until the first save and then vanish. Text where the
+  // reset is text.
+  /id="access-save-all"/,
+];
+r.ok('every survivor is a <select> option, an alert(), a textContent string, or that button\'s label',
+  emojiLines.every(l => TEXT_ONLY.some(re => re.test(l))),
+  emojiLines.filter(l => !TEXT_ONLY.some(re => re.test(l))));
+r.ok('...and the icon helper reaches the three screens the pass named',
+  /access-cust-copy">\$\{iconSvg\('copy'\)\}/.test(appCode) &&
+  /'<div class="empty-state"><span>' \+ iconSvg\('search'\) \+ '<\/span>'/.test(appCode) &&
+  /iconSvg\('camera'\)\} Capture photo/.test(appCode));
 r.ok('and none of them sits in the activity-log renderer, which owns its own icons',
   !EMOJI.test(appCode.slice(appCode.indexOf('function renderTimelineInto'),
                             appCode.indexOf('function renderTimelineInto') + 4000)));

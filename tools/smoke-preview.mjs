@@ -271,12 +271,23 @@ i18nCtx.window = i18nCtx;
 vm.createContext(i18nCtx);
 vm.runInContext(read('../i18n.js'), i18nCtx, { filename: 'i18n.js' });
 const STRINGS = i18nCtx.I18N.STRINGS;
+// The mark each empty state really carries is now a DRAWING, not an emoji, so the
+// board and the app are checked against the ONE table that owns it. The board reads
+// the body out of ICON_PATHS at build time; this reads the same body out of the same
+// table and requires both the `<span>` wrapper in app.js and the body on the board.
+const iconBody = name => {
+  const m = appJs.match(/const ICON_PATHS = \{([\s\S]*?)\n\};/);
+  const t = {};
+  if (m) [...m[1].matchAll(/(?:'([\w-]+)'|(\b[a-z][\w-]*)):\s*'([^']*)'/g)]
+    .forEach(x => { t[x[1] || x[2]] = x[3]; });
+  return t[name];
+};
 const realStates = [
-  [STRINGS['list.emptyFiltered'], '\u{1F50D}', 'list.emptyFiltered'],
-  [STRINGS['list.emptyNone'], '\u{1F4ED}', 'list.emptyNone'],
-  ['The flight-log reader did not load. Reload the app and try again.', null, null],
+  [STRINGS['list.emptyFiltered'], iconBody('search'), 'list.emptyFiltered', 'search'],
+  [STRINGS['list.emptyNone'], iconBody('inbox'), 'list.emptyNone', 'inbox'],
+  ['The flight-log reader did not load. Reload the app and try again.', null, null, null],
 ];
-realStates.forEach(([text, mark, key]) => {
+realStates.forEach(([text, mark, key, iconName]) => {
   // The sentence must really be what a user reads, not merely present somewhere: a
   // string in the table that no code asks for is a screen the app never shows, and
   // a preview that copies it would be reviewing a screen that does not exist.
@@ -284,8 +295,11 @@ realStates.forEach(([text, mark, key]) => {
   r.ok(`empty: "${text.slice(0, 34)}…" is the app's own wording`,
     asked && EMPTY.includes(text), { asked, inEmpty: EMPTY.includes(text) });
   if (mark) {
-    r.ok(`...and the app really draws it with ${mark}, so the board shows the same`,
-      new RegExp(`<span>${mark}</span>`).test(appJs) && EMPTY.includes(mark));
+    r.ok(`...and the app really draws it with the "${iconName}" glyph, so the board shows the same`,
+      !!mark &&
+      appJs.includes(`<span>' + iconSvg('${iconName}') + '</span>`) &&
+      EMPTY.includes(mark),
+      { body: (mark || '').slice(0, 50) });
   } else {
     r.ok('...and the third state really has no mark at all in the app', appJs.includes(`<div class="empty-state">${text}`));
   }

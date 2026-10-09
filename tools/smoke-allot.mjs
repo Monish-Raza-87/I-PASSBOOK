@@ -227,4 +227,84 @@ r.ok('...and the options are built from the same four the clock knows',
 r.ok('the card\'s folded detail line carries it too, since the pill is small',
   /ir\.priority \? escHtml\(priorityLabel\(ir\.priority\)\) : ''/.test(appJs));
 
+// ── The picker offers the ACCOUNTS, not just the hand-edited list ─────────────
+// The directory above is a MEMORY — an admin types names into it. The accounts in
+// the store are the FACT, and they arrive at boot through listTeam(). Offering the
+// memory alone fails in two directions at once, and neither shows an error:
+// a hand-typed name that matches no account makes the assignment email address
+// nobody, and a colleague who HAS an account but was never typed in is unpickable.
+r.head('the picker reads the live roster, not only the hand-edited list');
+
+const R = loadApp(`
+  assigneeRows, assigneeMatches, assigneeDisplayName, resolveTriageAssignee,
+  teamPeople, teamKey, applyRoster: t => { teamRoster = t; },
+  setDirectory: e => { teamDirectory = e; },
+  get directory() { return teamDirectory; },
+`);
+
+R.setDirectory([{ name: 'Monish Raza', email: 'monish.raza@indrones.com' }]);
+R.applyRoster([
+  { name: 'Monish Raza', email: 'monish.raza@indrones.com' },   // already listed
+  { name: 'Vikram Shetty', email: 'vikram@indrones.com' },      // an account NOT in the list
+]);
+
+r.ok('a colleague with an account but no directory row IS offered',
+  R.assigneeMatches('vikram').length === 1, R.assigneeMatches('vikram'));
+r.ok('...and it is the account\'s own name that is shown, not a blank',
+  R.assigneeDisplayName('vikram@indrones.com') === 'Vikram Shetty',
+  R.assigneeDisplayName('vikram@indrones.com'));
+r.ok('the hand-edited row and the account of the same person are ONE row, not two',
+  R.assigneeMatches('monish').length === 1, R.assigneeMatches('monish').length);
+r.ok('the email is matched case-insensitively on both sides',
+  R.teamKey('Vikram@Indrones.com') === 'vikram@indrones.com' &&
+  R.teamPeople().filter(d => d.email.toLowerCase() === 'vikram@indrones.com').length === 1);
+
+// The direction that must NOT change: an admin who wrote down a joiner must not
+// have them silently vanish because the account does not exist yet.
+R.setDirectory([
+  { name: 'Monish Raza',  email: 'monish.raza@indrones.com' },
+  { name: 'Joiner Soon',  email: 'joiner@indrones.com' },       // no account yet
+]);
+R.applyRoster([{ name: 'Monish Raza', email: 'monish.raza@indrones.com' }]);
+r.ok('a directory row for somebody with NO account yet survives the merge',
+  R.assigneeMatches('joiner').length === 1, R.assigneeMatches('joiner'));
+
+// The account's own name is the fact, so it wins over a stale hand-typed one.
+R.setDirectory([{ name: 'Vikram S.', email: 'vikram@indrones.com' }]);
+R.applyRoster([{ name: 'Vikram Shetty', email: 'vikram@indrones.com' }]);
+r.ok('a stale hand-typed name loses to the account\'s own name',
+  R.assigneeDisplayName('vikram@indrones.com') === 'Vikram Shetty',
+  R.assigneeDisplayName('vikram@indrones.com'));
+
+// Resolving a typed name must go through the same union, or the picker would offer
+// somebody that applyTriage then refuses to accept.
+R.setDirectory([]);
+R.applyRoster([{ name: 'Vikram Shetty', email: 'vikram@indrones.com' }]);
+r.ok('a name typed in resolves to the account email, not to nothing',
+  (R.resolveTriageAssignee('Vikram Shetty') || {}).email === 'vikram@indrones.com',
+  R.resolveTriageAssignee('Vikram Shetty'));
+
+// And the merge must never be written back over the admin's own document.
+r.ok('the roster is merged in memory only — the admin\'s saved list is untouched',
+  R.directory.length === 0, R.directory);
+
+// An old backend (v8 has no listTeam) answers nothing; the directory must then
+// stand alone rather than the picker emptying.
+R.setDirectory([{ name: 'Monish Raza', email: 'monish.raza@indrones.com' }]);
+R.applyRoster([]);
+r.ok('with no roster at all the hand-edited list stands alone — an old backend still works',
+  R.assigneeMatches('').length === 1 && R.assigneeMatches('monish').length === 1);
+
+// Boot wiring: it must actually be called, and it must be best-effort.
+r.ok('the boot starter asks for the roster',
+  /^\s*loadTeamRoster\(\);/m.test(appJs));
+r.ok('...and a roster that fails to arrive leaves the directory standing, never throws',
+  /function loadTeamRoster\(\)[\s\S]{0,700}?\.catch\(\(\) => null\);/.test(appJs));
+r.ok('the read paths go through teamPeople(), so the editor keeps editing the saved list',
+  /function assigneeRows\(\) \{\n  return teamPeople\(\)/.test(appJs) &&
+  /const hit = teamPeople\(\)\.find\(d => String\(d\.email \|\| ''\)\.toLowerCase\(\) === e\);/.test(appJs) &&
+  /const matches = teamPeople\(\)\n/.test(appJs) &&
+  /const member   = teamPeople\(\)\.find/.test(appJs) &&
+  /const direct = teamPeople\(\)\.find/.test(appJs));
+
 r.finish();

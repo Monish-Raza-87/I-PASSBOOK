@@ -405,11 +405,22 @@ ok('every {slot} survives translation, so no control renders a bare {n}',
 // translation" by rendering the acronym expansion or the section letter into Devanagari.
 ok('the name, its expansion, and the two identifiers the user types are not translated',
   hi['app.name'] === 'I-PASSBOOK' &&
-  hi['app.fullName'] === 'INDRONES-AFTER SALES SERVICE BOOK' &&
+  // ⚠ "INDRONES PRODUCT AFTER SALES SERVICE BOOK", NOT "…AFTER SALES SERVICE BOOK". The
+  // owner corrected this twice: on 2026-10-08 he asked for Summary→Service, and on
+  // 2026-10-09 he asked again because the expansion still dropped PRODUCT — *"It should
+  // everywhere has PRODUCT in that."* An expansion that names four of the five initials
+  // is not an expansion, and this assertion is the only place that says so.
+  hi['app.fullName'] === 'INDRONES PRODUCT AFTER SALES SERVICE BOOK' &&
   hi['auth.email'] === 'you@indrones.com' &&
   hi['cust.email'] === 'you@company.com' &&
   hi['overview.phoneHint'] === '+91 XXXXX XXXXX',
   [hi['app.name'], hi['app.fullName'], hi['auth.email'], hi['cust.email'], hi['overview.phoneHint']]);
+// The two legal labels are the same kind of thing: a name at a fixed address. A reader
+// who follows the link lands on a page titled "Terms of Use" / "Privacy Notice", so a
+// translated label would promise them a document by a name it does not carry.
+ok('the two legal labels are names too — the Hindi table carries them untranslated',
+  hi['landing.termsTos'] === 'Terms & Conditions' &&
+  hi['landing.termsPrivacy'] === 'Privacy Policy');
 ok('...and the section letter stays Latin, because the tab above the button says "B"',
   hi['section.close'].includes('{letter}') &&
   ['B', 'C', 'D', 'E', 'F', 'G'].every(L => String(hi['section.' + L.toLowerCase()]).includes(L)),

@@ -50,6 +50,15 @@ const TARGET = 'gh-pages'
 // app code. It answers "did the backup run last night?" without a sign-in, which is
 // the only way that question survives sign-in being the thing that broke. It reaches
 // the backend through the one public action, `backupPulse`.
+//
+// `terms.html` and `privacy.html` are the two legal pages the sign-in screen's
+// "Terms & Conditions and Privacy Policy" line points at. They were absent for far
+// too long: the line was shown as text and linked nowhere, which is worse than not
+// showing it at all. They follow the same rule as `backup.html` — own styles, no
+// scripts, no app code — because a legal page must still open on the day the app
+// itself is what is broken. Both stay out of sw.js's SHELL for the same reason
+// `faq.html` does: a reader opens them once, so precaching them is a cost with no
+// benefit.
 const SERVED = [
   'app.js',
   'backup.html',
@@ -66,7 +75,9 @@ const SERVED = [
   'manifest.json',
   'palette.css',
   'plan.html',
+  'privacy.html',
   'sw.js',
+  'terms.html',
   'theme.css',
   'tokens.css',
   'views.css',

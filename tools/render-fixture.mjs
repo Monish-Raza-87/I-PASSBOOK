@@ -51,7 +51,7 @@ const { T, byId } = loadApp(`
   get currentView(){return currentView;}, set currentView(v){currentView=v;},
   get insightsFilters(){return insightsFilters;}, set insightsFilters(v){insightsFilters=v;},
   get _dataIsDemo(){return _dataIsDemo;}, set _dataIsDemo(v){_dataIsDemo=v;},
-  irList,
+  irList, iconSvg,
   openAccessModal, renderCustomersTab, renderPeopleTab, renderDepartmentsTab,
   set accessTab(v){accessTab=v;},
   set accessCache(v){accessCache=v;},
@@ -80,6 +80,13 @@ const FIXTURE = [
 T.allIRs = FIXTURE;
 T.insightsFilters = { fy: ALL, month: ALL, status: ALL, category: ALL, customer: ALL, drone: ALL };
 T._dataIsDemo = false;
+// `renderInsights()` now opens with `if (currentView !== 'insights') return;` — a real
+// guard, added because two boot-time callers were rebuilding a pane nobody was looking
+// at. Without this line the fixture called it from the wrong view, got the early return,
+// and then died on `byId.get('insights-body').innerHTML` because the element had never
+// been asked for. It is set here and restored to 'detail' below, so the two captures do
+// not depend on the order they were written in.
+T.currentView = 'insights';
 T.renderInsights();
 const insights = byId.get('insights-body').innerHTML;
 
@@ -242,7 +249,15 @@ const accessShellTemplate = (() => {
     i++;
   }
   if (depth) throw new Error('unbalanced <div> in the User Access card');
-  const card = src.slice(at, i);
+  // The card is lifted out of app.js VERBATIM, so the fixture measures the real markup
+  // and not a copy of it. It carries exactly one interpolation — the icon on the title —
+  // and that one is RESOLVED through the app's own iconSvg() rather than being allowed
+  // through as source text, which would have printed the literal `${iconSvg('users')}`
+  // into the photographed page. Any SECOND interpolation is still an error: that is the
+  // signal that the card has grown logic and can no longer be lifted at all.
+  const KNOWN = ["${iconSvg('users')}"];
+  let card = src.slice(at, i);
+  for (const expr of KNOWN) card = card.split(expr).join(T.iconSvg('users'));
   if (card.indexOf('${') >= 0) throw new Error('the User Access card grew an interpolation; it can no longer be lifted out verbatim');
   return '<div class="inward-options-modal">' + card + '</div>';
 })();
@@ -416,6 +431,7 @@ OP.applyIRStateToAllIRs();       // ← the merge under test
 OP._dataIsDemo = false;
 OP.insightsFilters = { fy: ALL, month: ALL, status: ALL, category: ALL, customer: ALL, drone: ALL };
 
+OP.currentView = 'insights';      // renderInsights() returns early from any other view
 OP.renderInsights();
 const opInsights = opById.get('insights-body').innerHTML;
 OP.currentIR = UNALLOTTED[0];

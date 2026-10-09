@@ -196,26 +196,45 @@ guessing — and `smoke-ui.mjs` now pins the height, the `width: auto`, the abse
 pixel width, and the invert.
 
 ### Auth card (`.glass-card`)
-Flat `--surface-elevation-1` card with `--outline-gray-1` hairline and
-`--elevation-lg`. No backdrop blur — the light-mode glass cluster is what blocked
-light mode before, and `--surface-alpha-*` is the replacement where layering is
-genuinely needed.
+`--surface-elevation-1` card with an `--outline-gray-1` hairline, `--elevation-lg` and
+`--radius-6`, capped at 400px — **and `backdrop-filter: var(--glass-blur)` since
+2026-10-09, inside an `@supports` block**, with the same lit top edge the app's other
+glass surfaces carry. The `@supports` is the whole safety net: a browser without
+`backdrop-filter` gets the solid card it has always had, never a translucent panel with
+nothing behind it. The blur is real but nothing shows it over a flat colour, which is
+why `#auth-container` also paints a two-lobe accent field behind this card. This is a
+deliberate return of the thing that used to block light mode — the old glassmorphism
+cluster was many unguarded blurs over an opaque ground; this is one, guarded, over a
+field that was chosen to make it visible. See
+[09 — Design System](09 - Design System.md) for the five tokens and the full list of
+surfaces that spend them.
 
 ### The landing page (`.doors`, `.door`, `.door-role`)
-The sign-in screen is a **grid of two cards**, not one card with a link: an
-`Employee` card carrying the unchanged `#auth-form`, and a `Customer` card that opens
-`customer.html`. `repeat(auto-fit, minmax(280px, 1fr))` gives a phone one column and a
-desktop two **with no media query**, so the two arrangements cannot drift apart —
-and at 320px the two cards measure 288px wide inside the page's 16px gutter, with the
-document's `scrollWidth` still exactly 320. Each card is `<section class="door
-glass-card">`, so the Desk skin's `#auth-container .glass-card` rule dresses both and
-there is no second place for either card's shape to drift from. `.door` sets
-`max-width: none` (the card's own rule caps it at 400px for a single card) and
-`.door .auth-head { margin-bottom: 0.6rem }`, chosen so the flex `gap` plus that margin
-comes to the 1.5rem the single-card screen always had — the employee card is
-byte-for-byte the same screen it was. See
-[10 — Auth & Access Model](10 - Auth & Access Model.md#one-link-two-doors) for why the
-customer half is a link-out rather than a second copy of that page's sign-in.
+The sign-in screen is **one common typed head over two stacked doors**, not a grid of
+two cards. An `Employee` door carries the unchanged `#auth-form` with all four of its
+methods in one box; a `Customer` door below it has no password field at all and links
+out for its reset. `.doors` is a **flex column** capped at 420px, and no media query
+makes it a grid, so the phone and the desktop arrangements cannot drift apart.
+
+| | Employee (`#door-employee`) | Customer (`#door-customer`) |
+|---|---|---|
+| Holds | the one staff `#auth-form` — email → emailed code — plus the `.quick-row` (Google handoff, passkey, pattern) | its own `#cust-form`: welcome, the helper line, the address, **Continue**, `or`, and the desk's address for anyone not onboarded |
+| On arrival | **shut** | **shut** |
+
+**Both doors ship folded and both are independent.** `paintDoors()` shuts both on every
+arrival and restores nothing from storage; `toggleDoor(which)` reads only that door's own
+`data-open` and moves only that door. Any combination of open and shut is reachable —
+this is not an accordion, and it was one until 2026-10-09. The owner's correction, after
+two rejected attempts: *"I asked page opens the tabs collapsed, then we may open anyone
+or collapse anyone without being dependent on other."* `setDoor()` writes the one fact in
+all three of its places — `data-open` turns the chevron, `hidden` folds the panel (with a
+`!important` that beats `display: flex`), and `aria-expanded` tells a screen reader — and
+the markup ships in that same state, so nothing moves on the first frame. See
+[10 — Auth & Access Model](10 - Auth & Access Model.md#one-link-two-doors).
+
+Each door is `<section class="door glass-card" data-open="0">`, so the skin's
+`#auth-container .glass-card` rule dresses both, there is no second place for either
+card's shape to drift from, and the section carries the fold state a CSS reader can see.
 
 Nothing about this screen can be measured through `index.html` itself: over `file://`
 app.js fires a blocking `alert()` and the renderer stops answering CDP calls, so

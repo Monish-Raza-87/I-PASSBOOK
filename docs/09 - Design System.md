@@ -177,8 +177,22 @@ Three families. Learn these three and the rest follows:
 Each has a neutral `gray-1…10` ramp plus per-hue ramps (`red, blue, green, amber,
 violet`), and each has an `-alpha-*` variant for layering over images or
 gradients. In light mode the alpha ramps are black-alpha; in dark they are
-white-alpha. They are the replacement for the old glassmorphism cluster, which is
-what used to block light mode.
+white-alpha. They are the replacement **inside the app** for the old glassmorphism
+cluster, which is what used to block light mode: inside the workspace, layering is
+done with an alpha ramp, not with a blur.
+
+Liquid glass came back on 2026-10-09, and it is a different thing from that cluster.
+`base.css` declares five glass tokens — `--glass-fill`, `--glass-edge`, `--glass-blur`
+(`blur(18px) saturate(1.5)`), and the `--accent-tint` pair at 7% / 13% — and
+`industrial.css` §9 spends them on the app's **floating chrome only**: the auth
+container, the inward-options card and its modal scrim, `#user-menu`, `#nudge-panel`,
+`#toast`, the customer-door card, and the sign-in doors. The IR list rows and the
+sidebar are deliberately excluded: a `backdrop-filter` is a compositor layer per
+element, and three hundred rows on the device this app was built for is not a place to
+buy one. Every standalone page (`terms.html`, `privacy.html`, `faq.html`, `backup.html`,
+`customer.html`, `inspector.html`, `plan.html`) carries its own copy of the same five
+tokens and the same two-lobe ambient field, because a blur over a flat colour returns
+that flat colour — the field is what makes the glass visible at all.
 
 Two quirks preserved deliberately rather than "fixed":
 

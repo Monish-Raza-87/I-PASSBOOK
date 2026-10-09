@@ -30,6 +30,16 @@
     --radius: 10px;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    /* GLASS, restated rather than linked: this page loads no stylesheet at all, which is
+       the whole point of it. The fill is a step MORE opaque than the sign-in screen's 72%
+       — this page is long-form prose, and a paragraph drifting over a gradient is a
+       paragraph being read twice. 86% keeps the blur visible in the margins and the paper
+       under the words, which is the same change-of-material argument base.css makes, one
+       step further along. `--accent-soft` is reused as the ambient wash rather than a new
+       tint being invented for it. */
+    --glass-fill: color-mix(in srgb, var(--surface) 86%, transparent);
+    --glass-edge: rgba(255, 255, 255, 0.5);
+    --glass-blur: blur(18px) saturate(1.5);
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
@@ -48,6 +58,7 @@
       --warn-line: #55411f;
       --ok: #6fd3a0;
       --ok-soft: #14291f;
+      --glass-edge: rgba(255, 255, 255, 0.14);
       color-scheme: dark;
     }
   }
@@ -66,6 +77,7 @@
     --warn-line: #55411f;
     --ok: #6fd3a0;
     --ok-soft: #14291f;
+    --glass-edge: rgba(255, 255, 255, 0.14);
     color-scheme: dark;
   }
 
@@ -73,12 +85,19 @@
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    background: var(--bg);
     color: var(--fg);
     font-family: var(--sans);
     font-size: 16px;
     line-height: 1.6;
     padding-block: 0 4rem;
+    /* THE AMBIENT FIELD, at the same two lobes and the same two positions the sign-in
+       screen uses — that is what makes this the same glass as the app rather than a page
+       that merely also uses blur. A blur over a flat colour is invisible. */
+    background:
+      radial-gradient(120rem 70rem at 8% -18%,  var(--accent-soft), transparent 62%),
+      radial-gradient(105rem 62rem at 96% 118%, var(--accent-soft), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
   }
   .wrap { max-width: 74ch; margin: 0 auto; padding-inline: 16px; }
 
@@ -186,6 +205,23 @@
 
   /* No tables on this page on purpose — a table wide enough to be readable needs
      sideways scrolling on a phone, which is the one thing this page must not do. */
+
+  /* THE GLASS ITSELF. Two surfaces float here — a section, and a jump chip — and both
+     are over the ambient field, so both have something behind them for the blur to
+     show. The `@supports` guard is the whole safety net: a browser without
+     backdrop-filter keeps the solid card it can actually read, never a translucent one
+     with nothing behind it. The masthead is deliberately NOT here — it is the page's own
+     edge, not a pane floating over it. */
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    section,
+    nav.jump a {
+      background: var(--glass-fill);
+      -webkit-backdrop-filter: var(--glass-blur);
+      backdrop-filter: var(--glass-blur);
+      box-shadow: inset 0 1px 0 var(--glass-edge);
+    }
+    nav.jump a:hover { background: var(--accent-soft); }
+  }
 
   footer.end {
     margin-top: 1.6rem;

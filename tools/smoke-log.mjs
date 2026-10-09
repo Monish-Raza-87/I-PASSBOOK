@@ -471,7 +471,7 @@ r.ok('renderLayout hides the list for it on a phone and hands it the back button
 // pinned rather than left to a comment.
 r.head('pushing a report into an IR cannot destroy what is already in it');
 r.ok('Section D declares the field, as its own read-only type',
-  /id: 'd_logAnalysis',\s*label: 'Flight Log Analysis',\s*type: 'logAnalysis'/.test(appSrc));
+  /id: 'd_logAnalysis',\s*label: 'Flight log analysis',\s*type: 'logAnalysis'/.test(appSrc));
 r.ok('buildField renders it, and populateFieldValue fills it from the stored value',
   /field\.type === 'logAnalysis'\) \{\s*\n\s*\/\/[\s\S]{0,260}control = `<div class="log-analysis" id="\$\{id\}"><\/div>`;/.test(appSrc) &&
   /renderLogAnalysis\(fieldId, value\); return;/.test(appSrc));

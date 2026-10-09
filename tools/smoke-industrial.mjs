@@ -96,11 +96,28 @@ const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#ins
 // three of eight would leave the app disagreeing with itself. It is a fixed list:
 // anything new here has to be argued for.
 const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$)/;
-const escaped = selectors.filter(s => !SCOPES.test(s) && !GLOBALS.test(s));
-r.ok('every rule is scoped, or is one of the sanctioned globals',
+// The second sanctioned category, added 2026-10-09 with §9. These are the app's
+// FLOATING CHROME — the modal pane and its scrim, the two dropdown panels, the toast,
+// the customer door's own card. They are not a tenth root and must not become one: a
+// rule reaching into one of them cannot touch a screen, because none of them is a
+// screen. What they are is the only family in the app that is drawn ON TOP of the page
+// rather than in it, which is the test for membership — the same test §3's doors pass.
+// §9 gives the argument for why glass belongs on exactly these and on nothing else.
+//
+// The customer door's card is here rather than under #auth-container because it is
+// markup INSIDE that root, so `#auth-container .glass-card` already reaches it; the
+// entry exists for the case where it stops being a `.glass-card` and becomes the one
+// opaque panel on a glass screen, which is what §9 was written to prevent.
+const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#user-menu|#nudge-panel|#toast)\b/;
+const escaped = selectors.filter(s => !SCOPES.test(s) && !GLOBALS.test(s) && !CHROME.test(s));
+r.ok('every rule is scoped, is one of the sanctioned globals, or is floating chrome',
   escaped.length === 0, escaped);
-r.ok('...and the globals are only the colour steps',
-  selectors.filter(s => !SCOPES.test(s)).length <= 14,
+// The list stays a LIST. A count is the only thing that fails when a category quietly
+// grows, so the ceiling is real and low: five chrome selectors on the day it was
+// written, and the colour steps and the chrome family are counted together because both
+// are ways of leaving the roots behind.
+r.ok('...and neither sanctioned list has quietly grown',
+  selectors.filter(s => !SCOPES.test(s)).length <= 22,
   selectors.filter(s => !SCOPES.test(s)));
 
 // A rule that reached `.ir-card-side` is the owner's known defect re-opened: a side
@@ -430,9 +447,23 @@ r.ok('the IR number is the one bright thing on a row',
   (css.match(/#index-view \.ir-title\s*\{[^}]*\}/) || [''])[0]);
 // views.css slides the row on hover. A row answers the pointer by lighting up; an
 // instrument panel does not move when you look at it.
+//
+// ⚠ AND THE LIGHT-UP IS AN ACCENT WASH, NOT A GREY STEP. It was `--ind-inset` until
+// 2026-10-09, which is --surface-gray-2 — #f3f3f3 on a white row. The owner reported
+// twice that hovering a row did nothing; both times the rule was present and both times
+// it was three per cent away from the colour beside it, which is the same defect as
+// having no rule at all. §4 carries the measurement. Asserted on the ACCENT, so a
+// future edit that quietly goes back to a grey step fails here rather than on his
+// screen.
 r.ok('...and the row lights up on hover instead of sliding',
-  /#index-view \.ir-card:hover\s*\{\s*background:\s*var\(--ind-inset\)/.test(css) &&
+  /#index-view \.ir-card:hover\s*\{\s*background:\s*var\(--accent-tint-strong\)/.test(css) &&
   /#index-view \.ir-card:hover\s*\{\s*transform:\s*none/.test(css));
+// The open row must not be the same picture as the row under the pointer: it keeps the
+// panel ground and takes the accent as a RAIL, which is the mark the sidebar already
+// uses for "you are here".
+r.ok('...and the OPEN row is told apart from the hovered one by a rail, not by a tint',
+  /#index-view \.ir-card\.is-selected\s*\{[^}]*background:\s*var\(--ind-panel\)[^}]*box-shadow:\s*inset 2px 0 0 0 var\(--accent\)/.test(css),
+  (css.match(/#index-view \.ir-card\.is-selected\s*\{[^}]*\}/) || [''])[0]);
 
 r.head('the look reaches the shell and the other four roots');
 // Not "the rule exists" but "the rule names these roots": a scoped rule that forgot

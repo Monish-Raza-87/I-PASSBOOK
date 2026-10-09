@@ -162,7 +162,7 @@ r.ok('the photo field produces an images block, keyed for its bytes',
   (() => {
     const im = bModel.blocks.find(b => b.kind === 'images');
     return !!im && im.items.length === 1 && im.items[0].key === 'b_inwardPhotos#0' &&
-           im.items[0].caption === 'Box as received' && im.label === 'Inward Photos (Image or PDF)';
+           im.items[0].caption === 'Box as received' && im.label === 'Inward photos (image or PDF)';
   })(), bModel.blocks.filter(b => b.kind === 'images'));
 r.ok('the inward table produces a table block with its four columns',
   (() => {
@@ -262,7 +262,7 @@ r.ok('the analysis note is a block with the IR and the system id in it', (() => 
 r.ok('a missing IR leaves placeholders rather than the word "undefined"',
   !/undefined/.test(T.analysisNoteText(null)), T.analysisNoteText(null));
 r.ok('a divider in the form becomes a divider in the document',
-  T.sectionPdfModel('sec-f', {}, null).blocks.some(b => b.kind === 'divider' && /Flight Test/.test(b.text)),
+  T.sectionPdfModel('sec-f', {}, null).blocks.some(b => b.kind === 'divider' && /Flight test/.test(b.text)),
   T.sectionPdfModel('sec-f', {}, null).blocks.filter(b => b.kind === 'divider'));
 r.ok('a checkpoint draws its tick state AND its attachments',
   (() => {
@@ -275,7 +275,7 @@ r.ok('a checkpoint draws its tick state AND its attachments',
 r.head('the two Flight Test uploads are one field now, and only one');
 r.ok('g_basicReport carries both jobs', (() => {
   const f = T.SECTIONS['sec-f'].fields.find(x => x.id === 'g_basicReport');
-  return !!f && f.label === 'Flight Test Report (Image or PDF)' && f.type === 'imageEvidence';
+  return !!f && f.label === 'Flight test report (image or PDF)' && f.type === 'imageEvidence';
 })(), T.SECTIONS['sec-f'].fields.filter(f => /Report/.test(f.label || '')).map(f => [f.id, f.label]));
 r.ok('the old Basic / Mission labels are gone from every label, script and template', (() => {
   // Comments are stripped first: app.js explains the merge in prose, and naming the

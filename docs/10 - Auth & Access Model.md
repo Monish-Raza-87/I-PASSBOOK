@@ -24,11 +24,18 @@ are what a future session would otherwise restore:
 - **Two cards stacked, both open** was the middle shape, and it made the page taller
   without answering the complaint.
 
-**What ships now is an exclusive accordion**, and stacking is what fixes the length
-problem rather than making the two panels equal: side by side, two panels of different
-content are read against each other and the shorter one reads as incomplete however it
-is filled. Stacked, each is only ever compared with the page, and the folded one is a
-single 56px bar.
+- **Two cards stacked, one always open (an exclusive accordion)** was the third shape,
+  and it too was rejected. The owner, 2026-10-09: *"no its not done, I asked page opens
+  the tabs collapsed, then we may open anyone or collapse anyone without being
+  dependent on other."* Opening either bar closed the other, and one bar was open on
+  arrival. Both were wrong.
+
+**What ships now is two independent, both-shut doors.** Stacking is still what fixes the
+length problem rather than making the two panels equal: side by side, two panels of
+different content are read against each other and the shorter one reads as incomplete
+however it is filled. Stacked, each is only ever compared with the page, and the folded
+one is a single 56px bar. But the interlock is gone: each bar reads its OWN state and
+moves only itself, so any combination of open and shut is reachable.
 
 `#auth-container` holds a `<header class="landing-head">`, a `.doors` flex column
 (max-width 420px), the shared `.landing-terms` line, the language selector, `.landing-foot`
@@ -49,16 +56,24 @@ the old rule was protecting is still protected: `customer.html` keeps its own `i
 storage keys, so a customer session can never be inherited by, or inherit, a staff one
 on a shared machine, and the signed-in customer gets a link rather than a second form.
 
-`tools/smoke-shell.mjs` pins all of it: the head appears once and above the doors, the
-mark appears once and not again inside either door, `.doors` is a flex column with no
-media query that could make it a grid, both panels ship **unfolded** in the markup (so a
-JS-off page still shows both doors — a panel that shipped folded could never be opened
-again), and `setDoor()` writes all three statements of the one fact in one pass:
-`data-open` turns the chevron, `hidden` folds the panel (with the `!important` that beats
-`display: flex`), and `aria-expanded` tells a screen reader. **Both-shut is not a state**
-— `setDoor` takes a choice, not a toggle — and `DOOR_KEY` (`ipb_door`) reopens the door
-this device used last, the Employee's by default, painted by `paintDoors()` from
-`showAuth()` so a sign-out returns to the screen the person left.
+`tools/smoke-shell.mjs` pins the markup and `tools/smoke-doors.mjs` pins the behaviour:
+the head appears once and above the doors, the mark appears once and not again inside
+either door, `.doors` is a flex column with no media query that could make it a grid,
+both panels ship **folded** in the markup, and `setDoor()` writes all three statements of
+the one fact in one pass: `data-open` turns the chevron, `hidden` folds the panel (with
+the `!important` that beats `display: flex`), and `aria-expanded` tells a screen reader.
+
+**Both-shut is not merely a legal state — it is the state the page arrives in.**
+`paintDoors()` shuts both, every time, and restores nothing from storage. `DOOR_KEY`
+(`ipb_door`) records only the last door a person actually *opened*, because the code step
+comes back to the door that asked: a customer who mistyped their address and is put back
+on the Employee bar has lost their place. It is not consulted on arrival.
+
+The panels ship folded in the markup for the same reason. They shipped unfolded until
+2026-10-09 on the argument that a JS-off page then still showed the door; that traded a
+visible snap on every visit — both panels painted open, then folded a tick later — for a
+fallback that was never worth anything, since `toggleDoor` is the only thing that ever
+opened a panel and the bars are inert without JS.
 
 ## The funnel, in two steps
 

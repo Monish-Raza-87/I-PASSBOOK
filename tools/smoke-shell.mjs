@@ -243,7 +243,12 @@ ok('and no blur or darkening rule is left in the splash styles',
 // by the same words turning up in a card later.
 const landingHead = (html.match(/<header class="landing-head">[\s\S]*?<div class="doors">/) || [''])[0];
 ok('the product name moved to the common head, above both doors',
-  landingHead.length > 0 && /INDRONES-AFTER SALES SERVICE BOOK/.test(landingHead),
+  // ⚠ THE FULL NAME, WITH "PRODUCT" IN IT. This assertion read
+  // "INDRONES-AFTER SALES SERVICE BOOK" until 2026-10-09, and the owner caught it:
+  // *"It should everywhere has PRODUCT in that."* The line under the wordmark is the
+  // expansion of I-PASSBOOK, and an expansion that names I, A, S, S and B while dropping
+  // the P is not an expansion. See smoke-i18n for the other half of the same claim.
+  landingHead.length > 0 && /INDRONES PRODUCT AFTER SALES SERVICE BOOK/.test(landingHead),
   landingHead.replace(/\s+/g, ' ').slice(0, 160));
 // ⚠ THE HEAD HAS HAD THREE STRAIGHTLINES, and the two that lost are asserted as GONE
 // rather than merely un-asserted, because each of them was a sentence somebody once
@@ -842,26 +847,46 @@ head('the landing page offers two doors, stacked, each of them collapsible');
       card.indexOf('class="door-role"') < card.indexOf('class="door-chev"'));
     ok('...and a chevron is there to BE the state display',
       new RegExp('id="door-' + which + '-toggle"[\\s\\S]{0,400}?<span class="door-chev" aria-hidden="true"></span>').test(card));
-    // THE PANEL SHIPS UNFOLDED, and that is the fallback rather than an oversight: with
-    // JS off there are no accordions at all, and a panel that shipped folded could never
-    // be opened again. Both panels show, and app.js's first paint folds the one that was
-    // not chosen in the same tick it sets the bar honestly.
-    ok('...and the panel ships unfolded, so a JS-off page still shows the door',
-      new RegExp('<div class="door-body" id="door-' + which + '-body">').test(card) &&
-      !new RegExp('<div class="door-body" id="door-' + which + '-body"[^>]*hidden').test(card));
+    // THE PANEL SHIPS FOLDED, which is the opposite of what this asserted until
+    // 2026-10-09. The old assertion read "a JS-off page still shows the door", and it was
+    // wrong on both counts: shipping unfolded meant a browser painted both panels open and
+    // app.js folded them a tick later — a visible snap on every single visit, which the
+    // owner had already complained about twice — and the `aria-expanded="false"` the markup
+    // already carried described a collapsed panel that was in fact open. With JS off
+    // nothing is lost: the bars are inert either way, because `toggleDoor` is the only
+    // thing that ever opened a panel. Markup and first paint now agree, so nothing moves.
+    ok('...and the panel ships FOLDED, so the first frame is not both doors snapping shut',
+      new RegExp('<div class="door-body" id="door-' + which + '-body" hidden>').test(card) &&
+      new RegExp('id="door-' + which + '"[^>]*data-open="0"').test(card));
   }
 
-  // ── ONE FACT, THREE STATEMENTS, AND NO WAY TO GET BOTH SHUT ─────────────────
+  // ── ONE FACT, THREE STATEMENTS, AND NOTHING TO GET OUT OF STEP ─────────────
   // `data-open` turns the chevron, `hidden` folds the panel, `aria-expanded` tells a
   // screen reader. Three statements of one fact is one more than is comfortable, and each
   // is load-bearing: `hidden` alone leaves the arrow pointing down inside a shut panel,
   // and a class alone leaves a keyboard user tabbing through fields they cannot see. The
-  // assertion is that ALL THREE are written, for BOTH doors, in one pass.
-  ok('setDoor writes all three statements of the one fact, for both doors',
-    /function setDoor\(which\) \{[\s\S]*?DOORS\.forEach\(w => \{/.test(appCode) &&
+  // assertion is that ALL THREE are written, for the door that was named, in one pass.
+  //
+  // ⚠ THE TWO DOORS ARE INDEPENDENT, AND THAT IS THE OWNER'S CORRECTION OF 2026-10-09.
+  // They were an ACCORDION until then — one bar open on arrival, opening either one
+  // closing the other — and that was argued for here at length. He rejected the argument:
+  // *"no its not done, I asked page opens the tabs collapsed, then we may open anyone or
+  // collapse anyone without being dependent on other."* So setDoor takes a door AND its
+  // state rather than a sole choice, `toggleDoor` exists and flips ONE door, and BOTH
+  // SHUT is not merely a legal state but the state the page arrives in.
+  //
+  // The accordion's own worry is answered by the default rather than by the interlock:
+  // two open panels put the employee's four mechanisms and the customer's three above
+  // each other, which is the clutter he objected to — and it cannot happen on arrival,
+  // because arrival is both-shut.
+  ok('setDoor writes all three statements of the one fact, for the door it was given',
+    /function setDoor\(which, on\) \{/.test(appCode) &&
     /sec\.dataset\.open = on \? '1' : '0';/.test(appCode) &&
     /bar\.setAttribute\('aria-expanded', on \? 'true' : 'false'\);/.test(appCode) &&
-    /body\.hidden = !on;/.test(appCode));
+    /body\.hidden = !on;/.test(appCode) &&
+    // …and it names ONE door. A `DOORS.forEach` inside setDoor is the interlock coming
+    // back by the side door, so its absence is asserted rather than its shape.
+    !/function setDoor\(which, on\) \{[\s\S]{0,600}?DOORS\.forEach/.test(appCode));
   // The `!important` is not decoration: `display: flex` on .door-body would otherwise beat
   // the user agent's `[hidden] { display: none }`, which is the classic way an accordion
   // silently never closes.
@@ -869,17 +894,24 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /\.door-body\[hidden\] \{ display: none !important; \}/.test(baseCss));
   ok('...and the chevron turns over on that one attribute, with no glyph and no script',
     /\.door\[data-open="1"\] \.door-chev \{ transform: rotate\(-135deg\); \}/.test(baseCss));
-  // EXCLUSIVE, AND THERE IS NO "BOTH SHUT". setDoor takes a CHOICE, not a toggle, and a
-  // press on the bar that is already open keeps it open. Two open panels would put the
-  // employee's four mechanisms and the customer's three above each other — the clutter he
-  // described, only taller.
-  ok('...so opening one door closes the other, and both-shut is not a state',
-    /const want = DOORS\.indexOf\(which\) >= 0 \? which : 'employee';/.test(appCode) &&
-    !/function toggleDoor/.test(appCode));
-  ok('...and the door this device used last opens on arrival, the Employee’s by default',
+  // THE TWO ARE INDEPENDENT. `toggleDoor` flips the door it is handed and reads that
+  // door's own state to do it, so neither bar can move the other. This is asserted as the
+  // PRESENCE of the toggle and the ABSENCE of any cross-door write, because the failure
+  // mode is a line reappearing, not a shape going missing.
+  ok('...and each bar toggles ITSELF, reading its own state and touching no other door',
+    /function toggleDoor\(which\) \{/.test(appCode) &&
+    /setDoor\(w, !\(sec && sec\.dataset\.open === '1'\)\);/.test(appCode) &&
+    !/DOORS\.filter\(x => x !== w\)/.test(appCode));
+  // BOTH SHUT IS THE ARRIVAL STATE, not an edge case to be prevented.
+  ok('...and the page arrives with BOTH bars shut, which is the state he asked for',
+    /function paintDoors\(\) \{[\s\S]{0,220}?DOORS\.forEach\(w => setDoor\(w, false\)\);/.test(appCode) &&
+    !/setDoor\(DOORS\.indexOf\(want\) >= 0 \? want : 'employee'\);/.test(appCode));
+  // The last door a device opened is still worth remembering — it is what the sign-in
+  // code screen hands back to when it closes, and nothing else depends on it.
+  ok('...and the door a device used last is still remembered, for the code screen',
     /const DOOR_KEY = 'ipb_door';/.test(appCode) &&
-    /localStorage\.getItem\(DOOR_KEY\)/.test(appCode) &&
-    /setDoor\(DOORS\.indexOf\(want\) >= 0 \? want : 'employee'\);/.test(appCode));
+    /localStorage\.setItem\(DOOR_KEY, w\)/.test(appCode) &&
+    /function closeCodeView\(restore\) \{[\s\S]{0,400}?setDoor\(/.test(appCode));
   // …and it is repainted by the one function EVERY route back to the landing goes
   // through, not only at wiring time: a sign-out returns to this screen and must find the
   // door this device left open.
@@ -912,8 +944,10 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   //      MOVED: *"the whole page below it is increasing/decreasing its height … And line
   //      increasing/decreasing should not happen."*
   ok('the line under the wordmark is the owner’s plain name, in the markup and in the table',
-    /<p class="landing-full" id="landing-full" data-i18n="app\.fullName">INDRONES-AFTER SALES SERVICE BOOK<\/p>/.test(headBlock) &&
-    /'app\.fullName':\s*'INDRONES-AFTER SALES SERVICE BOOK'/.test(i18nJs));
+    // The name, not the name-with-a-letter-missing. Corrected 2026-10-09 — see the note
+    // on the head assertion above for the owner's own words.
+    /<p class="landing-full" id="landing-full" data-i18n="app\.fullName">INDRONES PRODUCT AFTER SALES SERVICE BOOK<\/p>/.test(headBlock) &&
+    /'app\.fullName':\s*'INDRONES PRODUCT AFTER SALES SERVICE BOOK'/.test(i18nJs));
   ok('...and both superseded straplines are gone from the head and from the language table',
     !/Indrones Product After-Sales Summary Book/.test(headBlock) &&
     !/Indrones Product After-Sales Summary Book/.test(i18nCode) &&
@@ -1103,7 +1137,7 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     custForm.length > 200);
   ok('...opening with the three lines the owner wrote, in the markup and in the table',
     /<p class="cust-welcome" data-i18n="cust\.welcome">Welcome! This is I-PASSBOOK<\/p>/.test(custForm) &&
-    /<p class="cust-tagline" data-i18n="cust\.tagline">For Everything Related To Indrones’ After-Sales<\/p>/.test(custForm) &&
+    /<p class="cust-tagline" data-i18n="cust\.tagline">For everything related to Indrones’ after-sales<\/p>/.test(custForm) &&
     /<p class="cust-lead" data-i18n="cust\.login">Log in to your I-PASSBOOK account\.<\/p>/.test(custForm) &&
     /'cust\.welcome':\s*'Welcome! This is I-PASSBOOK'/.test(i18nJs) &&
     /'cust\.login':\s*'Log in to your I-PASSBOOK account\.'/.test(i18nJs));
@@ -1198,7 +1232,7 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /function openCodeView\(door, email, password\) \{[\s\S]{0,1800}?authCont\.style\.display = 'none';/.test(appCode) &&
     /function openCodeView\(door, email, password\) \{[\s\S]{0,1800}?stopBrandTyping\(\);/.test(appCode));
   ok('...and closing it puts back the door that ASKED, not the Employee’s by default',
-    /function closeCodeView\(restore\) \{[\s\S]{0,900}?setDoor\(_codeDoor === 'customer' \? 'customer' : 'employee'\);/.test(appCode));
+    /function closeCodeView\(restore\) \{[\s\S]{0,900}?setDoor\(_codeDoor === 'customer' \? 'customer' : 'employee', true\);/.test(appCode));
   ok('...and a code arriving all at once always fills from the FIRST box',
     /const start = \(digits\.length >= boxes\.length\) \? 0 : Math\.max\(0, Math\.min\(from, boxes\.length - 1\)\);/.test(appCode));
   // Busy as an ATTRIBUTE rather than as disabled boxes: disabling the field the person is
@@ -1225,18 +1259,28 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   const footAt   = html.indexOf('<p class="landing-foot">');
   ok('the acknowledgement is one line below both doors, said once',
     termsAt > doorsEnd && footAt > termsAt &&
-    /<p class="landing-terms" data-i18n="landing\.terms">By continuing, you acknowledge that you understand and agree to the Terms &amp; Conditions and Privacy Policy<\/p>/.test(html) &&
-    /'landing\.terms':\s*'By continuing, you acknowledge that you understand and agree to the Terms & Conditions and Privacy Policy'/.test(i18nJs),
+    /<p class="landing-terms"><span data-i18n="landing\.termsPre">By continuing, you acknowledge that you understand and agree to the <\/span><a href="terms\.html" data-i18n="landing\.termsTos">Terms &amp; Conditions<\/a><span data-i18n="landing\.termsAnd"> and <\/span><a href="privacy\.html" data-i18n="landing\.termsPrivacy">Privacy Policy<\/a><\/p>/.test(html) &&
+    /'landing\.termsPre':\s*'By continuing, you acknowledge that you understand and agree to the '/.test(i18nJs),
     { termsAt, doorsEnd });
-  // ⚠ BOTH PHRASES ARE PLAIN TEXT WITH NO ANCHOR, and that is deliberate rather than
-  // unfinished: there is no terms.html and no privacy.html in this repo, and a link to a 404
-  // under the words "Terms & Conditions" is a worse answer than no link at all. Writing those
-  // pages means writing the company's legal position on its own data, which is the owner's to
-  // give. The moment they exist these become anchors — which is why the absence is asserted
-  // rather than left to be noticed.
-  ok('...with both phrases unlinked, because neither page exists to link to',
-    !/<a[^>]*>[^<]*(?:Terms|Privacy)/i.test(htmlCode) &&
-    !/terms\.html|privacy\.html/.test(htmlCode));
+  // ⚠ BOTH PHRASES ARE NOW REAL ANCHORS, and the four keys around them are what makes that
+  // possible: `data-i18n` sets an element's textContent, so a single-key sentence with an
+  // anchor nested inside it would have its link wiped on every repaint. Asserted rather than
+  // assumed, because the failure is silent — the sentence still reads correctly, it just
+  // stops being clickable, and the page it should have opened is unreachable.
+  ok('...with both phrases linked, and split into keys so the anchors survive a repaint',
+    /<a href="terms\.html" data-i18n="landing\.termsTos">/.test(htmlCode) &&
+    /<a href="privacy\.html" data-i18n="landing\.termsPrivacy">/.test(htmlCode) &&
+    /'landing\.termsTos':\s*'Terms & Conditions'/.test(i18nJs) &&
+    /'landing\.termsPrivacy':\s*'Privacy Policy'/.test(i18nJs) &&
+    !/'landing\.terms':/.test(i18nJs));
+  // Both pages must actually SHIP. A link to a page the deploy never publishes is the same
+  // 404 the two phrases were plain text to avoid. Checked against the deploy tool's own
+  // SERVED list rather than a second hand-kept list here, so the two cannot drift.
+  const deploySrc = read('./deploy-ghpages.mjs');
+  const exists = p => { try { read(p); return true; } catch (e) { return false; } };
+  ok('...and both pages exist and are published',
+    exists('../terms.html') && exists('../privacy.html') &&
+    /'terms\.html'/.test(deploySrc) && /'privacy\.html'/.test(deploySrc));
   // The language picker, where the owner asked for it ("a language select option at bottom
   // like in notion.app"). Its options are BUILT by app.js from I18N.LANGS, one per language, so
   // a language added to that list appears here with no second edit.

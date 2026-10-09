@@ -578,19 +578,33 @@
 
 /* The row. A hairline between rows and no card around them, which is what .ir-card
    already is — so this states the ground and switches off the hover slide: a row
-   answers the pointer by lighting up, it does not move. */
+   answers the pointer by lighting up, it does not move.
+
+   ⚠ THE HOVER IS AN ACCENT WASH AND NOT A GREY STEP, AND THAT IS A MEASURED FIX.
+   This rule used to lift the row to --ind-inset, which is --surface-gray-2 — #f3f3f3
+   on a white row in the light theme. That is a three per cent luminance step between
+   two near-whites, and on the phone this app is built for it is invisible: the owner
+   reported on 2026-10-08 and again on 2026-10-09 that hovering a row did nothing at
+   all. The rule was there both times. It was just too quiet to see, which is the same
+   defect wearing a different coat. --accent-tint-strong is a wash of the accent the
+   light palette already resolved to a readable value, and it is warm enough to read
+   against either ground in either theme. */
 #index-view .ir-card {
   padding: 0.5rem 0.9rem;
   background: var(--ind-panel);
   transition: background 0.1s var(--ease);
 }
-#index-view .ir-card:hover { background: var(--ind-inset); }
+#index-view .ir-card:hover { background: var(--accent-tint-strong); }
 #index-view .ir-card:active { background: var(--surface-gray-3); }
 @media (prefers-reduced-motion: no-preference) {
   #index-view .ir-card:hover { transform: none; }
 }
+/* SELECTED STILL READS AS SELECTED. A hovered row and the open row must never be the
+   same row: the open one keeps the panel ground and takes the accent as a RAIL, which
+   is the same mark the sidebar uses for "you are here". Wash for the pointer, rail for
+   the place — two signals, and neither is mistakable for the other. */
 #index-view .ir-card.is-selected {
-  background: var(--ind-inset);
+  background: var(--ind-panel);
   box-shadow: inset 2px 0 0 0 var(--accent);
 }
 
@@ -944,3 +958,176 @@
 
 #faq-view .faq-foot { border-top: 1px solid var(--ind-line); color: var(--ind-muted); }
 #faq-view .faq-foot a { color: var(--accent); }
+
+/* ══════════════════════════════════════════════════════════════
+   9 · LIQUID GLASS, EVERYWHERE ELSE
+
+   The owner asked on 2026-10-09 for the glass to stop being a landing-page-only
+   finish: "Liquid glass / glassmorphism — done on the landing page, do it for all
+   pages." This is that, and it is a short block because the honest answer is that
+   only the app's FLOATING CHROME can wear glass at all.
+
+   WHAT IS HERE, AND WHY ONLY THIS
+   Glass is a surface that floats over content you can still see through it. That
+   is true of exactly one family in this app: the things that are drawn ON TOP of
+   the page rather than IN it — the modal panes, the two dropdown panels, the toast.
+   They are transient, there are never more than a handful on screen, and each one
+   is over real content (rows, panels, a dimmed screen), so the blur has something to
+   show. That is the whole test, and every selector below passes it.
+
+   WHAT IS DELIBERATELY NOT HERE — THE LIST, AND THE SIDEBAR
+   The IR list rows do not get glass, and neither does the sidebar or a screen
+   panel. Two reasons, and the second is the binding one.
+
+   The first is that `backdrop-filter` is a COMPOSITOR LAYER PER ELEMENT. On a
+   300-row list that is 300 blurred layers being recomposited on every frame of a
+   scroll, on the phone in a hangar this app is built for. This app has already
+   fought exactly one performance defect — the list rebuild, measured at 0.06–0.1 ms
+   a row — and the whole lesson of that measurement is that cost proportional to the
+   number of rows is the cost that hurts. A blurred row is that cost again, in the
+   compositor rather than in JS, and nothing would show up in the numbers anybody
+   here can take.
+
+   The second is that they are not floating. §3's doors float — that is what a door
+   is. A list row and a sidebar are the page. Glass on them would be a texture, not
+   a material, and the industrial look this file is built on is precisely the refusal
+   to texture a flat panel.
+
+   THE FILL IS THE SAME TOKEN AS EVERYWHERE ELSE. `--glass-fill` is declared once in
+   base.css and this block does not invent a second one — a modal pane at 72% alpha
+   over a scrim reads as the same glass as a door at 72% over the ambient field, which
+   is the point of having a token. In dark mode the pane and the door move together.
+
+   `@supports` is repeated rather than inherited, because it is not inherited: a
+   browser without `backdrop-filter` must keep the solid pane it can actually read,
+   never a translucent one with nothing behind it. That is base.css's argument and it
+   holds here unchanged. */
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  /* The modal pane. It already carries --elevation-2xl and a hairline; the glass
+     REPLACES the fill and the shadow, because a pane that is translucent AND
+     dropped with a hard shadow reads as a floating card with a dirty edge, not as
+     glass. The lit top edge is the same inset highlight the doors use. */
+  .inward-options-card {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 var(--glass-edge);
+  }
+
+  /* The scrim behind it. A dim alone leaves the page sharp under the pane, which
+     makes the pane's own blur read as a smudge rather than as depth. Two pixels is
+     the whole move: enough to push the page back, not enough to look out of focus.
+     It is one layer, it exists only while a modal is open, and it costs nothing on a
+     screen nobody is scrolling. */
+  .inward-options-modal {
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
+  /* The two dropdown panels and the toast — the same family, the same fill. Each
+     already floats over the page and is never more than one on screen at a time. */
+  #user-menu,
+  #nudge-panel,
+  #toast {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 var(--glass-edge);
+  }
+
+  /* The customer door's card on the landing page is markup rather than a `.door`
+     section, so §3's `#auth-container .glass-card` rule does not reach it. It is the
+     same object on the same screen and must not be the one opaque panel on it. */
+  .customer-door-card {
+    background: var(--glass-fill);
+    -webkit-backdrop-filter: var(--glass-blur);
+    backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 var(--glass-edge);
+  }
+}
+
+
+
+/* ══════════════════════════════════════════════════════════════
+   10 · THE POINTER — every control answers, on a mouse AND on a thumb
+
+   This block exists because the owner reported the same thing twice: "if I am
+   hovering above a tab, it should highlight, this reflects that app is working on
+   realtime and responding on time, but it's not happening so, things are very laggy
+   now." Every rule he was pointing at already existed. The problem was that every one
+   of them answered in a GREY STEP — #ffffff to #f3f3f3 on a row, one grey word to a
+   slightly darker grey word on a tab — and a change that small between two near-whites
+   is not a thing a person can see. So the app read as unresponsive while being
+   perfectly responsive, which is worse than being slow: it is the screen telling a lie
+   about the app.
+
+   THE ANSWER IS THE ACCENT, EVERYWHERE. Hover is the one state where colour may be
+   spent freely, because it is transient and it says nothing — it is the app saying "I
+   heard you". --accent-tint-strong is that wash. In the light theme --accent has already
+   been resolved by palette.css to #7a5600, a value measured to read on a light ground;
+   in dark it is the brand yellow. One rule, legible in both, which is why this file
+   names --accent and never --ind-yellow.
+
+   A WASH FOR THE POINTER, A RAIL FOR THE PLACE. Nothing below reuses the accent rail,
+   the lit tile's solid fill, or the tab's underline for a hover state — so "what I am
+   pointing at" and "where I am" are never the same picture. Where a `:hover` rule would
+   outrank one of those, the state is excluded with :not() rather than restated in a
+   colour the state rule already owns; a restatement is a second copy that can drift.
+
+   AND IT ANSWERS A THUMB TOO. `@media (hover: none)` is the phone and the tablet: there
+   is no pointer to hover with, so :hover either never fires or sticks to whatever was
+   touched last. The same wash goes on :active there, which is the state a tap actually
+   produces — so a tap lights the row under the finger and it goes out when the finger
+   lifts. Without it the app feels dead on the device it was built for. */
+
+/* ── The row and the filter tiles ──────────────────────────────────────────────── */
+#index-view .ir-card:active { background: var(--accent-tint-strong); }
+/* The lit tile is excluded rather than repainted: `#index-view .segment.active` and a
+   `:hover` rule are the same specificity, so without the :not() the tile a person is
+   standing on would stop being lit the moment they pointed at it. */
+#index-view .segment:not(.active):hover {
+  background: var(--accent-tint-strong);
+  border-color: var(--ind-line);
+  color: var(--ink-gray-9);
+}
+
+/* ── The sidebar and the section tabs ───────────────────────────────────────────── */
+#sidebar .nav-item:hover { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+
+/* THE TABS. This is the one the owner named. views.css:469 answers a hovered tab by
+   moving one grey word to a darker grey word, which on a light ground is a change
+   nobody catches. The tab keeps its own language — the wash carries the hover and the
+   2px underline still carries the current section — so the two states differ by shape
+   and not only by depth of colour. A section this ticket's category makes meaningless is
+   struck through and stays struck through under the pointer: it is not an offer, so it
+   must not light up like one. */
+#detail-view .tab:not(.tab-inapplicable):hover { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+
+/* ── Help & FAQ, the back button, and the header icons ──────────────────────────── */
+#faq-view .faq-jump-item:hover { background: var(--accent-tint-strong); border-color: var(--ind-rule); color: var(--ink-gray-9); }
+#workspace header #back-btn:hover,
+#workspace header .icon-btn:hover { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+
+/* ── The user menu's own rows ────────────────────────────────────────────────────── */
+#user-menu .appearance-row:not(.is-on):hover { background: var(--accent-tint-strong); }
+/* components.css already tints the sign-out row red on hover. That stays red: the wash
+   is this app's default answer and signing out is the one row where a different answer
+   is the point. The general rule above does not reach it — the appearance rows and the
+   sign-out row are different classes — so nothing has to be named back out. */
+
+/* ── NO POINTER TO HOVER WITH ─────────────────────────────────────────────────────
+   The phone and the tablet. :hover either does not fire or sticks to the last thing
+   touched — either way it is not an answer to a thumb. :active is, so on these devices
+   the wash moves onto it. This is the block that stops the app feeling dead on the
+   device it was built for. It is written for `hover: none` and not for a width, because
+   the thing that decides is the INPUT, not the size of the screen. */
+@media (hover: none) {
+  #index-view .ir-card:active,
+  #sidebar .nav-item:active,
+  #faq-view .faq-jump-item:active { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+  #index-view .segment:not(.active):active,
+  #detail-view .tab:not(.tab-inapplicable):active { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+  #workspace header #back-btn:active,
+  #workspace header .icon-btn:active { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
+}

@@ -382,14 +382,14 @@ r.head('the site field is wired into the parts that make a field a field');
 
 const T5 = loadApp('fieldLabelFor, fieldSectionFor, OVERVIEW_KEY,');
 r.ok('it has a history label, so a history row never shows the raw storage key',
-  T5.fieldLabelFor('a_siteLocation') === 'Site Location', T5.fieldLabelFor('a_siteLocation'));
+  T5.fieldLabelFor('a_siteLocation') === 'Site location', T5.fieldLabelFor('a_siteLocation'));
 r.ok('...and it resolves to the Overview, so its history is gated on Triage like its neighbours',
   T5.fieldSectionFor('a_siteLocation') === T5.OVERVIEW_KEY, T5.fieldSectionFor('a_siteLocation'));
 r.ok('it carries the same per-field history button as the other two',
   /hist\('a_siteLocation'\)/.test(editable));
 // The LABEL is chrome and comes from the language table; the storage KEY does not.
 r.ok('its label comes from the language table',
-  /escHtml\(t\('overview\.siteLocation'\)\)/.test(editable) && !/>Site Location</.test(editable));
+  /escHtml\(t\('overview\.siteLocation'\)\)/.test(editable) && !/>Site location</.test(editable));
 r.ok('the link text does too', /t\('common\.openInMaps'\)/.test(editable));
 
 r.finish();

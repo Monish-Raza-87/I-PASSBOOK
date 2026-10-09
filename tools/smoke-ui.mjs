@@ -1734,6 +1734,16 @@ r.ok('no monogram is left in the header — the mark replaced it, and the "?" we
   !/userAvatar\.textContent = currentUser\?\.initial/.test(appSrc) &&
   /userAvatar\.innerHTML = avatarSvg\(/.test(appSrc));
 
+// The avatar holds an <svg>, so a click on it lands on the SVG, never on the div. The
+// outside-click guard compared the target against the div itself, so it read every
+// click the avatar received as "outside", closed the menu in the same event that opened
+// it, and locked everyone without a Google photo out of Sign Out. The guard has to ask
+// whether the click was inside the control, not whether it was the control.
+r.ok('the outside-click guard treats a click inside the avatar as a click on it',
+  /!userAvatar\.contains\(e\.target\)/.test(appSrc) &&
+  !/e\.target !== userAvatar/.test(appSrc),
+  'the guard must use contains(), because the avatar\'s own <svg> is the click target');
+
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');
 r.ok('classList.toggle remembers, in both the one- and two-argument form',

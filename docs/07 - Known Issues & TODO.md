@@ -174,7 +174,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
   - **There is now exactly ONE exception, and it is not a level: a customer account** (added 2026-10-07). An account scoped to a company in `access.json`'s `customers` map comes back from `getEffectiveAccess` with **every section `'none'`** and the Overview at `'view'`, so it sees its own company's IRs and nothing else. This does not weaken the decision above for staff — it is about accounts that are not staff at all. The withholding needs **no new filter code**: it rides the existing `canView()` in `getPassbook`. What *is* new is `refuseCustomer(access, what)` on the endpoints with no per-record ACL (`saveSection`, the comment thread, `getAuditLog`, `getLegacyIR`, `listLegacyIRs`) — and **that check is the whole control** on those, because the audit log trusts the caller's token for the repository and the legacy reads take an arbitrary IR number. `API_VERSION` 8 exists because an older backend would answer a customer's token with everything.
   - ✅ **The invite panel offered the wrong column, and it is fixed — 2026-10-08.** The company dropdown in **User Access → Customers** is what an admin picks to scope a customer, and it was built from `ir.customerName` — Col L, **"Who's Reporting?"**, the *person* who raised the fault. The backend scopes rows by `companyName` — Col R, **"Where Do You Work?"** — so the two never agreed. Nothing failed loudly: the account was created, the invitation mailed, and the customer's portal came back **empty**, with nothing on screen saying why. Both columns exist on every real ticket (`splitNamePhone` even splits the phone off Col L), so this was not a missing field, just the wrong one. One identifier in `knownCompanies()`; `tools/smoke-invite.mjs` now pins the column against the backend's own `companyColumnIndex` needles rather than against the Insights facet it happened to share a bug with. The demo records in `getDemoIRs()` carried a company name in `customerName` and no `companyName` at all, which is how the wrong shape got taught in the first place — they now carry both columns, as the form does.
 - ⚠️ **The Insights "Customer" filter still lists reporting people, not companies** (found 2026-10-08, not changed). `insightsFacets()`/`insightsMatches()` read `ir.customerName` — Col L, "Who's Reporting?" — while the Customers tab now correctly reads `ir.companyName` (Col R). So the same word means two different things on two screens: a chart filtered by "Customer: Asha Rao" is filtered by a person, and no company name will appear in that list. **Deliberately left as it is** rather than changed with the invite fix: this one alters an existing, shipped screen's facets and chart counts, so it is a decision to take deliberately, not a drive-by. The options are to relabel it "Reported by" (cheapest, honest, changes no data) or point it at `companyName` (changes what every chart shows). Recommend the relabel.
-- ⚠️ **`sessionCheck` puts the token in a URL.** It is a GET probe (`?action=sessionCheck&sessionToken=…`) and GAS logs the URL, so a live token can appear in the Executions panel. Every other call posts it in a form body. Moving this one to a POST body is a worthwhile small change; it is not done.
+- ✅ **`sessionCheck` no longer puts the token in a URL — fixed 2026-10-09.** It used to be a GET probe (`?action=sessionCheck&sessionToken=…`), and GAS writes the request URL to the Executions panel, so a live token could appear in a log an admin reads. It is now a **POST** with the token in the body (`app.js` → `confirmSessionAlive`), matching every other call. `action` **stays in the query deliberately**: the fetch interceptor recognises an auth call by matching the URL, and a call it does not recognise gets the token appended straight back onto the query string — which would undo the fix. `doPost` has carried `sessionCheck` all along, so no backend change was needed, and `application/x-www-form-urlencoded` is CORS-safelisted, so there is no preflight to be refused.
 
 ### Functionality
 - ⚠️ **Every ticket starts Open — including old finished ones, until CR allots them.**
@@ -219,12 +219,12 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 - ⚠️ **The live Sheet header row has never been verified directly** — reads from this dev environment return HTTP 401, so the header row is taken from `backend.gs`'s constants plus a test fixture. The mapper is self-auditing and matches by substring, which is why it was built that way; still, confirm against the real Sheet when convenient. This matters **more** now, not less: the Form Responses tab is one of only two Sheets the backend reads.
 
 ### UX
-- ⚠️ **Emoji still live in the older in-panel chrome** — the app's *icons* are now one inline-SVG set (`ICON_PATHS` / `iconSvg`), and the chrome the owner walks daily is fully converted. What is left is emoji inside **prose and status text**, plus a handful of older in-panel buttons: the `⚠️` hints, the `✓`/`✘`/`⚠` option labels (`Received` / `Missing` / `Damaged`), the `📎`/`📷`/`📄` evidence affordances, and the User Access modal's `👥`/`💾`/`📋`. Converting those is a **separate pass** — the option labels are customer-facing strings and the evidence affordances are inside the upload flow. `smoke-ui.mjs` caps the count at **49 non-comment lines**, so it can only go down: a new emoji cannot be added without a test failing and somebody deciding about it. (The ledger has been corrected upward twice, never to accommodate growth — the older ledger of 29 scanned only the part of the file the suite happened to concatenate, and every emoji below that point was invisible to it; 45 → 49 paid for the Customers panel reusing `✅`/`⚠️`/`📋`, and the envelope that would have been new was dropped rather than added.)
+- ✅ **Emoji are down to 19 non-comment lines, and only in slots where text is all that can live — 2026-10-09.** The app's *icons* are one inline-SVG set (`ICON_PATHS` / `iconSvg`), and the conversion has since finished everywhere an element can be built: the `⚠️` hints, the `📎`/`📷`/`📄` evidence affordances and the User Access modal's `👥`/`💾`/`📋` are all gone. What survives is emoji inside **strings no element can be built into** — the `✓`/`✘`/`⚠` option labels (`Received` / `Missing` / `Damaged`), the sync status strings, `'✓ Saved!'` / `'⚠ Retry Save'`, and one `alert()`. `smoke-ui.mjs` **tightened its cap to 19** rather than leaving it at 49, so the boundary now has no room in it, and the survivors are classified **by name** in `TEXT_ONLY` rather than waved through by count — a survivor that is none of those things fails the suite instead of being absorbed into a number with space left in it.
 - ⚠️ **No loading state per section** — loading saved data is silent; user sees empty forms briefly
 - ⚠️ **No error recovery** — if save fails, the retry button appears but doesn't auto-retry
 - ⚠️ **File previews are image-only** — PDF uploads show no preview, only images get thumbnails
 - ⚠️ **Checklist UX** — checklist items use dropdown selects instead of more intuitive checkbox UX
-- ⚠️ **No confirmation dialog** — save button has no "are you sure?" for critical sections
+- 🔧 **No confirmation dialog — and no Save button left to hang one on.** The Save button is gone from all six sections, and autosave fires about 1.5 s after you stop typing, so the old *"are you sure?"* step has no moment to attach to any more. What is genuinely missing in its place is **undo**: a save that overwrites a section is not reversible from inside the app.
 - ⚠️ **Assignment emails read as comments** — `sendNudgeEmail`'s subject is hardcoded to the comment wording, so the notification an assignee receives says "you have a comment". Needs a redeploy to fix — and the redeploy that fixes it is the cutover.
 - ⚠️ **The sign-in wait is improved, not fixed — and the improvement is unverified in the field.** Apps Script shuts the script down when nobody is using it, and the next caller pays the whole start-up before one line of our code runs: measured against the live deployment on 2026-09-21, `ping` took **31.6s** on the first call, then 3.7s and 1.5s. `warmBackend()` now fires that trivially cheap `ping` as soon as a load is known to be heading for the sign-in screen, so the wake-up overlaps the ~9-second intro and everything the person types. **The mechanism is measured; the outcome is not.** Three pings fired at once measured 9.0s / 9.5s / 10.5s each where a lone one is under four, so a submit that catches the wake-up still in flight may queue behind it — expected to be no worse than the cold start the submit would have paid by itself, but not proven. Nothing may be built on the wake-up: a container that has gone cold again still has to wake, which is why the wait screen's 8-second slow note (`SSO_SLOW_MS`) stays exactly where it is. The Google door is the worst case and is **not** warmed by this — the door and the app are two deployments of the same script, and waking one does not wake the other, so the exchange can still pay a second cold start. **The half that removes the wait rather than overlapping it is `installKeepWarmTrigger()`**, an every-minute trigger calling an empty `keepBackendWarm()` — **installed 2026-09-23**, run once from the editor, so the container is no longer left to go cold. One thing about it is **not verifiable from here**: whether that single trigger also keeps the domain-scoped door warm, since an unauthenticated request to that deployment never reaches our code. The thing to watch is whether the first sign-in of the day is actually shorter. **A third and separate cause was found and fixed on 2026-09-22**, and it was ours, not the platform's: the exchange resolved five store files — `codes.json`, `users.json`, `signins.jsonl`, `sessions.json`, `access.json` — by name, twice each, and a name lookup is a Drive *search* at about **0.37s** measured. That is **eleven searches**, and it was most of the 8-10 seconds reported from the field. `findStoreFile` now asks `CacheService` for the file's id first, so a warm sign-in pays **zero** searches; the expected result is about 5-6 seconds instead of 8-10, and the 8-second note should no longer appear. This half is **not measurable from here either**, but it *is* deployed — it and the trigger both went in with the 2026-09-23 paste, so the 5-6 seconds is now a real prediction to check rather than one held back by an undeployed backend. The real exchange needs the owner's Google identity, and what I could measure is the fallback path and the count of searches, both pinned in `smoke-store.mjs`. What is left is the floor: a ~1.8s platform round trip, three lock acquisitions, and five file reads and writes on top. Those are the next thing to doubt if 5-6 seconds still reads as slow. See [02 — Architecture & Data Flow](02 - Architecture & Data Flow.md).
 
@@ -561,11 +561,14 @@ is left is small.
    timestamp. So the customer accounts, the server-side narrowing that keeps one
    customer's rows away from another's, and the fifth **Customers** tab in User Access
    are all live, and the gate that said *no customer account may be created until this
-   lands* is OPEN. **`API_VERSION 9` — the team roster, `listTeam` — is now owed**: the
-   committed `backend.gs` is one past what the live deployments answer, and item 3
-   below says what that does and does not break. The two ways to read the
+   lands* is OPEN. ✅ **`API_VERSION 9` — the team roster, `listTeam` — went in on
+   2026-10-09**, the same way and read the same way, and it is **the owner's own `ping`
+   that says so**: `apiVersion 9`. The frontend went first, at `v80`, and the paste
+   followed it into the `/exec` deployments. Nothing broke in the window between them,
+   which is what the version note predicted: `loadTeamRoster()` is best-effort, so a v9
+   frontend meeting a v8 backend simply had no roster to show. The two ways to read the
    number, both of which need no tooling: inside the app, the User Access panel's own
-   status line (`Signed in as … · session ✓ · API v8`), or the deployment URL with
+   status line (`Signed in as … · session ✓ · API v9`), or the deployment URL with
    `?action=ping` appended — `ping` is in the pre-auth map, so it answers without a
    token. The primary deployment is
    `…/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec`
@@ -597,28 +600,42 @@ is left is small.
    > what appears in the `/exec` URL (`…/macros/s/AKfycb…jQXatfT/exec`). Pasting that
    > into a `/d/…/edit` link opens Google Drive's *"the file you have requested does
    > not exist"*. Use the `/home/projects/<script-id>/edit` form above.
-2. **Check the Triggers page holds three triggers**: `keepBackendWarm` (every minute),
-   the nightly backup, and the archive sweep. Each is installed by running its own
-   idempotent function once from the editor — `installKeepWarmTrigger()`,
-   `installBackupTrigger()`, `installArchiveTrigger()` — signed in as
-   `monish.raza@indrones.com`, the account that owns the Drive folder, because a
-   trigger executes as whoever installed it. Each replies *already installed* if it is
-   there. Until the archive sweep exists, closed IR folders are archived only by hand.
-3. ✅ **The frontend was published on 2026-10-08 at cache `v79`**, carrying the
-   one-common-head two-door landing page on top of the customer portal and the invite
-   panel (which went out at `v69` two days before). Publishing is
+2. ✅ **The Triggers page holds three triggers — confirmed 2026-10-09.** `keepBackendWarm`
+   (every minute), `runNightlyBackup` (daily ~23:40 IST) and `archiveClosedIRs` (daily
+   ~02:00) are all listed, owned by `monish.raza@indrones.com`, the account that owns the
+   Drive folder — which matters, because a trigger executes as whoever installed it. Each
+   is installed by running its own idempotent function once from the editor —
+   `installKeepWarmTrigger()`, `installBackupTrigger()`, `installArchiveTrigger()` — and
+   each replies *already installed* if it is there. **`runNightlyBackup()` was then run by
+   hand once**, which is what the installer asks for and what gives the app its first
+   "last backup" line: *"Backup 2026-10-09: 45 file(s) read, 20 written, 21 IR(s), 18
+   account(s), rotated out 0 old folder(s)."* — 51 seconds, and `rotated out 0` is correct
+   for a first run, since nothing is old enough to retire yet.
+3. ✅ **The frontend is published at cache `v80` — 2026-10-09.** It carries the team
+   roster read (`listTeam`) on top of the one-common-head two-door landing page, the
+   customer portal and the invite panel. Publishing is
    `DEPLOY_SOURCE=category-insights node tools/deploy-ghpages.mjs` to dry-run, then the
    same with `--commit --push`; it needs the working tree clean, so the commits go
    first, and a `CACHE_NAME` bump in `sw.js` or it warns that returning users keep the
    stale shell for a load. The deploy is confirmed by reading the **served** files,
-   never by a deploy date: `sw.js` answering `ipassbook-v79` and `app.js` answering
-   `APP_VERSION = 'v79'`.
-   **One thing is owed on the backend half:** item 1's paste is at `API_VERSION 8` and
-   the committed `backend.gs` is now at **9** (the team roster — `listTeam`). Nothing
-   breaks until it is pasted: `loadTeamRoster()` is best-effort by design, so an
-   un-pasted backend simply leaves the hand-edited directory standing alone. It becomes
-   owed the moment anything reads the roster as the authority.
-   The **frontend** is level with the committed code at `v80`.
+   never by a deploy date: `sw.js` answering `ipassbook-v80` and `app.js` answering
+   `APP_VERSION = 'v80'`. **Both were read on the live site on 2026-10-09 and both
+   answered.** The backend half went in after it — see item 1 — so **both halves are
+   level with the committed code at `v80` / `API_VERSION 9`.**
+
+   > **Two things stopped this deploy the first time, and neither is a code fault.**
+   > **(a)** `tools/deploy-ghpages.mjs` **refuses to run on a dirty tree** — it checks
+   > `git status --porcelain` and aborts, so seventeen uncommitted files stop it at
+   > line one. Commit first. **(b)** On Windows **PowerShell**, `DEPLOY_SOURCE=… node …`
+   > is not valid syntax — PowerShell has no env-var prefix, so the variable is silently
+   > empty and the script falls back to `main`, the wrong branch. Use
+   > `$env:DEPLOY_SOURCE='category-insights'; node tools/deploy-ghpages.mjs --commit --push`
+   > (or run it from bash). The dry run prints `cache ipassbook-v79 → ipassbook-v80`;
+   > **if that line shows no change, stop** — returning users would stay a load behind.
+   > Its `prune` line is safe to read as information: it removes files that are on
+   > `gh-pages` but no longer referenced, which is how the two dead pre-rename assets
+   > (`assets/Indrones Intro v2.mp4`, `assets/logo.png`) went; the live ones,
+   > `assets/intro_ipassbookv2.mp4` and `_mobile.mp4`, are named in `index.html` and stay.
 
 4. **Delete the retired `ACL` and `ACCESS_REQUESTS` tabs** — nothing has read them since
    the store moved to Drive JSON on **2026-09-17**, so **2026-10-17** is the earliest
@@ -699,7 +716,6 @@ is left is small.
         hides a file it has just made (`findOrCreateStoreFile`). The index would not hold
         that file until the index was rewritten.
 
-- [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 - [x] **The app feels laggy.** Raised 2026-10-08. **Measured 2026-10-08**, in a real
       browser (headless Chrome, 390×844, the app's own bundle served locally, rows shaped
       like what `listIRs` returns) rather than read off the source — the whole point of
@@ -761,8 +777,11 @@ is left is small.
 - [ ] **Erase archived IR folders.** Not built, deliberately: closing an IR moves its
       folder to `Archive IRs/` and nothing is ever deleted. The owner will watch Drive
       usage for a while and ask for this separately if space becomes an issue.
-- [ ] Move the IR list read behind the authenticated `listIRs` action (closes the last
-      unauthenticated data path)
+- [x] **Move the IR list read behind the authenticated `listIRs` action — DONE 2026-10-03.**
+      The no-login read path is deleted from `app.js` and the app names no sheet at all;
+      `listIRs` sits in the authed map and takes the caller's identity, so the read can no
+      longer be reached unsigned. `smoke-list-intel.mjs` fails if a `gviz`/`tqx=out` fetch,
+      a `spreadsheets/d/<id>` address, or a sheet id ever returns to `app.js`.
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written

@@ -310,23 +310,23 @@
   <section class="pv-block" id="today">
     <span class="pv-kicker">What the app shows now</span>
     <h2 class="pv-block-title">Three empty states, and one of them is blank</h2>
-    <p class="pv-block-note">Copied from the app rather than remembered: two carry a 2.5rem emoji
-    and the third carries nothing at all. The emoji is drawn by the operating system, so it is the
-    same picture in dark mode as in light and no token can reach it — which is the only real
-    argument against it.</p>
+    <p class="pv-block-note">Copied from the app rather than remembered. The two marks are the app's
+    own <b>ICON_PATHS</b> drawings, read out of <b>app.js</b> at build time and shown through the same
+    wrapper <b>iconSvg()</b> emits — so this board cannot drift from the screen it claims to show.
+    The third state carries nothing at all, and that is the app's real shape, not an omission here.</p>
 
       <div class="pv-demo pv-demo-pad">
-        <div class="pv-demo-cap"><b>app.js:5061</b><span>the list under a filter</span></div>
+        <div class="pv-demo-cap"><b>app.js</b><span>the list under a filter</span></div>
         <div class="pv-app is-demo">
-        <div class="empty-state"><span>🔍</span>No IRs match this filter.</div></div>
+        <div class="empty-state"><span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8l4.7 4.7"/></svg></span>No IRs match this filter.</div></div>
       </div>
       <div class="pv-demo pv-demo-pad">
-        <div class="pv-demo-cap"><b>app.js:5062</b><span>the list with nothing in it</span></div>
+        <div class="pv-demo-cap"><b>app.js</b><span>the list with nothing in it</span></div>
         <div class="pv-app is-demo">
-        <div class="empty-state"><span>📭</span>No IRs found. Create one via the customer form.</div></div>
+        <div class="empty-state"><span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 13.5V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4.5"/><path d="M3.5 13.5L6 4.5h12l2.5 9"/><path d="M3.5 13.5h4l1 2.5h7l1-2.5h4"/></svg></span>No IRs found. Create one via the customer form.</div></div>
       </div>
       <div class="pv-demo pv-demo-pad">
-        <div class="pv-demo-cap"><b>app.js:4425</b><span>no mark at all today</span></div>
+        <div class="pv-demo-cap"><b>app.js</b><span>no mark at all today</span></div>
         <div class="pv-app is-demo">
         <div class="empty-state">The flight-log reader did not load. Reload the app and try again.</div></div>
       </div>

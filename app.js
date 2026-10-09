@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v79';
+const APP_VERSION = 'v80';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -251,9 +251,22 @@ function clearLocalAuth() {
 function confirmSessionAlive() {
   const st = currentUser && currentUser.sessionToken;
   if (!st) return Promise.resolve(false);
-  const url = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?')
-    + 'action=sessionCheck&sessionToken=' + encodeURIComponent(st);
-  return _origFetch(url)
+  // The token travels in the BODY, never the query string. GAS writes the request
+  // URL to the Executions panel, so a GET here parks a live session token in a log
+  // an admin reads; every other call in this app posts its token for exactly that
+  // reason. `action` stays in the QUERY deliberately: the fetch interceptor below
+  // recognises an auth call by matching the URL, and a call it does not recognise
+  // gets the token appended right back onto the query string — which would undo
+  // this. doPost has carried sessionCheck all along, so no backend change is needed,
+  // and `application/x-www-form-urlencoded` is CORS-safelisted, so there is no
+  // preflight for GAS to refuse.
+  const url  = CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=sessionCheck';
+  const body = 'sessionToken=' + encodeURIComponent(st);
+  return _origFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body,
+    })
     .then(r => r.text().then(t => {
       try {
         const d = JSON.parse(t);
@@ -4132,6 +4145,12 @@ function startAppData() {
   // All three of those read their LOCAL copy above; this is the single network read
   // that refreshes them. One request, not three — see loadSharedConfig.
   loadSharedConfig();
+  // …and the real people, which the hand-edited directory above only remembers.
+  // Separate from loadSharedConfig because the roster is derived from ACCOUNTS, not
+  // from the admin's config document — it is the one thing an admin cannot edit and
+  // therefore the one thing that cannot be stale. Best-effort: an old backend
+  // answers nothing and the directory stands alone.
+  loadTeamRoster();
   // Load app-owned workflow state (status / assignee / priority / category per IR).
   // Runs alongside the first fetchIRs(); setAllIRs merges whatever has arrived,
   // and loadIRState re-merges + re-renders when it lands, so either order is
@@ -4370,7 +4389,7 @@ function openAccessModal() {
   modal.innerHTML = `
     <div class="access-card">
       <div class="inward-options-head">
-        <div class="inward-options-title">👥 User Access</div>
+        <div class="inward-options-title">${iconSvg('users')} User Access</div>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
       <div class="access-status" id="access-status"></div>
@@ -4480,7 +4499,7 @@ function updateAccessStatus() {
   const el = document.getElementById('access-status');
   if (!el) return;
   const hasSession = !!(currentUser && currentUser.sessionToken);
-  const cred = hasSession ? 'session ✓' : 'no active session';
+  const cred = hasSession ? 'session ' + iconSvg('check') : 'no active session';
   const v = accessCache.apiVersion ? ' · API v' + accessCache.apiVersion : '';
   el.innerHTML = `Signed in as <strong>${escHtml(currentUser?.email || '—')}</strong> · ${cred}${v}`;
 }
@@ -4586,12 +4605,12 @@ function backupHealthHtml() {
   }
   if (backupHealth.status !== 'ok') {
     return `<div class="access-section"><h3>Backups</h3>
-      <p class="access-backup access-backup-bad">⚠ Backup status unknown — ${escHtml(backupHealth.message || 'no answer')}</p>
+      <p class="access-backup access-backup-bad">${iconSvg('alert')} Backup status unknown — ${escHtml(backupHealth.message || 'no answer')}</p>
       <p class="access-hint">This says nothing about the backups themselves, only that this device could not ask. Read it as unknown, not as fine.</p></div>`;
   }
   if (backupHealth.never) {
     return `<div class="access-section"><h3>Backups</h3>
-      <p class="access-backup access-backup-bad">⚠ No backup has run yet</p>
+      <p class="access-backup access-backup-bad">${iconSvg('alert')} No backup has run yet</p>
       <p class="access-hint">The nightly export has never completed on this deployment. Run <strong>runNightlyBackup()</strong> once from the Apps Script editor to prove it works — until then there is no copy of the data to fall back on.</p></div>`;
   }
   const ok = backupHealth.ok !== false;
@@ -4601,7 +4620,7 @@ function backupHealthHtml() {
     : '';
   return `<div class="access-section"><h3>Backups</h3>
     <p class="access-backup ${ok ? 'access-backup-ok' : 'access-backup-bad'}">
-      ${ok ? '✓' : '⚠'} Last backup: <span class="access-backup-when">${escHtml(backupHealth.at || '—')}</span>
+      ${iconSvg(ok ? 'check' : 'alert')} Last backup: <span class="access-backup-when">${escHtml(backupHealth.at || '—')}</span>
       (${escHtml(backupHealth.ago || '')})</p>
     <p class="access-hint">${escHtml(counts)}${sheet}${backupHealth.message ? ' · ' + escHtml(backupHealth.message) : ''}</p>
     <p class="access-hint">Every night at about 23:40 IST, into <strong>I-PASSBOOK backups</strong> in Drive. 14 daily copies are kept, then one a week, one a month, and one a year forever.</p></div>`;
@@ -4964,10 +4983,10 @@ function renderCustomersTab() {
 
   const notice = custNotice ? `
     <div class="access-section acc-invite-${custNotice.mailed ? 'ok' : 'warn'}">
-      <h3>${custNotice.mailed ? '✅ Invited' : '⚠️ Account created — the invitation email could NOT be sent'}</h3>
+      <h3>${custNotice.mailed ? iconSvg('check-circle') + ' Invited' : iconSvg('alert') + ' Account created — the invitation email could NOT be sent'}</h3>
       <p class="access-hint">${escHtml(custNotice.message)}</p>
       <div class="access-add-row">
-        <button type="button" class="btn btn-sm" id="access-cust-copy">📋 Copy what to send them</button>
+        <button type="button" class="btn btn-sm" id="access-cust-copy">${iconSvg('copy')} Copy what to send them</button>
         <button type="button" class="btn btn-sm btn-secondary" id="access-cust-copy-link">Copy the portal link</button>
       </div>
       <p class="access-hint" style="margin-top:0.5rem;"><code>${escHtml(customerPortalLink())}</code></p>
@@ -5209,10 +5228,10 @@ function showCredentials(created, skipped) {
   wrap.innerHTML = `
     <div class="access-section">
       <h3>${created.length} temporary password${created.length === 1 ? '' : 's'}</h3>
-      <p class="access-hint">⚠️ <strong>Shown once.</strong> Only the hash is stored — if you lose these, use <em>Reset password</em> to issue new ones. Nothing here has been written to the sheet or to any file.</p>
+      <p class="access-hint">${iconSvg('alert')} <strong>Shown once.</strong> Only the hash is stored — if you lose these, use <em>Reset password</em> to issue new ones. Nothing here has been written to the sheet or to any file.</p>
       ${cards}
       <div class="access-add-row" style="margin-top:0.75rem;">
-        <button type="button" class="btn" id="cred-copy-all">📋 Copy all handover texts</button>
+        <button type="button" class="btn" id="cred-copy-all">${iconSvg('copy')} Copy all handover texts</button>
         <button type="button" class="btn btn-secondary" id="cred-copy-csv">Copy as CSV (email,password)</button>
       </div>
       ${skipped && skipped.length ? skippedHtml(skipped) : ''}
@@ -5238,7 +5257,7 @@ function createUserMenu() {
       <div class="user-menu-name">${currentUser?.name || 'User'}</div>
       <div class="user-menu-email">${currentUser?.email || ''}</div>
       ${buildAppearanceGroup()}
-      ${isAdmin() ? '<button class="signout-btn" id="access-admin-btn">👥 User Access</button>' : ''}
+      ${isAdmin() ? `<button class="signout-btn" id="access-admin-btn">${iconSvg('users')} User Access</button>` : ''}
       <button class="signout-btn" id="quick-unlock-btn">Turn on Quick unlock</button>
       <button class="signout-btn" id="signout-btn">Sign Out</button>
     `;
@@ -5839,8 +5858,14 @@ function renderInsights() {
         IR_CATEGORIES.map(k => insightsOpt(k, f.category, categoryLabel(k))).join('') +
         (sum.uncategorised || f.category === UNCATEGORISED
           ? insightsOpt(UNCATEGORISED, f.category, 'No category') : ''))}
-      ${filterRow('ins-customer', 'Customer',
-        insightsOpt(INSIGHTS_ALL, f.customer, 'All customers') +
+      <!-- "Reported by", not "Customer". This facet reads customerName — Col L,
+           "Who's Reporting?" — which is the PERSON who raised the fault, while the
+           company an account is scoped to is companyName (Col R). One word meaning
+           two different things on two screens is how the invite panel shipped the
+           wrong column; the label is the cheap honest fix and it changes no data.
+           See docs/07 on the Customers tab and companyColumnIndex. -->
+      ${filterRow('ins-customer', 'Reported by',
+        insightsOpt(INSIGHTS_ALL, f.customer, 'All reporters') +
         fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
       ${filterRow('ins-drone', 'Drone SN',
         insightsOpt(INSIGHTS_ALL, f.drone, 'All drones') +
@@ -7335,9 +7360,11 @@ function renderIRList(records) {
   renderSegments();
   renderCategorySegments();
   if (!records || records.length === 0) {
+    // The <span> stays around each glyph: `.empty-state span` is the rule that makes
+    // it 2.5rem, and `.icon` is sized in `em`, so the span is what sizes the icon.
     irList.innerHTML = sheetGapNote() + (allIRs.length
-      ? '<div class="empty-state"><span>🔍</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
-      : '<div class="empty-state"><span>📭</span>' + escHtml(t('list.emptyNone')) + '</div>');
+      ? '<div class="empty-state"><span>' + iconSvg('search') + '</span>' + escHtml(t('list.emptyFiltered')) + '</div>'
+      : '<div class="empty-state"><span>' + iconSvg('inbox') + '</span>' + escHtml(t('list.emptyNone')) + '</div>');
     updateListCounts(0);
     return;
   }
@@ -8179,7 +8206,7 @@ function intakeValueHtml(kind, raw) {
     return tokens.map((t, i) => {
       const e = escHtml(t);
       return /^https?:\/\//i.test(t)
-        ? `<div class="intake-ev"><span class="intake-ev-icon" aria-hidden="true">📎</span>` +
+        ? `<div class="intake-ev"><span class="intake-ev-icon" aria-hidden="true">${iconSvg('paperclip')}</span>` +
           `<a href="${e}" target="_blank" rel="noopener" class="intake-link" title="${e}">Evidence file ${i + 1} ↗</a></div>`
         : `<div class="intake-ev"><span class="intake-plain">${e}</span></div>`;
     }).join('');
@@ -8247,7 +8274,7 @@ function renderIntake() {
   const noSheetNote = ir.intake
     ? ''
     : `<p class="intake-audit">No Sheet row for this IR — showing only the fields the app holds. ` +
-      `Records from before the app (🏛 Legacy) live in the old workbook.</p>`;
+      `Records from before the app (${iconSvg('legacy')} Legacy) live in the old workbook.</p>`;
 
   body.innerHTML =
     `<div class="intake-head">
@@ -8576,7 +8603,7 @@ function renderBannerMeta() {
     (late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">${escHtml(t('common.overdue'))}</span>` : '') +
     (wantProgress(ir, prog) ? progressSteps(ir, prog) : '') +
     (owner
-      ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">👤 ${escHtml(owner)}</span>`
+      ? `<span class="meta-pill meta-owner" title="Assigned to ${escHtml(ir.assignee || owner)}">${iconSvg('user')} ${escHtml(owner)}</span>`
       : `<span class="meta-pill meta-unassigned">${escHtml(t('common.unassigned'))}</span>`);
   const triageBtn = document.getElementById('ir-triage-btn');
   if (triageBtn) triageBtn.style.display = showTriage ? '' : 'none';
@@ -8725,7 +8752,7 @@ function wireTriageCategoryRows() {
 // people already have in their heads. Sorted on a COPY so the stored array is
 // never re-ordered by a render.
 function assigneeRows() {
-  return teamDirectory.slice().sort((a, b) =>
+  return teamPeople().slice().sort((a, b) =>
     String(a.name || a.email || '').localeCompare(String(b.name || b.email || '')));
 }
 
@@ -8746,7 +8773,7 @@ function assigneeMatches(query) {
 function assigneeDisplayName(email) {
   const e = String(email || '').trim().toLowerCase();
   if (!e) return '';
-  const hit = teamDirectory.find(d => String(d.email || '').toLowerCase() === e);
+  const hit = teamPeople().find(d => String(d.email || '').toLowerCase() === e);
   return hit ? (hit.name || hit.email) : email;
 }
 
@@ -8851,7 +8878,7 @@ function resolveTriageAssignee(text) {
   if (!raw) return { email: '', name: '' };
   const q = raw.toLowerCase();
   if (q === String(t('common.unassigned')).toLowerCase() || q === 'unassigned') return { email: '', name: '' };
-  const hit = teamDirectory.find(d =>
+  const hit = teamPeople().find(d =>
     String(d.email || '').toLowerCase() === q ||
     String(d.name || '').toLowerCase() === q ||
     `${d.name || ''} <${d.email || ''}>`.toLowerCase() === q);
@@ -8889,7 +8916,7 @@ async function applyTriage() {
   const priority = document.getElementById('triage-priority')?.value   || '';
   const category = document.getElementById('triage-category')?.value   || '';
   const prev     = String(currentIR.assignee || '').toLowerCase();
-  const member   = teamDirectory.find(d => String(d.email).toLowerCase() === email.toLowerCase());
+  const member   = teamPeople().find(d => String(d.email).toLowerCase() === email.toLowerCase());
 
   // Category is MANDATORY. It is the one triage field the list filter and the
   // Insights page count by, so a triaged IR without one would be invisible to both
@@ -9026,7 +9053,7 @@ function openLegacyRecord(irNumber) {
     <div class="legacy-card legacy-card-record">
       <div class="legacy-head">
         <div>
-          <div class="legacy-title">🏛 Legacy I-PASSBOOK</div>
+          <div class="legacy-title">${iconSvg('legacy')} Legacy I-PASSBOOK</div>
           <div class="legacy-sub">${escHtml(label)} · read-only</div>
         </div>
         <button type="button" class="inward-options-close" onclick="closeLegacyModal()" title="Close">&times;</button>
@@ -9628,7 +9655,7 @@ function buildField(field, irNumber, sectionId) {
   } else if (field.type === 'file') {
     control = `
       <div class="file-upload-wrapper" onclick="document.getElementById('${escJsAttr(id)}').click()">
-        <span style="font-size:1.5rem;">📎</span>
+        <span style="font-size:1.5rem;">${iconSvg('paperclip')}</span>
         <span style="font-size:0.85rem; margin-top:4px;">Tap to attach photo or file</span>
         <input type="file" id="${id}" class="file-upload-input" accept="image/*,application/pdf" ${field.multiple ? 'multiple' : ''} />
       </div>
@@ -9748,7 +9775,7 @@ function buildField(field, irNumber, sectionId) {
         <div class="image-evidence-list" id="${id}-list"></div>
         <div class="evidence-actions">
           <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(id)}')">+ Add image / PDF</button>
-          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(id)}')">📷 Capture photo</button>
+          <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(id)}')">${iconSvg('camera')} Capture photo</button>
         </div>
         <input type="file" id="${id}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${id}', this)" />
         <input type="file" id="${id}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${id}', this)" />
@@ -9768,7 +9795,7 @@ function buildField(field, irNumber, sectionId) {
           <div class="image-evidence-list" id="${attachId}-list"></div>
           <div class="evidence-actions">
             <button type="button" class="btn-add-evidence" onclick="addEvidenceImage('${escJsAttr(attachId)}')">+ Add image / PDF</button>
-            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(attachId)}')">📷 Capture photo</button>
+            <button type="button" class="btn-add-evidence" onclick="captureEvidenceImage('${escJsAttr(attachId)}')">${iconSvg('camera')} Capture photo</button>
           </div>
           <input type="file" id="${attachId}-picker" accept="image/*,application/pdf" multiple style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
           <input type="file" id="${attachId}-capture" accept="image/*" capture="environment" style="display:none;" onchange="onEvidencePicked('${escHtml(attachId)}', this)" />
@@ -11862,11 +11889,11 @@ function renderImageEvidence(fieldId) {
           const name = e.name || (e.file ? e.file.name : 'PDF document');
           return href
             ? `<a class="evidence-pdf-link" href="${escHtml(href)}" target="_blank" rel="noopener">
-                 <span class="evidence-pdf-icon">📄</span>
+                 <span class="evidence-pdf-icon">${iconSvg('file')}</span>
                  <span class="evidence-pdf-name">${escHtml(name)}</span>
                  <span class="evidence-pdf-open">Open ↗</span>
                </a>`
-            : `<div class="evidence-pdf-link"><span class="evidence-pdf-icon">📄</span><span class="evidence-pdf-name">${escHtml(name)}</span></div>`;
+            : `<div class="evidence-pdf-link"><span class="evidence-pdf-icon">${iconSvg('file')}</span><span class="evidence-pdf-name">${escHtml(name)}</span></div>`;
         })()
       : (() => {
           const src = evidencePreviewUrl(e);
@@ -12014,7 +12041,7 @@ function updateCrossCheckSummary(fieldId) {
     else flagged++;
   });
   if (total === 0) { el.innerHTML = ''; return; }
-  if (packed === total) el.innerHTML = `<span class="cc-ok">✓ All ${total} particulars packed as received — ready to dispatch.</span>`;
+  if (packed === total) el.innerHTML = `<span class="cc-ok">${iconSvg('check')} All ${total} particulars packed as received — ready to dispatch.</span>`;
   else el.innerHTML = `<span class="cc-warn">${pending} pending · ${packed} packed · ${flagged} flagged — finish the cross-check before dispatch.</span>`;
 }
 function collectDispatchChecklist(fieldId) {
@@ -12177,6 +12204,57 @@ const TEAM_DIRECTORY_DEFAULTS = [
   { name: 'Adhik Nair',          email: 'adhik.nair@indrones.com' },
 ];
 let teamDirectory = TEAM_DIRECTORY_DEFAULTS.map(d => ({ ...d }));
+
+// ── The live roster, from the accounts in the store (backend `listTeam`) ─────
+// `teamDirectory` above is a MEMORY: a hand-edited list of names. The accounts in
+// the store are the FACT. Everywhere the app OFFERS a person — the Allot picker,
+// the @-mention suggestions, the nudge recipient box — the fact has to win, for
+// two reasons that both end in a silent failure:
+//
+//   • A name that resolves to no account makes an assignment a notification
+//     nobody receives, while the ticket shows an owner.
+//   • A colleague who has an account but was never typed into the hand-edited
+//     list is simply unpickable, and the picker looks like the company got
+//     smaller.
+//
+// So the app reads the UNION. The roster wins on the name (an account's own name
+// beats a stale hand-typed one); a directory row for somebody with no account yet
+// is KEPT, because an admin who wrote down a joiner must not have them vanish.
+//
+// The union is NEVER written back to `ipb_team_directory`: that key is the admin's
+// own document, and folding the live roster into it would make the editor show
+// rows the admin never added and cannot explain. The editor keeps editing
+// `teamDirectory`; only the READ paths below go through teamPeople().
+let teamRoster = [];   // [] until listTeam answers — an old backend just leaves it empty
+
+function teamKey(e) { return String(e || '').trim().toLowerCase(); }
+
+function teamPeople() {
+  if (!teamRoster.length) return teamDirectory;
+  const byEmail = new Map();
+  teamDirectory.forEach(d => { if (d && teamKey(d.email)) byEmail.set(teamKey(d.email), d); });
+  teamRoster.forEach(d => {
+    const e = teamKey(d && d.email);
+    if (e) byEmail.set(e, { name: (d.name || d.email), email: d.email });
+  });
+  return Array.from(byEmail.values());
+}
+
+// Best-effort, exactly like the other boot reads: an OLD backend (v8, which has no
+// listTeam) answers an error or an HTML page, both of which land here as a miss —
+// and the hand-edited directory then simply stands alone, which is what shipped
+// before this existed.
+function loadTeamRoster() {
+  return adminPost('listTeam', {}).then(d => {
+    if (!d || d.status !== 'ok' || !Array.isArray(d.team) || !d.team.length) return null;
+    teamRoster = d.team;
+    // The Allot picker only re-renders if it is OPEN — redrawing a closed list
+    // would pop it open under the cursor that is not in it.
+    const list = document.getElementById('triage-assignee-list');
+    if (list && list.dataset.open === '1') renderAssigneeOptions(document.getElementById('triage-assignee')?.value || '');
+    return d;
+  }).catch(() => null);
+}
 
 function loadTeamDirectory() {
   // Local copy first; the shared one arrives via applyTeamDirectory().
@@ -12718,7 +12796,7 @@ function renderNudgePanel() {
   const me = myEmail();
   const mine = nudges.filter(isForMe).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   const dirBtn = isAdmin()
-    ? `<button type="button" class="nudge-mini" title="Manage the @-mention directory" onclick="openTeamDirectoryModal()">⚙ Directory</button>`
+    ? `<button type="button" class="nudge-mini" title="Manage the @-mention directory" onclick="openTeamDirectoryModal()">${iconSvg('settings')} Directory</button>`
     : '';
   if (!mine.length) {
     panel.innerHTML = `<div class="nudge-panel-head">
@@ -12732,11 +12810,11 @@ function renderNudgePanel() {
     const canOpen = !!ir;
     const resolved = n.status === 'resolved';
     const statusChip = resolved
-      ? `<span class="nudge-status resolved">✓ Resolved</span>`
+      ? `<span class="nudge-status resolved">${iconSvg('check')} Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
       ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">${iconSvg('check')} Resolve</button>`;
     return `<div class="nudge-item ${resolved ? 'resolved' : ''}">
       <div class="nudge-item-top">
         <span class="nudge-from">${escHtml(n.fromName || n.from || 'Someone')}</span>
@@ -12833,15 +12911,15 @@ function renderNudgeThread() {
     const resolved = n.status === 'resolved';
     const editing = editingNudgeId === n.id;
     const editable = canEditNudge(n);
-    const loc = (ctx && ctx.scope === 'ir') ? `<div class="nudge-ctx">📍 ${escHtml(scopeContextText(n))}</div>` : '';
+    const loc = (ctx && ctx.scope === 'ir') ? `<div class="nudge-ctx">${iconSvg('pin')} ${escHtml(scopeContextText(n))}</div>` : '';
     const statusChip = resolved
-      ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">✓ Resolved</span>`
+      ? `<span class="nudge-status resolved" title="Resolved${n.resolvedBy ? ' by ' + n.resolvedBy : ''}${n.resolvedAt ? ' · ' + relativeTime(n.resolvedAt) : ''}">${iconSvg('check')} Resolved</span>`
       : `<span class="nudge-status open">● Open</span>`;
     const actionBtn = resolved
       ? `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">↻ Reopen</button>`
-      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">✓ Resolve</button>`;
+      : `<button type="button" class="nudge-mini" onclick="toggleNudgeStatus('${escJsAttr(n.id)}')">${iconSvg('check')} Resolve</button>`;
     const editBtn = editable && !editing
-      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escJsAttr(n.id)}')" title="Edit comment">✏ Edit</button>`
+      ? `<button type="button" class="nudge-mini" onclick="startEditNudge('${escJsAttr(n.id)}')" title="Edit comment">${iconSvg('pencil')} Edit</button>`
       : '';
     const editedTag = n.editedAt
       ? `<span class="nudge-edited" title="Edited${n.editedBy ? ' by ' + n.editedBy : ''} · ${relativeTime(n.editedAt)}">(edited)</span>`
@@ -12875,7 +12953,7 @@ function onNudgeRecipientInput(value) {
   if (!suggest) return;
   const q = (value || '').replace(/^@/, '').trim().toLowerCase();
   if (!q) { suggest.innerHTML = ''; suggest.style.display = 'none'; return; }
-  const matches = teamDirectory
+  const matches = teamPeople()
     .filter(d => (d.name || '').toLowerCase().includes(q) || (d.email || '').toLowerCase().includes(q))
     .slice(0, 6);
   if (!matches.length) { suggest.innerHTML = '<div class="nudge-suggest-empty">No match — type a full email to tag anyway.</div>'; suggest.style.display = 'block'; return; }
@@ -12930,7 +13008,7 @@ function resolveNudgeRecipient() {
   if (nudgeSelectedEmail) return nudgeSelectedEmail;
   const raw = (document.getElementById('nudge-recipient')?.value || '').trim();
   if (!raw) return '';
-  const direct = teamDirectory.find(d =>
+  const direct = teamPeople().find(d =>
     d.email.toLowerCase() === raw.toLowerCase() ||
     `${d.name} <${d.email}>`.toLowerCase() === raw.toLowerCase());
   if (direct) return direct.email;
@@ -13188,6 +13266,35 @@ const ICON_PATHS = {
   // The Log Analyser's nav glyph. A telemetry trace, because that is what the
   // screen reads: a signal with a spike in it, which is the thing it is looking for.
   pulse:          '<path d="M3 12h3.5l2.5-6.5 3.5 13 2.5-6.5H21"/>',
+
+  // ── The emoji pass, batch 1 ──────────────────────────────────────────────────
+  // Every one of these replaces a glyph the app already used — 👥 📋 ⚠ ✅ 🔍 📭 📎
+  // 📷 📄 ✓ ⚙ 📍 — so all ten are one drawing of a picture the screen is already
+  // making, which is what makes the swap invisible to a reader and therefore safe.
+  //
+  // They exist because an emoji is a different picture on every OS and reads as
+  // decoration rather than chrome. What did NOT move, and why, is written down at
+  // the emoji ledger in smoke-ui.mjs: the `<option>` labels and the alerts, where
+  // HTML forbids an element, and the toast / sync / save-button strings, which are
+  // a plain-text channel that must stay plain text.
+  copy:           '<rect x="9" y="9" width="11.5" height="11.5" rx="2"/><path d="M15.5 6.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8.5a2 2 0 0 0 2 2h1.5"/>',
+  alert:          '<path d="M10.3 4.6L2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0z"/><path d="M12 10v4"/><path d="M12 17.2h.01"/>',
+  // A blank list is a search that came back empty, and a list nobody has written
+  // to yet — two different sentences, so they are two different pictures.
+  search:         '<circle cx="11" cy="11" r="6.5"/><path d="M15.8 15.8l4.7 4.7"/>',
+  inbox:          '<path d="M3.5 13.5V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4.5"/><path d="M3.5 13.5L6 4.5h12l2.5 9"/><path d="M3.5 13.5h4l1 2.5h7l1-2.5h4"/>',
+  paperclip:      '<path d="M19.5 11.6l-8.2 8.2a4.9 4.9 0 0 1-6.9-6.9l8.6-8.6a3.2 3.2 0 0 1 4.6 4.6l-8.6 8.6a1.6 1.6 0 0 1-2.3-2.3l7.9-7.9"/>',
+  camera:         '<path d="M4 8.5h3l1.5-2.5h7l1.5 2.5h3a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8.5z"/><circle cx="12" cy="13.5" r="3.4"/>',
+  // Deliberately a plain page, NOT `report`: `report` is the clipped clipboard that
+  // already means the client's Report tab, and two page-shaped glyphs that mean
+  // different things is the confusion the `chart` entry above was split off to avoid.
+  file:           '<path d="M13.6 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.4z"/><path d="M13.6 3.5V8.4h4.9"/>',
+  check:          '<path d="M5 12.6l4.6 4.6L19 7.4"/>',
+  // Sliders, not a cog. A cog on this grid is eight spokes around a ring, which is
+  // one stroke away from the `sun` above that means the LIGHT THEME — and a settings
+  // button that reads as a brightness toggle is worse than the emoji it replaced.
+  settings:       '<path d="M4 7h8.5"/><path d="M17.5 7H20"/><circle cx="15" cy="7" r="2.2"/><path d="M4 17h2.5"/><path d="M11.5 17H20"/><circle cx="9" cy="17" r="2.2"/>',
+  pin:            '<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in

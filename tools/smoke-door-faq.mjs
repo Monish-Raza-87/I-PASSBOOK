@@ -243,8 +243,14 @@ ok('...and no markup is left over either',
 // Both load-bearing rules are asserted here so the layout cannot silently go back.
 head('the doors sit side by side, and the secondary actions are buttons');
 
+// ANCHORED TO THE START OF A LINE, which is where a class DEFINITION lives. Without
+// the `^`/`m` this finds the first mention of the selector anywhere — and base.css now
+// mentions `.link-btn` in a ground block (`.auth-main > :not(.doors) .link-btn`) that
+// sits far ABOVE the definition, so the helper read that rule's body instead and three
+// assertions about the real button failed at once. A selector written at the end of a
+// longer one is a consumer, not the definition.
 const baseRule = (sel) => {
-  const re = new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}');
+  const re = new RegExp('^' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'm');
   return (baseCss.match(re) || [])[1] || '';
 };
 

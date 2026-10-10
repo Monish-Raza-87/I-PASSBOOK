@@ -164,6 +164,16 @@ const chromeAfter = `
 // selector, then the shared foot. The old mock-up here was two cards side by side with
 // a `quick-row` and a "Forgot password?" — a design that no longer exists anywhere, and
 // a preview that shows a screen the app does not have is worse than no preview.
+//
+// ⚠ THIS IS THE PHONE RENDERING, AND THAT IS WHY THERE IS NO VIDEO AND NO PANEL ART
+// HERE. Every option below is drawn inside a `.pv-phone` frame, and the brand panel is
+// deliberately not drawn below 1024px — a phone gets the compact head and nothing else,
+// which is exactly what this mock shows. The split, the still, the video and the Service
+// Heartbeat only exist at a wide width; see the real screen, and tools/render-fixture.mjs.
+//
+// The `.auth-brand-panel` / `.auth-main` wrappers are here even so, because they are the
+// app's structure rather than decoration, and a mock that has the right picture with the
+// wrong shape is how the next reader gets told the wrappers do not exist.
 const doorBar = (role, open) => `
             <div class="door-bar"${open ? ' data-open="1"' : ''}>
               <span class="door-role">${role}</span><span class="door-chev"></span>
@@ -172,11 +182,14 @@ const screenSignIn = () => `
     <div class="pv-app is-auth">
       <a class="wa-corner" aria-label="Chat with us on WhatsApp"><span class="wa-glyph"></span></a>
       <div class="auth-wrap">
+        <div class="auth-brand-panel" data-brand="rest" data-ground="yellow">
         <header class="landing-head">
           <span class="landing-mark" aria-hidden="true"></span>
           <div class="landing-wordmark"><div class="landing-brand">I-PASSBOOK</div></div>
-          <p class="landing-full">INDRONES-AFTER SALES SERVICE BOOK</p>
+          <p class="landing-full">INDRONES PRODUCT AFTER SALES SERVICE BOOK</p>
         </header>
+        </div>
+        <div class="auth-main">
         <div class="doors">
           <section class="door glass-card">
             ${doorBar('Employee', true)}
@@ -211,6 +224,7 @@ const screenSignIn = () => `
           <span class="link-btn">Report a problem</span>
           <span class="link-btn">Help &amp; FAQ</span>
         </p>
+        </div>
         <p class="pv-version">${esc(APP_VERSION)}</p>
       </div>
     </div>`;
@@ -438,6 +452,11 @@ html { -webkit-text-size-adjust: 100%; }
    .pv-phone's overflow. The grid never got the chance to collapse to one column,
    because its container had already been forced wider than the phone. */
 .pv-app .auth-wrap { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
+/* The sign-in screen's two columns, at phone width they are stacked and transparent —
+   the panel draws only its head, and the form column is the rest of the page. See the
+   note on screenSignIn(). */
+.pv-app .auth-brand-panel { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.pv-app .auth-main { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; width: 100%; min-width: 0; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
 .pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
 .pv-app .landing-mark { width: 40px; height: 40px; }
@@ -1243,7 +1262,15 @@ const stripComments = css => css.replace(/\/\*[\s\S]*?\*\//g, '');
 // would leave a review page advertising a colour the app no longer has, which is the
 // exact failure `--check` exists to catch and the exact reason this is an extraction
 // and not a second copy of the hex.
-const brandBlock = (stripComments(baseCss).match(/[^{}]*\{[^{}]*--ind-[^{}]*\}/g) || [])
+//
+// `--ind-…` FOLLOWED BY A COLON, and the colon is the whole check. It used to be a bare
+// `--ind-`, which matched any rule that merely USED a brand colour — so on 2026-10-10 the
+// Service Heartbeat's two node rules, which read var(--ind-yellow), were dragged in whole
+// and brought their own private variables (--hb-delay, --panel-node-core) with them. The
+// token check below then failed the build for "tokens used but never defined" — correctly,
+// about a rule that should never have been in this block. This says what the comment above
+// always said: rules that DECLARE a brand token, not rules that happen to mention one.
+const brandBlock = (stripComments(baseCss).match(/[^{}]*\{[^{}]*--ind-[a-zA-Z0-9-]+\s*:[^{}]*\}/g) || [])
   .map(b => b.trim()).join('\n');
 if (!/--ind-yellow\s*:/.test(brandBlock)) {
   throw new Error('base.css no longer declares the INDRONES brand tokens; preview.css would ship a colourless default palette');

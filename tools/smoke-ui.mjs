@@ -1463,29 +1463,35 @@ r.ok('the note text is a real timeout, not a promise that never resolves',
 r.ok('clearing the wait also disarms the timer, so it cannot fire at a screen that is gone',
   /function endSsoWait\(\) \{[\s\S]*?clearTimeout\(_ssoSlowTimer\)/.test(appCode));
 
-r.head('the splash skip and the handoff return are pinned to each other');
-// index.html decides this BEFORE app.js parses, so that the nine-second intro never
-// flashes on the way into a sign-in that has already started. If the two conditions
-// drift, a Google return pays for the intro and app.js cannot tell anyone.
+r.head('the handoff return is pinned to the pre-paint gate that raises the wait screen');
+// index.html raises the wait screen BEFORE app.js parses, so the sign-in form never
+// paints underneath an exchange that is already running.
 //
-// The two pre-paint gates are read out of the source SEPARATELY and checked against
-// each other, because they are deliberately NOT the same test: the splash skip covers
-// both branches, and the wait screen covers only a code. An earlier version of this
-// assertion searched the whole file for the narrow form and required it to be absent,
-// which was fine until a second gate legitimately needed it — and then it could not
-// tell the two lines apart at all.
+// THE NARROW PREFIX IS THE WHOLE POINT of this block. `#sso=` means "a code came back",
+// and only that has anything to wait for. `#ssoerr=` is a refusal the door has already
+// explained, and it must land straight on the form with the reason on it — so a broad
+// `#sso` test here would park a refused person behind a spinner over an exchange that is
+// never going to happen.
+//
+// The SPLASH's own pre-paint skip used to be pinned beside this one, and it is gone: the
+// panel is a child of #auth-container, #auth-container is display:none until showAuth()
+// shows it, and both skip cases — a stored session, a Google return — leave without ever
+// calling showAuth(). A panel that is never displayed cannot flash, so there is nothing
+// left for a pre-paint attribute to do. It is asserted ABSENT rather than merely
+// un-asserted, so it is not quietly reintroduced by someone copying the gate below.
 const gate = re => (indexSrc.match(re) || [''])[0];
-const splashGate = gate(/if \(\(location\.hash \|\| ''\)\.indexOf\('#sso'\) === 0\) \{\s*document\.documentElement\.setAttribute\('data-splash', 'skip'\)/);
 const waitGate = gate(/if \(\(location\.hash \|\| ''\)\.indexOf\('#sso='\) === 0\) \{\s*document\.documentElement\.setAttribute\('data-sso', 'wait'\)/);
-r.ok('the pre-paint script skips the splash on a handoff return',
-  /\(\s*location\.hash \|\| ''\)\.indexOf\('#sso'\)/.test(splashGate), splashGate);
-r.ok('...and it uses the BROAD prefix, so a refusal skips the nine-second intro too',
-  splashGate !== '' && waitGate !== '' && splashGate !== waitGate,
-  { splash: splashGate, wait: waitGate });
-r.ok('app.js makes the same call at boot, for the loads pre-paint cannot cover',
-  /const handoff = checkHandoff\(\);\s*\n\s*if \(handoff\) \{ splash\.style\.display = 'none'; finishHandoff\(handoff\); return; \}/.test(appCode));
+r.ok('index.html raises the wait screen on a code return, before paint',
+  /\(\s*location\.hash \|\| ''\)\.indexOf\('#sso='\)/.test(waitGate), waitGate);
+r.ok('...and only on a CODE return — a refusal has nothing to wait for',
+  waitGate !== '' &&
+  (indexSrc.match(/setAttribute\('data-sso', 'wait'\)/g) || []).length === 1);
+r.ok('...and no splash skip is left beside it, broad prefix and all',
+  !/setAttribute\('data-splash'/.test(indexSrc) && !/html\[data-splash/.test(indexSrc));
+r.ok('app.js takes the same road at boot, for the loads pre-paint cannot cover',
+  /const handoff = checkHandoff\(\);\s*\n\s*if \(handoff\) \{ finishHandoff\(handoff\); return; \}/.test(appCode));
 r.ok('...and a device already signed in still wins, so a stale fragment cannot hijack it',
-  appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
+  appCode.indexOf('if (hasStoredSession()) {') <
   appCode.indexOf('const handoff = checkHandoff();'));
 
 // ── Waking the backend before it is needed ────────────────────────────────────
@@ -1526,15 +1532,21 @@ r.ok('...and the gap is short enough to cover the typing it exists to overlap',
 r.ok('the dev bypass is skipped, so a localhost session does not poke the live backend',
   /shouldUseDevAuthBypass\(\)\) return;/.test(fnBody('warmBackend')));
 
-// WHERE it fires is the whole feature. The intro is ~9s of the cold start paid for
-// by time already being spent, and the ordering below is what buys that.
-r.ok('the load that is heading for the sign-in screen wakes the backend BEFORE the intro',
-  appCode.indexOf('warmBackend();') >
-    appCode.indexOf('if (isHandoffReturn()) { splash.style.display') &&
-  appCode.indexOf('warmBackend();') < appCode.indexOf('const video = document.getElementById(\'splash-video\')'));
+// WHERE it fires is the whole feature. The intro is ~10s of video, and the cold start
+// paid for by time already being spent is that video's own running time. The ordering
+// below is what buys that.
+//
+// It fires PAST both other returns, so the two loads that end somewhere other than this
+// screen — a stored session going straight into the app, a Google return going through
+// its exchange — pay nothing to wake a backend they were going to reach anyway with a
+// real call. The sign-in route is the only one whose first real call is still typing away.
+r.ok('the load heading for the sign-in screen wakes the backend on its way there',
+  appCode.indexOf('if (hasStoredSession()) {') < appCode.indexOf('warmBackend();') &&
+  appCode.indexOf('if (handoff) { finishHandoff(handoff); return; }') < appCode.indexOf('warmBackend();'));
 r.ok('...and a device with a stored session does not, because its own first call is the wake-up',
-  appCode.indexOf('if (hasStoredSession()) { dismissSplash(true); return; }') <
-  appCode.indexOf('warmBackend();'));
+  appCode.indexOf('if (hasStoredSession()) {') <
+  appCode.indexOf('warmBackend();') &&
+  appCode.indexOf('if (hasStoredSession()) {') > -1);
 r.ok('showAuth wakes it too, so an expiry, a sign-out and a refused handoff all start one',
   /function showAuth\(\) \{\s*\n\s*endSsoWait\(\);[\s\S]{0,400}?warmBackend\(\);/.test(appCode));
 r.ok('showApp does not — there is nothing pre-auth left to wait for once inside',

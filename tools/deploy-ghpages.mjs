@@ -92,11 +92,18 @@ const SERVED = [
   'preview/board.html',
   'preview/preview.css',
   'assets/apple-touch-icon.png',
+  // The brand panel's two grounds. BOTH ARE DEPLOYED, because the choice between them is
+  // still open — `data-ground` on the panel is one word, and the loser's PNG goes from
+  // here in the same change that deletes its CSS block. See base.css's THE BRAND PANEL.
+  // They are backgrounds rather than <img> tags, which is exactly why they need listing
+  // here rather than turning up because something points at them: nothing greps for a
+  // url() in a stylesheet.
+  'assets/brand-panel-dark.png',
+  'assets/brand-panel-light.png',
+  'assets/brand-intro.mp4',
   'assets/icon-192.png',
   'assets/icon-512.png',
-  'assets/icon-mark.png',
-  'assets/intro_ipassbookv2.mp4',
-  'assets/intro_ipassbookv2_mobile.mp4'
+  'assets/icon-mark.png'
 ]
 
 // Present on gh-pages but not in the repo's main tree — carried over untouched.
@@ -107,8 +114,14 @@ const CARRY = ['.nojekyll']
 // from SERVED would linger there forever, still downloadable, still in every
 // clone. Anything that is genuinely dead belongs here instead.
 //
-// The intro this replaced: nothing references it any more (index.html points at
-// intro_ipassbookv2*.mp4), so it is ~3.9 MB of pure dead weight.
+// The intro this replaced: nothing references it any more, so it is pure dead weight.
+//
+// THE TWO intro_ipassbookv2 CUTS ARE THE 2026-10-10 RETIREMENT and they go for the same
+// reason. The sign-in screen no longer plays a full-screen splash; the video plays in
+// ONE HALF of a split screen whose other half is usable from the first frame, and it is
+// a single 16:9 cut named assets/brand-intro.mp4. The portrait cut existed to gate a
+// phone, and phones are no longer shown the video at all — see base.css's .brand-stage.
+// That is ~12.6 MB of dead video out for the 1.56 MB in.
 //
 // logo.png goes too. It was standing in as the app icon, but it is a letterhead
 // — not square, and carrying the company address and phone number — so at the
@@ -116,6 +129,8 @@ const CARRY = ['.nojekyll']
 // replaces it and sw.js no longer precaches it.
 const PRUNE = [
   'assets/Indrones Intro v2.mp4',
+  'assets/intro_ipassbookv2.mp4',
+  'assets/intro_ipassbookv2_mobile.mp4',
   'assets/logo.png'
 ]
 

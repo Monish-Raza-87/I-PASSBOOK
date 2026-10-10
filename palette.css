@@ -68,7 +68,7 @@
    as text on the dark ground and unreadable on a light one; see base.css. */
 :root,
 [data-palette="yellow"] {
-  --accent: var(--ind-accent-ink); /* 6.54:1 light & cream · 11.18:1 dark */
+  --accent: var(--ind-accent-ink); /* 17.62:1 light · 17.05:1 cream · 11.18:1 dark */
   --accent-soft: var(--ind-accent-soft);
   --accent-soft-line: var(--ind-accent-line);
   --accent-bar: var(--ind-yellow); /* a fill, so it is the brand value in both */

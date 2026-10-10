@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v83';
+const APP_VERSION = 'v84';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -188,12 +188,11 @@ function loadSession() {
 }
 
 // True when this device holds BOTH halves of a stored sign-in — exactly the
-// condition enterApp() below uses to go straight into the app, so the splash skip
-// and the boot path cannot disagree. index.html's pre-paint script asks the same
-// question with the same two key names, because it runs before this file is
-// parsed; smoke-shell.mjs pins the two together. If they ever drift, a signed-in
-// user is shown a nine-second video in front of a session that was going to
-// resume anyway.
+// condition routeBoot() below uses to go straight into the app, so the boot's
+// early return and the restore inside it cannot disagree. index.html's pre-paint
+// script asks the same question with the same two key names, because it runs
+// before this file is parsed. If they ever drift, a signed-in user is shown the
+// sign-in screen for a frame before the app replaces it.
 function hasStoredSession() {
   try { return !!(localStorage.getItem(USER_KEY) && localStorage.getItem(SESSION_KEY)); }
   catch { return false; }
@@ -1470,7 +1469,6 @@ let iqcZones = JSON.parse(JSON.stringify(IQC_ZONES_DEFAULTS));
 let iqcResultOptions = [...IQC_RESULT_OPTIONS_DEFAULTS];
 
 // ─── DOM REFS ─────────────────────────────────────────────────────────────────
-const splash      = document.getElementById('splash-screen');
 const authCont    = document.getElementById('auth-container');
 const appCont     = document.getElementById('app-container');
 const sidebarEl   = document.getElementById('sidebar');
@@ -1526,42 +1524,27 @@ let _irsReady = null;          // promise for the first IR-list load (deep links
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
 const mqDesktop = window.matchMedia('(min-width: 1024px)');
 
-// ─── SPLASH → AUTH FLOW ──────────────────────────────────────────────────────
-// The FULL intro plays on the FIRST arrival on this device, and again after an
-// update — the app's opening, not a tax on every visit. Everything in between
-// gets a brief splash that any tap clears.
+// ─── THE BRAND PANEL, AND ARRIVING AT THE SIGN-IN SCREEN ─────────────────────
+// THE FULL-SCREEN SPLASH IS GONE. It held the whole screen — and the sign-in form
+// with it — for nine seconds before anybody could type. The owner's intro video is
+// brand material and it stays; it now plays in ONE HALF of the sign-in screen whose
+// other half is live from the first frame, so nothing waits on it and it needs no
+// dismissal of any kind.
 //
-// It used to play in full every time a device reached the sign-in screen, which
-// is what the owner was shown and then asked to undo: a daily sign-in paid nine
-// seconds of video for an intro it had already delivered. "After an update" is
-// keyed on APP_VERSION — the same number the deploy bumps with CACHE_NAME — so
-// shipping a new shell hands every device its intro once more, which is exactly
-// the case where the intro is telling someone something new.
+// WHAT SURVIVES UNCHANGED IS THE RULE THAT PAYS FOR IT: the video is downloaded only
+// by a device that is going to watch it. It is `preload="none"`, it is not in sw.js's
+// SHELL, and the panel sits in the markup at `data-brand="rest"` — still and heartbeat
+// and no video at all. armBrandPanel() is the only thing in the app that ever asks
+// for it.
 //
-// The single exception is a device that is already signed in. Those people resume
-// straight into the app, and nine seconds of video in front of a session that was
-// going to resume anyway is a delay rather than a welcome. That case is decided
-// before paint (index.html) and re-checked here via hasStoredSession(), so what
-// the stylesheet hid and what this function does are the same decision.
+// "Once per VERSION" is still the mechanism, still keyed on APP_VERSION — the same
+// number the deploy bumps with CACHE_NAME — so shipping a new shell hands every device
+// its intro once more, which is exactly the case where the intro is saying something new.
 //
-// Note this is the BOOT path only — which is why signing out goes through it and
-// gets the same brief splash as any other return, while an in-app session EXPIRY
-// does not touch it at all (that path calls showAuth() in place, covering the
-// screen would be actively worse, and the expiry toast is the thing the person
-// needs to read).
-//
-// It is driven by the video's own `ended` event rather than a fixed wait, so
-// re-exporting the intro at a different length needs no code change. The
-// fallback timers below are backstops for the cases where `ended` never
-// arrives — a decode failure, a browser that refuses to play, a 404 — because
-// the user must reach sign-in no matter what the video does.
-const INTRO_FALLBACK_MS = 9500;   // current video is 9.03s; a little margin over that
-const SPLASH_FADE_MS    = 800;
-// The brief splash a device that has already seen this version's intro gets
-// instead: long enough to read as the app opening, short enough that nobody
-// waits on it — and any tap, click or key clears it on the spot.
+// The single exception is still a device that is already signed in: those people resume
+// straight into the app, and they are decided before anything else in the load handler.
+const INTRO_FALLBACK_MS = 10500;  // the panel video is 10.0s; a little margin over that
 const INTRO_DONE_KEY    = 'ipb_intro_ver';
-const INTRO_SHORT_MS    = 1400;
 
 // Which intro this device owes. The stored value is the VERSION whose full intro
 // was watched, compared against APP_VERSION — so bumping the version at deploy
@@ -1607,21 +1590,22 @@ window.addEventListener('load', () => {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
   }
 
-  // Start the update watch FIRST, above every early return below. Three of the
-  // paths out of this handler — an already-signed-in device, a Google return, and
-  // the brief-splash device that has seen this version's intro — are exactly the
-  // ones that must still be told a newer build exists, and all three leave before
-  // reaching warmBackend(). The check is one small request and is throttled, so
+  // Start the update watch FIRST, above every early return below. Two of the three
+  // paths out of this handler — an already-signed-in device and a Google return — are
+  // exactly the ones that must still be told a newer build exists, and both leave
+  // before reaching warmBackend(). The check is one small request and is throttled, so
   // starting it here costs the boot nothing measurable.
   startUpdateWatch();
 
-  let entered = false;
+  let routed = false;
 
-  // Everything that used to run when the splash timer expired, unchanged.
-  function enterApp() {
-    if (entered) return;
-    entered = true;
-    splash.style.display = 'none';
+  // WHICH SCREEN THIS LOAD ENDS ON. It used to be called when the splash timer expired
+  // and was named for that; nothing waits on anything any more, so it is the boot's
+  // routing and nothing else. Unchanged otherwise — the stored-session restore, the dev
+  // bypass, and the fork that clears a half-restored fragment.
+  function routeBoot() {
+    if (routed) return;
+    routed = true;
     const stored = loadStoredUser();
     const storedSession = loadSession();
     if (stored && storedSession) {
@@ -1651,84 +1635,24 @@ window.addEventListener('load', () => {
     }
   }
 
-  let dismissed = false;
-  function dismissSplash(instant) {
-    if (dismissed) return;
-    dismissed = true;
-    if (instant) { enterApp(); return; }
-    splash.style.opacity = '0';
-    splash.style.transform = 'scale(1.04)';
-    setTimeout(enterApp, SPLASH_FADE_MS);
-  }
-
-  // A device that is already signed in: no fade, no video, no download.
-  // base.css has already hidden the splash off the pre-paint attribute, so this
-  // only makes it explicit and keeps the element's inline state truthful.
-  //
-  // A Google return skips it for the same reason: the sign-in has already started,
-  // and nine seconds of intro in the middle of it is a delay standing between a
-  // person and a session they have already earned. index.html's pre-paint script
-  // makes the same call, so the splash never even paints — the two conditions are
-  // pinned to each other by smoke-shell.mjs.
-  if (hasStoredSession()) { dismissSplash(true); return; }
+  // A device that is already signed in: no video, no download, no flash of the sign-in
+  // screen. A Google return takes the same road for the same reason — the sign-in has
+  // already started, and an intro standing in the middle of it is a delay between a
+  // person and a session they have already earned.
+  if (hasStoredSession()) { routeBoot(); return; }
 
   const handoff = checkHandoff();
-  if (handoff) { splash.style.display = 'none'; finishHandoff(handoff); return; }
+  if (handoff) { finishHandoff(handoff); return; }
 
-  // Past both returns, this load is ending on the SIGN-IN screen — the one outcome
-  // we can be certain of, and the reason the wake-up is started here rather than in
-  // showAuth(), which does not run until the intro below has finished. Nine seconds
-  // of video plus everything the person types is a nine-plus-second head start on
-  // the backend's cold start, bought with time nobody was using. See warmBackend().
+  // Past both returns, this load is ending on the SIGN-IN screen — the one outcome we
+  // can be certain of, and the reason the wake-up is started here rather than inside
+  // showAuth(). See warmBackend().
   warmBackend();
 
-  const video = document.getElementById('splash-video');
-  if (!video) { dismissSplash(false); return; }
-
-  // A device that has already watched THIS version's intro gets the brief splash.
-  // It clears itself in a moment, and a tap, click or key clears it at once — so
-  // the wait is never something a person has to sit through to reach the form.
-  //
-  // Placed after warmBackend() on purpose: a returning device is still a person
-  // about to sign in, and the cold start waiting behind the form is the same one.
-  // It has to be BEFORE play() for the other half of the point — the video is
-  // never fetched, so the ~9.7 MB is paid only by whoever is going to watch it.
-  if (introDeliveredForThisVersion()) {
-    const brief = setTimeout(() => dismissSplash(false), INTRO_SHORT_MS);
-    const skipNow = () => { clearTimeout(brief); dismissSplash(false); };
-    splash.addEventListener('pointerdown', skipNow, { once: true });
-    splash.addEventListener('keydown', skipNow, { once: true });
-    return;
-  }
-
-  // The loader bar under the intro is timed from the video itself rather than a
-  // number in the stylesheet — it used to finish at 1.85s while nine seconds of
-  // video were still playing, which read as a stuck progress bar. --intro-ms is
-  // read by .splash-bar's animation-duration in base.css; the CSS default stands
-  // if metadata never arrives.
-  video.addEventListener('loadedmetadata', () => {
-    if (Number.isFinite(video.duration) && video.duration > 0) {
-      document.documentElement.style.setProperty('--intro-ms', video.duration + 's');
-    }
-  }, { once: true });
-
-  // The backstop, armed before play() so it covers every failure mode. `ended`
-  // normally beats it; if the video is missing or unplayable, `error` does.
-  const fallback = setTimeout(() => dismissSplash(false), INTRO_FALLBACK_MS);
-  const finish = () => {
-    clearTimeout(fallback);
-    // Recorded HERE rather than when the full intro was chosen, so closing the tab
-    // two seconds in does not cost the person the rest of it next time — the debt
-    // is paid when the intro is actually delivered. Every way of finishing counts:
-    // `ended`, a decode error, a refusal to play. A device whose video cannot play
-    // would otherwise replay nine seconds of it on every single load, which is the
-    // worse of the two failures.
-    markIntroDelivered();
-    dismissSplash(false);
-  };
-  video.addEventListener('ended', finish, { once: true });
-  video.addEventListener('error', finish, { once: true });
-  video.play().catch(finish);
+  // ...AND IT IS LIVE NOW. That is the whole point of the split: the form used to
+  // arrive only once the intro had finished, so this call used to be the video's
+  // `ended` handler. There is nothing left to wait for.
+  routeBoot();
 });
 
 // ─── OVERVIEW COLLAPSE ───────────────────────────────────────────────────────
@@ -2050,6 +1974,71 @@ function stopBrandTyping() {
   }
 }
 
+// ─── THE BRAND PANEL ─────────────────────────────────────────────────────────
+// Which state the left half of the sign-in screen opens in, and whether THIS device is
+// owed the intro. Called from showAuth() and nowhere else — that is the only route that
+// ever puts the panel on screen.
+//
+// THE ORDER OF THE CHECKS IS THE FEATURE, and every early exit below is "leave the panel
+// alone": the markup already says data-brand="rest", which is the still and the heartbeat
+// and no video at all.
+let _brandPainted = false;
+
+function paintBrandPanel() {
+  const panel = document.querySelector('.auth-brand-panel');
+  const video = document.getElementById('brand-video');
+  if (!panel) return;
+  // Once per page. showAuth() runs again on a session expiry and on every sign-out, and
+  // a second play() would restart a video this person has already watched.
+  if (_brandPainted) return;
+  _brandPainted = true;
+
+  // Below 1024px the stage is not drawn at all — a phone gets a compact brand header and
+  // nothing else — so there is nothing to decide and nothing to download.
+  if (!mqDesktop.matches || !video) return;
+  if (introDeliveredForThisVersion()) return;
+  // Reduced motion is a real instruction, not a hint: no video, and the heartbeat holds
+  // at rest (the global animation guard in base.css does that half). Delivery is
+  // deliberately NOT recorded — this device has not been shown the intro, so it is
+  // still owed it.
+  if (prefersReducedMotion()) return;
+
+  let settled = false;
+  let fallback = null;
+  const rest = () => {
+    if (settled) return;
+    settled = true;
+    if (fallback) clearTimeout(fallback);
+    panel.dataset.brand = 'rest';
+  };
+
+  // The backstop. `ended` normally beats it; `error` covers a decode failure or a 404.
+  // A video that plays and then stalls — the one case neither listener ever fires for —
+  // would otherwise leave a frozen frame standing where the heartbeat belongs.
+  fallback = setTimeout(rest, INTRO_FALLBACK_MS);
+  video.addEventListener('ended', rest, { once: true });
+  video.addEventListener('error', rest, { once: true });
+
+  // ⚠ DELIVERY IS RECORDED WHEN play() RESOLVES, NOT WHEN THE VIDEO ENDS, and that is
+  // load-bearing rather than pedantic. The form is usable from the first frame, so a
+  // person may sign in at three seconds and `ended` will never fire at all — recording
+  // only on `ended`, which is what the splash could afford to do, would replay the intro
+  // on every single load for exactly the people who use the app most.
+  video.play().then(() => {
+    markIntroDelivered();
+    // Painted only now that there is really something to show: the element fades in on
+    // this attribute, and setting it before play() resolved would fade a black rectangle
+    // in over the still on a slow connection.
+    panel.dataset.brand = 'video';
+  }).catch(() => {
+    // An autoplay refusal, or a source that will not load. There is nothing to display
+    // and nothing to wait for, so the panel rests — and the debt IS recorded here,
+    // because a device that cannot play it must not be asked again on every load.
+    markIntroDelivered();
+    rest();
+  });
+}
+
 function showAuth() {
   endSsoWait();
   warmBackend();
@@ -2060,10 +2049,16 @@ function showAuth() {
   // back goes through. See openCodeView/closeCodeView.
   closeCodeView(false);
   // The landing head types itself in the moment the sign-in screen is actually on
-  // screen. That is here rather than in the boot handler because the intro covers the
-  // screen until it finishes — see the note above warmBackend() — so a chain started
-  // at parse time would be several seconds into its loop before anybody could see it.
-  startBrandTyping();
+  // screen — but ONLY where it can be seen. At 1024px and wider the head is clipped out
+  // of sight behind the brand panel's stage (see base.css), and typing into a box nobody
+  // can read is pure work; below the split the head IS the screen's brand material and it
+  // types exactly as it always has.
+  if (!mqDesktop.matches) startBrandTyping();
+
+  // The brand panel: which state it opens in, and whether this device is owed the intro.
+  // Here rather than in the boot handler, because showAuth() is the only route that ever
+  // puts the panel on screen.
+  paintBrandPanel();
   const pc = document.getElementById('password-change');
   if (pc) pc.style.display = 'none';
   document.body.classList.remove('view-detail');

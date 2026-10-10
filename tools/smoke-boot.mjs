@@ -262,13 +262,15 @@ const AUTH_DRIVER = `<script>
   post();   // a synchronous first report: if nothing else arrives, the script ran
   (async function () {
   try {
-    // Do NOT wait on shown('auth-container'): that div is visible in the STATIC
-    // markup, before app.js has booted, so it is true the instant the HTML parses.
-    // Racing it means clicking a Sign in button with no listener — a native form
-    // submit, which reloads the page and re-runs this driver, forever. The splash
-    // going away is the app taking over: showAuth() runs in that same callback, and
-    // it is what wires the form and seeds the reveal buttons.
-    await waitFor(function () { return !shown('splash-screen') && shown('auth-container'); }, 30000);
+    // Do NOT wait on the document being parsed: #auth-container is display:none in
+    // base.css and only showAuth() sets it inline, so this is the app taking over rather
+    // than the markup arriving — which is what wired the form and seeded the reveal
+    // buttons. Racing it means clicking a Sign in button with no listener, a native form
+    // submit, which reloads the page and re-runs this driver, forever.
+    //
+    // The splash used to have to go away first. It is gone; there is nothing else to
+    // wait for, and shown() reads the COMPUTED display, so a stylesheet rule is enough.
+    await waitFor(function () { return shown('auth-container'); }, 30000);
     log('authShown', true);
     log('appBooted', true);
 
@@ -358,54 +360,67 @@ const AUTH_DRIVER = `<script>
 `;
 
 // ── The intro probe ───────────────────────────────────────────────────────────
-// The splash plays every time a device arrives at the sign-in screen, and is
-// skipped only for a device that is already signed in. Both halves of that have a
-// quiet failure mode — a dead video reference still lets the splash disappear (the
-// fallback timer guarantees it), so a 404 looks exactly like success from the
-// outside, and a skip that came from the wrong place still looks like a skip. The
-// only way to tell them apart is to ask a real browser, three times:
+// The intro plays in the brand panel on a first arrival at a wide width, and is
+// skipped for a device that has already been given this version's intro, and for one
+// that is already signed in. Every one of those has a quiet failure mode — a dead video
+// reference still leaves a perfectly good resting panel on screen, so a 404 looks
+// exactly like success from the outside, and a skip that came from the wrong place still
+// looks like a skip. The only way to tell them apart is to ask a real browser, three
+// times:
 //
 //   1. a fresh device                 → the intro really plays, and really arrives
-//   2. the SAME device again          → it plays AGAIN (the point of the change)
-//   3. the same device, signed in     → no splash, and no 9.7 MB download
+//   2. the SAME device again          → it does NOT play, and does not even fetch it
+//   3. the same device, signed in      → no panel promotion, no download, no wake-up
 //
-// Load 2 reuses the same profile on purpose. Strictly it no longer has to: what
-// decides the skip is the ABSENCE of a stored session, not a memory of having seen
-// the video, so a fresh profile would answer the same way. Sharing it keeps the
-// claim honest — this is a device that really did play the intro once, being asked
-// to play it again.
+// Load 2 reuses the same profile on purpose: what decides the skip is the record the
+// FIRST load wrote against APP_VERSION, so this is a device that really was given the
+// intro once, being asked again.
+//
+// ⚠ THE WINDOW HAS TO BE WIDE. The panel is not drawn below 1024px — that is the whole
+// phone strategy, and it means the video is never played there. Headless Chrome's
+// default window is 800x600, which is a phone-sized viewport for this purpose, so
+// without --window-size the first scenario would measure the phone path and report the
+// feature as broken. See runIntroLoad().
 const INTRO_PATH = '/__intro.html';
 
-// Counts the backend wake-up and answers it locally, passing every other call
-// through untouched.
+// Counts the backend wake-up, and answers every Apps Script call locally.
 //
-// The wake-up is a real fetch to script.google.com fired from `load`, so without
-// this the phase would depend on the live backend being reachable — and a cold
-// one is a half-minute hang in the middle of a test that has no stake in it. Only
-// the ping is intercepted: every other request this page makes (the signed-in
-// load's boot calls) behaves exactly as it did before, so this cannot quietly
-// change what the rest of the phase is measuring.
+// THE WAKE-UP IS COUNTED HERE because that count IS the assertion: the panel looks
+// right whether or not anything woke the backend, so "the ping left the page during the
+// intro" is only observable from inside the page.
 //
-// It is counted rather than merely blocked because that count IS the assertion:
-// the splash disappears whether or not anything woke the backend, so "the ping
-// left the page during the intro" is only observable from in here.
+// EVERY GAS CALL IS ANSWERED LOCALLY, and that is not tidiness. The signed-in load goes
+// past showApp() into the app, whose first act is refreshMyAccess() against the live
+// deployment — with a token this test made up. The live backend rejects it, the
+// interceptor confirms the session is dead and signs the device out, and the scenario
+// measures a sign-in screen it was supposed to prove was unreachable. Every stubbed call
+// gets the same benign error object the auth fixture uses, which the interceptor's own
+// rule 1 (`isUnauthorized` false) ignores. Nothing outside script.google.com is touched,
+// so this is the app running against a backend that simply says no — not a rewritten app.
+//
+// It also keeps the phase off the live backend entirely: a cold one is a half-minute hang
+// in the middle of a test that has no stake in it.
 const INTRO_STUB = `<script>
   var _introRealFetch = window.fetch.bind(window);
+  var INTRO_ERR = '{"status":"error","message":"blocked in test"}';
   window.fetch = function (url, init) {
-    if (/action=ping/.test(String(url))) {
+    var u = String(url);
+    if (u.indexOf('script.google.com') < 0) return _introRealFetch(url, init);
+    if (/action=ping/.test(u)) {
       window.__warmPings = (window.__warmPings || 0) + 1;
-      window.__warmPingUrl = String(url);
+      window.__warmPingUrl = u;
       return Promise.resolve(new Response('{"status":"ok","apiVersion":3}',
         { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
-    return _introRealFetch(url, init);
+    return Promise.resolve(new Response(INTRO_ERR,
+      { status: 200, headers: { 'Content-Type': 'application/json' } }));
   };
 <\/script>
 `;
 
-// The same page, with a stored sign-in seeded before index.html's pre-paint script
-// runs. The seed has to be the FIRST thing in <head>: the attribute the stylesheet
-// keys off is set by that script, at parse time, before anything else could set it.
+// The same page, with a stored sign-in seeded before anything else runs. It has to be
+// the FIRST thing in <head>: app.js's boot handler decides this load's whole route from
+// localStorage the moment `load` fires, and the seed must be there before that.
 const INTRO_SIGNED_IN_PATH = '/__intro-signedin.html';
 const SIGNED_IN_SEED = `<script>try{
 localStorage.setItem('ipb_user', JSON.stringify({name:'Seeded Tester',email:'seeded@indrones.com',initial:'S'}));
@@ -417,41 +432,57 @@ const INTRO_DRIVER = `<script>
   function report(o) {
     try { fetch('/__probe', { method: 'POST', body: JSON.stringify(o) }); } catch (e) {}
   }
-  // Sampled NOW, while this script is the last thing in the body and \`load\` has
-  // not fired: app.js has already parsed and bound its load handler but has not
-  // run it, so this is the splash as the person would first see it — before any
-  // dismissal. The snapshot below is taken after it is gone and cannot tell a
-  // skipped splash from one that merely finished.
-  var visibleAtStart = null;
-  var s0 = document.getElementById('splash-screen');
-  if (s0) { try { visibleAtStart = getComputedStyle(s0).display !== 'none'; } catch (e) {} }
+  // Sampled NOW, while this script is the last thing in the body and \`load\` has not
+  // fired: app.js has parsed and bound its load handler but has not run it, so the
+  // panel is still in the state the MARKUP shipped it in. That is the one sample that
+  // can tell a promotion from a default, and it cannot be taken later.
+  var p0 = document.querySelector('.auth-brand-panel');
+  var brandAtStart = p0 ? p0.getAttribute('data-brand') : null;
   function snap() {
-    var s = document.getElementById('splash-screen');
-    var v = document.getElementById('splash-video');
+    var panel = document.querySelector('.auth-brand-panel');
+    var v = document.getElementById('brand-video');
+    var head = document.querySelector('.auth-brand-panel .landing-head');
+    var stage = document.querySelector('.brand-stage');
+    var auth = document.getElementById('auth-container');
+    var app = document.getElementById('app-container');
     var res = performance.getEntriesByType('resource') || [];
-    var mp4 = res.filter(function (e) { return /intro_ipassbookv2\\.mp4/.test(e.name); });
+    var mp4 = res.filter(function (e) { return /brand-intro\\.mp4/.test(e.name); });
     report({
       done: true,
-      splashVisibleAtStart: visibleAtStart,
-      splashInlineDisplay: s ? s.style.display : null,
-      splashComputed: s ? getComputedStyle(s).display : null,
-      prePaintAttr: document.documentElement.getAttribute('data-splash'),
+      brandAtStart: brandAtStart,
+      brandMode: panel ? panel.getAttribute('data-brand') : null,
+      ground: panel ? panel.getAttribute('data-ground') : null,
+      stageDisplay: stage ? getComputedStyle(stage).display : null,
+      headClipped: head ? getComputedStyle(head).position === 'absolute' : null,
       videoDuration: v && isFinite(v.duration) ? v.duration : null,
       videoReadyState: v ? v.readyState : null,
       videoErrorCode: v && v.error ? v.error.code : null,
       mp4Requests: mp4.length,
       warmPings: window.__warmPings || 0,
       warmPingUrl: window.__warmPingUrl || null,
+      authDisplay: auth ? getComputedStyle(auth).display : null,
+      appDisplay: app ? getComputedStyle(app).display : null,
     });
   }
-  // Wait for the splash to actually go away rather than for a fixed delay: a
-  // video that plays to the end dismisses it at ~9s, one that fails dismisses it
-  // at once, and the fallback covers everything between.
-  var t0 = Date.now();
+  // SETTLE FOR 1800ms AFTER A REAL SCREEN IS UP, and both halves of that are deliberate.
+  // "A real screen" is whichever of the two this load ends on — the sign-in page or the
+  // app — because this driver is run three times and only the first two end on the
+  // sign-in. The form is usable from the first frame now, which is the whole point of the
+  // split, and that is also the moment app.js has called play() on the panel's video.
+  // 1800ms is long enough for the video to have started and for its request to have been
+  // recorded in the resource timeline, and deliberately SHORT of the intro's own ~10s, so
+  // nothing measured here depends on the video having finished. Scenario 2 is a test of
+  // exactly that: a device that has already been given this version's intro never asks
+  // for the file at all, and the record of that is taken long before \`ended\` could have
+  // fired either way.
+  var t0 = Date.now(), ready0 = null;
   (function tick() {
-    var s = document.getElementById('splash-screen');
-    var gone = s && (s.style.display === 'none' || getComputedStyle(s).display === 'none');
-    if (gone || Date.now() - t0 > 25000) { setTimeout(snap, 400); return; }
+    var auth = document.getElementById('auth-container');
+    var app = document.getElementById('app-container');
+    var up = (auth && getComputedStyle(auth).display !== 'none') ||
+             (app && getComputedStyle(app).display !== 'none');
+    if (up && ready0 === null) ready0 = Date.now();
+    if ((ready0 !== null && Date.now() - ready0 > 1800) || Date.now() - t0 > 25000) { snap(); return; }
     setTimeout(tick, 50);
   })();
 })();
@@ -490,8 +521,8 @@ if (!/<\/html>/i.test(dom)) ({ out: dom, err: log } = await runChrome('--headles
 // ── Assertions ────────────────────────────────────────────────────────────────
 head('the app boots');
 ok('Chrome produced a DOM', /<\/html>/i.test(dom), dom.length);
-ok('the splash screen is dismissed',
-  /id="splash-screen"[^>]*style="[^"]*display:\s*none/.test(dom));
+ok('the splash screen is gone from the document entirely',
+  !/id="splash-screen"/.test(dom));
 ok('the auth screen is hidden and the app shell is shown',
   /id="auth-container"[^>]*style="[^"]*display:\s*none/.test(dom) &&
   /id="app-container"[^>]*style="[^"]*display:\s*flex/.test(dom));
@@ -824,6 +855,11 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH) {
   const proc = spawn(chromePath, [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
     '--disable-extensions', '--mute-audio',
+    // ⚠ WIDE ON PURPOSE. The panel is not drawn below 1024px, and app.js will not call
+    // play() there either — that is the phone strategy, and it means every assertion in
+    // this phase would be measuring the phone path on Chrome's default 800x600 window
+    // and reporting a working feature as broken.
+    '--window-size=1440,900',
     // Muted autoplay is normally allowed, but the intro is the entire point of
     // this phase — a policy block would show up as "the video is fine but never
     // played", which is a confusing way to fail.
@@ -833,85 +869,105 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH) {
     `${base}${pagePath}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const got = await waitForProbe(before, ms);
-  // Give Chrome a moment to shut the profile down cleanly before killing it. This
-  // is load-bearing again: the full intro records the version it just delivered in
-  // the profile's LevelDB, and the SECOND load's assertion is precisely that it
-  // reads that record and skips the video. Killing the process the instant the
-  // probe arrived could lose the write and fail a working feature. That is the bug
-  // this wait was added for the first time, so it is not worth re-learning.
-  if (got) await new Promise(r => setTimeout(r, 1500));
+  // Give Chrome a moment to shut the profile down cleanly before killing it. This is
+  // load-bearing: the first load records the version it just delivered in the profile's
+  // LevelDB, and the SECOND load's assertion is precisely that it reads that record and
+  // skips the video. Killing the process the instant the probe arrived could lose the
+  // write and fail a working feature.
+  //
+  // ⚠ 4000ms, AND IT IS A DISK-FLUSH WINDOW RATHER THAN A FUNCTIONAL WAIT. The write is
+  // issued when play() resolves — the probe only ever arrives after that, because
+  // brandMode is set in the same breath — but Chrome flushes its LevelDB lazily, and
+  // child.kill() on Windows is a hard terminate with no flush of its own. 1500ms was
+  // enough on an idle machine and not enough when this suite runs inside smoke-all: it
+  // failed there and passed alone, which is the worst way for a test to be wrong.
+  if (got) await new Promise(r => setTimeout(r, 4000));
   try { proc.kill(); } catch { /* already gone */ }
   return got;
 }
 
-// Real time, not virtual: the video has to actually play, and that takes ~9s.
+// Real time, not virtual: the video has to actually play, and that takes ~10s. The
+// probe settles 1.8s after the form appears, so this budget covers the boot, not the
+// whole intro.
 const firstIntro = await runIntroLoad(45000);
 ok('the intro probe reported from a real browser', !!firstIntro);
 if (firstIntro) {
-  // readyState >= 1 means Chrome really fetched and parsed the file. Without this
-  // assertion the suite cannot tell a working intro from a missing one, because
-  // the splash disappears either way.
-  ok('the first open really loads the intro video',
+  // The panel ships as "rest" and app.js is the only thing that promotes it. Sampled
+  // before `load` fired, so this is the markup's own default and not a promotion.
+  ok('the panel arrives in its resting state, before app.js has touched it',
+    firstIntro.brandAtStart === 'rest', firstIntro.brandAtStart);
+  ok('the first open promotes it to the video',
+    firstIntro.brandMode === 'video', firstIntro.brandMode);
+  // readyState >= 1 means Chrome really fetched and parsed the file. Without this the
+  // suite cannot tell a working intro from a missing one, because the resting panel is
+  // perfectly good either way.
+  ok('...and the video really loads',
     firstIntro.videoReadyState >= 1 && firstIntro.videoErrorCode === null,
     { readyState: firstIntro.videoReadyState, error: firstIntro.videoErrorCode });
   ok('it is the full-length intro, not a truncated read',
-    firstIntro.videoDuration > 8.5 && firstIntro.videoDuration < 9.5,
+    firstIntro.videoDuration > 9.5 && firstIntro.videoDuration < 10.5,
     firstIntro.videoDuration);
-  ok('the splash is on screen before anything dismisses it',
-    firstIntro.splashVisibleAtStart === true, firstIntro.splashVisibleAtStart);
-  ok('the splash is dismissed afterwards',
-    firstIntro.splashInlineDisplay === 'none', firstIntro.splashInlineDisplay);
-  ok('nothing skipped it before paint — this device had no session to resume',
-    firstIntro.prePaintAttr === null, firstIntro.prePaintAttr);
-  // The wake-up, proven in the one place it can be: a real browser, on the load
-  // that ends at the sign-in screen. The assertion is that it left the page during
-  // the intro — i.e. that the ~9s of video and everything typed afterwards are
-  // spent overlapping Apps Script's cold start rather than waiting behind it.
+  // At a wide width the stage is drawn and the head beside it is clipped, which is the
+  // "brand said once" rule as it actually renders: the lockup already carries the
+  // wordmark, so printing the head too would say it twice.
+  ok('the stage is drawn, and the common head beside it is clipped to nothing',
+    firstIntro.stageDisplay === 'block' && firstIntro.headClipped === true,
+    { stage: firstIntro.stageDisplay, headClipped: firstIntro.headClipped });
+  ok('the form is up under it, so nobody is waiting for the video',
+    firstIntro.authDisplay === 'flex', firstIntro.authDisplay);
+  // The wake-up, proven in the one place it can be: a real browser, on the load that
+  // ends at the sign-in screen. The assertion is that it left the page during the intro
+  // — i.e. that the ~10s of video and everything typed afterwards are spent overlapping
+  // Apps Script's cold start rather than waiting behind it.
   ok('the backend is woken on the way to sign-in, not when the button is pressed',
     firstIntro.warmPings >= 1 && /action=ping/.test(firstIntro.warmPingUrl || ''),
     { pings: firstIntro.warmPings, url: firstIntro.warmPingUrl });
 }
 
-// THE POINT OF THE CHANGE. The intro is the app's OPENING, delivered once per
-// version: the full video on the first arrival, and on the first arrival after an
-// update, because APP_VERSION is what the key is compared against and the deploy
-// bumps it with CACHE_NAME. Every visit in between gets the brief splash.
+// THE POINT OF THE CHANGE. The intro is the app's OPENING, delivered once per VERSION:
+// the video on the first arrival, and on the first arrival after an update, because
+// APP_VERSION is what the key is compared against and the deploy bumps it with
+// CACHE_NAME. Every visit in between rests.
 //
-// `mp4Requests` is the honest signal, and here it is the whole assertion: the
-// splash element ends up display:none whether it played, failed, or was skipped,
-// so the only thing that separates the full intro from the brief one is whether
-// the browser went and got the video at all. `splashVisibleAtStart` proves the
-// brief splash is a real screen and not a silent skip — the person still sees the
-// app open, they just do not wait nine seconds for it.
+// `mp4Requests` is the honest signal, and here it is the whole assertion: the panel is
+// on screen and looks right whether the video played, failed, or was never asked for, so
+// the only thing that separates one from the other from outside is whether the browser
+// went and got the file at all. It is also the weight saving, stated as a number: a
+// returning device downloads no video, no still — nothing this panel needs is fetched
+// before sign-in on the second visit.
 const secondIntro = await runIntroLoad(45000);
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
-  ok('a device that has already seen this version\'s intro still gets a splash',
-    secondIntro.splashVisibleAtStart === true, secondIntro.splashVisibleAtStart);
-  ok('...but a brief one, which never fetches the ~9.7 MB video',
+  ok('a device that has already been given this version\'s intro is not given it again',
+    secondIntro.brandMode === 'rest', secondIntro.brandMode);
+  ok('...and never fetches the video to find that out',
     secondIntro.mp4Requests === 0, secondIntro.mp4Requests);
-  ok('...and it clears itself without being touched',
-    secondIntro.splashInlineDisplay === 'none', secondIntro.splashInlineDisplay);
-  ok('...and it is still not a pre-paint skip, so the splash really painted',
-    secondIntro.prePaintAttr === null, secondIntro.prePaintAttr);
+  ok('...and it is the resting panel, not an empty one, that it rests on',
+    secondIntro.stageDisplay === 'block' && secondIntro.headClipped === true,
+    { stage: secondIntro.stageDisplay, headClipped: secondIntro.headClipped });
   // Not once-ever: the container goes cold again, so every arrival at the sign-in
   // screen earns its own ping. A device that has seen the intro before is still a
-  // person about to sign in — and now it gets there sooner.
+  // person about to sign in — and now it gets to the form without waiting at all.
   ok('a returning device wakes the backend again', secondIntro.warmPings >= 1,
     secondIntro.warmPings);
 }
 
-// The one thing that does skip it. A seeded sign-in is put in localStorage before
-// index.html's pre-paint script runs, which is what a resuming device looks like
-// from that script's side.
+// The one thing that skips it entirely. A seeded sign-in is put in localStorage before
+// app.js's boot handler runs, which is what a resuming device looks like from there.
 const signedInIntro = await runIntroLoad(30000, INTRO_SIGNED_IN_PATH);
 ok('the signed-in device reports', !!signedInIntro);
 if (signedInIntro) {
-  ok('a device that is already signed in never sees the splash',
-    signedInIntro.splashVisibleAtStart === false && signedInIntro.prePaintAttr === 'skip',
-    { visibleAtStart: signedInIntro.splashVisibleAtStart, attr: signedInIntro.prePaintAttr });
-  // preload="none" plus a boot path that returns before touching the video: the
-  // ~9.7 MB is not paid by someone whose session was going to resume anyway.
+  // The panel is inside #auth-container, and showAuth() is the only route that ever
+  // puts it on screen. A resuming device goes through showApp() instead, so the panel is
+  // never displayed and never promoted — no video, no still, nothing to flash.
+  ok('a device that is already signed in never reaches the sign-in screen at all',
+    signedInIntro.authDisplay === 'none' && signedInIntro.appDisplay === 'flex',
+    { auth: signedInIntro.authDisplay, app: signedInIntro.appDisplay });
+  ok('...and the panel is left in its resting state, unpromoted',
+    signedInIntro.brandMode === 'rest' && signedInIntro.brandAtStart === 'rest',
+    { atStart: signedInIntro.brandAtStart, mode: signedInIntro.brandMode });
+  // preload="none" plus a boot path that returns before touching the video: the 1.6 MB
+  // is not paid by someone whose session was going to resume anyway.
   ok('...and does not download the video to find that out',
     signedInIntro.mp4Requests === 0, signedInIntro.mp4Requests);
   // The same early return skips the wake-up, and that is deliberate rather than

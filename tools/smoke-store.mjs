@@ -2986,7 +2986,15 @@ const searchesIn = fn => { events.length = 0; fn(); return events.filter(e => e.
 // The three files a SAVE alone touches. They are listed here rather than derived,
 // because the point of the assertion below is that they are exactly these — a fourth
 // would mean a store path that is not being remembered.
-const SAVE_ONLY = ['sections/index.json', 'audit/IR409.jsonl', 'journal/2026-10-09.jsonl'];
+//
+// THE DAY IS COMPUTED, NOT WRITTEN DOWN, and it was written down until 2026-10-10 — when
+// the literal '2026-10-09' went stale at midnight and took this suite red with it. The
+// journal is named for the day it is written on (backend.gs journalFileName, off
+// Utilities.formatDate(..., 'Asia/Kolkata', 'yyyy-MM-dd')), so a hardcoded date is a test
+// that passes on the day it is written and fails forever after. Same timezone, same
+// format, so the two agree except within seconds of an IST midnight.
+const IST_DAY = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+const SAVE_ONLY = ['sections/index.json', 'audit/IR409.jsonl', 'journal/' + IST_DAY + '.jsonl'];
 
 cacheStore.clear(); reexec();               // a deploy, a first-ever run, or an eviction
 const coldOpen = searchesIn(() => ctx.getPassbook(ADMIN, 'IR409'));

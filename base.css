@@ -60,11 +60,10 @@
    THE THREE THAT ARE NOT THE YELLOW ITSELF. #ffc400 is a light, saturated colour.
    It is 11.2:1 on the dark ground and 1.4:1 on white — so it is right as a FILL,
    a rule or a lit LED, and it can never be text on a light page. `--ind-accent-ink`
-   is therefore the yellow DARKENED until it clears AA as text, and it is the one
-   brand value that differs by mode: #7a5600 on the light and cream grounds (6.54:1
-   on the light page, 6.44:1 on the cream panel), and the brand yellow itself on
-   dark (11.2:1). Cream needs no compound of its own — the light value already
-   carries enough headroom, which is not true of the four ramps theme.css steps down.
+   is therefore INK on a light page and the brand yellow itself on dark — the one
+   brand value that differs by mode, and the ⚠ note at the declaration below is the
+   whole argument for the light value. Cream needs no compound of its own: there is no
+   yellow in its value at all to step down.
 
    THE BUTTON STATES ARE MEASURED, NOT PICKED. smoke-palette requires a hover and
    an active step that are visibly different from rest (≥1.15:1). A saturated
@@ -83,10 +82,73 @@
   --ind-yellow-lo:     #d9a600;  /* 1.40:1 from rest — the active step */
   --ind-on-yellow:     #171717;  /* 11.2:1 on the fill; ink on a lit surface */
 
-  /* Light and cream. See the note above for why these are not the brand value. */
-  --ind-accent-ink:    #7a5600;  /* 6.54:1 on the page */
+  /* Light and cream. See the note above for why these are not the brand value.
+     ⚠ THIS WAS #7a5600 — A BROWN — UNTIL 2026-10-10, AND THE OWNER THREW IT OUT:
+     *"I am not sure what color is chosen to write EMPLOYEE, CUSTOMER etc it is so absurd
+     as on where it got from? In Indrones website I can see that text are in either
+     black, yellow or silverish or white and always in contrast way, so ours should also
+     be same no, where did we got brownish from?"*
+     He is right, and the brown was mine: --accent is the TEXT role, the brand yellow is
+     ~1.4:1 on a light page and cannot be text, and I darkened it far enough to clear AA
+     instead of asking what a light page should say in its place. The answer is that the
+     brand's own rule already said it — yellow is a FILL, never text (see the header of
+     industrial.css) — so on a light page the accent's text role is simply INK, and the
+     yellow comes back as the fill it is: the soft wash, the bar, the solid button.
+     It still keeps AA by a mile: #171717 on #fdfdfd is 17.62:1 (17.05:1 on cream), and
+     it is the same black
+     the palette already puts on a lit yellow button (--ind-on-yellow), so the brand has
+     one black rather than two. */
+  --ind-accent-ink:    var(--ind-on-yellow);  /* 17.62:1 light · 17.05:1 cream, measured */
   --ind-accent-soft:   #fff7d9;  /* the wash behind a note */
   --ind-accent-line:   #f0dfa8;  /* that wash's edge */
+
+  /* ── THE TWO CONSTANTS THAT ARE NOT A MODE ─────────────────────────────────────
+     Every other brand value above swaps with the theme. These two cannot: they belong
+     to the sign-in screen's brand panel, which is DARK WHATEVER THE PAGE IS — the
+     owner's intro video was graded on black, and that is the ground his own layout
+     mockup shows the panel standing on.
+
+     #0b0b0b was already this app's black before it was anything else: it is the ground
+     behind the Google return screen below, chosen so a full-screen transient about to
+     be replaced by the app never flashes a light page through the middle of a sign-in.
+     #f8f8f8 is that screen's own text colour, for the same reason. Both are declared
+     HERE rather than written where they are used because industrial.css — which is
+     where the panel's look otherwise lives — is held by tools/smoke-industrial.mjs to
+     naming tokens and never writing a raw colour. See THE PANEL'S GROUND further down,
+     where the two grounds the owner is choosing between are built. */
+  --ind-black:         #0b0b0b;
+  --ind-white:         #f8f8f8;
+
+  /* ── THE PAPER PAIR, BORROWED FROM THE COMPANY'S OWN SITE ──────────────────────
+     indrones.com runs its full-width sections alternately pure white and warm
+     off-white with one hairline between them — `bg-white` against `bg-[#F1F1EE]`,
+     ruled by `border-[#E6E6E2]`, and #f1f1ee is that site's own body ground. The
+     owner asked the sign-in screen to do the same thing in the same two colours, so
+     these three are READ OFF HIS SITE rather than chosen by eye: the white half is
+     the sign-in, the off-white half is the brand panel, the hairline is the seam.
+
+     THEY ARE NOT THE APP'S --surface-* TOKENS, and that is the point of them being
+     here. Every grey in theme.css is neutral — `oklch(L 0 0)`, zero chroma, by rule —
+     and so is --ind-white above. These two carry a little warm chroma, which is what
+     makes them read as a brand pair rather than as two greys that disagree. Declared
+     HERE for the same reason --ind-black is, further up: industrial.css is held to
+     naming tokens and never writing a raw colour, and it is where the sign-in screen's
+     look otherwise lives. See THE PANEL'S GROUND below, which spends them. */
+  --ind-paper:         #ffffff;
+  --ind-paper-alt:     #f1f1ee;
+  --ind-paper-rule:    #e6e6e2;
+
+  /* ── THE DESK'S WHATSAPP GREEN — NOT OURS, AND THAT IS WHY IT IS ALLOWED HERE ──
+     The owner, 2026-10-10: *"whatsapp button to be made as in indrones.com 'get in
+     touch'"*. These two are lifted from indrones.com's own corner button, read out of
+     the served page: `bg-[#25D366] hover:bg-[#20BD5C]`, a white label and a white glyph
+     in a `bg-white/15` disc. They are WhatsApp's colour, not the brand's, and the app
+     has no business inventing a green — the whole point of matching it is that a
+     person recognises the button before they read it. Declared here, beside the other
+     raw literals, for the same reason they are: the file that spends it is held to
+     naming tokens and never writing a colour of its own. */
+  --ind-wa:            #25d366;  /* WhatsApp's own green, off indrones.com */
+  --ind-wa-hi:         #20bd5c;  /* their hover step, likewise */
 }
 /* Dark, stamped by the pre-paint script exactly as theme.css's own dark set is —
    which is why there is no media query on either side of this pairing: 'system'
@@ -187,7 +249,6 @@ code, pre, kbd { font-family: var(--font-mono); }
 @keyframes fadeIn  { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
 @keyframes shimmer { to { background-position: -200% 0; } }
-@keyframes loadbar { to { width: 100%; } }
 @keyframes spin    { to { transform: rotate(360deg); } }
 
 .animate-fade-in  { animation: fadeIn 0.25s ease-out both; }
@@ -203,79 +264,775 @@ code, pre, kbd { font-family: var(--font-mono); }
 }
 
 /* ══════════════════════════════════════════════════════════
-   SPLASH
-   The Indrones intro video is brand material and stays; the
-   chrome around it goes neutral so it doesn't reintroduce the
-   blue this design deliberately drops.
+   THE BRAND PANEL — THE LEFT OF THE SIGN-IN SPLIT
+
+   THE FULL-SCREEN SPLASH IS GONE. It held the whole screen for nine seconds
+   before anyone could reach the form, and its loader bar was the honest readout
+   of a wait the app was enforcing on itself. The video is brand material and it
+   stays; it now plays in ONE HALF of a screen whose other half is the sign-in,
+   usable from the first frame.
+
+   IT IS A COMPACT BRAND HEADER BELOW 1024px AND NOTHING MORE. `.brand-stage` is
+   not drawn there — no art, no video, no download — and the `.landing-head`
+   inside this panel is the brand material in full, exactly as it was before this
+   change. At 1024px and wider the stage appears and the head is visually hidden,
+   because the lockup drawn on the stage already carries the wordmark and the
+   strap line and printing both would say the brand twice. See the media query in
+   RESPONSIVE at the foot of this file.
+
+   THE GROUND IS ONE WORD AWAY FROM BEING THE OTHER ONE. The panel is always-dark or
+   the Indrones paper pair, and both are built so the owner can look at them; the
+   block immediately below picks between them off `data-ground`. This file only says
+   what the panel IS — a square, a video, and a heartbeat whose geometry is entirely
+   a percentage of that square.
    ══════════════════════════════════════════════════════════ */
-#splash-screen {
-  position: fixed;
-  inset: 0;
-  background: #0b0b0b;
-  z-index: var(--z-splash);
+.auth-brand-panel {
+  position: relative;
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  transition: opacity 0.6s ease, transform 0.6s ease;
 }
 
-/* The splash plays every time this device arrives at the sign-in screen. The one
-   device that skips it is one that is already signed in — the pre-paint script in
-   index.html sets this attribute before the body is parsed, so someone resuming a
-   session never sees even a frame of the splash and, since the video is
-   preload="none" and app.js returns before it touches the video, never downloads
-   it either. */
-html[data-splash="skip"] #splash-screen {
+/* ── THE PANEL'S GROUND — TWO BUILT, ONE SHIPPED ───────────────────────────────
+   THE OWNER ASKED TO SEE BOTH BEFORE ONE IS CHOSEN, so both are built and the
+   `data-ground` attribute on the panel picks between them. When he has looked, the
+   losing block goes and its PNG goes with it; nothing else refers to it.
+
+     dark    the panel is #0b0b0b whatever the theme is. That is the ground the video
+             was graded against, and it is what the owner's own layout mockup shows.
+     light   the panel takes the off-white half of the paper pair borrowed from
+             indrones.com and the sign-in column beside it takes the white half, so the
+             seam down the middle of the screen is the same white-to-off-white step his
+             own site's sections make. That pair is light mode's; see the DARK MODE note
+             below, where the same two halves are built out of the app's dark tokens so
+             a dark-theme visitor is not handed a white page.
+
+   BOTH ARE THE SAME DRAWING. The art is one master with the navy ink lifted to light
+   for the paper ground — tools/make-brand-assets.ps1 makes the two in one key pass, so
+   they can never disagree about where the artwork ends.
+
+   IT IS ALL INSIDE THE MEDIA QUERY, and that is not tidiness. Below 1024px the panel is
+   a compact brand header sitting on the PAGE's ground, and a background declared out
+   here would paint a dark band behind that header on every phone.
+
+   IT IS IN THIS FILE, NOT IN industrial.css, for the same reason --ind-yellow is: the
+   token table has no "always dark" step for a stylesheet to point at, and industrial.css
+   is held to naming tokens and nothing else (tools/smoke-industrial.mjs fails on a raw
+   hex there). The brand constants live here, and both files read them.
+   See the INDRONES block above, where #0b0b0b and #f8f8f8 are declared.
+
+   `--panel-node-core` is the heartbeat's core colour, read a few rules below. It is set
+   to the ground itself so a lit node reads as a hole punched through the mark rather
+   than a sticker on it; literal white would simply vanish against the light ground. */
+@media (min-width: 1024px) {
+  .auth-brand-panel[data-ground="dark"] {
+    --panel-node-core: var(--ind-white);
+    background: var(--ind-black);
+  }
+  .auth-brand-panel[data-ground="dark"] .brand-still {
+    background-image: url("assets/brand-panel-dark.png");
+  }
+
+  .auth-brand-panel[data-ground="light"] {
+    --panel-node-core: var(--ind-paper-alt);
+    background: var(--ind-paper-alt);
+    border-right: 1px solid var(--ind-paper-rule);
+  }
+  .auth-brand-panel[data-ground="light"] .brand-still {
+    background-image: url("assets/brand-panel-light.png");
+  }
+
+  /* ── THE OTHER HALF OF THE PAIR ─────────────────────────────────────────────────
+     THE FORM COLUMN TAKES THE WHITE, and it is set HERE — off the panel, through a
+     sibling combinator — rather than on #auth-container, because the two halves are
+     ONE decision and `data-ground` is the panel's attribute. A second attribute on
+     .auth-main would be a second place for the pair to disagree with itself.
+
+     THE AMBIENT FIELD COMES WITH IT, and that is not decoration either: the glass on
+     the doors is a backdrop blur, a blur over a flat colour is invisible, and a white
+     with nothing under it would silently stop the glass being glass. These are
+     #auth-container's own two glows re-anchored to this half of the screen. */
+  .auth-brand-panel[data-ground="light"] ~ .auth-main {
+    background:
+      radial-gradient(52rem 32rem at 12% -8%,  var(--accent-tint-strong), transparent 62%),
+      radial-gradient(46rem 30rem at 92% 108%, var(--accent-tint),        transparent 60%),
+      var(--ind-paper);
+  }
+
+  /* ── THE BLACK AND YELLOW PAIR ──────────────────────────────────────────────────
+     The black plate on the left, exactly as the always-dark ground above, and the
+     SIGN-IN COLUMN ON THE BRAND YELLOW. It is the owner's own pairing — black and
+     yellow are indrones.com's two colours, and white is what that site uses to let
+     the two apart.
+
+     THE BLACK HALF DOES NOT FOLLOW THE THEME AND THE YELLOW HALF HAS TO, AND THAT
+     ASYMMETRY IS THE WHOLE OF THIS BLOCK. The plate is black in light, in cream and in
+     dark — three lines above, ungated, because black is black. The right half cannot
+     be: the card on this ground is PAPER, and every colour inside a card is the THEME's
+     ink. Measured in dark mode, an ungated yellow half put yellow chips on white paper,
+     white link text on yellow, and — with a door open — near-white field text on a white
+     card. So the yellow half is gated to `:root:not([data-theme="dark"])`, and a
+     dark-theme visitor falls back to the always-dark ground above with no rule at all:
+     `.auth-main` has no background of its own, so `#auth-container`'s own ground shows
+     through. `light` is the ABSENCE of the attribute (index.html:66, app.js:3630), so
+     "not dark" is the only available spelling and it covers cream correctly.
+
+     THE COLUMN'S OWN TOKENS TURN OVER WITH THE GROUND. Every colour in this column was
+     picked against a paper-white page, and restating them selector by selector would be
+     a list that rots the moment a new control lands on the column. Turning the TOKENS
+     over catches whatever is added next, whichever stylesheet it was written in:
+       · --accent is the TEXT role and, on a light page, ink — the same call that killed
+         the brown. Pinned HERE rather than left to the theme because `light` carries no
+         attribute, so the generic cream block (theme.css:112, `--accent: ink-blue-8`)
+         would otherwise win by load order and paint these chips and this card's head
+         rule BLUE. This is a pin on one screen, NOT the global cream+yellow gap closing.
+       · --ind-muted is the column's SECOND VOICE — the field labels, the "or", the two
+         foot links. It is a step of grey measured against paper, and grey on #ffc400 is
+         mud. On this ground the second voice is ink as well, which is the owner's own
+         rule for his site: black, yellow, silver, white, always in contrast.
+       · --glass-fill is 72% of a near-white — a WASH. Over a tint that is a pane; over
+         a SATURATED yellow it is a pale yellow card, which is the one thing a card must
+         not be, and the first render of this ground showed exactly that. Here a card is
+         simply PAPER. The blur behind an opaque fill is invisible by definition, so
+         giving up the material costs nothing.
+
+     THIS GROUND KEEPS THE CARDS WHITE and does not turn the glass up; the fused grounds
+     below do the opposite, and the two are worth comparing side by side. Its footing is
+     dressed by the shared LIT RIGHT HALF block below. */
+  .auth-brand-panel[data-ground="yellow"] {
+    --panel-node-core: var(--ind-white);
+    background: var(--ind-black);
+  }
+  .auth-brand-panel[data-ground="yellow"] .brand-still {
+    background-image: url("assets/brand-panel-dark.png");
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main {
+    background: var(--ind-yellow);
+    --accent:          var(--ind-on-yellow);
+    --ind-muted:       var(--ind-on-yellow);
+    --glass-fill:      var(--ind-paper);
+    --glass-fill-base: var(--ind-paper);
+  }
+
+  /* ── THE PAPER PANEL OVER A BLACK COLUMN, WITH THE YELLOW ON THE BUTTONS ────────
+     The owner asked for this ground and then corrected it, the same day. First:
+     *"where on brand element side we keep the same color as it has [in the paper pair].
+     while on right side where login buttons are there, we use a combination of black and
+     yellow, where black is main and yellow looks good above black."* Then, having looked
+     at it: *"on right side where you made black, you infused yellow in that on top which
+     is not correct … total black background, employee and customr buttons in yellow, text
+     EMPLOYEE and CUSTOMER within yellow button in black. so, this whole login page is a
+     combination of yellow, black and warm off-white #f1f1ee."*
+
+     SO THE COLUMN IS FLAT BLACK AND THE YELLOW IS NOT PAINTED ON IT AT ALL. What stood
+     here was a yellow band across the top of the column, falling into the black beneath
+     it — and the fall was the whole difficulty of it, because yellow to black passes
+     through a dark desaturated gold in EVERY colour space, and a crossing wide enough to
+     read as a gradient is wide enough to read as a brown stripe. That is what he threw
+     out, twice: the first version's crossing spread over a third of the screen and the
+     second only squeezed it to a sixth. Taking the yellow off the ground does not fix
+     that arithmetic, it makes it MOOT — there is no crossing left to get wrong. What the
+     column is painted with now is a single gradient, and it is not a yellow one: see the
+     seam crossing at the rule itself.
+
+     THE YELLOW COMES BACK WHERE HE PUT IT — ON THE BUTTONS. The two door bars are yellow
+     with the role text in ink, and a card's one action is yellow with it. A black ground
+     carries a saturated yellow better than any other value in this palette, and that is
+     what makes the pairing read as the company's own rather than as decoration. They are
+     dressed below, past the footing.
+
+     THE NAME SURVIVES ITS REASON. `horizon` was the band, and the band is gone — but the
+     two halves still meet at the screen's own horizon, off-white on one side and black on
+     the other, and that seam is still what this ground IS.
+
+     THE CARDS ARE PAPER, and on this ground they are the owner's WARM paper rather than
+     white — see the group below, which is where `--ind-paper` becomes `--ind-paper-alt`. A
+     card here sits on black, and a 72%-white glass over black is a grey pane, the one
+     thing a card must not be; opaque paper on a deep ground is a card. The material is not
+     lost by it, because the blur behind an opaque fill is invisible by definition.
+
+     GATED FOR THE REASON THE YELLOW GROUND IS GATED: the cards are light paper and every
+     colour inside them is the THEME's ink, so a dark-theme visitor falls back to the
+     always-dark ground with no rule at all. `.auth-main` has no background of its own, so
+     `#auth-container`'s own shows through and nothing is half-applied.
+
+     ITS FOOTING IS THE ONE THING THE SHARED BLOCK BELOW CANNOT DRESS. That block paints
+     the footing INK, which is right on the yellow and on the light end of the fused ramps
+     and exactly wrong on a black column. So this ground dresses its own — see the two
+     groups below, and note that both reach the footing BY POSITION (`> :not(.doors)`) and
+     never the cards, which are paper and keep their own dark ink.
+
+     AND THE FOOTING NEEDS ONE MORE THING HERE THAN ON THE OTHER GROUNDS: AIR. On every other
+     ground the doors end in a card, and a card has an edge and a shadow, so the terms line
+     under it reads as a caption on the PAGE. Here the last thing above it is a flat yellow
+     bar with a hard edge, and at base.css's own 0.35rem the acknowledgement reads as a
+     caption on the CUSTOMER BUTTON — the one sentence on this screen that must not look
+     like it belongs to a control. One rem more, on this ground only. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main > .landing-terms {
+    margin-top: 1.35rem;
+  }
+  .auth-brand-panel[data-ground="horizon"] {
+    --panel-node-core: var(--ind-paper-alt);
+    background: var(--ind-paper-alt);
+  }
+  .auth-brand-panel[data-ground="horizon"] .brand-still {
+    background-image: url("assets/brand-panel-light.png");
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main {
+    /* ── THE SEAM IS CROSSED, NOT DRAWN ──────────────────────────────────────────────
+       The owner, 2026-10-10, one message after the ground itself: *"if transition of color
+       from warm off-white #f1f1ee to black between left and right section also has a swift
+       transition instead of direct line, that can also look better. we can see."*
+
+       SO THE PANEL KEEPS ITS OWN BORDER-RIGHT — which is what the `light` ground uses to
+       rule the seam, his own site's #e6e6e2 — and this half opens on the panel's EXACT
+       colour and falls to black a swift way in. There is therefore no line to see: the two
+       halves agree at the seam to the byte, and the crossing lives entirely on this side
+       of it, so the brand panel is untouched and stays the flat #f1f1ee he asked to keep.
+
+       ⚠ THIS CROSSING IS SAFE WHERE THE YELLOW FALL WAS NOT, and the difference is worth
+       naming because it is why one was thrown out and this one is not: off-white and black
+       differ only in LIGHTNESS, so every step between them is a warm neutral grey. Yellow
+       and black sit at opposite ends of hue as well, so every step between THEM is a gold,
+       and that gold is what read as a brown band. This ramp has no hue in it to get wrong.
+       Nine per cent of this half's width, which is under 5rem at the 1024px split and about
+       4rem at 1440 — swift enough to read as the light falling off the panel's edge rather
+       than as a grey column between the two halves. Widen it far and it starts to read as
+       a third field; that is the only failure mode here, and it is a mild one. */
+    background: linear-gradient(90deg,
+      var(--ind-paper-alt)  0%,
+      var(--ind-black)      9%);
+    --accent:          var(--ind-on-yellow);
+    --ind-muted:       var(--ind-on-yellow);
+    --glass-fill:      var(--ind-paper-alt);
+    --glass-fill-base: var(--ind-paper-alt);
+    /* The "or" rule between the Continue button and the three alternatives. On the app's
+       own paper it is --outline-gray-1 (#ededed), and against the owner's #f1f1ee that is
+       a two per cent step — a divider that is not there. It is put back on the same
+       hairline the rest of this ground's paper uses. */
+    --ind-rule:        var(--ind-paper-rule);
+  }
+  /* ── THE FOOTING, IN THE COLUMN'S OWN LIGHT ─────────────────────────────────────
+     It sits at the foot of a 100dvh column, and the WHOLE of that column is black now, so
+     it is on black by construction — and every colour it was drawn with was measured
+     against paper. On black they are not "a bit dim": the theme's second voice is a mid
+     grey and the accent's text role is INK, which is what put a black heart on a black
+     ground in the first render of this block.
+
+     SO THE TOKENS TURN OVER HERE, the way they do on the yellow ground and for the same
+     reason — a list of selectors rots the moment a new control lands in the foot, and the
+     tokens catch whatever is added next whichever stylesheet wrote it. Two of them have to:
+       · --accent is the footing's accent — the heart, the two foot links on hover, the Terms
+         links. On black that is the brand yellow, which is the one colour a black ground can
+         carry and is legal here as it always is on dark.
+       · --ind-muted is the second voice, and industrial.css reaches it by ID
+         (`#auth-container .link-btn { color: var(--ind-muted) }`), so a rule of mine written
+         from the panel alone loses to it and the foot links stayed dark. Overriding the
+         TOKEN is what wins that, and it keeps winning for controls that do not exist yet.
+     The two rules are scoped `> :not(.doors)` — the footing and NOT the cards, which are
+     paper and keep the ink they were drawn with. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main > :not(.doors) {
+    --accent:     var(--ind-yellow);
+    --ind-muted:  var(--ind-paper-alt);
+    --ink-gray-5: var(--ind-paper-alt);
+    color: var(--ind-paper-alt);
+  }
+  /* The two foot links are the app's GHOST pair — a translucent grey fill with a translucent
+     grey edge, which is a soft box on paper and an invisible one on black. Here they are an
+     outline drawn in the column's light: still controls, still told apart from the words
+     beside them, and still not a solid block competing with the card above. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main > :not(.doors) .link-btn {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.34);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main > :not(.doors) .link-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+  }
+  /* ── WHAT THE PAPER HOLDS: NO WHITE, AND EVERY CONTROL RE-CUT FOR OFF-WHITE ─────
+     ⚠ THIS IS THE PART THE CARD'S OWN SWAP DOES NOT DO BY ITSELF, and it is the reason
+     the change is not a find-and-replace. Every control inside a door was drawn against
+     WHITE paper: the field was --surface-gray-2 (#f3f3f3), the secondary buttons
+     --surface-base (#ffffff), the language picker --surface-elevation-1 (#ffffff). On the
+     owner's warm #f1f1ee those two whites become slabs LIGHTER than the card they sit on
+     — three bright chips on paper, which is a different page — and #f3f3f3 is a
+     dead-neutral grey within two per cent of the card's own lightness, so the field does
+     not merely look wrong, it disappears into it. He asked for white to be REPLACED, not
+     for the controls to be left where they were and hoped for.
+
+     SO EACH TAKES #e6e6e2 — --ind-paper-rule, the colour his own site rules its
+     white/off-white alternation with, and already on this screen as the seam between the
+     two halves. It is the one value in the palette that means "this paper, a step in": a
+     field is a well and a secondary button is a block, and both now read as pressed INTO
+     the card rather than laid on top of it. Measured, --ink-gray-9 lands at 15.3:1 on
+     #e6e6e2 and at 17.4:1 on the bare card. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .form-input {
+    background: var(--ind-paper-rule);
+    border-color: var(--ind-paper-rule);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .btn-secondary {
+    background: var(--ind-paper-rule);
+    border-color: var(--ind-paper-rule);
+    color: var(--ind-on-yellow);
+  }
+  /* The language picker is a native <select> and it sits on the BLACK, not on a card, so
+     its fill is the off-white itself rather than the well colour — it is the one piece of
+     the panel's own paper that appears on this side of the seam. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .landing-lang select {
+    background: var(--ind-paper-alt);
+    border-color: var(--ind-paper-rule);
+    color: var(--ind-on-yellow);
+  }
+
+  /* ── AND THE YELLOW: THE TWO DOOR BARS, WHICH ARE THE BUTTONS HE NAMED ─────────────
+     The owner, verbatim: *"employee and customr buttons in yellow, text EMPLOYEE and
+     CUSTOMER within yellow button in black."* The bar is the whole of a door while the
+     door is shut, so it is the thing a person actually presses; making it look like the
+     button it is, is the entire ask. It stays yellow once the door is open as well, which
+     keeps the two bars identical — one of them is open, and that is what the chevron says
+     — so nothing about the bar moves when a door is chosen.
+
+     ⚠ THE ROLE TEXT KEEPS ITS PLACE AND LOSES ITS CHIP. `#auth-container .door-role` sets
+     `color: var(--accent)`, which on this ground is already ink — but base.css draws it as
+     a grey pill, and a grey pill inside a yellow bar is two surfaces where the ask was for
+     one. So the pill's own fill and edge are cleared, and the mono, letterspaced, uppercase
+     treatment underneath it is left exactly as it was. It is still a role marker; it is the
+     bar's label now rather than a chip sitting on the bar.
+
+     THE HOVER AND PRESS STEPS ARE THE APP'S OWN — --ind-yellow-hi and --ind-yellow-lo, the
+     very pair palette.css hands every solid yellow button — so the bar answers the pointer
+     in the same two steps as the Continue button inside it. base.css's own
+     `.door-bar:hover` would otherwise lay a translucent grey over the yellow and dull it. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .door-bar {
+    background: var(--ind-yellow);
+    color: var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .door-bar:hover {
+    background: var(--ind-yellow-hi);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .door-bar:active {
+    background: var(--ind-yellow-lo);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .door-bar .door-role {
+    border-color: transparent;
+    background: transparent;
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main .door-bar .door-chev {
+    border-color: var(--ind-on-yellow);
+  }
+  /* ── THE FUSED GROUNDS — ONE PAINT, TWO WINDOWS, NO SEAM ────────────────────────
+     The owner, 2026-10-10: *"a fusion of colors we have or their variants without a
+     legit separate boundary between colors for transitions and a better liquid glass
+     view, can try some options?"*
+
+     THE SEAM CANNOT BE HIDDEN WHILE TWO ELEMENTS PAINT, and that is the whole reason
+     these are built differently from the three grounds above. Each of those gives the
+     panel one opaque background and `.auth-main` another, and then spends a rule making
+     the join read as deliberate — a hairline, a white-to-off-white step, a
+     black-to-yellow break. A GRADIENT cannot be split that way: the two halves would
+     meet at whatever colour the arithmetic lands on, and one rounding, border or
+     scrollbar between them shows up as a line. So here the ground is painted ONCE, on
+     `#auth-container`, and both halves are simply windows onto it — no background of
+     their own, the mark floating on the dark end and the cards on the light one. There
+     is nothing left to mis-register.
+
+     THAT IS WHY THERE IS A `:has()` HERE, and it is the only one in the app. The choice
+     lives on the panel, but the paint has to happen on its PARENT: a sibling combinator
+     only ever reaches forwards, and the panel is the first child. It is not a new
+     dependency — the glass fill a little way up is a `color-mix()`, and every browser
+     that understands that understands `:has()`. Where it does not, the rule is dropped
+     whole and the screen falls back to the app's own ground rather than to a
+     half-painted one.
+
+     GATED `:root:not([data-theme="dark"])` FOR THE SAME REASON THE YELLOW GROUND IS: the
+     cards sit on the light end of these ramps and every colour inside them is the
+     THEME's ink. In dark the ground reverts to the app's own and the artwork to the dark
+     master with it — nothing is half-applied.
+
+     THREE RAMPS, EVERY COLOUR OUT OF WHAT THE APP ALREADY OWNS: the near-black end is
+     --ind-black and the greys beside it, the middle runs up through the brand's own
+     three steps (--ind-yellow-lo, --ind-yellow, --ind-yellow-hi), and the only other
+     white in the picture is the glass. Nothing here was invented for this screen.
+
+     ⚠ THE MUD IS THE THING TO KEEP OUT, and it is arithmetic, not taste. Black and yellow
+     sit at opposite ends of both lightness and hue, so a straight interpolation between
+     them passes through a dark desaturated gold — which reads as the brown that was
+     thrown out of this screen one round earlier (see the accent's text role above), and
+     the first three ramps below were drawn before that was understood — the two that
+     showed it have been deleted rather than left in the build.
+     THE WAY OUT IS THE OWNER'S OWN FOURTH WORD. *"black, yellow or silverish or white"* —
+     silver is already in his palette for exactly this job, so one of the two crossings
+     below goes through it, and the other keeps its crossing NARROW enough to read as a
+     soft edge rather than as a region with a colour of its own.
+
+     AND EACH RAMP IS STILL MOVING UNDER THE CARDS. A blur over a flat colour is
+     invisible — that has been this app's own rule since the glass was written, and it is
+     why a gradient ground is not merely prettier than a split one: it is the first
+     ground here that lets the material do anything at all. A ramp that reached full
+     yellow at 60% and held would put the two cards back on a flat field, so every ramp
+     below is still climbing when it passes behind them, and the brightest step is saved
+     for the right-hand edge. The cards start at about 60% of the width and END AT 90%.
+
+     ⚠ THE TWO RAMPS ARE `--ind-` NAMES, AND THE PREFIX IS LOAD-BEARING. `--ind-ground` is
+     what actually paints, and the two rules that set it are written where the choice
+     lives — but `tools/build-ui-options.mjs` lifts every base.css block that DECLARES an
+     `--ind-` token into the preview build, and then refuses the build if anything that
+     block mentions is declared nowhere. A ramp named `--fuse-feather` was therefore
+     "used but never defined" and refused the build, even though it is defined four lines
+     up. Naming them `--ind-fuse-*` puts the declaration inside the block the checker
+     reads, and the refusal goes away for the right reason. */
+  #auth-container {
+    /* A FEATHER — the plate with a soft edge, the way a printed card lies on a coloured
+       table. TEN PER CENT OF THE WIDTH, not thirty: the first attempt at this spread the
+       crossing over a third of the screen and a slow crossing through an empty middle is
+       a smudge whatever colour it is — that was the mistake, and it was the WIDTH of the
+       band and not the hue of it that made it read as brown. Squeezed this tight it reads
+       as the plate's own edge, and the bloom laid over it is what keeps it from reading
+       as a line. */
+    --ind-fuse-feather:
+      radial-gradient(38% 130% at 49% 50%,
+        rgba(255, 196, 0, 0.32) 0%, rgba(255, 196, 0, 0.10) 42%, transparent 72%),
+      linear-gradient(96deg,
+        var(--ind-black) 0%, #101010 41.5%, #1d1808 45%,
+        #6b5200 48.5%, #d9a600 51.5%, var(--ind-yellow) 55%,
+        #ffc400 62%, #ffd21a 80%, #ffe066 100%);
+    /* A SILVER SEAM. The one crossing that never touches a gold between the two ends:
+       the black steps up to neutral grey and then to light, and only then does the yellow
+       arrive. It is the owner's own fourth word, and it is also the only bright thing in
+       the app that is not the brand yellow. Same width as the feather above, for the same
+       reason. */
+    --ind-fuse-silver: linear-gradient(97deg,
+      var(--ind-black) 0%, #141414 41%, #3a3a37 45%,
+      #9a9a94 48%, var(--ind-paper-alt) 50.5%, #fffdf4 53%,
+      #ffea9e 57%, var(--ind-yellow) 63%,
+      #ffd21a 80%, #ffe066 100%);
+  }
+  :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-feather"]) { --ind-ground: var(--ind-fuse-feather); }
+  :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-silver"])  { --ind-ground: var(--ind-fuse-silver); }
+
+  /* THE ARTWORK IS CHOSEN BY THE GROUND, and nothing else in the app names these two
+     files — a ground that does not set one gets NO mark at all, which is a blank panel
+     and not an error. The dark end is where the mark sits here, so it is the dark
+     master, on white node cores. */
+  .auth-brand-panel[data-ground^="fuse"] {
+    --panel-node-core: var(--ind-white);
+  }
+  .auth-brand-panel[data-ground^="fuse"] .brand-still {
+    background-image: url("assets/brand-panel-dark.png");
+  }
+
+  /* ── THE GLASS, TURNED UP, WHICH IS WHAT THE FUSION WAS FOR ─────────────────────
+     THE FIRST ATTEMPT AT THIS WAS STILL A STICKER, and it was not the blur's fault — it
+     was the FILL's. A flat 62% white over any ground is a flat card, and a flat card with
+     a hairline round it is a sticker no matter how much is smeared behind it. So the pane
+     is now built the way a pane is: four things, none of them a new colour.
+
+       · THE FILL IS NOT ONE COLOUR ANY MORE. A single diagonal sheen is laid over it —
+         brightest at the top-left corner where a light would strike it, fading through
+         nothing at 56%, and picking up a little bounce at the far corner. It is the
+         card's own `background-image`, painted over the fill rather than instead of it,
+         so the fill still carries every label at the contrast it was measured with.
+       · THE FILL ALSO COMES DOWN, 72% → 54%, and only here. That is the one number that
+         trades against the app's written legibility argument; it is safe because what is
+         behind these cards is the LIGHT end of every ramp. Measured on the render, not
+         assumed: the darkest thing under a card is the brand yellow itself, and 54% of
+         paper over it composites to about #ffe48a — 14.5:1 for the ink, against 17.6:1
+         for the same ink on bare paper. A long way past AA either way.
+       · THE EDGE IS A BEVEL, not a hairline: bright across the top, faintly bright down
+         the left, dark along the bottom and the right. One highlight alone reads as a
+         sticker; two opposite ones read as thickness.
+       · AND THE PANE CASTS A SHADOW AGAIN — a long soft one for the lift, and a short
+         tight one for contact. industrial.css sets `box-shadow: none` on these cards,
+         which it can afford while everything around them is flat; a card standing over a
+         ramp needs to sit ON it.
+
+     The selector carries `#auth-container` for one reason: industrial.css's `box-shadow:
+     none` is an id and a class, so a rule written from the panel alone loses to it and
+     the shadow is silently never drawn. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {
+    --glass-blur:      blur(30px) saturate(1.9);
+    /* THE FILL IS A GRADIENT, WHICH IS THE ONE THING THAT MAKES IT GLASS RATHER THAN A
+       PALER BOX. Every pane in this app has until now been one flat colour, and a flat
+       colour is what a sticker is: the same value in every corner, so there is nothing
+       for the eye to read as thickness. This one is nearly opaque at the corner a light
+       would strike and nearly half air at the corner furthest from it, so the ground's
+       own colour arrives through the far corner and the pane has a direction. It starts
+       a little above the 72% the app has always used — a door card sits over the brand
+       yellow here, and at 72/36 that yellow read straight through it — and falls to 44.
+       Measured at the WORST corner — 44% of paper composited over the brand yellow,
+       rgb(255,222,112) — the ink lands at 13.6:1. */
+    --glass-fill: linear-gradient(154deg,
+      rgba(255, 255, 255, 0.84)   0%,
+      rgba(255, 255, 255, 0.66)  42%,
+      rgba(255, 255, 255, 0.44) 100%);
+    --glass-fill-base: color-mix(in srgb, var(--ind-paper) 54%, transparent);
+    --glass-edge:      rgba(255, 255, 255, 0.95);
+    /* the accent's text role is ink on a lit ground, exactly as on the yellow ground */
+    --accent:    var(--ind-on-yellow);
+    --ind-muted: var(--ind-on-yellow);
+
+    /* ── AND THE ACTION INSIDE THE CARD IS THE OWNER'S OWN PAPER ────────────────────
+       The owner, 2026-10-10, having just chosen this ground: *"Just one change, any
+       button to be off-white #f1f1ee."*
+       ⚠ ON THIS GROUND THAT IS A REPAIR AND NOT A TINT. Measured off the render with a
+       pixel sampler rather than judged by eye: the Continue button's fill came out
+       #ffc400 and the card it sits on came out #ffc500–#ffd900 — the button was very
+       nearly the colour of the thing behind it, which is why it read as a faint band
+       rather than as a control. The yellow belongs on this ground and on the two door
+       bars; it does not belong on the one action inside a card that is already yellow.
+       So the action takes the paper, and the ink on it is the ink that was already
+       measured against that paper.
+       ⚠ THESE ARE TOKENS HERE RATHER THAN A `background:` RULE, AND THAT IS NOT STYLE.
+       industrial.css paints `.btn` from `#auth-container .btn:not(…):not(…)` — one id and
+       two classes — and no rule written from the panel alone can beat an id however many
+       classes it carries; the shadow below carries `#auth-container` for exactly this
+       reason. A custom property is INHERITED rather than cascaded, so re-pointing it here
+       walks straight into industrial's own rule and there is no fight to lose. Verified
+       before writing: `--btn-solid-*` is read by `.btn` and by the app's status lamps, and
+       by nothing inside `.auth-main` except `.btn` itself. */
+    --btn-solid-bg:        var(--ind-paper-alt);
+    --btn-solid-bg-hover:  var(--ind-paper-rule);
+    --btn-solid-bg-active: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));
+    --btn-solid-fg:        var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) #auth-container .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .glass-card {
+    background-image: linear-gradient(158deg,
+      rgba(255, 255, 255, 0.34)  0%,
+      rgba(255, 255, 255, 0.00) 40%);
+    box-shadow:
+      0 30px 58px -24px rgba(23, 23, 23, 0.52),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 -1px 0 rgba(23, 23, 23, 0.07);
+  }
+
+  /* ── THE REST OF THE WHITE IN THE RIGHT HALF, PUT ON THE SAME PAPER ────────────
+     The action above is a token; these three are written directly, because each of them
+     reads a token that is TOO BROAD to re-point from here.
+       `.btn-secondary` and the language picker read `--surface-base` and
+       `--surface-elevation-1`. Both of those are also the fill of things that are NOT in
+       `.auth-main` — `#auth-container`'s own background, `#code-view`, the glass card's
+       own base fill — so turning them over from here would be a change with a footprint
+       this rule cannot see. Written directly instead: these win on class count alone, and
+       nothing in industrial.css touches a secondary's or a native `<select>`'s fill.
+     ⚠ THE CUSTOMER DOOR IS DELIBERATELY NOT IN THIS LIST, and it was in it until it was
+     checked. `.customer-door` is a SIBLING of `#auth-container` — it is opened over the
+     whole app, not inside the sign-in split — so its white body and its
+     `Open the report form` button are reached by neither this rule nor any token set on
+     `.auth-main`. A selector naming it here would have matched nothing at all: dead CSS
+     that reads as a fix. It is left exactly as it was.
+     The three alternatives stay told apart from the action by their EDGE rather than by a
+     second colour, which is the distinction the app already draws between `.btn` (no
+     edge) and `.btn-secondary` (a hairline) — kept, not invented. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .btn-secondary,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
+    background: var(--ind-paper-alt);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .btn-secondary,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
+    border-color: var(--ind-paper-rule);
+    color: var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .btn-secondary:hover {
+    background: var(--ind-paper-rule);
+    border-color: var(--ind-paper-rule);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .btn-secondary:active {
+    background: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));
+  }
+
+  /* ── THE LIT RIGHT HALF — ONE SET OF RULES FOR EVERY GROUND THAT HAS ONE ────────
+     The brand yellow and the fused ramps all end in the same place: a LIT right half,
+     where every colour that was picked against a paper-white page reads wrong. Stated
+     once here rather than twice, because two copies of four rules is two chances to
+     change one and not the other. The three paper-and-dark grounds above are NOT in
+     this list — they are light-mode versions of a neutral page, and their footing keeps
+     the greys it was drawn with.
+
+     THE FOOTING IS REACHED BY POSITION, not by name. `.auth-main`'s DIRECT children are
+     the two cards plus the footing, so `> :not(.doors)` reaches the footing — the
+     acknowledgement, the language picker, the two foot links, the credit — and NOT the
+     cards, which keep their own ink. That is what makes a lit card on a lit field still
+     read as a card. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main > :not(.doors),
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) {
+    color: var(--ind-on-yellow);
+  }
+  /* The two foot links are the app's GHOST pair — a translucent grey fill with a
+     translucent grey edge, which is a soft box on paper and an almost invisible one on
+     a lit ground. Here they are paper with an ink edge, the same object as the cards
+     above them. Told apart by being controls, not by being a different colour.
+
+     THEY WERE `--ind-paper` — pure white — and they are `--ind-paper-alt` now, the
+     owner's warm off-white, for the same request that moved the buttons: *"any button to
+     be off-white #f1f1ee."* That makes this the last white surface on the lit half, and
+     the hover steps one deeper rather than back to white. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main > :not(.doors) .link-btn,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) .link-btn {
+    background: var(--ind-paper-alt);
+    border-color: var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main > :not(.doors) .link-btn:hover,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) .link-btn:hover {
+    background: var(--ind-paper-rule);
+  }
+  /* The language picker keeps its white box — it is a native <select> and its fill is
+     the platform's, not the page's — and takes the same edge as the links. Its border
+     was a paper grey that all but disappears on a lit ground. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main .landing-lang select,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
+    border-color: var(--ind-on-yellow);
+  }
+
+  /* ── DARK MODE IS THE DARK GROUND, ARTWORK AND ALL ──────────────────────────────
+     The paper pair is a LIGHT-MODE idea: there is no white left to alternate with once
+     the page is dark, so a dark-theme visitor falls back to the dark plate.
+
+     ⚠ IT MUST FALL BACK TO THE DARK ARTWORK TOO, and this is the half that is easy to
+     get wrong. The two PNGs are not the same picture with a different background — the
+     paper one has the navy ink LIFTED to light, which is what makes it read on
+     #f1f1ee. Put that file on a dark ground and its lifted ink becomes the light: the
+     wordmark turns into white blobs and the parts that stayed dark disappear into the
+     ground. Measured, not guessed — the first version of this block did exactly that.
+
+     So there is one decision here and it is the same one the always-dark ground makes:
+     dark page, dark plate, the artwork the video was graded against. Nothing else. */
+  [data-theme="dark"] .auth-brand-panel[data-ground="light"],
+  [data-theme="dark"] .auth-brand-panel[data-ground="horizon"] {
+    --panel-node-core: var(--ind-white);
+    background: var(--ind-black);
+    border-right: 1px solid var(--surface-gray-1);
+  }
+  [data-theme="dark"] .auth-brand-panel[data-ground="light"] .brand-still,
+  [data-theme="dark"] .auth-brand-panel[data-ground="horizon"] .brand-still {
+    background-image: url("assets/brand-panel-dark.png");
+  }
+  [data-theme="dark"] .auth-brand-panel[data-ground="light"] ~ .auth-main {
+    background:
+      radial-gradient(52rem 32rem at 12% -8%,  var(--accent-tint-strong), transparent 62%),
+      radial-gradient(46rem 30rem at 92% 108%, var(--accent-tint),        transparent 60%),
+      var(--surface-base);
+  }
+}
+
+/* THE SQUARE, AND THE SQUARENESS IS LOAD-BEARING. The three heartbeat nodes are
+   placed as a percentage of THIS box, and those percentages were measured by the
+   owner against the master artwork's own 2048x2048 canvas — which
+   tools/make-brand-assets.ps1 is careful not to crop. The still and the video are
+   both letterboxed into this same box, so the handover between them happens at the
+   same coordinates and nothing jumps.
+
+   `container-type: inline-size` is what lets the nodes below be sized as a
+   proportion of the square rather than in pixels — the owner's own dot is 9px in a
+   480px panel, and the same 9px in a 1024px panel would be a fifth of the mark. It
+   contains the inline axis only: the square's height still comes from
+   `aspect-ratio`, so nothing about the layout changes. */
+.brand-stage {
+  position: relative;
   display: none;
+  width: min(100%, 560px);
+  aspect-ratio: 1 / 1;
+  container-type: inline-size;
 }
 
-/* The intro plays full-bleed and nothing is drawn over it. There USED to be a
-   darkening layer here, with a backdrop blur, sitting behind the wordmark; the
-   owner saw the result as a blurry video and asked for it gone. The wordmark
-   and the "Indrones Product After-Sales Summary Book" line moved to the
-   sign-in card, which is where the full product name belongs anyway.
-
-   Sized to the VIEWPORT, not to the video's own pixels. The rules here were
-   `min-width/min-height: 100%` with `width/height: auto`, which reads as
-   full-bleed and is not: a replaced element with auto sizing keeps its
-   intrinsic size, and the minimums only ever raise it. So the element rendered
-   at 1080x1920 CSS px on a phone and 1920x1080 on a desktop, and the centring
-   translate cropped the middle of the frame — measured on the live build, a
-   phone was showing 47% x 43% of the picture against the desktop's 74% x 74%.
-   That is the ~2.3x zoom the owner reported as the mobile intro "not appearing
-   properly", and it was worst on the narrowest screen, where the mobile cut
-   matters most. `inset: 0` + 100% makes the element the size of the screen and
-   `object-fit: cover` does the cropping deliberately, preserving the aspect
-   ratio instead of magnifying it. */
-.splash-video {
+/* Both children fill the square and letterbox into it. The still is a DIV WITH A
+   BACKGROUND rather than an <img> so that the ground can choose its own artwork in
+   CSS — the dark ground is the same drawing with its navy ink lifted to light — and
+   a background is the only place a stylesheet can make that choice. */
+.brand-still,
+.brand-video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  z-index: 1;
+  object-fit: contain;
+  transition: opacity 0.6s ease;
+}
+.brand-still {
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+.brand-video { opacity: 0; }
+
+/* THE CROSSFADE, AND IT IS ONE ATTRIBUTE. `data-brand` is on the panel in the
+   markup as "rest", so this is the state a browser with no JavaScript ever sees:
+   the still and the heartbeat, and a video that is never asked for. app.js promotes
+   it to "video" only on a first arrival at a wide width (see paintBrandPanel()). */
+.auth-brand-panel[data-brand="video"] .brand-video { opacity: 1; }
+.auth-brand-panel[data-brand="video"] .brand-still,
+.auth-brand-panel[data-brand="video"] .brand-heartbeat { opacity: 0; }
+
+/* ── THE SERVICE HEARTBEAT ────────────────────────────────────────────────
+   Three glowing nodes on the mark's own intersections, breathing on a loop for as
+   long as this screen is open. No audio ever, and nothing to dismiss: this is what
+   the panel RETURNS TO when the video ends, not a static picture. Pure CSS, so it
+   breathes with scripting off.
+
+   THE THREE COORDINATES ARE THE OWNER'S OWN, measured against the artwork, and are
+   the reason the master is never cropped. .hb-dot is the node and .hb-ring is the
+   radar ripple it throws; both are sized from .hb-node, so there is one size.
+
+   Two deliberate departures from the prototype this was built from:
+     · the ripple SCALES. The prototype animated width and height on a 3s loop,
+       which re-lays-out the sign-in page every frame; scale() is the same picture
+       on the compositor. Given what paint cost is worth in this app, that is not a
+       detail — see the IR list rebuild notes in memory.
+     · the core takes --panel-node-core rather than literal white. A white core
+       vanishes on a light ground; it should read as a hole punched through the mark.
+   @media (prefers-reduced-motion) is NOT repeated here on purpose: the global block
+   above already cuts every animation to its first keyframe, which leaves the rings
+   invisible and the dots resting still at 0.85 scale and 0.6 opacity. */
+.brand-heartbeat {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.6s ease;
 }
 
-.splash-loader {
+.hb-node {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: rgb(255 255 255 / 0.18);
-  overflow: hidden;
-  z-index: 3;
+  width: 9px;          /* the owner's own size, in a 480px panel … */
+  width: 1.9cqw;       /* … and the same proportion at every other width */
+  aspect-ratio: 1 / 1;
+  transform: translate(-50%, -50%);
+  will-change: transform, opacity;
 }
-/* The duration is set from the video itself (app.js, on loadedmetadata) so the
-   bar tracks the actual intro rather than a guess. 9s is the last-resort value
-   if metadata never arrives; the previous 1.85s finished while nine seconds of
-   video were still playing, which read as a stuck loader. */
-.splash-bar {
-  height: 100%;
-  background: rgb(255 255 255 / 0.9);
-  width: 0;
-  animation: loadbar var(--intro-ms, 9s) ease-in-out forwards;
+.hb-center { left: 50%;   top: 50.5%; --hb-delay: 0s; }
+.hb-tip    { left: 74%;   top: 31.8%; --hb-delay: 0.5s; }
+.hb-joint  { left: 39.5%; top: 27%;   --hb-delay: 1s; }
+
+/* The node itself: a disc with its core knocked out, so the glow reads as light
+   coming through the mark rather than a sticker on top of it. */
+.hb-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%,
+              var(--panel-node-core, #ffffff) 0 56%,
+              var(--ind-yellow) 56% 100%);
+  box-shadow: 0 0 10px var(--ind-yellow), 0 0 20px var(--ind-yellow);
+  animation: heartbeatBreathe 3s ease-in-out infinite;
+  animation-delay: var(--hb-delay);
+}
+
+.hb-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1px solid var(--ind-yellow);
+  animation: radarRipple 3s ease-in-out infinite;
+  animation-delay: var(--hb-delay);
+}
+
+/* 0.85 -> 1.35 and 0.6 -> 1, exactly as the owner drew it. */
+@keyframes heartbeatBreathe {
+  0%, 100% { transform: scale(0.85); opacity: 0.6; }
+  50%      { transform: scale(1.35); opacity: 1; }
+}
+/* The prototype went 10px -> 44px around a 9px node; in scales of the node that is
+   1.1 -> 4.9, which is the same picture without a layout pass. */
+@keyframes radarRipple {
+  0%   { transform: scale(1.1); opacity: 0.85; }
+  100% { transform: scale(4.9); opacity: 0; }
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -297,8 +1054,9 @@ html[data-splash="skip"] #splash-screen {
   justify-content: center;
   padding: 24px;
   text-align: center;
-  background: #0b0b0b;   /* the splash's ground, so the handover does not flicker
-                            from black to a light page and back into the app */
+  background: #0b0b0b;   /* a full-screen transient about to be replaced by the app must
+                            not flash a light page through the middle of a sign-in. This is
+                            also the brand panel's dark ground — the two agree on purpose. */
   color: #f8f8f8;
 }
 html[data-sso="wait"] #sso-wait { display: flex; }
@@ -389,9 +1147,92 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   padding: 2rem 1rem;
   background: var(--surface-base);
 }
-/* The ambient field the glass sits on is declared in desk.css, which is loaded
-   LAST: Desk gives this page a flat ground of its own, and a rule here would be
-   overwritten by it. See THE GLASS, ON THE LANDING PAGE there. */
+/* The ambient field the glass sits on is declared in industrial.css, which is loaded
+   LAST: the industrial skin gives this page a ground of its own, and a rule here would
+   be overwritten by it. See the `#auth-container` background there — a blur over a flat
+   colour is invisible, so the glass needs that field to be glass at all. */
+
+/* ── THE RIGHT OF THE SPLIT ───────────────────────────────────────────────────
+   Below 1024px this is transparent markup: it reproduces what #auth-container
+   already did to its children — a centred column — so the doors and their footing
+   lay out exactly as they did before the split existed. It becomes a column of the
+   split only in the media query below.
+
+   `width: 100%` is not decoration: #auth-container centres its items on the cross
+   axis, so without it this box would shrink to the width of the widest door bar and
+   the whole column would jump to the left. */
+.auth-main {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* ── THE SPLIT, AT 1024px AND WIDER ────────────────────────────────────────────
+   1024 is the app's OWN definition of "wide" — the sidebar becomes a bottom bar
+   below it (RESPONSIVE, further down) and tools/smoke-overview.mjs pins the same
+   number — so the sign-in screen changes shape where everything else does rather
+   than inventing a second breakpoint.
+
+   `padding: 0` on the container is what makes the two grounds meet dead centre with
+   no grey between them: the panel bleeds to the seam and each half does its own
+   padding, and both halves now take the same 2.5rem because nothing else needs the
+   room. It used to be 4.5rem at the top of the form column, owed to .wa-corner — a
+   `position: fixed` element that was out of flow in the viewport's TOP-right, which at
+   the split is the top of the form column. The button moved to the bottom-right on
+   2026-10-10 (see the corner button below), so that debt is paid and the two halves
+   are symmetric again. */
+@media (min-width: 1024px) {
+  #auth-container {
+    flex-direction: row;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 0;
+  }
+
+  .auth-brand-panel {
+    flex: 1 1 50%;
+    justify-content: center;
+    padding: 2.5rem;
+  }
+  .brand-stage { display: block; }
+
+  .auth-main {
+    flex: 1 1 50%;
+    min-height: 100dvh;
+    /* CENTRED, and it is what the two halves want to do to each other: the artwork in
+       the panel is centred in its half, so a form column stacked at the top of the other
+       half reads as a page that has lost its balance. `safe` for the same reason
+       #auth-container uses it — a short laptop and an open door push this column past one
+       screenful, and plain centring in an overflow container puts the top of it above the
+       scrollable area where nothing can reach it. */
+    justify-content: safe center;
+    padding: 2.5rem;
+  }
+
+  /* THE HEAD IS HIDDEN, NOT REMOVED. The lockup on the stage already carries the
+     wordmark and the strap line, so printing this one beside it would say the brand
+     twice — but deleting it would take the screen's only <h1>, and the whole
+     accessible name of the page, out of the tree. Clipped, it is invisible and still
+     read. It is shown in full below 1024px, where the stage is not drawn at all and
+     this head IS the screen's brand material. */
+  .auth-brand-panel .landing-head {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* app.js types into this head, and at this width nobody can see it. The typing is
+     gated off there (startBrandTyping()); this only stops the box it reserves from
+     taking any room if it is ever run anyway. */
+  .auth-brand-panel .landing-wordmark { width: auto !important; }
+}
 
 /* ── GLASS ───────────────────────────────────────────────────────────────────
    The owner asked for a liquid-glass surface, so this is the real thing rather
@@ -582,10 +1423,27 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 }
 
 /* ── The corner button ────────────────────────────────────────────────────────
-   Fixed to the top right of the SCREEN, not of the head, so it stays put while the page
-   scrolls — the same place every site in this shape puts Sign Up, which is the slot the
-   owner named. `top` clears the phone's own status bar via the inset, because a Safari
-   tab on a notched phone draws under it. */
+   THE OWNER, 2026-10-10: *"whatsapp button to be made as in indrones.com 'get in touch'"*.
+   So it is that button, not a paraphrase of it: a green PILL, sitting in the bottom-right
+   of the SCREEN, carrying the words and the mark together. What was here before was a
+   44px grey disc that said nothing — a person had to recognise a small glyph, or hover it
+   and hope for a `title`, before they knew what it did. indrones.com's own button tells
+   them in words, and the green is the second half of that: it is recognised before it is
+   read. Everything below is read off their served page — the pill's radius, its padding
+   (a long left side for the words, a short right side so the disc almost touches the
+   edge), the 15px white label, the 44px `white/15` disc inside it, the hover's lift and
+   shadow, and their own 300ms `cubic-bezier(.22,.7,.2,1)`.
+
+   ⚠ IT MOVED FROM THE TOP-RIGHT TO THE BOTTOM-RIGHT, and that is part of matching it.
+   The top-right was chosen when this stood in for "Sign Up"; bottom-right is where a
+   floating contact button is looked for, and where indrones.com puts this one. It is
+   still `position: fixed` to the viewport, so it stays put while the page scrolls.
+   `bottom` clears the phone's own home indicator via the inset, the way `top` used to
+   clear its status bar.
+
+   ⚠ THE DISC IS A `::before` AND NOT A SECOND ELEMENT, so the markup keeps the one
+   `<span class="wa-glyph">` this app has always had — `tools/smoke-shell.mjs` reads that
+   tag as a literal string, and it is right to: the span is what carries the mask. */
 .wa-corner {
   /* The WhatsApp mark, as a mask source rather than an <img> so that it can be drawn in
      `currentColor` — see .wa-glyph below. simple-icons' WhatsApp path (CC0-1.0): the
@@ -594,25 +1452,48 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      data: URL. */
   --wa-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23000' d='M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.872.118.571-.085 1.758-.719 2.006-1.413.247-.694.247-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z'/%3E%3C/svg%3E");
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 0.85rem);
-  right: calc(env(safe-area-inset-right, 0px) + 0.85rem);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 3.5rem);
+  right: calc(env(safe-area-inset-right, 0px) + 1.5rem);
   z-index: 30;
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.375rem 0.375rem 0.375rem 1.25rem;
+  border-radius: 999px;
+  background: var(--ind-wa);
+  color: var(--ind-white);
+  text-decoration: none;
+  box-shadow: var(--elevation-md);
+  transition: background 0.3s cubic-bezier(0.22, 0.7, 0.2, 1),
+              box-shadow 0.3s cubic-bezier(0.22, 0.7, 0.2, 1),
+              transform  0.3s cubic-bezier(0.22, 0.7, 0.2, 1);
+}
+.wa-corner:hover {
+  background: var(--ind-wa-hi);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.22);
+  transform: translateY(-2px);
+}
+/* The words. `white-space: nowrap` because the pill is sized by its content and a wrap
+   would give it a second line on a narrow phone — a two-line contact button is a card. */
+.wa-label {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+/* The disc: WhatsApp's own green at 15% white over it, holding the mask at 22px. The
+   glyph is a mask, not an image, so it takes `currentColor` and needs no second asset. */
+.wa-glyph {
+  display: grid;
+  place-items: center;
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  background: var(--surface-elevation-1);
-  border: 1px solid var(--outline-gray-2);
-  box-shadow: var(--elevation-md);
-  color: var(--ink-gray-7);
+  background: rgba(255, 255, 255, 0.15);
+  flex: 0 0 auto;
 }
-.wa-corner:hover { background: var(--surface-alpha-gray-2); }
-/* The glyph is a mask, not an image: it takes the button's own colour, so the corner
-   needs no second asset and follows the theme with no second rule. Masking is the one
-   way to draw a shape in `currentColor` from a data URI without an inline SVG. */
-.wa-glyph {
+.wa-glyph::before {
+  content: "";
   width: 22px;
   height: 22px;
   background: currentColor;

@@ -103,11 +103,35 @@ function tokenHex(token, mode) {
 const baseCssRaw = read('../base.css');
 const baseCssScannable = baseCssRaw.replace(/\/\*[\s\S]*?\*\//g, '');
 const brand = { light: new Map(), dark: new Map() };
+const aliases = [];
 for (const m of baseCssScannable.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
   const bucket = /\[data-theme="dark"\]/.test(m[1]) ? brand.dark : brand.light;
   for (const d of m[2].matchAll(/(--ind-[a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g)) {
     bucket.set(d[1], d[2]);
   }
+  for (const d of m[2].matchAll(/(--ind-[a-z0-9-]+)\s*:\s*var\((--ind-[a-z0-9-]+)\)\s*;/g)) {
+    aliases.push([bucket, d[1], d[2]]);
+  }
+}
+// ONE BRAND NAME MAY BE AN ALIAS OF ANOTHER, and that is deliberate rather than
+// incidental: `--ind-accent-ink` is the accent's TEXT role, and on a light page the
+// answer is the same black the palette already puts on a lit yellow button, so it
+// says `var(--ind-on-yellow)` instead of repeating the hex and drifting from it.
+// A resolver that only reads literals would throw on that — and its throw is
+// otherwise right, because a name that resolves to nothing is an accent that
+// disappears. So follow the hop. Looped, because an alias may point at an alias;
+// bounded, because a cycle would otherwise spin here forever.
+for (let pass = 0; pass < 4; pass++) {
+  let moved = false;
+  for (const [bucket, to, from] of aliases) {
+    if (bucket.has(to)) continue;
+    // SAME BUCKET ONLY. A cross-mode fallback here would quietly answer a light-mode
+    // question with the dark-mode value, which is precisely the bug the two buckets
+    // exist to catch: --ind-accent-ink MOVES between modes, and it must be seen to.
+    const hex = bucket.get(from);
+    if (hex) { bucket.set(to, hex); moved = true; }
+  }
+  if (!moved) break;
 }
 const isBrand = t => /^--ind-/.test(t);
 function brandHex(token, mode) {

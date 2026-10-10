@@ -375,15 +375,18 @@ r.head('dismissing lasts for the visit, and a NEWER version still speaks up');
 r.head('the watch starts on every boot path, and reads its own version right');
 
 {
-  // The three early returns out of the load handler are an already-signed-in
-  // device, a Google return and the brief-splash device — the ones that must still
-  // be told. Starting the watch after any of them would exempt exactly the people
-  // who use the app most.
+  // The two early returns out of the load handler are an already-signed-in device and
+  // a Google return — the ones that must still be told. Starting the watch after
+  // either would exempt exactly the people who use the app most. There used to be a
+  // third, the brief-splash device; the splash is gone and so is its return.
   const loadAt = APP.indexOf("window.addEventListener('load'");
   const watchAt = APP.indexOf('startUpdateWatch();');
-  const firstReturn = APP.indexOf('dismissSplash(true); return;');
+  const firstReturn = APP.indexOf('if (hasStoredSession()) {');
+  const lastReturn = APP.indexOf('finishHandoff(handoff); return;');
   r.ok('the watch is started before EVERY early return in the load handler',
-    watchAt > loadAt && watchAt < firstReturn, { watchAt, firstReturn });
+    watchAt > loadAt && firstReturn > loadAt && lastReturn > loadAt &&
+    watchAt < firstReturn && watchAt < lastReturn,
+    { watchAt, firstReturn, lastReturn });
   r.ok('...and once, not once per path', (APP.match(/^\s*startUpdateWatch\(\);/gm) || []).length === 1);
 }
 

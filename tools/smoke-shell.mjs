@@ -18,6 +18,7 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
 const html = read('../index.html');
 const viewsCss = read('../views.css');
+const i18nCode = read('../i18n.js');
 
 let fails = 0;
 const ok = (name, cond, extra) => {
@@ -182,65 +183,72 @@ ok('the old "shown below first" claim is gone',
   !/shown below first/.test(appJs), (appJs.match(/[^\n]*shown below[^\n]*/) || [''])[0]);
 
 // ── The intro video ───────────────────────────────────────────────────────────
-// The intro plays once per device and is then skipped. The failure mode this
-// guards is quiet: if the file 404s or the name changes, the splash still goes
-// away — the fallback timer dismisses it — so the app looks fine and just never
-// shows the intro. Nothing else in the suite would notice.
+// The intro plays once per VERSION, in the brand panel, and is then skipped. The
+// failure mode this guards is quiet: if the file 404s or the name changes, the panel
+// simply RESTS — the still and the heartbeat are already on screen and the sign-in
+// form is usable either way — so the app looks fine and just never shows the intro.
+// Nothing else in the suite would notice.
 head('the intro video');
 const swJs = read('../sw.js');
 
-const videoTag = (html.match(/<video id="splash-video"[\s\S]*?<\/video>/) || [''])[0];
-ok('the splash video tag exists', videoTag.length > 0);
+const videoTag = (html.match(/<video id="brand-video"[\s\S]*?<\/video>/) || [''])[0];
+ok('the brand panel video tag exists', videoTag.length > 0);
 
-// Two cuts of the same intro. The phone one must come FIRST and carry the media
-// gate: <source> selection takes the first entry that matches, so a desktop file
-// listed first would win on a phone as well and the portrait cut would never play.
+// ONE cut, ungated. The splash carried a second, portrait cut behind a
+// `max-width: 639px` media query so a phone could pick a file it had room for. The
+// panel is not drawn below 1024px at all, so that gate now selects for a case that
+// never happens — a phone would have to download a 4 MB cut to play in a box that has
+// no height. Both the gate and the file went with it.
 const sources = [...videoTag.matchAll(/<source\s+src="[^"]+"[^>]*>/g)].map(m => m[0]);
-ok('the splash offers two cuts of the intro', sources.length === 2, sources);
-ok('the phone cut is listed first and is the media-gated one',
-  /intro_ipassbookv2_mobile\.mp4/.test(sources[0] || '') &&
-  /media="\(max-width: 639px\)"/.test(sources[0] || '') &&
-  !/media=/.test(sources[1] || ''),
+ok('the panel offers one ungated cut of the intro', sources.length === 1, sources);
+ok('...and it is not media-gated, because the width gate is now the panel itself',
+  /assets\/brand-intro\.mp4/.test(sources[0] || '') && !/media=/.test(sources[0] || ''),
   sources);
-ok('both cuts exist on disk',
-  ['intro_ipassbookv2.mp4', 'intro_ipassbookv2_mobile.mp4']
-    .every(f => fs.existsSync(new URL(`../assets/${f}`, import.meta.url))));
-ok('and no longer references the file it replaced',
+ok('that cut exists on disk',
+  fs.existsSync(new URL('../assets/brand-intro.mp4', import.meta.url)));
+// …and the two the splash carried are GONE from the tree, asserted as an absence rather
+// than merely un-asserted: dropped from SERVED they would linger on gh-pages forever,
+// which is what deploy-ghpages.mjs's PRUNE list is for, and 14 MB of video nothing can
+// request is 14 MB in every clone.
+ok('the two splash cuts are gone from the tree',
+  !fs.existsSync(new URL('../assets/intro_ipassbookv2.mp4', import.meta.url)) &&
+  !fs.existsSync(new URL('../assets/intro_ipassbookv2_mobile.mp4', import.meta.url)));
+ok('and no file still references the cut it replaced',
   !/Indrones Intro v2\.mp4/.test(html) && !/Indrones Intro v2\.mp4/.test(appJs));
-// preload="none" + no autoplay is what stops a RETURNING user downloading the
-// intro for a splash they will never be shown. Either alone would fetch it.
+// preload="none" + no autoplay is what stops a RETURNING user — and every phone, where
+// the panel never plays it — downloading the intro. Either alone would fetch it.
 ok('it is preloaded lazily and not autoplayed',
   /preload="none"/.test(videoTag) && !/\bautoplay\b/.test(videoTag),
   videoTag.replace(/\s+/g, ' '));
-// Precaching either cut in SHELL would make EVERY first-time install pay the
-// whole download before sign-in, which is the opposite of what lazy loading bought.
-ok('neither cut is precached in the service worker shell',
-  !/intro_ipassbookv2/.test(swJs));
+// Precaching it in SHELL would make EVERY first-time install pay the whole download
+// before sign-in, which is the opposite of what lazy loading bought.
+ok('the intro is not precached in the service worker shell',
+  !/brand-intro/.test(swJs) && !/intro_ipassbookv2/.test(swJs));
 
 // Nothing is drawn over the intro. A darkening layer with backdrop-filter: blur()
 // used to sit on top of it — the owner saw the result as a blurry video — and the
-// wordmark that sat on that layer moved to the sign-in card. Scoped to the splash
-// block and the splash styles, because `backdrop-filter` is used legitimately
-// elsewhere (the frosted headers).
+// wordmark that sat on that layer moved to the sign-in card. Scoped to the panel block
+// and the panel styles, because `backdrop-filter` is used legitimately elsewhere (the
+// frosted headers, and the glass on the doors beside this panel).
 //
-// Both halves are sliced between NAMED section markers rather than by counting
-// closing tags: the screen after the splash became a two-door grid, which is exactly
-// the kind of shape change that silently turns a boundary into '' and a test into a
-// tautology. Keep the two markers in index.html and base.css in step with these.
-const splashBlock = (html.match(/<div id="splash-screen">[\s\S]*?<!-- ========== THE LANDING PAGE/) || [''])[0];
+// Both halves are sliced between NAMED markers rather than by counting closing tags: a
+// boundary that silently turns into '' turns the test into a tautology. Keep the markers
+// in index.html and base.css in step with these.
+const panelBlock = (html.match(/<div class="auth-brand-panel"[\s\S]*?<header class="landing-head">/) || [''])[0];
 ok('nothing is layered over the video',
-  splashBlock.length > 0 &&
-  !/splash-overlay|splash-logo|splash-sub|class="[^"]*overlay/.test(splashBlock),
-  splashBlock.replace(/\s+/g, ' ').slice(0, 200));
-const splashCss = (read('../base.css').match(/SPLASH[\s\S]*?THE LANDING PAGE \(ONE HEAD, TWO DOORS\)/) || [''])[0];
-ok('and no blur or darkening rule is left in the splash styles',
-  splashCss.length > 0 &&
-  !/backdrop-filter|splash-overlay|splash-logo|splash-sub/.test(splashCss));
-// The common head, not the splash and not either card, is where the full product name
-// now lives — the owner asked for the mark and the name to be shared ABOVE the two
-// doors rather than repeated inside each. Sliced between the head's own markers and
-// bounded by the doors grid, so this is a claim about the head and cannot be satisfied
-// by the same words turning up in a card later.
+  panelBlock.length > 0 &&
+  !/splash-overlay|splash-logo|splash-sub|class="[^"]*overlay/.test(panelBlock),
+  panelBlock.replace(/\s+/g, ' ').slice(0, 200));
+const panelCss = (read('../base.css').match(/THE BRAND PANEL[\s\S]*?THE LANDING PAGE \(ONE HEAD, TWO DOORS\)/) || [''])[0];
+ok('and no blur or darkening rule is left in the panel styles',
+  panelCss.length > 0 &&
+  !/backdrop-filter|splash-overlay|splash-logo|splash-sub/.test(panelCss));
+// The common head, not either card, is where the full product name now lives — the
+// owner asked for the mark and the name to be shared ABOVE the two doors rather than
+// repeated inside each. Sliced between the head's own markers and bounded by the doors
+// grid, so this is a claim about the head and cannot be satisfied by the same words
+// turning up in a card later. It sits inside the brand panel now, which does not change
+// any of that: the panel is above the doors in document order too.
 const landingHead = (html.match(/<header class="landing-head">[\s\S]*?<div class="doors">/) || [''])[0];
 ok('the product name moved to the common head, above both doors',
   // ⚠ THE FULL NAME, WITH "PRODUCT" IN IT. This assertion read
@@ -317,62 +325,59 @@ const mp4DurationMs = (file) => {
   const duration = b.readUInt32BE(i + 20);
   return timescale ? (duration / timescale) * 1000 : null;
 };
-const durations = {
-  desktop: mp4DurationMs('intro_ipassbookv2.mp4'),
-  mobile: mp4DurationMs('intro_ipassbookv2_mobile.mp4')
-};
-ok('both cuts are readable MP4s', Object.values(durations).every(v => v !== null), durations);
+const introMs = mp4DurationMs('brand-intro.mp4');
+ok('the intro is a readable MP4', introMs !== null, introMs);
 
 const fallbackMs = Number((appJs.match(/INTRO_FALLBACK_MS\s*=\s*(\d+)/) || [])[1]);
 ok('app.js declares an intro fallback timer', Number.isFinite(fallbackMs), fallbackMs);
-ok('the fallback outlasts the longer cut, so it truncates neither',
-  Object.values(durations).every(v => v !== null && fallbackMs >= v),
-  { fallbackMs, ...durations });
+// The backstop for the case the `ended` event never arrives — the video played and then
+// stalled. It must OUTLAST the file, or it would crossfade away a perfectly good intro
+// on every device. Checked against the MP4 rather than against a number typed beside it,
+// which is the bug this replaced: a 9500ms timer against a longer file truncates it.
+ok('the fallback outlasts the intro, so it truncates nothing',
+  introMs !== null && fallbackMs >= introMs, { fallbackMs, introMs });
 
-// The loader bar is timed from the video, not from a number in the stylesheet —
-// it used to reach 100% at 1.85s while nine seconds of intro were still playing,
-// which read as a stuck progress bar.
-ok('the loader bar is timed from the video itself',
-  /--intro-ms/.test(appJs) && /var\(--intro-ms/.test(read('../base.css')));
-
-// The splash plays every time a device arrives at the sign-in screen. The one
-// device that skips it is one that is ALREADY SIGNED IN — nine seconds of video in
-// front of a session that was going to resume anyway is a delay, not a welcome.
+// THE PANEL PLAYS THE INTRO ONCE PER VERSION, and the one device that never sees it is
+// one that is ALREADY SIGNED IN — ten seconds of video in front of a session that was
+// going to resume anyway is a delay, not a welcome.
 //
-// That decision is made twice: once before paint in index.html (which cannot call
-// into app.js, because app.js has not parsed yet) and once in app.js's boot path.
-// The two must ask the same question, and nothing in this app fails as quietly as
-// they would by drifting: the stylesheet hides the splash while the boot path
-// plays the video, or the boot path skips while the splash is still on screen, and
-// either one only ever shows up on a real device.
-head('the splash skip and the boot path ask the same question');
+// This used to be decided TWICE: once before paint in index.html, because #splash-screen
+// was `position:fixed; inset:0` and painted with the body before app.js parsed, and once
+// in app.js's boot path. It is ONE decision now, and that is a consequence of the split
+// rather than a simplification: the panel is a child of #auth-container, which is
+// `display: none` until showAuth() sets it inline, and BOTH skip cases — a stored
+// session, a Google return — route to showApp() or to the SSO wait screen and never call
+// showAuth() at all. A panel that is never displayed cannot flash, so a pre-paint
+// attribute has nothing left to do.
+//
+// It is asserted as GONE FROM BOTH FILES rather than merely un-asserted: a pre-paint
+// attribute nobody sets, beside a stylesheet rule nobody matches, both look like working
+// code — and the next person to move the panel would find out otherwise.
+head('arriving signed in skips the panel, and the skip is asked in one place');
 const prePaint = (html.match(/<head>[\s\S]*?<\/head>/) || [''])[0];
-ok('index.html decides the skip before paint, off BOTH stored keys',
-  /getItem\('ipb_user'\)/.test(prePaint) && /getItem\('ipb_session'\)/.test(prePaint));
-// Before the body is parsed, or the person whose session is resuming sees the
-// splash flash for a frame before app.js hides it.
-ok('...and marks it with data-splash="skip"',
-  /setAttribute\('data-splash', 'skip'\)/.test(prePaint));
-ok('base.css hides the splash off that exact attribute',
-  /html\[data-splash="skip"\]\s*#splash-screen\s*\{[^}]*display:\s*none/.test(read('../base.css')));
+ok('index.html no longer decides the skip before paint',
+  // Both the setter AND any selector that could act on it. Not a bare scan for the
+  // string: index.html carries a note saying what used to be here and why it left, and
+  // that note names the attribute — a scan would fail on the record of the deletion,
+  // which is the opposite of what this is for.
+  !/setAttribute\('data-splash'/.test(html) && !/html\[data-splash/.test(html));
+ok('...and the head script no longer reads the stored session at all',
+  !/getItem\('ipb_user'\)/.test(prePaint) && !/getItem\('ipb_session'\)/.test(prePaint),
+  (prePaint.match(/[^\n]*getItem\([^\n]*/) || [''])[0]);
+ok('...and base.css no longer hides anything off that attribute',
+  !/data-splash/.test(read('../base.css')));
 ok('app.js asks it once, through hasStoredSession()',
   /function hasStoredSession\(\)/.test(appJs) &&
   /localStorage\.getItem\(USER_KEY\) && localStorage\.getItem\(SESSION_KEY\)/.test(appJs));
-// ...and the NAMES agree, not merely the shape. "index.html reads two keys" is not
-// the claim; "index.html reads the two keys app.js reads" is. A renamed constant on
-// one side is exactly the drift this block exists to catch, and reading the
-// literals out of their declarations is the only way to compare them.
-const userKey = (appJs.match(/const USER_KEY\s*=\s*'([^']+)';/) || [])[1];
-const sessionKey = (appJs.match(/const SESSION_KEY\s*=\s*'([^']+)';/) || [])[1];
-ok('app.js declares the two keys it checks',
-  !!userKey && !!sessionKey, { user: userKey, session: sessionKey });
-ok('index.html checks THOSE keys, spelled the same way',
-  !!userKey && !!sessionKey &&
-  prePaint.includes("getItem('" + userKey + "')") &&
-  prePaint.includes("getItem('" + sessionKey + "')"),
-  { user: userKey, session: sessionKey });
-ok('the boot path consults the same predicate',
-  /if \(hasStoredSession\(\)\) \{ dismissSplash\(true\); return; \}/.test(appJs));
+// ...and the boot path consults THAT predicate, not a second copy of the condition.
+// It returns before checkHandoff() and before warmBackend(): a device that is already
+// signed in must not pay a backend wake-up for a sign-in screen it will never see.
+ok('the boot path leaves through the same predicate',
+  /if \(hasStoredSession\(\)\) \{ routeBoot\(\); return; \}/.test(appJs),
+  (appJs.match(/[^\n]*hasStoredSession\(\)[^\n]*/) || [''])[0]);
+ok('...before the handoff is even looked for, and before the backend is woken',
+  appJs.indexOf('if (hasStoredSession()) {') < appJs.indexOf('const handoff = checkHandoff();') &&
+  appJs.indexOf('const handoff = checkHandoff();') < appJs.indexOf('warmBackend();'));
 // The old once-per-device flag is gone, not merely unused: a leftover write would
 // keep working and quietly make the intro once-per-device again for anyone whose
 // key it set, which is the bug the owner asked to have removed.
@@ -392,34 +397,47 @@ ok('the intro is recorded against the running version, not against the device',
   /localStorage\.getItem\(INTRO_DONE_KEY\) === APP_VERSION/.test(appJs) &&
   /const INTRO_DONE_KEY\s*=\s*'[^']+';/.test(appJs));
 
-// The splash is sized to the VIEWPORT, not to the video's own pixels. This is
-// asserted because the wrong version is the one that looks right when you read
-// it: `min-width/min-height: 100%` with `width/height: auto` reads as full-bleed,
-// but a replaced element with auto sizing keeps its INTRINSIC size and the
-// minimums only ever raise it. That shipped, and put a 1080x1920 element on a
-// phone, so the centring crop showed 47% x 43% of the frame against the desktop's
-// 74% x 74% — the owner reported the result as the mobile intro "not appearing
-// properly". object-fit: cover is what does the cropping, deliberately, once the
-// element is the size of the screen.
-head('the splash video fills the screen instead of zooming into the middle of it');
-const splashVideo = (read('../base.css').match(/\.splash-video\s*\{[^}]*\}/) || [''])[0];
-ok('.splash-video is pinned to the viewport, not to its own pixel size',
-  /inset:\s*0/.test(splashVideo) &&
-  /width:\s*100%/.test(splashVideo) && /height:\s*100%/.test(splashVideo),
-  splashVideo);
-ok('...and it does not size itself from the video\'s intrinsic dimensions',
-  !/width:\s*auto/.test(splashVideo) && !/height:\s*auto/.test(splashVideo) &&
-  !/min-width/.test(splashVideo) && !/min-height/.test(splashVideo),
-  splashVideo);
-ok('object-fit: cover does the cropping, so the aspect ratio is preserved',
-  /object-fit:\s*cover/.test(splashVideo));
-// The phone cut is chosen by a media query on <source>, and the phone cut is the
-// portrait one — so if this pairing drifts, the phone silently gets the 16:9
-// desktop frame it has no room for.
-ok('the portrait mobile cut is offered first, gated to phone widths',
-  /intro_ipassbookv2_mobile\.mp4[\s\S]{0,120}max-width:\s*639px/.test(html) &&
-  html.indexOf('intro_ipassbookv2_mobile.mp4') < html.indexOf('intro_ipassbookv2.mp4"'),
-  (html.match(/<video id="splash-video"[\s\S]{0,400}/) || [''])[0]);
+// THE STILL AND THE VIDEO OCCUPY ONE SQUARE, and the square is what makes the handover
+// between them happen at the same coordinates and the same scale. Asserted rather than
+// assumed, because this is the same class of bug the splash shipped once: the wrong
+// version is the one that looks right when you read it — `min-width/min-height: 100%`
+// with `width/height: auto` reads as full-bleed, but a replaced element with auto sizing
+// keeps its INTRINSIC size and the minimums only ever raise it, which put a 1080x1920
+// element on a phone and showed 47% x 43% of the frame. Here both children are absolutely
+// positioned against the stage, so there is no intrinsic size left to fight.
+//
+// The squareness is also load-bearing for the heartbeat: the three node coordinates are
+// percentages of THIS box, measured by the owner against the master artwork's own 2048²
+// canvas. Re-shaping the stage moves every node without an error anywhere.
+head('the still and the video occupy one square, so the handover does not move');
+const brandStage = (read('../base.css').match(/\.brand-stage\s*\{[^}]*\}/) || [''])[0];
+ok('.brand-stage is a square, and it is the box the heartbeat percentages are of',
+  /position:\s*relative/.test(brandStage) && /aspect-ratio:\s*1\s*\/\s*1/.test(brandStage),
+  brandStage);
+ok('...and it declares itself a container, which is what sizes the nodes',
+  /container-type:\s*inline-size/.test(brandStage), brandStage);
+const brandMedia = (read('../base.css').match(/\.brand-still,\s*\n\.brand-video\s*\{[^}]*\}/) || [''])[0];
+ok('the still and the video are both pinned to the square, not to their own pixels',
+  /inset:\s*0/.test(brandMedia) &&
+  /width:\s*100%/.test(brandMedia) && /height:\s*100%/.test(brandMedia) &&
+  !/width:\s*auto/.test(brandMedia) && !/height:\s*auto/.test(brandMedia) &&
+  !/min-width/.test(brandMedia) && !/min-height/.test(brandMedia),
+  brandMedia);
+ok('object-fit: contain letterboxes both into it, so neither is cropped against the other',
+  /object-fit:\s*contain/.test(brandMedia));
+// THE CROSSFADE IS ONE ATTRIBUTE, and it ships as "rest" in the markup, so a browser with
+// no JavaScript gets the still and the heartbeat and never asks for the video. Both
+// halves are pinned because either alone is broken: the rule without the markup default
+// flashes an empty panel, and the markup default without the rule means the video never
+// appears at all.
+ok('the resting state is what the markup ships, and one attribute is the whole crossfade',
+  /<div class="auth-brand-panel" data-brand="rest"/.test(html) &&
+  /\[data-brand="video"\]\s*\.brand-video\s*\{\s*opacity:\s*1/.test(read('../base.css')));
+// It plays in ONE HALF of a screen whose other half is a usable form, so no rule may pin
+// it to the viewport any more. A leftover `.splash-video` would be dead CSS that reads as
+// live, and the next person to reach for it would find the video under the doors.
+ok('the video fills its half of the screen and no longer the whole of it',
+  !/\.splash-video/.test(html) && !/\.splash-video/.test(read('../base.css')));
 
 // ── The app icon ─────────────────────────────────────────────────────────────
 // The icon set replaced a letterhead PNG that was standing in as one. A manifest
@@ -820,8 +838,13 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // …and a column is a column at EVERY width, so there is no wide-screen arrangement left
   // to undo and no media query is needed. What stood here was an auto-fit grid plus a
   // query that collapsed it.
+  // The `\{` is load-bearing. The check is "no media query REWRITES .doors", and the
+  // ground blocks do mention the name — inside a `:not(.doors)` on `.auth-main`'s direct
+  // children, which is a statement about the footing and not about this box at all.
+  // Matching the bare name fired on that. A selector is only rearranged by a rule that
+  // OPENS on it.
   ok('...and nothing rearranges them at any width, so no media query is needed',
-    !/@media[^{]*\{[^@]*\.doors/.test(baseCss));
+    !/@media[^{]*\{[^@]*\.doors\s*\{/.test(baseCss));
   ok('...and a door is the width of the column, not of its own contents',
     /\.door \{[^}]*max-width: none;/.test(baseCss) &&
     /\.doors \{[^}]*max-width: 420px;/.test(baseCss));
@@ -1328,12 +1351,26 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /<a class="wa-corner" id="whatsapp-btn"[^>]*style="display:none"/.test(html) &&
     /function wireWhatsApp\(\) \{[\s\S]{0,300}?const url = CONFIG\.WHATSAPP_URL;/.test(appCode) &&
     /if \(!url\) \{ btn\.style\.display = 'none'; return; \}/.test(appCode));
-  // It is fixed to the SCREEN and not to the head, so it stays put while the page scrolls —
-  // and it clears the phone's own status bar via the inset, because a Safari tab on a notched
-  // phone draws under it.
-  ok('...pinned to the screen’s corner, clear of the phone’s own status bar',
+  // ⚠ IT IS A LABELLED PILL IN THE BOTTOM-RIGHT AS OF 2026-10-10, NOT A BARE DISC IN THE
+  // TOP-RIGHT. The owner: *"whatsapp button to be made as in indrones.com 'get in touch'"*.
+  // What the old assertions pinned — a 44px grey circle whose meaning had to be guessed, or
+  // hovered for a `title` — is exactly what he asked to have replaced, so the position half
+  // of this check moved with the design rather than being deleted.
+  ok('...carrying the words, not a glyph a person has to guess at',
+    /<span class="wa-label" data-i18n="door\.whatsappCta">Get in touch<\/span>/.test(html) &&
+    /\.wa-corner \{[\s\S]*?background: var\(--ind-wa\)/.test(baseCss) &&
+    /\.wa-corner:hover \{[\s\S]*?background: var\(--ind-wa-hi\)/.test(baseCss));
+  // The visible word and the spoken name must agree, or voice control says what it can see
+  // and hits nothing (WCAG 2.5.3). This is the one place the pair can drift.
+  ok('...and its spoken name begins with the words printed on it',
+    /'door\.whatsapp':\s*'Get in touch/.test(i18nCode) &&
+    /'door\.whatsappCta':\s*'Get in touch'/.test(i18nCode));
+  // Fixed to the SCREEN and not to the head, so it stays put while the page scrolls — and it
+  // clears the phone's own home indicator via the inset, because a Safari tab on a notched
+  // phone draws under the bottom edge. `top` was the status bar's inset and went with the move.
+  ok('...pinned to the screen’s corner, clear of the phone’s own home indicator',
     /\.wa-corner \{[\s\S]*?position: fixed/.test(baseCss) &&
-    /\.wa-corner \{[\s\S]*?env\(safe-area-inset-top/.test(baseCss) &&
+    /\.wa-corner \{[\s\S]*?env\(safe-area-inset-bottom/.test(baseCss) &&
     /\.wa-corner \{[\s\S]*?env\(safe-area-inset-right/.test(baseCss));
 }
 

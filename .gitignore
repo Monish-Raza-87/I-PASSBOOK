@@ -46,6 +46,7 @@ tools/.cache/theme-shots/
 # reads it.
 tools/.cache/*.mjs
 tools/.cache/*.js
+tools/.cache/*.sh
 tools/.cache/*.txt
 tools/.cache/*.log
 
@@ -53,3 +54,10 @@ tools/.cache/*.log
 dist/
 # A third-party log analyser, downloaded to read for ideas. Not ours to commit.
 indrones-dev-loganalyzer-*/
+
+# The brand masters: four 2048px presentation plates plus the intro video, ~24 MB.
+# What SHIPS is derived from them and IS tracked — assets/brand-panel-*.png and
+# assets/brand-intro.mp4, produced by tools/make-brand-assets.ps1 — so a clone needs
+# none of this. It also blocks every deploy while it sits untracked:
+# tools/deploy-ghpages.mjs refuses on any `git status --porcelain` output.
+Brand Elements I-PASSBOOK/

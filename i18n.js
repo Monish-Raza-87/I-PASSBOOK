@@ -266,7 +266,15 @@
     // button every site in this shape carries, and the owner's reason is the honest one:
     // there IS no sign-up here, every account is provisioned by an admin. So the corner
     // holds the thing a person who cannot get in actually needs.
-    'door.whatsapp':      'Chat with us on WhatsApp',
+    //
+    // ⚠ THIS IS THE BUTTON'S ACCESSIBLE NAME, AND IT MUST BEGIN WITH THE WORDS ON THE
+    // BUTTON. The owner asked on 2026-10-10 for indrones.com's own "Get in touch", which
+    // carries a visible label as well as an `aria-label`; an `aria-label` REPLACES the
+    // text for a screen reader, so a name that did not contain "Get in touch" would leave
+    // a voice-control user saying the words they can see and hitting nothing (WCAG 2.5.3,
+    // Label in Name). indrones.com's own string does begin with them, and so does this one.
+    'door.whatsapp':      'Get in touch on WhatsApp',
+    'door.whatsappCta':   'Get in touch',
 
     // ── The customer's panel ─────────────────────────────────────────────────
     // THE OWNER'S OWN COPY, written out in his message of 2026-10-08 and kept verbatim,
@@ -573,7 +581,8 @@
     'door.customer':      'ग्राहक',
     'door.openSpace':     'कस्टमर स्पेस खोलें',
     'door.expand':        '{role} साइन-इन दिखाएँ',
-    'door.whatsapp':      'WhatsApp पर हमसे बात करें',
+    'door.whatsapp':      'WhatsApp पर संपर्क करें',
+    'door.whatsappCta':   'संपर्क करें',
 
     // ── The customer's panel ─────────────────────────────────────────────────
     'cust.welcome':       'स्वागत है! यह I-PASSBOOK है',

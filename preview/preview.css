@@ -1166,15 +1166,90 @@
   --ind-on-yellow:     #171717;  
 
   
-  --ind-accent-ink:    #7a5600;  
+  --ind-accent-ink:    var(--ind-on-yellow);  
   --ind-accent-soft:   #fff7d9;  
   --ind-accent-line:   #f0dfa8;  
+
+  
+  --ind-black:         #0b0b0b;
+  --ind-white:         #f8f8f8;
+
+  
+  --ind-paper:         #ffffff;
+  --ind-paper-alt:     #f1f1ee;
+  --ind-paper-rule:    #e6e6e2;
+
+  
+  --ind-wa:            #25d366;  
+  --ind-wa-hi:         #20bd5c;  
 }
 [data-theme="dark"] {
   --ind-accent-ink:    #ffc400;  
   --ind-accent-soft:   #3a2e00;
   --ind-accent-line:   #6b5500;
 }
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground="yellow"] ~ .auth-main {
+    background: var(--ind-yellow);
+    --accent:          var(--ind-on-yellow);
+    --ind-muted:       var(--ind-on-yellow);
+    --glass-fill:      var(--ind-paper);
+    --glass-fill-base: var(--ind-paper);
+  }
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main {
+    
+    background: linear-gradient(90deg,
+      var(--ind-paper-alt)  0%,
+      var(--ind-black)      9%);
+    --accent:          var(--ind-on-yellow);
+    --ind-muted:       var(--ind-on-yellow);
+    --glass-fill:      var(--ind-paper-alt);
+    --glass-fill-base: var(--ind-paper-alt);
+    
+    --ind-rule:        var(--ind-paper-rule);
+  }
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground="horizon"] ~ .auth-main > :not(.doors) {
+    --accent:     var(--ind-yellow);
+    --ind-muted:  var(--ind-paper-alt);
+    --ink-gray-5: var(--ind-paper-alt);
+    color: var(--ind-paper-alt);
+  }
+#auth-container {
+    
+    --ind-fuse-feather:
+      radial-gradient(38% 130% at 49% 50%,
+        rgba(255, 196, 0, 0.32) 0%, rgba(255, 196, 0, 0.10) 42%, transparent 72%),
+      linear-gradient(96deg,
+        var(--ind-black) 0%, #101010 41.5%, #1d1808 45%,
+        #6b5200 48.5%, #d9a600 51.5%, var(--ind-yellow) 55%,
+        #ffc400 62%, #ffd21a 80%, #ffe066 100%);
+    
+    --ind-fuse-silver: linear-gradient(97deg,
+      var(--ind-black) 0%, #141414 41%, #3a3a37 45%,
+      #9a9a94 48%, var(--ind-paper-alt) 50.5%, #fffdf4 53%,
+      #ffea9e 57%, var(--ind-yellow) 63%,
+      #ffd21a 80%, #ffe066 100%);
+  }
+:root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-feather"]) { --ind-ground: var(--ind-fuse-feather); }
+:root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-silver"])  { --ind-ground: var(--ind-fuse-silver); }
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {
+    --glass-blur:      blur(30px) saturate(1.9);
+    
+    --glass-fill: linear-gradient(154deg,
+      rgba(255, 255, 255, 0.84)   0%,
+      rgba(255, 255, 255, 0.66)  42%,
+      rgba(255, 255, 255, 0.44) 100%);
+    --glass-fill-base: color-mix(in srgb, var(--ind-paper) 54%, transparent);
+    --glass-edge:      rgba(255, 255, 255, 0.95);
+    
+    --accent:    var(--ind-on-yellow);
+    --ind-muted: var(--ind-on-yellow);
+
+    
+    --btn-solid-bg:        var(--ind-paper-alt);
+    --btn-solid-bg-hover:  var(--ind-paper-rule);
+    --btn-solid-bg-active: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));
+    --btn-solid-fg:        var(--ind-on-yellow);
+  }
 
 /* ============================================================
    palette.css — the accent role, and the four selectable palettes
@@ -1246,7 +1321,7 @@
    as text on the dark ground and unreadable on a light one; see base.css. */
 :root,
 [data-palette="yellow"] {
-  --accent: var(--ind-accent-ink); /* 6.54:1 light & cream · 11.18:1 dark */
+  --accent: var(--ind-accent-ink); /* 17.62:1 light · 17.05:1 cream · 11.18:1 dark */
   --accent-soft: var(--ind-accent-soft);
   --accent-soft-line: var(--ind-accent-line);
   --accent-bar: var(--ind-yellow); /* a fill, so it is the brand value in both */
@@ -1517,6 +1592,11 @@ html { -webkit-text-size-adjust: 100%; }
    .pv-phone's overflow. The grid never got the chance to collapse to one column,
    because its container had already been forced wider than the phone. */
 .pv-app .auth-wrap { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 2rem 1rem; }
+/* The sign-in screen's two columns, at phone width they are stacked and transparent —
+   the panel draws only its head, and the form column is the rest of the page. See the
+   note on screenSignIn(). */
+.pv-app .auth-brand-panel { display: flex; flex-direction: column; align-items: center; width: 100%; }
+.pv-app .auth-main { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; width: 100%; min-width: 0; }
 .pv-app .glass-card { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 0.7rem; }
 .pv-app .landing-head { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; text-align: center; }
 .pv-app .landing-mark { width: 40px; height: 40px; }

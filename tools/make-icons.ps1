@@ -1,4 +1,4 @@
-# make-icons.ps1 — regenerate the app icon set from the brand master.
+# make-icons.ps1 — regenerate the app icon set from the brand masters.
 #
 #   pwsh -File tools/make-icons.ps1
 #
@@ -7,109 +7,96 @@
 # sharp/jimp to reach for. System.Drawing is in-box on Windows, needs no
 # download, and is what generated the icons that ship today.
 #
-# ── The master changed, and this file changed with it ────────────────────────
+# ── THERE ARE TWO MASTERS, AND THEY ARE NOT THE SAME PICTURE ──────────────────
 #
-# Everything below used to be built from `assets/icon-master.jpeg`, the 2025
-# disc-and-script mark. On 2026-10-10 the owner replaced the brand with **Option A
-# The Telemetry Grid & Sub-Branding Variant** and said, in his own words: "I can
-# see the icon of our app in browser tab is still not updated, we need to use our
-# same logo everywhere which is Option A". Asked whether the icon should be the
-# monogram or the whole lockup he answered **"The full lockup."** So the source is
-# now `assets/icon-master.png` and the three square icons are the whole lockup,
-# annotations and all — the `[0.5x]` dimension marks and crosshairs are part of
-# what that variant IS, not dirt to be cleaned off it.
+# On 2026-10-10 the owner delivered two files and named their slots himself:
+# "Mobile and web browser tab logo are kept in `Brand Elements I-PASSBOOK` by file
+# name Mobile Logo and Browser Tab Logo." Read as a pair, the difference between
+# them is the whole design:
 #
-# ── Why the master in the repo is 1024 and not the owner's 2048 ───────────────
+#   * `Browser Tab Logo.png`  -> assets/icon-master.png        the mark ALONE
+#   * `Mobile Logo.png`       -> assets/icon-master-plate.png  the mark plus the
+#                                                              TELEMETRY GRID and
+#                                                              CROSSHAIRS, on an
+#                                                              opaque near-white field
 #
-# The delivered master is 2048x2048 RGBA and 4.7 MB. `Brand Elements I-PASSBOOK/`
-# is untracked and gitignored (24 MB of master art has no business in a public
-# repo, and untracked files block tools/deploy-ghpages.mjs), so a clone with no
-# access to that folder could not regenerate a single icon. The committed master
-# is therefore the same artwork resampled to 1024x1024 — 1.2 MB — which is the
-# largest size anything here asks for: 512 for the Android/Chrome tile, and 505
-# for the mark's crop. Nothing downstream needs a pixel the 1024 does not carry.
+# That was not obvious from the names, and it is not visible in a thumbnail: the
+# two share a canvas ratio to four decimals (478x522 and 741x809 are the same
+# composition at 1.55x), so they look like one file exported twice. Rendering the
+# difference is what settled it — tools/.cache/master-diff.png, 2026-10-10, three
+# panels: the tab master with no hairlines on it at all, the plate master framed by
+# them, and the per-pixel difference lighting the frame up. **Check that picture
+# before changing anything here.**
 #
-# ── The borderless mark, and why it is a COLOUR key and not a flood fill ──────
+# So the split this script builds is not arbitrary, it is the one the artwork asks
+# for:
 #
-# The square icons keep their background on purpose: a home-screen tile is square
-# and iOS/Android mask it themselves. Inside the app it is the opposite — the
-# owner's words about the old one were that it "comes in a shape of square" and
-# should "feel real embedded into the page". So this also writes
-# assets/icon-mark.png: the mark with its background made TRANSPARENT, for the
-# sidebar, the sign-in panel and the emailed door page.
+#   * the CLEAN mark goes everywhere the app draws the brand itself — the sidebar,
+#     the sign-in panel, the tab, the handoff page. At the sizes those use (16px in
+#     a tab strip, 26px in the sidebar) the grid is sub-pixel, so all it can do is
+#     dirty the mark. This is the same fault the owner had already reported on the
+#     handoff page, where the old mark's crosshairs "read as dirt" at 56px.
+#   * the FRAMED mark goes on the three square tiles, where an OS draws it at 180
+#     and 512 and the grid is legible and is the point of the variant.
 #
-# The old mark needed a border-seeded FLOOD FILL here, because its monogram and
-# its "Passbook" script were the SAME COLOUR as the background they sat on, and
-# only connectivity could tell them apart — and that fill needed a `RestoreDisc`
-# afterwards, because it leaked into the circle through the knockout band behind
-# the script and punched the artwork out. None of that survives this change:
+# ── Why the masters in the repo are copies ────────────────────────────────────
 #
-#   * Option A's field is `#fffffd`, flat within a few levels, and its artwork is
-#     three SOLID inks — navy `#2b2b3a`, brand yellow `#f8c808`, and the darker
-#     yellow `#b88900` facet on the bolt. Every one of them is 200+ away from the
-#     field. So the background is separable by colour alone, and a flood fill
-#     would only introduce the failure mode it once had to be patched for.
-#   * There is no disc and no knockout, so there is nothing to restore. The
-#     `RestoreDisc` geometry is specific to the old circle and is deleted rather
-#     than left dormant — a dormant branch keyed to a mark that no longer exists
-#     is a trap for whoever reads this next.
+# `Brand Elements I-PASSBOOK/` is untracked and gitignored (24 MB of master art has
+# no business in a public repo, and untracked files block tools/deploy-ghpages.mjs),
+# so a clone with no access to that folder could not regenerate a single icon. The
+# two files in assets/ are the owner's originals verbatim — no resample, nothing to
+# go stale. To refresh them, copy them over and re-run this.
 #
-# ── What the key deliberately KEEPS ──────────────────────────────────────────
+# ── No colour key any more ────────────────────────────────────────────────────
+ #
+# There used to be one, and it was the most delicate thing in this file: the 2025
+# mark was a lockup on a flat field with its monogram and script in the SAME COLOUR
+# as that field, so only a border-seeded flood fill could tell them apart — and it
+# leaked through the knockout band and had to be patched with a `RestoreDisc`. All
+# of it is gone, and not because the key got better: `icon-master.png` arrives with
+# an alpha channel already (60% clear, 39% opaque, 2% edge ramp — measured,
+# tools/.cache/master-probe.ps1). A key over artwork that is already keyed would
+# only add the failure mode this file spent a year working around.
 #
-# The blueprint gridlines and the crosshairs are drawn ON TOP of the artwork in
-# the master, in a near-black hairlines grey. They are further from the field
-# than the navy is, so a colour key keeps them — and that is the right answer,
-# not an oversight: the telemetry grid is the point of this variant. At the 26px
-# the sidebar draws the mark they are sub-pixel and vanish on their own; at 512
-# they read as the spec-sheet hairlines the design is built from.
-#
-# The key is an ALPHA RAMP, not a cut, so the anti-aliased edge of every shape
-# keeps its blend — a hard threshold leaves a one-pixel staircase that is
-# invisible at 60px and obvious at 512. Colours are NOT snapped to the nearest
-# ink, because the blend of an ink with this field composites correctly on the
-# light page by construction; on the dark page the filter below does not care.
+# ⚠ What replaced it is a crop, and a crop is the OTHER silent failure: the wrong
+# rectangle still produces a valid PNG of the right width, showing a piece of the
+# artwork to nobody who does not look. So the crop is measured off the alpha at run
+# time rather than hardcoded, and the checks below refuse to write if it found
+# nothing or found everything.
 
 param(
-  [string]$Source = (Join-Path $PSScriptRoot '..\assets\icon-master.png'),
-  [string]$OutDir = (Join-Path $PSScriptRoot '..\assets')
+  [string]$TabMaster   = (Join-Path $PSScriptRoot '..\assets\icon-master.png'),
+  [string]$PlateMaster = (Join-Path $PSScriptRoot '..\assets\icon-master-plate.png'),
+  [string]$OutDir      = (Join-Path $PSScriptRoot '..\assets')
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
-if (-not (Test-Path $Source)) { throw "No master image at $Source" }
+foreach ($m in @($TabMaster, $PlateMaster)) {
+  if (-not (Test-Path $m)) { throw "No master image at $m" }
+}
 
-# name -> edge length. 192 is the favicon; 512 is what Android/Chrome want for the
-# home screen; 180 is the exact size iOS asks for by file name.
+# name -> edge length. 192 and 512 are what the manifest declares and what
+# Android/Chrome want for the home screen; 180 is the exact size iOS asks for by
+# file name.
 $targets = [ordered]@{
   'icon-192.png'         = 192
   'icon-512.png'         = 512
   'apple-touch-icon.png' = 180
 }
 
-# ── The mark's crop, in the 1024px master's pixels ────────────────────────────
-#
-# The master is a stacked lockup: "IND…RONES" on top, the big angular P in the
-# middle, "PASSBOOK" and the strap line below. Only the P is the mark — the three
-# in-app placements all sit it BESIDE the name already spelled out in text, so
-# handing them the full lockup would say the brand twice.
-#
-# These four numbers were MEASURED off the 2048 master, not guessed: a per-row and
-# per-column ink-density scan (tools/.cache probes, 2026-10-10) put the P's ink at
-# x 566..1541, y 488..1583, and the box below is that, padded ~5px a side and
-# halved with everything else. They are not self-locating, so the run below
-# ASSERTS that the crop still lands on the mark — see the checks after the key. If
-# the master is ever replaced with a differently-composed lockup, this script
-# stops instead of shipping the wordmark, or the strap, as "the mark".
-$MarkBox = @{ X = 280; Y = 240; W = 505; H = 555 }
+# The clean mark, sized by its width. 512 is what the app's own CSS assumes
+# (`.brand-mark img` sizes by height and lets the width follow) and what
+# smoke-shell.mjs asserts.
 $MarkWidth = 512
 
-# What the key calls background. Measured, not chosen: the field is flat within ~5
-# levels of itself and the nearest ink is 212 away. 12 sits below the field's own
-# noise; the ramp tops out at 192, well under the navy's 212, so every solid ink
-# pixel comes out fully opaque rather than merely dark.
-$FieldTolerance = 12
-$KeyRamp        = 180
+# Tolerance for "this pixel is artwork and not the plate", used only to sanity
+# check the plate master. The plate is a near-white field with +/-3 levels of
+# export noise — measured, not assumed (tools/.cache/master-probe.ps1 found 30
+# distinct colours on the border ring, spanning 252..255) — so a threshold well
+# above that separates artwork from noise.
+$PlateTolerance = 24
 
 function New-Canvas([int]$size) {
   New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -133,7 +120,7 @@ function Resize-Step($src, [int]$size) {
 }
 
 # Halve while the current edge is more than twice the target, then finish. A
-# single bicubic pass straight down to 180 softens the lockup's edges noticeably;
+# single bicubic pass straight down to 180 softens the hairlines noticeably;
 # stepping down to within 2x and finishing once keeps them crisp.
 function Resize-To($src, [int]$size) {
   $work = $src
@@ -170,11 +157,41 @@ function Resize-Width($src, [int]$w) {
   return $final
 }
 
-# Measure the mark, so the script reports something a human can check rather
-# than just "wrote a file". Ink = luminance below 128 — which for this artwork is
-# the NAVY only, the yellow being bright. Its box as a share of the icon's width
-# tells you whether the lockup is the size you intended.
-function InkReport($bmp) {
+# The plate master is 741x809 — the same composition as the tab master, so NOT
+# square, and forcing it into a square would squash the monogram by 9%. It is
+# centred instead, and the two side bands are filled by EDGE-CLAMPING the master's
+# own outermost column across them rather than by a flat fill of the sampled plate
+# colour. A flat fill leaves a 255-vs-253 step down both edges: invisible on a
+# white page, a measurable seam on a coloured home screen, and exactly the kind of
+# one-pixel lie a 512px icon is asked about. Clamping has nothing to leave a seam
+# between, because the pixels either side of the join are the same plate.
+function New-PlatedSquare($src, $pr, $pg, $pb) {
+  $side = [Math]::Max($src.Width, $src.Height)
+  $sq = New-Object System.Drawing.Bitmap $side, $side, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $g = [System.Drawing.Graphics]::FromImage($sq)
+  Set-Quality $g
+  $g.Clear([System.Drawing.Color]::FromArgb(255, $pr, $pg, $pb))
+  $ox = [int](($side - $src.Width) / 2)
+  $oy = [int](($side - $src.Height) / 2)
+  $g.DrawImage($src, $ox, $oy, $src.Width, $src.Height)
+  $PX = [System.Drawing.GraphicsUnit]::Pixel
+  if ($ox -gt 0) {
+    $g.DrawImage($src, (New-Object System.Drawing.Rectangle 0, $oy, $ox, $src.Height),
+                       0, 0, 1, $src.Height, $PX)
+    $g.DrawImage($src, (New-Object System.Drawing.Rectangle ($ox + $src.Width), $oy, $ox, $src.Height),
+                       ($src.Width - 1), 0, 1, $src.Height, $PX)
+  }
+  if ($oy -gt 0) {
+    $g.DrawImage($src, (New-Object System.Drawing.Rectangle $ox, 0, $src.Width, $oy),
+                       0, 0, $src.Width, 1, $PX)
+    $g.DrawImage($src, (New-Object System.Drawing.Rectangle $ox, ($oy + $src.Height), $src.Width, $oy),
+                       0, ($src.Height - 1), $src.Width, 1, $PX)
+  }
+  $g.Dispose()
+  return $sq
+}
+
+function Get-Bytes($bmp) {
   $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
   $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
                         [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -182,7 +199,15 @@ function InkReport($bmp) {
   [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
   $stride = $data.Stride
   $bmp.UnlockBits($data)
+  return @($bytes, $stride)
+}
 
+# Measure the finished tile, so the script reports something a human can check
+# rather than just "wrote a file". Ink = luminance below 128 — which for this
+# artwork is the NAVY only, the yellow being bright. Its box as a share of the
+# icon's width tells you whether the mark is the size you intended.
+function InkReport($bmp) {
+  $r = Get-Bytes $bmp; $bytes = $r[0]; $stride = $r[1]
   $minX = $bmp.Width; $maxX = -1; $minY = $bmp.Height; $maxY = -1; $ink = 0
   for ($y = 0; $y -lt $bmp.Height; $y++) {
     for ($x = 0; $x -lt $bmp.Width; $x++) {
@@ -202,27 +227,20 @@ function InkReport($bmp) {
 }
 
 # What share of the finished mark is see-through, and how much of it is the two
-# inks rather than the hairlines. A key that quietly failed reads as 0%
-# transparent; one that ate the artwork reads as transparent nearly everywhere.
+# inks. A crop that quietly failed reads as 0% transparent; one that ate the
+# artwork reads as transparent nearly everywhere.
 function MarkReport($bmp) {
-  $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
-  $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
-                        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-  $bytes = New-Object byte[] ($data.Stride * $bmp.Height)
-  [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
-  $stride = $data.Stride
-  $bmp.UnlockBits($data)
-
+  $r = Get-Bytes $bmp; $bytes = $r[0]; $stride = $r[1]
   $clear = 0; $solid = 0; $yellow = 0; $navy = 0
   for ($y = 0; $y -lt $bmp.Height; $y++) {
     for ($x = 0; $x -lt $bmp.Width; $x++) {
       $i = $y * $stride + $x * 4
-      $b = $bytes[$i]; $g = $bytes[$i + 1]; $r = $bytes[$i + 2]; $a = $bytes[$i + 3]
+      $b = $bytes[$i]; $g = $bytes[$i + 1]; $r2 = $bytes[$i + 2]; $a = $bytes[$i + 3]
       if ($a -eq 0) { $clear++; continue }
       if ($a -lt 250) { continue }
       $solid++
-      if ($r -gt 200 -and $g -gt 150 -and $b -lt 120) { $yellow++ }
-      elseif ($r -lt 90 -and $g -lt 90 -and $b -lt 110 -and $b -gt $r) { $navy++ }
+      if ($r2 -gt 200 -and $g -gt 150 -and $b -lt 120) { $yellow++ }
+      elseif ($r2 -lt 90 -and $g -lt 90 -and $b -lt 110 -and $b -gt $r2) { $navy++ }
     }
   }
   $total = $bmp.Width * $bmp.Height
@@ -234,116 +252,96 @@ function MarkReport($bmp) {
   return @($line, $clear, $solid, $yellow, $navy, $total)
 }
 
-# ── The key, compiled ────────────────────────────────────────────────────────
-# Conservative C# (no interpolation, no expression bodies) so this compiles under
-# Windows PowerShell 5.1's csc as well as pwsh's Roslyn.
-Add-Type -TypeDefinition @'
-public static class BrandMark
-{
-    // Set alpha from how far each pixel is from the field colour. `bg` is one
-    // field pixel sampled from the master itself, never a literal — the field is
-    // #fffffd here but nothing in this file should have to be edited if a
-    // re-export shifts it by a level.
-    //
-    // Format32bppArgb is BGRA in memory, and so is the byte[] copied out of
-    // LockBits, which is why every index below is +2 for red.
-    public static void KeyField(byte[] px, int w, int h, int fr, int fg, int fb, int lo, int ramp)
-    {
-        for (int p = 0; p < w * h; p++)
-        {
-            int i = p * 4;
-            int dr = px[i + 2] - fr; if (dr < 0) dr = -dr;
-            int dg = px[i + 1] - fg; if (dg < 0) dg = -dg;
-            int db = px[i]     - fb; if (db < 0) db = -db;
-            int d = dr > dg ? dr : dg;
-            if (db > d) d = db;
+# ══ The two masters ═══════════════════════════════════════════════════════════
 
-            int a = (int)(255.0 * (d - lo) / ramp);
-            if (a < 0) a = 0; else if (a > 255) a = 255;
-            px[i + 3] = (byte)a;
-        }
-    }
+$tabImg  = [System.Drawing.Image]::FromFile((Resolve-Path $TabMaster))
+$tabBmp  = New-Object System.Drawing.Bitmap $tabImg
+$plateImg = [System.Drawing.Image]::FromFile((Resolve-Path $PlateMaster))
+$plateBmp = New-Object System.Drawing.Bitmap $plateImg
 
-    // Bounding box of what is left after the key, as {x0, y0, x1, y1} — the cue
-    // the checks below use to prove the crop still lands on the mark.
-    public static int[] SolidBox(byte[] px, int w, int h)
-    {
-        int minX = w, minY = h, maxX = -1, maxY = -1;
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                if (px[(y * w + x) * 4 + 3] < 128) continue;
-                if (x < minX) minX = x;
-                if (x > maxX) maxX = x;
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-        }
-        return new int[] { minX, minY, maxX, maxY };
-    }
-}
-'@
-
-$master = [System.Drawing.Image]::FromFile((Resolve-Path $Source))
-$masterBmp = New-Object System.Drawing.Bitmap $master
-
-"master: $(Split-Path $Source -Leaf)  $($masterBmp.Width)x$($masterBmp.Height)"
+"tab master   : $(Split-Path $TabMaster -Leaf)   $($tabBmp.Width)x$($tabBmp.Height)"
+"plate master : $(Split-Path $PlateMaster -Leaf)   $($plateBmp.Width)x$($plateBmp.Height)"
 ""
 
-foreach ($name in $targets.Keys) {
-  $size = $targets[$name]
-  $icon = Resize-To $masterBmp $size
-  $path = Join-Path $OutDir $name
-  $icon.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
-  "{0,-22} {1}x{1}  {2,8:N0} bytes   {3}" -f $name, $size, (Get-Item $path).Length, (InkReport $icon)
-  $icon.Dispose()
+# The two files share one composition, which is what makes them a pair and not two
+# unrelated exports. Pinning it catches the one edit that would quietly break this
+# script's premise: a master replaced by artwork framed differently, so that the
+# mark and the tiles stop being the same design at two scales.
+$ratioTab   = $tabBmp.Width / $tabBmp.Height
+$ratioPlate = $plateBmp.Width / $plateBmp.Height
+if ([Math]::Abs($ratioTab - $ratioPlate) -gt 0.005) {
+  throw ("The two masters are no longer the same composition: aspect {0:N4} vs {1:N4}. They are supposed to be one design at two scales, one clean and one framed by the telemetry grid. If the owner has delivered genuinely new artwork, replace them here rather than letting the mark and the tiles drift apart. Nothing was written." -f $ratioTab, $ratioPlate)
 }
+"masters agree on composition: aspect {0:N4} vs {1:N4}" -f $ratioTab, $ratioPlate
 
-# ── And the borderless mark ──────────────────────────────────────────────────
+# The plate, read off the plate master's own corner rather than written down.
+$pc = $plateBmp.GetPixel(0, 0)
+$pr = [int]$pc.R; $pg = [int]$pc.G; $pb = [int]$pc.B
+if ($pc.A -lt 250) {
+  throw "The plate master's corner is not opaque (alpha $($pc.A)) — it is not the plated file this script expects. Nothing was written."
+}
+"plate colour : rgb($pr,$pg,$pb), sampled from the plate master's corner"
 
-# A fresh 32bpp canvas: the master's alpha is opaque everywhere, and the key
-# writes the alpha directly, so this is the copy the key works on.
-$plate = New-Object System.Drawing.Bitmap $masterBmp.Width, $masterBmp.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-$g = [System.Drawing.Graphics]::FromImage($plate)
-Set-Quality $g
-$g.DrawImage($masterBmp, 0, 0, $masterBmp.Width, $masterBmp.Height)
-$g.Dispose()
+# The plate master must actually carry artwork. "differs from the plate by more
+# than the export noise" is the only test that can see it, since every pixel of it
+# is opaque and an alpha test would call the whole canvas ink.
+$inkCols = 0
+$plateProbe = 0
+for ($x = 0; $x -lt $plateBmp.Width; $x += 4) {
+  for ($y = 0; $y -lt $plateBmp.Height; $y += 4) {
+   $p = $plateBmp.GetPixel($x, $y)
+    $d = [Math]::Max([Math]::Abs($p.R - $pr), [Math]::Max([Math]::Abs($p.G - $pg), [Math]::Abs($p.B - $pb)))
+    if ($d -gt $PlateTolerance) { $inkCols++ }
+    $plateProbe++
+  }
+}
+$inkShare = [Math]::Round(100 * $inkCols / $plateProbe)
+if ($inkShare -lt 3) {
+  throw ("Only $inkShare% of the plate master differs from its own plate colour — it is blank, or its corner is not the field. Nothing was written.")
+}
+"plate carries artwork : $inkShare% of sampled pixels differ from the plate"
+""
 
-# The field, read off the master's own top-left pixel rather than written down.
-$probe = $plate.GetPixel(0, 0)
-$fr = [int]$probe.R; $fg = [int]$probe.G; $fb = [int]$probe.B
-
-$crop = New-Object System.Drawing.Rectangle $MarkBox.X, $MarkBox.Y, $MarkBox.W, $MarkBox.H
-$trimmed = $plate.Clone($crop, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-
-$all = New-Object System.Drawing.Rectangle 0, 0, $trimmed.Width, $trimmed.Height
-$data = $trimmed.LockBits($all, [System.Drawing.Imaging.ImageLockMode]::ReadWrite,
-                          [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-$bytes = New-Object byte[] ($data.Stride * $trimmed.Height)
-[System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
-
-[BrandMark]::KeyField($bytes, $trimmed.Width, $trimmed.Height, $fr, $fg, $fb, $FieldTolerance, $KeyRamp)
-
-[System.Runtime.InteropServices.Marshal]::Copy($bytes, 0, $data.Scan0, $bytes.Length)
-$trimmed.UnlockBits($data)
-
-$box = [BrandMark]::SolidBox($bytes, $trimmed.Width, $trimmed.Height)
-
-# ── The checks, which are the reason those four numbers can be hardcoded ─────
+# ══ The clean mark, from the tab master — measured and checked FIRST ══════════
 #
-# A crop is a silent failure: the wrong rectangle still produces a valid PNG of
-# the right width, and the page shows a wordmark or a strap line where the mark
-# should be, only to the person who looks. So the crop has to prove it landed on
-# the mark before anything is written.
-if ($box[2] -lt 0) {
-  throw "The key left nothing behind at all — the field it sampled ($fr,$fg,$fb) is not the artwork's background. Nothing was written."
+# ⚠ This block runs BEFORE the three tiles are written, and the order is the point.
+# Every refusal below ends "Nothing was written", and with the tiles first that
+# sentence was false: a mark that lost its bolt still left three freshly-written
+# square icons on disk, which the next `git add` would carry into a release. The
+# tiles are the output that LOOKS right and is not, so nothing is saved until both
+# halves have passed every check.
+
+# The crop is MEASURED, not hardcoded. The tab master arrives already keyed out, so
+# its own alpha says where the artwork is, and a measurement cannot fall out of date
+# the way the four numbers this replaced could.
+$tabBytes = Get-Bytes $tabBmp; $b = $tabBytes[0]; $st = $tabBytes[1]
+$minX = $tabBmp.Width; $maxX = -1; $minY = $tabBmp.Height; $maxY = -1
+for ($y = 0; $y -lt $tabBmp.Height; $y++) {
+  for ($x = 0; $x -lt $tabBmp.Width; $x++) {
+    if ($b[$y * $st + $x * 4 + 3] -lt 128) { continue }
+    if ($x -lt $minX) { $minX = $x }; if ($x -gt $maxX) { $maxX = $x }
+    if ($y -lt $minY) { $minY = $y }; if ($y -gt $maxY) { $maxY = $y }
+  }
 }
-$reachX = [Math]::Max($box[0], $trimmed.Width - 1 - $box[2])
-$reachY = [Math]::Max($box[1], $trimmed.Height - 1 - $box[3])
-if ($reachX -gt ($trimmed.Width * 0.06) -or $reachY -gt ($trimmed.Height * 0.06)) {
-  throw ("The mark's crop is no longer tight to the artwork — the ink stops {0}px short horizontally and {1}px vertically inside a {2}x{3} crop. `$MarkBox in this script is measured for ONE lockup; re-measure it rather than shipping a crop that holds something else. Nothing was written." -f $reachX, $reachY, $trimmed.Width, $trimmed.Height)
+
+if ($maxX -lt 0) {
+  throw "The tab master has no opaque pixels at all — it is blank, or it is not the keyed-out file. Nothing was written."
 }
+$inkW = $maxX - $minX + 1
+$inkH = $maxY - $minY + 1
+
+# A crop that found nothing, or found the whole canvas, is a crop that learned
+# nothing. Both are the shapes a silent failure takes: the first ships an empty
+# PNG, the second ships the file unchanged and calls it cropped.
+if ($inkW -lt ($tabBmp.Width * 0.30)) {
+  throw ("The tab master's ink is only $inkW of $($tabBmp.Width) px wide. Either the alpha is broken or this is not the clean mark. Nothing was written.")
+}
+if ($inkW -ge $tabBmp.Width -and $inkH -ge $tabBmp.Height) {
+  throw "The tab master's ink fills its whole canvas — it has no alpha to crop against. Nothing was written."
+}
+
+$crop = New-Object System.Drawing.Rectangle $minX, $minY, $inkW, $inkH
+$trimmed = $tabBmp.Clone($crop, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 
 $mark = Resize-Width $trimmed $MarkWidth
 $markPath = Join-Path $OutDir 'icon-mark.png'
@@ -353,7 +351,7 @@ $report = MarkReport $mark
 # mark looking broken: it is the bolt, and a mark that lost it is still a
 # recognisable shape, so nothing about the file's size or dimensions would say so.
 if ($report[3] -lt ($report[2] * 0.10)) {
-  throw ("Only {0}% of the mark's opaque pixels are brand yellow. The bolt did not survive the key. Nothing was written." -f [Math]::Round(100 * $report[3] / [Math]::Max(1, $report[2])))
+  throw ("Only {0}% of the mark's opaque pixels are brand yellow. The bolt did not survive the crop. Nothing was written." -f [Math]::Round(100 * $report[3] / [Math]::Max(1, $report[2])))
 }
 if ($report[4] -lt ($report[2] * 0.05)) {
   throw ("Only {0}% of the mark's opaque pixels are navy — the crop is probably not on the monogram. Nothing was written." -f [Math]::Round(100 * $report[4] / [Math]::Max(1, $report[2])))
@@ -364,16 +362,31 @@ if ($clearPct -lt 20 -or $clearPct -gt 70) {
   throw "The mark is $clearPct% transparent, which is neither a keyed-out mark nor a plausible one. Nothing was written."
 }
 
+# Both halves have passed. Only now are the tiles written — see the note above the
+# mark's measurement for why this loop is not where it used to be.
+$square = New-PlatedSquare $plateBmp $pr $pg $pb
+
+foreach ($name in $targets.Keys) {
+  $size = $targets[$name]
+  $icon = Resize-To $square $size
+  $path = Join-Path $OutDir $name
+  $icon.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+  "{0,-22} {1}x{1}  {2,8:N0} bytes   {3}" -f $name, $size, (Get-Item $path).Length, (InkReport $icon)
+  $icon.Dispose()
+}
+
 $mark.Save($markPath, [System.Drawing.Imaging.ImageFormat]::Png)
 ""
 "{0,-22} {1}x{2}  {3,8:N0} bytes   {4}" -f 'icon-mark.png', $mark.Width, $mark.Height, (Get-Item $markPath).Length, $report[0]
-"  field sampled at the master's corner: rgb($fr,$fg,$fb); keyed with a $FieldTolerance..$($FieldTolerance + $KeyRamp) ramp"
-"  cropped $($MarkBox.X),$($MarkBox.Y) $($MarkBox.W)x$($MarkBox.H); ink reaches to $reachX px / $reachY px of the edge"
-"  this one is the INSIDE-the-app mark: no square, no background, the page shows through."
-"  light mode uses it as drawn. Dark mode does NOT invert it any more — see the note in"
-"  base.css: inverting this artwork turns the brand yellow blue, which is not a brand."
+"  cropped to the tab master's own ink: x{0}..{1} y{2}..{3} of {4}x{5}, i.e. {6}x{7}" -f `
+  $minX, $maxX, $minY, $maxY, $tabBmp.Width, $tabBmp.Height, $inkW, $inkH
+"  no colour key ran: this artwork arrives with its alpha already in it."
+"  this one is the INSIDE-the-app mark and the TAB: no square, no background, no"
+"  telemetry grid, the page shows through. It is used as drawn in light mode."
+"  Dark mode does NOT invert it — see the note in base.css: inverting this artwork"
+"  turns the brand yellow blue, which is not a brand."
 
-$mark.Dispose(); $trimmed.Dispose(); $plate.Dispose()
-$masterBmp.Dispose(); $master.Dispose()
+$mark.Dispose(); $trimmed.Dispose(); $square.Dispose()
+$plateBmp.Dispose(); $plateImg.Dispose(); $tabBmp.Dispose(); $tabImg.Dispose()
 ""
 "Now bump CACHE_NAME in sw.js — the icons are precached under it."

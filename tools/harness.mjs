@@ -74,13 +74,26 @@ function el() {
       return (listeners.get(type) || []).length;
     },
     _listeners: listeners,
-    appendChild() {}, remove() {},
+    // `children`/`firstElementChild`/`appendChild` are REAL, like classList and style
+    // above, and for the same reason: a swallowed appendChild makes every "this
+    // render built that child" assertion vacuous. Nothing read `children` when this
+    // was a no-op, so making it work cannot have changed an existing suite's meaning —
+    // it only lets a suite seed, or read back, what a builder actually appended.
+    children: [],
+    get firstElementChild() { return this.children[0] || null; },
+    appendChild(node) { this.children.push(node); return node; },
+    insertBefore(node, ref) {
+      const i = ref ? this.children.indexOf(ref) : -1;
+      i < 0 ? this.children.push(node) : this.children.splice(i, 0, node);
+      return node;
+    },
+    remove() {},
     querySelector() { return null; }, querySelectorAll() { return []; },
     focus() {}, blur() {},
     setAttribute(n, v) { attrs.set(n, String(v)); },
     getAttribute(n) { return attrs.has(n) ? attrs.get(n) : null; },
     removeAttribute(n) { attrs.delete(n); },
-    scrollIntoView() {}, children: [], insertBefore() {}, closest() { return null; },
+    scrollIntoView() {}, closest() { return null; },
   };
 }
 
@@ -123,13 +136,28 @@ export function loadApp(bindings = '', opts = {}) {
   const storage2 = opts.splitStorage ? makeStorage() : shared;
 
   const byId = new Map();
+  // `absentIds` — ids that must answer null, as they do in a browser before the
+  // element exists. The stub answers EVERY id with an element, which is the right
+  // default (it lets a suite assert on what a render wrote without seeding the whole
+  // shell) but it makes one class of code untestable: anything guarded by
+  // `if (document.getElementById(x)) return;` sees the guard as already taken, so the
+  // build below it never runs and no suite can reach it. The pattern-setup overlay is
+  // exactly that, and that is how an empty `catch (e) { }` lived in it unnoticed.
+  const absent = new Set(opts.absentIds || []);
   const getElementById = opts.capture
     // Persistent, so innerHTML written by a render survives to be asserted on.
-    ? id => { if (!byId.has(id)) byId.set(id, el()); return byId.get(id); }
-    : () => el();
+    ? id => { if (absent.has(id)) return null; if (!byId.has(id)) byId.set(id, el()); return byId.get(id); }
+    : id => (absent.has(id) ? null : el());
 
   const ctx = {
     console, setTimeout, clearTimeout, setInterval, clearInterval,
+    // A browser global Node does not have. app.js uses it for "after the next layout
+    // pass, once" — the only way to measure something the current style change has not
+    // been applied to yet — so a suite driving one of those paths needs it to exist.
+    // The shim is a macrotask, not a frame: it says nothing about paint timing, and any
+    // assertion that depends on rAF running BETWEEN two renders is not one to write.
+    requestAnimationFrame: cb => setTimeout(() => cb(Date.now()), 0),
+    cancelAnimationFrame: id => clearTimeout(id),
     URLSearchParams, AbortController,
     // NOTE the absence of Array / Object / String / Number / Date / Math / JSON /
     // Promise / Set / Map / RegExp / Error / Intl.
@@ -151,6 +179,14 @@ export function loadApp(bindings = '', opts = {}) {
     localStorage: storage,
     sessionStorage: storage2,
     navigator: { userAgent: 'node', onLine: true },
+    // Real browser globals a bare V8 context does not have, so they belong in this
+    // list rather than in one suite's `globals`. Their absence was not harmless: the
+    // app encodes a WebAuthn credential id through btoa/atob, so the ReferenceError it
+    // threw was caught by the same broad `catch` that reported every fingerprint
+    // failure as "cancelled" — a suite driving that path would have been told a story
+    // about the app's error handling rather than about the missing global.
+    atob: globalThis.atob,
+    btoa: globalThis.btoa,
     // A browser always has these; a bare V8 context has neither. Both are no-ops
     // that change nothing observable, so they cannot make an assertion pass that a
     // browser would fail — they only let a suite drive a post-auth path (showApp
@@ -172,6 +208,11 @@ export function loadApp(bindings = '', opts = {}) {
   ctx.globalThis = ctx;
   // Extra globals a suite needs the app to see.
   if (opts.globals) Object.assign(ctx, opts.globals);
+  // A suite that needs `createElement` to yield something richer than the bare stub —
+  // because the code under test builds an element and then queries its own children
+  // back — supplies a factory. Additive: every existing suite leaves it out and gets
+  // exactly what it got before.
+  if (opts.createElement) ctx.document.createElement = opts.createElement;
   // Only when a suite supplies its own transport. app.js posts with FormData, so
   // a suite that drives the real login path needs the constructor to exist; it is
   // left undefined otherwise so no existing suite changes behaviour.

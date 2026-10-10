@@ -32,6 +32,7 @@ const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
 const html = read('../index.html');
 const viewsCss = read('../views.css');
+const baseCss = read('../base.css');
 
 // The language table, evaluated rather than regexed out of the source: its own
 // values contain escaped apostrophes, and a regex that has to know that is a test
@@ -290,6 +291,155 @@ ok('the board styles sit before the POLISH block, not after it',
   viewsCss.indexOf('THE IR BOARD') < viewsCss.indexOf('POLISH — level:'));
 ok('and the board restates no colour — every value is a token',
   !/#[0-9a-fA-F]{3,8}\b/.test(viewsCss.slice(viewsCss.indexOf('THE IR BOARD'), viewsCss.indexOf('POLISH — level:'))));
+
+// ── The list already scrolls on its own, and this is what keeps it that way ───
+// The first half of his request — "separate scroll bar for IR list" — was already
+// true and is deliberately NOT changed: `.ir-list` is its own vertical scroller and
+// the toolbar above it sits outside that scroller, so the search box and the two
+// filter strips stay put while the rows move under them. The property that makes it
+// so is `#index-view` carrying NO overflow — one added there would make the whole
+// pane scroll, toolbar and all, and nothing else in the app would look wrong.
+head('the IR list scrolls inside itself, under a toolbar that stays put');
+const listRule = ((viewsCss + baseCss).match(/\n\.ir-list\s*\{([^}]*)\}/) || [])[1] || '';
+ok('the list is its own vertical scroll area',
+  /overflow-y:\s*auto/.test(listRule) &&
+  /flex:\s*1/.test(listRule) && /min-height:\s*0/.test(listRule), listRule.trim());
+// `min-height: 0` is the half that actually fails: without it a flex item refuses to
+// shrink below its content, so the list grows past the pane and the SCROLLBAR APPEARS
+// ON THE WINDOW instead — the exact complaint this is answering.
+const paneRules = [...(baseCss + viewsCss).matchAll(/(?:^|\n)#index-view\s*\{([^}]*)\}/g)].map(m => m[1]);
+ok('...and the pane around it never scrolls, so the toolbar cannot leave the screen',
+  paneRules.length > 0 && paneRules.every(r => !/overflow/.test(r)),
+  paneRules.map(r => r.trim().replace(/\s+/g, ' ')));
+// Sibling order is the other half of "separate": a toolbar INSIDE the scroller would
+// ride up with the rows no matter what the CSS says.
+const listAt = html.indexOf('id="ir-list"');
+const toolbarAt = html.indexOf('class="list-toolbar"');
+ok('...and the toolbar is markup the list does not contain',
+  toolbarAt > -1 && listAt > toolbarAt &&
+  html.slice(toolbarAt, listAt).indexOf('id="ir-list"') === -1 &&
+  (html.match(/id="ir-list"/g) || []).length === 1);
+
+// ── The left-right bar rides ABOVE the columns, not under them ───────────────
+// The owner, 2026-10-10: "previously I have asked about separate scroll bar for IR
+// list and similarly in for board since number of columns are more, we can have
+// left-right scrollable bar on top of columns space."
+//
+// The bar is a real SECOND scrollbar, so asserting the CSS alone asserts nothing —
+// two elements kept in step drift apart silently, and a bar that has stopped moving
+// the columns looks exactly like a bar that is working. What is asserted here is that
+// the three parts agree: the element is placed before the board, CSS shows it only
+// when the board shows, and the app keeps the two scrolled together.
+head('the board\'s scroll bar rides above the columns');
+
+const barAt = html.indexOf('id="ir-board-scroll"');
+const boardAt = html.indexOf('id="ir-board"');
+// `before`, not merely `present`: a bar after the board IS the bug this element
+// exists to fix, and the two sit one line apart in the markup — exactly the layout
+// an edit moves by accident. No intervening close tag means they are siblings.
+// Sliced from the END of the bar's own markup, not from its opening tag: the bar is
+// `<div id="ir-board-scroll" …><div></div></div>`, so its own closing tags are inside
+// that span and would read as a nesting change that is not there.
+const barEnd = html.indexOf('</div></div>', barAt) + '</div></div>'.length;
+ok('the bar sits between the list and the board, as their sibling',
+  barAt > -1 && barEnd > barAt && boardAt > barEnd &&
+  barAt > html.indexOf('id="ir-list"') &&
+  html.slice(barEnd, boardAt).indexOf('</div>') === -1,
+  { barAt, barEnd, boardAt, between: html.slice(barEnd, boardAt).trim().slice(0, 120) });
+// Its one child is the thumb the app sizes. With no child there is nothing to give a
+// length to, and the bar shows a full-width thumb over a board that is still scrolling.
+ok('...and it carries the thumb element the app sizes',
+  /id="ir-board-scroll"[^>]*>\s*<div><\/div>\s*<\/div>/.test(html));
+// The board below is the scrollable region and already carries tabindex and a label;
+// a second stop for one column strip would be worse than none.
+ok('...and it is hidden from assistive tech, since the board below is the region',
+  /id="ir-board-scroll"[^>]*aria-hidden="true"/.test(html));
+
+const barRules = [...viewsCss.matchAll(/([^{}]*\.board-scrollbar[^{}]*)\{([^}]*)\}/g)];
+const shownRules = barRules.filter(m => /display:\s*block/.test(m[2]));
+ok('it is display:none until the pane carries .is-board',
+  barRules.some(m => /display:\s*none/.test(m[2])) &&
+  shownRules.length === 1 && /\.is-board/.test(shownRules[0][1]),
+  { rules: barRules.length, shown: shownRules.map(m => m[1].trim()) });
+const shownBody = shownRules.length ? shownRules[0][2] : '';
+ok('...and it scrolls sideways only, never vertically',
+  /overflow-x:\s*auto/.test(shownBody) && /overflow-y:\s*hidden/.test(shownBody),
+  shownBody.trim());
+// The board's OWN bar is deliberately kept as well: on a touch device it is the one a
+// finger meets, and hiding it would leave the last row of cards looking cut off.
+ok('the board keeps its own reachable bar too, for touch',
+  (viewsCss.match(/#index-view\.is-board\s+\.ir-board\s*\{[^}]*\}/g) || [])
+    .some(r => /overflow-x:\s*auto/.test(r)));
+
+// ── Driven, against the app's own element ────────────────────────────────────
+// `byId` memoizes elements by id, so these ARE the objects app.js is holding — a
+// mirroring test against fresh stubs would prove nothing about the app. The identity
+// check is what earns the rest: if app.js were bound to a different element, every
+// assertion below would pass while the real board scrolled alone.
+const { T: B, byId } = loadApp(
+  'scrollBoardMirror, mirrorBoardScroll, get irBoard() { return irBoard; }',
+  { capture: true });
+const board = byId.get('ir-board');
+const bar = byId.get('ir-board-scroll');
+ok('the test is holding the same board element the app is',
+  !!board && !!bar && B.irBoard === board, { same: B.irBoard === board });
+
+const thumb = { style: {} };
+bar.appendChild(thumb);
+board.scrollWidth = 2266;   // nine columns of cards, the width actually measured
+board.scrollLeft = 400;
+B.scrollBoardMirror();
+// Both jobs in one call, and they are different jobs: the WIDTH comes from the board's
+// scrollWidth (so the thumb is the right length for the columns there are), the OFFSET
+// from its scrollLeft. A version that copied clientWidth would pass a length check and
+// still draw a thumb that lies about the board.
+ok('the thumb is sized to the board\'s scrollWidth and follows its offset',
+  thumb.style.width === '2266px' && bar.scrollLeft === 400,
+  { width: thumb.style.width, barLeft: bar.scrollLeft });
+// The bar has no thumb until a render puts one there; measuring must be a no-op, not
+// a TypeError on the boot path where the markup has not been filled in yet.
+bar.children.length = 0;
+let threw = null;
+try { B.scrollBoardMirror(); } catch (e) { threw = e && e.message; }
+ok('a bar with no thumb is a no-op rather than a crash', threw === null, threw);
+
+board.scrollLeft = 640; B.mirrorBoardScroll(board, bar);
+ok('dragging the board moves the bar with it', bar.scrollLeft === 640, bar.scrollLeft);
+bar.scrollLeft = 1200; B.mirrorBoardScroll(bar, board);
+ok('...and the bar drives the board, so either end can be the one you grab',
+  board.scrollLeft === 1200, board.scrollLeft);
+
+// The re-entrancy guard, DRIVEN rather than reasoned about. Writing one element's
+// scrollLeft fires its own scroll event, which writes the other's, which fires again;
+// the stubs below make that happen on purpose, so deleting the guard hangs or overflows
+// this suite instead of quietly shipping. Two levels is the honest maximum: the write
+// each setter makes is refused by the guard, so the recursion is exactly one deep.
+const pairA = { _v: 0 }, pairB = { _v: 0 };
+let depth = 0, deepest = 0;
+for (const o of [pairA, pairB]) {
+  Object.defineProperty(o, 'scrollLeft', {
+    get() { return this._v; },
+    set(v) { this._v = v; deepest = Math.max(deepest, ++depth); B.mirrorBoardScroll(pairA, pairB); depth--; },
+  });
+}
+pairA.scrollLeft = 400;
+// EXACTLY two, not "at most": if the setters never re-entered, the depth would be 1
+// and the guard would be untested — a green assertion about code that was never run.
+ok('the two-way mirror terminates instead of echoing forever',
+  deepest === 2 && pairA.scrollLeft === 400 && pairB.scrollLeft === 400,
+  { deepest, a: pairA.scrollLeft, b: pairB.scrollLeft });
+
+// Where the mirror is re-taken. A bar measured once and never again is stale the
+// moment a column empties or the board goes full-screen, and a stale bar looks
+// completely normal — it is simply the wrong length.
+const rbBody = (appJs.match(/function renderBoard\(records\)[\s\S]*?\n\}/) || [''])[0];
+const slvBody = (appJs.match(/function setListView\(mode\)[\s\S]*?\n\}/) || [''])[0];
+ok('renderBoard re-measures after the columns are in the DOM',
+  (rbBody.match(/scrollBoardMirror\(\);/g) || []).length >= 2,
+  (rbBody.match(/.*scrollBoardMirror.*/g) || []));
+ok('...and choosing the board re-measures once the fold has been applied',
+  /requestAnimationFrame\(scrollBoardMirror\)/.test(slvBody),
+  (slvBody.match(/.*scrollBoardMirror.*/g) || []));
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

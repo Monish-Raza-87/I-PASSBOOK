@@ -632,6 +632,17 @@ is left is small.
    never by a deploy date. The backend half is unchanged in this release — it is still
    **`v85` frontend / `API_VERSION 9` backend.**
 
+   ⏳ **`v86` is BUILT AND NOT YET PUBLISHED (as of 2026-10-10).** `APP_VERSION` and
+   `CACHE_NAME` both read `v86`; all 37 smoke suites pass; the generated `preview/*.html`
+   have been rebuilt against it. It carries the eight items listed under *Done since this
+   list was written* — most of them the owner's own 2026-10-10 list. **Two of them need a
+   paste as well as a push**, because they live in `backend.gs`: the Google door's
+   transition page (its mark's dark treatment) and nothing else. The frontend goes first,
+   as always; the paste goes to **both** `/exec` deployments as a **New version**, and the
+   primary `/exec` must still end `jQXatfT/exec`. **This paragraph is the one to update
+   once it ships; the v85 record above should be left standing as the last confirmed
+   published build.**
+
    > ⚠ **`--push` PUSHES `gh-pages` ONLY. IT DOES NOT PUSH THE SOURCE BRANCH.** The tool
    > reads the served files out of `DEPLOY_SOURCE` and commits them to `gh-pages`
    > (`git push origin gh-pages`), and stops there. So after the `v85` deploy
@@ -924,6 +935,50 @@ is left is small.
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **Eight things the owner raised on 2026-10-10, all closed in the `v86` work.** Listed
+  here so the next reader can find them; each is written up in full in
+  [01 — Project Overview](01 - Project Overview.md) (the icons),
+  [06 — UI Components & Styling](06 - UI Components & Styling.md) (the head line, the
+  sidebar lockup, the two scroll areas) and
+  [04 — Backend API Reference](04 - Backend API Reference.md) (the door page).
+
+  - **The tab icon is the clean mark, and the home-screen tiles are plated.** He supplied
+    `Mobile Logo.png` and `Browser Tab Logo.png` by name and said which slot each was for.
+    `<link rel="icon">` had been pointing at `icon-192.png` — the framed lockup, which at
+    16 px is a smudge, and which he had *separately* reported as "dirt" at 56 px on the door
+    page before anyone joined the two up. It now points at `icon-mark.png` on `index.html`
+    and on the four standalone pages. **The two files are one mark on two grounds**, not two
+    marks: the transparent one everywhere the app paints the mark, the plated one wherever
+    an OS draws a tile and masks it. No new file went into any precache or serve list.
+  - **The door page's logo was wrong twice over, and both halves are fixed.** The mark it
+    loads is `assets/icon-mark.png` **from the app's origin**, so replacing the artwork fixed
+    it with no paste. Separately its dark treatment was a **bare `invert(1)`**, which turns
+    the brand yellow `#f8c808` into `#0737f7`, an electric blue; it is now
+    `brightness(0) invert(1)`, matching the app. The comment that justified the old value
+    described the 2025 disc — rewritten, not deleted.
+  - **The fingerprint door explained nothing, because ONE `catch` said "cancelled" to every
+    failure.** A device that no longer holds the key, a browser refusing the call, a
+    dismissed prompt and a timeout are four different things and wore one sentence — which
+    is why *"it is different now"* could not be diagnosed from the screen. Each now has its
+    own message; enrollment failure is reported instead of handing over a pattern dialog in
+    silence (it was an empty `catch (e) { }`); the button's busy label went through the
+    translation table like every other one in the app; a dead twin function
+    (`unlockFingerprintGesture`, defined and never called) is deleted; and a passkey is no
+    longer left on the device with no record pointing at it. **What is still owed is his
+    retry** — the fixed build will name which of the four it is.
+  - **The sidebar lockup types itself on a loop**, as he described: mark, then the word
+    typed, then both fade, then a beat, then again. A `clip-path` reveal rather than a width
+    change, wrapped in `no-preference`, and the keyframes drive *out of* the composed state
+    so that "no animation" and "animation finished" both mean "the brand is there".
+  - **The board has a left-right bar above its columns** — a real second scrollbar in
+    `#ir-board-scroll`, kept in step with the board by `scrollBoardMirror()`, because CSS
+    cannot move a scrollbar off the bottom edge of its own scroll container and the
+    `scaleY(-1)` flip would flip every card with it. **The IR list's own separate scroll area
+    already existed and was deliberately left alone**: `.ir-list` scrolls inside a
+    `#index-view` that declares no `overflow`, so the search box and both filter strips stay
+    put. Both halves are pinned in `smoke-board.mjs`.
+  - **The sign-in head now quotes the product name**: `WELCOME TO INDRONES' AFTER SALES
+    PORTAL "I-PASSBOOK"` (straight quotes, his choice), in the markup and in both languages.
 - ✅ **The Help & FAQ page wears the app's own skin at last.** The owner, 2026-10-10:
   *"Help and FAQ page's UI is not aligned with our app's UI, rectify it."* He was looking
   at `faq.html`, and it was true — the page had been left on the language the app

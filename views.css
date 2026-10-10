@@ -2452,6 +2452,29 @@
 }
 
 #index-view .ir-board { display: none; }
+
+/* The left-right bar that rides ABOVE the columns, and the reason it is an element
+   of its own rather than a style on the board: a scrollbar is always drawn at the
+   END edge of its scroll container, so the board's own always lands along the
+   bottom. `#index-view` is a column flex, so a flex item placed before the board
+   sits above it — and this one is a real, native scrollbar, not a drawn imitation
+   of one. Its height is the browser's own scrollbar height in the common case; the
+   `flex-basis` is only a floor for browsers that overlay theirs. The 1px child is
+   sized by scrollBoardMirror() in app.js to the BOARD's scrollWidth, which is what
+   makes the thumb the right length for the columns there are.
+   Hidden unless the board is showing, exactly as the board is. */
+.board-scrollbar { display: none; }
+#index-view.is-board .board-scrollbar {
+  display: block;
+  flex: 0 0 auto;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: 0.6rem 0.9rem 0;
+  min-height: 0.75rem;
+  overscroll-behavior-x: contain;
+}
+.board-scrollbar > div { height: 1px; }
+
 #index-view.is-board .ir-list { display: none; }
 #index-view.is-board .ir-board {
   display: flex;

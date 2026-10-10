@@ -2446,6 +2446,73 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   white-space: nowrap;
 }
 
+/* ── THE LOCKUP TYPES ITSELF ───────────────────────────────────────────────────
+
+   The owner, 2026-10-10: *"in dashboard above service desk, are placed logo and
+   I-PASSBOOK… logo appears and then I-PASSBOOK gets typed, then it fades and then
+   it repeats itself."* This is that pair — index.html:761-764 — and nothing else.
+
+   ⚠ IT IS WRAPPED IN `no-preference`, and that guard is the whole safety of it.
+   base.css carries a global reduced-motion rule (further down) that forces
+   `animation-iteration-count: 1` and a 0.01ms duration on everything. Without this
+   wrapper, a device asking for less motion is thrown to the LAST keyframe of this
+   animation — the faded-out beat before the loop — and sits there looking at two
+   blank spaces where the app's name goes. Guarded, it simply never applies.
+
+   ⚠ AND THE KEYFRAMES DRIVE OUT OF THE COMPOSED STATE, NOT INTO IT. The un-animated
+   `.brand-text` is the full word, always. The tempting inverse — hide it in the base
+   rule and animate it in — leaves a blank sidebar every time something stops the
+   animation: reduced motion, a print stylesheet, a future `animation: none`. This
+   way round, "no animation" and "animation finished" both mean "the brand is there".
+   The fill mode is deliberately left off for the same reason: an element with no
+   fill returns to its base state, so this stays correct even if the wrapper above is
+   ever removed.
+
+   THE TYPING IS A CLIP, NOT A WIDTH. The word is laid out at full width for the whole
+   cycle and `white-space: nowrap` (above) keeps it on one line, so the flex row never
+   reflows and the sidebar's layout never moves; only those ~90x16 px repaint.
+   Animating `width` would do the opposite — a layout pass per step, on the chrome of
+   every screen in the app — for a worse result, since a width change reads as a wipe
+   rather than as typing. `steps()` is what makes it read as typing. clip-path is
+   applied to a flex item here, which is blockified, so it does apply; on a plain
+   inline span it would not have.
+
+   Nothing is paid for when nothing is seen: #sidebar is display:none while signed out
+   and below 1024px, so although the animation still exists it paints nothing. The
+   collapsed 56px rail hides .brand-text outright, so the rail is untouched — that is
+   deliberate, not an oversight.
+
+   NOT the intro. INTRO_DONE_KEY / paintBrandPanel() govern the once-per-VERSION
+   sign-in video and share nothing with this; do not wire the two together. This one
+   is unconditional and continuous on purpose. */
+@media (prefers-reduced-motion: no-preference) {
+  #sidebar .brand-mark {
+    animation: brand-lockup-mark 6s linear infinite;
+  }
+  #sidebar .brand-text {
+    animation: brand-lockup-type 6s linear infinite;
+  }
+}
+/* 6s, and the two share one clock. The mark lands at 0.36s, the word finishes typing
+   at 2.28s, the pair holds for two seconds, and both are gone by 5.3s — leaving about
+   0.7s of quiet, which is what stops a loop this short from reading as a flicker. The
+   word stays hidden until 0.48s so the mark is on screen first, as he described it. */
+@keyframes brand-lockup-mark {
+  0%   { opacity: 0; }
+  6%   { opacity: 1; }
+  72%  { opacity: 1; }
+  88%  { opacity: 0; }
+  100% { opacity: 0; }
+}
+@keyframes brand-lockup-type {
+  0%   { clip-path: inset(0 100% 0 0); opacity: 1; }
+  8%   { clip-path: inset(0 100% 0 0); animation-timing-function: steps(10, end); }
+  38%  { clip-path: inset(0 0 0 0); }
+  72%  { opacity: 1; }
+  88%  { opacity: 0; }
+  100% { clip-path: inset(0 0 0 0); opacity: 0; }
+}
+
 .sidebar-nav {
   display: flex;
   flex-direction: column;

@@ -53,18 +53,22 @@ i-passbook-app/
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
-│   ├── icon-master.png  # The brand master (Option A, 1024²) — the ONLY source
-│   │                    #   for the icons below. The owner's 2048² original is
-│   │                    #   in the untracked `Brand Elements I-PASSBOOK/`
-│   ├── icon-192.png    # App icon (manifest + favicon)
-│   ├── icon-512.png    # App icon, large
-│   ├── apple-touch-icon.png  # 180×180, the size iOS asks for
-│   ├── icon-mark.png   # The SAME artwork with its background keyed out — what
-│   │                   #   the app itself shows (sidebar + sign-in card), so the
-│   │                   #   mark sits on the page instead of in a tile on it
-│   ├── logo.png        # Legacy letterhead — NOT an icon, pruned from the deploy
-│   ├── intro_ipassbookv2.mp4         # Splash video, 16:9 master (9.7 MB, 9.0s)
-│   └── intro_ipassbookv2_mobile.mp4  # Splash video, portrait cut (3.8 MB, 9.1s)
+│   ├── icon-master.png        # The ink master — the owner's "Browser Tab Logo",
+│   │                          #   478×522, the monogram ON TRANSPARENCY. Build input.
+│   ├── icon-master-plate.png  # The plate master — his "Mobile Logo", 741×809,
+│   │                          #   the same monogram on an opaque plate. Build input.
+│   ├── icon-mark.png          # Generated. The ink master cropped to its ink box,
+│   │                          #   512×588 — the mark the app and every page shows:
+│   │                          #   sidebar, sign-in card, `#sso-wait`, the Google
+│   │                          #   door's transition page, AND the browser tab.
+│   ├── icon-192.png           # Generated. The master ON THE PLATE, 192²
+│   ├── icon-512.png           # Generated. The master ON THE PLATE, 512²
+│   ├── apple-touch-icon.png   # Generated. The master ON THE PLATE, 180²
+│   ├── brand-intro.mp4        # The sign-in film (the left half of the split door)
+│   ├── brand-panel-light.png  # The sign-in panel's ground, light
+│   ├── brand-panel-dark.png   # The sign-in panel's ground, dark
+│   ├── logo.png               # Legacy letterhead — NOT an icon, pruned at deploy
+│   └── Indrones Intro v2.mp4  # Superseded by brand-intro.mp4, pruned at deploy
 └── docs/               # ← This knowledge base
 ```
 
@@ -122,32 +126,76 @@ full lockup."** The master is now **`assets/icon-master.png`** — the same artw
 resampled to 1024×1024, because the delivered 2048×2048 master lives in the untracked
 `Brand Elements I-PASSBOOK/` folder and a clone must be able to regenerate the icons.
 
-Four things change with it, and the four paragraphs above describe none of them:
+Four things changed with it, and the four paragraphs above describe none of them:
 
 - **There is no disc, so there is no flood fill and no `RestoreDisc`.** Option A's
   field is a flat near-white and its art is two **solid** inks — navy `#2b2b3a` and
-  brand yellow `#f8c808`, plus a darker yellow facet on the bolt. Nothing is the same
-  colour as the background, so the key is a plain alpha ramp off the field's own
-  colour and the leak-and-restore failure mode is gone with the artwork it belonged
-  to. `RestoreDisc` is **deleted, not left dormant** — it is keyed to a disc that no
-  longer exists.
-- **The mark is the monogram, not the lockup.** The three square icons are the whole
-  lockup (his choice); `icon-mark.png` is the P alone, because all three in-app
-  placements sit it beside the name already spelled out in text. Its crop is a
-  measured rectangle, and `make-icons.ps1` **asserts** the crop is still tight to the
-  artwork before writing — a wrong crop is silent, and produces a perfectly valid PNG
-  of the wordmark or the strap line.
-- **The blueprint gridlines and hairlines are kept, deliberately.** They are drawn
-  over the artwork in the master and the colour key keeps them, which is the right
-  answer: the telemetry grid is the point of the variant. The mark is never drawn
-  above 60px in the app (26px sidebar, 56px handoff, 60px sign-in panel), where they
-  are sub-pixel.
-- **Dark mode now flattens the mark to a WHITE SILHOUETTE** — `brightness(0)
-  invert(1)`, the exact treatment the old note above called the wrong answer. It was
-  the wrong answer *for a disc*; it is the right one here. Inverting Option A outright
-  turns its navy bone-white and its brand yellow `#f8c808` into `#0737f7`, an electric
-  blue — legible, so it passes any "is it visible" check, and not the brand. Rendered
-  and looked at before changing it, not reasoned about: `tools/.cache/mark-dark.png`.
+  brand yellow `#f8c808`, plus a darker yellow facet on the bolt. `RestoreDisc` is
+  **deleted, not left dormant** — it was keyed to a disc that no longer exists.
+- **The mark is the monogram, not the lockup.** `icon-mark.png` is the P alone, because
+  the places the app shows it sit it beside the name already spelled out in text.
+- **The blueprint gridlines and hairlines were kept, deliberately.** They were drawn
+  over that artwork and the colour key kept them, which was the right answer: the
+  telemetry grid was the point of the variant.
+- **Dark mode flattens the mark to a WHITE SILHOUETTE** — `brightness(0) invert(1)`, the
+  exact treatment the old note above called the wrong answer. It was the wrong answer
+  *for a disc*; it is the right one here. Inverting Option A outright turns its navy
+  bone-white and its brand yellow `#f8c808` into `#0737f7`, an electric blue — legible,
+  so it passes any "is it visible" check, and not the brand. Rendered and looked at
+  before changing it, not reasoned about: `tools/.cache/mark-dark.png`.
+
+### ⚠⚠ And the icon split changed again, the same day — 2026-10-10, later.
+
+The owner then supplied **two files of his own** — `Mobile Logo.png` and
+`Browser Tab Logo.png` in the untracked `Brand Elements I-PASSBOOK/` — and named their
+slots: the first for the home screen, the second **for the browser tab**. They are one
+composition at two scales: the tab file is the monogram **on transparency** (478×522),
+the mobile file the same monogram **on an opaque plate** (741×809), and the ratio agrees
+to four decimals (0.9157 vs 0.9159), which is what makes them derivable from one another
+rather than each resampled down its own pipeline.
+
+So there are now **two masters**, and the split is **one mark, two grounds** rather than
+two marks:
+
+| File | Source | Where it goes |
+|---|---|---|
+| `icon-master.png` | his **Browser Tab Logo**, verbatim | build input only — never served |
+| `icon-master-plate.png` | his **Mobile Logo**, verbatim | build input only — never served |
+| `icon-mark.png` | the ink master, cropped to its own alpha bounding box and resized to exactly 512 wide (512×588) | the sidebar, the sign-in panel, `#sso-wait`, the Google door's transition page, **and the browser tab** |
+| `icon-192.png`, `icon-512.png`, `apple-touch-icon.png` | the **plate** master, edge-clamped to a square and resized | the manifest and the OS home-screen tiles |
+
+The reasoning is that a home screen draws a **square and masks it itself**, so a tile
+should arrive plated; but a page draws the mark on its own ground, where a plate reads as
+exactly the "shape of square" the owner had already reported once. The tab was the last
+place still holding the framed lockup, where at 16 px it is a smudge — the same artwork he
+had separately called "dirt" at 56 px on the door page, before anyone connected the two.
+**No new file was added to any list**: `icon-mark.png` was already precached and already
+served, so the tab simply points at it (`<link rel="icon">` on `index.html` and the four
+standalone pages) and nothing had to be kept in step in three places.
+
+**What the tool does now, and what it refuses.** No colour key runs at all — the incoming
+art arrives with its alpha already in it, and a key over keyed art is how the old
+leak-and-restore failure would come back. `icon-mark.png`'s crop is **measured** from the
+master's own alpha, not hardcoded, and the tool **refuses to write anything** unless every
+one of these holds: the two masters are still the same composition (aspect within 0.005);
+the plate master's corner is opaque and its field carries at least 3 % artwork; the tab
+master has opaque pixels at all; its ink is at least 30 % of its canvas wide and does not
+fill the whole canvas (a crop that found nothing and a crop that found everything are the
+two shapes a silent failure takes); at least 10 % of the mark's opaque pixels are brand
+yellow and 5 % navy (the bolt is the thing that can go missing without the mark looking
+broken); and the mark is 20–70 % transparent. **All of those checks run before a single
+file is saved** — they did not, and the tiles used to be written first, so a refusal
+ending *"Nothing was written"* left three fresh square icons on disk for the next
+`git add` to carry into a release. The plate colour is **sampled from the plate master's
+own corner** rather than hardcoded, so it follows the owner's file.
+
+`smoke-shell.mjs` checks the other side of it: that `icon-mark.png` really is
+49 % transparent, 66 % brand yellow and 29 % navy; that both masters are present; that
+every declared manifest icon is a real PNG of the size it claims and not a blank one; and
+that `index.html` points the tab at `icon-mark.png` and **not** at `icon-192.png`.
+
+The mark is never drawn above 60 px in the app (26 px sidebar, 56 px handoff, 60 px
+sign-in panel).
 
 ## Key Design Decisions
 

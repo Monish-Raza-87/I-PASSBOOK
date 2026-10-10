@@ -111,10 +111,15 @@ function canvasEl() {
 // `fetchImpl` is optional and defaults to the suite's standing "no network in test".
 // The busy-state tests pass a fetch that is deliberately slow instead — the one thing
 // a synchronous stub cannot express.
-function drive(record, counters, fetchImpl) {
+function drive(record, counters, fetchImpl, extraGlobals) {
   const T = loadApp(`
     submitUnlock, saveUnlock, loadUnlock, clearUnlock, localStorage, UNLOCK_KEY,
     setAuthMode, patternHashOf, showMethodInactiveNote, hideMethodInactiveNote,
+    tFloor,
+    // A typeof on a name that is no longer declared is safe, so this reads the app's
+    // OWN scope rather than grepping the file for the dead twin's name — which the
+    // comment explaining its removal also contains. See section 6(g).
+    deadGestureType: typeof unlockFingerprintGesture,
     getMode: () => _authMode,
   `, {
     capture: true,
@@ -122,7 +127,7 @@ function drive(record, counters, fetchImpl) {
     // Both are real browser globals a bare VM context lacks (the harness supplies
     // only the genuinely non-V8 ones). webcrypto is the platform's own WebCrypto,
     // not a stand-in, so the SHA-256 the app computes here is the real one.
-    globals: { crypto: webcrypto, TextEncoder },
+    globals: Object.assign({ crypto: webcrypto, TextEncoder }, extraGlobals || {}),
     // THE WARM-UP PING IS NOT A SERVER CALL IN THE SENSE THESE ASSERTIONS MEAN. It has
     // no credential, no email and no device token on it, and the app sends it from the
     // top of the pattern branch so that the round trip it is about to make does not pay
@@ -319,5 +324,244 @@ F.T.setAuthMode('pattern');
 r.ok('a pattern-only device shows the pattern door and hides the fingerprint button',
   shown(F.byId, 'auth-pattern-link') && !shown(F.byId, 'auth-unlock-btn'),
   (F.byId.get('auth-unlock-btn') || {}).style);
+
+// ── 6. THE FINGERPRINT GESTURE, DRIVEN — every failure says which failure it was ──
+//
+// The owner, 2026-10-10: "There's something wrong with unlock with fingerprint option
+// … it used to ask for laptop password in web portal and fingerprint in mobile. I have
+// tested in web, its different now."
+//
+// I cannot reproduce his laptop, so what this section can do is not guess at his cause
+// — it is to make sure the app NAMES one. Every failure of `navigator.credentials.get()`
+// used to be caught by a single `catch` and reported as "The fingerprint prompt was
+// cancelled": four different faults wearing one sentence, one of which (a device whose
+// key is gone) is the most likely reading of his report. The mapping is what is pinned
+// here, case by case, driven through the app's own `submitUnlock` against a fake
+// platform authenticator whose ONLY members are ones the real API has.
+const domErr = (name) => { const e = new Error(name); e.name = name; return e; };
+const FP_CFG = { isUserVerifyingPlatformAuthenticatorAvailable: async () => true };
+// A `get()` that records the button's label at the instant it is called — the in-flight
+// state — and then fails the way the browser would. `seen` is filled in after the app
+// loads, because the element it reads does not exist until then; `get` itself is not
+// called until `submitUnlock` reaches it, so nothing reads `seen` early.
+function getThatFails(err, delayMs, seen) {
+  return async () => {
+    const b = seen.byId && seen.byId.get('auth-unlock-btn');
+    if (b) seen.label = b.textContent;
+    if (delayMs) await new Promise(res => setTimeout(res, delayMs));
+    throw err;
+  };
+}
+// One case: build the sandbox, then hand it the byId map the recorder will read.
+function fpCase(err, delayMs) {
+  const seen = {};
+  const T = drive(FP_ONLY, { calls: 0 }, undefined, {
+    PublicKeyCredential: FP_CFG,
+    navigator: { userAgent: 'node', onLine: true, credentials: { get: getThatFails(err, delayMs, seen) } },
+  });
+  seen.byId = T.byId;
+  return { T: T.T, byId: T.byId, seen };
+}
+
+r.head('a fingerprint failure names the failure — it is not always "cancelled"');
+
+// (a) THE STALE KEY. The device answered in under a second, which means no sheet was
+// ever shown — a prompt cannot be dismissed that fast. That is the credential id no
+// longer resolving on this machine, and it is the one reading of "it is different now"
+// this suite can positively identify rather than merely report.
+const G1 = fpCase(domErr('NotAllowedError'), 0);
+await G1.T.submitUnlock('fingerprint');
+r.ok('a key the device no longer holds is named as exactly that, not as a cancellation',
+  /no longer holds the key registered/.test(errorText(G1.byId)), errorText(G1.byId));
+r.ok('...and not the word "cancelled", which is what every failure used to say',
+  !/cancel/i.test(errorText(G1.byId)), errorText(G1.byId));
+r.ok('...and the way out is named — re-register it, not just "try again"',
+  /profile menu/.test(errorText(G1.byId)), errorText(G1.byId));
+
+// (b) THE PROMPT HE ACTUALLY DISMISSED. The same error name, but the call took more
+// than a second, so a sheet did appear. Timing is the only thing that separates these
+// two cases — the spec makes them the same exception — and this asserts the separation
+// is real rather than a comment.
+const G2 = fpCase(domErr('NotAllowedError'), 1050);
+await G2.T.submitUnlock('fingerprint');
+r.ok('a dismissed or timed-out prompt says so, and does NOT blame a missing key',
+  /dismissed or timed out/.test(errorText(G2.byId)) &&
+  !/no longer holds/.test(errorText(G2.byId)), errorText(G2.byId));
+
+// (c) THE BROWSER THAT WILL NOT PLAY. Distinct error names, distinct sentences: a
+// SecurityError and a NotSupportedError are two different problems with two different
+// remedies, and one shared sentence would send the person down the wrong one.
+const G3 = fpCase(domErr('SecurityError'), 0);
+await G3.T.submitUnlock('fingerprint');
+r.ok('a browser refusing WebAuthn on this origin says that, and not "cancelled"',
+  /will not offer a fingerprint on this address/.test(errorText(G3.byId)), errorText(G3.byId));
+
+const G4 = fpCase(domErr('ConstraintError'), 0);
+await G4.T.submitUnlock('fingerprint');
+r.ok('a device with no sensor this browser will use offers a pattern instead of a dead end',
+  /no fingerprint sensor this browser will use/.test(errorText(G4.byId)) &&
+  /pattern/.test(errorText(G4.byId)), errorText(G4.byId));
+
+// (d) AN ERROR NOBODY PREDICTED. The honest answer is the browser's own name for it —
+// terse, but TRUE, and it is what makes the owner's next report actionable. Inventing
+// a friendly sentence here would be inventing a diagnosis.
+const G5 = fpCase(domErr('SomeFutureError'), 0);
+await G5.T.submitUnlock('fingerprint');
+r.ok('an unrecognised failure reports its own error name rather than a confident guess',
+  /SomeFutureError/.test(errorText(G5.byId)), errorText(G5.byId));
+
+// (e) A BROWSER WITH NO WEBAUTHN AT ALL. Reading `navigator.credentials.get` threw a
+// TypeError here, which the old catch reported as "the prompt was cancelled" — about a
+// prompt that could never have existed.
+const G6 = drive(FP_ONLY, { calls: 0 }, undefined, { navigator: { userAgent: 'node', onLine: true } });
+await G6.T.submitUnlock('fingerprint');
+r.ok('a browser with no WebAuthn at all is told that, instead of being told it cancelled',
+  /will not offer a fingerprint here/.test(errorText(G6.byId)), errorText(G6.byId));
+
+// (f) THE BUTTON'S OWN LABEL. `#auth-unlock-btn` carries data-i18n="auth.unlock", so
+// I18N applies its text — and the app then wrote a raw English literal over it and
+// never put it back. Two things were wrong at once: the label under Hindi flipped to
+// English, and the restore wrote a string this button has never had in any language.
+const G7 = fpCase(domErr('NotAllowedError'), 0);
+await G7.T.submitUnlock('fingerprint');
+r.ok('while the prompt is up the button reads its OWN busy label, not a raw literal',
+  G7.seen.label === G7.T.tFloor('auth.unlocking', '__FALLBACK__') &&
+  G7.seen.label !== '__FALLBACK__',
+  { inFlight: G7.seen.label });
+r.ok('...and the resting label comes back through the translation table, not hardcoded English',
+  (G7.byId.get('auth-unlock-btn') || {}).textContent === G7.T.tFloor('auth.unlock', '__FALLBACK__') &&
+  (G7.byId.get('auth-unlock-btn') || {}).textContent !== 'Unlock with fingerprint',
+  (G7.byId.get('auth-unlock-btn') || {}).textContent);
+r.ok('...which means both keys exist in the language table and not only as English floors',
+  G7.T.tFloor('auth.unlocking', '__FALLBACK__') !== '__FALLBACK__' &&
+  G7.T.tFloor('auth.unlock', '__FALLBACK__') !== '__FALLBACK__');
+
+// (g) THE DEAD TWIN. A second copy of the unlock gesture — `unlockFingerprintGesture()`
+// — sat beside the live one, called by nothing, and asked for the OPPOSITE of what
+// enrollment mints (no `allowCredentials` needs a discoverable credential; enrollment
+// asks for `residentKey: 'discouraged'`). Deleted rather than repaired. `typeof` on an
+// absent name is safe, so this reads the app's own scope rather than the file's text.
+const G8 = drive(FP_ONLY, { calls: 0 });
+r.ok('the dead second gesture is gone, not merely unused',
+  G8.T.deadGestureType === 'undefined', G8.T.deadGestureType);
+
+// ── 7. ENROLMENT — the half of this feature no test had ever run ─────────────
+//
+// Sections 1 and 2 above assert the setup overlay by READING app.js, and for a good
+// reason: the overlay could not be built under the harness at all. `openPatternSetup`
+// opens with `if (document.getElementById('pattern-setup-overlay')) return;`, and the
+// harness's stub `getElementById` answers EVERY id with an element — so the guard was
+// always already taken and the body below it was unreachable. The suite that looks
+// like it tests the overlay tests its class name.
+//
+// That blindness has a cost on the record: an empty `catch (e) { }` — a refused passkey
+// silently downgraded to a pattern dialog — sat in that unreachable body and shipped.
+// So the harness grew two additive options (`absentIds`, `createElement`) and this
+// section runs the real `beginQuickUnlockSetup` end to end: real function, real
+// overlay, real message, asserted off the note element the overlay itself built.
+//
+// The fake platform authenticator offers `create` and `isUserVerifyingPlatform
+// AuthenticatorAvailable` — both real members of the real API, in the shapes the real
+// API gives them. Nothing here invents a member the browser lacks.
+const jsonReply = body => () =>
+  Promise.resolve({ text: () => Promise.resolve(JSON.stringify(body)) });
+
+// A stand-in for the element `document.createElement('div')` returns. `querySelector`
+// and `textContent` are real members of a real element; the factory memoises children
+// so a test can read back the note the overlay wrote, which is the entire point.
+function overlayFactory(seen) {
+  return () => {
+    const kids = new Map();
+    const ov = {
+      style: {}, dataset: {}, textContent: '', innerHTML: '', children: [],
+      classList: { add() {}, remove() {}, contains: () => false, toggle: () => false },
+      querySelector(sel) {
+        if (!kids.has(sel)) kids.set(sel, sel === '#pattern-setup-canvas'
+          ? canvasEl()
+          : { textContent: '', style: {}, addEventListener() {}, classList: { add() {}, remove() {} } });
+        return kids.get(sel);
+      },
+      querySelectorAll: () => [],
+      addEventListener() {}, removeEventListener() {},
+      appendChild() {}, remove() {},
+      setAttribute() {}, getAttribute: () => null,
+    };
+    seen.ov = ov;
+    return ov;
+  };
+}
+
+function setupCase({ biometric, create, fetch }) {
+  const seen = {};
+  const built = loadApp(`
+    beginQuickUnlockSetup, loadUnlock,
+    setUser: (u) => { currentUser = u; },
+  `, {
+    capture: true,
+    splitStorage: true,
+    absentIds: ['pattern-setup-overlay'],
+    createElement: overlayFactory(seen),
+    globals: {
+      crypto: webcrypto, TextEncoder,
+      PublicKeyCredential: { isUserVerifyingPlatformAuthenticatorAvailable: async () => biometric },
+      navigator: { userAgent: 'node', onLine: true, credentials: { create } },
+    },
+    fetch,
+  });
+  built.T.setUser({ email: 'monish.raza@indrones.com', name: 'Monish Raza' });
+  return { T: built.T, byId: built.byId, seen };
+}
+const noteOfSetup = seen => (seen.ov ? (seen.ov.querySelector('#pattern-setup-note') || {}).textContent || '' : '<no overlay was built>');
+
+r.head('enrolling quick unlock says what went wrong, instead of quietly offering a pattern');
+
+// (a) THE PASSKEY IS REFUSED. This exact case was `catch (e) { }` — the person was
+// handed a pattern dialog with no word of explanation, which reads as the feature
+// half-working. It has to reach the note INSIDE the overlay: a toast fired in the same
+// tick as a full-screen dimming overlay opens is a message nobody reads.
+const S1 = setupCase({
+  biometric: true,
+  create: async () => { throw domErr('NotAllowedError'); },
+  fetch: jsonReply({ status: 'ok', deviceToken: 'c'.repeat(32) }),
+});
+await S1.T.beginQuickUnlockSetup();
+r.ok('a refused passkey explains itself inside the overlay that follows it',
+  /dismissed or timed out/.test(noteOfSetup(S1.seen)), noteOfSetup(S1.seen));
+r.ok('...and says the pattern is still a working door, rather than leaving it ambiguous',
+  /pattern below will work instead/i.test(noteOfSetup(S1.seen)), noteOfSetup(S1.seen));
+r.ok('...and no device record is saved from a half-finished attempt',
+  !S1.T.loadUnlock(), S1.T.loadUnlock());
+
+// (b) NO PLATFORM AUTHENTICATOR. Every desktop without Windows Hello enrolled lands
+// here, which is most of them — and this branch explained itself with nothing at all.
+const S2 = setupCase({
+  biometric: false,
+  create: async () => { throw new Error('never called'); },
+  fetch: jsonReply({ status: 'ok', deviceToken: 'd'.repeat(32) }),
+});
+await S2.T.beginQuickUnlockSetup();
+r.ok('a device with no platform authenticator says so, and names the pattern as the door',
+  /no fingerprint or face sensor/.test(noteOfSetup(S2.seen)) &&
+  /pattern is the quick-unlock door/.test(noteOfSetup(S2.seen)), noteOfSetup(S2.seen));
+r.ok('...and the pattern record IS saved, because that path is a real enrolment',
+  !!(S2.T.loadUnlock() && S2.T.loadUnlock().mode === 'pattern' && S2.T.loadUnlock().deviceToken === 'd'.repeat(32)),
+  S2.T.loadUnlock());
+
+// (c) THE HAPPY PATH STILL WORKS. Everything above is a failure branch, and a suite
+// that only drives failures cannot tell a fixed error message from a feature that has
+// stopped working altogether.
+const S3 = setupCase({
+  biometric: true,
+  create: async () => ({ rawId: new Uint8Array([1, 2, 3, 4]) }),
+  fetch: jsonReply({ status: 'ok', deviceToken: 'e'.repeat(32) }),
+});
+await S3.T.beginQuickUnlockSetup();
+const rec3 = S3.T.loadUnlock() || {};
+r.ok('a device that CAN enrol still does, and stores the credential id it was given',
+  rec3.mode === 'fingerprint' && rec3.deviceToken === 'e'.repeat(32) &&
+  rec3.credentialId === 'AQIDBA' && rec3.email === 'monish.raza@indrones.com',
+  rec3);
+r.ok('...and no pattern overlay is opened over a successful enrolment',
+  !S3.seen.ov, !!S3.seen.ov);
 
 r.finish();

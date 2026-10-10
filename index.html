@@ -33,7 +33,14 @@
        converts and what it deliberately leaves alone. -->
   <link rel="stylesheet" href="industrial.css" />
 
-  <link rel="icon" type="image/png" sizes="192x192" href="assets/icon-192.png" />
+  <!-- The TAB is the clean mark, not the tile. icon-192.png is the framed Option A
+       lockup with its telemetry grid, which is right on a home screen at 180/512 and
+       is a smudge at 16 — it was the tab icon until 2026-10-10, and the owner had
+       already reported the same artwork as "dirt" at 56px on the handoff page. This
+       is the same mark with nothing drawn on it. The trade is real and small: the
+       mark's navy goes quiet on a dark tab strip, where the yellow bolt carries it.
+       See tools/make-icons.ps1 for why the two files differ at all. -->
+  <link rel="icon" type="image/png" sizes="512x588" href="assets/icon-mark.png" />
   <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.json" />
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
@@ -331,7 +338,7 @@
            A art already carries the wordmark), so a head placed there would say nothing
            on the wide screen where he asked for it. Here it is visible at every width. -->
       <header class="landing-lockup">
-        <p class="landing-welcome" data-i18n="landing.welcome">WELCOME TO INDRONES' AFTER SALES PORTAL I-PASSBOOK</p>
+        <p class="landing-welcome" data-i18n="landing.welcome">WELCOME TO INDRONES' AFTER SALES PORTAL "I-PASSBOOK"</p>
         <p class="landing-login" data-i18n="landing.login">LOGIN</p>
       </header>
 
@@ -947,6 +954,18 @@
             <div class="ir-skeleton"></div>
             <div class="ir-skeleton"></div>
           </div>
+          <!-- The board's left-right bar, and it is a SECOND scrollbar on purpose.
+               A scrollbar is drawn at the END edge of its own scroll container, so a
+               box that scrolls sideways always wears it along the BOTTOM — under
+               column bodies that are as tall as the pane, half a screen away from the
+               column headers you are scrolling to reach. Nothing in CSS relocates it
+               except the scaleY(-1) flip, which flips every descendant with it. So
+               this is a real second scrollbar above the columns, kept in step with the
+               board's by scrollBoardMirror() in app.js, which is also what sets its
+               one-pixel-tall child's width. aria-hidden: the board below is the
+               scrollable region and already carries tabindex and a label; two stops
+               for one column strip would be worse than none. -->
+          <div id="ir-board-scroll" class="board-scrollbar" aria-hidden="true"><div></div></div>
           <!-- The board: the same filtered rows, drawn as nine columns. Rendered by
                renderBoard() and hidden by CSS unless #index-view carries .is-board,
                so the switch never has to touch two elements to stay consistent.

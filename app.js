@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v85';
+const APP_VERSION = 'v86';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -2290,17 +2290,62 @@ function bytesFromB64url(str) {
   return Uint8Array.from(raw, ch => ch.charCodeAt(0));
 }
 
-// The unlock gesture. No rpId is given (it binds to this origin) and no
-// allowCredentials (any resident credential on the device may answer); what the
-// gesture must produce is the biometric's own accept. The signature the device
-// returns is NOT verified server-side — Apps Script has no Web Crypto — so the
-// honest label for this check is "the finger was read", nothing more.
-async function unlockFingerprintGesture() {
-  const challenge = crypto.getRandomValues(new Uint8Array(32));
-  const cred = await navigator.credentials.get({
-    publicKey: { challenge, userVerification: 'required', timeout: 60000 }
-  });
-  return !!cred;
+// ── WHY A FAILED GESTURE NOW SAYS WHICH FAILURE IT WAS ────────────────────────
+// There was a second copy of the unlock gesture here — `unlockFingerprintGesture()`
+// — defined and never called by anything (verified across the whole repo). It
+// asked for NO `allowCredentials`, which can only ever be answered by a
+// DISCOVERABLE credential, while enrollment mints its passkey with
+// `residentKey: 'discouraged'` (:2679). Two functions that looked like one, one of
+// them dead, holding contradictory requirements, is how this area got its
+// reputation. Deleted rather than repaired: the live path is `submitUnlock`.
+//
+// Below it sat the reason the owner could not diagnose his own door. Every failure
+// of the gesture — a dismissed prompt, a device whose key is gone, a browser that
+// refuses WebAuthn outright, a call that threw before any prompt could appear —
+// was caught by one `catch` and reported as "The fingerprint prompt was cancelled".
+// Four different faults wearing one sentence. Each now gets its own, and none of
+// them guesses at his finger.
+//
+// `NotAllowedError` is the one that genuinely covers two cases: the spec makes a
+// dismissed prompt and a credential id the device no longer holds
+// indistinguishable in the error. They ARE separable, by TIME — and that is a fact
+// about people rather than a heuristic. No one dismisses a prompt, or fails a
+// fingerprint, within a second of the sheet appearing. So a round trip that comes
+// back under a second never showed a sheet, which means the key is not on this
+// device. That is the reading of "it used to ask for the laptop password and now
+// it does not" that we could not otherwise name.
+function fingerprintErrorMessage(e, askedForASpecificKey, ms) {
+  const name = (e && (e.name || (e.constructor && e.constructor.name))) || '';
+  if (name === 'NotAllowedError') {
+    if (askedForASpecificKey && ms < 1000) {
+      return 'This device no longer holds the key registered for quick unlock. '
+           + 'Turn quick unlock off and on again from your profile menu to re-register it — '
+           + 'or use your email code.';
+    }
+    return 'The fingerprint prompt was dismissed or timed out — try again, or use your email code.';
+  }
+  if (name === 'SecurityError') {
+    return 'This browser will not offer a fingerprint on this address. Use your email code instead.';
+  }
+  if (name === 'NotSupportedError' || name === 'ConstraintError') {
+    return 'This device has no fingerprint sensor this browser will use. Use your email code, '
+         + 'or set an unlock pattern instead.';
+  }
+  if (name === 'InvalidStateError') {
+    return 'This device has no key registered for quick unlock any more. Turn quick unlock off '
+         + 'and on again from your profile menu.';
+  }
+  if (name === 'AbortError') {
+    return 'The fingerprint check was interrupted before it finished — try again.';
+  }
+  if (name === 'TimeoutError') {
+    return 'The fingerprint prompt timed out — try again, or use your email code.';
+  }
+  // Nothing above matched. Inventing a sentence here would be me guessing at his
+  // laptop; the browser's own name for what happened is terse, but it is TRUE, and
+  // it is the thing that makes his next report actionable instead of a story.
+  return 'The fingerprint check failed (' + (name || 'no error name') + '). '
+       + 'Use your email code, and tell us this message.';
 }
 
 // Enrollment. Two credentials are minted together: the server's device token
@@ -2375,9 +2420,25 @@ async function submitUnlock(method, patternSeq) {
     if (!rec || !rec.deviceToken || !rec.email) { clearUnlock(); setAuthMode('email'); return; }
   }
   const btn = document.getElementById('auth-unlock-btn');
+  // The label. `#auth-unlock-btn` carries `data-i18n="auth.unlock"` (index.html:478),
+  // so I18N.applyStatic() owns its resting text. Writing a raw English literal back
+  // over it — which is what this did at all four sites in this function — both broke
+  // the label under Hindi and replaced the button's own name with a string the button
+  // never had. Every other busy label in the app reads its text through tFloor
+  // (:3076, :3097, :3233); this one was the exception, and the exception was invisible.
+  const unlockIdle  = () => { if (btn) { btn.disabled = false; btn.textContent = tFloor('auth.unlock', 'Continue with fingerprint / passkey'); } };
   if (method === 'fingerprint') {
-    if (btn) { btn.disabled = true; btn.textContent = 'Unlocking…'; }
+    if (btn) { btn.disabled = true; btn.textContent = tFloor('auth.unlocking', 'Unlocking…'); }
     setAuthError('');
+    // Re-checked here rather than trusted from the button's visibility: a browser
+    // with no WebAuthn at all throws a TypeError on the property read below, and
+    // "the prompt was cancelled" was a flat lie about it — there was never a prompt.
+    if (!window.PublicKeyCredential || !navigator.credentials || typeof navigator.credentials.get !== 'function') {
+      unlockIdle();
+      setAuthError('This browser will not offer a fingerprint here. Use your email code instead.');
+      return;
+    }
+    const startedAt = Date.now();
     try {
       // allowCredentials from the stored id when there is one, so the prompt
       // names the exact key this device registered.
@@ -2385,10 +2446,16 @@ async function submitUnlock(method, patternSeq) {
       const opts = { challenge, userVerification: 'required', timeout: 60000 };
       if (rec.credentialId) opts.allowCredentials = [{ id: bytesFromB64url(rec.credentialId), type: 'public-key' }];
       const cred = await navigator.credentials.get({ publicKey: opts });
-      if (!cred) throw new Error('cancelled');
+      // A resolved-to-null `get()` is vanishingly rare (the spec throws instead),
+      // but it is not a cancellation and must not borrow that word.
+      if (!cred) {
+        unlockIdle();
+        setAuthError('No fingerprint was accepted — try again, or use your email code.');
+        return;
+      }
     } catch (e) {
-      if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
-      setAuthError('The fingerprint prompt was cancelled — try again, or use your email code.');
+      unlockIdle();
+      setAuthError(fingerprintErrorMessage(e, !!rec.credentialId, Date.now() - startedAt));
       return;
     }
   }
@@ -2401,7 +2468,7 @@ async function submitUnlock(method, patternSeq) {
   const patternish = (method === 'pattern');
 
   postAuth('deviceUnlock', { deviceToken: rec.deviceToken, email: rec.email, method, device: deviceLabel(), version: APP_VERSION }).then(d => {
-    if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+    unlockIdle();
     if (d && d.status === 'ok' && d.sessionToken) { finishAuth(rec.email, d); return; }
     setAuthError((d && d.message) || 'Unlock failed — sign in with your email and code.');
     // Idle title, NOT a verdict. The canvas goes back to asking for a pattern and the
@@ -2413,7 +2480,7 @@ async function submitUnlock(method, patternSeq) {
     // person's gesture for the server's answer, and disagreed with the line above it.
     if (patternish) resetPatternCanvas();
   }).catch(() => {
-    if (btn) { btn.disabled = false; btn.textContent = 'Unlock with fingerprint'; }
+    unlockIdle();
     if (patternish) resetPatternCanvas();
     setAuthError('Could not reach the backend — use your email and code.');
   });
@@ -2662,13 +2729,22 @@ async function patternForUnlock() {
 // ─── SETUP — offered from the user's own profile menu, never sprung on them ──
 // Enrollment: server token first (it is authed), then the passkey, then the
 // local record. If the platform refuses a passkey, the fall-back offer is the
-// pattern — never a silent failure.
+// pattern.
+//
+// That last sentence used to end "— never a silent failure", and it was untrue here
+// for as long as it was written. The refusal was caught by `catch (e) { }`: an EMPTY
+// block, with the passkey attempt's own reason discarded. The person was then handed
+// a pattern dialog with no word of explanation, which reads exactly like the feature
+// half-working. It is not silent any more — the reason travels into the overlay as
+// `whyNot`, because a toast fired immediately before a full-screen dimming overlay
+// opens is a message nobody reads.
 async function beginQuickUnlockSetup() {
   const st = loadUnlock();
   if (st) { if (!st.patternHash) openPatternSetup(); else return offerRemoveUnlock(); return; }
   const biometric = await quickUnlockBiometricAvailable();
   if (biometric) {
     const email = (currentUser && currentUser.email) || '';
+    const attemptStart = Date.now();
     try {
       const challenge = crypto.getRandomValues(new Uint8Array(32));
       const cred = await navigator.credentials.create({ publicKey: {
@@ -2689,11 +2765,28 @@ async function beginQuickUnlockSetup() {
       syncQuickUnlockMenu();
       showToast('Fingerprint unlock is on for this device — a pattern can be added from this menu too.');
       return;
-    } catch (e) { /* passkey refused — fall through to the pattern offer */ }
+    } catch (e) {
+      // The passkey was refused — say so, then still offer the pattern, which is
+      // the real fall-back and not a consolation prize.
+      //
+      // One asymmetry to be honest about: if the failure came from the SERVER call
+      // and not the platform, a passkey has already been minted on this device with
+      // no record pointing at it. There is no client-side API to delete a WebAuthn
+      // credential, so it cannot be cleaned up from here; the message says the
+      // attempt failed rather than pretending the device is untouched. The next
+      // attempt mints a fresh one, and the orphan is inert — `residentKey:
+      // 'discouraged'` means it is not discoverable and cannot answer a prompt.
+      openPatternSetup(fingerprintErrorMessage(e, false, Date.now() - attemptStart)
+        + ' A pattern below will work instead.');
+      return;
+    }
   }
-  // No platform biometric (or the passkey was refused): the pattern is the
-  // quick-unlock door. The device token exists before the overlay opens, so a
-  // record is always complete by the time a first draw can be saved.
+  // No platform biometric (or, above, the passkey was refused): the pattern is the
+  // quick-unlock door. The device token exists before the overlay opens, so a record
+  // is always complete by the time a first draw can be saved.
+  //
+  // This branch is reached on every desktop without Windows Hello enrolled, and it
+  // used to explain itself with nothing at all. It says why now.
   const reg = await deviceRegisterBackend();
   if (!reg || reg.status !== 'ok' || !reg.deviceToken) {
     showToast((reg && reg.message) || 'Registering this device failed — try again.');
@@ -2701,7 +2794,9 @@ async function beginQuickUnlockSetup() {
   }
   saveUnlock({ email: (currentUser && currentUser.email) || '', mode: 'pattern', deviceToken: reg.deviceToken });
   syncQuickUnlockMenu();
-  openPatternSetup();
+  openPatternSetup(biometric
+    ? ''
+    : 'This device has no fingerprint or face sensor this browser will use — a pattern is the quick-unlock door here.');
 }
 function offerRemoveUnlock() {
   const st = loadUnlock();
@@ -2716,7 +2811,14 @@ function offerRemoveUnlock() {
 
 // In-app pattern setup: a small overlay carrying the same canvas engine. Two
 // draws — the second must match the first, or nothing is stored.
-function openPatternSetup() {
+//
+// `whyNot` is the honest head of the failure that led here (a refused passkey, or a
+// device with no platform authenticator). It is deliberately an ARGUMENT and not a
+// toast: this overlay is a full-screen dimming ground that opens in the same tick,
+// so anything printed behind it is a message that was written and never read. It
+// goes in `#pattern-setup-note`, the same slot the mismatch message already uses, and
+// the first draw clears it — by then it has been read or it is no longer needed.
+function openPatternSetup(whyNot) {
   if (document.getElementById('pattern-setup-overlay')) return;
   const ov = document.createElement('div');
   ov.id = 'pattern-setup-overlay';
@@ -2739,6 +2841,7 @@ function openPatternSetup() {
   let first = null;
   const title = ov.querySelector('#pattern-setup-title');
   const note  = ov.querySelector('#pattern-setup-note');
+  if (whyNot) note.textContent = whyNot;
   attachPatternCanvas(ov.querySelector('#pattern-setup-canvas'), async (seq) => {
     if (!first) {
       first = await patternHashOf(seq);
@@ -7834,6 +7937,7 @@ function renderBoard(records) {
       (allIRs.length ? t('list.emptyFiltered') : t('board.emptyNone')) +
       '</div>';
     updateListCounts(0);
+    scrollBoardMirror();   // an emptied board has no overflow, so the bar goes quiet
     return;
   }
   const byCol = {};
@@ -7858,6 +7962,8 @@ function renderBoard(records) {
     </div>`;
   }).join('');
   updateListCounts(records.length);
+  // After the columns are in the DOM, because it is their total width this measures.
+  scrollBoardMirror();
 }
 
 // The switch's one setter, so the class on the pane, the buttons and the repaint
@@ -7881,6 +7987,10 @@ function setListView(mode) {
   }
   applyListFilters();
   renderLayout();   // the board's full-screen class is a side of the fold rule
+  // `html.board-full` gives the pane its width in a LAYOUT pass, so the width the bar
+  // must mirror is not knowable until after one. The board's own render already
+  // measured; this is the second look, taken once the fold has been applied.
+  requestAnimationFrame(scrollBoardMirror);
 }
 if (listViewSwitch) {
   listViewSwitch.addEventListener('click', e => {
@@ -7894,6 +8004,59 @@ if (irBoard) {
   irBoard.addEventListener('click', e => {
     if (e.target.closest('.kb-more')) setListView('list');
   });
+}
+
+// ── THE BOARD'S LEFT-RIGHT BAR, ABOVE THE COLUMNS ─────────────────────────────
+// The owner, 2026-10-10: "similarly in for board since number of columns are more,
+// we can have left-right scrollable bar on top of columns space."
+//
+// He is right that the bar was in the wrong place, and CSS cannot move it: a
+// scrollbar is drawn at the END edge of its scroll container, so a box that scrolls
+// sideways always wears it along the bottom — under column bodies as tall as the
+// pane, half a screen from the column headers you scroll to reach. The only CSS that
+// relocates it is the scaleY(-1) flip, which flips every descendant with it.
+//
+// So `#ir-board-scroll` is a second, REAL scrollbar sitting above the board (see
+// index.html and .board-scrollbar in views.css), and the two are kept equal here.
+// It is the same control and the same drag; only the box it is drawn in differs.
+// The board keeps its own as well — on a touch device that one is the only one a
+// finger meets, and removing it would leave the last row of cards looking cut off.
+// Looked up per call, not captured once. A `const` captured here would be in its
+// temporal dead zone for any renderBoard() that ran during boot — renderBoard is
+// defined above this block, so the order reads as "fine" and is not — and it would
+// go stale if the pane were ever rebuilt. Two getElementByIds per call is nothing;
+// this runs on a resize and after a render, not on a scroll frame.
+function scrollBoardMirror() {
+  const bar = document.getElementById('ir-board-scroll');
+  if (!bar || !irBoard) return;
+  const thumb = bar.firstElementChild;
+  if (!thumb) return;
+  // The thumb's length is decided by the proxy's content width, so that is what is
+  // measured — and it changes without the board scrolling at all: a filter that
+  // empties a column, the pane's own drag handle, a window resize, the board going
+  // full-screen via html.board-full.
+  thumb.style.width = irBoard.scrollWidth + 'px';
+  bar.scrollLeft = irBoard.scrollLeft;
+}
+
+// Re-entrancy, stated rather than assumed: writing one element's scrollLeft fires its
+// own scroll event, which would write the other's, which would fire again. The second
+// pass is harmless — the values are already equal, so the browser does not re-fire —
+// but a loop that terminates by luck is not a loop to leave unguarded.
+let boardMirroring = false;
+function mirrorBoardScroll(from, to) {
+  if (boardMirroring) return;
+  boardMirroring = true;
+  to.scrollLeft = from.scrollLeft;
+  boardMirroring = false;
+}
+if (irBoard) {
+  const bar = document.getElementById('ir-board-scroll');
+  if (bar) {
+    irBoard.addEventListener('scroll', () => mirrorBoardScroll(irBoard, bar), { passive: true });
+    bar.addEventListener('scroll', () => mirrorBoardScroll(bar, irBoard), { passive: true });
+  }
+  window.addEventListener('resize', scrollBoardMirror);
 }
 
 // The `.assignee-avatar` circle was removed from the LIST ROW with the 2026-09-21

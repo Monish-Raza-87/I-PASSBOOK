@@ -179,6 +179,11 @@
     // no pop-up and no wait. See app.js's GOOGLE SIGN-IN block.
     'auth.sso':            'Continue with Indrones’ official email',
     'auth.unlock':         'Continue with fingerprint / passkey',
+    // The busy label for that button. It existed only as a hardcoded English literal in
+    // app.js, written over a button that carries data-i18n="auth.unlock" — so under Hindi
+    // the door flipped to English mid-tap, and it never came back (the restore wrote
+    // 'Unlock with fingerprint', a string this button has never had in any language).
+    'auth.unlocking':      'Unlocking…',
     'auth.usePattern':     'Continue with pattern',
     // Said when the button is tapped on a device that has not enrolled the method yet.
     // The first line is the owner's own sentence, verbatim. The steps after it are the
@@ -390,7 +395,16 @@
     // because that is how he wrote it — the caps are copy, not a CSS `text-transform`, so
     // a translator can choose their own treatment and the Devanagari line (which has no
     // case at all) is not fighting a rule.
-    'landing.welcome':       'WELCOME TO INDRONES\' AFTER SALES PORTAL I-PASSBOOK',
+    //
+    // The product name is QUOTED, also his ask, the same day: *"we should keep I-PASSBOOK
+    // with some identifier maybe between double inverted commas."* Asked which, he chose
+    // **straight** quotes over typographic ones. Straight quotes are what a keyboard
+    // types and what a URL-safe identifier is written with; the curly pair would be the
+    // typographically tidier choice for prose and the wrong one for a product name that
+    // is also a folder name. The quotes are safe here by construction rather than by
+    // luck: I18N.applyStatic() writes with textContent and never innerHTML, so a quote
+    // cannot become markup and needs no escaping.
+    'landing.welcome':       'WELCOME TO INDRONES\' AFTER SALES PORTAL "I-PASSBOOK"',
     // The second line, and the reason he asked for it: *"So it gives a wholesome sense of
     // login as a employee or login as a customer."* On its own "LOGIN" over two buttons
     // reads as a heading; the two door labels below complete the sentence.
@@ -559,6 +573,7 @@
     'auth.or':             'या',
     'auth.sso':            'Indrones के आधिकारिक ईमेल से जारी रखें',
     'auth.unlock':         'फ़िंगरप्रिंट / पासकी से जारी रखें',
+    'auth.unlocking':      'अनलॉक हो रहा है…',
     'auth.usePattern':     'पैटर्न से जारी रखें',
     'auth.methodInactive.say':     'यह लॉगिन तरीका तब चालू होता है जब आप इसे अपने लॉगिन से सक्षम करते हैं।',
     'auth.methodInactive.step1':   'अपने ईमेल और हमारे भेजे कोड से I-PASSBOOK में साइन इन करें।',
@@ -643,7 +658,12 @@
     // the script cannot obey. The all-caps in the English line is copy, not a style, and a
     // script without case simply opts out of it — which is exactly why the caps are not a
     // CSS `text-transform` (see the note on landing.welcome).
-    'landing.welcome':    'इंड्रोन्स के बिक्री-पश्चात पोर्टल I-PASSBOOK में आपका स्वागत है',
+    //
+    // The quotes around the product name are carried across, because they are part of
+    // naming it rather than part of the English sentence — and they are needed more here
+    // than there, not less: the name is Latin script inside Devanagari, so the eye has to
+    // be told where the borrowed proper noun begins.
+    'landing.welcome':    'इंड्रोन्स के बिक्री-पश्चात पोर्टल "I-PASSBOOK" में आपका स्वागत है',
     'landing.login':      'लॉग इन',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────

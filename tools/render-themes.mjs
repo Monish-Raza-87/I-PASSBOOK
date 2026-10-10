@@ -54,6 +54,15 @@ const SEED = flag('seed', '');
 // drag — can be photographed at all. Its return value is printed, so a driver that
 // silently did nothing is visible rather than looking like a layout bug.
 const EVAL = flag('eval', '');
+// A rect "x,y,w,h" in CSS pixels, when the thing under judgement is one element and
+// not a page. Without it, judging a 90x16 px lockup means squinting at it inside a
+// 1440x900 shot — which is how a favicon gets judged at the wrong size.
+const CLIP = flag('clip', '');
+// Force `prefers-reduced-motion: reduce` for the whole run, through CDP rather than a
+// Chrome flag, so it applies to the same browser instance the other modes use. This is
+// the only way to SEE what a reduced-motion device gets: a suite can prove a media
+// query exists, never what a person ends up looking at when the animation is disabled.
+const REDUCED = argv.includes('--reduced');
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const target = /^https?:/.test(page) ? page : pathToFileURL(path.resolve(page)).href;
@@ -110,6 +119,12 @@ try {
 
   await send('Page.enable');
   await send('Runtime.enable');
+  if (REDUCED) {
+    // Sent once and left set: CDP keeps emulated media across navigations, and every
+    // theme below reloads the page. `no-preference` is the default and needs no call.
+    await send('Emulation.setEmulatedMedia',
+      { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
+  }
   if (SEED) await send('Page.addScriptToEvaluateOnNewDocument', { source: SEED });
   await send('Emulation.setDeviceMetricsOverride',
     { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: WIDTH < 640 });
@@ -174,7 +189,12 @@ try {
     }
     await sleep(220);   // let transitions settle before capturing
 
-    const cap = await withTimeout(send('Page.captureScreenshot', { format: 'png' }), 20000, 'the capture');
+    const capArgs = { format: 'png' };
+    if (CLIP) {
+      const [x, y, w, h] = CLIP.split(',').map(Number);
+      if ([x, y, w, h].every(n => Number.isFinite(n))) capArgs.clip = { x, y, width: w, height: h, scale: 1 };
+    }
+    const cap = await withTimeout(send('Page.captureScreenshot', capArgs), 20000, 'the capture');
     if (!cap || !cap.result || !cap.result.data) { console.log(`  ${t}: capture failed`); continue; }
 
     const file = path.join(OUT, `${label}-${t}-${WIDTH}.png`);

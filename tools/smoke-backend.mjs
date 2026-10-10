@@ -2484,6 +2484,28 @@ r.ok('...and nothing else can leave the page: two branch links and one shared "n
                                                       // single "choose a different account" link
   !/<form|<meta http-equiv="refresh"/i.test(hpage));
 
+// The mark on that page is fetched from the APP'S OWN ORIGIN, not embedded. That is
+// what makes replacing assets/icon-mark.png a frontend deploy rather than a backend
+// paste — the owner saw this page's logo as "wrong" and no backend change was needed
+// to fix it. Asserted because the tempting "improvement" here is to inline the image
+// as a data URI to save a request, and that would silently tie this page to a paste
+// forever.
+r.ok('the page draws the mark from the app\'s own origin, so the artwork is a frontend deploy and not a paste',
+  /base\.replace\([\s\S]{0,60}assets\/icon-mark\.png/.test(hpage) && !/data:image\//.test(hpage),
+  (hpage.match(/[^\n]*icon-mark[^\n]*/) || ['the page no longer draws the mark'])[0]);
+
+// Its dark-mode filter, and the same trap base.css fell into. A BARE invert(1) leaves
+// the mark perfectly legible — so it passes any "is it visible" check — while turning
+// the brand yellow #f8c808 into #0737f7, an electric blue. The bolt is the loudest
+// shape in the mark, so that is not a dark variant of the brand, it is a different one.
+// This page kept the bare filter long after base.css was fixed, and nothing here
+// checked it, because its comment still described the 2025 slate disc — the one
+// artwork for which a bare invert WAS correct. The rendered page is invisible to every
+// suite (that is why tools/render-doorpage.mjs exists); the filter string is not.
+r.ok('the door page flattens the mark to a white silhouette, NOT a bare invert(1) that would turn the brand yellow blue',
+  /filter:\s*brightness\(0\)\s+invert\(1\)/.test(hpage) && !/filter:\s*invert\(1\)/.test(hpage),
+  (hpage.match(/[^\n]*filter:[^\n]*/) || ['no filter on the mark'])[0]);
+
 // ── THE PHONE THAT HANDS OVER THE WRONG GOOGLE ACCOUNT ────────────────────────
 // The app starts every Google sign-in at Google's own account picker, because a web
 // app is served the browser's DEFAULT account and a phone with a personal account

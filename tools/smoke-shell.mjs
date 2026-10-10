@@ -474,20 +474,39 @@ ok('the video fills its half of the screen and no longer the whole of it',
 // not match the size it claims, and offers no install prompt — with no error in
 // the console, so nobody notices until someone tries to add it to a home screen.
 head('the app icon');
-ok('index.html points at the icon set, not the old letterhead',
-  /rel="icon"[^>]*assets\/icon-192\.png/.test(html) &&
+// THE TAB IS THE CLEAN MARK, THE TILES ARE PLATED, and they were the other way round
+// until 2026-10-10. `<link rel="icon">` pointed at icon-192.png — the framed Option A
+// lockup with its telemetry grid, drawn for a home screen at 180/512 and a smudge at
+// 16. The owner had already reported that same artwork as "dirt" at 56px on the Google
+// door's transition page before anyone connected the two. A favicon judged at 192px is
+// judged at the wrong size; it was rendered at 16/24/32/48 on both light and dark chrome
+// before this changed. See tools/make-icons.ps1 for why the two files differ at all.
+ok('index.html points the TAB at the clean mark and keeps the plated tile for iOS',
+  /rel="icon"[^>]*assets\/icon-mark\.png/.test(html) &&
   /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(html) &&
+  !/rel="icon"[^>]*assets\/icon-192\.png/.test(html) &&
   !/assets\/logo\.png/.test(html));
+// The four standalone pages carry the tab icon too, and they are separate documents
+// that load none of the app's stylesheets — so they are the ones that get forgotten.
+// Same mark, or the tab changes appearance when someone opens the FAQ.
+for (const page of ['faq.html', 'privacy.html', 'terms.html', 'customer.html']) {
+  ok(`${page} carries the same tab icon as the app`,
+    /rel="icon"[^>]*assets\/icon-mark\.png/.test(read('../' + page)),
+    (read('../' + page).match(/<link rel="icon"[^>]*>/) || ['no icon link at all'])[0]);
+}
 // The mark moved out of the card and into the common head above both doors, so it is
 // asserted by its new class and against the head, not the card. It is still the ONE
 // mark on this screen: smoke-shell's landing block asserts neither card repeats it.
 ok('the common head shows the mark',
   /class="landing-mark"/.test(html) && /assets\/icon-mark\.png/.test(landingHead));
-// The sidebar and the sign-in card show the BORDERLESS mark, while the tab, the
-// home screen and the manifest keep the square icons — an OS tile has to be
-// square, and iOS/Android mask it themselves. The two must not be swapped: the
-// square one inside the app shows the light background it was drawn on, which is
-// the "it comes in a shape of square" the owner reported.
+// So the split is ONE MARK ON TWO GROUNDS rather than two marks: the transparent
+// artwork everywhere the app paints it, the plated one wherever an OS draws a tile
+// and masks it itself. Three places have to agree — the two in-app marks, the tab
+// (asserted above), and the manifest's declared sizes (asserted below) — and the two
+// ways of getting it wrong are opposite. The square icon inside the app shows the
+// light background it was drawn on, which is the "it comes in a shape of square" the
+// owner reported; the transparent mark in a manifest tile loses its navy half on a
+// white home screen. Neither must be swapped for the other.
 ok('the sidebar brand mark is the borderless mark, not the square icon',
   /class="brand-mark"[^>]*>\s*<img[^>]*assets\/icon-mark\.png/.test(html) &&
   !/class="brand-mark"[^>]*>\s*[A-Za-z]/.test(html),
@@ -664,16 +683,23 @@ ok('the apple-touch-icon is a real 180x180 PNG', (() => {
 // regeneration produces — tools/make-icons.ps1 writes a fresh file of the right
 // size even if it read a master that was wrong or empty. A flat single-colour
 // PNG of this size deflates to a few hundred bytes, so the byte count is the
-// canary the IHDR cannot be. The master is asserted too: it is the only source
-// for all three, and a missing one is what the NEXT icon change would trip on.
-ok('no icon is a blank file, and the master they come from is present', (() => {
+// canary the IHDR cannot be. BOTH masters are asserted, not just the transparent
+// one: there is now a plate master (`icon-master-plate.png`, the owner's Mobile Logo)
+// as well as the ink master (his Browser Tab Logo), and the plate is the source of the
+// colour the three tiles are built on. Asserting only one would let the other be
+// deleted and the NEXT icon change would then fail inside make-icons.ps1 — or, worse,
+// fall back to a hardcoded plate and quietly stop matching the owner's file.
+ok('no icon is a blank file, and both masters they come from are present', (() => {
   const names = ['assets/icon-192.png', 'assets/icon-512.png', 'assets/apple-touch-icon.png'];
   const thin = names.filter(n => {
     const p = new URL(`../${n}`, import.meta.url);
     return !fs.existsSync(p) || fs.statSync(p).size < 4096;
   });
-  const master = new URL('../assets/icon-master.png', import.meta.url);
-  return thin.length === 0 && fs.existsSync(master) && fs.statSync(master).size > 4096;
+  const masters = ['assets/icon-master.png', 'assets/icon-master-plate.png'].filter(n => {
+    const p = new URL(`../${n}`, import.meta.url);
+    return !fs.existsSync(p) || fs.statSync(p).size < 4096;
+  });
+  return thin.length === 0 && masters.length === 0;
 })(), 'a blank PNG deflates to well under 4 KB');
 // sw.js precaches what it lists, and the deploy only serves what SERVED names.
 // An entry in one and not the other is a 404 the browser swallows.

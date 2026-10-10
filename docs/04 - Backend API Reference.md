@@ -567,6 +567,28 @@ the five palette presets: both are stored preferences, and this page is on anoth
 no storage to read. What is left is the app's default **light** look plus its dark mode under
 `prefers-color-scheme` — the one theme signal this page can actually see.
 
+**The mark on it is the clean one, and its dark treatment is not a bare `invert(1)`.**
+Two separate things, found separately, and both are worth keeping straight.
+
+*The file.* The page loads `assets/icon-mark.png` **from the app's origin**, so it shows
+whatever that file currently is — the door carries no copy of its own and needs no paste to
+follow the mark. That is why replacing the artwork on 2026-10-10 fixed this page for free: the
+mark it had been loading was the annotated Option A lockup, telemetry crosshairs and a `[0.5x]`
+dimension label and all, which at this page's own `height: 56px` reads as dirt. The owner
+reported it as *"the logo is wrong"* without knowing that was the cause.
+
+*The filter.* The page's dark ground is genuinely dark (`--ground: #1a1713`,
+`--panel: #262119`), so a silhouette **is** right here — and unlike `#sso-wait` there is no
+white-on-white risk to guard against. But the treatment was a **bare `invert(1)`**, which on
+this artwork turns the brand yellow `#f8c808` into `#0737f7`, an electric blue. It is now
+`brightness(0) invert(1)`, matching the app. The comment that justified the old value had
+described *"a dark slate disc, so on the dark ground only its knocked-out white pieces would
+show"* — the **2025** artwork. The mark has been two flat inks since Option A, and the
+reasoning died with the disc; the comment is rewritten rather than deleted, because a stale
+comment is what a future reader otherwise trusts. `smoke-backend.mjs` pins both halves:
+the mark comes from `assets/icon-mark.png` and not a `data:` URI, and the dark filter is
+`brightness(0) invert(1)` and **not** a bare `invert(1)`.
+
 **`node tools/render-doorpage.mjs`** writes both branches to disk so they can be photographed.
 This is the only page in the app that cannot be reached without a live Google account, which
 is exactly why it went three months without anyone seeing that it was wrong.

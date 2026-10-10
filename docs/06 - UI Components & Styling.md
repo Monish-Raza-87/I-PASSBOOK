@@ -110,6 +110,40 @@ must keep writing **inline** `display` values — `applyAccessGating` reads
 `detailView.style.display`, and `applySectionAccessGating` selects
 `.tab:not([style*="display: none"])`.
 
+**The sidebar brand types itself, on a loop.** The owner, 2026-10-10: *"in dashboard
+above service desk, are placed logo and I-PASSBOOK… logo appears and then I-PASSBOOK
+gets typed, then it fades and then it repeats itself."* That is `#sidebar .brand-mark`
+plus `.brand-text` and nothing else — a ~6 s cycle in which the mark fades in, the word
+types, the pair holds, both fade, and there is a beat of empty before it repeats. It is
+**`base.css`**, immediately after `.brand-text`, and three things about it are
+load-bearing rather than decorative:
+
+- **It is wrapped in `@media (prefers-reduced-motion: no-preference)`.** `base.css`
+  carries a global reduced-motion rule that forces `animation-iteration-count: 1` and a
+  0.01 ms duration on everything in the document. Unwrapped, a device asking for less
+  motion would be thrown straight to this animation's **last** keyframe — the faded-out
+  beat — and would sit looking at two blank spaces where the app's name goes. Guarded,
+  the rule simply never applies and the lockup stays composed.
+- **The keyframes drive *out of* the composed state, not into it.** The un-animated
+  `.brand-text` is the full word at full width, always. The tempting inverse — hide it
+  in the base rule and animate it in — leaves a blank sidebar the moment anything stops
+  the animation: reduced motion, a print stylesheet, a future `animation: none`. This
+  way round, "no animation" and "animation finished" both mean "the brand is there".
+  The fill mode is deliberately left off for the same reason.
+- **The typing is a `clip-path`, not a width.** The word is laid out at full width for
+  the whole cycle and `white-space: nowrap` keeps it on one line, so the flex row never
+  reflows and nothing else on the screen moves; only those ~90×16 px repaint. Animating
+  `width` would buy a layout pass per step, on the chrome of every screen, for a worse
+  result — a wipe instead of typing. `steps()` is what makes it read as typing, and the
+  clip is applied to a flex item, which is blockified, so it applies.
+
+Nothing is paid for when nothing is seen: `#sidebar` is `display:none` while signed out
+and below 1024 px, so the animation exists but paints nothing, and the collapsed 56 px
+rail hides `.brand-text` outright — the rail is untouched on purpose. **This is not the
+intro.** `INTRO_DONE_KEY` / `paintBrandPanel()` govern the once-per-VERSION sign-in film
+and share nothing with it; the two must not be wired together. If the motion ever wears
+thin, the whole answer is `animation-iteration-count` — one number, no markup.
+
 ### Splash (`#splash-screen`)
 Fixed overlay at `--z-splash` holding nothing but the intro video and a loader bar.
 **Nothing is layered over the video** — a darkening div with a backdrop blur used to
@@ -181,19 +215,26 @@ empty track — the one state that reads as *stuck* rather than *working* — so
 parked centred explicitly instead. The mark is already in `sw.js`'s `SHELL`, so the
 screen downloads nothing.
 
-**The mark is drawn from a height with `width: auto`, and it is inverted** — and both
-halves of that were a real defect, not a preference. The owner's second look reported
+**The mark is drawn from a height with `width: auto`, and it carries NO filter at all.**
+The height is a real defect fixed, not a preference: the owner's second look reported
 *"the logo/icon used is not the correct one with proper background etc, it has unclear
-things in the logo."* The artwork is a **4:3 lockup** (`512×384`: the disc, then
+things in the logo."* The artwork then was a **4:3 lockup** (`512×384`: the disc, then
 "Passbook" beside it), so `.sso-wait-mark` forcing `width: 56px; height: 56px` squashed
 it — the same reason `.auth-logo` and `.brand-mark` have always sized the mark off a
-height. And the disc is a dark slate (`#323943`) on a permanently `#0b0b0b` screen, so
-without `filter: invert(1)` the disc vanished into the ground and only the knocked-out
-white pieces showed, which reads as a logo full of holes. That is the same treatment,
-for the same reason, as the dark theme's own `[data-theme="dark"] .auth-logo`. Both
-were confirmed by decoding the PNG and compositing it on `#0b0b0b` both ways, not by
-guessing — and `smoke-ui.mjs` now pins the height, the `width: auto`, the absence of a
-pixel width, and the invert.
+height.
+
+**The filter is gone, and its removal is the part a reader is most likely to undo.**
+That disc was a dark slate (`#323943`) on a permanently `#0b0b0b` screen, so
+`filter: invert(1)` turned the disc light and kept its knocked-out monogram legible —
+right for that artwork. Two things then moved underneath it: the mark became the
+current **two flat inks on transparency** (see [the app icon](01 - Project Overview.md)),
+and this screen's ground became the app's own `--ind-ground`, which is **light in light
+mode**. On the old treatment the mark would now be `brightness(0) invert(1)` — a white
+silhouette on a white page. So the rule is: **whatever ground the screen stands on, the
+artwork is drawn as it is.** `smoke-shell.mjs` pins the height, the `width: auto`, the
+absence of a pixel width, **and the absence of that filter** — an assertion that had to
+be inverted rather than loosened, because "the filter is still there" was exactly the
+failure the old form of the line could no longer see.
 
 ### Auth card (`.glass-card`)
 `--surface-elevation-1` card with an `--outline-gray-1` hairline, `--elevation-lg` and
@@ -321,6 +362,34 @@ tab order and a keyboard user would land on it. The hover rules sit inside
 stuck — a phone would swap a row's contents to the hover line and never swap back.
 And nothing about the row depends on `position: absolute`, so no overlay can be
 clipped by `#ir-list`'s own scroll box.
+
+**Two scroll areas, and both are the owner's.** On 2026-10-10 he asked for *"separate
+scroll bar for IR list and similarly in for board since number of columns are more, we
+can have left-right scrollable bar on top of columns space."* They were answered in
+opposite ways, and the difference is worth knowing:
+
+- **The list already had its own, and it was left alone.** `.ir-list` is
+  `flex: 1; min-height: 0; overflow-y: auto`, and `#index-view` around it declares **no
+  `overflow` at all** — so the toolbar with the title, the search box and the two filter
+  strips sits outside the scroller and stays put while the rows move under it. The
+  property doing the work is the *absent* one: a single `overflow: auto` added to
+  `#index-view` would put the whole pane in one scroller, toolbar and all, and nothing
+  else on the screen would look wrong. `min-height: 0` is the other half — without it a
+  flex item refuses to shrink below its content, so the list would grow past the pane and
+  the scrollbar would appear on the **window** instead. `smoke-board.mjs` pins all three.
+- **The board's bar is a second, real element.** `#ir-board-scroll` is an empty
+  `.board-scrollbar` div carrying one 1 px child, placed between `.ir-list` and
+  `#ir-board` as their sibling; `scrollBoardMirror()` in `app.js` sizes that child to the
+  **board's** `scrollWidth` and keeps the two `scrollLeft`s equal in both directions,
+  under a re-entrancy guard. The reason it exists is that **CSS cannot move a
+  scrollbar**: one is always drawn at the *end* edge of its own scroll container, so the
+  board's own always lands along the bottom, under column bodies as tall as the pane and
+  half a screen from the column headers you are scrolling to reach. The only CSS that
+  relocates it is the `scaleY(-1)` flip, which flips every descendant with it. The board
+  **keeps its own bar as well** — on a touch device that one is the only one a finger
+  meets, and removing it would leave the last row of cards looking cut off. Both are
+  shown and hidden together by the single `#index-view.is-board` gate, and both are
+  driven in `smoke-board.mjs`.
 
 ### Sync bar (`#sync-status`)
 `.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +

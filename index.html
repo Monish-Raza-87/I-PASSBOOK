@@ -315,6 +315,26 @@
          between them (see base.css). -->
     <div class="auth-main">
 
+      <!-- ── THE HEAD OVER THE TWO DOORS ──
+           The owner, 2026-10-10, in his own words: *"Above buttons of emploee and
+           customer 'WELCOME TO INDRONES' AFTER SALES PORTAL I-PASSBOOK' should be
+           written and in the next line 'LOGIN' … So it gives a wholesome sense of
+           login as a employee or login as a customer."*
+
+           IT IS ONE LOCKUP WITH THE TWO BARS BELOW IT — the head says LOGIN, and the
+           bars finish the sentence, "AS A EMPLOYEE" / "AS A CUSTOMER". Change any one of
+           the three and the other two stop reading as a sentence, which is why the three
+           strings sit together in i18n.js and are noted there.
+
+           IT IS IN .auth-main AND NOT IN THE BRAND PANEL, and that is not a
+           detail: at 1024px and wider the panel's own head is visually hidden (the Option
+           A art already carries the wordmark), so a head placed there would say nothing
+           on the wide screen where he asked for it. Here it is visible at every width. -->
+      <header class="landing-lockup">
+        <p class="landing-welcome" data-i18n="landing.welcome">WELCOME TO INDRONES' AFTER SALES PORTAL I-PASSBOOK</p>
+        <p class="landing-login" data-i18n="landing.login">LOGIN</p>
+      </header>
+
       <!-- ── THE TWO DOORS, STACKED AND CONDENSED ──
            They were two cards side by side. The owner, 2026-10-08: *"In our login page,
            currently employee login box is much lengthier than customer's, plus employee
@@ -351,7 +371,7 @@
           <button type="button" class="door-bar" id="door-employee-toggle"
                   aria-expanded="false" aria-controls="door-employee-body"
                   data-i18n-aria="door.expand" data-i18n-var-role="Employee">
-            <span class="door-role" id="door-employee-role" data-i18n="door.employee">Employee</span>
+            <span class="door-role" id="door-employee-role" data-i18n="door.employee">AS A EMPLOYEE</span>
             <span class="door-chev" aria-hidden="true"></span>
           </button>
           <!-- THE PANEL SHIPS FOLDED — `hidden`, and `data-open="0"` on the section above
@@ -538,7 +558,7 @@
           <button type="button" class="door-bar" id="door-customer-toggle"
                   aria-expanded="false" aria-controls="door-customer-body"
                   data-i18n-aria="door.expand" data-i18n-var-role="Customer">
-            <span class="door-role" id="door-customer-role" data-i18n="door.customer">Customer</span>
+            <span class="door-role" id="door-customer-role" data-i18n="door.customer">AS A CUSTOMER</span>
             <span class="door-chev" aria-hidden="true"></span>
           </button>
           <!-- Folded on arrival for the same reason and in the same words as its twin
@@ -581,7 +601,7 @@
       </div>
 
       <!-- ── WHAT EVERY VISITOR PASSES, BELOW BOTH DOORS ──
-           Three things that belong to neither door and are true of both, so they are said
+           Two things that belong to neither door and are true of both, so they are said
            once, under the pair, in the order a person meets them.
 
            1. THE ACKNOWLEDGEMENT, and both phrases in it are now REAL LINKS. They were
@@ -599,27 +619,42 @@
               the Hindi table is a HALF translation: it is real, but any key it does not
               carry falls back to the English string through I18N's per-string fallback
               rather than showing a blank or a key. See the language layer's own header in
-              i18n.js for what that fallback is for and what it is not. -->
+              i18n.js for what that fallback is for and what it is not.
+
+              ⚠ IT SITS INSIDE .landing-foot NOW, and the owner asked for exactly that on
+              2026-10-10: *"Help and FAQ button and Language button can be placed
+              adjacent."* They were two stacked centred lines with a gap between them.
+              They are one line now. `smoke-shell.mjs` holds both of them in that one
+              line, so a later edit that pulls the picker back out fails rather than
+              silently restacking the foot. -->
 
       <p class="landing-terms"><span data-i18n="landing.termsPre">By continuing, you acknowledge that you understand and agree to the </span><a href="terms.html" data-i18n="landing.termsTos">Terms &amp; Conditions</a><span data-i18n="landing.termsAnd"> and </span><a href="privacy.html" data-i18n="landing.termsPrivacy">Privacy Policy</a></p>
-
-      <div class="landing-lang">
-        <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
-      </div>
 
       <!-- ── THE FOOT, SHARED BY BOTH DOORS ──
            Where these two belong: they are not the customer's things, they are the
            desk's, and an employee with a problem has exactly as much use for them as a
            customer does. Centred, below the pair, said once.
 
-           The Report button stays hidden until CUSTOMER_FORM_URL is set in app.js — an
-           entry that opens an empty frame is worse than no entry. The FAQ is always
-           available: it is a static page, and it answers the questions the form's own
-           existence raises. -->
-      <p class="landing-foot">
-        <button type="button" class="link-btn" id="customer-door-open" style="display:none" data-i18n="door.report">Report a problem</button>
+           ⚠ "REPORT A PROBLEM" IS GONE FROM THIS SCREEN, on the owner's instruction of
+           2026-10-10: *"We need to remove report a problem button from login page, this
+           element is for customers after loging in."* It is right, and the reason is
+           worth keeping: the button opened the Google form door, which is a POST-LOGIN
+           thing — the signed-in customer already has it, three times over, in the
+           Customer Space (customer.html's #raise, #raise-2, #raise-3). On the sign-in
+           screen it was answering a question nobody standing here had asked, next to the
+           WhatsApp corner, which is the thing a person who cannot get IN actually
+           needs.
+
+           The door itself is not gone: #customer-door, wireCustomerDoor() and
+           CUSTOMER_FORM_URL all still stand, and the entry point moved INTO the app, to
+           the signed-in nav beside Help & FAQ — see #nav-report in the sidebar. A modal
+           with no trigger is dead code that reads as a feature. -->
+      <div class="landing-foot">
         <a class="link-btn" id="auth-faq-link" href="faq.html" data-i18n="door.faq">Help &amp; FAQ</a>
-      </p>
+        <div class="landing-lang">
+          <select id="lang-select" aria-label="Language" data-i18n-aria="landing.language"></select>
+        </div>
+      </div>
 
       <!-- The credit sits on the LANDING SCREEN, not only inside the app: it is the one
            screen everybody sees on every device, every day. It moved out from under the
@@ -766,6 +801,29 @@
           <span class="nav-icon" aria-hidden="true"></span>
           <span class="nav-label" data-i18n="nav.help">Help &amp; FAQ</span>
         </a>
+
+        <!-- ── REPORT A PROBLEM, FOR SOMEONE ALREADY SIGNED IN ──
+             It stood on the SIGN-IN screen until 2026-10-10, and the owner moved it:
+             *"We need to remove report a problem button from login page, this element is
+             for customers after loging in."* It is the Google-Forms door, and a person
+             who has just failed to get in has no use for a form about a job; the WhatsApp
+             corner is what that person needs. A signed-in customer does have a use for
+             it, and does not have to look for it.
+
+             ⚠ IT KEEPS THE ID `customer-door-open`, deliberately. `wireCustomerDoor()`
+             in app.js binds it, and tools/smoke-door-faq.mjs holds the wiring to the
+             markup by that id. Renaming it to match its new home would be a rename of
+             the wiring's anchor, not a description of where the button is — and the id
+             still says the true thing: it opens the customer door.
+
+             It stays `display:none` until CUSTOMER_FORM_URL is a real URL, for the same
+             reason it did before: an entry that opens an empty tab is worse than no
+             entry. app.js reveals it. -->
+        <button type="button" class="nav-item" id="customer-door-open" style="display:none"
+                title="Report a problem" data-i18n-title="door.report">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label" data-i18n="door.report">Report a problem</span>
+        </button>
 
         <div class="sidebar-section-label" id="nav-admin-label" style="display:none" data-i18n="nav.administration">Administration</div>
         <button type="button" class="nav-item" id="nav-access" style="display:none">

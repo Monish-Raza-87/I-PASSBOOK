@@ -2005,11 +2005,17 @@
    INSIGHTS — the charts, the bars and the People list
    Everything below draws from markup that is already plain HTML. There is no
    canvas and no charting library anywhere in this file, and that is a decision
-   with a reason behind it rather than a preference: the app's one canvas
-   painting (the unlock pattern) hardcodes six hex values, because a canvas
-   cannot read a CSS variable — so it is the single surface in the app that
-   ignores all four palettes and both themes. Bars built from divs inherit the
-   accent and follow the theme for free.
+   with a reason behind it rather than a preference: a canvas cannot read a CSS
+   variable, so the app's one canvas painting (the unlock pattern) has to ASK the
+   cascade for each of its three colours by name — see patternInk() in app.js.
+   That works, and it is the only way it works. A bar built from a div simply
+   inherits the accent and follows the theme with nothing asked of it at all.
+   ⚠ THAT PARAGRAPH USED TO SAY something else, and it is worth leaving the
+   correction here rather than quietly deleting it: it claimed the pattern "is the
+   single surface in the app that ignores all four palettes and both themes" because
+   it "hardcodes six hex values". The claim was TRUE for as long as it stood — and
+   the cost of the cheap version of drawing to a canvas is exactly that, so it is the
+   reason this file keeps to divs.
    ══════════════════════════════════════════════════════════ */
 
 /* ── The stat row ─────────────────────────────────────────────────────────── */
@@ -2362,7 +2368,16 @@
   width: 240px;
   height: 240px;
   touch-action: none;      /* the draw is a pointer gesture, not a page scroll */
-  border-radius: 12px;
+  /* SQUARE CORNERS AND A HAIRLINE, because the well is a recessed PANEL and not a card
+     floating on the page. It shipped as `border-radius: 12px` on a #f2f2f5 plate, which
+     is the one rounded, cool-grey, iOS-shaped object in a UI made of square corners,
+     hairline rules and the brand yellow — so it read as a widget embedded in the app
+     rather than as part of it. `border-box` keeps the 240px the geometry is written
+     against: the painter's logical box is square either way, but the CSS box and the
+     backing store must stay the same number or the dots land off-centre. */
+  box-sizing: border-box;
+  border: 1px solid var(--ind-line);
+  background: var(--ind-inset);
 }
 /* WHILE A PATTERN IS BEING CHECKED (2026-10-08). app.js puts `.is-busy` on the canvas
    for the whole of a verification and refuses `pointerdown` on it, while the line

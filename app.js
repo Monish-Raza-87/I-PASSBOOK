@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v84';
+const APP_VERSION = 'v85';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1993,9 +1993,14 @@ function paintBrandPanel() {
   if (_brandPainted) return;
   _brandPainted = true;
 
-  // Below 1024px the stage is not drawn at all — a phone gets a compact brand header and
-  // nothing else — so there is nothing to decide and nothing to download.
-  if (!mqDesktop.matches || !video) return;
+  // ⚠ IT PLAYS ON A PHONE TOO, WHICH IT DID NOT UNTIL NOW. The owner was shown both
+  // and asked for it by name: "turn it on for mobile too." The cost is stated where it
+  // belongs rather than hidden here — 1.56 MB, once per VERSION and not once per load,
+  // because deliveredForThisVersion() below is what the second and every later arrival
+  // is refused on. What a phone must NOT do is download it before the form is usable,
+  // and it cannot: the element is preload="none", so the bytes are asked for by play()
+  // and not by the markup.
+  if (!video) return;
   if (introDeliveredForThisVersion()) return;
   // Reduced motion is a real instruction, not a hint: no video, and the heartbeat holds
   // at rest (the global animation guard in base.css does that half). Delivery is
@@ -2415,10 +2420,15 @@ async function submitUnlock(method, patternSeq) {
 }
 
 // ─── THE PATTERN ENGINE — one canvas, three uses (unlock, setup, re-setup) ───
-// 3×3 dots on a square canvas; a sequence qualifies at 4 dots. Dots carry the
-// neutral palette in both themes; the drawn line follows the same values. All
-// geometry is derived from the canvas size, so a bigger canvas needs no new math.
+// 3×3 dots on a square canvas; a sequence qualifies at 4 dots. Every coordinate below is
+// expressed in PATTERN_BOX, the LOGICAL box, and never in the canvas's backing store —
+// which is what lets the backing store be raised for a sharp phone without moving a
+// single dot.
 const PATTERN_MIN_DOTS = 4;
+// The logical size of both canvases: their CSS size, and the unit the geometry is in.
+// `width="240" height="240"` in the markup is only the value before the first paint —
+// paintPattern() rewrites it to PATTERN_BOX × devicePixelRatio.
+const PATTERN_BOX = 240;
 
 // ─── THE PATTERN'S TWO STATES, AND WHY THEY ARE ONE BUG ──────────────────────
 // The owner's report, verbatim: *"once we enter pattern it takes a long halt and
@@ -2485,23 +2495,77 @@ function patternHashOf(seq) {
 // attachPatternCanvas wires pointer events once per canvas element, and calls
 // back with the FINISHED sequence — the pattern logic lives above the canvas,
 // so setup and unlock share the engine without sharing state.
-function patternDots(canvas) {
-  const m = canvas.width * 0.18, step = (canvas.width - 2 * m) / 2;
+function patternDots() {
+  const m = PATTERN_BOX * 0.18, step = (PATTERN_BOX - 2 * m) / 2;
   return [0,1,2].flatMap(r => [0,1,2].map(c => ({ x: m + c * step, y: m + r * step, n: r * 3 + c + 1 })));
 }
+
+// ─── THE PATTERN'S THREE COLOURS, AND WHERE THEY COME FROM ───────────────────
+// ⚠ A CANVAS CANNOT READ A CSS VARIABLE. `ctx.fillStyle = 'var(--x)'` is not a colour
+// and paints black — which is why this surface used to carry six hardcoded hex values
+// and was, in views.css's own words, "the single surface in the app that ignores all
+// four palettes and both themes". But a canvas CAN read a variable's COMPUTED VALUE,
+// and that one indirection is the whole difference: the painter now asks the cascade
+// what colour it should be, exactly as every other surface does.
+//
+// The named token, and the role it is playing:
+//   well   --ind-inset    the recessed surface the dots sit in — the same one the
+//                         sign-in card and the wait screen's track are cut from.
+//   idle   --ink-gray-4   a dot not taken yet: legible as a target, quiet enough that
+//                         the taken ones are obviously the answer. Deliberately NOT
+//                         --ind-rule or --ind-line, which are HAIRLINE colours — a 2px
+//                         ring of either on the well above is very nearly invisible.
+//   taken  --ind-yellow   a dot taken. A disc is a FILL, so the brand yellow is legal
+//                         here, and it is the one thing on this canvas that should
+//                         read as "you did this". See the yellow-is-a-fill rule.
+//
+// ⚠ THE LITERAL BESIDE EACH NAME IS NOT A SECOND PALETTE. It is what a run with no CSS
+// engine at all paints with: tools/smoke-unlock.mjs drives this engine inside a VM that
+// has no `getComputedStyle` and no stylesheets, and what that suite asserts is which
+// BRANCH runs, not what the canvas looks like. In a browser the token always resolves
+// and the literal is never reached.
+const PATTERN_INK = {
+  well:  ['--ind-inset',  '#f3f3f3'],
+  idle:  ['--ink-gray-4', '#999999'],
+  taken: ['--ind-yellow', '#ffc400'],
+};
+function patternInk(canvas, role) {
+  const [name, fallback] = PATTERN_INK[role];
+  if (!canvas || typeof getComputedStyle !== 'function') return fallback;
+  const v = String(getComputedStyle(canvas).getPropertyValue(name) || '').trim();
+  return v || fallback;
+}
+
 function paintPattern(canvas, seq, hover) {
   const ctx = canvas.getContext('2d');
-  const dpi = (typeof isDarkTheme === 'function' && isDarkTheme());
-  const bg   = dpi ? '#2a2a2e' : '#f2f2f5';
-  const dim  = dpi ? '#4a4a52' : '#d1d5db';
-  const live = dpi ? '#e8eaed' : '#4b5563';
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const dots = patternDots(canvas);
+  const well  = patternInk(canvas, 'well');
+  const idle  = patternInk(canvas, 'idle');
+  const taken = patternInk(canvas, 'taken');
+
+  // THE BACKING STORE, AT THE DEVICE'S OWN RESOLUTION. This is sharpness and not
+  // geometry: the logical space stays PATTERN_BOX square, so nothing below changes. A
+  // 240px canvas on a 3× phone is a 240px image spread over 720 device pixels, and a
+  // 9px disc resampled 3× is a smear — on the one device the gesture exists for. The
+  // rewrite is guarded because assigning `canvas.width` clears the context's own state,
+  // so it must not happen on every repaint.
+  const dpr = Math.max(1, Math.min(3, (typeof window !== 'undefined' && window.devicePixelRatio) || 1));
+  const px = Math.round(PATTERN_BOX * dpr);
+  if (canvas.width !== px) { canvas.width = px; canvas.height = px; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  ctx.clearRect(0, 0, PATTERN_BOX, PATTERN_BOX);
+  ctx.fillStyle = well;
+  ctx.fillRect(0, 0, PATTERN_BOX, PATTERN_BOX);
+
+  const dots = patternDots();
   const picked = new Set(seq || []);
-  ctx.strokeStyle = live + '88'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+
+  // The trail. SOLID, and thinner than the discs rather than fainter: a translucent
+  // tint is a second colour nobody chose, and 55% of the yellow over the dark ground's
+  // near-black is a muddy olive — the same yellow at full strength is right in both
+  // themes. The discs stay the subject because they are 18px across and this line is 4.
   if (seq && seq.length > 1) {
+    ctx.strokeStyle = taken; ctx.lineWidth = 4; ctx.lineCap = 'round';
     ctx.beginPath();
     seq.forEach((n, i) => {
       const d = dots[n - 1];
@@ -2510,11 +2574,21 @@ function paintPattern(canvas, seq, hover) {
     if (hover) { const h = dots[hover - 1]; ctx.lineTo(h.x, h.y); }
     ctx.stroke();
   }
+
+  // AN UNTOUCHED DOT IS A RING; A TAKEN ONE IS A DISC. The two states differ in fill
+  // AND in weight, so the gesture is read at a glance and never depends on telling two
+  // greys apart.
   dots.forEach(d => {
     ctx.beginPath();
     ctx.arc(d.x, d.y, 9, 0, Math.PI * 2);
-    ctx.fillStyle = picked.has(d.n) ? live : dim;
-    ctx.fill();
+    if (picked.has(d.n)) {
+      ctx.fillStyle = taken;
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = idle;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
   });
 }
 function resetPatternCanvas(message) {
@@ -2534,10 +2608,12 @@ function attachPatternCanvas(canvas, onPattern) {
   let seq = [];
   const dotAt = (ev) => {
     const r = canvas.getBoundingClientRect();
-    const x = (ev.clientX - r.left) * (canvas.width / r.width);
-    const y = (ev.clientY - r.top)  * (canvas.height / r.height);
-    const R = canvas.width * 0.10;
-    const d = patternDots(canvas).find(dd => Math.hypot(dd.x - x, dd.y - y) <= R * 1.9);
+    // PATTERN_BOX, not canvas.width: the backing store is the device's resolution and
+    // the gesture's coordinates are the logical box's.
+    const x = (ev.clientX - r.left) * (PATTERN_BOX / r.width);
+    const y = (ev.clientY - r.top)  * (PATTERN_BOX / r.height);
+    const R = PATTERN_BOX * 0.10;
+    const d = patternDots().find(dd => Math.hypot(dd.x - x, dd.y - y) <= R * 1.9);
     return d ? d.n : null;
   };
   paintPattern(canvas, []);
@@ -3593,9 +3669,12 @@ function resolvedTheme() {
   if (THEME_VALUES.indexOf(p) >= 0) return p;
   return prefersDark() ? 'dark' : 'light';
 }
-// Kept as a boolean for its one non-CSS caller — the canvas painter, which cannot
-// read a CSS variable and so has to choose its own hex values.
-function isDarkTheme() { return resolvedTheme() === 'dark'; }
+// ⚠ `isDarkTheme()` STOOD HERE AND IS GONE, and the reason is worth a line rather than
+// a silent deletion: it existed for ONE caller, the canvas painter, which could not read
+// a CSS variable and so had to pick its own hex values by hand. The painter now reads the
+// tokens' computed values instead — see patternInk() — so it no longer needs to be told
+// which theme it is in, and neither does anything else. Nothing outside app.js ever
+// named it.
 
 const THEME_CHOICES = [
   { value: 'light',  label: 'Light' },
@@ -13452,6 +13531,11 @@ function initIcons() {
     ['#nav-insights .nav-icon',              'chart'],
     ['#nav-log .nav-icon',                   'pulse'],
     ['#nav-faq .nav-icon',                   'help'],
+    // The signed-in home of "Report a problem", moved here from the sign-in screen on
+    // the owner's instruction of 2026-10-10 (see index.html's note on it). The glyph is
+    // the same one the intake tab wears, because it is the same act: telling the desk
+    // what went wrong.
+    ['#customer-door-open .nav-icon',        'report'],
     ['#nav-access .nav-icon',                'users'],
     ['#sidebar-toggle .sidebar-toggle-icon', 'panel-left'],
     ['#list-toggle .list-toggle-icon',       'list'],

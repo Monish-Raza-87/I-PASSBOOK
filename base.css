@@ -299,8 +299,14 @@ code, pre, kbd { font-family: var(--font-mono); }
    `data-ground` attribute on the panel picks between them. When he has looked, the
    losing block goes and its PNG goes with it; nothing else refers to it.
 
-     dark    the panel is #0b0b0b whatever the theme is. That is the ground the video
-             was graded against, and it is what the owner's own layout mockup shows.
+     dark    the panel is #0b0b0b whatever the theme is, and it is what the owner's own
+             layout mockup shows.
+             ⚠ THIS LINE USED TO ADD "That is the ground the video was graded against",
+             AND THAT WAS FALSE. It was never measured; it was assumed from the mockup,
+             and it is what put the film on the black end of a black-to-yellow ramp and
+             made it read as a bright box. The film's field is #f2f2f2 — LIGHT — decoded
+             and read back off the real file by tools/.cache/vidprobe.mjs. See the
+             --ind-film block below, where the measurement and the ramp it corrects are.
      light   the panel takes the off-white half of the paper pair borrowed from
              indrones.com and the sign-in column beside it takes the white half, so the
              seam down the middle of the screen is the same white-to-off-white step his
@@ -710,6 +716,66 @@ code, pre, kbd { font-family: var(--font-mono); }
   :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-feather"]) { --ind-ground: var(--ind-fuse-feather); }
   :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-silver"])  { --ind-ground: var(--ind-fuse-silver); }
 
+  /* ── THE FILM'S OWN FIELD, AND THE ONE NUMBER IN THIS FILE THAT WAS MEASURED
+     OFF A PIXEL RATHER THAN CHOSEN ────────────────────────────────────────────────
+     The intro is LIGHT ART. It is a near-white drawing of the mark on a near-white
+     field, and the ramps above end at --ind-black — so a film laid on them is a
+     bright rectangle on a dark ground, which is the "box" the owner reported. No
+     filter, blend mode or mask can hide that, because the mismatch is the GROUND
+     and the ground is on the wrong side of the ramp.
+
+     SO THE RAMP'S LEFT END MOVES TO THE FILM. Everything from the crossing rightward
+     is the shipped feather, stop for stop, unchanged: the black band, the amber, the
+     arrival in the brand yellow. Only the left end — which was the black field the
+     mark was meant to float on — becomes the field the film actually carries, and
+     the film then has nothing to be a rectangle against.
+
+     ⚠ #f4f4f4 IS A MEASUREMENT, NOT A TASTE. tools/.cache/vidprobe.mjs decodes
+     assets/brand-intro.mp4 through the same Chrome that plays it and reads the
+     pixels back as 24-bit values: the outer 3% ring of the frame is #f2f2f2 across
+     42-48% of the frame and #f1f1f1-#f6f6f6 across the whole of it, and the literal
+     corners are #f1f1f1 / #f2f2f2 / #f3f3f3. The token is the RENDERED value and not
+     the file's, because `object-fit: cover` crops the 16:9 frame to the square stage
+     and the centre of that field is a shade brighter than its edge — the first
+     attempt used #f2f2f2, and tools/.cache/probe-seam.ps1 found the four-level step
+     it left at the stage's edge (#f2f2f2 panel against #f6f6f6 interior). At #f4f4f4
+     a scanline across that edge is continuous.
+
+     ⚠ base.css:294 SAYS #0b0b0b IS "THE GROUND THE VIDEO WAS GRADED AGAINST". That
+     line is WRONG and is the reason the film was painted onto the black end of a
+     black-to-yellow ramp in the first place. It has been corrected there.
+
+     ⚠ AND IT IS INSIDE min-width: 1024px, WHICH IS ABOUT THE RAMP'S SHAPE, NOT ABOUT
+     WHETHER THE FILM PLAYS. It plays at both widths — the owner asked for the phone by
+     name — but a 96deg ramp across a 390x844 column is the phone picture that was
+     already rejected once: the dark band lands on the head and half the type vanishes.
+     So the phone gets its own vertical ramp in the max-width block below, and this
+     horizontal one is scoped away from it rather than left to be inherited. */
+  :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-brand="video"]) {
+    --ind-film: #f4f4f4;
+    --ind-ground:
+      radial-gradient(38% 130% at 49% 50%,
+        rgba(255, 196, 0, 0.32) 0%, rgba(255, 196, 0, 0.10) 42%, transparent 72%),
+      linear-gradient(96deg,
+        var(--ind-film) 0%, var(--ind-film) 45%,
+        #0b0b0b 50%, #1d1808 53%, #6b5200 56%,
+        #d9a600 59%, var(--ind-yellow) 63%,
+        #ffd21a 80%, #ffe066 100%);
+  }
+  /* THE FILM FILLS ITS SQUARE, AND THE FEATHER IS WHAT THE MASK IS FOR.
+     `object-fit: cover` is not cosmetic: the stage is square and the film is 16:9,
+     so a letterboxed film would leave its own band of the ground showing above and
+     below the picture — a rectangle again, just a different shape. Cropping the
+     frame's centre instead means the film's field covers the whole stage. The radial
+     mask then takes the stage's own edge off, so the picture has no edge at all and
+     the field simply continues. */
+  .auth-brand-panel[data-brand="video"] .brand-video {
+    opacity: 1;
+    object-fit: cover;
+    -webkit-mask-image: radial-gradient(closest-side, #000 72%, transparent 100%);
+            mask-image: radial-gradient(closest-side, #000 72%, transparent 100%);
+  }
+
   /* THE ARTWORK IS CHOSEN BY THE GROUND, and nothing else in the app names these two
      files — a ground that does not set one gets NO mark at all, which is a blank panel
      and not an error. The dark end is where the mark sits here, so it is the dark
@@ -778,10 +844,12 @@ code, pre, kbd { font-family: var(--font-mono); }
        pixel sampler rather than judged by eye: the Continue button's fill came out
        #ffc400 and the card it sits on came out #ffc500–#ffd900 — the button was very
        nearly the colour of the thing behind it, which is why it read as a faint band
-       rather than as a control. The yellow belongs on this ground and on the two door
-       bars; it does not belong on the one action inside a card that is already yellow.
-       So the action takes the paper, and the ink on it is the ink that was already
-       measured against that paper.
+       rather than as a control. The yellow belongs on this ground; it does not belong on
+       the one action inside a card that is already yellow. So the action takes the paper,
+       and the ink on it is the ink that was already measured against that paper.
+       ⚠ THE TWO DOOR BARS TOOK THE SAME PAPER AN HOUR LATER, on his own correction — "Both
+       buttons to be made of same off-white color like other buttons" — so this ground now
+       has no yellow button on it at all. See the bar's own block below.
        ⚠ THESE ARE TOKENS HERE RATHER THAN A `background:` RULE, AND THAT IS NOT STYLE.
        industrial.css paints `.btn` from `#auth-container .btn:not(…):not(…)` — one id and
        two classes — and no rule written from the panel alone can beat an id however many
@@ -1043,6 +1111,22 @@ code, pre, kbd { font-family: var(--font-mono); }
    reached. It is hidden by default and shown by the attribute, exactly like the
    splash — the two are the same kind of thing, which is why the attribute pattern
    is reused rather than a class toggled from app.js after parsing.
+
+   ⚠ IT STANDS ON THE APP'S GROUND NOW, AND IT USED TO STAND ON #0b0b0b. The old rule
+   was right when it was written and the reason has since inverted. It read: "a
+   full-screen transient about to be replaced by the app must not flash a light page
+   in between two dark ones" — true while the sign-in screen and the brand panel were
+   both near-black. The sign-in screen is not dark any more; it opens on the film's
+   own light field. So the argument now runs the other way and a black interstitial is
+   the flash, between a light sign-in and a light app. Taking `--ind-ground` means this
+   screen is whatever the app's own ground is, in both themes, by construction rather
+   than by a literal that has to be kept in step by hand.
+
+   ⚠ AND THE MARK IS NO LONGER INVERTED. It was a flat-white silhouette (`brightness(0)
+   invert(1)`) because it stood on black. On a light ground that filter renders the
+   brand mark as a white blob on white — invisible — so the filter goes WITH the dark
+   ground it was written for. What is left is the mark in its own colours, which is the
+   same one the sign-in head draws.
    ══════════════════════════════════════════════════════════ */
 #sso-wait {
   position: fixed;
@@ -1054,47 +1138,51 @@ code, pre, kbd { font-family: var(--font-mono); }
   justify-content: center;
   padding: 24px;
   text-align: center;
-  background: #0b0b0b;   /* a full-screen transient about to be replaced by the app must
-                            not flash a light page through the middle of a sign-in. This is
-                            also the brand panel's dark ground — the two agree on purpose. */
-  color: #f8f8f8;
+  background: var(--ind-ground);
+  color: var(--ink-gray-9);
 }
 html[data-sso="wait"] #sso-wait { display: flex; }
 
-/* NOT a square, and inverted — both learned from the owner looking at it.
-   The artwork is a 4:3 lockup (512x384: the disc, then "Passbook" to its right), so
+/* NOT a square, and the mark keeps its own colours. The mark is taller than it is
+   wide (512x563 for the 2026 Option A artwork; 512x384 for the disc it replaced), so
    forcing 56x56 SQUASHES it — the mark is drawn at `width: auto` from a height for
    exactly this reason, the same rule `.auth-logo` and `.brand-mark` have followed
-   from the start. And this screen is dark by definition, so the mark needs the same
-   `invert(1)` the dark theme applies: its disc is a dark slate, which on #0b0b0b
-   leaves only the knocked-out white pieces showing and reads as a logo with holes in
-   it. Inverting keeps the design's internal contrast because the monogram and script
-   are holes in the disc — see the full note on `[data-theme="dark"] .auth-logo`. */
+   from the start. */
 .sso-wait-mark {
   height: 56px;
   width: auto;
   display: block;
-  filter: invert(1);
 }
+/* THE TYPE IS THE APP'S TYPE. The shell says everything in the mono face, uppercase,
+   letterspaced — the filter labels, the panel heads, the status chips. A wait screen
+   set in the body face and in sentence case is the one surface in the product that
+   does not look like the product, which is exactly what the owner saw. */
 .sso-wait-title {
-  margin: 16px 0 0;
-  font-size: var(--text-lg);
+  margin: 18px 0 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 .sso-wait-note {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   max-width: 34ch;
   font-size: var(--text-sm);
   line-height: var(--leading-body);
-  color: rgb(248 248 248 / 0.72);
+  color: var(--ink-gray-7);
 }
 
+/* SQUARE, AND A HAIRLINE. Every other corner in this app is `--radius-*: 0px` (see the
+   industrial token block), so a 999px pill here was the tell that this screen had been
+   left behind. The track is a rule rather than a trough: 1px of `--ind-rule` around a
+   4px well, which is the same hairline-and-fill pair the filter bars above the list use. */
 .sso-wait-track {
   width: 200px;
   height: 4px;
-  margin-top: 24px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.16);
+  margin-top: 26px;
+  border: 1px solid var(--ind-rule);
+  background: var(--ind-inset);
   overflow: hidden;
 }
 /* INDETERMINATE on purpose, and that is the honest choice rather than a lazy one:
@@ -1105,13 +1193,17 @@ html[data-sso="wait"] #sso-wait { display: flex; }
    the app" rather than as a progress bar about to finish.
    The travel is in the SWEEP's own width (45% of the track), so the offsets are
    wide: -215% puts its left edge clear of the track, and the hold sits it clear of
-   the right edge, so it never appears to stop mid-track. */
+   the right edge, so it never appears to stop mid-track.
+   ⚠ IT IS THE BRAND YELLOW AS A FILL, which is the one role that colour has on a
+   light page (see the note on the accent's text role). It used `--accent`, and
+   `--accent` on a light page is INK — so the bar was drawn in a colour chosen to be
+   read, on a element whose whole job is to be seen moving. It was invisible in the
+   probe, which is how that was found. */
 .sso-wait-sweep {
   width: 45%;
   height: 100%;
   margin-left: 50%;
-  border-radius: 999px;
-  background: var(--accent);
+  background: var(--ind-yellow);
   transform: translateX(-50%);
   animation: ssoSweep 1.4s var(--ease) infinite;
 }
@@ -1232,6 +1324,285 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      gated off there (startBrandTyping()); this only stops the box it reserves from
      taking any room if it is ever run anyway. */
   .auth-brand-panel .landing-wordmark { width: auto !important; }
+}
+
+/* ── THE GROUND, CARRIED TO THE PHONE ────────────────────────────────────────────
+   The owner, 2026-10-10, one line, having looked at the wide screen: *"yes, do the
+   phone too."* Until now every ground's rules lived inside `@media (min-width: 1024px)`
+   and a phone got the app's own grey page — see the note on that gate at the top of the
+   ground block, which says the gate was there on purpose: "a background declared out
+   here would paint a dark band behind that header on every phone." That sentence was
+   right about the BAND and it is the band he is now asking for.
+
+   ⚠ THE RAMP IS RE-DRAWN FOR THE NARROW CASE, AND IT IS NOT THE SAME GRADIENT ROTATED.
+   The wide ramp runs left-to-right because the screen is split left-to-right. A phone has
+   no split: one column, centred, over a screen it does not fill. So the ground here is
+   the LIGHT END of the fuse — the brand's own yellow field — covering the page, with the
+   dark end arriving as a feathered band on the screen's TOP EDGE.
+
+   ⚠ AND THE DARK BAND IS SIZED IN `vh` AND STOPS WELL SHORT OF THE CONTENT. This is the
+   one thing that had to be measured rather than drawn. On the wide screen the crossing
+   passes behind the cards because the cards sit on the light end by construction. Here
+   the column is CENTRED (`justify-content: safe center`), so where the content starts
+   depends on the phone, and a crossing anchored to the content would move every time a
+   door was opened. A crossing anchored to the viewport cannot move — so it is put
+   entirely in the empty space above the column: black to 6vh and gone by 13vh, which is
+   51px→110px on a 844px screen where the column starts at 136px. On a short phone, where
+   `safe center` degrades to `flex-start` and the column starts at the 2rem padding, the
+   tail of the band passes behind the top of the brand mark — a fade, not a field, which
+   is the failure mode this shape is chosen for.
+
+   ✅ AND IT WAS CHECKED, at 320x568 — the shortest screen this app will meet — rather
+   than left as a worry. The band ends at 74px there and the mark's top edge is at about
+   35px, so the upper third of the mark sits on the dark amber end of the ramp. It reads:
+   the monogram's own yellow strokes carry it and nothing else on the screen is touched —
+   the head, both doors and the footing are all on clean yellow. So the prediction above
+   is right, the cost is real, and it is small enough to keep the vh sizing, which is the
+   thing that stops the crossing moving when a door is opened. Re-render before doubting
+   it: `node tools/render-themes.mjs "<%TEMP%>/ipassbook-render/landing.html" --width 320
+   --height 568`.
+
+   ⚠ THE CONTROLS ARE RESTATED HERE RATHER THAN INHERITED, and that is a real cost paid
+   deliberately. `--btn-solid-bg` and the glass are set on `.auth-main` up in the ground
+   block, inside the desktop media query; there is no way to reuse them from here without
+   moving a hundred lines of that block out of the query it is written in. THIS SET AND
+   THAT SET MUST MOVE TOGETHER — they are the same ground seen at two widths, and
+   tools/smoke-shell.mjs holds the two lists to each other so that a change to one that
+   is not made to the other fails rather than drifting. */
+@media (max-width: 1023px) {
+  /* The field. Declared on #auth-container because that is what reads --ind-ground
+     (industrial.css paints it there), and scoped to the container rather than to :root
+     because --ind-ground is ALSO the ground of the app's own panes — #index-view,
+     #detail-view, the sidebar — and a phone signing in must not repaint them. */
+  :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground^="fuse"]) {
+    --ind-fuse-feather-narrow: linear-gradient(178deg,
+      var(--ind-black)  0vh,
+      #101010           4vh,
+      #1d1808           7vh,
+      #6b5200           9vh,
+      #d9a600          11vh,
+      var(--ind-yellow) 13vh,
+      #ffc400          24vh,
+      #ffd21a          58%,
+      #ffe066         100%);
+    --ind-ground: var(--ind-fuse-feather-narrow);
+  }
+
+  /* ── THE PHONE, WITH THE FILM ON IT ─────────────────────────────────────────────
+     THE FILM GETS A BAND AT THE TOP OF THE COLUMN, and the band exists because the
+     film does: 16:9 on a 390px phone is 219px, and the mark's own square would be 390.
+     `height` in vh rather than an `aspect-ratio` is the load-bearing choice here — the
+     field stop below has to end where the band ends, and a percentage of the container
+     can be written against a vh height but not against an aspect ratio the gradient
+     cannot see. 26vh of an 844px phone is 219px: the band's own height.
+
+     THE CROSSING NEEDS A GAP TO LIVE IN, and that is what the `margin-bottom` is doing
+     rather than any spacing taste. The first phone build put the head directly under the
+     band — the two boxes touched at 329px — and the crossing then had nowhere to go but
+     across the film's own lower half, which is opaque to 86% of the band. 7vh opens the
+     gap the desktop gets for free from the empty middle of a wide screen.
+
+     ⚠ THE CROSSING THEN HAS TO FINISH BEFORE THE HEAD, AND THAT IS THE WHOLE TROUBLE.
+     The first phone build borrowed the desktop idea — a long field with a black band in
+     its middle — and the black landed squarely on the head: "WELCOME TO INDRONES'" and
+     "LOGIN" came out dark-on-black, half of each word gone. There is no room on this
+     column for a black region between the film and the type, so on a phone there is
+     none: the field holds under the band, the film's own masked bottom edge dissolves
+     into the amber, and the dark top of the narrow ramp above is simply replaced by the
+     film standing in it.
+
+     THE MARK GOES, BECAUSE THE FILM IS ALREADY DRAWING IT. With the band above it the
+     head would draw the same monogram twice, once in motion and once still. The mark is
+     the duplicate and it is decorative (`alt=""`); the wordmark and the strap are text
+     and stay, and the h1 in particular never leaves the tree.
+
+     THE MASK CHANGES SHAPE WITH THE BAND. A mask sized off `closest-side` is right for a
+     square and wrong for a 16:9 band — on this one it would fade the left and right
+     thirds of the film away. The feather here is on the bottom edge, where the band
+     meets the page. */
+  :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-brand="video"]) {
+    --ind-film: #f4f4f4;
+    --ind-ground: linear-gradient(178deg,
+      var(--ind-film)   0%,
+      var(--ind-film)   35vh,
+      #6b5200           39vh,
+      var(--ind-yellow) 43vh,
+      #ffc400           50vh,
+      #ffd21a           62%,
+      #ffe066          100%);
+  }
+  #auth-container .auth-brand-panel[data-brand="video"] .brand-stage {
+    display: block;
+    width: 100%;
+    height: 26vh;
+    margin-bottom: 7vh;
+    aspect-ratio: auto;
+  }
+  #auth-container .auth-brand-panel[data-brand="video"] .brand-video {
+    opacity: 1;
+    /* ⚠ BOTH EDGES ARE FEATHERED, AND THE TOP ONE IS NOT DECORATION. The ground is not
+       the ramp alone: industrial.css lays two accent-tint scrims over it, and a scrim
+       darkens the CONTAINER while the film is a child painted on top of it — so the
+       strip of ground above the band comes out about twenty levels darker than the
+       film's own field. On a wide screen the top-left scrim reaches nothing near the
+       stage; on a phone it covers the whole top of the page, and the band's upper edge
+       lands right in it. Fading the film's own top edge means the two never meet at a
+       line, whatever the scrim is doing that day. */
+    -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 84%, transparent 100%);
+            mask-image: linear-gradient(180deg, transparent 0, #000 11%, #000 84%, transparent 100%);
+  }
+  #auth-container .auth-brand-panel[data-brand="video"] .landing-mark { display: none; }
+
+  /* The controls. The same values as the desktop block's — see the note above. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {
+    --glass-blur:      blur(30px) saturate(1.9);
+    --glass-fill:      linear-gradient(154deg,
+      rgba(255, 255, 255, 0.84)   0%,
+      rgba(255, 255, 255, 0.66)  42%,
+      rgba(255, 255, 255, 0.44) 100%);
+    --glass-fill-base: color-mix(in srgb, var(--ind-paper) 54%, transparent);
+    --glass-edge:      rgba(255, 255, 255, 0.95);
+    --accent:    var(--ind-on-yellow);
+    --ind-muted: var(--ind-on-yellow);
+    --btn-solid-bg:        var(--ind-paper-alt);
+    --btn-solid-bg-hover:  var(--ind-paper-rule);
+    --btn-solid-bg-active: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));
+    --btn-solid-fg:        var(--ind-on-yellow);
+  }
+  /* A card on this field sits over the brand yellow at the top and the pale yellow at the
+     bottom, so it takes the same shadow the desktop cards take — without it a 54%-white
+     pane is a flat band on a field that never stops moving. */
+  :root:not([data-theme="dark"]) #auth-container .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .glass-card {
+    box-shadow:
+      0 30px 58px -24px rgba(23, 23, 23, 0.52),
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),
+      inset 0 -1px 0 rgba(23, 23, 23, 0.07);
+  }
+  /* The three alternatives inside the customer door, and the language picker: off-white
+     like the action, told apart by their edge. Same pair of rules as the desktop block. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .btn-secondary,
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
+    background: var(--ind-paper-alt);
+    border-color: var(--ind-paper-rule);
+    color: var(--ind-on-yellow);
+  }
+  /* The footing, in the column's own ink: the acknowledgement, the foot links and the
+     credit were drawn against a grey page and the muted greys disappear on yellow. */
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) {
+    color: var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) .link-btn {
+    background: var(--ind-paper-alt);
+    border-color: var(--ind-on-yellow);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main > :not(.doors) .link-btn:hover {
+    background: var(--ind-paper-rule);
+  }
+  :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .landing-lang select {
+    border-color: var(--ind-on-yellow);
+  }
+}
+
+/* ── AND THE TWO DOOR BARS ARE THAT SAME OFF-WHITE — THEY ARE THE OTHER BUTTONS ──
+   The owner, 2026-10-10, having chosen the ground and then looked at it: *"'EMPLOYEE'
+   in employee button to updated to 'AS A EMPLOYEE', and customer button updated to 'AS
+   A CUSTOMER' … Both buttons to be made of same off-white color like other buttons."*
+
+   IT IS WRITTEN AS THE TOKEN AND NOT AS THE COLOUR, and that is the whole content of
+   this rule. `--btn-solid-bg` is re-pointed by the fuse ground — on `.auth-main` at both
+   widths, see the two ground blocks — so `background: var(--btn-solid-bg)` on the bar is
+   LITERALLY the fill the Continue button wears: one value, two readers, and no way for
+   the bars and the button to drift apart on a later change. A literal `#f1f1ee` here
+   would be a second copy of that colour and the next thing to go stale.
+
+   ⚠ THIS REVERSES A SENTENCE IN THE GROUND BLOCK ABOVE ("the yellow belongs on this
+   ground and on the two door bars"). It did, until he asked for this. The yellow-on-black
+   is still what the HORIZON ground does with its bars; the two grounds are now
+   deliberately different.
+
+   ⚠ IT IS OUTSIDE BOTH MEDIA QUERIES ON PURPOSE, and it is the only fuse rule that is:
+   the bar and everything under it read nothing but `--btn-solid-*` and `--accent`, and
+   those are set at BOTH widths. A copy inside each ground block would be two copies of
+   five rules, and the phone's copy is exactly what went missing the first time.
+
+   ⚠ THE CHIP LOSES ITS FILL, for the reason horizon's block gives: base.css draws
+   `.door-role` as a grey pill, and a grey pill inside a solid button is two surfaces
+   where the ask was one. Its colour is left alone — `#auth-container .door-role` is an
+   id, it sets `color: var(--accent)`, and `--accent` on this ground is already the ink
+   that was measured against this paper. Nothing to re-say, and re-saying it from here
+   would lose to that id anyway.
+
+   ⚠ `.door-bar:hover` in base.css lays a translucent grey over the fill. On a transparent
+   bar that is a tint; on a solid one it DULLS it. The two steps below are the same two the
+   Continue button uses. */
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .door-bar {
+  background: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
+}
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .door-bar:hover {
+  background: var(--btn-solid-bg-hover);
+}
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .door-bar:active {
+  background: var(--btn-solid-bg-active);
+}
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .door-bar .door-role {
+  border-color: transparent;
+  background: transparent;
+}
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main .door-bar .door-chev {
+  border-color: var(--btn-solid-fg);
+}
+
+/* ── THE LOCKUP OVER THE TWO DOORS ──────────────────────────────────────────────
+   The owner, 2026-10-10: *"Above buttons of emploee and customer 'WELCOME TO INDRONES'
+   AFTER SALES PORTAL I-PASSBOOK' should be written and in the next line 'LOGIN' … So it
+   gives a wholesome sense of login as a employee or login as a customer."*
+
+   THE THREE STRINGS ARE ONE SENTENCE READ TOP TO BOTTOM — "WELCOME TO … I-PASSBOOK /
+   LOGIN / AS A EMPLOYEE" — which is why the head and the two bars are written and
+   changed together, and why the head sits at the top of THIS half rather than in the
+   brand panel: at 1024px and wider the panel's own head is clipped to a screen-reader
+   box, so a head placed there would say nothing on the screen he was looking at.
+
+   IT IS NOT A `<h1>`. The page's one h1 is the product name in `.landing-head`, and it
+   is still there, clipped at wide widths. This is a sign over a door, not a document
+   title — a `role="heading"` here would give the page two top-level headings and make a
+   screen reader announce the same product twice before the form.
+
+   THE TWO LINES ARE SIZED AS ONE THING: the greeting is the app's small-caps voice and
+   the word LOGIN is the largest type on the screen, because it is the only word on this
+   half that a person has to read before deciding which bar to press. */
+.landing-lockup {
+  width: 100%;
+  max-width: 420px;
+  margin: 0 0 1rem;
+  text-align: center;
+}
+.landing-welcome {
+  margin: 0;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: 0.16em;
+  line-height: 1.5;
+  /* It is one long sentence and it is allowed to run to two lines — at 320px it must —
+     so the line box is a comfortable 1.5 and the two lines are BALANCED rather than left
+     to break wherever the last word falls. */
+  text-wrap: balance;
+  color: var(--ink-gray-7);
+}
+.landing-login {
+  margin: 0.15rem 0 0;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  /* A wide track on a single short word, which is what makes it read as a sign rather
+     than as a title — the same treatment the product name wears, one step wider. */
+  letter-spacing: 0.3em;
+  line-height: 1.15;
+  /* ⚠ THE TRACK IS ADDED AFTER EVERY LETTER, INCLUDING THE LAST, so a centred "LOGIN"
+     sits about 0.3em left of centre. Half a track of left padding puts it back. This is
+     the standard fix and it is invisible until it is missing. */
+  text-indent: 0.3em;
+  color: var(--ink-gray-9);
 }
 
 /* ── GLASS ───────────────────────────────────────────────────────────────────
@@ -1502,9 +1873,9 @@ html[data-sso="wait"] #sso-wait { display: flex; }
 }
 
 /* ── The foot of the landing page ──────────────────────────────────────────────
-   The acknowledgement and the language selector, below BOTH doors and above the FAQ
-   line. Both are centred like everything else in the foot, and both are deliberately
-   small: a reader who wants the doors should not have to step over either. */
+   The acknowledgement, and then the foot line. All three are centred like everything
+   else here, and all three are deliberately small: a reader who wants the doors should
+   not have to step over any of them. */
 .landing-terms {
   width: 100%;
   max-width: 420px;
@@ -1514,7 +1885,40 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   color: var(--ink-gray-5);
   text-align: center;
 }
-.landing-lang { margin-top: 0.75rem; }
+/* ⚠ THE TWO LINKS INSIDE IT HAVE TO LOOK LIKE LINKS, and the owner said so on
+   2026-10-10: *"In the lin 'By continuing … and Privacy Policy.' Terms and conditions and
+   privacy possible are clickables, but in current view they are not looking different,
+   either we need to make them bold or do something to look different."*
+
+   HE IS RIGHT AND THE REASON IS THIS FILE'S OWN DOING. Every other anchor on this screen
+   is a BUTTON — `.link-btn` wears a fill and an edge — so an anchor that is merely
+   underlined among them reads as a button that has lost its box, and a button that has
+   lost its box reads as broken. These two are the only things on the whole sign-in screen
+   that are PLAIN LINKS, and the underline is the one convention that says so.
+
+   So: underlined, in the ink rather than in the muted grey of the sentence around them,
+   and at the same size — no bigger, because the sentence must still read as one sentence
+   and the acknowledgement must not become the loudest thing on the page. The contrast is
+   carried by COLOUR and the RULE, not by size. Computed from the tokens rather than
+   judged: #0f0f0f on #f1f1ee is 17.0:1 and this sentence's own #7c7c7c is 3.7:1, which is
+   under AA — so the links are also the only part of this line that was ever legible
+   enough to be a link, and making them look like one improves the line rather than
+   decorating it. */
+.landing-terms a {
+  color: var(--ink-gray-9);
+  font-weight: var(--weight-semibold);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  /* The gap between the rule and the letters, so an underlined descender is not touched
+     by the line — this sentence contains a 'y' and a 'p'. */
+  text-underline-offset: 0.18em;
+  text-decoration-color: var(--outline-gray-4);
+}
+.landing-terms a:hover { text-decoration-color: currentColor; }
+/* It is a flex ITEM of .landing-foot now rather than a centred line of its own — see the
+   owner's "Help and FAQ button and Language button can be placed adjacent" at the
+   markup. No margin: the foot's own gap spaces it, and a margin here would double it. */
+.landing-lang { margin: 0; }
 /* A native <select>, not a styled div. It is the one control on this page that has to
    work on a phone with a thumb, in a language this file does not speak, before anyone
    has signed in — and the native picker is the only one that is guaranteed to be
@@ -2004,25 +2408,35 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   width: auto;
   display: block;
 }
-/* On a light page the mark is used exactly as drawn. On a dark one its two tones
-   both disappear: the circle is a dark navy on #171717 and the "Passbook" script
-   is darker still, so the mark reads as an empty box. The owner reported exactly
-   that after the tile was removed.
+/* On a light page the mark is used exactly as drawn. On a dark one, the 2026
+   Option A artwork needs the OPPOSITE treatment to the mark it replaced, and the
+   reasoning that used to sit here is kept only so the reversal is not mistaken
+   for drift.
 
-   invert() is the whole fix, and it works because of how the artwork is built:
-   the monogram and the script inside the circle are HOLES knocked out of the
-   disc, so inverting turns the disc light and those knockouts dark, keeping the
-   design's internal contrast. Outside the circle the script is dark ink on a now
-   transparent background, so it inverts to a light word on the dark page — which
-   is what the artwork does in reverse on white. No second asset, no plate, and
-   nothing to keep in sync when the master is replaced.
+   The old mark was a dark disc with its monogram and script knocked out of it, so
+   inverting it turned the disc light and the knockouts dark and the design kept
+   its internal contrast — invert(1) was the whole fix, and it was right.
 
-   brightness(0) invert(1) would NOT work: it flattens the mark to one colour and
-   the monogram disappears into the disc. Probed on the real dark surface before
-   choosing, not guessed. */
+   Option A is not built that way. It is two SOLID inks — navy #2b2b3a and brand
+   yellow #f8c808 — on a transparent field. Inverting it turns the navy bone-white
+   and, worse, turns the brand yellow #f8c808 into #0737f7, an electric blue. That
+   is not a darker version of the brand, it is a different brand, and the bolt is
+   the loudest shape in the mark. Rendered and looked at before changing this, not
+   reasoned about: tools/.cache/mark-dark.png, 2026-10-10.
+
+   So on the dark surface the mark is drawn as a flat WHITE SILHOUETTE —
+   brightness(0) flattens both inks to black, invert(1) lifts them to white, and
+   the keyed-out alpha is untouched, so the shape survives whole and the page
+   shows through it exactly as on the light one. The old comment here warned that
+   flattening "loses the monogram"; that was true of a disc whose monogram was a
+   hole in it, and is not true of two flat inks that merge into one silhouette.
+
+   The alternative — a second asset with the navy re-inked for dark — was rejected
+   for the reason the old note gives: one mark, one file, nothing to keep in sync
+   when the master is replaced. */
 [data-theme="dark"] .brand-mark img,
 [data-theme="dark"] .landing-mark {
-  filter: invert(1);
+  filter: brightness(0) invert(1);
 }
 .brand-text {
   font-size: var(--text-base);

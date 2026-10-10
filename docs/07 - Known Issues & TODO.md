@@ -611,21 +611,36 @@ is left is small.
    "last backup" line: *"Backup 2026-10-09: 45 file(s) read, 20 written, 21 IR(s), 18
    account(s), rotated out 0 old folder(s)."* — 51 seconds, and `rotated out 0` is correct
    for a first run, since nothing is old enough to retire yet.
-3. ✅ **The frontend is published at cache `v82` — 2026-10-09.** `v80` carried the team
-   roster read (`listTeam`); **`v82` is the release the owner asked for in full** — the
-   two doors folded on arrival and independent of each other, liquid glass on every
-   page including the two new legal ones, PRODUCT in the tagline, the desk's WhatsApp
-   button live rather than hidden, sentence-cased labels, and the darker avatar. Read on
-   the live site after the push: `sw.js` answering `ipassbook-v82`, `app.js` answering
-   `APP_VERSION = 'v82'`, `privacy.html` and `terms.html` both `200`, both door bodies
-   carrying `hidden`, and `wa.me/918655366232` in the served `app.js`. Publishing is
+3. ✅ **The frontend is published at cache `v85` — 2026-10-10.** `v80` carried the team
+   roster read (`listTeam`); `v82` was the two doors folded and independent on liquid
+   glass; `v84` split the sign-in screen in two and deleted the full-screen splash. **`v85`
+   is the three things the owner asked for on 2026-10-10**: the intro film now plays on a
+   phone as well as a desktop (he was shown both and asked for it by name), the
+   "Signing you in…" screen takes the app's own `--ind-ground` instead of the `#0b0b0b`
+   it had been left on, and the unlock pattern reads its three colours from the cascade
+   instead of six hardcoded hexes — so it is the first release in which that canvas
+   follows all four palettes and both themes. Read on the live site after the push:
+   `sw.js` answering `ipassbook-v85`, `app.js` answering `APP_VERSION = 'v85'` and
+   carrying `patternInk`, `preview/video.html` `200`, `assets/brand-intro.mp4` and
+   `assets/brand-panel-dark.png` both `200`, and the four pruned files
+   (`intro_ipassbookv2.mp4`, `intro_ipassbookv2_mobile.mp4`, `Indrones Intro v2.mp4`,
+   `logo.png`) all `404`. **All read on 2026-10-10 and all answered.** Publishing is
    `DEPLOY_SOURCE=category-insights node tools/deploy-ghpages.mjs` to dry-run, then the
    same with `--commit --push`; it needs the working tree clean, so the commits go
    first, and a `CACHE_NAME` bump in `sw.js` or it warns that returning users keep the
    stale shell for a load. The deploy is confirmed by reading the **served** files,
-   never by a deploy date. The backend half went in after the `v80` frontend — see
-   item 1 — so **both halves are level with the committed code at `v82` /
-   `API_VERSION 9`.**
+   never by a deploy date. The backend half is unchanged in this release — it is still
+   **`v85` frontend / `API_VERSION 9` backend.**
+
+   > ⚠ **`--push` PUSHES `gh-pages` ONLY. IT DOES NOT PUSH THE SOURCE BRANCH.** The tool
+   > reads the served files out of `DEPLOY_SOURCE` and commits them to `gh-pages`
+   > (`git push origin gh-pages`), and stops there. So after the `v85` deploy
+   > **`origin/category-insights` was still at `6f0739f` while the release commit
+   > `04a7e62` existed only on the machine it was made on** — and the same is true of
+   > `v83` and `v84` before it. Nothing is lost as long as that machine is the same one,
+   > but a clone of this repo does not contain the source of what is running. Deciding
+   > whether the source branch should be pushed with the deploy is the owner's call; it
+   > has not been.
 
    > **A new file needs a SERVED line, and a stale one is worse than a missing one.**
    > `terms.html` and `privacy.html` are in `tools/deploy-ghpages.mjs`'s `SERVED` array.

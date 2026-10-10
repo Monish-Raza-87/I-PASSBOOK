@@ -909,6 +909,29 @@ is left is small.
 - [ ] An ids index for the fixed-name store files, on the `sections/index.json` pattern
 
 ### Done since this list was written
+- ✅ **The Help & FAQ page wears the app's own skin at last.** The owner, 2026-10-10:
+  *"Help and FAQ page's UI is not aligned with our app's UI, rectify it."* He was looking
+  at `faq.html`, and it was true — the page had been left on the language the app
+  abandoned on 2026-10-08. It was blue (`--accent: #2440d8`), rounded (`--radius: 10px`),
+  3px-left-barred cards with an 18px `backdrop-filter` over an ambient gradient. The app
+  beside it is **INDRONES INDUSTRIAL**: a ruled flat ground, square corners, hairlines,
+  and the mono face for anything that labels rather than speaks.
+  The page now restates the app's own **role** tokens — `--ind-ground`, `--ind-panel`,
+  `--ind-inset`, `--ind-line`, `--ind-rule`, `--ink`, `--ind-muted`, `--accent` and the two
+  `--st-*-fg` callout edges — under the app's own names, light values on bare `:root` and
+  both dark blocks re-pointing every one of them, because a colour defined only inside a
+  dark block is invisible to a viewer whose system theme is the other one. **The glass and
+  the gradient are gone, not replaced**: `industrial.css` §9 keeps the blur for the app's
+  floating chrome and says why a panel is not floating — *"a flat colour is what a sticker
+  is"* — so with nothing to blur there was nothing for the gradient to show either.
+  Two things are worth knowing about it. **The accent is a role and not the brand yellow**:
+  `#ffc400` is 11.18:1 on the dark ground and about 1.4:1 on this one, so the light block
+  carries the **ink** `#171717` and only the dark block carries the yellow. And **the
+  brand yellow appears exactly once**, as a 3px rule across the masthead — a fill, where
+  it is legible in both themes, and never a word. `smoke-door-faq.mjs` used to check three
+  tokens by the page's own old private names (`--bg`, `--fg`, `--surface`), which would
+  have gone on passing while the page wore a look the app had left; it now checks the
+  **roles**, both dark blocks, and both accent invariants.
 - ✅ **The mobile intro filled the screen by zooming into the middle of it.** The
   splash video was sized `min-width/min-height: 100%` with `width/height: auto`,
   which reads as full-bleed and is not — a replaced element with auto sizing keeps
@@ -919,24 +942,29 @@ is left is small.
   cover` now, so the element is the size of the screen and the cropping is
   deliberate. The portrait cut itself was always right and always chosen
   (1080×1920, 3.8 MB, gated to `max-width: 639px`); the file was never the problem.
-- ✅ **The app has a real icon, generated from one brand master.** The owner-supplied
-  crop is now `assets/icon-master.jpeg` (1653×1653), and `icon-192.png`,
-  `icon-512.png` and `apple-touch-icon.png` are all produced from it by
-  `tools/make-icons.ps1` — the whole square is downscaled, never a bounding-box crop,
-  because the background wash runs corner to corner and a tight crop leaves a visible
-  seam. The mark sits at 75% of the width, consistently inset across all three, and the
-  master is the **only** source: the superseded 2048×2048 upload is deleted rather than
+- ✅ **The app has a real icon, generated from one brand master.** On 2026-10-10 the
+  owner replaced the brand with **Option A, The Telemetry Grid & Sub-Branding Variant**,
+  and asked for it "everywhere". The master is now `assets/icon-master.png` (1024², the
+  owner's 2048² original resampled — the largest size anything downstream asks for),
+  and `icon-192.png`, `icon-512.png` and `apple-touch-icon.png` are all produced from
+  it by `tools/make-icons.ps1`. Asked whether the tab icon should be the monogram or the
+  whole lockup he answered **"The full lockup"**, so the three square icons are the whole
+  thing, dimension marks and crosshairs included — that is what the variant *is*. The
+  master is the **only** source: the superseded 2025 disc master is deleted rather than
   left beside it to be picked up by mistake. `smoke-shell.mjs` now fails if any icon is
   blank or the master goes missing.
 - ✅ **The logo sits on the page instead of in a tile on it.** The owner reported the
-  icon arriving "in a shape of square" and asked for it borderless, "to feel real
-  embedded into the page". The square was the artwork's own light background, and the
-  fix is `assets/icon-mark.png` — the same logo with that background **keyed out** —
-  used for the sidebar and the sign-in card, while the tab, home screen and manifest
-  keep the square icons, because an OS tile has to be square. It cannot be done by
-  colour: the monogram and the "Passbook" script are the same colour as the background,
-  so a flood fill inward from the border is what separates them, and one wrong
-  tolerance either leaves the square or hollows the logo out.
+  earlier icon arriving "in a shape of square" and asked for it borderless, "to feel real
+  embedded into the page". The fix is `assets/icon-mark.png` — the **monogram** with its
+  background **keyed out** — used for the sidebar, the sign-in panel and the emailed door
+  page, while the tab, home screen and manifest keep the square lockup icons, because an
+  OS tile has to be square. Under Option A the key is a **colour key** (an alpha ramp off
+  the flat `#fffffd` field), not the border flood fill the old disc needed: the three inks
+  are each 200+ levels from the field, so connectivity has nothing left to separate. The
+  crop is measured, and the tool **asserts** it still lands on the monogram before writing,
+  because a wrong crop is silent — the wrong rectangle still produces a valid PNG.
+  Dark mode no longer inverts this mark: `invert(1)` turns the brand yellow electric blue,
+  which is not a brand. It is `brightness(0) invert(1)` — a flat white silhouette.
 - ✅ **The list says how far along each IR is, and how long it has been sitting.**
   Every card carries a `3/6` completion chip (a small bar plus the count, green at
   `6/6`) and an age — `In status 6d` when the app recorded the status change, `Raised

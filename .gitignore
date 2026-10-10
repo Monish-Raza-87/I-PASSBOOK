@@ -50,6 +50,17 @@ tools/.cache/*.sh
 tools/.cache/*.txt
 tools/.cache/*.log
 
+# The same two families again, which the list above was written without. A probe that
+# answers a colour or geometry question in PowerShell is `tools/.cache/*.ps1` — the
+# siblings of `make-icons.ps1` are real tools and stay tracked, so this cannot be
+# `*.ps1` — and the contact sheets those probes draw land beside them as PNGs. Both are
+# throwaway by the same argument as the shots above: they are EVIDENCE of one render, and
+# a sheet left in the tree reads as a picture of the app. They were also, until now, the
+# thing that blocked the deploy: tools/deploy-ghpages.mjs refuses on any
+# `git status --porcelain` output, and a single untracked probe sheet produces exactly that.
+tools/.cache/*.ps1
+tools/.cache/*.png
+
 # Build artifacts
 dist/
 # A third-party log analyser, downloaded to read for ideas. Not ours to commit.

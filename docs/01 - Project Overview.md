@@ -43,7 +43,7 @@ i-passbook-app/
 ├── views.css           # Ticket list, sync bar, ticket detail, intake report, section tables
 ├── tools/
 │   ├── gen-tokens.mjs     # Regenerates tokens.css from frappe/frappe-ui
-│   ├── make-icons.ps1     # Regenerates the icon set from assets/icon-master.jpeg
+│   ├── make-icons.ps1     # Regenerates the icon set from assets/icon-master.png
 │   ├── deploy-ghpages.mjs # Publishes to the gh-pages branch (dry run by default)
 │   ├── serve-local.mjs    # Zero-dependency local server (no npm download)
 │   ├── harness.mjs        # Shared smoke-test harness
@@ -53,7 +53,9 @@ i-passbook-app/
 ├── sw.js               # Service worker for offline caching
 ├── manifest.json       # PWA manifest
 ├── assets/
-│   ├── icon-master.jpeg # The brand master — the ONLY source for the icons below
+│   ├── icon-master.png  # The brand master (Option A, 1024²) — the ONLY source
+│   │                    #   for the icons below. The owner's 2048² original is
+│   │                    #   in the untracked `Brand Elements I-PASSBOOK/`
 │   ├── icon-192.png    # App icon (manifest + favicon)
 │   ├── icon-512.png    # App icon, large
 │   ├── apple-touch-icon.png  # 180×180, the size iOS asks for
@@ -101,22 +103,51 @@ punched out the monogram and the lettering — 21,000 pixels of artwork turned
 see-through. On a light page that is indistinguishable from correct, because a
 transparent hole shows the page and the page is the same near-white the artwork's
 background was; it only became visible in **dark mode**, where the mark turned
-into an empty box. The circle is now restored from the original pixels after the
+into an empty box. The circle was restored from the original pixels after the
 fill (`RestoreDisc`), located from the surviving ink rather than from hardcoded
-geometry, and the tool refuses to write a mark whose circle does not come back
-filled. Rendering the mark over magenta is what makes this class of bug obvious.
+geometry. Rendering the mark over magenta is what makes this class of bug obvious.
 
-`smoke-shell.mjs` decodes the PNG and counts its pixels — the intact mark has
-~22,000 opaque near-white ones and a hollowed-out mark has ~800 — because a
+`smoke-shell.mjs` decodes the PNG and counts its pixels — the intact mark had
+~22,000 opaque near-white ones and a hollowed-out mark had ~800 — because a
 dimension check and a "not blank" check both pass on the broken file.
 
-**Dark mode inverts the mark** (`filter: invert(1)` in `base.css`). Both of its
-tones are dark, so on the dark surface it is invisible as drawn — the owner
-reported exactly that. Inverting works *because* of how the artwork is built: the
-monogram and the script inside the circle are knockouts in the disc, so they
-invert along with it and the design keeps its internal contrast. `brightness(0)
-invert(1)`, the obvious-looking alternative, flattens the whole mark to one colour
-and loses the monogram.
+---
+
+### ⚠ All of the above is history. The brand changed on 2026-10-10.
+
+The owner replaced the 2025 disc with **Option A, The Telemetry Grid & Sub-Branding
+Variant**, and said: *"we need to use our same logo everywhere which is Option A."*
+Asked whether the icon should be the monogram or the whole lockup he answered **"The
+full lockup."** The master is now **`assets/icon-master.png`** — the same artwork
+resampled to 1024×1024, because the delivered 2048×2048 master lives in the untracked
+`Brand Elements I-PASSBOOK/` folder and a clone must be able to regenerate the icons.
+
+Four things change with it, and the four paragraphs above describe none of them:
+
+- **There is no disc, so there is no flood fill and no `RestoreDisc`.** Option A's
+  field is a flat near-white and its art is two **solid** inks — navy `#2b2b3a` and
+  brand yellow `#f8c808`, plus a darker yellow facet on the bolt. Nothing is the same
+  colour as the background, so the key is a plain alpha ramp off the field's own
+  colour and the leak-and-restore failure mode is gone with the artwork it belonged
+  to. `RestoreDisc` is **deleted, not left dormant** — it is keyed to a disc that no
+  longer exists.
+- **The mark is the monogram, not the lockup.** The three square icons are the whole
+  lockup (his choice); `icon-mark.png` is the P alone, because all three in-app
+  placements sit it beside the name already spelled out in text. Its crop is a
+  measured rectangle, and `make-icons.ps1` **asserts** the crop is still tight to the
+  artwork before writing — a wrong crop is silent, and produces a perfectly valid PNG
+  of the wordmark or the strap line.
+- **The blueprint gridlines and hairlines are kept, deliberately.** They are drawn
+  over the artwork in the master and the colour key keeps them, which is the right
+  answer: the telemetry grid is the point of the variant. The mark is never drawn
+  above 60px in the app (26px sidebar, 56px handoff, 60px sign-in panel), where they
+  are sub-pixel.
+- **Dark mode now flattens the mark to a WHITE SILHOUETTE** — `brightness(0)
+  invert(1)`, the exact treatment the old note above called the wrong answer. It was
+  the wrong answer *for a disc*; it is the right one here. Inverting Option A outright
+  turns its navy bone-white and its brand yellow `#f8c808` into `#0737f7`, an electric
+  blue — legible, so it passes any "is it visible" check, and not the brand. Rendered
+  and looked at before changing it, not reasoned about: `tools/.cache/mark-dark.png`.
 
 ## Key Design Decisions
 

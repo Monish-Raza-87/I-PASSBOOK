@@ -90,6 +90,13 @@ const SERVED = [
   'preview/parts.html',
   'preview/empty.html',
   'preview/board.html',
+  // The intro video, demonstrated both ways on one page, so the owner can watch the
+  // MOTION on his own phone before choosing. A still frame cannot answer it — the whole
+  // complaint was "the video was playing in a box", which is a question about a rectangle
+  // in motion — and his phone cannot open any third-party host. Regenerate with
+  // `node tools/build-video-options.mjs`; it slices the real sign-in screen out of
+  // index.html, so it cannot drift from the screen it is asking about.
+  'preview/video.html',
   'preview/preview.css',
   'assets/apple-touch-icon.png',
   // The brand panel's two grounds. BOTH ARE DEPLOYED, because the choice between them is

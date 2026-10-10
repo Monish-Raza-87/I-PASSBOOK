@@ -425,6 +425,35 @@ ok('the still and the video are both pinned to the square, not to their own pixe
   brandMedia);
 ok('object-fit: contain letterboxes both into it, so neither is cropped against the other',
   /object-fit:\s*contain/.test(brandMedia));
+// ⚠ AND THE PLAYING FILM IS THE ONE EXCEPTION, DELIBERATELY. The stage is square and the
+// film is 16:9, so a letterboxed film leaves a band of the ground showing above and below
+// the picture — a rectangle again, just a different shape. The film's field is LIGHT and
+// the ground it plays on is not, so that band would be the "box" the owner reported, back
+// in a new place. Cropping the frame's centre makes the film's own field cover the whole
+// square instead. The still is never cropped: it is square art and fills the stage exactly,
+// which is what the rule above pins.
+ok('...but the playing film alone is cropped to fill the square, so its own field is the ground',
+  /\[data-brand="video"\]\s*\.brand-video\s*\{[^}]*object-fit:\s*cover/.test(read('../base.css')));
+// THE FILM'S FIELD IS THE ONE COLOUR IN base.css MEASURED OFF A PIXEL. It is held across
+// the ramp's LEFT HALF and only then hands over to the shipped crossing, and the hold is
+// the whole mechanism: a field that ramps from its first stop reads as a gradient, not as
+// a ground, and the film sitting on it is a box again. Both stops are pinned, because a
+// ramp that keeps the token and loses the second stop looks correct in a diff.
+const baseCssRaw = read('../base.css');
+ok('the film ramp holds its measured field flat across the left half before the crossing',
+  /--ind-film:\s*#[0-9a-f]{6}/.test(baseCssRaw) &&
+  /var\(--ind-film\)\s+0%,\s*var\(--ind-film\)\s+45%/.test(baseCssRaw));
+ok('...and that ramp is scoped to the split, so a window dragged narrow keeps the phone ground',
+  (() => {
+    // Position is the only thing that can tell the two apart, so the rule's media query is
+    // found by scanning backwards to the nearest one — the same idiom the fused-ground
+    // check below uses. A rule that merely MENTIONS --ind-film must not be mistaken for the
+    // rule that declares it, hence the search for the declaration and not the first mention.
+    const at = baseCssRaw.search(/--ind-film:\s*#/);
+    if (at < 0) return false;
+    const media = ((baseCssRaw.slice(0, at).match(/@media[^{]*/g) || []).pop() || '').trim();
+    return /min-width:\s*1024px/.test(media) && !/max-width/.test(media);
+  })());
 // THE CROSSFADE IS ONE ATTRIBUTE, and it ships as "rest" in the markup, so a browser with
 // no JavaScript gets the still and the heartbeat and never asks for the video. Both
 // halves are pinned because either alone is broken: the rule without the markup default
@@ -483,18 +512,30 @@ ok('the borderless mark is a real PNG with an alpha channel, and is not blank',
 
 // ── The mark must still HAVE its artwork, and must work in dark mode ──────────
 //
-// The bug this pins, found by the owner in dark mode and by nobody on the light
-// page: the cutout's flood fill reached INSIDE the circle, through the light
-// knockout band behind the "Passbook" script, and punched out the monogram and
-// the lettering. On a light page that is invisible — a transparent hole shows the
-// page, and the page is the same near-white the artwork's background was. On the
-// dark one the whole mark became an empty box.
+// The bug the original version of this pinned, found by the owner in dark mode
+// and by nobody on the light page: the 2025 mark's flood fill reached INSIDE the
+// circle, through the light knockout band behind the "Passbook" script, and
+// punched out the monogram and the lettering. On a light page that is invisible —
+// a transparent hole shows the page and the page is the same near-white the
+// artwork's background was. On the dark one the whole mark became an empty box.
 //
-// A dimension check and a "not blank" check both pass on the hollowed-out mark,
-// so this decodes the pixels and counts them. The white monogram and script
-// knockouts are ~22,000 fully opaque near-white pixels when the mark is intact
-// and ~800 when the fill has eaten them — the numbers below are measured against
-// both versions of the real file, not chosen.
+// ── What replaced it, and why the numbers below are different ────────────────
+//
+// On 2026-10-10 the owner replaced the brand with Option A, The Telemetry Grid, and
+// told me to "use our same logo everywhere". That artwork needed no flood fill at
+// all: its field is a flat near-white and its art is two SOLID inks, so a plain
+// colour key separates them and the whole leak-and-restore failure mode is gone
+// with the disc it belonged to. See tools/make-icons.ps1.
+//
+// But a key introduces a DIFFERENT silent failure, which is why this still decodes
+// the pixels instead of trusting the dimensions: a key tuned too tight leaves the
+// mark as a white rectangle on the page, and one tuned too loose eats the artwork.
+// Both produce a valid 512-wide RGBA PNG that a "not blank" check passes.
+//
+// So the counts below are the real file's, measured, not chosen: the mark is
+// ~44% transparent field, and of what is left the great majority is ink — a
+// yellow bolt and a navy chevron. The yellow is the one that can vanish without
+// the mark looking wrong, because what remains is still a recognisable shape.
 function pngPixels(p) {
   const b = fs.readFileSync(p);
   let off = 8, w = 0, h = 0, ct = 0;
@@ -536,41 +577,65 @@ const markStats = (() => {
   const png = pngPixels(new URL('../assets/icon-mark.png', import.meta.url));
   if (!png) return null;
   const { w, h, px } = png;
-  let clear = 0, solid = 0, nearWhiteSolid = 0;
+  let clear = 0, solid = 0, yellow = 0, navy = 0;
   for (let i = 0; i < w * h; i++) {
     const a = px[i * 4 + 3];
-    if (a === 0) { clear++; continue; }
+    if (a < 128) { clear++; continue; }
     if (a !== 255) continue;
     solid++;
-    const lum = 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
-    if (lum > 230) nearWhiteSolid++;
+    const r = px[i * 4], g = px[i * 4 + 1], b = px[i * 4 + 2];
+    if (r > 200 && g > 150 && b < 120) yellow++;
+    else if (r < 90 && g < 90 && b < 110 && b > r) navy++;
   }
-  return { clear, solid, nearWhiteSolid, total: w * h };
+  return { clear, solid, yellow, navy, total: w * h };
 })();
 
-ok('the mark still contains its white artwork — the fill did not eat the monogram',
-  !!markStats && markStats.nearWhiteSolid > 8000,
-  markStats ? `${markStats.nearWhiteSolid} opaque near-white px (hollowed-out mark: ~800)` : 'unreadable PNG');
-ok('and that white is a real share of the mark, not a few stray rim pixels',
-  !!markStats && markStats.nearWhiteSolid / markStats.solid > 0.1,
-  markStats ? `${(100 * markStats.nearWhiteSolid / markStats.solid).toFixed(1)}% of opaque px are near-white` : '');
-ok('the background is still transparent — the fix did not put the square back',
-  !!markStats && markStats.clear / markStats.total > 0.3 && markStats.clear / markStats.total < 0.6,
+ok('the mark still carries its brand yellow — the key did not eat the bolt',
+  !!markStats && markStats.solid > 0 && markStats.yellow / markStats.solid > 0.25,
+  markStats ? `${(100 * markStats.yellow / Math.max(1, markStats.solid)).toFixed(0)}% of opaque px are brand yellow` : 'unreadable PNG');
+ok('...and its navy, so the crop is on the monogram and not on the wordmark',
+  !!markStats && markStats.solid > 0 && markStats.navy / markStats.solid > 0.08,
+  markStats ? `${(100 * markStats.navy / Math.max(1, markStats.solid)).toFixed(0)}% of opaque px are navy` : '');
+// The key has to have actually run. A mark that kept its background is a white
+// rectangle sitting on the page — the exact thing the owner reported against the
+// old one ("it comes in a shape of square") — and its dimensions and byte count
+// are indistinguishable from a correct one's.
+ok('the background is gone — the key ran, and the square did not come back',
+  !!markStats && markStats.clear / markStats.total > 0.3 && markStats.clear / markStats.total < 0.7,
   markStats ? `${(100 * markStats.clear / markStats.total).toFixed(0)}% transparent` : '');
 
-// The mark's two tones are both dark, so on the dark surface it is invisible as
-// drawn. inverted it is legible, and the inversion is what keeps the artwork's
-// internal contrast (the monogram is a knockout in the disc, so it inverts with
-// it). Both in-app marks have to be covered, or one of them stays a blank box.
+// The 2026 Option A mark is two SOLID inks on a transparent field, not a dark disc
+// with its monogram knocked out of it, and the two need opposite treatments:
+//   * a disc with holes inverts to a light disc with dark holes — legible, and the
+//     design keeps its internal contrast;
+//   * two flat inks do not. Inverting Option A turns its navy bone-white and, far
+//     worse, turns the brand yellow #f8c808 into #0737f7 — an electric blue. The
+//     bolt is the loudest shape in the mark, so that is not a dark variant of the
+//     brand, it is a different one. Rendered before it was changed, not reasoned
+//     about (tools/.cache/mark-dark.png).
+// So dark mode flattens both inks to one WHITE SILHOUETTE. Both in-app marks have
+// to be covered, or one of them stays a dark shape on a dark page.
 const baseCss = read('../base.css');
-ok('dark mode inverts BOTH in-app marks, so neither is a blank box on the dark page',
-  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.landing-mark\s*\{[^}]*filter:\s*invert\(1\)/.test(
-    baseCss.replace(/\s+/g, m => m.includes('\n') ? '\n' : ' ')),
+const baseFlat = baseCss.replace(/\s+/g, m => m.includes('\n') ? '\n' : ' ');
+ok('dark mode draws BOTH in-app marks as a flat white silhouette',
+  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.landing-mark\s*\{[^}]*filter:\s*brightness\(0\)\s+invert\(1\)/.test(baseFlat),
   (baseCss.match(/\[data-theme="dark"\][^{]*\{[^}]*invert[^}]*\}/) || ['none — the mark is invisible in dark mode'])[0]);
-// brightness(0) invert(1) flattens the mark to a single colour, and the monogram
-// disappears into the disc. It is the obvious-looking wrong answer here.
-ok('and it is invert(1), NOT brightness(0) invert(1) which flattens the mark',
-  !/\[data-theme="dark"\][^{]*\{[^}]*brightness\(0\)[^}]*\}/.test(baseCss));
+// Plain invert(1) is the obvious-looking wrong answer for THIS artwork: it leaves
+// the mark legible, so it passes any "is it visible" check, and turns the brand
+// yellow blue, which no contrast measurement can see.
+ok('and NOT a filter that begins with a bare invert(1), which would turn the brand yellow blue',
+  !/\[data-theme="dark"\][^{]*\{[^}]*filter:\s*invert\(1\)/.test(baseFlat));
+// ⚠ THIS ASSERTION IS INVERTED, AND IT IS NOT A LOOSENING. The handoff screen used to be
+// the one screen that was dark whatever the theme was, so its mark took the dark-theme
+// silhouette treatment. It now stands on `--ind-ground` — the app's own ground, light in
+// light mode — where `brightness(0) invert(1)` renders the brand mark as a white blob on
+// a white page. So what is asserted is that the filter is GONE. "It is still there" is
+// exactly the failure the old form of this line could no longer see: it pinned the
+// treatment to a screen whose ground had moved out from under it. base.css carries the
+// whole argument above `#sso-wait`.
+ok('the sign-in handoff mark does NOT take the dark-screen silhouette, which is now white on white',
+  !/\.sso-wait-mark\s*\{[^}]*filter:\s*brightness\(0\)\s+invert\(1\)/.test(baseFlat),
+  (baseCss.match(/\.sso-wait-mark\s*\{[^}]*\}/) || ['none'])[0]);
 
 const manifest = JSON.parse(read('../manifest.json'));
 ok('the manifest declares both icon sizes',
@@ -607,7 +672,7 @@ ok('no icon is a blank file, and the master they come from is present', (() => {
     const p = new URL(`../${n}`, import.meta.url);
     return !fs.existsSync(p) || fs.statSync(p).size < 4096;
   });
-  const master = new URL('../assets/icon-master.jpeg', import.meta.url);
+  const master = new URL('../assets/icon-master.png', import.meta.url);
   return thin.length === 0 && fs.existsSync(master) && fs.statSync(master).size > 4096;
 })(), 'a blank PNG deflates to well under 4 KB');
 // sw.js precaches what it lists, and the deploy only serves what SERVED names.
@@ -850,9 +915,15 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /\.doors \{[^}]*max-width: 420px;/.test(baseCss));
 
   // ── EACH DOOR IS AN ACCORDION, AND THE BAR IS THE CONTROL ───────────────────
+  // The two words are the owner's, changed on 2026-10-10: *"'EMPLOYEE' in employee
+  // button to updated to 'AS A EMPLOYEE', and customer button updated to 'AS A
+  // CUSTOMER'. So it gives a wholesome sense of login as a employee or login as a
+  // customer."* They are asserted here rather than left to the i18n table because
+  // they are the two words that complete the head above them — "LOGIN" over "AS A
+  // EMPLOYEE" is one sentence, and the plain nouns are not.
   for (const [which, key, word] of [
-    ['employee', 'door.employee', 'Employee'],
-    ['customer', 'door.customer', 'Customer'],
+    ['employee', 'door.employee', 'AS A EMPLOYEE'],
+    ['customer', 'door.customer', 'AS A CUSTOMER'],
   ]) {
     const card = (doorsBlock.match(new RegExp('<section class="door [^"]*" id="door-' + which + '"[\\s\\S]*?</section>')) || [''])[0];
     ok('#' + which + ' is a door whose whole BAR is the control',
@@ -1279,7 +1350,7 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // ── WHAT EVERY VISITOR PASSES, BELOW BOTH DOORS ───────────────────────────────
   const doorsEnd = html.indexOf('</section>', html.indexOf('id="door-customer"'));
   const termsAt  = html.indexOf('<p class="landing-terms"');
-  const footAt   = html.indexOf('<p class="landing-foot">');
+  const footAt   = html.indexOf('<div class="landing-foot">');
   ok('the acknowledgement is one line below both doors, said once',
     termsAt > doorsEnd && footAt > termsAt &&
     /<p class="landing-terms"><span data-i18n="landing\.termsPre">By continuing, you acknowledge that you understand and agree to the <\/span><a href="terms\.html" data-i18n="landing\.termsTos">Terms &amp; Conditions<\/a><span data-i18n="landing\.termsAnd"> and <\/span><a href="privacy\.html" data-i18n="landing\.termsPrivacy">Privacy Policy<\/a><\/p>/.test(html) &&
@@ -1320,17 +1391,32 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // The foot: the desk's two doors, below BOTH and outside either. Anchored on the CUSTOMER
   // section's closing tag rather than merely on the grid's, because a foot that drifted one
   // level in would sit inside a card — which "comes after .doors" would happily pass.
-  ok('Report a problem and the Help & FAQ are one common foot, below both doors',
+  //
+  // It was a <p> holding two links; on 2026-10-10 the owner moved one out and one in —
+  // *"We need to remove report a problem button from login page, this element is for
+  // customers after loging in. Help and FAQ button and Language button can be placed
+  // adjacent."* So it is a <div> now: the Help & FAQ link, and the language picker pulled
+  // up out of a sibling line of its own so the two sit beside each other.
+  const footHtml = html.slice(footAt, html.indexOf('</div>', html.indexOf('id="lang-select"')) + 6);
+  ok('the Help & FAQ and the language picker are one common foot, below both doors',
     footAt > doorsEnd &&
-    /<p class="landing-foot">[\s\S]*?id="customer-door-open"[\s\S]*?id="auth-faq-link"[\s\S]*?<\/p>/.test(html) &&
-    !/customer-door-open|auth-faq-link/.test(custCard) &&
-    !/customer-door-open|auth-faq-link/.test(empCard));
+    /<div class="landing-foot">[\s\S]*?id="auth-faq-link"[\s\S]*?id="lang-select"/.test(html) &&
+    !/auth-faq-link|lang-select/.test(custCard) &&
+    !/auth-faq-link|lang-select/.test(empCard));
   ok('...and it is a centred line, not a card of its own',
-    /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(baseCss));
-  // The Report button stays hidden until CUSTOMER_FORM_URL is set: an entry that opens an
-  // empty frame is worse than no entry.
-  ok('...with the report button off the screen until there is a form behind it',
-    /<button type="button" class="link-btn" id="customer-door-open" style="display:none"/.test(html) &&
+    /\.landing-foot \{[\s\S]*?justify-content:\s*center/.test(baseCss) &&
+    /\.landing-foot \{[\s\S]*?display:\s*flex/.test(baseCss));
+  // ⚠ "Report a problem" IS NOT ON THIS SCREEN ANY MORE, and the id that drives it is
+  // deliberately still in the document — it just lives where the thing it opens actually
+  // exists. It used to be here, next to the FAQ link, and opened a form for somebody who had
+  // not signed in yet; the owner's words were "this element is for customers after loging
+  // in". `wireCustomerDoor()` and smoke-door-faq still resolve the id, so moving the button
+  // was the whole change — nothing was deleted and no feature was orphaned.
+  ok('...and "Report a problem" is off the sign-in screen entirely',
+    !/customer-door-open/.test(footHtml) &&
+    footHtml.indexOf('auth-faq-link') > -1);
+  ok('...because it moved behind the sign-in, still hidden until a form is configured',
+    /<button type="button" class="nav-item" id="customer-door-open" style="display:none"/.test(html) &&
     /getElementById\('customer-door-open'\)/.test(appCode));
 
   // ── THE CORNER: WHAT REPLACES "SIGN UP" ────────────────────────────────────────
@@ -1372,6 +1458,49 @@ head('the landing page offers two doors, stacked, each of them collapsible');
     /\.wa-corner \{[\s\S]*?position: fixed/.test(baseCss) &&
     /\.wa-corner \{[\s\S]*?env\(safe-area-inset-bottom/.test(baseCss) &&
     /\.wa-corner \{[\s\S]*?env\(safe-area-inset-right/.test(baseCss));
+}
+
+// ── The two halves of one ground ────────────────────────────────────────────────
+head('the fused ground is restated for the phone, and the two restatements agree');
+{
+  // base.css paints the fused ground twice: once inside `@media (min-width: 1024px)` for
+  // the split screen, and once inside `@media (max-width: 1023px)` for the phone, where
+  // the ground is a `vh`-sized ramp rather than a feathered crossing. The second cannot
+  // inherit the first's control tokens — a media query is not a scope, and `--btn-solid-*`
+  // and the glass are set on `.auth-main` inside the desktop query — so they are
+  // RESTATED, under the same selector, with the same values.
+  //
+  // ⚠ THE RESTATEMENT IS THE WHOLE RISK, and base.css's own comment promised this check:
+  // "THIS SET AND THAT SET MUST MOVE TOGETHER … tools/smoke-shell.mjs holds the two lists
+  // to each other so that a change to one that is not made to the other fails rather than
+  // drifting." It did not, until now — which is the same defect as two spellings of one
+  // thing, caught the same way. The symptom would be a control that is legible on a
+  // laptop and invisible on the phone in the hangar, which is the device this app is for.
+  const css = read('../base.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const SELECTOR = ':root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {';
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  // Position is the ONLY thing that can tell the two apart, because the selector is
+  // deliberately the same string in both — so each block's media query is found by
+  // scanning backwards to the nearest one.
+  const blocks = [...css.matchAll(new RegExp(esc(SELECTOR) + '([\\s\\S]*?)\\n  \\}', 'g'))].map(m => ({
+    media: ((css.slice(0, m.index).match(/@media[^{]*/g) || []).pop() || '').trim(),
+    decls: [...m[1].matchAll(/(--[\w-]+):\s*([^;]+);/g)]
+      .map(d => d[1] + ': ' + d[2].replace(/\s+/g, ' ').trim())
+  }));
+  const desktop = blocks.find(b => /min-width:\s*1024px/.test(b.media));
+  const phone   = blocks.find(b => /max-width:\s*1023px/.test(b.media));
+
+  ok('the fused ground is restated exactly twice — once per width, and neither of them gone',
+    blocks.length === 2 && !!desktop && !!phone, blocks.map(b => b.media));
+
+  ok('...and the two carry the SAME control tokens, to the value, so neither width can drift alone',
+    !!desktop && !!phone && desktop.decls.length >= 8 &&
+    desktop.decls.join('\n') === phone.decls.join('\n'),
+    desktop && phone ? {
+      desktopOnly: desktop.decls.filter(d => !phone.decls.includes(d)),
+      phoneOnly:   phone.decls.filter(d => !desktop.decls.includes(d))
+    } : 'a block is missing — see base.css on the phone ramp');
 }
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);

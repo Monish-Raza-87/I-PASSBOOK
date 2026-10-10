@@ -1416,26 +1416,39 @@ r.ok('the wait screen is hidden by default and shown by the attribute — the sp
 // The owner's second look at this screen, verbatim: "the logo/icon used is not the
 // correct one with proper background etc, it has unclear things in the logo." Both
 // halves of that were real, and both were caused by this one rule.
-// 1. The artwork is a 4:3 lockup (512x384 — the disc, then "Passbook" beside it), so a
-//    square box SQUASHES it. `width: auto` off a height is the rule `.auth-logo` and
-//    `.brand-mark` have always followed; this rule must not be the exception.
-// 2. The disc is dark slate (#323943) and this screen is #0b0b0b by definition, so
-//    without the invert the disc disappears and only the knocked-out white pieces
-//    show — a logo with holes in it. Same treatment, same reason, as the dark theme's
-//    own `[data-theme="dark"] .auth-logo { filter: invert(1); }`.
-// Measured, not guessed: decoded the PNG and composited it on #0b0b0b both ways.
+//
+// ⚠ THE ARTWORK UNDER IT CHANGED ON 2026-10-10, and this block was left describing the
+// one it replaced — the 512x384 disc-and-wordmark lockup that was `assets/logo.png`.
+// The owner then asked for "our same logo everywhere, which is Option A", so the mark
+// here is the keyed MONOGRAM (assets/icon-mark.png, 512x563) on both screens. Both
+// halves of the rule survive the swap, but for a different reason each:
+// 1. `width: auto` off a height. The old artwork was landscape and a square box
+//    SQUASHED it sideways; the new one is PORTRAIT (563 wide against 512 tall) and the
+//    same square would stretch it the other way. The rule is a shape contract rather
+//    than a fix for one aspect ratio, which is why it is still asserted.
+// 2. THE INVERT IS GONE, AND IT IS WORTH SAYING WHY RATHER THAN JUST DELETING THE LINE.
+//    The mark was `brightness(0) invert(1)` — a flat white silhouette, correct on
+//    #0b0b0b, where a dark slate disc used to vanish and leave "a logo with holes in
+//    it". The wait screen no longer stands on #0b0b0b: it stands on `--ind-ground`, the
+//    app's own ground, because the sign-in screen it interrupts is now the film's light
+//    field and a black interstitial became the flash it was written to prevent. On a
+//    light ground that same filter is a white mark on a white page — so the filter goes
+//    with the ground it was written for, and what is asserted here is that it is GONE.
+//    (The two in-app marks keep it: see the assertion below.)
 const waitMarkRule = (baseSrc.match(/\.sso-wait-mark \{[\s\S]*?\n\}/) || [''])[0];
-r.ok('the mark is drawn from a height with width:auto — a square box squashes a 4:3 lockup',
+r.ok('the mark is drawn from a height with width:auto — a square box squashes the keyed monogram',
   /height: \d+px;/.test(waitMarkRule) && /width: auto;/.test(waitMarkRule), waitMarkRule);
 r.ok('...and no width: with a px value, which is the squash itself',
   !/width: \d+px;/.test(waitMarkRule));
-r.ok('...and it is inverted, or a dark slate disc on #0b0b0b reads as a logo with holes',
-  /filter: invert\(1\);/.test(waitMarkRule), waitMarkRule);
-r.ok('...matching the dark-theme treatment the mark already gets everywhere else',
-  /\[data-theme="dark"\] \.landing-mark \{[\s\S]{0,20}?filter: invert\(1\);/.test(baseSrc));
-r.ok('...and it sits on the splash\'s layer and ground, so the handover does not flash',
-  /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc) &&
-  /#sso-wait \{[\s\S]*?background: #0b0b0b/.test(baseSrc));
+r.ok('...and it carries NO filter at all, because the ground under it is no longer black',
+  !/filter:/.test(waitMarkRule), waitMarkRule);
+r.ok('...while the two in-app marks keep the dark-theme silhouette, which is still the right answer on a dark page',
+  /\[data-theme="dark"\] \.brand-mark img,\s*\n\[data-theme="dark"\] \.landing-mark \{[\s\S]{0,60}?filter: brightness\(0\) invert\(1\);/.test(baseSrc));
+r.ok('...and it sits on the splash\'s LAYER, so a real screen cannot paint underneath the handover',
+  /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc));
+r.ok('...and on the app\'s own ground rather than a #0b0b0b literal, so a light theme does not get a black interstitial',
+  /#sso-wait \{[\s\S]*?background: var\(--ind-ground\)/.test(baseSrc) &&
+  !/#sso-wait \{[\s\S]*?background: #0b0b0b/.test(baseSrc));
 // The sweep's own rule, not the whole file: base.css has other `transition: width`
 // declarations (the legacy progress bar), and a global scan would be testing those.
 const sweepRule = (baseSrc.match(/\.sso-wait-sweep \{[\s\S]*?\n\}/) || [''])[0];

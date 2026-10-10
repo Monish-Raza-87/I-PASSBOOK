@@ -108,7 +108,15 @@ const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$)
 // markup INSIDE that root, so `#auth-container .glass-card` already reaches it; the
 // entry exists for the case where it stops being a `.glass-card` and becomes the one
 // opaque panel on a glass screen, which is what §9 was written to prevent.
-const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#user-menu|#nudge-panel|#toast)\b/;
+//
+// #pattern-setup-overlay is the app's OTHER modal pane and scrim — the set-your-pattern
+// dialog, appended to <body> so it can be opened from the avatar menu while signed in.
+// It belongs to the family this list is FOR: it is drawn on top of the page rather than
+// in it, and a rule reaching into it cannot touch a screen. It is the case the §2 radius
+// block and §3's card rule both silently missed by being scoped to roots it is not
+// inside — which is exactly why membership in this list is written down rather than
+// discovered by a selector happening to match.
+const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#pattern-setup-overlay|#user-menu|#nudge-panel|#toast)\b/;
 const escaped = selectors.filter(s => !SCOPES.test(s) && !GLOBALS.test(s) && !CHROME.test(s));
 r.ok('every rule is scoped, is one of the sanctioned globals, or is floating chrome',
   escaped.length === 0, escaped);

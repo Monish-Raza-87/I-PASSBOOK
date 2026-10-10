@@ -1231,6 +1231,17 @@
   }
 :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-feather"]) { --ind-ground: var(--ind-fuse-feather); }
 :root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground="fuse-silver"])  { --ind-ground: var(--ind-fuse-silver); }
+:root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-brand="video"]) {
+    --ind-film: #f4f4f4;
+    --ind-ground:
+      radial-gradient(38% 130% at 49% 50%,
+        rgba(255, 196, 0, 0.32) 0%, rgba(255, 196, 0, 0.10) 42%, transparent 72%),
+      linear-gradient(96deg,
+        var(--ind-film) 0%, var(--ind-film) 45%,
+        #0b0b0b 50%, #1d1808 53%, #6b5200 56%,
+        #d9a600 59%, var(--ind-yellow) 63%,
+        #ffd21a 80%, #ffe066 100%);
+  }
 :root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {
     --glass-blur:      blur(30px) saturate(1.9);
     
@@ -1245,6 +1256,45 @@
     --ind-muted: var(--ind-on-yellow);
 
     
+    --btn-solid-bg:        var(--ind-paper-alt);
+    --btn-solid-bg-hover:  var(--ind-paper-rule);
+    --btn-solid-bg-active: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));
+    --btn-solid-fg:        var(--ind-on-yellow);
+  }
+:root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-ground^="fuse"]) {
+    --ind-fuse-feather-narrow: linear-gradient(178deg,
+      var(--ind-black)  0vh,
+      #101010           4vh,
+      #1d1808           7vh,
+      #6b5200           9vh,
+      #d9a600          11vh,
+      var(--ind-yellow) 13vh,
+      #ffc400          24vh,
+      #ffd21a          58%,
+      #ffe066         100%);
+    --ind-ground: var(--ind-fuse-feather-narrow);
+  }
+:root:not([data-theme="dark"]) #auth-container:has(> .auth-brand-panel[data-brand="video"]) {
+    --ind-film: #f4f4f4;
+    --ind-ground: linear-gradient(178deg,
+      var(--ind-film)   0%,
+      var(--ind-film)   35vh,
+      #6b5200           39vh,
+      var(--ind-yellow) 43vh,
+      #ffc400           50vh,
+      #ffd21a           62%,
+      #ffe066          100%);
+  }
+:root:not([data-theme="dark"]) .auth-brand-panel[data-ground^="fuse"] ~ .auth-main {
+    --glass-blur:      blur(30px) saturate(1.9);
+    --glass-fill:      linear-gradient(154deg,
+      rgba(255, 255, 255, 0.84)   0%,
+      rgba(255, 255, 255, 0.66)  42%,
+      rgba(255, 255, 255, 0.44) 100%);
+    --glass-fill-base: color-mix(in srgb, var(--ind-paper) 54%, transparent);
+    --glass-edge:      rgba(255, 255, 255, 0.95);
+    --accent:    var(--ind-on-yellow);
+    --ind-muted: var(--ind-on-yellow);
     --btn-solid-bg:        var(--ind-paper-alt);
     --btn-solid-bg-hover:  var(--ind-paper-rule);
     --btn-solid-bg-active: color-mix(in srgb, var(--ind-paper-alt) 80%, var(--ind-black));

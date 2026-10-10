@@ -321,13 +321,64 @@ ok('every jump link lands on a heading that exists',
     return targets.length >= 8 && targets.every(t => ids.has(t));
   })(), (faqHtml.match(/href="#[\w-]+"/g) || []).filter(t => !faqHtml.includes('id="' + t.slice(7, -1) + '"')));
 ok('the app is one tap away from it', /href="index\.html"/.test(faqCode), 'back link');
+// ── THE PALETTE, AND THE THREE THINGS THAT HAVE TO BE TRUE OF IT ───────────────
+//
+// ⚠ THIS ASSERTION USED TO SPELL ITS THREE TOKENS --bg, --fg AND --surface, which
+// were the names of the page's own private palette. That palette is GONE: on
+// 2026-10-10 the owner said *"Help and FAQ page's UI is not aligned with our app's UI,
+// rectify it"*, and the fix was to restate the app's own INDUSTRIAL roles here instead
+// of a second vocabulary for the same ideas. A check written against the old names
+// would have gone on passing while the page wore a look the app had abandoned — which
+// is exactly what had happened. So it now names the ROLES, which is what the question
+// was always about.
+//
+// Everything here reads a COMMENT-STRIPPED copy: the file's comments quote token names
+// in prose ("bare :root FIRST", "--accent is the role palette.css resolved"), and a
+// scan that counted those would find tokens no rule ever declared.
+const faqCss = faqHtml.slice(faqHtml.indexOf('<style>'), faqHtml.indexOf('</style>'))
+  .replace(/\/\*[\s\S]*?\*\//g, '');
+
+/** Every block that starts at :root, with the token names declared inside it. */
+const rootBlocks = [...faqCss.matchAll(/:root[^{}]*\{([^{}]*)\}/g)].map(m => ({
+  sel: m[0].slice(0, m[0].indexOf('{')).trim(),
+  names: new Set(m[1].match(/--[\w-]+/g) || [])
+}));
+const lightRoot = rootBlocks.find(b => b.sel === ':root');
+const darkRoots = rootBlocks.filter(b => b.sel !== ':root');
+
+// The roles this page must be able to answer for, whoever is looking at it.
+const ROLE_TOKENS = ['--ind-ground', '--ind-panel', '--ind-inset', '--ind-line', '--ind-rule',
+  '--ink', '--ind-muted', '--accent', '--st-danger-fg', '--st-resolved-fg'];
+
 ok('it defines a complete light palette on bare :root, before any dark block',
+  !!lightRoot && ROLE_TOKENS.every(n => lightRoot.names.has(n)) &&
+  faqCss.indexOf('--ind-ground') < faqCss.indexOf('prefers-color-scheme: dark'),
+  { found: lightRoot && ROLE_TOKENS.filter(n => !lightRoot.names.has(n)), blocks: rootBlocks.length });
+
+ok('...and BOTH dark blocks re-point every one of those roles, so neither theme borrows a colour from the other',
+  darkRoots.length === 2 && darkRoots.every(d => ROLE_TOKENS.every(n => d.names.has(n))),
+  { darkBlocks: darkRoots.length, missing: darkRoots.map(d => ROLE_TOKENS.filter(n => !d.names.has(n))) });
+
+// THE TWO ACCENT INVARIANTS, and they are the whole reason the accent is a role rather
+// than the brand colour. #ffc400 is Indrones' yellow: it is a FILL in this product and
+// it is never a word on a light ground, because it is about 1.4:1 there and no amount
+// of taste makes that readable. So in the light block the accent must be an INK — a
+// grey, r == g == b, no hue at all — and only where the ground is dark enough to carry
+// it may it become the brand yellow itself.
+const lightAccent = (faqCss.match(/:root\s*\{[^}]*--accent:\s*#([0-9a-f]{6})/i) || [])[1];
+ok('...and the light accent is the INK, not a hue — the brand yellow cannot be a word on a light ground',
   (() => {
-    const bare = (faqHtml.split(':root {')[1] || '').split('}')[0];
-    const dark = faqHtml.indexOf('prefers-color-scheme: dark');
-    return /--bg:/.test(bare) && /--fg:/.test(bare) && /--surface:/.test(bare) &&
-      faqHtml.indexOf('--bg:') < dark;
-  })(), 'token order');
+    if (!lightAccent) return false;
+    const [r, g, b] = [0, 2, 4].map(i => parseInt(lightAccent.slice(i, i + 2), 16));
+    return r === g && g === b;
+  })(), lightAccent ? '#' + lightAccent : 'no light accent');
+
+ok('...and the dark accent IS the brand yellow — the one ground dark enough to carry it as text',
+  (() => {
+    const brand = (faqCss.match(/--ind-yellow:\s*#([0-9a-f]{6})/i) || [])[1];
+    const dark = (faqCss.match(/:root\[data-theme="dark"\]\s*\{[^}]*--accent:\s*#([0-9a-f]{6})/i) || [])[1];
+    return !!brand && !!dark && brand.toLowerCase() === dark.toLowerCase();
+  })(), faqCss.match(/--ind-yellow:\s*#[0-9a-f]{6}[^;]*|--accent:\s*#[0-9a-f]{6}[^;]*/gi));
 ok('...and the two dark blocks re-point the SAME tokens, so neither theme shows a hole',
   (() => {
     const bare = (faqHtml.split(':root {')[1] || '').split('}')[0];

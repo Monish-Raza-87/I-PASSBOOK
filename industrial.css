@@ -123,7 +123,18 @@
 #log-view,
 #faq-view,
 #sidebar,
-#workspace header {
+#workspace header,
+/* ⚠ #pattern-setup-overlay IS HERE BECAUSE OF WHERE IT LIVES, NOT WHAT IT LOOKS LIKE.
+   The scale is zeroed on a list of ROOTS, and this overlay is appended to <body> — it
+   is opened from the avatar menu, so it can appear while SIGNED IN, outside every other
+   root on this list. Off the list it inherited the untouched --radius-6 (12px), and the
+   card rendered as the ONE rounded panel in an app of square ones, which is the state
+   the owner was looking at when he asked for the unlock pattern to be brought into line.
+   A `border-radius: 0` on the card would have fixed that one corner and left the button
+   inside it and the canvas beside it rounded; naming the root is what squares the lot.
+   (Read as: whatever the app grows that floats on <body> has to be added here, or it
+   silently keeps a radius the rest of the app does not have.) */
+#pattern-setup-overlay {
   --radius-1: 0px;
   --radius-2: 0px;
   --radius-3: 0px;
@@ -318,7 +329,16 @@
 #password-change { background: var(--ind-ground); }
 
 #auth-container .glass-card,
-#password-change .glass-card {
+#password-change .glass-card,
+/* THE PATTERN-SETUP OVERLAY'S CARD. It is appended to <body> and NOT to the sign-in
+   container — it is opened from the avatar menu, so it appears while SIGNED IN — which
+   means §3's rule does not reach it and §2's root list did not either. It is the same
+   object on the same app and was the one panel in it with rounded corners.
+   ⚠ IT IS NOT MOVED INSIDE #auth-container TO FIX THAT. `.glass-card` carries a
+   backdrop-filter, and a backdrop-filter makes an element a CONTAINING BLOCK for its
+   fixed descendants: a `position: fixed; inset: 0` overlay placed inside one would size
+   itself to the CARD instead of the screen. */
+#pattern-setup-overlay .glass-card {
   border: 1px solid var(--ind-line);
   border-top: 2px solid var(--accent);
   box-shadow: none;

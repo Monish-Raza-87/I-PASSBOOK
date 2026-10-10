@@ -255,8 +255,18 @@
     // door.openSpace survives from the two-card layout because it is not prose: it is
     // the button a customer who is ALREADY signed in on this device taps instead of a
     // form.
-    'door.employee':      'Employee',
-    'door.customer':      'Customer',
+    //
+    // ⚠ THE ROLE WORD IS NOW A PHRASE, and that is the owner's correction of 2026-10-10,
+    // verbatim: *"'EMPLOYEE' in employee button to updated to 'AS A EMPLOYEE', and
+    // customer button updated to 'AS A CUSTOMER'. So it gives a wholesome sense of login
+    // as a employee or login as a customer."* The two bars therefore read as the two
+    // halves of the sentence the head above them begins — he named both lines of that
+    // head in the same message, so the three are one lockup and must move together.
+    // ⚠ `door.expand` is a DIFFERENT string and is deliberately NOT phrased this way: it
+    // is a screen reader's verb phrase ("Show the Employee sign-in"), where "AS AN
+    // EMPLOYEE" would read "Show the AS A EMPLOYEE sign-in".
+    'door.employee':      'AS A EMPLOYEE',
+    'door.customer':      'AS A CUSTOMER',
     'door.openSpace':     'Open the Customer Space',
     // The bar's accessible name. A bare "Employee" announces a control with no verb,
     // and the chevron that says "this opens" is decorative and aria-hidden — so the
@@ -374,6 +384,17 @@
     'landing.termsTos':      'Terms & Conditions',
     'landing.termsAnd':      ' and ',
     'landing.termsPrivacy':  'Privacy Policy',
+    // The head that stands over the two doors, asked for on 2026-10-10 in his own words:
+    // *"Above buttons of emploee and customer 'WELCOME TO INDRONES' AFTER SALES PORTAL
+    // I-PASSBOOK' should be written and in the next line 'LOGIN'".* It ships in capitals
+    // because that is how he wrote it — the caps are copy, not a CSS `text-transform`, so
+    // a translator can choose their own treatment and the Devanagari line (which has no
+    // case at all) is not fighting a rule.
+    'landing.welcome':       'WELCOME TO INDRONES\' AFTER SALES PORTAL I-PASSBOOK',
+    // The second line, and the reason he asked for it: *"So it gives a wholesome sense of
+    // login as a employee or login as a customer."* On its own "LOGIN" over two buttons
+    // reads as a heading; the two door labels below complete the sentence.
+    'landing.login':         'LOGIN',
     // The language selector's accessible name. Its OPTIONS are language endonyms and are
     // NOT translated — a person looking for Hindi is looking for the word हिन्दी, not for
     // the word "Hindi" in English.
@@ -577,8 +598,8 @@
     'common.openInMaps':   'Maps में खोलें →',
 
     // ── The two doors on the landing page ────────────────────────────────────
-    'door.employee':      'कर्मचारी',
-    'door.customer':      'ग्राहक',
+    'door.employee':      'कर्मचारी के रूप में',
+    'door.customer':      'ग्राहक के रूप में',
     'door.openSpace':     'कस्टमर स्पेस खोलें',
     'door.expand':        '{role} साइन-इन दिखाएँ',
     'door.whatsapp':      'WhatsApp पर संपर्क करें',
@@ -617,6 +638,13 @@
     // at fixed URLs, and a reader who wants them needs the words printed on the pages
     // themselves. Translating the label would send them to a page titled something else.
     'landing.language':   'भाषा',
+    // The head over the two doors. NOT in capitals, and not because the English is not:
+    // Devanagari has no upper case, so "WELCOME TO …" written in capitals would be a rule
+    // the script cannot obey. The all-caps in the English line is copy, not a style, and a
+    // script without case simply opts out of it — which is exactly why the caps are not a
+    // CSS `text-transform` (see the note on landing.welcome).
+    'landing.welcome':    'इंड्रोन्स के बिक्री-पश्चात पोर्टल I-PASSBOOK में आपका स्वागत है',
+    'landing.login':      'लॉग इन',
 
     // ── The customer door, and the FAQ behind it ─────────────────────────────
     'door.report':      'समस्या बताएँ',

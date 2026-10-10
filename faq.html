@@ -6,78 +6,112 @@
 <title>I-PASSBOOK Help &amp; FAQ</title>
 <link rel="icon" href="assets/icon-192.png">
 <style>
-  /* Its own token set, in the shape the app's tokens.css uses, so this page reads
-     as the same product without loading a stylesheet — and without touching the
-     six-file cascade that smoke-shell.mjs pins. Every token is defined on bare
-     :root FIRST; the two dark blocks only re-point them. A colour whose only
-     definition sat inside one of those blocks would be invisible to a viewer
-     whose system theme is the other one. */
+  /* ══════════════════════════════════════════════════════════════════════════
+     THE APP'S OWN SKIN, RESTATED HERE.
+
+     The owner, 2026-10-10: *"Help and FAQ page's UI is not aligned with our app's UI,
+     rectify it."* He was right, and the reason is simple: this file was left on the
+     old language — a blue accent, rounded cards, a glass layer — while the app it
+     belongs to moved to INDRONES INDUSTRIAL on 2026-10-08.
+
+     So every value below is a value the app already uses, under the name the app
+     already uses. It is restated rather than linked because this page loads no
+     stylesheet and runs no script — the rule terms.html, privacy.html, plan.html,
+     inspector.html and backup.html all follow — and restating it under the app's OWN
+     token names is what lets a reader who knows the app read this file.
+
+     ⚠ ONE ROLE, TWO VALUES, IN EVERY CASE. `industrial.css` §1 picks the panel to be
+     the LIGHTER of the page and the card in BOTH themes, because "dark page, lighter
+     card" is the same sentence either way round. A single value per role would give
+     one of the two themes a card that reads as a hole punched in the screen. Hence
+     the three blocks: bare :root FIRST, then the two dark blocks re-pointing them —
+     the order tokens.css uses, and for the same reason. A colour whose only
+     definition sat inside a dark block would be invisible to a viewer whose system
+     theme is the other one.
+
+     WHAT IS NOT HERE, and both omissions are deliberate:
+       · NO GLASS. `industrial.css` §9 keeps the blur for the app's floating chrome —
+         a modal pane, a dropdown, the toast — and names the reason: a section and a
+         list row are not floating, and "the industrial look this file is built on is
+         precisely the refusal to texture a flat panel."
+       · NO AMBIENT GRADIENT. It existed only to give the blur something to show. With
+         no blur it is decoration bought with contrast under every sentence here.
+     ══════════════════════════════════════════════════════════════════════════ */
   :root {
-    --bg: #f6f7f9;
-    --surface: #ffffff;
-    --surface-2: #eef0f5;
-    --fg: #14171f;
-    --fg-muted: #5a6273;
-    --line: #dcdfe7;
-    --line-strong: #b9bfcc;
-    --accent: #2440d8;
-    --accent-soft: #e8ebfb;
-    --warn: #9a4a00;
-    --warn-soft: #fdf0dd;
-    --warn-line: #e8c48a;
-    --ok: #1d6b45;
-    --ok-soft: #e2f3ea;
-    --radius: 10px;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    /* GLASS, restated rather than linked: this page loads no stylesheet at all, which is
-       the whole point of it. The fill is a step MORE opaque than the sign-in screen's 72%
-       — this page is long-form prose, and a paragraph drifting over a gradient is a
-       paragraph being read twice. 86% keeps the blur visible in the margins and the paper
-       under the words, which is the same change-of-material argument base.css makes, one
-       step further along. `--accent-soft` is reused as the ambient wash rather than a new
-       tint being invented for it. */
-    --glass-fill: color-mix(in srgb, var(--surface) 86%, transparent);
-    --glass-edge: rgba(255, 255, 255, 0.5);
-    --glass-blur: blur(18px) saturate(1.5);
+    /* THE GROUND, THE PANEL AND THE TWO KINDS OF LINE — industrial.css §1, one for one. */
+    --ind-ground: #f8f8f8;   /* --surface-gray-1   the page itself */
+    --ind-panel:  #ffffff;   /* --surface-base     a section sitting on it */
+    --ind-inset:  #f3f3f3;   /* --surface-gray-2   anything recessed: code, the callouts */
+    --ind-line:   #e2e2e2;   /* --outline-gray-2   the edge of a box */
+    --ind-rule:   #ededed;   /* --outline-gray-1   a divider that is not a box */
+
+    /* THE TWO TEXT STEPS, AND --ind-muted IS MEASURED RATHER THAN PICKED.
+       --ink-gray-5 failed AA on both grounds this page has (4.18:1 on the page,
+       3.76:1 on a hovered row); --ink-gray-6 is 7.80:1 and 6.29:1 on the same two.
+       Every secondary word on this page is that one step. */
+    --ink:       #0f0f0f;    /* --ink-gray-9 */
+    --ind-muted: #525252;    /* --ink-gray-6 */
+
+    /* The brand yellow, which base.css declares once for the whole app. It appears in
+       this file exactly once, as the masthead's top rule — a FILL, never a word. */
+    --ind-yellow: #ffc400;
+
+    /* THE ACCENT IS THE TEXT ROLE, NOT THE BRAND YELLOW, and this is the most
+       important line in the file. #ffc400 is 11.18:1 on the dark ground and about
+       1.4:1 on this one: legible as a mark, unreadable as a word. `--accent` is the
+       role palette.css already resolved — INK here, the brand yellow only where the
+       ground is dark enough to carry it. A file that named the yellow directly would
+       be a file that only worked in one theme, which is the defect industrial.css's
+       own header is written about. */
+    --accent: #171717;
+
+    /* THE CALLOUT EDGES ARE THE STATUS STEPS, because that is what the callouts say:
+       a warning in the alarm's own hue, a clearance in the resolved one. The FILL is
+       the recessed panel and never the status colour — a 2px edge is the whole
+       signal, exactly as the app's Insights cards carry the accent. */
+    --st-danger-fg:   #ce2c2c;
+    --st-resolved-fg: #258c5c;
+
+    /* SQUARE IS THE LANGUAGE — an instrument panel has corners. industrial.css squares
+       its nine roots by re-pointing the radius scale rather than by writing
+       `border-radius: 0` ninety times, so this file reads the same one token at every
+       corner it draws. */
+    --radius: 0;
+
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
+  /* The app's dark values, role for role. Note that --ind-ground and --ind-panel SWAP
+     ENDS of the ramp between the two themes — the page goes dark and the panel comes
+     up to meet it — and that inversion is industrial.css §1's decision, not this
+     file's. */
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) {
-      --bg: #0f1218;
-      --surface: #171b24;
-      --surface-2: #1e2431;
-      --fg: #e7eaf1;
-      --fg-muted: #98a1b3;
-      --line: #2a3140;
-      --line-strong: #3b4354;
-      --accent: #8fa2ff;
-      --accent-soft: #1d2440;
-      --warn: #e8b06a;
-      --warn-soft: #2c2314;
-      --warn-line: #55411f;
-      --ok: #6fd3a0;
-      --ok-soft: #14291f;
-      --glass-edge: rgba(255, 255, 255, 0.14);
+      --ind-ground: #171717;
+      --ind-panel:  #1f1f1f;
+      --ind-inset:  #292929;
+      --ind-line:   #383838;
+      --ind-rule:   #242424;
+      --ink:        #f8f8f8;
+      --ind-muted:  #999999;
+      --accent:     #ffc400;
+      --st-danger-fg:   #eb4c4c;
+      --st-resolved-fg: #369768;
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #0f1218;
-    --surface: #171b24;
-    --surface-2: #1e2431;
-    --fg: #e7eaf1;
-    --fg-muted: #98a1b3;
-    --line: #2a3140;
-    --line-strong: #3b4354;
-    --accent: #8fa2ff;
-    --accent-soft: #1d2440;
-    --warn: #e8b06a;
-    --warn-soft: #2c2314;
-    --warn-line: #55411f;
-    --ok: #6fd3a0;
-    --ok-soft: #14291f;
-    --glass-edge: rgba(255, 255, 255, 0.14);
+    --ind-ground: #171717;
+    --ind-panel:  #1f1f1f;
+    --ind-inset:  #292929;
+    --ind-line:   #383838;
+    --ind-rule:   #242424;
+    --ink:        #f8f8f8;
+    --ind-muted:  #999999;
+    --accent:     #ffc400;
+    --st-danger-fg:   #eb4c4c;
+    --st-resolved-fg: #369768;
     color-scheme: dark;
   }
 
@@ -85,152 +119,196 @@
   html { -webkit-text-size-adjust: 100%; }
   body {
     margin: 0;
-    color: var(--fg);
-    font-family: var(--sans);
+    background: var(--ind-ground);
+    color: var(--ink);
+    font-family: var(--font-sans);
     font-size: 16px;
     line-height: 1.6;
     padding-block: 0 4rem;
-    /* THE AMBIENT FIELD, at the same two lobes and the same two positions the sign-in
-       screen uses — that is what makes this the same glass as the app rather than a page
-       that merely also uses blur. A blur over a flat colour is invisible. */
-    background:
-      radial-gradient(120rem 70rem at 8% -18%,  var(--accent-soft), transparent 62%),
-      radial-gradient(105rem 62rem at 96% 118%, var(--accent-soft), transparent 60%),
-      var(--bg);
-    background-attachment: fixed;
   }
   .wrap { max-width: 74ch; margin: 0 auto; padding-inline: 16px; }
 
+  /* ── THE MASTHEAD IS THE SCREEN'S TOOLBAR ───────────────────────────────────────
+     Inside the app this screen opens on a `.list-toolbar`: a panel, a hairline under
+     it, and the screen's own name in the mono face. This is that bar with the
+     document's title in it, and the 3px rule across the top is the page's single
+     piece of brand material — the one use of --ind-yellow in this file, and it is a
+     fill, so it is legible in both themes where a yellow WORD would not be. */
   header.masthead {
-    border-bottom: 1px solid var(--line);
-    background: var(--surface);
+    background: var(--ind-panel);
+    border-top: 3px solid var(--ind-yellow);
+    border-bottom: 1px solid var(--ind-line);
     padding-block: 2.5rem 2rem;
     margin-bottom: 1.6rem;
   }
+  /* The eyebrow is the app's `.faq-eyebrow`: mono, widely tracked, in the accent. */
   .eyebrow {
-    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
     text-transform: uppercase;
-    letter-spacing: 0.09em;
-    color: var(--fg-muted);
+    letter-spacing: 0.18em;
+    color: var(--accent);
     font-weight: 600;
-    margin: 0 0 0.6rem;
+    margin: 0 0 0.7rem;
   }
   h1 {
-    font-size: clamp(1.65rem, 5vw, 2.3rem);
-    line-height: 1.15;
-    margin: 0 0 0.7rem;
-    letter-spacing: -0.02em;
+    font-size: clamp(1.6rem, 5vw, 2.2rem);
+    line-height: 1.12;
+    margin: 0 0 0.8rem;
+    letter-spacing: -0.015em;
+    color: var(--ink);
     text-wrap: balance;
   }
-  .standfirst { font-size: 1.05rem; color: var(--fg-muted); margin: 0; max-width: 62ch; }
+  /* The standfirst is the one piece of running prose in the masthead, and it is set
+     off by a RULE rather than by a size or a tint — the app's `.faq-standfirst`, to
+     the letter. A rule is the only device this skin has for saying "this is set
+     apart", and it is enough. */
+  .standfirst {
+    font-size: 1rem;
+    color: var(--ind-muted);
+    margin: 0;
+    max-width: 62ch;
+    border-left: 2px solid var(--ind-rule);
+    padding-left: 0.8rem;
+  }
 
+  /* A section title is headed exactly as every other group heading in this skin is:
+     mono, widely tracked, upper case, in the accent. Ten of them down the page, so
+     this is the page's whole rhythm and has to be a rhythm rather than a shout —
+     which is why it is small and the QUESTIONS below it stay in the reading face. */
   h2 {
-    font-size: 1.25rem;
-    line-height: 1.25;
-    margin: 0 0 0.9rem;
-    letter-spacing: -0.01em;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--accent);
+    margin: 0 0 1.1rem;
     text-wrap: balance;
   }
+  /* A question is a ruled ROW, not a second heading — the app's register of lines. The
+     hairline is the divider and the weight is the affordance, so the collapsed list
+     reads as an index rather than as a wall of bold text. */
   h3 {
     font-size: 1rem;
-    margin: 1.4rem 0 0.35rem;
+    font-weight: 600;
+    color: var(--ink);
+    border-top: 1px solid var(--ind-line);
+    padding-top: 0.95rem;
+    margin: 1.2rem 0 0.35rem;
     letter-spacing: -0.005em;
     text-wrap: balance;
   }
-  h3:first-of-type { margin-top: 0; }
+  h3:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
   p { margin: 0 0 0.85rem; }
   p:last-child { margin-bottom: 0; }
-  a { color: var(--accent); }
+  a { color: var(--accent); text-underline-offset: 2px; }
   strong { font-weight: 650; }
   code {
-    font-family: var(--mono);
+    font-family: var(--font-mono);
     font-size: 0.87em;
-    background: var(--surface-2);
-    border: 1px solid var(--line);
-    border-radius: 5px;
+    background: var(--ind-inset);
+    border: 1px solid var(--ind-line);
+    border-radius: var(--radius);
     padding: 0.08em 0.35em;
   }
 
+  /* A SECTION IS A PANEL: square, hairline, on the ruled ground — and NOT glass.
+     This is the one place the old file most visibly disagreed with the app, which
+     had a blurred, rounded, left-barred card here. A section is not floating, and
+     industrial.css §9 is explicit that a panel does not get the blur; the only
+     surfaces in this product that do are the ones drawn ON TOP of the page. */
   section {
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--line-strong);
+    background: var(--ind-panel);
+    border: 1px solid var(--ind-line);
     border-radius: var(--radius);
     padding: 1.4rem 1.3rem;
     margin-bottom: 1rem;
   }
+  /* Landing on a section from the jump strip marks it with the accent as a RULE — the
+     same `inset 2px 0 0` flash the app's own jump strip gives, so "you landed here"
+     means one thing in this product wherever you meet it. It is done with :target,
+     which is why it costs no script on a page that runs none. */
+  section:target { box-shadow: inset 2px 0 0 var(--accent); }
   /* There used to be `section.is-now` / `section.is-ask` here, colouring the left
      edge of three sections. They went on 2026-10-08 with the move to one generated
      body: a distinction only ONE of the two renderers can see is a distinction the
      two will disagree about, and a section's heading already says what it is about. */
 
+  /* The jump strip is the app's `.faq-jump-item` set: small ruled tiles in the mono
+     face, square, on the panel colour. The hover moves the FILL to the recessed step
+     rather than lighting the border, because nothing here is a filter and nothing
+     here is ever "active" — every one of them is a control that scrolls. */
   nav.jump { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.2rem; }
   nav.jump a {
-    font-size: 0.82rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
     text-decoration: none;
-    color: var(--fg-muted);
-    border: 1px solid var(--line);
-    background: var(--surface);
-    border-radius: 999px;
-    padding: 0.3rem 0.7rem;
+    color: var(--ink);
+    border: 1px solid var(--ind-line);
+    background: var(--ind-panel);
+    border-radius: var(--radius);
+    padding: 0.42rem 0.7rem;
   }
-  nav.jump a:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  nav.jump a:hover { background: var(--ind-inset); border-color: var(--ind-rule); }
+  nav.jump a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   ul { margin: 0 0 0.85rem; padding-left: 1.2rem; }
   li { margin-bottom: 0.4rem; }
-  li::marker { color: var(--fg-muted); }
+  li::marker { color: var(--ind-muted); }
   ul:last-child { margin-bottom: 0; }
 
+  /* THE TWO CALLOUTS. A recessed fill, a 2px left edge in the status step that says
+     the same thing, and a mono label. The fill is NEVER the status colour — a 2px
+     edge is the whole signal. The label stays in --ind-muted in both cases, which is
+     the app's own choice: the EDGE carries the warning, and a word coloured to match
+     it would be a second, quieter copy of the same alarm. */
   .callout {
-    border-radius: 8px;
+    background: var(--ind-inset);
+    border-left: 2px solid var(--st-danger-fg);
+    border-radius: var(--radius);
     padding: 0.85rem 1rem;
     margin: 0.9rem 0;
-    border: 1px solid var(--warn-line);
-    background: var(--warn-soft);
-    color: var(--fg);
+    color: var(--ink);
     font-size: 0.95rem;
   }
   .callout p:last-child { margin-bottom: 0; }
   .callout .ct {
     display: block;
-    font-weight: 700;
-    margin-bottom: 0.25rem;
-    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
     text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: var(--warn);
+    letter-spacing: 0.14em;
+    color: var(--ind-muted);
   }
-  .callout.ok { border-color: var(--ok); background: var(--ok-soft); }
-  .callout.ok .ct { color: var(--ok); }
+  .callout.ok { border-left-color: var(--st-resolved-fg); }
 
   /* No tables on this page on purpose — a table wide enough to be readable needs
      sideways scrolling on a phone, which is the one thing this page must not do. */
 
-  /* THE GLASS ITSELF. Two surfaces float here — a section, and a jump chip — and both
-     are over the ambient field, so both have something behind them for the blur to
-     show. The `@supports` guard is the whole safety net: a browser without
-     backdrop-filter keeps the solid card it can actually read, never a translucent one
-     with nothing behind it. The masthead is deliberately NOT here — it is the page's own
-     edge, not a pane floating over it. */
-  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    section,
-    nav.jump a {
-      background: var(--glass-fill);
-      -webkit-backdrop-filter: var(--glass-blur);
-      backdrop-filter: var(--glass-blur);
-      box-shadow: inset 0 1px 0 var(--glass-edge);
-    }
-    nav.jump a:hover { background: var(--accent-soft); }
-  }
+  /* THE GLASS LAYER THAT USED TO BE HERE IS GONE, and the tombstone is left so the
+     removal is not mistaken for an oversight. It was a `@supports (backdrop-filter…)`
+     block giving the sections and the jump chips a translucent fill, an 18px blur and
+     a lit top edge over the page's ambient gradient. It was not wrong — it was the
+     old look, faithfully kept — but the app it belongs to stopped drawing that look
+     on 2026-10-08, and industrial.css §9 says why the replacement is nothing rather
+     than something else: a section is not floating, there is no content behind it to
+     see through it, and "the industrial look is precisely the refusal to texture a
+     flat panel." With the blur gone the gradient above it had nothing left to show,
+     so it went too, and the ground is now flat in both themes. */
 
   footer.end {
-    margin-top: 1.6rem;
+    margin-top: 1.8rem;
     padding-top: 1.2rem;
-    border-top: 1px solid var(--line);
-    color: var(--fg-muted);
+    border-top: 1px solid var(--ind-line);
+    color: var(--ind-muted);
     font-size: 0.88rem;
   }
-  footer.end a { color: var(--fg); }
+  footer.end a { color: var(--accent); }
 </style>
 </head>
 <body>

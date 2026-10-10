@@ -667,7 +667,7 @@ r.ok('...and .ir-meta carries its gap and its > * rule, which is the whole line'
 
 // ── 11. The owner can reach it ──────────────────────────────────────────────
 r.head('every preview file is served, and none of it is in the app\'s shell');
-const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/board.html', 'preview/preview.css'];
+const PREVIEW_FILES = ['preview/index.html', 'preview/a.html', 'preview/b.html', 'preview/c.html', 'preview/d.html', 'preview/parts.html', 'preview/empty.html', 'preview/board.html', 'preview/video.html', 'preview/preview.css'];
 PREVIEW_FILES.forEach(f => r.ok(`deploy serves ${f}`, deployJs.includes(`'${f}'`)));
 // The negative half matters more: the shell is precached on every install, so a
 // mock page in there would be downloaded by every user who never opens it.

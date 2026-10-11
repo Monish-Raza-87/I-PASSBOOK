@@ -115,6 +115,28 @@
   flex-direction: column;
   padding-bottom: 1rem;
 }
+/* ⚠ THE ROWS MUST NOT SHRINK, AND THIS IS NOT DECORATION — IT IS THE WHOLE FIX
+   FOR THE LIST COLLAPSING THE MOMENT IT LEARNED TO SCROLL.
+
+   `.ir-list` above is a COLUMN flex container, so every row is a flex ITEM and
+   `flex-shrink` defaults to **1**. While the list had no definite height that was
+   invisible and harmless: there was nothing to shrink into. `body { height: 100dvh }`
+   (v87, base.css) made the height definite all the way down the chain — so the list
+   became definite too, and forty-nine rows were then squeezed to fit 562px. Measured
+   2026-10-11 at 1440x900: **each `.ir-card` fell from 77px to 17px** — the scrollbar
+   arrived and the list was crushed with it. `flex: 0 0 auto` says what was always
+   meant: a row is as tall as its content, and the LIST scrolls, not the rows.
+
+   ⚠ Applied to `*`, not to `.ir-card`, deliberately. `.ir-list`'s other two children
+   are `p.intake-audit` (the bad-row note) and `.empty-state`, and on a short viewport
+   they are just as shrinkable and just as wrong to squeeze. `.empty-state` centres
+   itself with `padding: 4rem 1.5rem` and no `flex`, so nothing here is relying on
+   growth — only on not being compressed.
+
+   Same failure family as the height bug it came with: a rule can be CORRECT and
+   still do nothing, and a rule can start doing something the day a neighbouring
+   rule changes. Neither shows up in a suite that only greps for declarations. */
+.ir-list > * { flex: 0 0 auto; }
 
 .ir-card {
   position: relative;
@@ -2592,6 +2614,200 @@
 @media (max-width: 639px) {
   .kb-col { flex-basis: 13.25rem; }
   .kb-col-quiet { flex-basis: 11rem; }
+}
+
+/* ══════════════════════════════════════════════════════════
+   THE IR GRID — the same rows, drawn as tiles
+
+   The third drawing of one dataset, after the list and the board, and it is built
+   to the same two rules they are:
+
+   1. `#index-view.is-grid` is the ONLY thing that decides the grid is showing. It is
+      toggled from setListView(), the switch's one setter, so the class on the pane,
+      the three buttons and the repaint cannot disagree. Exactly the contract
+      `#index-view.is-board` above keeps.
+   2. It restates no colour, no radius and no shadow. `#index-view` already re-points
+      --radius-1…--radius-8 to 0px (industrial.css), so the tile is SQUARE by asking
+      for a token rather than by asking for zero; and this look floats nothing, so a
+      tile is a fill plus a hairline — the board's own column, at tile size.
+
+   ⚠ `.ir-grid` is a SIBLING of `#ir-list`/`#ir-board`, never a child of `.ir-list`.
+   `.ir-list > *` is `flex: 0 0 auto` — the guard that stops a row being crushed now
+   that the list scrolls — and a grid nested inside it would be pinned at its content
+   height and would never scroll at all. */
+.ir-grid { display: none; }
+#index-view.is-grid .ir-list,
+#index-view.is-grid .ir-board { display: none; }
+#index-view.is-grid .ir-grid {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+  /* ⚠ `min-content` IS LOAD-BEARING, and `auto` — the default — CRUSHES EVERY TILE.
+     This is the list's own bug one level down, and it took a browser to see it.
+
+     A `grid-auto-rows: auto` track starts at its items' automatic minimum size, and
+     that minimum is ZERO for an item with `overflow: hidden` (as `.ir-tile` is, for
+     width safety). So every row started at 0 and then grew only by its share of the
+     container's free space: measured 1440x900 with 80 records, 16 rows, clientHeight
+     572 — each row got 399/16 and the tiles came out **24px tall with 124px of
+     content**, clipped by their own `overflow: hidden`. And because the rows absorbed
+     exactly the free space, `scrollHeight` equalled `clientHeight` and there was NO
+     scrollbar — a crushed grid that looks like a short one.
+
+     `min-content` sizes each row from its items' content instead of from the leftover
+     space, so the rows total more than the frame and the frame scrolls. Measured, same
+     run: row 159px, tile 159px, scrollHeight 2584 vs clientHeight 572, and it scrolls.
+     `max-content` measures the same 159 here — min-content is the one that is right
+     whatever the subject's line count. Same family as `.ir-list > * { flex: 0 0 auto }`:
+     a definite height only helps if the children refuse to absorb it. */
+  grid-auto-rows: min-content;
+  /* The mockup's own 280px, in this app's rems. `auto-fill` against a minimum means
+     a narrow pane falls to one column by itself — no breakpoint, no phone rule. */
+  grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+  gap: 0.6rem;
+  padding: 0.8rem 0.9rem 1rem;
+}
+
+/* The tile. A column of four fixed kinds of line so a grid of them lines up, with the
+   footer pushed to the bottom by `margin-top: auto` — two tiles whose subjects run to
+   one and two lines still put their footers on the same line. */
+.ir-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--ind-line);
+  border-left: 3px solid transparent;
+  border-radius: var(--radius-4);
+  background: var(--ind-panel);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.1s var(--ease), border-color 0.1s var(--ease);
+}
+.ir-tile:hover { background: var(--surface-gray-1); border-color: var(--outline-gray-2); }
+.ir-tile:active { background: var(--surface-gray-2); }
+
+/* Late is a LEFT BAR, not a tinted fill — the same signal the board's card carries
+   (`border-left-color: var(--st-danger-fg)`), so "this one is overdue" reads the same
+   way in both drawings instead of having to be learned twice. */
+.ir-tile.is-late { border-left-color: var(--st-danger-fg); }
+
+/* Selected (desktop split pane). Mirrors the polished `.ir-card.is-selected` — the
+   accent-soft fill with the accent rail at the inline-start — so the open ticket is
+   marked identically whichever of the three drawings is on screen. */
+.ir-tile.is-selected { background: var(--accent-soft); }
+.ir-tile.is-selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.ir-tile-top { display: flex; align-items: baseline; gap: 0.4rem; min-width: 0; }
+.ir-tile-top .ir-title { font-weight: var(--weight-semibold); }
+/* The badge is the one thing on this line that never gives way and never wraps; the
+   number gives way to it. The row keeps the same precedence (`.ir-card-side`). */
+.ir-tile-top > :last-child { margin-left: auto; flex: 0 0 auto; }
+
+/* Two lines, then an ellipsis. `-webkit-line-clamp` is the only way to clamp to N
+   lines in vanilla CSS; the box/flex pair is what makes it apply. */
+.ir-tile-subject {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  color: var(--ink-gray-7);
+}
+
+.ir-tile-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  font-size: var(--text-2xs);
+  color: var(--ink-gray-5);
+}
+.ir-tile-meta .ir-tile-co { color: var(--ink-gray-8); font-weight: var(--weight-medium); }
+
+.ir-tile-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--outline-gray-1);
+}
+.ir-tile-state { display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; min-width: 0; }
+.ir-tile-who { display: flex; align-items: center; gap: 0.35rem; margin-left: auto; flex: 0 0 auto; }
+
+/* The initials monogram. `initialsOf()` was kept when the row's own circle left in
+   September; this is the one reader it has left. It is a monogram on purpose — there
+   are no avatars in this app and nothing here uploads one. */
+.ir-tile-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-9);
+  background: var(--surface-gray-3);
+  color: var(--ink-gray-8);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+}
+
+/* The one way past the cap, spanning the row so it reads as a note about the whole
+   grid rather than as a sixtieth tile. It goes to the LIST — the drawing that holds
+   every IR — which is the same honest answer `.kb-more` gives. */
+.grid-more {
+  grid-column: 1 / -1;
+  padding: 0.5rem;
+  border: 1px dashed var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.grid-more:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+
+/* ── Priority + sort, the two selects under the strips ───────────────────────────
+   `.list-select`, not `.form-input`: these are filters on the toolbar, sized to sit
+   under the segments rather than to be filled in. Both feed applyListFilters(), the
+   one function the search box and both strips already pass through, so no drawing can
+   show a set the others do not. */
+.list-selects { display: flex; gap: 0.4rem; }
+.list-select {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--outline-gray-2);
+  border-radius: var(--radius-3);
+  background: var(--surface-base);
+  color: var(--ink-gray-9);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.list-select:focus-visible { border-color: var(--accent); }
+
+/* A phone zooms the whole page when a control it is about to open is under 16px, and
+   a `<select>` counts. The same rule `.search-bar` is held to, for the same reason:
+   a phone rule here only ever RAISES a control, never lowers one. */
+@media (max-width: 639px) {
+  .list-select { font-size: 16px; }
 }
 
 /* ══════════════════════════════════════════════════════════

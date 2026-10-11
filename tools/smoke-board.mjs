@@ -165,10 +165,25 @@ ok('...and what was left behind is stated, with a way back to the list',
   (appJs.match(/[^\n]*kb-more[^\n]*/) || [''])[0]);
 
 // ── The switch re-draws the SAME rows, and is CSS-driven ─────────────────────
-head('List | Board is a switch over one filtered set of rows');
+head('List | Board | Grid is a switch over one filtered set of rows');
 ok('index.html carries the switch, with a button per view',
   /id="list-view-switch"/.test(html) &&
-  /data-view="list"/.test(html) && /data-view="board"/.test(html));
+  /data-view="list"/.test(html) && /data-view="board"/.test(html) &&
+  /data-view="grid"/.test(html));
+// Three buttons, and the count is asserted rather than each one being spotted: a
+// fourth drawing added by copying a button is a drawing with no renderer behind it.
+// `class="view-switch-btn` without the closing quote, because the ACTIVE one carries
+// a second class — an exact match would count two and pass a three-button claim.
+ok('...exactly three of them, one per drawing the app can actually render',
+  (html.match(/class="view-switch-btn[" ]/g) || []).length === 3 &&
+  new Set(html.match(/data-view="[a-z]+"/g) || []).size === 3 &&
+  (html.match(/data-view="(list|board|grid)"/g) || []).length === 3,
+  (html.match(/data-view="[a-z]+"/g) || []));
+// The tablist's own label said "List or board". With a third tab that is a lie a
+// screen reader reads out, so it moved into the language table with the buttons.
+ok('...and the tablist is labelled from the language table, not from the old two-view wording',
+  /role="tablist"[^>]*data-i18n-aria="list\.viewMode"/.test(html) &&
+  !/data-i18n-aria="list\.viewBoard"/.test(html));
 ok('it sits in the list toolbar, beside the title, above the filters',
   html.indexOf('id="list-view-switch"') > html.indexOf('class="list-toolbar-top"') &&
   html.indexOf('id="list-view-switch"') < html.indexOf('id="search-input"'));
@@ -177,22 +192,48 @@ ok('the board is a sibling of the list, not a seventh nav tab',
   !/data-section="board"/.test(html));
 ok('the board pane is reachable by keyboard, for its sideways scroll',
   /<div id="ir-board"[^>]*tabindex="0"/.test(html));
+// The grid scrolls VERTICALLY, like the list it is a drawing of, so it needs no
+// tabindex — a stop that goes nowhere is worse than no stop. It is pinned here so a
+// later "make it reachable like the board" does not quietly add one.
+ok('the grid is a sibling of both, and carries no tabindex of its own',
+  /<div id="ir-grid"[^>]*class="ir-grid"/.test(html) &&
+  !/<div id="ir-grid"[^>]*tabindex/.test(html));
+// ⚠ SIBLING, never a child of `.ir-list`. `.ir-list > *` is `flex: 0 0 auto` — the
+// guard that stopped the rows being crushed when the list learned to scroll — and a
+// grid inside it would be pinned at its content height and never scroll at all.
+ok('...and it is NOT nested inside .ir-list, whose children cannot shrink',
+  html.indexOf('id="ir-grid"') > html.indexOf('id="ir-list"') &&
+  html.slice(html.indexOf('id="ir-list"'), html.indexOf('id="ir-grid"'))
+      .indexOf('<div id="ir-grid"') === -1,
+  html.slice(html.indexOf('id="ir-board"'), html.indexOf('id="ir-grid"') + 40).slice(-120));
 
-// The one filter, two drawings: the branch is the whole contract.
+// The one filter, three drawings: the branch is the whole contract.
 const applyFilters = (appJs.match(/function applyListFilters\(\)[\s\S]*?\n\}/) || [''])[0];
-ok('applyListFilters feeds the board the very same rows the list would get',
+ok('applyListFilters feeds each drawing the very same rows the list would get',
   /if \(listMode === 'board'\) renderBoard\(rows\);/.test(applyFilters) &&
+  /else if \(listMode === 'grid'\) renderIRGrid\(rows\);/.test(applyFilters) &&
   /else renderIRList\(rows\);/.test(applyFilters),
-  applyFilters.slice(-160));
+  applyFilters.slice(-200));
 ok('...so a filter or a search repaints whichever view is showing',
   /setListView\([\s\S]*?applyListFilters\(\)/.test(appJs));
 
-// CSS alone decides which of the two is drawn, so the buttons, the pane class and
+// CSS alone decides which of the three is drawn, so the buttons, the pane class and
 // the repaint cannot disagree about which view is showing.
-ok('the switch is a class on the pane, not two elements kept in step',
+ok('the switch is a class on the pane, not three elements kept in step',
   /#index-view\.is-board \.ir-list\s*\{\s*display:\s*none/.test(viewsCss) &&
   /#index-view\.is-board \.ir-board\s*\{/.test(viewsCss) &&
   /pane\.classList\.toggle\('is-board'/.test(appJs));
+ok('...and the grid is gated by its own class on the same pane, hiding the other two',
+  /#index-view\.is-grid \.ir-list,/.test(viewsCss) &&
+  /#index-view\.is-grid \.ir-board\s*\{\s*display:\s*none/.test(viewsCss) &&
+  /#index-view\.is-grid \.ir-grid\s*\{/.test(viewsCss) &&
+  /pane\.classList\.toggle\('is-grid'/.test(appJs));
+// The class is the ONLY gate, and this is the assertion that says so out loud: if the
+// three-way normalisation ever lets a fourth word through, `is-board` and `is-grid`
+// are both false and the list is what shows — never nothing.
+ok('an unrecognised mode falls back to the list rather than to a blank pane',
+  /listMode = VIEW_MODES\.includes\(mode\) \? mode : 'list';/.test(appJs) &&
+  /const VIEW_MODES = \['list', 'board', 'grid'\];/.test(appJs));
 
 // ── The board scrolls sideways inside its own frame, never the page ──────────
 head('the board scrolls inside itself');
@@ -368,6 +409,33 @@ ok('...and every pane from #app-container to #index-view is flexible and may shr
     rs.every(b => /flex:\s*1/.test(b) && /min-height:\s*0/.test(b))),
   chain.map((s, i) => s + ' x' + chainRules[i].length).join(' '));
 
+// ── ⚠ AND THE ROWS MUST NOT SHRINK, OR THE FIX BREAKS THE LIST IT FIXED ──────
+// The height fix above is what made the list scroll — and it is also what CRUSHED
+// it. `.ir-list` is a COLUMN flex container, so each row is a flex ITEM and
+// `flex-shrink` defaults to 1. With no definite height there was nothing to shrink
+// into, so nobody ever saw it. The moment `body` got `height: 100dvh`, the list
+// became definite too and forty-nine rows were squeezed to fit 562px.
+//
+// The owner, 2026-10-11, after v87 shipped: "after bringing in scroll bar for IRs,
+// it has significantly affected the representation/view of list."
+//
+// ⚠ SAY WHAT THIS IS, because it is the SAME weakness the block above confesses to.
+// A declaration test is the WEAK half. The proof is a browser: measured the same day,
+// 1440x900, 49 rows injected — `.ir-card` height **77px -> 17px** without the rule,
+// 77px with it; `.ir-list` scrollHeight 849 -> 3765 (the pre-fix content height to the
+// pixel) and it scrolls; the page does not. `tools/render-themes.mjs --eval` is the
+// only instrument, since Chrome runs with `--hide-scrollbars`.
+const irListCss = viewsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+const irListRule = (irListCss.match(/(?:^|\n)\.ir-list\s*\{([^}]*)\}/) || [])[1] || '';
+const irListChildRules = [...irListCss.matchAll(/(?:^|\n)\.ir-list\s*>\s*([^\s{,]+)\s*\{([^}]*)\}/g)]
+  .map(m => ({ sel: m[1], body: m[2] }));
+ok('the list is a COLUMN flex container, so its rows are shrinkable flex items',
+  /display:\s*flex/.test(irListRule) && /flex-direction:\s*column/.test(irListRule),
+  irListRule.trim().replace(/\s+/g, ' ').slice(0, 120));
+ok('...and every child of it refuses to shrink, so a row keeps its own height',
+  irListChildRules.some(r => r.sel === '*' && /flex:\s*0\s+0\s+auto/.test(r.body)),
+  irListChildRules.map(r => '.ir-list > ' + r.sel).join(', ') || '(no child rule at all)');
+
 // ── The left-right bar rides ABOVE the columns, not under them ───────────────
 // The owner, 2026-10-10: "previously I have asked about separate scroll bar for IR
 // list and similarly in for board since number of columns are more, we can have
@@ -488,6 +556,219 @@ ok('renderBoard re-measures after the columns are in the DOM',
 ok('...and choosing the board re-measures once the fold has been applied',
   /requestAnimationFrame\(scrollBoardMirror\)/.test(slvBody),
   (slvBody.match(/.*scrollBoardMirror.*/g) || []));
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE IR GRID — the third drawing, and the one that taught this file the most
+// ══════════════════════════════════════════════════════════════════════════════
+// The owner, 2026-10-11: "for viewing our list of IRs, I also want a grid view
+// option. As of now we have list and board. but grid in my view will have better UI
+// for users." It is a third branch of applyListFilters, so it obeys the same search
+// box, the same two strips and the same sort for free — and those are asserted above,
+// on the switch, not here.
+head('the grid draws the same rows as tiles, from fields an IR actually has');
+
+const gridCode = [
+  (appJs.match(/const GRID_CAP\s*=\s*\d+;/) || [''])[0],
+  (appJs.match(/function gridTile\(ir\)[\s\S]*?\n\}/) || [''])[0],
+  (appJs.match(/function renderIRGrid\(records\)[\s\S]*?\n\}/) || [''])[0],
+].join('\n');
+// ⚠ COMMENTS STRIPPED FIRST, and for the third time in this file it is not tidiness.
+// The note inside `gridTile` explains in prose that there is "no warranty field and no
+// model field on an IR" and warns about `companyName` with a ⚠. Testing the raw
+// function body found the WORD warranty and the EMOJI in the prose describing their
+// absence — a test that reads comments is reading the wrong text.
+const gridSrc = gridCode.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+ok('the grid has its own renderer, beside the board\'s', gridCode.length > 0);
+// The cap is the REASON this view is affordable at all: the list's cost is measured
+// proportional to data (~0.1ms/row, docs/07), a tile is a heavier node than a row,
+// and the search path repaints on every 150ms tick. The board caps for the same
+// reason. Asserted as an inequality so a future "just raise it" is a decision.
+ok('and it caps what it draws, so a search keystroke cannot repaint 453 tiles',
+  /const GRID_CAP = (\d+);/.test(appJs) && Number(RegExp.$1) > 0 && Number(RegExp.$1) <= 60,
+  (appJs.match(/const GRID_CAP = \d+;/) || [''])[0]);
+ok('...and what it left behind is stated, with a way back to the list',
+  /const shown = records\.slice\(0, GRID_CAP\)/.test(appJs) &&
+  /more > 0/.test(appJs) &&
+  /class="grid-more">\$\{escHtml\(t\('grid\.more', \{ n: more \}\)\)\}/.test(appJs));
+
+// ⚠ `companyName`, NEVER `customerName`. The intake form has two name-shaped columns
+// — Col L is the PERSON who reported it, Col R is the COMPANY — and access is scoped
+// by the company, so reading the wrong one is a mistake this project has already paid
+// for (a customer with an empty portal and no error anywhere). The reporter's name is
+// still reachable, as the tile's tooltip, which is where it belongs.
+ok('the tile identifies the COMPANY, and never prints the person\'s name',
+  /escHtml\(ir\.companyName\)/.test(gridCode) &&
+  !/>\$\{escHtml\(ir\.customerName\)\}/.test(gridCode) &&
+  /title="\$\{escHtml\(ir\.customerName\)\}"/.test(gridCode));
+// The mockup asked for a "Product Name" and a warranty status; an IR has neither. The
+// serial is the only product identifier a record actually carries.
+ok('it ships no warranty and no model, because an IR has no such field',
+  !/warranty/i.test(gridSrc) && !/ir\.model/i.test(gridSrc) &&
+  /escHtml\(ir\.droneId\)/.test(gridSrc));
+// A tile that reads as broken is a blank middle, so the subject falls back.
+ok('the subject falls back to what the customer wrote rather than going blank',
+  /ir\.issueType \|\| ir\.issueDesc \|\| ''/.test(gridCode));
+// `droneId` is written by the PUBLIC customer form and was an XSS vector; the tile
+// keeps the row's and the board's discipline rather than inventing a third.
+ok('...and every value on it is escaped, as the row and the card are',
+  /escHtml\(ir\.irNumber\)/.test(gridCode) &&
+  /escJsAttr\(ir\.irNumber\)/.test(gridCode) &&
+  /escHtml\(initialsOf\(owner\)\)/.test(gridCode));
+// The monogram is `initialsOf()`, the one reader it has left since the row's circle
+// was removed in September. There are no avatars in this app and nothing uploads one.
+ok('the assignee is a monogram from the app\'s own initials helper, not an avatar',
+  /initialsOf\(owner\)/.test(gridCode) && !/<img/.test(gridCode));
+ok('...and an unassigned ticket says so in the app\'s own words',
+  /t\('common\.unassigned'\)/.test(gridCode));
+// The click target is the EXISTING ticket pane. The mockup's slide-out drawer was
+// rejected by the owner, and a second ticket screen is the failure this pins.
+ok('a tile opens the app\'s own ticket pane and nothing else',
+  /onclick="goTicket\('\$\{escJsAttr\(ir\.irNumber\)\}'\)"/.test(gridCode) &&
+  !/drawer|openDrawer/.test(gridCode));
+ok('the grid adds no emoji of its own', !EMOJI.test(gridSrc), (gridSrc.match(EMOJI) || []));
+ok('...and the open ticket is marked in the grid as it is in the list',
+  (appJs.match(/querySelectorAll\('\.ir-card'\)/) || []).length >= 1 &&
+  /querySelectorAll\('\.ir-tile'\)/.test(appJs));
+
+// ── The sort, and the mutation it must not make ───────────────────────────────
+// Sort + priority are the mockup's own two controls, and they are NOT a second filter
+// system: both feed applyListFilters(), the one function the search box and both
+// strips already pass through. So every drawing is filtered and ordered by one path.
+head('priority and sort are the same pipeline the search box uses');
+
+const prioAt = html.indexOf('id="filter-priority"');
+const sortAt = html.indexOf('id="sort-by"');
+ok('the toolbar carries both selects, after the strips',
+  prioAt > -1 && sortAt > prioAt &&
+  prioAt > html.indexOf('id="list-categories"') && sortAt < html.indexOf('id="search-input"') + 4000);
+ok('...and each is read by applyListFilters and by nothing else',
+  /filterPriority\.addEventListener\('change'/.test(appJs) &&
+  /sortBy\.addEventListener\('change'/.test(appJs) &&
+  /activePriority = filterPriority\.value/.test(appJs) &&
+  /activeSort = sortBy\.value/.test(appJs));
+ok('the priority filter and the sort are both applied inside applyListFilters',
+  /ir\.priority === activePriority/.test(applyFilters) &&
+  /rows = sortIRRows\(rows, activeSort\)/.test(applyFilters),
+  applyFilters.slice(-260));
+// Priority is app-owned and most tickets have none, so "No priority" is a real bucket
+// rather than an empty state — the same convention the category strip's own
+// uncategorised bucket set.
+ok('"No priority" is a bucket of its own, not an empty result',
+  /UNCATEGORISED/.test(applyFilters) && /!ir\.priority/.test(applyFilters));
+// ⚠ THE MUTATION HAZARD, and the reason this assertion exists: applyListFilters hands
+// sortIRRows `allIRs` ITSELF when no filter is active, and `.sort()` is IN PLACE — so
+// sorting without copying would silently reorder the master list and every count on
+// the Insights dashboard with it.
+const sortBody = (appJs.match(/function sortIRRows\(rows, mode\)[\s\S]*?\n\}/) || [''])[0];
+ok('the sort copies before it sorts, so it cannot reorder the master list',
+  /const out = rows\.slice\(\)/.test(sortBody) && sortBody.length > 0,
+  sortBody.slice(0, 120));
+// `dateRaised` is display-only; `dateRaisedISO` is the one clean sortable date on a
+// record. Sorting on the display string would order tickets by the month's name.
+ok('...and it sorts on the ISO date, not on the display string',
+  /dateRaisedISO/.test(sortBody) && !/\.dateRaised\b(?!ISO)/.test(sortBody));
+ok('...with priority ranked Urgent-first, and unset last',
+  /PRIORITY_RANK/.test(appJs) && /Object\.fromEntries\(TICKET_PRIORITIES/.test(appJs) &&
+  /PRIORITY_RANK/.test(sortBody));
+
+// ── The two rules that keep the grid from being crushed and from being one wide ──
+head('the grid rows are content-sized, and the pane is gated by one class');
+
+const gridCssNC = viewsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+const gridRule = (gridCssNC.match(/#index-view\.is-grid \.ir-grid\s*\{([^}]*)\}/) || [])[1] || '';
+ok('the grid is its own vertical scroller, like the list',
+  /overflow-y:\s*auto/.test(gridRule) && /flex:\s*1/.test(gridRule) && /min-height:\s*0/.test(gridRule),
+  gridRule.trim().replace(/\s+/g, ' ').slice(0, 140));
+// ⚠⚠ THE FIX THIS FILE EXISTS FOR, ONE LEVEL DOWN. `grid-auto-rows: auto` — the
+// default — starts every row at its items' automatic minimum size, and that minimum
+// is ZERO for an item with `overflow: hidden`, as a tile is. So each row grew only by
+// its share of the container's free space: measured 1440x900, 80 records, 16 rows,
+// clientHeight 572 — rows resolved to 24px against 124px of tile content, clipped,
+// and scrollHeight equalled clientHeight so there was NO scrollbar. A crushed grid
+// that reads as a short one. `min-content` sizes the rows from their content instead
+// of from the leftover space. Same lesson as `.ir-list > * { flex: 0 0 auto }`.
+ok('...and its rows are content-sized, not handed the leftover free space',
+  /grid-auto-rows:\s*min-content/.test(gridRule),
+  (gridRule.match(/grid-auto-rows:[^;]*/) || ['(no grid-auto-rows at all)'])[0]);
+// The mockup's 280px, and `auto-fill` so a narrow pane falls to one column with no
+// breakpoint behind it.
+ok('the columns are the mockup\'s own minimum width, and auto-fill does the phone',
+  /grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(17\.5rem,\s*1fr\)\)/.test(gridRule));
+// Square tiles "for free": #index-view re-points --radius-1…--radius-8 to 0px, so
+// asking for a TOKEN is what makes them square. A hand-written radius would be a
+// second opinion about the look, and a shadow is the one thing this look never does.
+const tileRule = (gridCssNC.match(/(?:^|\n)\.ir-tile\s*\{([^}]*)\}/) || [])[1] || '';
+ok('the tile takes its radius from a token, and writes no radius value of its own',
+  /border-radius:\s*var\(--radius-\d\)/.test(tileRule) &&
+  !/border-radius:\s*[^;]*\d(?:px|rem)/.test(tileRule) &&
+  /background:\s*var\(--ind-panel\)/.test(tileRule),
+  (tileRule.match(/border-radius:[^;]*/) || ['(none)'])[0]);
+ok('...and it floats nothing, because this look floats nothing',
+  !/box-shadow/.test(tileRule) && !/box-shadow/.test(gridRule));
+ok('...and it clips its own subject to two lines, the only way vanilla CSS can',
+  /-webkit-line-clamp:\s*2/.test(gridCssNC) &&
+  /\.ir-tile-subject\s*\{[^}]*-webkit-box-orient:\s*vertical/.test(gridCssNC));
+// Folded to the rail, the grid must go too, or it stays on screen over nothing.
+ok('folding the list to its rail hides the grid with the list and the board',
+  /html\.list-collapsed #index-view \.ir-list,[\s\S]{0,200}?html\.list-collapsed #index-view \.ir-grid,/.test(baseCss));
+// A phone zooms the page for a control under 16px, and a `<select>` counts.
+ok('the two selects are raised to 16px on a phone, like the search field',
+  /@media \(max-width: 639px\)\s*\{\s*\.list-select\s*\{\s*font-size:\s*16px;\s*\}\s*\}/.test(gridCssNC));
+
+// ── Driven, against the app's own renderer ───────────────────────────────────
+// Everything above reads the source. This runs it, because a renderer that is
+// correct in the file and wrong in the browser is precisely the failure this suite
+// was written after: the list "had" `overflow-y: auto` for weeks and could not
+// scroll one pixel.
+const { T: G, byId: gById } = loadApp(
+  'renderIRGrid, gridTile, GRID_CAP, get irGrid() { return irGrid; }',
+  { capture: true });
+const gridEl = gById.get('ir-grid');
+ok('the test is holding the same grid element the app is', !!gridEl && G.irGrid === gridEl);
+
+const tileIR = {
+  irNumber: 'IR470', status: 'Open', issueType: 'Battery not charging',
+  companyName: 'MAHYCO', customerName: 'A Person', droneId: 'SN-4412',
+  category: 'CRASH', priority: 'Urgent', assigneeName: 'AN Adhik Nair',
+  dateRaisedISO: '2026-09-01',
+};
+const oneTile = G.gridTile(tileIR);
+ok('a tile is drawn from a record, and carries the id the app routes on',
+  /class="ir-tile/.test(oneTile) && /data-id="IR470"/.test(oneTile));
+ok('...it prints the company and the serial, and NOT the reporter\'s name',
+  /MAHYCO/.test(oneTile) && /SN-4412/.test(oneTile) &&
+  oneTile.indexOf('A Person') > 0 && !/>A Person</.test(oneTile),
+  oneTile.replace(/\s+/g, ' ').slice(0, 200));
+ok('...it carries the status badge the list uses, not a colour of its own',
+  /class="badge/.test(oneTile) && /Open/.test(oneTile));
+ok('...and the priority, the assignee monogram and the age',
+  /prio prio-urgent/.test(oneTile) && /AN/.test(oneTile) && /ir-age/.test(oneTile));
+
+G.renderIRGrid([]);
+ok('an empty result says so, in the words the list and the board already use',
+  /class="empty-state"/.test(gridEl.innerHTML), gridEl.innerHTML.slice(0, 120));
+
+const many = Array.from({ length: 200 }, (_, i) => ({ ...tileIR, irNumber: 'IR' + i }));
+G.renderIRGrid(many);
+// ⚠ `class="ir-tile[" ]` and not `class="ir-tile` — the tile's OWN children are
+// `.ir-tile-top`, `.ir-tile-subject`, `.ir-tile-meta`, `.ir-tile-foot`, `.ir-tile-state`,
+// `.ir-tile-who`, `.ir-tile-avatar` and `.ir-tile-co`, so a prefix match counted all nine
+// of them per tile. It read 540 against a cap of 60 — a number that would have passed
+// for the wrong reason the day it happened to line up.
+const TILE_RE = /class="ir-tile[" ]/g;
+const drawn = (gridEl.innerHTML.match(TILE_RE) || []).length;
+ok('the cap is what is DRAWN, and exactly the cap',
+  drawn === G.GRID_CAP, { drawn, cap: G.GRID_CAP });
+ok('...and the rest is offered as a way back to the list, with the count in it',
+  /class="grid-more"/.test(gridEl.innerHTML) && /grid-more/.test(appJs) &&
+  gridEl.innerHTML.indexOf('grid-more') > gridEl.innerHTML.indexOf('class="ir-tile'));
+// The header count is the FULL count while only the drawing is capped — the board's
+// own rule, and the reason a capped view can never quietly under-report.
+G.renderIRGrid(many.slice(0, 3));
+ok('a short result draws every tile and offers no way out',
+  (gridEl.innerHTML.match(TILE_RE) || []).length === 3 &&
+  !/grid-more/.test(gridEl.innerHTML),
+  (gridEl.innerHTML.match(TILE_RE) || []).length);
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);
 process.exit(fails ? 1 : 0);

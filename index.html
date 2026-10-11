@@ -930,13 +930,17 @@
           <div class="list-toolbar">
             <div class="list-toolbar-top">
               <span class="list-title" data-i18n="list.title">IRs</span>
-              <!-- List | Board. A SWITCH, not a seventh nav tab: the board is another
-                   drawing of the SAME rows, so it must obey the same search box and the
-                   same two filter strips that sit directly below it. A separate tab
-                   would mean filtering twice and reading two different numbers. -->
-              <span class="view-switch" id="list-view-switch" role="tablist" aria-label="List or board" data-i18n-aria="list.viewBoard">
+              <!-- List | Board | Grid. A SWITCH, not a seventh nav tab: all three are
+                   drawings of the SAME rows, so they must obey the same search box, the
+                   same two filter strips and the same sort directly below them. A
+                   separate tab would mean filtering twice and reading two different
+                   numbers. `#index-view` carries ONE class naming the drawing that
+                   shows, and it is the only thing that decides — no second element kept
+                   in step (see setListView). -->
+              <span class="view-switch" id="list-view-switch" role="tablist" aria-label="List, board or grid" data-i18n-aria="list.viewMode">
                 <button type="button" class="view-switch-btn active" data-view="list" role="tab" aria-selected="true" data-i18n="list.viewList">List</button>
                 <button type="button" class="view-switch-btn" data-view="board" role="tab" aria-selected="false" data-i18n="list.viewBoardBtn">Board</button>
+                <button type="button" class="view-switch-btn" data-view="grid" role="tab" aria-selected="false" data-i18n="list.viewGridBtn">Grid</button>
               </span>
               <span class="list-count" id="list-count"></span>
             </div>
@@ -947,6 +951,28 @@
                  so it inherits the strip's own CSS and its counts read exactly like
                  the status counts directly above it. -->
             <div class="segments segments-cat" id="list-categories" role="tablist"></div>
+            <!-- Priority + sort. TWO SELECTS, and deliberately NOT a third widget:
+                 both feed applyListFilters(), the one function the search box and both
+                 strips already pass through — so all three drawings are filtered and
+                 ordered by the same code and none of them can show a different set.
+                 Priority is app-owned (set in Allot CAPS) and most tickets have none,
+                 so "No priority" is a real bucket rather than an empty state, following
+                 the same convention the Category strip's own uncategorised bucket set. -->
+            <div class="list-selects">
+              <select id="filter-priority" class="list-select" aria-label="Priority" data-i18n-aria="list.filterPriority">
+                <option value="all" data-i18n="list.filterPriority">All priorities</option>
+                <option value="Urgent" data-i18n="priority.urgent">Urgent</option>
+                <option value="High" data-i18n="priority.high">High</option>
+                <option value="Medium" data-i18n="priority.medium">Medium</option>
+                <option value="Low" data-i18n="priority.low">Low</option>
+                <option value="__none__" data-i18n="list.priorityNone">No priority</option>
+              </select>
+              <select id="sort-by" class="list-select" aria-label="Sort" data-i18n-aria="list.sortLabel">
+                <option value="newest" data-i18n="list.sortNewest">Newest first</option>
+                <option value="oldest" data-i18n="list.sortOldest">Oldest first</option>
+                <option value="priority" data-i18n="list.sortPriority">Highest priority</option>
+              </select>
+            </div>
           </div>
           <div id="sync-status"></div>
           <div id="ir-list" class="ir-list">
@@ -971,6 +997,15 @@
                so the switch never has to touch two elements to stay consistent.
                tabindex makes the sideways scroll reachable from a keyboard. -->
           <div id="ir-board" class="ir-board" role="region" aria-label="IR board" tabindex="0" data-i18n-aria="board.label"></div>
+          <!-- The grid: the same filtered rows, drawn as tiles. A SIBLING of
+               #ir-list and #ir-board, never a child of either — `.ir-list > *` is
+               `flex: 0 0 auto` (it is what stops a row being crushed now that the
+               list scrolls), so a grid nested inside it would be pinned at its
+               content height and would never scroll at all. Hidden by CSS unless
+               #index-view carries .is-grid, the same one-class gate the board uses.
+               No tabindex: it scrolls VERTICALLY, so its own scrollbar is already at
+               its end edge and a tab stop here would be a stop for nothing. -->
+          <div id="ir-grid" class="ir-grid" role="region" aria-label="IR grid" data-i18n-aria="grid.label"></div>
 
           <!-- The IR list's own width handle, the twin of the sidebar's. It rides
                #index-view's right edge, which is the SAME edge the list's fold

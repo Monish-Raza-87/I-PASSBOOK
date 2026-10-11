@@ -3055,23 +3055,30 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   html.pane-resizing #index-view { transition: none; }
   html.pane-resizing .pane-resize { background: var(--accent); opacity: 0.75; }
   /* A handle is meaningless on a column that is not there: the rail has no width
-     to set, and the full-screen board has given its width away on purpose. */
+     to set, and a view that has taken the workspace has given its width away on
+     purpose. */
   html.list-collapsed #list-resize,
-  html.board-full #list-resize,
+  html.view-full #list-resize,
   html.rail-collapsed #sidebar-resize { display: none; }
 
-  /* ── The board takes the workspace ──────────────────────
-     Nine columns of cards need the room, so choosing Board gives it the whole
-     row: the sidebar and the "No IR selected" placeholder step out and this pane
-     stops being a fixed 400px column. The fold control goes with them — on the
-     board there is no list to fold, and its rail would cover the board up. */
-  html.board-full #sidebar { display: none; }
-  html.board-full #index-view { flex: 1 1 auto; width: auto; }
-  html.board-full #detail-placeholder { display: none; }
+  /* ── A view takes the workspace ─────────────────────────
+     `html.view-full` means one thing — "this drawing takes the whole row" — and it
+     is set by BOTH the board (nine columns of cards do need the room) and the grid
+     (a grid laid out inside the list's own 400px column would be ONE TILE WIDE).
+     Two parallel classes would have been two places for the same fact to drift, so
+     there is one, and setListView() is its only writer.
+
+     Choosing either view: the sidebar and the "No IR selected" placeholder step
+     out, and this pane stops being a fixed 400px column. The fold controls go with
+     them — on these drawings there is no list to fold, and the rail would cover
+     them up. Switching back to List brings everything straight back. */
+  html.view-full #sidebar { display: none; }
+  html.view-full #index-view { flex: 1 1 auto; width: auto; }
+  html.view-full #detail-placeholder { display: none; }
   /* Both fold controls go: the list has no left to give up, and the sidebar's own
      toggle would sit there switching a sidebar that is not on screen. */
-  html.board-full #list-toggle,
-  html.board-full #sidebar-toggle { display: none; }
+  html.view-full #list-toggle,
+  html.view-full #sidebar-toggle { display: none; }
 
   /* ── The IR list's fold: to a rail, never to nothing ──────
      The service-desk sidebar folds to a 56px rail and keeps a way back; the IR
@@ -3094,6 +3101,7 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   html.list-collapsed #index-view .list-toolbar,
   html.list-collapsed #index-view .ir-list,
   html.list-collapsed #index-view .ir-board,
+  html.list-collapsed #index-view .ir-grid,
   html.list-collapsed #index-view > #sync-status { display: none; }
 
   html.list-collapsed #list-rail {

@@ -88,12 +88,19 @@
     // that impossible — which is the whole reason this table exists.
     'nav.help':            'Help & FAQ',
 
-    // ── The IR list, and the board it draws the same rows as ─────────────────
+    // ── The IR list, and the board and grid it draws the same rows as ────────
     'list.title':          'IRs',
     'list.search':         'Search by IR number or drone ID…',
     'list.viewList':       'List',
-    'list.viewBoard':      'List or board',
     'list.viewBoardBtn':   'Board',
+    'list.viewGridBtn':    'Grid',
+    'list.viewMode':       'List, board or grid',
+    'list.filterPriority': 'All priorities',
+    'list.priorityNone':   'No priority',
+    'list.sortLabel':      'Sort',
+    'list.sortNewest':     'Newest first',
+    'list.sortOldest':     'Oldest first',
+    'list.sortPriority':   'Highest priority',
     'list.emptyFiltered':  'No IRs match this filter.',
     'list.emptyNone':      'No IRs found. Create one via the customer form.',
     'board.label':         'IR board',
@@ -102,6 +109,8 @@
     'board.paused':        'Paused',
     'board.finished':      'Finished',
     'board.more':          '+{n} more — see list',
+    'grid.label':          'IR grid',
+    'grid.more':           '+{n} more — see list',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             'Move to {column} →',
@@ -508,12 +517,19 @@
     'nav.userAccess':      'उपयोगकर्ता पहुँच',
     'nav.help':            'सहायता और FAQ',
 
-    // ── The IR list, and the board it draws the same rows as ─────────────────
+    // ── The IR list, and the board and grid it draws the same rows as ────────
     'list.title':          'IR',
     'list.search':         'IR नंबर या ड्रोन ID से खोजें…',
     'list.viewList':       'सूची',
-    'list.viewBoard':      'सूची या बोर्ड',
     'list.viewBoardBtn':   'बोर्ड',
+    'list.viewGridBtn':    'ग्रिड',
+    'list.viewMode':       'सूची, बोर्ड या ग्रिड',
+    'list.filterPriority': 'सभी प्राथमिकताएँ',
+    'list.priorityNone':   'कोई प्राथमिकता नहीं',
+    'list.sortLabel':      'क्रम',
+    'list.sortNewest':     'नवीनतम पहले',
+    'list.sortOldest':     'पुराना पहले',
+    'list.sortPriority':   'उच्चतम प्राथमिकता',
     'list.emptyFiltered':  'इस फ़िल्टर से कोई IR मेल नहीं खाता।',
     'list.emptyNone':      'कोई IR नहीं मिला। ग्राहक फ़ॉर्म से एक बनाएँ।',
     'board.label':         'IR बोर्ड',
@@ -522,6 +538,8 @@
     'board.paused':        'रुका हुआ',
     'board.finished':      'पूरा हुआ',
     'board.more':          '+{n} और — सूची देखें',
+    'grid.label':          'IR ग्रिड',
+    'grid.more':           '+{n} और — सूची देखें',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             '{column} पर ले जाएँ →',

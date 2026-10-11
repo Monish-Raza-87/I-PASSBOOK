@@ -113,7 +113,61 @@ feature that lies:
 
 ---
 
-## 5. Future Roadmap (Planned)
+## 5. The IR Grid, and the two scroll bugs the browser found (2026-10-11)
+
+### What he asked for
+*"In our app, for viewing our list of IRs, I also want a grid view option. As of now we
+have list and board. but grid in my view will have better UI for users."* — with a
+pasted Odoo-style mockup described as *"something like this"*, a picture of the *shape*
+rather than a specification of this app.
+
+Four decisions came from him rather than from me: a **third mode** (List and Board
+untouched), **sort + priority dropdowns added** (the app had no priority filter at all),
+**square tiles** matching the app rather than the mockup's 12–16px corners, and a tile
+click that opens **the app's own ticket pane**, not the mockup's slide-out drawer.
+
+### What the mockup asked for that this app cannot give, and it was stated, not faked
+- `Critical / High / Medium / Low` — the real four are **Urgent**/High/Medium/Low.
+- `New / In Progress / Waiting Parts / Resolved` — fabricated; the app owns **ten
+  stages**, badge-coloured by four categories.
+- **Warranty Status** — **no warranty field exists on an IR**; the only warranty value
+  lives inside a Section D *form* field a tile cannot reach.
+- **Product Name** — **no model field exists on an IR either** (Col S is read by
+  nothing). The serial is the only product identifier a record carries.
+- Assignee **avatar photos** — no avatars in this app; the tile reuses `initialsOf()`,
+  the monogram helper the row stopped using on 2026-09-21.
+- Hover **elevation shadows** — this look floats nothing; a tile is a fill plus a hairline.
+
+### The build
+The grid is a **third branch of `applyListFilters()`**, which is what makes it obey the
+one search box, both filter strips and the new sort for free — no second filter system.
+`html.board-full` was generalised to **`html.view-full`** (one class for "this drawing
+takes the whole row", set by both Board and Grid) because at ≥1024px the pane is a fixed
+400px rail and a grid inside it would have been **one tile wide**. `GRID_CAP = 60`,
+mirroring `BOARD_CAP`, measured **13.4 ms flat** against `renderIRList`'s 211 ms at 1200.
+
+### ⚠ The bug that only a browser could show
+The first render was wrong and looked plausible: **every tile 24px tall holding 124px of
+content**, and `scrollHeight === clientHeight`, so there was **no scrollbar** — a crushed
+grid that reads as a short one. Cause: `grid-auto-rows: auto` starts each row at its
+items' automatic minimum size, which is **zero for an item with `overflow: hidden`** (a
+tile, kept for width safety). So each row grew only by its share of the container's free
+space — 399/16 per row at 1440×900 with 80 records. `min-content` fixed it: rows 159px,
+`scrollHeight` 2584 vs `clientHeight` 572, and it scrolls.
+
+**This is the same family as v87→v88, one level down**: a definite height only helps if
+the children refuse to absorb it — `.ir-list > * { flex: 0 0 auto }` then,
+`grid-auto-rows: min-content` now. And the same lesson twice over: **a declaration is not
+an application**, and geometry probes — not screenshots, because Chrome runs with
+`--hide-scrollbars` — are the only instrument.
+
+**Shipped as v89** (frontend only — no `API_VERSION` move, no Apps Script paste). Note
+that v88's own crushed-list fix (`views.css` `.ir-list > * { flex: 0 0 auto }`) rides in
+the same deploy, because the version could not be pushed without his go.
+
+---
+
+## 6. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

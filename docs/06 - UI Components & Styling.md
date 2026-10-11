@@ -297,7 +297,8 @@ is written out separately with the media query rewritten, because that page read
 [04 — Backend API Reference](04 - Backend API Reference.md).
 
 ### Ticket list (`#index-view`)
-`.list-toolbar` (title, count, search, filter segments) over `.ir-list`. Rows are
+`.list-toolbar` (title, the List/Board/Grid switch, count, search, filter segments,
+the priority and sort selects) over `.ir-list`. Rows are
 `.ir-card` — flat with dividers rather than floating cards, which holds up better
 at 400 rows. `.ir-card.is-selected` marks the row open in the split pane.
 
@@ -390,6 +391,78 @@ opposite ways, and the difference is worth knowing:
   meets, and removing it would leave the last row of cards looking cut off. Both are
   shown and hidden together by the single `#index-view.is-board` gate, and both are
   driven in `smoke-board.mjs`.
+
+### The three drawings — List, Board, Grid (`#ir-list`, `#ir-board`, `#ir-grid`)
+All three are drawings of **one filtered set of rows**, which is the whole design.
+`applyListFilters()` is the single place that filters, sorts and searches, and its last
+three lines route the *same* `rows` to `renderIRList`, `renderBoard` or `renderIRGrid`.
+So the search box, both filter strips, and the priority and sort selects apply to all
+three for free, and no drawing can show a set the others do not.
+
+- **The switch is CSS-driven.** `#index-view` carries exactly one class naming the
+  drawing — `is-board` or `is-grid`, neither for the List — and `setListView()` is its
+  only writer. The buttons, the pane class and the repaint therefore cannot disagree.
+  An unrecognised mode normalises back to `list`, never to a blank pane.
+- **A view that needs the workspace takes it.** At ≥1024px `#index-view` is a fixed
+  `--list-w` rail (400px), and nine columns of cards — or a grid — do not fit in 400px.
+  `html.view-full` makes the pane take the whole row and steps the sidebar, the
+  "No IR selected" placeholder and both fold toggles aside. **It is one class for both
+  views**, not one each: "this drawing takes the whole row" is a single fact, and two
+  parallel classes would be two places for it to drift. Everything behind it is
+  desktop-scoped, so a phone (where both views are already a full screen) is untouched.
+- **The Board** is nine columns from `BOARD_COLUMNS`, capped at `BOARD_CAP = 25` cards
+  per column with the column's FULL count in its header, plus a `.kb-more` button back
+  to the List. Its own sideways scroll bar is described below.
+
+**The Grid** (2026-10-11 — *"I also want a grid view option. As of now we have list and
+board. but grid in my view will have better UI for users"*) is the same rows as square
+tiles, `repeat(auto-fill, minmax(17.5rem, 1fr))` — so a narrow pane falls to one column
+with no breakpoint behind it — capped at `GRID_CAP = 60` for the same reason the board
+caps: the list's cost is measured proportional to data (~0.1 ms/row, see
+[07](07 - Known Issues & TODO.md)) and the search path repaints on every 150 ms tick.
+`.ir-tile` reuses the app's own parts rather than inventing any: `.ir-title`, the shared
+`getBadgeClass()` badge, `statusLabel()`, the shared `progressChip()`, the `.prio` dot
+and **`initialsOf()`** for the monogram — the one reader that helper has left since the
+row's initials circle was removed. A tile shows the **company** (`companyName`, Col R —
+never `customerName`, Col L, which is the *person*), the serial, the category, priority,
+the Overdue flag, the completion chip and the age; the reporter's name is the tile's
+`title`. Clicking a tile opens the **existing ticket pane** — the mockup's slide-out
+drawer was rejected, and a second ticket screen is what `smoke-board.mjs` pins against.
+
+Two things the mockup asked for that an IR cannot give, and they are stated rather than
+faked: there is **no warranty field** on a record (the only warranty value is a Section D
+*form* field, which a tile cannot reach without loading every ticket's Section D), and
+there is **no model/product field** at all — the serial is the only product identifier a
+record carries. Its `Critical` priority does not exist either; the real four are Urgent,
+High, Medium, Low. Its 12–16px corners became square for free by asking for
+`var(--radius-N)` (`#index-view` re-points those tokens to `0px`), and it casts no
+shadow, because this look floats nothing.
+
+⚠ **`grid-auto-rows: min-content` on `.ir-grid` is load-bearing, and `auto` — the
+default — crushes every tile.** This is the list's own scroll bug one level down. A
+`grid-auto-rows: auto` track starts at its items' automatic minimum size, and that
+minimum is **zero** for an item with `overflow: hidden`, as a tile is (kept for width
+safety, the same reason `.ir-card` keeps it). So every row started at 0 and then grew
+only by its share of the container's free space: measured 1440×900 with 80 records,
+16 rows, clientHeight 572 — each row got 399/16, and the tiles came out **24px tall
+holding 124px of content**, clipped by their own `overflow: hidden`. And because the rows
+absorbed exactly the free space, `scrollHeight` equalled `clientHeight` and there was
+**no scrollbar** — a crushed grid that reads as a short one. `min-content` sizes each row
+from its items instead of from the leftover space: same run, row 159px, `scrollHeight`
+2584 vs `clientHeight` 572, and it scrolls. Same family as `.ir-list > * { flex: 0 0 auto }`:
+a definite height only helps if the children refuse to absorb it.
+
+**Priority and sort are the same pipeline, not a second filter system.** The two
+`<select>`s in the toolbar (`.list-select`, raised to 16px on a phone so iOS does not
+zoom) feed `applyListFilters()` and nothing else — so they order and filter all three
+drawings at once. Sort uses **`dateRaisedISO`**, the only clean sortable date on a record
+(`dateRaised` is display-only), with priority ranked Urgent-first and unset last, and
+`sortIRRows()` **copies before it sorts** — `applyListFilters` hands it `allIRs` itself
+when no filter is active and `.sort()` is in place, so sorting in place would silently
+reorder the master list and every Insights count with it. The default order is
+**Newest first**, which means this release changed the List's order too. The view mode is
+remembered across a reload; **the filters deliberately are not** — a hidden priority
+filter surviving a reload is how someone concludes the app has lost tickets.
 
 ### Sync bar (`#sync-status`)
 `.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +

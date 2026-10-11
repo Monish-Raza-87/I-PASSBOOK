@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v87';
+const APP_VERSION = 'v89';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1415,6 +1415,13 @@ const subCategoryLabel = v => labelFrom(SUBCATEGORY_LABELS, v);
 // one exists (fetchIRsFromSheet) and from here when the app sets it.
 const TICKET_PRIORITIES = ['Urgent', 'High', 'Medium', 'Low'];
 
+// The list's "Highest priority" sort order, DERIVED from the array above rather than
+// written out a second time, so a fifth priority cannot be added without it sorting
+// somewhere sensible. An IR with NO priority is deliberately absent from this map:
+// see sortIRRows, where untriaged sorts after every ranked one rather than being
+// quietly demoted to a "Low" — those are two different facts about a ticket.
+const PRIORITY_RANK = Object.fromEntries(TICKET_PRIORITIES.map((p, i) => [p, i]));
+
 // Runtime option lists (defaults merged with any saved overrides).
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
 // Image-evidence control state (used by Section D + E/F/G/H/I uploads):
@@ -1502,7 +1509,12 @@ const listSegments  = document.getElementById('list-segments');
 const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
 const irBoard       = document.getElementById('ir-board');
+const irGrid        = document.getElementById('ir-grid');
 const listViewSwitch = document.getElementById('list-view-switch');
+// The two selects under the filter strips. They are read only by applyListFilters(),
+// which is what keeps them from being a second filter system living beside the first.
+const filterPriority = document.getElementById('filter-priority');
+const sortBy         = document.getElementById('sort-by');
 const bannerPills   = document.getElementById('ir-banner-pills');
 const railToggle    = document.getElementById('sidebar-toggle');
 const listToggle    = document.getElementById('list-toggle');
@@ -1515,10 +1527,30 @@ const listResize    = document.getElementById('list-resize');
 // ─── VIEW / ROUTER STATE ─────────────────────────────────────────────────────
 // currentView is the single source of truth for which screen is showing.
 // renderLayout() translates it into the inline display of the three panes.
+//
+// ⚠ VIEW_KEY is NOT LIST_KEY (further down, = 'list'). LIST_KEY is the flag for the
+// IR list folded to a rail; this one is which drawing of the list was last on screen.
+// They are one letter apart in localStorage and mean nothing to each other.
+const VIEW_KEY   = 'listMode';
+const VIEW_MODES = ['list', 'board', 'grid'];
+
+// The drawing reads back as a preference; the FILTERS below deliberately do not.
+// A priority filter surviving a reload is how someone concludes the app has lost
+// tickets — the failure the sync bar and the "no IRs match this filter" empty state
+// exist to prevent. A view mode cannot hide anything, so it is safe to remember.
+function readViewMode() {
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    return VIEW_MODES.includes(v) ? v : 'list';
+  } catch { return 'list'; }
+}
+
 let currentView = 'index';     // 'index' | 'detail' | 'insights' | 'log'
 let activeSegment = 'all';     // IR-list filter segment
 let activeCategory = 'all';    // IR-list filter category (a SECOND, independent axis)
-let listMode = 'list';         // 'list' | 'board' — the same filtered rows, two drawings
+let activePriority = 'all';    // IR-list filter priority (a THIRD; app-owned, and most IRs have none)
+let activeSort = 'newest';     // IR-list order: 'newest' | 'oldest' | 'priority'
+let listMode = readViewMode(); // 'list' | 'board' | 'grid' — the same filtered rows, three drawings
 let _appBooted = false;        // showApp() guard — it re-binds listeners
 let _irsReady = null;          // promise for the first IR-list load (deep links await it)
 let _openSeq = 0;              // supersedes an in-flight openPassbook()
@@ -4144,13 +4176,13 @@ function renderLayout() {
   // than sit beside it. This is the only place the fold removes anything, and the
   // back button below is what stops it stranding anyone.
   const listHidden = full && !desktop;
-  // The board owns the whole row, so there is nothing left to fold into a rail —
-  // and folding it there WOULD strand the user, because the rail would replace the
-  // board and the detail pane behind it has no ticket in it. So on the board the
-  // fold is suppressed (and its control is hidden); the preference is untouched
-  // and comes straight back when List is chosen again.
-  const boardFull  = desktop && listMode === 'board';
-  document.documentElement.classList.toggle('list-collapsed', desktop && !boardFull && storedFlag(LIST_KEY));
+  // A full-width view owns the whole row, so there is nothing left to fold into a
+  // rail — and folding it there WOULD strand the user, because the rail would
+  // replace the board or the grid and the detail pane behind it has no ticket in it.
+  // So on those views the fold is suppressed (and its control is hidden); the
+  // preference is untouched and comes straight back when List is chosen again.
+  const viewFull   = desktop && (listMode === 'board' || listMode === 'grid');
+  document.documentElement.classList.toggle('list-collapsed', desktop && !viewFull && storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
   // The Insights dashboard is a SIBLING pane, not a panel inside the detail one:
@@ -4172,10 +4204,18 @@ function renderLayout() {
   document.body.classList.toggle('view-log', log);
   document.body.classList.toggle('view-faq', faq);
 
-  // On desktop the list stays on screen, so mark which row is open.
+  // On desktop these views stay on screen, so mark which ticket is open. The board
+  // deliberately does NOT do this — it is a wall of work, not a column of rows — but
+  // the grid is a browsing surface like the list, so the open tile is marked the same
+  // way the open row is.
   if (irList) {
     irList.querySelectorAll('.ir-card').forEach(card => {
       card.classList.toggle('is-selected', detail && card.dataset.id === currentIR?.irNumber);
+    });
+  }
+  if (irGrid) {
+    irGrid.querySelectorAll('.ir-tile').forEach(tile => {
+      tile.classList.toggle('is-selected', detail && tile.dataset.id === currentIR?.irNumber);
     });
   }
 
@@ -7966,18 +8006,120 @@ function renderBoard(records) {
   scrollBoardMirror();
 }
 
+// ── THE GRID — the same filtered rows, drawn as tiles ────────────────────────
+// How many tiles the grid draws before it stops and says how many it left behind.
+//
+// The cap is load-bearing, not caution. This list is the one piece of the app whose
+// cost is proportional to the data, and it is MEASURED at ~0.1ms a row (21ms at 100
+// IRs, 122ms at 1200 — see the note on the search listener). A tile is a heavier node
+// than a row, and the search box repaints on a 150ms tick, so an uncapped grid would
+// put the whole archive through that tick on every keystroke. The board caps for the
+// same reason (BOARD_CAP). Only the DRAWING is capped: the header counts stay full,
+// so nothing lies about how many IRs there are.
+const GRID_CAP = 60;
+
+function gridTile(ir) {
+  const owner = ir.assigneeName || ir.assignee || '';
+  const age   = irAge(ir);
+  const late  = irOverdue(ir);
+  const prog  = sectionProgress(ir.done);
+  const showProg = wantProgress(ir, prog);
+  const sel   = currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : '';
+  // The tile's one line of prose: what the customer asked for, falling back to what
+  // they wrote. A tile with a blank middle reads as broken.
+  const subject = ir.issueType || ir.issueDesc || '';
+  // The reporter is NOT printed on the tile — the company is, because access is
+  // scoped by the company. Their name is the tooltip, which is where it belongs.
+  const who = ir.customerName ? ` title="${escHtml(ir.customerName)}"` : '';
+  // Same field discipline as the row and the board card, and for the same reason:
+  // `droneId` is written by the PUBLIC customer form, so every value here is escaped.
+  //
+  // ⚠ `companyName`, NOT `customerName`. The intake form has two name-shaped columns
+  // — Col L (`customerName`) is the PERSON who reported it, Col R (`companyName`) is
+  // the COMPANY — and access is scoped by the company, so the company is what
+  // identifies the ticket. Reading the other one is a mistake this project has
+  // already paid for.
+  //
+  // There is no warranty field and no model field on an IR, so the tile carries
+  // neither: the serial is the only product identifier a record actually has, and
+  // "in warranty" lives inside Section D where a tile cannot reach it.
+  return `
+    <div class="ir-tile${late ? ' is-late' : ''}${sel}"
+         data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')"${who}>
+      <div class="ir-tile-top">
+        <span class="ir-title">${escHtml(ir.irNumber)}</span>
+        <span class="${getBadgeClass(ir.status)}">${escHtml(statusLabel(ir.status))}</span>
+      </div>
+      ${subject ? `<div class="ir-tile-subject">${escHtml(subject)}</div>` : ''}
+      <div class="ir-tile-meta">
+        ${ir.companyName ? `<span class="ir-tile-co">${escHtml(ir.companyName)}</span>` : ''}
+        ${ir.companyName && ir.droneId ? '<span class="ir-dot">·</span>' : ''}
+        ${ir.droneId ? `<span class="ir-sn">${escHtml(ir.droneId)}</span>` : ''}
+        ${ir.category ? `<span class="ir-dot">·</span><span class="ir-cat">${escHtml(categoryLabel(ir.category))}</span>` : ''}
+      </div>
+      <div class="ir-tile-foot">
+        <span class="ir-tile-state">
+          ${ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(priorityLabel(ir.priority))}</span>` : ''}
+          ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
+          ${showProg ? progressChip(prog) : ''}
+        </span>
+        <span class="ir-tile-who">
+          ${owner
+            ? `<span class="ir-tile-avatar" title="${escHtml(owner)}">${escHtml(initialsOf(owner))}</span>`
+            : `<span class="ir-assignee is-unassigned">${escHtml(t('common.unassigned'))}</span>`}
+          ${age ? `<span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
+        </span>
+      </div>
+    </div>`;
+}
+
+function renderIRGrid(records) {
+  if (!irGrid) return;
+  // The two filter strips are drawn here too, exactly as the list and the board draw
+  // them: the switch changes the drawing of the rows, never the controls above them.
+  renderSegments();
+  renderCategorySegments();
+  if (!records || records.length === 0) {
+    // Deliberately no glyph and no emoji: the app has one icon source, and a literal
+    // emoji here would be a second one nothing can restyle. Same as the board's.
+    irGrid.innerHTML = '<div class="empty-state">' +
+      (allIRs.length ? t('list.emptyFiltered') : t('board.emptyNone')) +
+      '</div>';
+    updateListCounts(0);
+    return;
+  }
+  const shown = records.slice(0, GRID_CAP);
+  const more  = records.length - shown.length;
+  // A button, not a dead end — the same contract the board's "+N more" keeps. The
+  // grid caps its drawing for speed; the honest answer to "where is the rest?" is
+  // the List, which draws all of them.
+  irGrid.innerHTML = shown.map(gridTile).join('') +
+    (more > 0
+      ? `<button type="button" class="grid-more">${escHtml(t('grid.more', { n: more }))}</button>`
+      : '');
+  updateListCounts(records.length);
+}
+
 // The switch's one setter, so the class on the pane, the buttons and the repaint
 // can never disagree about which view is showing.
 function setListView(mode) {
-  listMode = mode === 'board' ? 'board' : 'list';
+  listMode = VIEW_MODES.includes(mode) ? mode : 'list';
   const pane = document.getElementById('index-view');
-  if (pane) pane.classList.toggle('is-board', listMode === 'board');
-  // The board draws the same rows across nine columns and needs the width, so
-  // choosing it gives it the workspace: `html.board-full` hides the sidebar and
-  // the "No IR selected" placeholder and lets this pane take the whole row. The
-  // class is inert below lg — every rule behind it is desktop-scoped — because on
-  // a phone the board is already a full screen.
-  document.documentElement.classList.toggle('board-full', listMode === 'board');
+  if (pane) {
+    pane.classList.toggle('is-board', listMode === 'board');
+    pane.classList.toggle('is-grid',  listMode === 'grid');
+  }
+  // The board draws the same rows across nine columns and the grid draws them as
+  // tiles across the pane, and BOTH need the width: `html.view-full` hides the
+  // sidebar and the "No IR selected" placeholder and lets this pane take the whole
+  // row. Without it a desktop grid would be laid out inside the list's own 400px
+  // column and would be ONE TILE WIDE — the exact opposite of what a grid is for.
+  // The class is inert below lg — every rule behind it is desktop-scoped — because
+  // on a phone both of these views are already a full screen.
+  //
+  // ONE class and not one per view: "this drawing takes the workspace" is a single
+  // fact, and two parallel classes would be two places for it to drift.
+  document.documentElement.classList.toggle('view-full', listMode === 'board' || listMode === 'grid');
   if (listViewSwitch) {
     listViewSwitch.querySelectorAll('.view-switch-btn').forEach(b => {
       const on = b.dataset.view === listMode;
@@ -7985,9 +8127,13 @@ function setListView(mode) {
       b.setAttribute('aria-selected', String(on));
     });
   }
+  // Remembered — the DRAWING only, never the filters above it. A view mode cannot
+  // hide anything, so it is safe to carry across a reload; a priority filter can,
+  // and is deliberately not persisted (see the note at VIEW_KEY).
+  try { localStorage.setItem(VIEW_KEY, listMode); } catch { /* non-fatal */ }
   applyListFilters();
-  renderLayout();   // the board's full-screen class is a side of the fold rule
-  // `html.board-full` gives the pane its width in a LAYOUT pass, so the width the bar
+  renderLayout();   // the full-width class is a side of the fold rule
+  // `html.view-full` gives the pane its width in a LAYOUT pass, so the width the bar
   // must mirror is not knowable until after one. The board's own render already
   // measured; this is the second look, taken once the fold has been applied.
   requestAnimationFrame(scrollBoardMirror);
@@ -8005,6 +8151,26 @@ if (irBoard) {
     if (e.target.closest('.kb-more')) setListView('list');
   });
 }
+if (irGrid) {
+  // The same contract, for the same reason: the grid caps its drawing too (tiles are
+  // heavier nodes than rows), so it must offer the same way out rather than leaving
+  // someone to wonder where four hundred tickets went.
+  irGrid.addEventListener('click', e => {
+    if (e.target.closest('.grid-more')) setListView('list');
+  });
+}
+// Priority and sort. Both feed applyListFilters() — the ONE function the search box
+// and both filter strips already pass through — so there is one filter pipeline with
+// three drawings at the end of it, not a second filter system beside the first.
+// Neither is persisted: see the note at VIEW_KEY.
+if (filterPriority) filterPriority.addEventListener('change', () => {
+  activePriority = filterPriority.value || 'all';
+  applyListFilters();
+});
+if (sortBy) sortBy.addEventListener('change', () => {
+  activeSort = sortBy.value || 'newest';
+  applyListFilters();
+});
 
 // ── THE BOARD'S LEFT-RIGHT BAR, ABOVE THE COLUMNS ─────────────────────────────
 // The owner, 2026-10-10: "similarly in for board since number of columns are more,
@@ -8034,7 +8200,7 @@ function scrollBoardMirror() {
   // The thumb's length is decided by the proxy's content width, so that is what is
   // measured — and it changes without the board scrolling at all: a filter that
   // empties a column, the pane's own drag handle, a window resize, the board going
-  // full-screen via html.board-full.
+  // full-screen via html.view-full.
   thumb.style.width = irBoard.scrollWidth + 'px';
   bar.scrollLeft = irBoard.scrollLeft;
 }
@@ -8338,7 +8504,32 @@ function renderCategorySegments() {
   }).join('');
 }
 
-// The one place the search box and the segment strip combine into a filter.
+// The list's order, and the only place it is decided. `ir.dateRaisedISO` is the one
+// clean sortable date on a record — `ir.dateRaised` is display-only, and sorting it
+// would sort a formatted string.
+//
+// ⚠ It COPIES before sorting, and that is not tidiness. applyListFilters() hands it
+// `allIRs` ITSELF whenever no filter is active, and `.sort()` is in place — so
+// sorting the argument directly would silently reorder the master list, and with it
+// every Insights count, on the first repaint. The copy is the whole guard.
+function sortIRRows(rows, mode) {
+  const out = rows.slice();
+  const iso = ir => ir.dateRaisedISO || '';
+  const newestFirst = (a, b) => iso(b).localeCompare(iso(a));
+  const oldestFirst = (a, b) => iso(a).localeCompare(iso(b));
+  if (mode === 'oldest') return out.sort(oldestFirst);
+  if (mode === 'priority') {
+    const rank = ir => Object.prototype.hasOwnProperty.call(PRIORITY_RANK, ir.priority)
+      ? PRIORITY_RANK[ir.priority] : 9;   // 9 = untriaged, after every ranked priority
+    // The date breaks the tie, so the order is stable across repaints instead of
+    // shuffling equal-priority tickets every time the search box ticks.
+    return out.sort((a, b) => (rank(a) - rank(b)) || newestFirst(a, b));
+  }
+  return out.sort(newestFirst);   // 'newest' — the default
+}
+
+// The one place the search box, the two segment strips, the priority select and the
+// sort select combine into what is drawn.
 function applyListFilters() {
   const q = (searchInput.value || '').toLowerCase().trim();
   let rows = allIRs;
@@ -8348,15 +8539,25 @@ function applyListFilters() {
       ? !ir.category
       : ir.category === activeCategory);
   }
+  // Priority is APP-OWNED (set in Allot CAPS) and most tickets have none, so "No
+  // priority" is a bucket someone will actually want — the same convention the
+  // Category strip's own uncategorised bucket set.
+  if (activePriority !== 'all') {
+    rows = rows.filter(ir => activePriority === UNCATEGORISED
+      ? !ir.priority
+      : ir.priority === activePriority);
+  }
   if (q) {
     rows = rows.filter(ir =>
       ir.irNumber?.toLowerCase().includes(q) ||
       ir.droneId?.toLowerCase().includes(q)
     );
   }
-  // One filter, two drawings. The board reads the SAME `rows` the list would, so
-  // the switch can never show a different set of IRs from the one above it.
+  rows = sortIRRows(rows, activeSort);
+  // One filter, THREE drawings. The board and the grid read the SAME `rows` the list
+  // would, so the switch can never show a different set of IRs from the one above it.
   if (listMode === 'board') renderBoard(rows);
+  else if (listMode === 'grid') renderIRGrid(rows);
   else renderIRList(rows);
 }
 

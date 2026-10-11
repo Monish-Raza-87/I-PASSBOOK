@@ -882,6 +882,15 @@ is left is small.
       | `renderSegments` / `renderCategorySegments` | — | — | 0.8 / 0.3 ms | — |
       | `applyIRStateToAllIRs`, `refreshCommentCounts` (46 buttons), `buildTimeline` | — | — | under 2 ms each | — |
 
+      `renderIRGrid` is the first entry here that is a **row** rather than N — measured
+      2026-10-11 at 1440×900 on the same probe: **13.4 ms for 60 records, 12.7 ms for
+      300, 13.7 ms for 1200.** Flat, because `GRID_CAP = 60` bounds what it builds and
+      the cap does not move with N. That is the cap earning its place rather than a
+      hunch: a tile is a heavier node than a row, and `renderIRList` at 1200 measured
+      **211 ms** in the same run, so an uncapped grid would have been worse than the
+      list it draws. `renderBoard` measured 6.7 ms at 1200 for the same reason — its
+      own per-column cap.
+
       So there is exactly **one** cost in this app proportional to the data — putting N
       cards on screen at ~0.06–0.1 ms each — and everything else a static read flags
       (layout walks, state overlays, the comment-bell sweep) is noise. `buildSectionForms`

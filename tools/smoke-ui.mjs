@@ -454,10 +454,10 @@ r.ok('the rail is CSS-owned: one class on <html>, no second writer of a pane dis
     /html\.list-collapsed #index-view \.list-toolbar,[\s\S]{0,200}?html\.list-collapsed #index-view \.ir-board,/.test(css) &&
     /html\.list-collapsed #index-view > #sync-status \{ display: none; \}/.test(css) &&
     /html\.list-collapsed #list-rail \{/.test(css) &&
-    /classList\.toggle\('list-collapsed', desktop && !boardFull && storedFlag\(LIST_KEY\)\)/.test(appCode) &&
-    // The board exception is the whole reason the fold is not simply
+    /classList\.toggle\('list-collapsed', desktop && !viewFull && storedFlag\(LIST_KEY\)\)/.test(appCode) &&
+    // The full-workspace exception is the whole reason the fold is not simply
     // `storedFlag(LIST_KEY)`, so it is pinned rather than left to the comment.
-    /const boardFull\s*=\s*desktop && listMode === 'board'/.test(appCode);
+    /const viewFull\s*=\s*desktop && \(listMode === 'board' \|\| listMode === 'grid'\)/.test(appCode);
 })(), 'the rules live in base.css above lg and nowhere write display inline');
 r.ok('the detail pane is what governs the back button, not the fold',
   /backBtn\.style\.display\s*=/.test(appCode));
@@ -565,44 +565,58 @@ r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() 
   r.ok('...and the class that disables the transition is gone when the drag ends', idle);
 }
 
-{ // The board giving up its column, and the fold standing down while it does.
+{ // A view giving up its column — the fold standing down while it does.
+  // ONE class, `html.view-full`, and BOTH drawings that need the workspace set it.
+  // Two parallel classes would be two places for the same fact to drift, so the grid
+  // is asserted through the board's own path rather than beside it.
   const { T: B } = loadApp(`
     setListView, renderLayout, setFlag, LIST_KEY, applyListFilters,
     get htmlEl() { return document.documentElement; },
     get listMode() { return listMode; },
     get view() { return currentView; },
     set view(v) { currentView = v; },
-    renderBoard() {}, renderIRList() {},
+    renderBoard() {}, renderIRList() {}, renderIRGrid() {},
   `, { capture: true, desktop: true });
   B.view = 'index';
   B.setFlag(B.LIST_KEY, true);          // the list is folded…
   B.setListView('board');
-  const hiddenSidebar = /html\.board-full #sidebar \{ display: none; \}/.test(baseSrc);
-  const full = B.htmlEl.classList.contains('board-full');
+  const hiddenSidebar = /html\.view-full #sidebar \{ display: none; \}/.test(baseSrc);
+  const full = B.htmlEl.classList.contains('view-full');
   const unfolded = !B.htmlEl.classList.contains('list-collapsed');
   const mode = B.listMode;
   B.setListView('list');
-  const backToNormal = !B.htmlEl.classList.contains('board-full') &&
+  const backToNormal = !B.htmlEl.classList.contains('view-full') &&
                        B.htmlEl.classList.contains('list-collapsed');
+  // The grid takes the same workspace by the same class, or a desktop grid would be
+  // laid out inside the list's own 400px rail and would be ONE TILE WIDE.
+  B.setListView('grid');
+  const gridFull = B.htmlEl.classList.contains('view-full') &&
+                   !B.htmlEl.classList.contains('list-collapsed') &&
+                   B.listMode === 'grid';
+  B.setListView('list');
   B.setFlag(B.LIST_KEY, false);
   r.ok('choosing Board gives it the workspace', full && mode === 'board');
   r.ok('...and the stylesheet steps the sidebar, the placeholder and the fold aside',
     hiddenSidebar &&
-    /html\.board-full #index-view \{ flex: 1 1 auto; width: auto; \}/.test(baseSrc) &&
-    /html\.board-full #detail-placeholder \{ display: none; \}/.test(baseSrc) &&
+    /html\.view-full #index-view \{ flex: 1 1 auto; width: auto; \}/.test(baseSrc) &&
+    /html\.view-full #detail-placeholder \{ display: none; \}/.test(baseSrc) &&
     // Both fold controls go with them — a toggle for a column that is not on
     // screen is a dead control, which is how this one read in the browser.
-    /html\.board-full #list-toggle,\s*\n\s*html\.board-full #sidebar-toggle \{ display: none; \}/.test(baseSrc));
+    /html\.view-full #list-toggle,\s*\n\s*html\.view-full #sidebar-toggle \{ display: none; \}/.test(baseSrc));
   r.ok('...and the fold stands down, because a rail over the board is a stranding',
     unfolded);
   r.ok('...and going back to List restores both the fold and the sidebar',
     backToNormal);
-  r.ok('the board class is inert below lg, so the phone board is untouched',
+  r.ok('choosing Grid takes the SAME workspace, through the same one class',
+    gridFull);
+  r.ok('...and nothing anywhere still names the retired two-view class',
+    !/board-full/.test(baseSrc) && !/board-full/.test(appCode));
+  r.ok('the class is inert below lg, so a phone drawing is untouched',
     (() => {
       const css = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
       const at = css.indexOf('@media (min-width: 1024px) {');
-      const board = css.indexOf('html.board-full #sidebar');
-      return at >= 0 && board > at;
+      const view = css.indexOf('html.view-full #sidebar');
+      return at >= 0 && view > at;
     })());
 }
 

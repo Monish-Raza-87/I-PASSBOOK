@@ -330,8 +330,8 @@ ok('it writes textContent, never innerHTML',
 
 // ── The board's own words, as the first real customer of the layer ───────────
 head('the wording the board and the list show comes from the table');
-ok('the list and the board draw the same filtered-empty wording',
-  (appJs.match(/t\('list\.emptyFiltered'\)/g) || []).length === 2,
+ok('the list, the board and the grid draw the same filtered-empty wording',
+  (appJs.match(/t\('list\.emptyFiltered'\)/g) || []).length === 3,
   (appJs.match(/t\('list\.emptyFiltered'\)/g) || []).length);
 ok('the board\'s own empty sentence is its own — the list\'s says "create one via the form"',
   STRINGS['board.emptyNone'] === 'No IRs found.' &&

@@ -196,8 +196,39 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  min-height: 100dvh;
-  overflow-x: hidden;
+  /* ⚠ A DEFINITE HEIGHT, AND `min-height` IS NOT ONE — this is the whole of the
+     fix for the IR list's missing scrollbar.
+
+     This said `min-height: 100dvh` until 2026-10-11. It reads as "at least a
+     screenful", which is what it means — and it is exactly why nothing inside the
+     shell could ever scroll. Every pane below here is `flex: 1; min-height: 0`,
+     which only clips its content if its own parent's height is DEFINITE. With
+     `min-height` the body's height is still `auto`, so the chain resolves against
+     the CONTENT's height instead of the viewport's: the list grew to fit its forty
+     rows, the panes grew with it, and the whole PAGE scrolled while `.ir-list` —
+     carrying a correct `overflow-y: auto` the entire time — never overflowed once
+     and so never grew a scrollbar.
+
+     `height: 100dvh` makes the body's box definite, the flex chain resolves
+     against the viewport, and `.ir-list` finally clips. Measured, 1440×900, forty
+     rows added: before, `.ir-list` reported clientHeight 3459 = scrollHeight 3459
+     and `scrollTop = 300` did nothing, with the body at 3797px; after, 562 vs 781,
+     `scrollTop` settled at 219, and the body stayed at 900.
+
+     `overflow: hidden` is the other half and is NOT belt-and-braces: it is what
+     stops the page itself from scrolling now that the shell owns its own scroll
+     areas. Nothing becomes unreachable, because every screen already declares the
+     scroller it needs and simply never had one to use — `#auth-container` carries
+     `overflow-y: auto` beside its own `min-height: 100dvh`, and it takes over
+     exactly as written (measured at 390×600 with a 1400px child: the container
+     holds at 600 and scrolls its content, where before the page scrolled instead).
+     The detail pane, the insights pane and the section bodies are the same story.
+
+     This is base.css, so it reaches `index.html` and nothing else — the four
+     standalone pages (customer, faq, privacy, terms) carry their own styles and
+     never load this file. */
+  height: 100dvh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
 }

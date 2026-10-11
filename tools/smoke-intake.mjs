@@ -331,8 +331,16 @@ for (const t of tags) {
 const ALLOWED_ATTRS = ['class', 'data-id', 'onclick', 'title', 'href', 'target', 'rel'];
 const injected = [...attrNames].filter(n => !ALLOWED_ATTRS.includes(n));
 ok('no attribute was injected by the data', injected.length === 0, injected);
-ok("the only handler attribute is the app's own goTicket()",
-  (card.match(/\son[a-z]+\s*="/gi) || []).length === 1, card.match(/\son[a-z]+\s*="/gi));
+// The handler's NAME moved on 2026-10-11 — the tile opens the ticket dock now, not
+// the full passbook — and what these three pin never depended on it. They pin that
+// there is exactly ONE handler attribute, and that its argument is escaped for a JS
+// context rather than an HTML one. The name below is read off the app's own tile
+// rather than written here, so the next rename cannot quietly turn these into
+// assertions about a string that no longer exists anywhere.
+const OPEN_FN = (card.match(/\son[a-z]+\s*="([A-Za-z_$][\w$]*)\(/) || [])[1] || '';
+ok("the only handler attribute is the app's own ticket opener",
+  (card.match(/\son[a-z]+\s*="/gi) || []).length === 1 && !!OPEN_FN,
+  card.match(/\son[a-z]+\s*="/gi));
 ok('the serial is inert text', card.includes('&lt;img src=x onerror=alert(1)&gt;'), card.slice(0, 400));
 ok('the status is inert text', card.includes('&lt;script&gt;alert(2)&lt;/script&gt;'));
 
@@ -340,9 +348,9 @@ ok('the status is inert text', card.includes('&lt;script&gt;alert(2)&lt;/script&
 // there, because it leaves the single quote intact and the payload closes the
 // string literal. escJsAttr() escapes both the quote and the backslash.
 ok('the onclick argument cannot close its string literal',
-  !card.includes(`goTicket('${BREAKOUT}')`), card.match(/goTicket\([^)]*\)/));
+  !card.includes(`${OPEN_FN}('${BREAKOUT}')`), card.match(new RegExp(OPEN_FN + '\\([^)]*\\)')));
 ok('the quote in the IR number is backslash-escaped inside the handler',
-  card.includes(`goTicket('x\\');fetch(`), card.match(/goTicket\('x[^)]{0,40}/));
+  card.includes(`${OPEN_FN}('x\\');fetch(`), card.match(new RegExp(OPEN_FN.replace(/\$/g, '\\$') + "\\('x[^)]{0,40}")));
 ok('the data-id attribute is quote-escaped, so it cannot add an attribute',
   !/data-id="x'/.test(card), card.match(/data-id="[^"]*"/));
 

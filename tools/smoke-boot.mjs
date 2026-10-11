@@ -528,8 +528,14 @@ ok('the auth screen is hidden and the app shell is shown',
   /id="app-container"[^>]*style="[^"]*display:\s*flex/.test(dom));
 
 head('the ticket list rendered');
+// The Service Desk opens on the GRID as of 2026-10-11, so the drawing a cold boot
+// paints is the grid's tiles and the list's own cards are not written at all. The
+// assertion is that the app put TICKETS on screen — which of the three drawings did
+// it is the owner's choice, and the view switch's job, not this test's.
 const cards = (dom.match(/class="ir-card/g) || []).length;
-ok('at least one ticket card rendered', cards > 0, cards);
+const tiles = (dom.match(/class="ir-tile/g) || []).length;
+ok('at least one ticket is on screen — a card or a tile', cards + tiles > 0,
+  { cards, tiles });
 ok('the sync bar reported something', /id="sync-status"[^>]*>\s*<span class="sync-msg"/.test(dom),
   (dom.match(/id="sync-status"[\s\S]{0,160}/) || [''])[0]);
 
@@ -650,13 +656,26 @@ head('every icon slot in the rendered page is actually filled');
 // after showApp() ran means a call site asked for a name the map does not have, and
 // in a browser that is a blank button, not a failing test.
 const iconSlots = [...domNoComments.matchAll(
-  /<(span|div)[^>]*class="([^"]*\b(?:nav-icon|ph-icon|btn-icon|activity-caret|tab-icon|sidebar-toggle-icon|list-toggle-icon|list-rail-icon|nudge-bell-icon)\b[^"]*)"[^>]*>([\s\S]{0,400}?)<\/\1>/g)];
+  /<(span|div)[^>]*class="([^"]*\b(?:nav-icon|btn-icon|activity-caret|tab-icon|sidebar-toggle-icon|list-toggle-icon|list-rail-icon|nudge-bell-icon)\b[^"]*)"[^>]*>([\s\S]{0,400}?)<\/\1>/g)];
 const emptySlots = iconSlots.filter(m => !/<svg/.test(m[3]));
 ok('there are icon slots on the page at all', iconSlots.length >= 8, iconSlots.length);
 ok('none of them is left empty', emptySlots.length === 0,
   emptySlots.map(m => m[2]).slice(0, 8));
 ok('the IR nav glyph is an inline SVG, not an emoji or a blank',
   /id="nav-tickets"[\s\S]{0,300}?class="nav-icon"[^>]*>\s*<svg/.test(domNoComments));
+// #detail-placeholder used to be the 'ph-icon' slot in the scan above. It is not an
+// icon slot any more: the owner asked on 2026-10-11 for a big faded logo in that blank
+// space, and a raster mark cannot come from ICON_PATHS, which is SVG path data. So it
+// swapped an inline glyph for a real <img> — which means the scan above no longer
+// covers it, and an <img> pointing at nothing is INVISIBLE, not broken-looking. This
+// is the replacement guard. It pins the FILE too, because the tempting asset here is
+// assets/logo.png and that one is on deploy-ghpages.mjs's PRUNE list.
+ok('the empty-detail panel draws the brand mark, not a glyph slot',
+  /id="detail-placeholder"[\s\S]{0,300}?<img class="ph-mark" src="assets\/icon-mark\.png"/.test(domNoComments) &&
+  !/id="detail-placeholder"[\s\S]{0,300}?class="ph-icon"/.test(domNoComments),
+  (domNoComments.match(/id="detail-placeholder"[\s\S]{0,160}/) || [''])[0]);
+ok('...and that mark is not one of the retired image assets',
+  !/id="detail-placeholder"[\s\S]{0,300}?assets\/logo\.png/.test(domNoComments));
 ok('the comments button carries the speech-bubble icon',
   /id="ir-nudge-btn"[\s\S]{0,300}?<svg/.test(domNoComments));
 ok('no SVG in the page reaches for a network asset the offline shell lacks',

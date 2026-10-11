@@ -2466,7 +2466,8 @@ html[data-sso="wait"] #sso-wait { display: flex; }
    for the reason the old note gives: one mark, one file, nothing to keep in sync
    when the master is replaced. */
 [data-theme="dark"] .brand-mark img,
-[data-theme="dark"] .landing-mark {
+[data-theme="dark"] .landing-mark,
+[data-theme="dark"] .ph-mark {
   filter: brightness(0) invert(1);
 }
 .brand-text {
@@ -3161,8 +3162,35 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      #/insights. The Log Analyser is the same case for the same reason. */
   body.view-insights #detail-placeholder { display: none; }
   body.view-log #detail-placeholder { display: none; }
-  .ph-icon { color: var(--ink-gray-6); opacity: 0.45; line-height: 1; }
-  .ph-icon .icon { width: 2.75rem; height: 2.75rem; }
+  /* The big faded mark. It replaced a 2.75rem inline glyph on 2026-10-11, on the
+     owner's instruction: "when landing on dashboard and no any service desk is open,
+     in blank space big faded logo to appear." See index.html for why it is an <img>.
+
+     `height: clamp(8rem, 26vh, 13rem)` and NOT a fixed size: 26vh is what keeps this
+     proportionate on a tall screen and, more importantly, keeps an 8rem floor from
+     overflowing a short one. The panel has no overflow of its own — deliberately,
+     since it is the empty state and a scrollbar in it would be absurd — so the only
+     thing stopping it spilling is this clamp. `width: auto` because the mark is
+     512x563, not square, and squashing it to a box is how a monogram stops reading
+     as one.
+
+     `flex: 0 0 auto` is the v87/v88 lesson applied here before it bites: this is a
+     flex COLUMN, so the mark is a flex item, and a flex item shrinks by default. It
+     has nothing to shrink into on its own, but the two lines under it are flex items
+     too, and the day anything else in this panel grows, an unguarded image is the
+     first thing squeezed to nothing. */
+  .ph-mark {
+    flex: 0 0 auto;
+    display: block;
+    height: clamp(8rem, 26vh, 13rem);
+    width: auto;
+    margin-bottom: 1.1rem;
+    opacity: 0.09;
+    /* The mark's own inks, not a recolour: fading the real logo reads as a watermark,
+       whereas tinting it flat reads as a second, worse logo. */
+    user-select: none;
+    -webkit-user-drag: none;
+  }
   .ph-title { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--ink-gray-7); }
   .ph-sub { font-size: var(--text-sm); color: var(--ink-gray-5); }
 

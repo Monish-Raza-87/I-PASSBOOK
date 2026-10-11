@@ -389,7 +389,7 @@ r.ok('an open IR keeps the list beside it, and folding gives the width away as a
   // The default harness viewport is a PHONE, where an open detail legitimately hides
   // the list. The claim being tested is the DESKTOP rule, so it needs a desktop.
   const { T: D } = loadApp(`
-    renderLayout, setFlag, LIST_KEY,
+    renderLayout, setFlag, LIST_KEY, setListView,
     get view() { return currentView; },
     set view(v) { currentView = v; },
     set ir(v) { currentIR = v; },
@@ -397,6 +397,11 @@ r.ok('an open IR keeps the list beside it, and folding gives the width away as a
   `, { capture: true, desktop: true });
   D.view = 'detail';
   D.ir = { irNumber: 'IR409' };
+  // Ask for the LIST by name. Since the Service Desk opens on the Grid (owner,
+  // 2026-10-11) the module default is `grid`, and a grid is a full-width view where
+  // the fold is deliberately suppressed — so without this the assertion below would
+  // be measuring the grid's rule, not the list's.
+  D.setListView('list');
   D.setFlag(D.LIST_KEY, false);
   D.renderLayout();
   const besideIt = !D.htmlEl.classList.contains('list-collapsed');
@@ -409,12 +414,13 @@ r.ok('an open IR keeps the list beside it, and folding gives the width away as a
 
 r.ok('the fold changes the layout with no IR open — the defect that read as a dead button', (() => {
   const { T: D } = loadApp(`
-    renderLayout, setFlag, LIST_KEY,
+    renderLayout, setFlag, LIST_KEY, setListView,
     get view() { return currentView; },
     set view(v) { currentView = v; },
     get htmlEl() { return document.documentElement; },
   `, { capture: true, desktop: true });
   D.view = 'index';
+  D.setListView('list');   // see the note above — the fold lives on the List
   D.setFlag(D.LIST_KEY, false);
   D.renderLayout();
   const open = !D.htmlEl.classList.contains('list-collapsed');
@@ -490,9 +496,16 @@ r.ok('a handle is a pointer nicety, not a keyboard affordance it cannot honour',
   /id="list-resize" title="[^"]*" aria-hidden="true"/.test(indexCode) &&
   !/id="(sidebar|list)-resize"[^>]*tabindex/.test(indexCode));
 
+// The two assertions below read the BODY of one function out of app.js's source by
+// slicing to its closing brace. The terminator is `'\n}'` and NOT `'\n}\n'`: on a
+// checkout with `core.autocrlf=true` — which is what this repo is worked in — every
+// line ends `\r\n`, so a `\n}\n` search finds nothing, `slice(0, -1)` hands back the
+// whole rest of the file instead of one function, and the `!/.style.width/` half then
+// fails against unrelated code 5000 lines away. That was the whole failure: it is
+// invisible on an LF clone and reports as a real defect on Windows.
 r.ok('the drag sets a custom property on <html> — never a width on the pane', (() => {
   const fn = appCode.slice(appCode.indexOf('function wirePaneResize'));
-  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  const body = fn.slice(0, fn.indexOf('\n}'));
   return /documentElement\.style\.setProperty\(cssVar, last \+ 'px'\)/.test(body) &&
     !/\.style\.width/.test(body) && !/\.style\.flexBasis/.test(body);
 })(), 'one source of width, so every var(--sidebar-w) rule follows for free');
@@ -503,7 +516,7 @@ r.ok('the reset clears the property AND the stored number',
 
 r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() => {
   const fn = appCode.slice(appCode.indexOf('function wirePaneResize'));
-  const body = fn.slice(0, fn.indexOf('\n}\n'));
+  const body = fn.slice(0, fn.indexOf('\n}'));   // see the line-ending note above
   return /handle\.setPointerCapture\(e\.pointerId\)/.test(body) &&
     /handle\.releasePointerCapture\(e\.pointerId\)/.test(body) &&
     /addEventListener\('pointerup', onPointerUp\)/.test(body) &&
@@ -955,7 +968,13 @@ r.ok('index.html keeps it only in the id and the deep-link route',
 r.ok('no capital-T "Ticket" survives in app.js prose or strings',
   !/\bTickets?\b/.test(appCode), (appCode.match(/.*\bTickets?\b.*/g) || []));
 r.ok('every lowercase survivor is a deliberate identifier', (() => {
-  const allowed = /nav-tickets|#\/tickets|TICKET_(TYPES|PRIORITIES)|goTicket|'tickets?'|name: 'ticket'/;
+  // A CLOSED set, and it grows only on purpose. `litTicket` and `applyTicketMark`
+  // joined it at v90 with the ticket dock: a row is "lit" when the screen is about
+  // that ticket, whether the passbook is on it or its sheet is up. They are the same
+  // deliberate exception as `goTicket` — this is the code's word for the thing, not
+  // the screen's, which says IR everywhere. Anything else added here is a rename
+  // that did not finish.
+  const allowed = /nav-tickets|#\/tickets|TICKET_(TYPES|PRIORITIES)|goTicket|litTicket|applyTicketMark|'tickets?'|name: 'ticket'/;
   const bad = appCode.split('\n').filter(l => /ticket/i.test(l) && !allowed.test(l));
   return bad.length === 0;
 })(), appCode.split('\n').filter(l => /ticket/i.test(l)).slice(0, 8));
@@ -1456,8 +1475,20 @@ r.ok('...and no width: with a px value, which is the squash itself',
   !/width: \d+px;/.test(waitMarkRule));
 r.ok('...and it carries NO filter at all, because the ground under it is no longer black',
   !/filter:/.test(waitMarkRule), waitMarkRule);
-r.ok('...while the two in-app marks keep the dark-theme silhouette, which is still the right answer on a dark page',
-  /\[data-theme="dark"\] \.brand-mark img,\s*\n\[data-theme="dark"\] \.landing-mark \{[\s\S]{0,60}?filter: brightness\(0\) invert\(1\);/.test(baseSrc));
+// 3. REWRITTEN 2026-10-11, FROM TWO NAMED MARKS TO THREE. This pinned the literal
+//    two-selector list — `.brand-mark img` and `.landing-mark` — and the day a THIRD
+//    in-app mark arrived (`.ph-mark`, the big faded logo in the empty-detail panel) it
+//    failed on the list's shape rather than on anything being wrong. The spirit was
+//    "every in-app mark gets the dark-theme silhouette"; so it now names each one and
+//    fails only when one of them is genuinely missing the filter. A fourth mark added
+//    without being listed here still slips through — the note in base.css is what
+//    makes that list the place to look.
+const darkMarkRule = (baseSrc.match(/\[data-theme="dark"\] \.brand-mark img,[\s\S]*?\n\}/) || [''])[0];
+r.ok('...while every in-app mark keeps the dark-theme silhouette, which is still the right answer on a dark page',
+  ['.brand-mark img', '.landing-mark', '.ph-mark']
+    .every(sel => new RegExp('\\[data-theme="dark"\\] ' + sel.replace(/[.]/g, '\\.') + '\\s*[,{]').test(darkMarkRule)) &&
+  /filter: brightness\(0\) invert\(1\);/.test(darkMarkRule),
+  darkMarkRule || 'the dark-theme mark list is missing');
 r.ok('...and it sits on the splash\'s LAYER, so a real screen cannot paint underneath the handover',
   /#sso-wait \{[\s\S]*?z-index: var\(--z-splash\)/.test(baseSrc));
 r.ok('...and on the app\'s own ground rather than a #0b0b0b literal, so a light theme does not get a black interstitial',

@@ -299,8 +299,16 @@ const boardCode = [
 ].join('\n');
 ok('the board adds no emoji of its own', !EMOJI.test(boardCode),
   (boardCode.match(EMOJI) || []));
+// The slice runs from the switch to the END OF ROW ONE, not to the count. The count
+// stopped being the switch's next sibling in v90, when the search box moved up
+// between them: the old terminator `</span>\s*<span class="list-count"` then matched
+// NOTHING, the `|| ['']` fallback handed back an EMPTY STRING, and `!EMOJI.test('')`
+// passed. The test would have gone on reporting green while checking no markup at
+// all — so the terminator moves to `.filter-toggle`, the last thing on the row, and
+// the assertion now also refuses to pass on an empty slice.
+const switchRow = (html.match(/<span class="view-switch"[\s\S]*?class="filter-toggle"/) || [''])[0];
 ok('the switch markup carries no emoji either',
-  !EMOJI.test((html.match(/<span class="view-switch"[\s\S]*?<\/span>\s*<span class="list-count"/) || [''])[0]));
+  switchRow.length > 0 && !EMOJI.test(switchRow), { chars: switchRow.length });
 // Every glyph in this app has exactly ONE source, so the board uses the shared
 // chip renderer rather than drawing its own count.
 ok('the card reuses the shared completion chip, not a second renderer',
@@ -620,11 +628,72 @@ ok('the assignee is a monogram from the app\'s own initials helper, not an avata
   /initialsOf\(owner\)/.test(gridCode) && !/<img/.test(gridCode));
 ok('...and an unassigned ticket says so in the app\'s own words',
   /t\('common\.unassigned'\)/.test(gridCode));
-// The click target is the EXISTING ticket pane. The mockup's slide-out drawer was
-// rejected by the owner, and a second ticket screen is the failure this pins.
-ok('a tile opens the app\'s own ticket pane and nothing else',
-  /onclick="goTicket\('\$\{escJsAttr\(ir\.irNumber\)\}'\)"/.test(gridCode) &&
-  !/drawer|openDrawer/.test(gridCode));
+// ── The click target, REWRITTEN on 2026-10-11 ────────────────────────────────
+// What was here pinned `onclick="goTicket(…)"` on the tile, and it was right for two
+// years' worth of reasons: the mockup's slide-out drawer was rejected by the owner,
+// and the failure it guarded is a SECOND TICKET SCREEN — a lighter view of a ticket
+// with a renderer of its own, drifting from the passbook until the two disagree about
+// what a ticket says.
+//
+// The owner changed the interaction, not the rule: "on my click on any ir box, ir will
+// slide in and view above other IRs, but not in a full screen view. if i want to
+// continue fully into that ir, there would be an expand button." So all three drawings
+// now open the ticket dock, and the assertion is rewritten rather than deleted —
+// because the failure it guards is still a failure, and these three checks are what
+// still catch it. They are three checks and not one on purpose: the first pins that
+// there is ONE ticket-opening path and every drawing takes it, the second pins that the
+// dock is a preview built from the app's existing renderer, and the third pins that the
+// full passbook is still reachable and still the only full screen.
+const dockCode = (appJs.match(
+  /\/\* ══ THE IR DOCK ═+[\s\S]*?\nfunction wireDock\(\)[\s\S]*?\n\}/) || [''])[0];
+const dockSrc  = dockCode.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+
+// Comments stripped FIRST, and for the fourth time in this file. `escJsAttr`'s own doc
+// comment shows a call site as its example, so it holds one more `onclick="openTicket…"`
+// than the app really has and a retired name could sit in prose forever. A test that
+// reads comments is reading the wrong text — this file has already learned that twice.
+const appNoComments = appJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+ok('all three drawings open the SAME ticket surface, and it is the only way in',
+  (appNoComments.match(/onclick="openDock\('\$\{escJsAttr\(ir\.irNumber\)\}'\)"/g) || []).length === 3 &&
+  !/onclick="goTicket\(/.test(appNoComments) &&
+  !/onclick="openPassbook\(/.test(appNoComments) &&
+  !/drawer|openDrawer/.test(appNoComments));
+// The dock must not grow a renderer of its own. It builds its activity list with the
+// passbook's own buildTimeline() and draws it with the app's only container-parameterised
+// renderer — the same two calls refreshActivityLog() makes — and it must define neither.
+ok('...and the dock is a preview, not a second ticket screen: it renders the app\'s own timeline',
+  dockCode.length > 0 &&
+  /const all = buildTimeline\(irNumber, entries, nudges, 0, mail\);/.test(dockSrc) &&
+  /renderTimelineInto\(node, all\.slice\(-ACTIVITY_LIMIT\)/.test(dockSrc) &&
+  !/function buildTimeline\s*\(/.test(dockCode) &&
+  !/function renderTimelineInto\s*\(/.test(dockCode) &&
+  !/function renderTimeline\b/.test(dockCode));
+ok('...and Expand reaches the existing passbook and nothing else',
+  /function expandDock\(irNumber\) \{\s*goTicket\(irNumber\);\s*\}/.test(dockSrc));
+
+// ── The dock's own chrome, and the one under it ───────────────────────────────
+// The strip is `position: fixed` on the bottom edge — which is the edge the app's toast
+// is parked on. Raising the toast's `bottom` is the obvious half and, on its own, the
+// WRONG half: base.css hides the pill with `translateX(-50%) translateY(140%)` — 140% of
+// its OWN height — and that was only ever enough to put it past the window edge while
+// `bottom` was 1.25rem. Raise `bottom` by the strip's height and the hidden pill comes
+// back INTO view, fully opaque: the toast has no `opacity: 0` rest state, so the
+// translate is the whole of the hide. Measured on a 900px window, the hidden toast
+// landed at y851-889 — sitting on IR407's tab — and neither the rule's absence nor its
+// presence was visible to any check that reads CSS rather than boxes.
+//
+// The third line is the one that fails LOUDEST if it is dropped: `body.has-dock #toast`
+// is one id, one class and one element, so it outranks base.css's `#toast.show` (one id,
+// one class) whatever the source order. Without the re-stated show state the lift wins
+// the cascade in BOTH directions and every toast in the app is invisible — but only on a
+// device that has ever opened the dock.
+const toastCss = read('../components.css');
+ok('a toast clears the dock strip when it is shown',
+  /body\.has-dock #toast \{[\s\S]{0,200}?bottom: calc\(var\(--dock-tab-h\)/.test(toastCss));
+ok('...and a hidden one still goes off the window, which is the half that is easy to miss',
+  /body\.has-dock #toast \{[\s\S]{0,300}?translateY\(calc\(140% \+ var\(--dock-tab-h\)/.test(toastCss));
+ok('...and the show state is re-stated, or the lift above wins the cascade and hides every toast',
+  /body\.has-dock #toast\.show \{[^}]*translateY\(0\)/.test(toastCss));
 ok('the grid adds no emoji of its own', !EMOJI.test(gridSrc), (gridSrc.match(EMOJI) || []));
 ok('...and the open ticket is marked in the grid as it is in the list',
   (appJs.match(/querySelectorAll\('\.ir-card'\)/) || []).length >= 1 &&

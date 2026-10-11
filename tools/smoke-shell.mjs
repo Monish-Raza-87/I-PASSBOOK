@@ -17,6 +17,14 @@ import zlib from 'node:zlib';
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 const appJs = read('../app.js');
 const html = read('../index.html');
+// Markup with its comments removed, for the ABSENCE checks. A rule that was removed, or
+// an asset that is now forbidden, is worth explaining where it stood — and the note
+// explaining it names the very thing the check looks for, so a search of the raw text
+// fails on the prose describing the absence it is asserting. This is the same treatment
+// the landing-page block below already gives base.css and app.js, and the same one
+// smoke-board.mjs gives the CSS comment that quotes `min-height: 100dvh`.
+const stripHtmlComments = t => t.replace(/<!--[\s\S]*?-->/g, '');
+const htmlCode = stripHtmlComments(html);
 const viewsCss = read('../views.css');
 const i18nCode = read('../i18n.js');
 
@@ -482,10 +490,10 @@ head('the app icon');
 // judged at the wrong size; it was rendered at 16/24/32/48 on both light and dark chrome
 // before this changed. See tools/make-icons.ps1 for why the two files differ at all.
 ok('index.html points the TAB at the clean mark and keeps the plated tile for iOS',
-  /rel="icon"[^>]*assets\/icon-mark\.png/.test(html) &&
-  /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(html) &&
-  !/rel="icon"[^>]*assets\/icon-192\.png/.test(html) &&
-  !/assets\/logo\.png/.test(html));
+  /rel="icon"[^>]*assets\/icon-mark\.png/.test(htmlCode) &&
+  /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(htmlCode) &&
+  !/rel="icon"[^>]*assets\/icon-192\.png/.test(htmlCode) &&
+  !/assets\/logo\.png/.test(htmlCode));
 // The four standalone pages carry the tab icon too, and they are separate documents
 // that load none of the app's stylesheets — so they are the ones that get forgotten.
 // Same mark, or the tab changes appearance when someone opens the FAQ.
@@ -636,9 +644,22 @@ ok('the background is gone — the key ran, and the square did not come back',
 // to be covered, or one of them stays a dark shape on a dark page.
 const baseCss = read('../base.css');
 const baseFlat = baseCss.replace(/\s+/g, m => m.includes('\n') ? '\n' : ' ');
-ok('dark mode draws BOTH in-app marks as a flat white silhouette',
-  /\[data-theme="dark"\]\s*\.brand-mark\s+img\s*,\s*\[data-theme="dark"\]\s*\.landing-mark\s*\{[^}]*filter:\s*brightness\(0\)\s+invert\(1\)/.test(baseFlat),
-  (baseCss.match(/\[data-theme="dark"\][^{]*\{[^}]*invert[^}]*\}/) || ['none — the mark is invisible in dark mode'])[0]);
+// REWRITTEN 2026-10-11 from a hard-coded PAIR to a named LIST. It pinned the literal
+// two-selector shape `… .brand-mark img, … .landing-mark {`, so the third in-app mark
+// (`.ph-mark`, the big faded logo in the empty-detail panel) broke it on the list's
+// SHAPE rather than on anything being wrong — and a rewrite that widened the regex to
+// `[^{]*` would have stopped checking WHICH marks are covered, which is the whole
+// point. It now names each mark and fails when one of them is missing the filter.
+// A fourth mark added without joining this list still slips through: base.css's note
+// on the rule is what makes that list the place to look.
+const darkMarks = ['.brand-mark img', '.landing-mark', '.ph-mark'];
+const selToRe = sel => sel.replace(/\./g, '\\.').replace(/ /g, '\\s+');
+ok('dark mode draws EVERY in-app mark as a flat white silhouette',
+  darkMarks.every(sel =>
+    new RegExp('\\[data-theme="dark"\\]\\s*' + selToRe(sel) + '\\s*[,{]').test(baseFlat)) &&
+  /filter:\s*brightness\(0\)\s+invert\(1\)/.test(baseFlat.match(/\[data-theme="dark"\][^{]*\{[^}]*invert[^}]*\}/)?.[0] || ''),
+  darkMarks.filter(sel => !new RegExp('\\[data-theme="dark"\\]\\s*' + selToRe(sel) + '\\s*[,{]').test(baseFlat))
+    .map(sel => sel + ' — missing from the dark-theme list'));
 // Plain invert(1) is the obvious-looking wrong answer for THIS artwork: it leaves
 // the mark legible, so it passes any "is it visible" check, and turns the brand
 // yellow blue, which no contrast measurement can see.

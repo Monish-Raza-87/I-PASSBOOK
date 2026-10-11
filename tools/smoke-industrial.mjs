@@ -116,7 +116,14 @@ const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$)
 // block and §3's card rule both silently missed by being scoped to roots it is not
 // inside — which is exactly why membership in this list is written down rather than
 // discovered by a selector happening to match.
-const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#pattern-setup-overlay|#user-menu|#nudge-panel|#toast)\b/;
+// #ir-dock joined on 2026-10-11, with the feature — it is the ticket dock, the
+// bottom sheet and strip that opens over the drawing when a tile is clicked. It is
+// here and NOT under SCOPES for `#pattern-setup-overlay`'s reason, which is written
+// out just above: it is drawn on top of the page rather than in it, and a rule
+// reaching into it cannot touch a screen. Only its entry in §2's radius block is
+// actually written; the rest of it is styled from components.css, where the rest of
+// the floating chrome lives.
+const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#pattern-setup-overlay|#ir-dock|#user-menu|#nudge-panel|#toast)\b/;
 const escaped = selectors.filter(s => !SCOPES.test(s) && !GLOBALS.test(s) && !CHROME.test(s));
 r.ok('every rule is scoped, is one of the sanctioned globals, or is floating chrome',
   escaped.length === 0, escaped);

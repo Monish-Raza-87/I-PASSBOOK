@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v89';
+const APP_VERSION = 'v90';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1508,6 +1508,12 @@ const navCountEl    = document.getElementById('nav-count');
 const listSegments  = document.getElementById('list-segments');
 const listCategories = document.getElementById('list-categories');
 const listCountEl   = document.getElementById('list-count');
+// The compact toolbar and its filters panel. `listToolbar` is the element the panel's
+// open/closed class goes on, `filterSummary` is the row of chips that names what is
+// filtering while the panel is shut.
+const listToolbar   = document.getElementById('list-toolbar');
+const filterToggle  = document.getElementById('filter-toggle');
+const filterSummary = document.getElementById('filter-summary');
 const irBoard       = document.getElementById('ir-board');
 const irGrid        = document.getElementById('ir-grid');
 const listViewSwitch = document.getElementById('list-view-switch');
@@ -1534,6 +1540,13 @@ const listResize    = document.getElementById('list-resize');
 const VIEW_KEY   = 'listMode';
 const VIEW_MODES = ['list', 'board', 'grid'];
 
+// DEFAULT_VIEW is what a device that has never chosen gets, and it is the Grid as
+// of 2026-10-11. The owner: "when I click on IRS Service Desk, it should default open
+// in Grid view and from there I can use other view options." A stored choice still
+// wins — this is the DEFAULT, not a reset — so a device that has picked List keeps it
+// until it picks again, and clearing site data lands back on the Grid.
+const DEFAULT_VIEW = 'grid';
+
 // The drawing reads back as a preference; the FILTERS below deliberately do not.
 // A priority filter surviving a reload is how someone concludes the app has lost
 // tickets — the failure the sync bar and the "no IRs match this filter" empty state
@@ -1541,8 +1554,8 @@ const VIEW_MODES = ['list', 'board', 'grid'];
 function readViewMode() {
   try {
     const v = localStorage.getItem(VIEW_KEY);
-    return VIEW_MODES.includes(v) ? v : 'list';
-  } catch { return 'list'; }
+    return VIEW_MODES.includes(v) ? v : DEFAULT_VIEW;
+  } catch { return DEFAULT_VIEW; }
 }
 
 let currentView = 'index';     // 'index' | 'detail' | 'insights' | 'log'
@@ -4006,6 +4019,9 @@ function buildAppearanceGroup() {
 const RAIL_KEY     = 'rail';       // sidebar folded to an icon rail
 const LIST_KEY     = 'list';       // IR list folded away
 const ACTIVITY_KEY = 'activity';   // activity log expanded
+// Whether the toolbar's filters panel is open. A UI fold like the other three and NOT a
+// filter — see the note on VIEW_KEY below, which is the opposite rule deliberately.
+const FILTERS_KEY  = 'filters';
 
 function storedFlag(key) {
   try { return localStorage.getItem(key) === '1'; } catch { return false; }
@@ -4208,16 +4224,15 @@ function renderLayout() {
   // deliberately does NOT do this — it is a wall of work, not a column of rows — but
   // the grid is a browsing surface like the list, so the open tile is marked the same
   // way the open row is.
-  if (irList) {
-    irList.querySelectorAll('.ir-card').forEach(card => {
-      card.classList.toggle('is-selected', detail && card.dataset.id === currentIR?.irNumber);
-    });
-  }
-  if (irGrid) {
-    irGrid.querySelectorAll('.ir-tile').forEach(tile => {
-      tile.classList.toggle('is-selected', detail && tile.dataset.id === currentIR?.irNumber);
-    });
-  }
+  applyTicketMark();
+
+  // The ticket dock follows the same rule as the panes above it, and this is one of
+  // its TWO callers — the other is renderDock, because a ticket can be docked
+  // or closed without the layout changing at all. It stands down while the full
+  // passbook, the dashboard, the analyser or the FAQ is open: all four own the
+  // screen on a phone, and on desktop the passbook is a pane whose own bottom bar
+  // would sit under a sheet anchored to the window's bottom edge.
+  applyDockState();
 
   // Which section the user is in. A ticket belongs to the IRs item — it is a row
   // of that list, not a section of its own.
@@ -4279,6 +4294,359 @@ function goTicket(irNumber) {
   const hash = '#/tickets/' + encodeURIComponent(irNumber);
   if (location.hash === hash) { handleRoute(); return; }
   location.hash = hash;
+}
+
+/* ══ THE IR DOCK ═════════════════════════════════════════════════════════
+   Clicking an IR used to throw the drawing away and take the whole window. It now
+   opens a sheet over the drawing and leaves a tab in a strip along the bottom, so
+   the work he was reading stays on screen behind it. The owner, 2026-10-11:
+   "bottom sheet, where it can be minimised, like a gmail compose email tap. such
+   that I can minimise and keep multiple IRs on my worklist on screen minimised."
+
+   THE ONE RULE IS THAT THIS IS NOT A SECOND TICKET SCREEN. The sheet carries no
+   editable section, and its activity list is built by buildTimeline() and drawn by
+   renderTimelineInto() — the app's only container-parameterised renderer, already
+   shared by the passbook's timeline and the History modal. That pairing is the
+   whole of the reuse argument: the list on this sheet IS the list on the passbook,
+   from the same two functions. Expand is goTicket(), the existing full-screen path.
+   The moment a fact here needs a renderer of its own, that fact belongs on the
+   passbook instead, and putting it here is how the two drift apart.
+
+   NOT A ROUTE, on purpose. `#/tickets/IR470` still means FULL SCREEN: it is what an
+   emailed link and a nudge land on, and neither should start opening a floating
+   sheet. So the dock never writes the hash and the hash never opens a sheet. The
+   cost is stated rather than discovered — browser Back does not close the sheet,
+   because on #/tickets Back already leaves the app. Close is the ✕ and Escape;
+   Escape MINIMISES (non-destructive, focus back to the tab) and ✕ REMOVES.
+
+   WHERE IT IS SHOWN is decided in exactly one place, applyDockState(), and that is
+   called from renderLayout() and from renderDock(). Two writers for one
+   class is how a pane ends up visible with nothing in it. */
+
+let dockIRs = [];   // irNumbers, left to right — the strip's order
+let dockOpen    = null; // the one ticket whose sheet is up, or null
+let dockSeq     = 0;    // makes a slow fetch for an abandoned sheet a no-op
+
+// WHICH DRAWING IS LIT — the one question, asked in one place. A row or tile is lit
+// when the screen is currently about that ticket, and there are exactly two ways
+// that can be true: the full passbook is open on it (`currentIR`), or its sheet is
+// up in the dock (`dockOpen`). They cannot both be true, because `applyDockState()`
+// stands the dock down the moment the passbook opens — so one answer, not an OR of
+// two half-answers that could disagree.
+//
+// ⚠ It is READ AT RENDER TIME by three different renderers (the list row, the grid
+// tile, and renderLayout's post-hoc pass), so a rebuild for a filter change keeps
+// the mark instead of losing it, and it is re-applied from renderDock() as well,
+// because opening or minimising a sheet changes no layout at all.
+function litTicket() {
+  return currentView === 'detail' ? (currentIR?.irNumber || null) : dockOpen;
+}
+
+// The strip and the sheet are rebuilt together from those two bindings, so there is
+// no incremental DOM to keep in step and no way for the two to disagree.
+function renderDock() {
+  const el = document.getElementById('ir-dock');
+  if (!el) return;
+  // A ticket can leave the dock from under an open sheet — that is what Close does —
+  // and the sheet must not outlive its tab.
+  if (dockOpen && !dockIRs.includes(dockOpen)) dockOpen = null;
+  // The sheet first, the strip second: #ir-dock is a column anchored to the
+  // bottom edge, so DOM order is screen order — the sheet sits directly on top of
+  // the strip it belongs to, and the strip never moves when the sheet comes and goes.
+  el.innerHTML = dockIRs.length
+    ? (dockOpen ? dockSheetHTML(dockOpen) : '') +
+      `<div class="dock-tabs">${dockIRs.map(dockTabHTML).join('')}</div>`
+    : '';
+  applyDockState();
+  // Opening a sheet changes no layout, so renderLayout() does not run — the drawing
+  // underneath has to be told whose sheet just came up. See litTicket().
+  applyTicketMark();
+  // The timeline is the one part that is fetched rather than computed from what is
+  // already in memory, so it is loaded after the frame is up rather than before it:
+  // the facts, the stage and the quick actions are all readable immediately.
+  if (dockOpen) loadDockTimeline(dockOpen);
+}
+
+// THE ONE WRITER of `body.has-dock`. The dock is on screen for the three IR drawings
+// and nowhere else: while the full passbook is open it stands down, because on
+// desktop the passbook is a pane beside the list and a sheet anchored to the bottom
+// edge would sit on top of the passbook's own bottom bar. `dockIRs` is memory,
+// so coming back restores the worklist intact — nothing is lost by standing down.
+function applyDockState() {
+  const on = dockIRs.length > 0 && currentView === 'index';
+  document.body.classList.toggle('has-dock', on);
+}
+
+// The post-hoc half of litTicket(): the list and the grid are already drawn, and only
+// the class changes. The board is deliberately left out — it is a wall of work, not a
+// column of rows, and it has never marked the open ticket. This used to live inline in
+// renderLayout() with the passbook as its only answer; it now reads the same binding
+// the sheet does, so a sheet coming up lights the row behind it.
+function applyTicketMark() {
+  const lit = litTicket();
+  if (irList) irList.querySelectorAll('.ir-card').forEach(card =>
+    card.classList.toggle('is-selected', !!lit && card.dataset.id === lit));
+  if (irGrid) irGrid.querySelectorAll('.ir-tile').forEach(tile =>
+    tile.classList.toggle('is-selected', !!lit && tile.dataset.id === lit));
+}
+
+// One tab. His order, left to right: name, then the mid-size view, then the full
+// view, then close — the three buttons he checked against Gmail's own minimised
+// tabs. The name is the button that brings the sheet back, which is what makes the
+// whole tab body a target rather than only its three small corners.
+function dockTabHTML(irNumber) {
+  const ir  = allIRs.find(r => r.irNumber === irNumber);
+  const sub = ir ? (ir.companyName || '') : '';
+  const id  = escJsAttr(irNumber);
+  const open = dockOpen === irNumber;
+  return `
+    <div class="dock-tab${open ? ' is-open' : ''}" data-dock-id="${id}">
+      <button type="button" class="dock-tab-name" data-dock="toggle" data-dock-id="${id}"
+              title="${escHtml(open ? t('dock.minimise') : t('dock.restore', { ir: irNumber }))}">
+        <span class="dock-tab-num">${escHtml(irNumber)}</span>
+        ${sub ? `<span class="dock-tab-co">${escHtml(sub)}</span>` : ''}
+      </button>
+      <span class="dock-tab-btns">
+        <button type="button" class="dock-btn" data-dock="toggle" data-dock-id="${id}"
+                aria-pressed="${open ? 'true' : 'false'}"
+                title="${escHtml(open ? t('dock.minimise') : t('dock.openPanel'))}">${iconSvg('panel-bottom')}</button>
+        <button type="button" class="dock-btn" data-dock="full" data-dock-id="${id}"
+                title="${escHtml(t('dock.openFull'))}">${iconSvg('expand')}</button>
+        <button type="button" class="dock-btn dock-btn-close" data-dock="close" data-dock-id="${id}"
+                title="${escHtml(t('dock.close'))}">&times;</button>
+      </span>
+    </div>`;
+}
+
+function dockSheetHTML(irNumber) {
+  const ir  = allIRs.find(r => r.irNumber === irNumber);
+  const id  = escJsAttr(irNumber);
+  const late = ir ? irOverdue(ir) : 0;
+  const age  = ir ? irAge(ir) : 0;
+  const owner = ir ? (ir.assigneeName || ir.assignee || '') : '';
+  const subject = ir ? (ir.issueType || ir.issueDesc || '') : '';
+  const stage = canonicalStage((irState[irNumber] || {}).status || (ir ? ir.status : ''));
+
+  // The buttons are in the sheet's HEAD and not its foot: the foot of a panel that
+  // scrolls is off screen the moment anyone reads, and these are the three controls
+  // that must not move. The same three, in the same order, as the strip below.
+  const head = `
+    <div class="dock-sheet-head">
+      <div class="dock-sheet-title">
+        <span class="dock-sheet-num">${escHtml(irNumber)}</span>
+        ${ir ? `<span class="${getBadgeClass(stage)}">${escHtml(statusLabel(stage))}</span>` : ''}
+        ${ir && ir.priority ? `<span class="prio prio-${escHtml(String(ir.priority).toLowerCase().replace(/[^a-z0-9_-]/g, ''))}">${escHtml(priorityLabel(ir.priority))}</span>` : ''}
+        ${late ? `<span class="badge badge-danger" title="${escHtml(overdueTitle(ir, late))}">Overdue</span>` : ''}
+      </div>
+      <div class="dock-sheet-btns">
+        <button type="button" class="dock-btn" data-dock="toggle" data-dock-id="${id}" aria-pressed="true"
+                title="${escHtml(t('dock.minimise'))}">${iconSvg('panel-bottom')}</button>
+        <button type="button" class="dock-btn" data-dock="full" data-dock-id="${id}"
+                title="${escHtml(t('dock.openFull'))}">${iconSvg('expand')}</button>
+        <button type="button" class="dock-btn dock-btn-close" data-dock="close" data-dock-id="${id}"
+                title="${escHtml(t('dock.close'))}">&times;</button>
+      </div>
+    </div>`;
+
+  if (!ir) {
+    // Reachable only if a ticket left the loaded list while docked. A sheet that
+    // says so beats a sheet of blanks, and beats throwing on a render.
+    return `<section class="dock-sheet" role="dialog" aria-label="${escHtml(irNumber)}">${head}
+      <div class="dock-sheet-body" tabindex="-1"><p class="dock-fact-empty">${escHtml(irNumber)} is no longer in the list on this page.</p></div>
+    </section>`;
+  }
+
+  // Same field discipline as the row, the card and the tile: `droneId` is written by
+  // the PUBLIC customer form, so every value here is escaped.
+  const facts = [
+    ir.companyName ? escHtml(ir.companyName) : '',
+    ir.droneId     ? escHtml(ir.droneId)     : '',
+    ir.category    ? escHtml(categoryLabel(ir.category)) : '',
+    owner          ? escHtml(owner) : `<span class="is-unassigned">${escHtml(t('common.unassigned'))}</span>`,
+    age ? `<span title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '',
+  ].filter(Boolean);
+
+  // THE QUICK ACTIONS ARE GATED, or a view-only user is shown two controls that
+  // cannot work. It is the same gate the board's own "move on" button passes, and
+  // the same one the Triage dialog is behind — status, assignee and priority are one
+  // person's job, so they are one permission.
+  const quick = canTriage() ? `
+    <div class="dock-quick">
+      <label class="dock-field">
+        <span class="dock-field-lbl">Stage</span>
+        <select class="list-select" data-dock-set="status">
+          ${IR_STATUS_VALUES.map(v => `<option value="${escHtml(v)}"${v === stage ? ' selected' : ''}>${escHtml(statusLabel(v))}</option>`).join('')}
+        </select>
+      </label>
+      <label class="dock-field">
+        <span class="dock-field-lbl">Priority</span>
+        <select class="list-select" data-dock-set="priority">
+          <option value=""${!ir.priority ? ' selected' : ''}>${escHtml(t('list.priorityNone'))}</option>
+          ${TICKET_PRIORITIES.map(v => `<option value="${escHtml(v)}"${v === ir.priority ? ' selected' : ''}>${escHtml(priorityLabel(v))}</option>`).join('')}
+        </select>
+      </label>
+    </div>` : '';
+
+  return `
+    <section class="dock-sheet" role="dialog" aria-label="${escHtml(irNumber)}">
+      ${head}
+      <div class="dock-sheet-body" tabindex="-1">
+        ${subject ? `<p class="dock-subject">${escHtml(subject)}</p>` : ''}
+        <div class="dock-facts">${facts.map(f => `<span class="dock-fact">${f}</span>`).join('')}</div>
+        ${quick}
+        <div class="dock-activity-head">
+          <span class="dock-activity-title">${escHtml(t('dock.activity'))}</span>
+          <span class="dock-activity-count" id="dock-timeline-count"></span>
+        </div>
+        <div class="dock-timeline" id="dock-timeline"></div>
+      </div>
+    </section>`;
+}
+
+// Opening a ticket that is already docked RESTORES it rather than adding a second
+// copy — otherwise the same ticket could be on the strip twice with two sheets
+// disagree-ing about which was current.
+function openDock(irNumber) {
+  if (!irNumber) return;
+  if (!dockIRs.includes(irNumber)) dockIRs.push(irNumber);
+  dockOpen = irNumber;
+  renderDock();
+  const sheet = document.querySelector('#ir-dock .dock-sheet-body');
+  // Focus moves into the sheet so Escape works from the keyboard without a click
+  // first, and so a screen reader follows the thing that just appeared. Not a focus
+  // TRAP: this is a preview over work he is still reading, and trapping focus in a
+  // preview is what makes a person think the page underneath is gone.
+  if (sheet) sheet.focus({ preventScroll: true });
+}
+
+function minimiseDock() {
+  if (!dockOpen) return;
+  const was = dockOpen;
+  dockOpen = null;
+  renderDock();
+  // Focus goes back to the tab it came from — the strip's own button for that ticket,
+  // not the body. Escape must never leave the keyboard nowhere. Matched by walking
+  // the rebuilt tabs rather than by a selector built out of the id: an IR number is
+  // data, and a data value inside a CSS selector is a quoting problem with no good
+  // answer at this size.
+  const back = Array.from(document.querySelectorAll('#ir-dock .dock-tab'))
+    .find(tab => tab.dataset.dockId === was);
+  const btn = back && back.querySelector('.dock-tab-name');
+  if (btn) btn.focus({ preventScroll: true });
+}
+
+function closeDockTab(irNumber) {
+  const i = dockIRs.indexOf(irNumber);
+  if (i === -1) return;
+  const wasOpen = dockOpen === irNumber;
+  dockIRs.splice(i, 1);
+  // Closing the open tab hands the sheet to the tab that takes its place — the one
+  // to its right, or the last one if it was the rightmost. That is the same rule the
+  // strip itself follows when a tab leaves, so the sheet never jumps to a tab the eye
+  // did not see move.
+  if (wasOpen) dockOpen = dockIRs[i] || dockIRs[i - 1] || null;
+  renderDock();
+}
+
+// The full passbook, and nothing else. Deliberately not a "bigger sheet": there is
+// exactly one full ticket screen in this app and this button goes to it.
+function expandDock(irNumber) {
+  goTicket(irNumber);
+}
+
+// The sheet's activity list, which is the passbook's list. Same two functions, same
+// order, same 400-row read; only the element it lands in is different.
+async function loadDockTimeline(irNumber) {
+  const seq = ++dockSeq;
+  const el  = document.getElementById('dock-timeline');
+  if (!el) return;
+  el.innerHTML = `<div class="hist-list"><div class="nudge-empty">Loading…</div></div>`;
+  // Fired together and for the same reason loadActivityLog fires them together: they
+  // are two reads of two different stores, and the slower is the sheet.
+  const mailPromise = fetchIRThreads(irNumber);
+  let entries = [];
+  try { entries = await fetchAuditEntries(irNumber, 400, true); } catch { entries = []; }
+  const mail = await mailPromise.catch(() => []);
+  // Two tickets can have been opened and closed while this was in flight; the seq
+  // is what makes the late answer a no-op rather than a stale list under a new title.
+  if (seq !== dockSeq || dockOpen !== irNumber) return;
+  const node = document.getElementById('dock-timeline');
+  if (!node) return;
+  // The whole list, then sliced here — never by passing the limit in, so the count
+  // can report the TRUE total. "40 of 128" is honest; a bare "40" is not.
+  const all = buildTimeline(irNumber, entries, nudges, 0, mail);
+  renderTimelineInto(node, all.slice(-ACTIVITY_LIMIT), {
+    emptyText: 'No activity recorded yet for this IR.',
+  });
+  const count = document.getElementById('dock-timeline-count');
+  if (count) count.textContent = !all.length ? ''
+    : (all.length > ACTIVITY_LIMIT
+        ? t('dock.showing', { n: ACTIVITY_LIMIT, total: all.length })
+        : String(all.length));
+}
+
+// The stage write, and the ONLY thing in the dock that moves a clock. It is
+// moveOnByHand's shape exactly — including its guard, so re-choosing the stage the
+// ticket is already on is not a movement and must not fake a fresh `statusAt`, which
+// is what "in status 3d" and every overdue limit are measured from.
+//
+// patchIRState already repaints the drawing underneath (it calls applyListFilters),
+// so the row, card or tile behind the sheet changes under it for free.
+async function dockSetStatus(irNumber, stage) {
+  if (!canTriage() || !stage) return;
+  if (canonicalStage((irState[irNumber] || {}).status) === stage) return;
+  await patchIRState(irNumber, {
+    status: stage,
+    statusOwned: true,
+    statusAt: Date.now(),
+    statusBy: myEmail() || 'unknown',
+  });
+  renderDock();
+}
+
+// Priority has no clock and no owner flag, so this is the whole of it — the same
+// patch the Triage dialog sends for the one field.
+async function dockSetPriority(irNumber, priority) {
+  if (!canTriage()) return;
+  await patchIRState(irNumber, { priority: priority || '' });
+  renderDock();
+}
+
+// Bound ONCE, on the element that outlives every repaint. Every control in the strip
+// and the sheet is a [data-dock] button, so one delegated listener covers both and
+// there is no inline `onclick` to escape a ticket number into.
+function wireDock() {
+  const el = document.getElementById('ir-dock');
+  if (!el || el.dataset.wired) return;
+  el.dataset.wired = '1';
+  el.addEventListener('click', e => {
+    const btn = e.target.closest('[data-dock]');
+    if (!btn || !el.contains(btn)) return;
+    const id = btn.dataset.dockId || '';
+    const act = btn.dataset.dock;
+    // One action name for both directions: pressing the panel button on the tab of
+    // the ticket that is ALREADY open puts it away. That is what makes it a toggle
+    // rather than a second, invisible way to open the same thing again.
+    if (act === 'toggle') { dockOpen === id ? minimiseDock() : openDock(id); return; }
+    if (act === 'full')   { expandDock(id);  return; }
+    if (act === 'close')  { closeDockTab(id);   return; }
+  });
+  // Change, not input: a select fires `input` on every arrow key while the menu is
+  // still open, and a write per keystroke is a store round trip per keystroke.
+  el.addEventListener('change', e => {
+    const sel = e.target.closest('[data-dock-set]');
+    if (!sel || !dockOpen) return;
+    if (sel.dataset.dockSet === 'status')   dockSetStatus(dockOpen, sel.value);
+    if (sel.dataset.dockSet === 'priority') dockSetPriority(dockOpen, sel.value);
+  });
+  // Escape MINIMISES. It is the customer door's shape — fire only while there is
+  // something to close, so the key is never swallowed on a screen that has nothing
+  // to put away. It deliberately does not remove the ticket: Escape is the "put it
+  // down" gesture, and ✕ is the one that throws it away.
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || !dockOpen) return;
+    minimiseDock();
+  });
 }
 
 function goInsights() {
@@ -4351,6 +4719,22 @@ async function handleRoute() {
   }
 
   if (currentView === 'index') return;
+  // THE SERVICE DESK OPENS ON THE GRID. The owner, 2026-10-11: "when I click on
+  // IRS Service Desk, it should default open in Grid view and from there I can
+  // use other view options."
+  //
+  // It is decided HERE rather than on #nav-tickets, which is a plain hash link
+  // with no JS binding on purpose (see the note in index.html) — the hashchange
+  // listener is the whole mechanism, and a click handler would be a second one.
+  //
+  // The guard above is what makes this safe to put on a route that also fires
+  // while he is standing on it: the view-switch buttons never touch the hash, so
+  // flipping to List or Board in place returns early and his choice survives.
+  //
+  // Coming BACK from a full ticket is the one arrival that does not force it, so
+  // Back returns to the drawing the list was left in rather than stamping Grid
+  // over a deliberate choice.
+  if (currentView !== 'detail') setListView('grid');
   showIndex();
 }
 
@@ -4462,7 +4846,17 @@ function showApp() {
   applyTheme();          // sync <html> with the stored light/dark preference
   applyPalette();        // ...and with the stored accent, before anything paints
   initIcons();           // the inline-SVG family — every static glyph comes from ICON_PATHS
+  wireDock();      // the dock's one delegated listener, bound once for the session
   applyChromeState();    // ...and the sidebar / IR-list folds
+  applyFiltersState();   // ...and the toolbar's filters panel, shut unless asked for
+  // THE STORED DRAWING IS APPLIED, NOT MERELY READ. `listMode` is restored at module
+  // load, but the pane's own class, `html.view-full` and the switch's pressed state
+  // are written by setListView() and by NOTHING ELSE — so before this line a device
+  // that had chosen the Board or the Grid came back to a LIST, with the switch
+  // showing List, while `listMode` said otherwise and applyListFilters() drew the
+  // grid into a pane CSS had `display: none` on. It was invisible for as long as
+  // List was what everyone landed on, and it is load-bearing the moment it is not.
+  setListView(listMode);
   applyActivityState(storedFlag(ACTIVITY_KEY));
   syncNavAccess();
   // The site-wide palette allowlist, once per session. Deliberately not awaited:
@@ -7450,7 +7844,13 @@ async function fetchIRs() {
     writeIRListCache();
     _lastSyncAt = new Date();
     setSyncStatus(`✓ ${allIRs.length} IRs loaded`);
-    renderIRList(allIRs);
+    // applyListFilters() and NOT renderIRList() directly — here and at the three
+    // other reload paths below. The row set has just changed, so SOMETHING has to
+    // repaint; going through the app's one funnel means the paint lands on whichever
+    // of the three drawings is current and is sorted the way the sort select says.
+    // The old direct call was mode-blind, so a Grid user's reload quietly painted a
+    // List into the hidden list pane and left the grid empty.
+    applyListFilters();
     return;
   } catch (err) {
     // A REAL list is never replaced by fabricated cards. If a list is already on
@@ -7476,7 +7876,7 @@ async function fetchIRs() {
     // stops demonstrating anything. In memory only, never saved: nothing here is real.
     irState = getDemoIRState();
     setAllIRs(getDemoIRs());
-    renderIRList(allIRs);
+    applyListFilters();   // the current drawing, not always the list — see the note above
   }
 }
 
@@ -7541,7 +7941,7 @@ function paintCachedIRList() {
   const records = readIRListCache();
   if (!records) return false;
   setAllIRs(records);
-  renderIRList(allIRs);
+  applyListFilters();   // the current drawing, not always the list — see the note above
   return true;
 }
 
@@ -7618,7 +8018,7 @@ async function loadLegacyIndex() {
       // by the renderer — so an index whose IRs are all in the Sheet would still
       // need this render to show them as legacy.
       mergeLegacyOnlyIRs();
-      renderIRList(allIRs);
+      applyListFilters();   // the current drawing, not always the list — see the note above
       // NO SUCCESS TOAST. It fired on every sign-in for a load that always
       // succeeds, which is a daily interruption announcing that nothing went
       // wrong; the 161 legacy cards appearing in the list are the evidence. The
@@ -7723,7 +8123,7 @@ function renderIRList(records) {
       age ? escHtml(ageLabel(age)) + (late ? ' · overdue' : '') : '',
     ].filter(Boolean).join(' · ');
     return `
-    <div class="ir-card animate-slide-up${currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
+    <div class="ir-card animate-slide-up${litTicket() === ir.irNumber ? ' is-selected' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="openDock('${escJsAttr(ir.irNumber)}')">
       <div class="ir-card-main">
         <div class="ir-title-row">
           <span class="ir-title">${escHtml(ir.irNumber)}</span>
@@ -7948,7 +8348,7 @@ function boardCard(ir) {
   // Same field discipline as the list row, and for the same reason: `droneId` is
   // written by the public customer form, so every value here is escaped.
   return `
-    <div class="kb-card${late ? ' is-late' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')">
+    <div class="kb-card${late ? ' is-late' : ''}" data-id="${escJsAttr(ir.irNumber)}" onclick="openDock('${escJsAttr(ir.irNumber)}')">
       <div class="kb-card-top">
         <span class="ir-title">${escHtml(ir.irNumber)}</span>
         ${age ? `<span class="ir-age${late ? ' is-late' : ''}" title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : ''}
@@ -8024,7 +8424,7 @@ function gridTile(ir) {
   const late  = irOverdue(ir);
   const prog  = sectionProgress(ir.done);
   const showProg = wantProgress(ir, prog);
-  const sel   = currentView === 'detail' && currentIR?.irNumber === ir.irNumber ? ' is-selected' : '';
+  const sel   = litTicket() === ir.irNumber ? ' is-selected' : '';
   // The tile's one line of prose: what the customer asked for, falling back to what
   // they wrote. A tile with a blank middle reads as broken.
   const subject = ir.issueType || ir.issueDesc || '';
@@ -8045,7 +8445,7 @@ function gridTile(ir) {
   // "in warranty" lives inside Section D where a tile cannot reach it.
   return `
     <div class="ir-tile${late ? ' is-late' : ''}${sel}"
-         data-id="${escJsAttr(ir.irNumber)}" onclick="goTicket('${escJsAttr(ir.irNumber)}')"${who}>
+         data-id="${escJsAttr(ir.irNumber)}" onclick="openDock('${escJsAttr(ir.irNumber)}')"${who}>
       <div class="ir-tile-top">
         <span class="ir-title">${escHtml(ir.irNumber)}</span>
         <span class="${getBadgeClass(ir.status)}">${escHtml(statusLabel(ir.status))}</span>
@@ -8171,6 +8571,45 @@ if (sortBy) sortBy.addEventListener('change', () => {
   activeSort = sortBy.value || 'newest';
   applyListFilters();
 });
+// The Filters fold. It toggles a stored flag and nothing else — no repaint, because
+// opening the panel changes no filter and therefore changes no row.
+if (filterToggle) {
+  filterToggle.addEventListener('click', () => {
+    setFlag(FILTERS_KEY, !storedFlag(FILTERS_KEY));
+    applyFiltersState();
+  });
+}
+// A chip clears ITS OWN filter and only its own. Every branch goes through the same
+// setter the panel's own control uses — renderSegments() before applyListFilters() for
+// the segment, setCategoryFilter() for the category, and the select's own value written
+// back for the priority — so a chip cannot leave the panel showing one thing while the
+// list shows another. `sort` has no chip: an order is not a filter, and hiding rows is
+// the thing this row exists to disclose.
+if (filterSummary) {
+  filterSummary.addEventListener('click', e => {
+    const chip = e.target.closest('.filter-chip');
+    if (!chip) return;
+    switch (chip.dataset.clear) {
+      case 'query':
+        searchInput.value = '';
+        break;
+      case 'segment':
+        activeSegment = 'all';
+        renderSegments();
+        break;
+      case 'category':
+        setCategoryFilter(CATEGORY_ALL);   // repaints the strip and the list itself
+        return;
+      case 'priority':
+        activePriority = 'all';
+        if (filterPriority) filterPriority.value = 'all';
+        break;
+      default:
+        return;
+    }
+    applyListFilters();
+  });
+}
 
 // ── THE BOARD'S LEFT-RIGHT BAR, ABOVE THE COLUMNS ─────────────────────────────
 // The owner, 2026-10-10: "similarly in for board since number of columns are more,
@@ -8450,6 +8889,16 @@ function segmentCounts() {
   return c;
 }
 
+// The strip's word for a segment key, in ONE place. The summary row below names the
+// same filter, and two spellings of one filter is the defect this function exists to
+// make impossible. (These four are the strip's own words and are not in the language
+// table — see renderFilterSummary for why the chip follows the tile rather than
+// overtaking it.)
+function segmentFilterLabel(key) {
+  const row = SEGMENT_LABELS.find(([k]) => k === key);
+  return row ? row[1] : String(key);
+}
+
 // Counts always come from allIRs, so they stay right while a filter is applied.
 function renderSegments() {
   if (!listSegments) return;
@@ -8457,7 +8906,7 @@ function renderSegments() {
   listSegments.innerHTML = SEGMENT_LABELS.map(([key, label]) => `
     <button type="button" class="segment${activeSegment === key ? ' active' : ''}"
             data-seg="${key}" role="tab" aria-selected="${activeSegment === key}">
-      ${label}<span class="segment-count">${c[key] || 0}</span>
+      ${segmentFilterLabel(key)}<span class="segment-count">${c[key] || 0}</span>
     </button>
   `).join('');
 }
@@ -8469,6 +8918,19 @@ function renderSegments() {
 // applyListFilters(), not two states of one control.
 const CATEGORY_ALL = 'all';
 const UNCATEGORISED = '__none__';   // an IR CR has not triaged yet
+
+// The strip's word for a category key, in ONE place — the same reason
+// segmentFilterLabel exists one screen up. The summary row names the filter the strip
+// is lit on, and two spellings of one filter is the defect both functions prevent.
+// ('All categories' and 'No category' are the strip's own words and are not in the
+// language table; the chip deliberately repeats them rather than translating over the
+// top of the tile it is describing. A half-translated pair would be worse than two
+// English ones — see renderFilterSummary.)
+function categoryFilterLabel(key) {
+  if (key === CATEGORY_ALL) return 'All categories';
+  if (key === UNCATEGORISED) return 'No category';
+  return categoryLabel(key);
+}
 
 function categoryCounts() {
   const c = { all: allIRs.length };
@@ -8492,16 +8954,11 @@ function renderCategorySegments() {
   const c = categoryCounts();
   const keys = [CATEGORY_ALL, ...IR_CATEGORIES];
   if (c[UNCATEGORISED]) keys.push(UNCATEGORISED);
-  listCategories.innerHTML = keys.map(key => {
-    const label = key === CATEGORY_ALL ? 'All categories'
-                : key === UNCATEGORISED ? 'No category'
-                : categoryLabel(key);
-    return `
+  listCategories.innerHTML = keys.map(key => `
     <button type="button" class="segment${activeCategory === key ? ' active' : ''}"
             data-cat="${escHtml(key)}" role="tab" aria-selected="${activeCategory === key}">
-      ${escHtml(label)}<span class="segment-count">${c[key] || 0}</span>
-    </button>`;
-  }).join('');
+      ${escHtml(categoryFilterLabel(key))}<span class="segment-count">${c[key] || 0}</span>
+    </button>`).join('');
 }
 
 // The list's order, and the only place it is decided. `ir.dateRaisedISO` is the one
@@ -8559,6 +9016,66 @@ function applyListFilters() {
   if (listMode === 'board') renderBoard(rows);
   else if (listMode === 'grid') renderIRGrid(rows);
   else renderIRList(rows);
+  // …and one summary row, from the SAME four scalars read just above. It is painted
+  // here rather than from each control's own listener so that it cannot be one repaint
+  // behind the filters it describes — `loadIRState`, `patchIRState`, a deep link from
+  // Insights and the throttled search all arrive through this one function.
+  renderFilterSummary();
+}
+
+// ─── THE FILTERS PANEL, AND THE ROW THAT STOPS IT LYING ───────────────────────
+// The panel holds the two strips and the two selects, and it is SHUT at rest — see
+// the measured reasoning at the top of the toolbar in index.html. That fold is the
+// whole point of this block, and it creates one hazard worth naming: this app has a
+// written rule that filters do NOT persist, because *a hidden filter surviving a
+// reload is how somebody concludes the app has lost tickets* (see VIEW_KEY). A shut
+// panel hides the controls that STATE what is filtering, which is the same hazard by a
+// different road. So the shut row NAMES the filters in force, and each chip clears its
+// own. A filter can never be both hidden and in force.
+//
+// ⚠ THE CHIPS FOLLOW THE CONTROLS THEY DESCRIBE, INCLUDING IN LANGUAGE. The strips are
+// worded in English literals (renderSegments / renderCategorySegments), so the chips
+// reuse those very functions' words. Translating the chip alone would put a Hindi word
+// on the summary row pointing at an English tile inside the panel — two names for one
+// filter, which is precisely what these helpers were extracted to prevent.
+function filterChipHTML(kind, label) {
+  return `
+    <button type="button" class="filter-chip" data-clear="${kind}"
+            title="${escHtml(t('list.clearFilter', { name: label }))}">
+      <span>${escHtml(label)}</span><span class="filter-chip-x" aria-hidden="true">&times;</span>
+    </button>`;
+}
+
+function renderFilterSummary() {
+  if (!filterSummary) return;
+  const chips = [];
+  // Order matches the controls: search, then the status strip, then the category strip,
+  // then the two selects.
+  const q = (searchInput.value || '').trim();
+  if (q) chips.push(filterChipHTML('query', '“' + q + '”'));
+  if (activeSegment !== 'all') chips.push(filterChipHTML('segment', segmentFilterLabel(activeSegment)));
+  if (activeCategory !== CATEGORY_ALL) chips.push(filterChipHTML('category', categoryFilterLabel(activeCategory)));
+  if (activePriority !== 'all') {
+    chips.push(filterChipHTML('priority', activePriority === UNCATEGORISED
+      ? t('list.priorityNone')
+      : tPriority(activePriority)));
+  }
+  filterSummary.innerHTML = chips.join('');
+}
+
+// The fold itself. One class on the toolbar, one attribute on the button, and the same
+// stored-flag convention the sidebar and the list already use — so it is remembered per
+// device and clearing site data lands back on the shut panel, which is the default this
+// screen was asked for.
+//
+// It is a UI fold and so it DOES persist, unlike the filters inside it. That is not a
+// contradiction: remembering that someone wants the panel open costs nothing when it
+// is wrong, whereas remembering that someone wants only Crashes is how a ticket goes
+// missing. The two are deliberately opposite and the keys are neighbours on purpose.
+function applyFiltersState() {
+  const open = storedFlag(FILTERS_KEY);
+  if (listToolbar) listToolbar.classList.toggle('is-filters-open', open);
+  if (filterToggle) filterToggle.setAttribute('aria-expanded', String(open));
 }
 
 // Search / segment filter.
@@ -10580,8 +11097,9 @@ function escHtml(s) {
   return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Escaper for a value interpolated into an INLINE HANDLER, e.g.
-//   onclick="goTicket('${escJsAttr(ir.irNumber)}')"
+// Escaper for a value interpolated into an INLINE HANDLER, e.g. the one on every
+// ticket row, card and tile:
+//   onclick="openDock('${escJsAttr(ir.irNumber)}')"
 // escHtml is NOT enough there: it does not touch `'`, and every handler in this
 // file is a single-quoted JS string inside a double-quoted attribute — so a value
 // containing a quote closes the JS string and the rest runs as code. That is a
@@ -13866,6 +14384,19 @@ const ICON_PATHS = {
   // button that reads as a brightness toggle is worse than the emoji it replaced.
   settings:       '<path d="M4 7h8.5"/><path d="M17.5 7H20"/><circle cx="15" cy="7" r="2.2"/><path d="M4 17h2.5"/><path d="M11.5 17H20"/><circle cx="9" cy="17" r="2.2"/>',
   pin:            '<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/>',
+
+  // ── The ticket dock's two, 2026-10-11 ────────────────────────────────────────
+  // `panel-bottom` is the bottom sheet itself — a window with its lower band marked.
+  // It is deliberately NOT `chevron` (which is a right-pointing caret and means "go
+  // in" everywhere else in this app) and not a bare upward arrow: the control does
+  // not move the sheet, it toggles whether the panel is up, and it has to read the
+  // same on the tab, where the panel is down, as on the sheet, where it is up.
+  'panel-bottom': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14h18"/><path d="M6.5 17h3"/>',
+  // The full passbook. Two arrows out to opposite corners — the conventional
+  // "open this properly". NOT the same drawing as `panel-bottom`, because these two
+  // buttons sit next to each other and mean genuinely different things: one previews,
+  // one navigates, and they must be tellable apart at a glance.
+  expand:         '<path d="M14 4h6v6"/><path d="M20 4l-6.5 6.5"/><path d="M10 20H4v-6"/><path d="M4 20l6.5-6.5"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in
@@ -13890,6 +14421,10 @@ function iconSvg(name, extraClass) {
 function initIcons() {
   [
     ['#ir-activity-toggle .activity-caret',  'chevron'],
+    // The filters panel's caret, and the same glyph the activity toggle wears: the app
+    // gets ONE idea of what "this row opens" looks like rather than two. It rotates on
+    // `.filter-toggle[aria-expanded="true"]` exactly as that one does on `.is-open`.
+    ['#filter-toggle .filter-caret',         'chevron'],
     ['#nudge-bell .nudge-bell-icon',         'bell'],
     ['#nav-tickets .nav-icon',               'ir'],
     ['#nav-insights .nav-icon',              'chart'],
@@ -13906,7 +14441,11 @@ function initIcons() {
     // The same glyph the toolbar's own fold control wears, so the rail's button
     // reads as "that button, again" rather than as the sidebar's panel toggle.
     ['#list-rail-restore .list-rail-icon',   'list'],
-    ['#detail-placeholder .ph-icon',         'ir'],
+    // #detail-placeholder is deliberately NOT here any more. It used to take the
+    // 'ir' glyph; on 2026-10-11 the owner asked for a big faded logo in that blank
+    // space instead, and a raster mark cannot come from ICON_PATHS — this table is
+    // SVG path data, and every entry here must resolve to a path or smoke-boot
+    // fails. So the panel now carries a real <img> (see index.html).
     ['#ir-triage-btn .btn-icon',             'target'],
     ['#ir-nudge-btn .btn-icon',              'comment'],
     ['#ir-history-btn .btn-icon',            'clock'],

@@ -31,7 +31,7 @@ const r = makeReporter();
 const { T, byId } = loadApp(`
   parseISODate, irFiscalYear, irMonthNumber, fyLabel, MONTH_LABELS,
   insightsFacets, insightsSummary, INSIGHTS_SKELETON, renderInsights,
-  categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter,
+  categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter, setListView,
   IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS, UNCATEGORISED, CATEGORY_ALL,
   INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel, statusCategory,
   get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
@@ -212,6 +212,11 @@ T.allIRs = [
   { irNumber: 'IR3', droneId: 'D-3', status: 'Delivered', category: 'REPAIR' },
   { irNumber: 'IR4', droneId: 'D-4', status: 'Open' },
 ];
+// The Service Desk OPENS ON THE GRID as of 2026-10-11 (the owner: "when I click on
+// IRS Service Desk, it should default open in Grid view"), so the module default is
+// now `grid` and `#ir-list` is not the surface a render writes until the List is
+// asked for BY NAME. Everything below is about the LIST's category axis, so it asks.
+T.setListView('list');
 const counts = T.categoryCounts();
 r.ok('all counts the whole list', counts.all === 4, counts.all);
 r.ok('REPAIR counts two', counts.REPAIR === 2, counts.REPAIR);
@@ -460,6 +465,7 @@ r.head('the search box is rate-limited, and the last keystroke is the one that p
   // all call applyListFilters() directly and each must land on the tick it was asked.
   T.currentView = 'insights';
   T.allIRs = FIXTURE;
+  T.setListView('list');   // this block asserts on #ir-list, so it asks for the List
   T.searchInput.value = 'ird';
   T.applyListFilters();
   r.ok('applyListFilters() still paints on the tick it is called',

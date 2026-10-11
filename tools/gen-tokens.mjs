@@ -298,9 +298,17 @@ ${FONT_SIZES.map(s => {
    5 · LAYOUT
    --header-h replaces the hardcoded 56px sticky offsets
    (.tabs-container, #user-menu, .nudge-panel all assumed it).
+
+   ── IT IS 44px AS OF 2026-10-11, and was 56px before that. The
+   owner, looking at the IR screen: "the amount of space occupied
+   by header (almost blank) ... is too much." He is right about the
+   "almost blank" — this bar holds a wordmark, a couple of buttons
+   and a sync dot, and every pixel of it is charged to the working
+   area underneath. 44px still clears a 40px touch target with room
+   for the rule under it; --rail-w follows it automatically.
    ══════════════════════════════════════════════════════════ */
 :root {
-  --header-h: 56px;
+  --header-h: 44px;
   --sidebar-w: 232px;
   --list-w: 400px;
   --bottombar-h: 60px;

@@ -1209,3 +1209,322 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   border-radius: 50%;
   background: var(--ink-gray-5);
 }
+
+/* ══════════════════════════════════════════════════════════════
+   THE IR DOCK — the strip along the bottom, and the sheet above it
+
+   Markup in index.html is one empty div: every child here is written by
+   renderDock(), so this file styles classes and never an element that
+   does not exist yet. That is also why there is exactly one writer per
+   visibility state — `body.has-dock` for the dock, `.is-open` for a tab.
+
+   ⚠ IT FLOATS ON <body>, which is the whole reason it is square. industrial.css
+   re-points the --radius-* scale inside a LIST of roots that float there, and
+   #ir-dock is on it. Take it off and this family silently keeps a rounded
+   corner nothing else in the app has — the file's own comment says exactly that,
+   and it was written because #pattern-setup-overlay had already done it once.
+
+   BELOW lg, #sidebar IS a fixed bottom bar at bottom: 0, so the strip stands ON
+   TOP of it. Both offsets are written from --dock-tab-h and --bottombar-h, so
+   changing either moves the sheet, the strip and the toast together rather than
+   three of them separately. */
+:root { --dock-tab-h: 3rem; }
+
+#ir-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: var(--z-bottombar);
+  display: none;
+  flex-direction: column;
+  /* The sheet is centred and narrower than the window on a laptop; the ground
+     either side of it still belongs to the page behind, so it has to keep taking
+     clicks. The two real pieces of chrome turn pointer-events back on. */
+  pointer-events: none;
+}
+body.has-dock #ir-dock { display: flex; }
+/* On a phone the app's own bottom bar owns the bottom edge. The strip goes above
+   it, and so does the toast — which is parked at that same offset in base.css and
+   would otherwise land behind a tab every time it had something to say. */
+@media (max-width: 1023px) {
+  #ir-dock { bottom: calc(var(--bottombar-h) + var(--safe-b)); --dock-tab-h: 3.5rem; }
+}
+/* ── THE TOAST HAS TO CLEAR THE STRIP — AND TO STAY GONE WHEN IT IS HIDDEN ───────
+   Raising `bottom` is the obvious half and the wrong half on its own. base.css parks
+   the toast with `transform: translateX(-50%) translateY(140%)` — 140% OF ITS OWN
+   HEIGHT, which was just enough to drop it past the window edge while `bottom` was
+   1.25rem. Once `bottom` is raised by --dock-tab-h the same 140% no longer reaches the
+   edge, and the HIDDEN pill comes back into view: measured on a 900px window, fully
+   opaque at y851–889, sitting on IR407's tab. The toast has no `opacity: 0` rest state
+   to save it — the translate is the whole of the hide.
+
+   So the raise is added to the hidden offset as well. And `.show` is RE-STATED below,
+   which is not belt-and-braces: `body.has-dock #toast` (one id, one class, one element)
+   outranks base.css's `#toast.show` (one id, one class) whatever the source order, so
+   without that line every toast in the app would transition to `translateY(0)` and be
+   overruled back down — permanently invisible, with the dock on screen. */
+body.has-dock #toast {
+  bottom: calc(var(--dock-tab-h) + var(--safe-b) + 1rem);
+  transform: translateX(-50%) translateY(calc(140% + var(--dock-tab-h) + var(--safe-b) + 1rem));
+}
+body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
+@media (max-width: 1023px) {
+  body.has-dock #toast {
+    bottom: calc(var(--bottombar-h) + var(--dock-tab-h) + var(--safe-b) + 0.75rem);
+    transform: translateX(-50%) translateY(calc(140% + var(--bottombar-h) + var(--dock-tab-h) + var(--safe-b) + 0.75rem));
+  }
+}
+
+/* ── The strip ──────────────────────────────────────────────────────────────
+   His rule, in his words: "if the tabs are more than that can come on screen…
+   it will show those many tabs minimised how much can come on screen, and if on
+   screen tabs are closed, then others can come and take vacant minimised tab's
+   space." That is a flexible, scrollable row and nothing more — each tab grows
+   into the room the others leave, and past the point where they are all still
+   readable the row scrolls.
+
+   A "+N" chip was planned for the overflow and is deliberately NOT here. It would
+   have been a second place a ticket could go invisible, behind a tap that reveals
+   another list; a horizontal scroll is a gesture every phone already has, and the
+   strip is a strip. */
+.dock-tabs {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  height: var(--dock-tab-h);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--ind-line);
+  border-top: 1px solid var(--ind-line);
+  scrollbar-width: thin;
+}
+
+.dock-tab {
+  flex: 1 1 16rem;
+  min-width: 13rem;
+  max-width: 24rem;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px 0 10px;
+  background: var(--ind-panel);
+  border-top: 2px solid transparent;
+}
+/* The one already up is marked, so the strip answers "which one am I reading?"
+   without anyone having to look up at the sheet. It is a rule along the top edge
+   and not a fill: a fill would make an open tab read as the SELECTED one among
+   several, and this strip is a worklist, not a set of choices. */
+.dock-tab.is-open { border-top-color: var(--accent); background: var(--ind-ground); }
+
+.dock-tab-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  height: 100%;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.dock-tab-num {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-tab-co {
+  font-size: var(--text-xs);
+  color: var(--ink-gray-6);
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dock-tab-name:hover .dock-tab-num { color: var(--accent); }
+
+/* His three, in his order: leftmost the mid-size view, middle the full view,
+   rightmost save-and-close. There is nothing to save — the sheet holds no
+   editable field, and the quick actions write the moment they are used — so the
+   rightmost button closes, and it cannot lose a change. Labelling a control
+   "Save" that does not save is the one thing that would make this strip lie. */
+.dock-tab-btns {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.dock-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--ink-gray-6);
+  font-family: inherit;
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+.dock-btn:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+.dock-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dock-btn .icon { width: 1.05em; height: 1.05em; }
+/* The close is an &times; and not a glyph — the app's close idiom in all nine of
+   its modals, and deliberately NOT in ICON_PATHS. This is that same character,
+   not a tenth drawing of one. */
+.dock-btn-close { font-size: var(--text-xl); }
+.dock-btn[aria-pressed="true"] { color: var(--accent); }
+
+/* ── The sheet ───────────────────────────────────────────────────────────────
+   Opaque, NOT glass. §9 of industrial.css gives the glass fill to panels that are
+   one small object over a page; this is 60vh of it, and a blurred list showing
+   through the activity it is summarising reads as broken, not as layered.
+
+   The max-height is what makes the whole chain work: it is the only DEFINITE
+   height in here, and without it the body below would grow to fit its content and
+   the sheet would run off the top of the window. */
+.dock-sheet {
+  pointer-events: auto;
+  align-self: center;
+  width: 100%;
+  max-width: 68rem;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--ind-panel);
+  border: 1px solid var(--ind-line);
+  border-bottom: 0;
+  box-shadow: var(--elevation-lg);
+}
+@media (max-width: 1023px) {
+  .dock-sheet { max-width: none; max-height: 85vh; border-left: 0; border-right: 0; }
+}
+
+.dock-sheet-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--ind-line);
+}
+.dock-sheet-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+.dock-sheet-num {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-9);
+  white-space: nowrap;
+}
+.dock-sheet-btns { flex: 0 0 auto; display: flex; align-items: center; gap: 1px; }
+
+/* THE DEFINITE-HEIGHT CHAIN, second link. The max-height on the sheet above is
+   what this needs; `min-height: 0` is what stops it refusing to shrink below its
+   content — the failure that cost this project a scrollbar for weeks at v87. */
+.dock-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.dock-sheet-body:focus { outline: none; }
+
+.dock-subject {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--ink-gray-8);
+  line-height: 1.35;
+}
+.dock-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  font-size: var(--text-sm);
+  color: var(--ink-gray-6);
+}
+.dock-fact { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.dock-fact .is-unassigned { font-style: italic; }
+.dock-fact-empty { margin: 0; font-size: var(--text-sm); color: var(--ink-gray-6); }
+
+.dock-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--ind-line);
+  background: var(--ind-ground);
+}
+.dock-field { display: flex; align-items: center; gap: 0.4rem; min-width: 0; flex: 1 1 12rem; }
+.dock-field-lbl {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.dock-field .list-select { flex: 1 1 auto; min-width: 0; }
+
+.dock-activity-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--ind-line);
+}
+.dock-activity-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-gray-6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.dock-activity-count { font-size: var(--text-xs); color: var(--ink-gray-6); }
+
+/* The list itself is renderTimelineInto's, unchanged — this only keeps it off the
+   sheet's own edges. Nothing in this file styles a `.hist-*` row: those carry the
+   design system, and they are the same rows the passbook shows. */
+.dock-timeline { flex: 0 0 auto; }
+.dock-timeline .hist-list { padding: 0; }
+
+/* ── Phone ───────────────────────────────────────────────────────────────────
+   Thumb-sized buttons, one tab to the row, and the same 16px floor on a select
+   that the list's own selects get — iOS zooms the whole page on a focused control
+   below it, and the sheet is the last place anyone wants the page to jump. */
+@media (max-width: 639px) {
+  .dock-tab { flex: 1 1 100%; min-width: 12rem; max-width: none; }
+  .dock-btn { width: 2.5rem; height: 2.5rem; }
+  .dock-sheet-body { padding: 0.625rem; }
+  .dock-field { flex: 1 1 100%; }
+}

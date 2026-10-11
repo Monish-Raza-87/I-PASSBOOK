@@ -300,7 +300,48 @@ is written out separately with the media query rewritten, because that page read
 `.list-toolbar` (title, the List/Board/Grid switch, count, search, filter segments,
 the priority and sort selects) over `.ir-list`. Rows are
 `.ir-card` — flat with dividers rather than floating cards, which holds up better
-at 400 rows. `.ir-card.is-selected` marks the row open in the split pane.
+at 400 rows. `.ir-card.is-selected` marks the row **the screen is about** — see
+*The ticket dock* below, which is the other way that becomes true.
+
+**The toolbar is compact by measurement, not by taste (2026-10-11).** The owner, looking
+at this screen: *"the amount of space occupied by header (almost blank), search bar,
+filters (all sorts of) are occupying in the page is too much and should be thought out
+intelligently and designed modularly."* He was right, and the number was **328px above the
+first row** — 37% of a 900px window, and **394px of a 844px phone**, 47% of the screen spent
+before the work starts.
+
+It is now two rows and one fold:
+
+- **`.list-toolbar-top`** — title, the view switch, **the search box**, the count and the
+  `Filters ▾` toggle, on one line. The search moved up onto the title row; it is also the
+  order `smoke-board.mjs` already pins (the switch must sit between `class="list-toolbar-top"`
+  and `id="search-input"`), so the constraint and the design agree instead of fighting. On a
+  phone the row wraps to two lines and the toggle is a 40px target.
+- **`#filter-summary`** — the **names of the filters in force**, each a chip that clears
+  itself. **This is not decoration and it is not optional.** The app's written rule is that
+  filters deliberately do not persist (`VIEW_KEY`), because *a hidden filter surviving a
+  reload is how someone concludes the app has lost tickets*. Folding the panel away hides the
+  controls, so the closed row has to *say* what is filtering — and then a filter can never be
+  hidden and in force at the same time. It is empty and takes no height at all until one is.
+- **`#list-filters`** — the status strip, the category strip and both selects, unchanged,
+  inside a panel shut unless asked for. `list-toolbar:not(.is-filters-open)` hides it, and it
+  is hidden **by a class rather than with `hidden`** because the strips inside it are measured
+  *in place* by the geometry checks in the suites; taking them out of layout would break
+  twenty rules that have nothing to do with this change.
+
+`--header-h` went 56px → **44px** in the same pass (still clearing a 40px touch target with
+room for the rule beneath it); `--rail-w` follows it automatically. Net: **130px** of chrome
+in Grid/Board and **165px** in List at 1440×900, **160px** on the phone. The open/closed state
+of the fold persists through the same `storedFlag`/`setFlag` convention as the rail — it is a
+**UI fold, not a filter**, which is the opposite rule on purpose, and `FILTERS_KEY` says so
+in a comment where someone would otherwise "fix" it.
+
+⚠ **Option 3 — "keep it, hide it on scroll" — was evaluated and rejected**, because it saves
+nothing at rest (the top of the list is where every filter change lands), it would hide the
+search box exactly while searching, it needs a scroll listener on `#ir-list` that this project
+has already measured and deliberately not paid for, and it makes *"how much space is this
+taking?"* stop having an answer. The compact toolbar reclaims the space **always**, with no
+new listener, and hide-on-scroll layers on top of it later if he still wants it.
 
 An `.ir-card` shows the **assignee's name** as `.ir-assignee`, beside the IR number
 in `.ir-title-row`. It was an initials circle (`.assignee-avatar`, `initialsOf()`)
@@ -463,6 +504,49 @@ reorder the master list and every Insights count with it. The default order is
 **Newest first**, which means this release changed the List's order too. The view mode is
 remembered across a reload; **the filters deliberately are not** — a hidden priority
 filter surviving a reload is how someone concludes the app has lost tickets.
+
+### The ticket dock (`#ir-dock`)
+A strip along the bottom of the window holding every ticket the owner has opened, and the
+bottom sheet that one of them can raise. His words, after checking Gmail himself: *"bottom
+sheet, where it can be minimised… such that I can minimise and keep multiple IRs on my
+worklist on screen minimised."* And, on the shape of the minimised tabs: *"seated adjacent to
+each other in bottom, i.e., a line one next to other, facing us (the user)"* — a **row**, not
+Gmail's vertical stack.
+
+- **The tab** — name left, ellipsised, then **three buttons right-aligned in his order**:
+  the mid-size panel, the full view, and close. The name is *also* a button, so the whole tab
+  body brings its sheet back rather than only the three small corners.
+- **The sheet** — one at a time, ~60vh (85vh on a phone), read view plus quick actions, with
+  the three buttons repeated at its foot. **The sheet is not a second ticket screen**: its
+  activity list is `buildTimeline()` + `renderTimelineInto()`, the exact pair the passbook's
+  own `#ir-timeline` calls; its quick actions write through the single store writer
+  `patchIRState()`, whose tail already repaints the drawing underneath; and they render
+  **only** when `canEditSection()` passes, or a view-only user is shown controls that cannot
+  work. **Expand calls `goTicket()`** — the existing passbook and no new one. All three
+  drawings open it (`openDock()`), and it works on a phone.
+- **The rightmost button is not labelled "Save".** He called it *save and close*, and there is
+  nothing to save: the sheet holds no editable fields and every quick action has already
+  written. The button closes, and it cannot lose a change.
+- **Not a route.** `#/tickets/IR470` still means *full screen* — it is what a nudge and an
+  emailed link land on — so the dock never writes the hash and the hash never opens a sheet.
+  A consequence, stated rather than discovered: **browser Back does not close the sheet.**
+  Close is ✕; `Escape` **minimises** (non-destructive) under the same fire-only-while-open
+  guard the customer door uses.
+- **`#ir-dock` is a static child of `<body>`**, like the other floating chrome — never inside
+  `#index-view`, which is overflow-free by assertion and re-shaped by `list-collapsed`.
+  `applyDockState()` is the **one writer** of `body.has-dock`: the dock is on screen for the
+  three drawings and nowhere else, standing down while the passbook, dashboard, analyser or
+  FAQ owns the screen. `dockIRs` is memory, so coming back restores the worklist intact.
+
+⚠ **`#toast` had to be taught about the strip, and the hidden state is the half that bites.**
+`#toast` has **no `opacity: 0` rest state** — base.css hides it purely with
+`transform: translateX(-50%) translateY(140%)`, **140% of its own height**. Raising `bottom`
+by the dock's height therefore lifted the *hidden* pill back on screen, fully opaque, sitting
+on a tab (measured: y851–889 on a 900px window). So `body.has-dock #toast` carries the dock
+height in the hidden offset too — **and re-states `.show`**, because `body.has-dock #toast`
+(1 id, 1 class, 1 element) outranks base.css's `#toast.show` (1 id, 1 class) whatever the
+source order, and without that line every toast in the app would be invisible while the dock
+was up. **A hide implemented as a transform is a hide with an implicit size in it.**
 
 ### Sync bar (`#sync-status`)
 `.sync-msg` (the last status message) + `.sync-meta` (`Synced HH:MM`) +

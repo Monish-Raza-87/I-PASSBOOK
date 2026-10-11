@@ -927,51 +927,98 @@
             <span class="list-rail-count" id="list-rail-count"></span>
             <span class="list-rail-label" data-i18n="list.title">IRs</span>
           </div>
-          <div class="list-toolbar">
+          <!-- ══ THE COMPACT TOOLBAR ══════════════════════════════════════════════
+               The owner, 2026-10-11: "the amount of space occupied by header (almost
+               blank), search bar, filters (all sorts of) are occupying in the page is
+               too much and should be thought out intelligently and designed modularly."
+
+               Measured before: 56px of app header + a 245px toolbar + a 28px sync line
+               = **328px above the first row**, and 394px on a 390x844 phone — 47% of a
+               phone's screen spent before the work starts.
+
+               The shape now is two things and not six. ONE row carries the title, the
+               drawing switch, the search box, the count and the Filters control — all
+               the things a person touches on the way IN. Under it, ONE collapsible
+               panel carries the status strip, the category strip and the two selects —
+               the things a person touches occasionally, and never while reading.
+
+               ── WHY THE SUMMARY CHIPS MATTER, and are not decoration ───────────────
+               This app has a written rule that the FILTERS deliberately do not persist
+               (see VIEW_KEY in app.js): a priority filter surviving a reload is how
+               somebody concludes the app has lost tickets. Collapsing the panel hides
+               the controls that state what is filtering — so the closed row NAMES what
+               is filtering, and a filter can never be hidden and in force at the same
+               time. Each chip is a button that clears its own filter.
+
+               ── AND WHY THIS IS NOT "hide it on scroll" ────────────────────────────
+               Hiding the chrome while the list scrolls was considered and rejected: it
+               saves nothing at rest (the top of the list is where every filter change
+               lands), it would hide the search box exactly while searching, it needs a
+               scroll listener on #ir-list that this project has already measured and
+               deliberately not paid for, and it makes "how much room is this taking?"
+               stop having an answer. This reclaims the space ALWAYS. -->
+          <div class="list-toolbar" id="list-toolbar">
+            <!-- ROW ONE: everything a person touches on the way IN. It wraps rather
+                 than overflowing, because this same toolbar is drawn inside the
+                 `--list-w` 400px pane whenever a ticket is open beside it. -->
             <div class="list-toolbar-top">
               <span class="list-title" data-i18n="list.title">IRs</span>
               <!-- List | Board | Grid. A SWITCH, not a seventh nav tab: all three are
-                   drawings of the SAME rows, so they must obey the same search box, the
-                   same two filter strips and the same sort directly below them. A
-                   separate tab would mean filtering twice and reading two different
-                   numbers. `#index-view` carries ONE class naming the drawing that
-                   shows, and it is the only thing that decides — no second element kept
-                   in step (see setListView). -->
+                   drawings of the SAME rows, so they obey the same search box, the same
+                   two filter strips and the same sort. A separate tab would mean
+                   filtering twice and reading two different numbers. `#index-view`
+                   carries ONE class naming the drawing that shows, and it is the only
+                   thing that decides — no second element kept in step (see setListView). -->
               <span class="view-switch" id="list-view-switch" role="tablist" aria-label="List, board or grid" data-i18n-aria="list.viewMode">
                 <button type="button" class="view-switch-btn active" data-view="list" role="tab" aria-selected="true" data-i18n="list.viewList">List</button>
                 <button type="button" class="view-switch-btn" data-view="board" role="tab" aria-selected="false" data-i18n="list.viewBoardBtn">Board</button>
                 <button type="button" class="view-switch-btn" data-view="grid" role="tab" aria-selected="false" data-i18n="list.viewGridBtn">Grid</button>
               </span>
+              <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" data-i18n-placeholder="list.search" />
               <span class="list-count" id="list-count"></span>
+              <button type="button" id="filter-toggle" class="filter-toggle"
+                      aria-expanded="false" aria-controls="list-filters"
+                      title="Show or hide the filters" data-i18n-title="list.filtersToggle">
+                <span class="filter-toggle-lbl" data-i18n="list.filters">Filters</span>
+                <span class="filter-caret" aria-hidden="true"></span>
+              </button>
             </div>
 
-            <input type="text" id="search-input" class="search-bar" placeholder="Search by IR number or drone ID…" data-i18n-placeholder="list.search" />
-            <div class="segments" id="list-segments" role="tablist"></div>
-            <!-- The Category strip. A SECOND .segments row rather than a new widget,
-                 so it inherits the strip's own CSS and its counts read exactly like
-                 the status counts directly above it. -->
-            <div class="segments segments-cat" id="list-categories" role="tablist"></div>
-            <!-- Priority + sort. TWO SELECTS, and deliberately NOT a third widget:
-                 both feed applyListFilters(), the one function the search box and both
-                 strips already pass through — so all three drawings are filtered and
-                 ordered by the same code and none of them can show a different set.
-                 Priority is app-owned (set in Allot CAPS) and most tickets have none,
-                 so "No priority" is a real bucket rather than an empty state, following
-                 the same convention the Category strip's own uncategorised bucket set. -->
-            <div class="list-selects">
-              <select id="filter-priority" class="list-select" aria-label="Priority" data-i18n-aria="list.filterPriority">
-                <option value="all" data-i18n="list.filterPriority">All priorities</option>
-                <option value="Urgent" data-i18n="priority.urgent">Urgent</option>
-                <option value="High" data-i18n="priority.high">High</option>
-                <option value="Medium" data-i18n="priority.medium">Medium</option>
-                <option value="Low" data-i18n="priority.low">Low</option>
-                <option value="__none__" data-i18n="list.priorityNone">No priority</option>
-              </select>
-              <select id="sort-by" class="list-select" aria-label="Sort" data-i18n-aria="list.sortLabel">
-                <option value="newest" data-i18n="list.sortNewest">Newest first</option>
-                <option value="oldest" data-i18n="list.sortOldest">Oldest first</option>
-                <option value="priority" data-i18n="list.sortPriority">Highest priority</option>
-              </select>
+            <!-- ROW TWO: what is filtering, said out loud. It is EMPTY and takes no
+                 height at all until a filter is in force, so the closed toolbar costs
+                 one row and not two. Filled by renderFilterSummary() from the same
+                 state applyListFilters() reads, so the two can never disagree. -->
+            <div class="filter-summary" id="filter-summary"></div>
+
+            <!-- ⚠ HIDDEN BY A CLASS ON THE TOOLBAR AND NOT WITH `hidden`, because the
+                 strips in here are MEASURED in place by the smoke suites' geometry
+                 checks, and an element with `display: none` has no box to measure. Shut
+                 at rest; open, it holds exactly what it always held. -->
+            <div class="list-filters" id="list-filters">
+              <div class="segments" id="list-segments" role="tablist"></div>
+              <!-- A SECOND .segments row rather than a new widget, so it inherits the
+                   strip's own CSS. -->
+              <div class="segments segments-cat" id="list-categories" role="tablist"></div>
+              <!-- TWO SELECTS, and deliberately NOT a third widget: both feed
+                   applyListFilters(), the one function the search box and both strips
+                   already pass through, so all three drawings filter and order alike.
+                   "No priority" is a real bucket, not an empty state — priority is
+                   app-owned and most tickets have none. -->
+              <div class="list-selects">
+                <select id="filter-priority" class="list-select" aria-label="Priority" data-i18n-aria="list.filterPriority">
+                  <option value="all" data-i18n="list.filterPriority">All priorities</option>
+                  <option value="Urgent" data-i18n="priority.urgent">Urgent</option>
+                  <option value="High" data-i18n="priority.high">High</option>
+                  <option value="Medium" data-i18n="priority.medium">Medium</option>
+                  <option value="Low" data-i18n="priority.low">Low</option>
+                  <option value="__none__" data-i18n="list.priorityNone">No priority</option>
+                </select>
+                <select id="sort-by" class="list-select" aria-label="Sort" data-i18n-aria="list.sortLabel">
+                  <option value="newest" data-i18n="list.sortNewest">Newest first</option>
+                  <option value="oldest" data-i18n="list.sortOldest">Oldest first</option>
+                  <option value="priority" data-i18n="list.sortPriority">Highest priority</option>
+                </select>
+              </div>
             </div>
           </div>
           <div id="sync-status"></div>
@@ -1217,9 +1264,24 @@
 
         <!-- Desktop-only empty state, shown until an IR is selected.
              A sibling of #detail-view rather than a child, so that
-             #detail-view's display stays a truthful "is an IR open" flag. -->
+             #detail-view's display stays a truthful "is an IR open" flag.
+
+             THE BIG FADED MARK. The owner, 2026-10-11: "when landing on dashboard
+             and no any service desk is open, in blank space big faded logo to
+             appear." This panel IS that blank space — it is on screen whenever no
+             ticket, dashboard, analyser or FAQ pane owns the row — so the mark
+             goes here and nowhere else.
+
+             It replaced a 2.75rem inline glyph filled from ICON_PATHS. A raster
+             mark cannot come from ICON_PATHS — that table is SVG path data — so
+             this is a real <img>, the same keyed monogram the sign-in head and the
+             sidebar wear. NOT assets/logo.png: that file is on
+             tools/deploy-ghpages.mjs's PRUNE list and is deleted from gh-pages.
+
+             alt="" on purpose: the two lines under it already say what this panel
+             is, so the mark is decoration and saying it twice helps nobody. -->
         <div id="detail-placeholder">
-          <div class="ph-icon" aria-hidden="true"></div>
+          <img class="ph-mark" src="assets/icon-mark.png" alt="" />
           <p class="ph-title">No IR selected</p>
           <p class="ph-sub">Pick an IR from the list to open its passbook.</p>
         </div>
@@ -1297,6 +1359,29 @@
        that was lost. The inner span is separate so `pointer-events` can be `auto`
        on the pill and `none` on its text — otherwise the text node swallows taps. -->
   <div id="toast" role="status" aria-live="polite" title="Tap to dismiss"><span id="toast-text"></span></div>
+
+  <!-- ========== THE IR DOCK ==========
+       Clicking an IR used to throw the drawing away and take the whole window. It
+       now slides a sheet up over the drawing and leaves a tab in a strip along the
+       bottom, so the work he was reading stays behind it and the ticket stays one
+       tap away. The owner, 2026-10-11. The full passbook is unchanged, behind the
+       middle button on every tab.
+
+       It lives on <body> with the other floating chrome — the same home as the
+       customer door and the pattern dialog below, for the same reason — and NOT
+       inside #index-view. Three separate traps make that the only place it can go:
+       #index-view may never gain an `overflow` (smoke-board pins that), the class
+       that folds the list hides a fixed list of #index-view's own children, and
+       renderLayout() is the single writer of pane visibility — which this sits
+       outside of precisely because it has to be able to open over any of the three
+       drawings, and over none of them.
+
+       DELIBERATELY EMPTY. Every child is written by renderDock(), because the
+       strip and the sheet are rebuilt together from one array and two writers would
+       disagree the first time one of them changed. What is not optional is the
+       element itself: app.js must find it rather than create it, or a second sign-in
+       would leave a second dock stacked on the first. -->
+  <div id="ir-dock"></div>
 
   <!-- ========== THE CUSTOMER DOOR ==========
        A modal, appended to <body> like every other one (see the MODALS note in

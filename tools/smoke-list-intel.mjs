@@ -368,6 +368,7 @@ function loadList(fetchImpl) {
     get allIRs() { return allIRs; }, set allIRs(v) { allIRs = v; },
     get dataIsDemo() { return _dataIsDemo; },
     get syncText() { return document.getElementById('sync-status').innerHTML; },
+    setListView,
   `, { capture: true, fetch: fetchImpl || deadFetch });
 }
 
@@ -382,6 +383,9 @@ function loadList(fetchImpl) {
 const asUser = (T, email) => T.persistUser({ name: email, email, initial: email[0].toUpperCase() });
 
 const A = loadList();
+// The Service Desk opens on the GRID now, so a render draws tiles until the List is
+// asked for by name. Everything in this suite is about the LIST's cached paint.
+A.T.setListView('list');
 const seed = (T, records) => { T.allIRs = records; T.writeIRListCache(); T.allIRs = []; };
 asUser(A.T, 'monish.raza@indrones.com');
 seed(A.T, SEED);

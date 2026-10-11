@@ -1,5 +1,5 @@
 # I-PASSBOOK Project Milestone Log
-*Last Updated: 2026-10-01*
+*Last Updated: 2026-10-11*
 
 This document serves as the authoritative record of architectural changes, bug fixes, and feature blueprints implemented during the recent development cycle.
 
@@ -167,7 +167,154 @@ the same deploy, because the version could not be pushed without his go.
 
 ---
 
-## 6. Future Roadmap (Planned)
+## 6. The ticket dock, and the chrome that was eating the screen (2026-10-11)
+
+### What he asked for
+Four things, asked in one message the day v89 landed. *"When i'm on a grid view page, IR
+should not occupy the space in page, it should be grid only… on my click on any ir box, ir
+will slide in and view above other IRs, but not in a full screen view. if i want to continue
+fully into that ir, there would be an expand button."* Then, sharper, after checking Gmail
+himself: *"bottom sheet, where it can be minimised… such that I can minimise and keep
+multiple IRs on my worklist on screen minimised."* Plus: *"the amount of space occupied by
+header (almost blank), search bar, filters (all sorts of) are occupying in the page is too
+much and should be thought out intelligently and designed modularly"*, a Service Desk that
+opens on the **Grid**, and a **big faded logo** in the blank space where no ticket is open.
+
+All four are one ask — *give the work the screen* — so they ship together as **v90**.
+
+### Part A — the dock
+`#ir-dock` is **a static child of `<body>`**, the same home as the other floating chrome
+(never inside `#index-view`, which is `overflow: hidden` by assertion and re-shaped by
+`list-collapsed`). Two bindings hold the whole state — `dockIRs` (strip order) and `dockOpen`
+(the one sheet up) — and `renderDock()` rebuilds the strip and the sheet together from them,
+so there is no incremental DOM to keep in step and no way for the two to disagree.
+
+- **The tab** is name-left, then **three buttons right-aligned in his order**: mid-size
+  panel, full view, close. The name *is* also the button that brings the sheet back, which
+  makes the whole tab body a target and not only its three small corners.
+- **The row, not a stack.** He checked Gmail and wants the minimised tabs **adjacent along
+  the bottom, facing the user**, so that is what is built. More tabs than fit is real but
+  rare; the strip is a horizontal scroll of exactly the tabs that cannot fit.
+- **Exactly one sheet; the rest stay minimised.** **Newest lands last**, left to right.
+  Re-opening a docked ticket restores it rather than adding a second copy.
+- **Expand is `goTicket()` — the existing passbook and no new one.** A lighter ticket screen
+  that drifts from the passbook is the real risk, and the guard against it is reuse, not
+  discipline: the sheet's activity list is `buildTimeline()` + `renderTimelineInto()`, the
+  exact pair the passbook's `#ir-timeline` calls; the quick actions write through the single
+  store writer `patchIRState()`, whose own tail already repaints the drawing underneath; and
+  they render **only** when `canEditSection()` passes, or a view-only user is shown controls
+  that cannot work.
+- **The rightmost button is not labelled "Save".** He called it *save and close*, and there
+  is nothing to save — the sheet holds no editable fields and every quick action writes
+  through the moment it is used. It closes, and it cannot lose a change. A control called
+  Save that does not save is a lie the app would have to keep.
+
+**The dock is deliberately not a route.** `#/tickets/IR470` keeps meaning *full screen*: it
+is what a nudge and an emailed link land on. So the dock never writes the hash and the hash
+never opens a sheet — and one consequence is stated rather than discovered: **browser Back
+does not close the sheet.** Close is ✕, and `Escape` **minimises** (non-destructive, focus
+back to the tab) under the same guard shape the customer door uses — it fires only while a
+sheet is open, so it never swallows a key anywhere else in the app.
+
+### Part B — the chrome, measured rather than guessed
+**328px of chrome sat above the first row** (37% of a 900px window; 394px of a 844px phone —
+47% of the screen spent before the work starts).
+
+| | Before | After |
+|---|---|---|
+| App header | 56px | **44px** (`--header-h`; `--rail-w` follows automatically) |
+| Title · view switch · **search** · count | two rows, ~49px | **one row** |
+| Status strip + category strip + both selects | 134px, always open | **one Filters row, ~28px closed** |
+| Sync bar | 25px | folded under the Filters row |
+| **Grid/Board, 1440×900** | **328px** | **130px** |
+| **List, 1440×900** (400px pane, row one wraps) | **328px** | **165px** |
+| **Phone 390×844** | **394px** | **160px** |
+
+The closed row **names what is filtering** — `Filters ▾  "crash" · Crash · Urgent` — and each
+chip clears its own filter. That is not decoration: this app has a written rule that filters
+**deliberately do not persist** (`VIEW_KEY`), because *a hidden filter surviving a reload is
+how someone concludes the app has lost tickets*. Collapsing the panel hides the controls, so
+the closed row has to say what is in force, and a filter can never be hidden and applying at
+the same time. The open/closed state persists through the same `storedFlag`/`setFlag`
+convention as the rail — a **UI fold, not a filter**, which is the opposite rule on purpose.
+
+The panel is hidden **by a class on the toolbar, not with `hidden`**, because the strips in
+it are measured *in place* by the geometry checks in the suites — 20-odd rules over
+`.segment` / `.segment-count` — and taking them out of layout would have broken all of them.
+
+### ⚠ Option 3, evaluated and rejected — written down, because "we thought about it" is not a record
+*Keep it, hide it on scroll* was the obvious third option and it was not built:
+
+1. **The pane does not scroll — the list does.** Hiding the toolbar means a scroll listener
+   on `#ir-list`, throttled through rAF. This project already measured its scroll path and
+   deliberately stopped a repaint on every search tick; this would add one back.
+2. **It hides the search box exactly while searching.** You scroll *to scan results*, and the
+   control vanishes at the moment it is most wanted.
+3. **It saves nothing at rest.** At the top of the list — where he lands after every filter
+   change — the full chrome is still there. The 328px is only reclaimed once he is already
+   reading.
+4. **It is non-deterministic**, so *"how much space is this taking?"* stops having an answer —
+   which is the question he actually asked.
+
+The compact toolbar reclaims the space **always**, with no new listener. And it is reversible:
+if he wants hide-on-scroll *after* living with this, it layers on top without undoing any of it.
+
+### Part C — the Service Desk opens on the Grid
+Done in `handleRoute()`, **not on the link** — `#nav-tickets` is a plain `<a href="#/tickets">`
+with no JS binding by design, and suites lean on that. Two guards keep it honest: arriving
+while already on a drawing does not stamp on the view he just chose, and coming **back from a
+ticket** does not force the Grid, so Back returns to the drawing he left. `setListView()`'s
+own byte-pinned line is untouched, so no assertion moved.
+
+### Part D — the faded mark
+`#detail-placeholder` — the *"No IR selected"* blank, which he chose over the empty list. It
+is `assets/icon-mark.png`, **not** `logo.png` (that one is in the deploy tool's prune list and
+is deleted from gh-pages), sized large and faded, with its own dark-theme treatment because
+the mark has one and would otherwise vanish in dark mode.
+
+⚠ **Stated consequence of Part C:** Grid takes the whole workspace on desktop, and that rule
+*hides* `#detail-placeholder`. So with Grid now the default, the mark is met in **List** —
+the one drawing with blank space to fill. If he wants a watermark in the Grid's own empty area
+too, that is a separate small change he can ask for.
+
+### ⚠ The bug the screenshots found, and only the screenshots could
+The dock shipped, and the toast landed **on top of it** — visible in the PNG, sitting on
+IR407's tab. The probe explained it: `#toast` has **no `opacity: 0` rest state**; base.css hides
+it purely by sliding it down `translateY(140%)` — **140% of its own height**. Raising `bottom`
+by the dock's height therefore lifted the *hidden* pill back into view: fully opaque at
+y851–889 on a 900px window. The fix adds the dock height to the hidden offset as well — and
+**re-states `body.has-dock #toast.show`**, because `body.has-dock #toast` (1 id, 1 class, 1
+element) outranks base.css's `#toast.show` (1 id, 1 class) whatever the source order, so
+without that line *every toast in the app* would be invisible whenever the dock was on screen.
+Three assertions now pin all three halves. **A hide implemented as a transform is a hide with
+an implicit size in it**, and moving the element moves that size too.
+
+### The mark, in one place
+A row or tile is **lit** when the screen is about that ticket — the passbook is on it
+(`currentIR`), or its sheet is up (`dockOpen`). Those two cannot both be true, because the
+dock stands down the moment the passbook opens, so `litTicket()` answers one question rather
+than OR-ing two half-answers. It is read at render time by the list row and the grid tile, so
+a rebuild for a filter change keeps the mark, and `renderDock()` re-applies it as well, because
+opening or minimising a sheet changes no layout at all. The board still marks nothing: it is a
+wall of work, not a column of rows.
+
+### Verification
+37 suites green. Then driven in a real browser: three tickets docked → three tabs, one sheet,
+correct order; ✕ on the open one → the next takes its place; ✕ out of order → the space
+closes; the middle button → `#/tickets/IR409` **and the existing passbook up**, proving no
+second ticket screen was built. The mark: open A lights A, open B lights B alone, minimise
+lights nothing, expand keeps A lit behind the passbook. The definite-height chain survived the
+shrink — 65 injected rows still give `scrollHeight` 4989 vs `clientHeight` 748, and `scrollTop`
+takes. On 390×844: one column, tabs clear of the app's own bottom bar, both selects 16px,
+`scrollWidth === innerWidth`, and a shown toast clears the strip while a hidden one is off the
+window.
+
+**Shipped as v90.** Frontend only — nothing here is routed, so `API_VERSION` did not move and
+**no Apps Script paste is owed.**
+
+---
+
+## 7. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

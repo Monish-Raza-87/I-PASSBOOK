@@ -134,7 +134,14 @@
    inside it and the canvas beside it rounded; naming the root is what squares the lot.
    (Read as: whatever the app grows that floats on <body> has to be added here, or it
    silently keeps a radius the rest of the app does not have.) */
-#pattern-setup-overlay {
+/* #ir-dock joined on 2026-10-11, the day it was built. It is the second case of
+   the SAME mistake this block's note above describes: a piece of chrome that floats on
+   <body> rather than inside a screen. Without this entry its sheet, its buttons and its
+   tabs all keep the untouched --radius-3 and --radius-6, and it renders as the one
+   rounded family in an app of square ones. It is the whole corner block's own advice,
+   taken: whatever the app grows that floats on <body> has to be added here. */
+#pattern-setup-overlay,
+#ir-dock {
   --radius-1: 0px;
   --radius-2: 0px;
   --radius-3: 0px;
@@ -532,6 +539,50 @@
    this file. It still reads as a placeholder: the value a user types is --ink-gray-9,
    three steps away. */
 #index-view .search-bar::placeholder { color: var(--ind-muted); }
+
+/* ── The Filters control and its chips, 2026-10-11 ───────────────────────────────
+   The toolbar gained a collapsible filters panel (views.css carries the reasoning) and
+   these two controls are the only new furniture in it. They are drawn in this file's
+   hand rather than left at views.css's defaults, or the one screen the owner looks at
+   most would have a rounded white pill sitting in a row of ruled mono tiles.
+
+   The toggle is the SAME FONT, TRACKING AND BORDER as a segment tile, because it opens
+   the strip those tiles live on and should read as a member of that family — but it is
+   NOT a bordered tile at rest: it is a hairline in --ind-muted, so a closed panel does
+   not look like a filter that is switched on. Open, it takes the inset ground, which is
+   the same "you are here" step `#index-view .segment:hover` uses.
+
+   The chips are the opposite: a chip is IN FORCE, so it wears the panel ground and
+   --ink-gray-9, and its ✕ is the accent — the only bright thing on the row, because it
+   is the only thing that does something. Border-radius is left to views.css: the pill
+   is what marks a chip as removable rather than as a segment you can select. */
+#index-view .filter-toggle {
+  border: 1px solid var(--ind-line);
+  background: var(--ind-panel);
+  color: var(--ind-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#index-view .filter-toggle:hover { background: var(--ind-inset); color: var(--ink-gray-9); }
+#index-view .filter-toggle[aria-expanded="true"] {
+  background: var(--ind-inset);
+  border-color: var(--ind-line);
+  color: var(--ink-gray-9);
+}
+#index-view .filter-caret { color: var(--accent); }
+#index-view .filter-chip {
+  border: 1px solid var(--ind-line);
+  background: var(--ind-inset);
+  color: var(--ink-gray-9);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+#index-view .filter-chip:hover { background: var(--ind-panel); color: var(--ink-gray-9); }
+#index-view .filter-chip-x { color: var(--accent); }
 
 /* The filters. A chip is a small tile here, and the strip wraps rather than
    scrolling sideways: overflow-x: auto is still in views.css and would come back

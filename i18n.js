@@ -103,6 +103,12 @@
     'list.sortPriority':   'Highest priority',
     'list.emptyFiltered':  'No IRs match this filter.',
     'list.emptyNone':      'No IRs found. Create one via the customer form.',
+    // The toolbar's fold, 2026-10-11. `filters` is the control's own word and
+    // `filtersToggle` its tooltip; `clearFilter` is the tooltip on a summary chip,
+    // where {name} is that chip's own label ("Clear: Crash", "Clear: Urgent").
+    'list.filters':        'Filters',
+    'list.filtersToggle':  'Show or hide the filters',
+    'list.clearFilter':    'Clear: {name}',
     'board.label':         'IR board',
     'board.emptyNone':     'No IRs found.',
     'board.notStarted':    'Not started',
@@ -111,6 +117,22 @@
     'board.more':          '+{n} more — see list',
     'grid.label':          'IR grid',
     'grid.more':           '+{n} more — see list',
+
+    // ── The ticket dock ──────────────────────────────────────────────────────
+    // The strip along the bottom holding every ticket he has opened, and the sheet
+    // above it. Seven labels, and not one of them is a new vocabulary: 'openFull' is
+    // the whole passbook, 'close' is the close, 'minimise' is what the second press
+    // on the same button does. The quick actions deliberately carry NO keys — they
+    // read "Stage" and "Priority", the same two words the Triage dialog has used
+    // since it was written, and a translated "Stage" on this sheet beside an English
+    // one in the dialog would be two names for one control.
+    'dock.restore':        'Bring {ir} back',
+    'dock.openPanel':      'Open in a panel',
+    'dock.openFull':       'Open the whole passbook',
+    'dock.close':          'Close this ticket',
+    'dock.minimise':       'Minimise',
+    'dock.activity':       'Activity',
+    'dock.showing':        '{n} of {total}',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             'Move to {column} →',
@@ -532,6 +554,9 @@
     'list.sortPriority':   'उच्चतम प्राथमिकता',
     'list.emptyFiltered':  'इस फ़िल्टर से कोई IR मेल नहीं खाता।',
     'list.emptyNone':      'कोई IR नहीं मिला। ग्राहक फ़ॉर्म से एक बनाएँ।',
+    'list.filters':        'फ़िल्टर',
+    'list.filtersToggle':  'फ़िल्टर दिखाएँ या छिपाएँ',
+    'list.clearFilter':    'हटाएँ: {name}',
     'board.label':         'IR बोर्ड',
     'board.emptyNone':     'कोई IR नहीं मिला।',
     'board.notStarted':    'शुरू नहीं हुआ',
@@ -540,6 +565,15 @@
     'board.more':          '+{n} और — सूची देखें',
     'grid.label':          'IR ग्रिड',
     'grid.more':           '+{n} और — सूची देखें',
+
+    // ── The ticket dock ──────────────────────────────────────────────────────
+    'dock.restore':        '{ir} फिर खोलें',
+    'dock.openPanel':      'पैनल में खोलें',
+    'dock.openFull':       'पूरा पासबुक खोलें',
+    'dock.close':          'यह टिकट बंद करें',
+    'dock.minimise':       'छोटा करें',
+    'dock.activity':       'गतिविधि',
+    'dock.showing':        '{total} में से {n}',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             '{column} पर ले जाएँ →',

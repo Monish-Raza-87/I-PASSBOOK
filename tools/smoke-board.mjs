@@ -320,6 +320,54 @@ ok('...and the toolbar is markup the list does not contain',
   html.slice(toolbarAt, listAt).indexOf('id="ir-list"') === -1 &&
   (html.match(/id="ir-list"/g) || []).length === 1);
 
+// ── ⚠ AND THE ANCHOR AT THE TOP OF THAT CHAIN ─────────────────────────────────
+// The three assertions above passed for weeks on a list that could not scroll one
+// pixel. This block exists because of exactly why.
+//
+// Every pane from #app-container down is `flex: 1; min-height: 0`, and that only
+// clips its content if its parent's height is DEFINITE. `body` declared
+// `min-height: 100dvh`, so it was not: the chain resolved against the CONTENT's
+// height instead of the viewport's, `.ir-list` grew to fit its rows, and the whole
+// PAGE scrolled while `overflow-y: auto` never overflowed once.
+//
+// The owner, 2026-10-11: "IR List scroll is still not there." He was right.
+//
+// ⚠ SAY WHAT THIS IS. A stylesheet assertion is the WEAK half — it pins the fix
+// against regression, it does not prove the list scrolls. The proof is a browser and
+// it cannot be a screenshot, because render-themes launches Chrome with
+// `--hide-scrollbars`. It is `tools/render-themes.mjs --eval`, forcing the overflow
+// and then reading scrollTop back: measured 2026-10-11, 1440x900, 40 rows added —
+// before, list clientHeight 3459 = scrollHeight 3459 and `scrollTop = 300` did
+// nothing while the body stood at 3797px; after, 562 vs 781, scrollTop settled at
+// 219, body 900. At 390x600 with a 1400px child, `#auth-container` holds at 600 and
+// scrolls its own content rather than trapping it.
+// ⚠ COMMENTS STRIPPED FIRST, and this is not tidiness. The note inside `body`
+// QUOTES the bug — it says the rule "said `min-height: 100dvh`" — so testing the raw
+// rule body matched the prose describing the fault and failed a fix that was present.
+// The same trap runs the other way: `overflow: hidden` appears in that prose too, so
+// the second assertion below would have PASSED on a stylesheet that had lost the
+// declaration entirely. A test that reads comments is reading the wrong text.
+const baseCssNC = baseCss.replace(/\/\*[\s\S]*?\*\//g, '');
+const bodyRule = (baseCssNC.match(/\nbody\s*\{([^}]*)\}/) || [])[1] || '';
+ok('the shell is anchored to a DEFINITE height, not a minimum',
+  /height:\s*100dvh/.test(bodyRule) && !/min-height:\s*100dvh/.test(bodyRule),
+  bodyRule.trim().replace(/\s+/g, ' ').slice(0, 160));
+ok('...and the page itself never scrolls, so the panes own their scroll areas',
+  /overflow:\s*hidden/.test(bodyRule));
+// The chain, stated once: each of these must be flexible AND allowed to shrink below
+// its content. Drop `min-height: 0` from any one and the list stops clipping again,
+// one level up from where it was lost the first time.
+const chain = ['#app-container', '#panes', '#index-view'];
+const chainCss = (baseCss + viewsCss).replace(/\/\*[\s\S]*?\*\//g, '');
+const chainRules = chain.map(sel => {
+  const re = new RegExp('(?:^|\\n)' + sel + '\\s*\\{([^}]*)\\}', 'g');
+  return [...chainCss.matchAll(re)].map(m => m[1]);
+});
+ok('...and every pane from #app-container to #index-view is flexible and may shrink',
+  chainRules.every(rs => rs.length > 0 &&
+    rs.every(b => /flex:\s*1/.test(b) && /min-height:\s*0/.test(b))),
+  chain.map((s, i) => s + ' x' + chainRules[i].length).join(' '));
+
 // ── The left-right bar rides ABOVE the columns, not under them ───────────────
 // The owner, 2026-10-10: "previously I have asked about separate scroll bar for IR
 // list and similarly in for board since number of columns are more, we can have

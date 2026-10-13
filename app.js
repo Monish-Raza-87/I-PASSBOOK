@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v92';
+const APP_VERSION = 'v93';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -2382,8 +2382,8 @@ function fingerprintErrorMessage(e, askedForASpecificKey, ms) {
   const name = (e && (e.name || (e.constructor && e.constructor.name))) || '';
   if (name === 'NotAllowedError') {
     if (askedForASpecificKey && ms < 1000) {
-      return 'This device no longer holds the key registered for quick unlock. '
-           + 'Turn quick unlock off and on again from your profile menu to re-register it — '
+      return 'This device no longer holds the key registered for quick unlock. Open your '
+           + 'profile menu (top right), choose “Remove quick unlock”, then set it up again — '
            + 'or use your email code.';
     }
     return 'The fingerprint prompt was dismissed or timed out — try again, or use your email code.';
@@ -2396,8 +2396,8 @@ function fingerprintErrorMessage(e, askedForASpecificKey, ms) {
          + 'or set an unlock pattern instead.';
   }
   if (name === 'InvalidStateError') {
-    return 'This device has no key registered for quick unlock any more. Turn quick unlock off '
-         + 'and on again from your profile menu.';
+    return 'This device has no key registered for quick unlock any more. Open your profile '
+         + 'menu (top right), choose “Remove quick unlock”, then set it up again.';
   }
   if (name === 'AbortError') {
     return 'The fingerprint check was interrupted before it finished — try again.';
@@ -2526,8 +2526,8 @@ async function submitUnlock(method, patternSeq) {
     if (!rec.credentialId) {
       unlockIdle();
       setAuthError('Quick unlock is on for this account but this device has no key registered '
-                 + 'for it — turn quick unlock off and on again from your profile menu, or use '
-                 + 'your email code.');
+                 + 'for it — open your profile menu (top right), choose “Remove quick unlock”, '
+                 + 'then set it up again. Or use your email code.');
       return;
     }
     try {
@@ -6054,6 +6054,7 @@ function createUserMenu() {
       ${buildAppearanceGroup()}
       ${isAdmin() ? `<button class="signout-btn" id="access-admin-btn">${iconSvg('users')} User access</button>` : ''}
       <button class="signout-btn" id="quick-unlock-btn">Turn on Quick unlock</button>
+      <button class="signout-btn" id="quick-unlock-remove-btn">Remove quick unlock</button>
       <button class="signout-btn" id="signout-btn">Sign out</button>
     `;
     document.body.appendChild(menu);
@@ -6067,12 +6068,18 @@ function createUserMenu() {
     });
     syncAppearanceMenu();
     document.getElementById('signout-btn').addEventListener('click', signOut);
-    // Quick unlock. What the row does depends on where the device already is:
-    // nothing here → enroll; a token but no pattern → add the pattern; a full
-    // record → offer removal. syncQuickUnlockMenu keeps the label right.
+    // Quick unlock. The FIRST row offers what is still missing from this device:
+    // nothing here → enroll; a token but no pattern → add the pattern. The SECOND
+    // row is removal, and it is separate on purpose — see syncQuickUnlockMenu for
+    // the closed loop that folding the two together into one three-label button
+    // left the owner in.
     document.getElementById('quick-unlock-btn').addEventListener('click', () => {
       menu.style.display = 'none';
       beginQuickUnlockSetup();
+    });
+    document.getElementById('quick-unlock-remove-btn').addEventListener('click', () => {
+      menu.style.display = 'none';
+      offerRemoveUnlock();
     });
     syncQuickUnlockMenu();
     const adminBtn = document.getElementById('access-admin-btn');
@@ -6095,17 +6102,34 @@ function createUserMenu() {
   return menu;
 }
 
-// The menu row's label IS the state: nothing registered yet = the setup offer;
-// a token but no pattern = the pattern is the missing half; a full record = the
-// removal offer. Called on enrollment, on pattern saves and on removal, and
-// from createUserMenu when the menu is first built.
+// The menu's two quick-unlock rows, and the state they show. The FIRST row offers what is
+// still MISSING from this device: nothing registered = turn it on; a record with no pattern
+// = the pattern is the missing half; a record with both = nothing is missing, so the row
+// goes rather than sitting there disabled with nothing to say. The SECOND row is removal,
+// and it is offered whenever there is a record to remove.
+//
+// ⚠ REMOVAL USED TO BE THE THIRD LABEL OF THE SAME BUTTON, AND THAT LEFT A CLOSED LOOP THE
+// OWNER COULD NOT ESCAPE (2026-10-13). The three states were one button — enrol,
+// add-pattern, remove — so a record holding a FINGERPRINT and no pattern showed "Add unlock
+// pattern" and nothing else: no way to re-register the fingerprint, and no way to remove
+// it. When the browser no longer held that key, every route the app offered led back to the
+// same refusal, and the refusal itself said *"turn quick unlock off and on again from your
+// profile menu"* — an instruction this menu made impossible to follow. He reported it
+// exactly as the loop it was: *"my device's … whichever login password is, I can enter that
+// same to login in my app."* Two rows, and the second one is always there when there is
+// something to remove.
+//
+// Called on enrollment, on pattern saves and on removal, and from createUserMenu when the
+// menu is first built.
 function syncQuickUnlockMenu() {
   const btn = document.getElementById('quick-unlock-btn');
+  const rm  = document.getElementById('quick-unlock-remove-btn');
   if (!btn) return;
   const st = loadUnlock();
   if (!st) btn.textContent = 'Turn on Quick unlock';
   else if (!st.patternHash) btn.textContent = 'Add unlock pattern';
-  else btn.textContent = 'Remove quick unlock';
+  btn.style.display = (st && st.patternHash) ? 'none' : '';
+  if (rm) rm.style.display = st ? '' : 'none';
 }
 
 function toggleUserMenu() {

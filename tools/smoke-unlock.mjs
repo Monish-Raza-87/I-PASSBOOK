@@ -491,6 +491,40 @@ r.ok('...and says which state the device is in, and how to leave it',
 r.ok('...and points at the door that does open, rather than ending in a dead end',
   /email code/.test(errorText(H1.byId)), errorText(H1.byId));
 
+// ⚠ AND THE MENU IT SENDS HIM TO MUST BE ABLE TO DO WHAT IT SAYS. This is the half that
+// was missing for as long as the message has existed (found 2026-10-13, from the owner's
+// own report). Every one of those sentences tells him to go and re-register the method —
+// and the profile menu, which was ONE button carrying three labels, could not: a record
+// holding a fingerprint and no pattern showed "Add unlock pattern" and nothing else, so
+// there was no way to remove it and no way to re-register it. **A recovery instruction
+// naming a control the app does not have is worse than no instruction**, because it
+// converts a dead end into a loop he will keep walking. Removal is its own row now, and
+// these two assertions are what keep the row and the sentence married.
+r.ok('the profile menu offers removal as its OWN row, and offers it whenever a record exists',
+  /id="quick-unlock-remove-btn"/.test(appJs) &&
+  /document\.getElementById\('quick-unlock-remove-btn'\)\.addEventListener\('click'/.test(appJs) &&
+  /offerRemoveUnlock\(\);\s*\n\s*\}\);/.test(appJs));
+r.ok('...and the row is shown by the device state, not left to the primary row\'s three labels',
+  /const rm\s+= document\.getElementById\('quick-unlock-remove-btn'\);/m.test(appJs) &&
+  /if \(rm\) rm\.style\.display = st \? '' : 'none';/.test(appJs));
+r.ok('...and the primary row now offers what is MISSING, so it can never be the only row',
+  /if \(!st\) btn\.textContent = 'Turn on Quick unlock';\n\s*else if \(!st\.patternHash\) btn\.textContent = 'Add unlock pattern';/.test(appJs) &&
+  /btn\.style\.display = \(st && st\.patternHash\) \? 'none' : '';/.test(appJs));
+// The instruction has to name the row by the words actually on it, or he looks for
+// something that is not there — which is the exact failure this section exists for.
+//
+// ⚠ AGAINST COMMENT-STRIPPED SOURCE. The note that explains this bug necessarily QUOTES
+// the retired sentence, so a raw-source check fails on the comment that documents the
+// absence — the same trap smoke-ui.mjs hit on the `view-full` sidebar rule. Strip first,
+// then ask.
+const appCodeOnly = appJs
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^[ \t]*\/\/.*$/gm, '');
+r.ok('every recovery sentence names that row by its real label',
+  (appCodeOnly.match(/Remove quick unlock/g) || []).length >= 4 &&
+  !/off and on again/i.test(appCodeOnly),
+  (appCodeOnly.match(/Remove quick unlock/g) || []).length);
+
 // (ii) AN ID. The call names it, and names where it lives.
 const withId = recGet();
 const H2 = drive(FP_ONLY, { calls: 0 }, undefined, {

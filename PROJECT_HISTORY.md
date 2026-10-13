@@ -631,9 +631,61 @@ All 37 suites green (4,400+ cases). Browser probes at 1440×900 and 390×844 via
 **Shipped as v92.** Frontend only — `backend.gs` untouched, `API_VERSION` did not move and
 **no Apps Script paste is owed.**
 
+### v93 — the instruction named a control that did not exist
+
+He tried the fingerprint door the next time he signed in and got Chrome's own message:
+*"No passkeys available. There aren't any passkeys for monish-raza-87.github.io on this
+device."* And then the request underneath it, in his words:
+
+> *"I am not asking to look into my github or anyone else needing a key of my github account
+> but I am asking that my device's, i.e., currently laptop that I am using, whichever login
+> password is, I can enter that same to login in my app."*
+
+Two things had to be separated. `monish-raza-87.github.io` is not his GitHub account — it is
+**the address the app is served from** (GitHub Pages), and a browser will only ever offer a
+key that was created *for the address it was created on*. That is the browser protecting him,
+and the app never contacts GitHub at any point. The thing he wants — his own device's login —
+**is** what a platform authenticator gives: the dialog that appears is Windows Hello, which is
+his fingerprint, his face, or his PIN. (A site is, by design, never allowed to ask for the raw
+Windows account password. That restriction is the feature.)
+
+The actual defect was elsewhere, and it was mine. Every failure sentence the app owns ends
+with the same instruction — *go to your profile menu and set the method up again* — and **the
+profile menu could not do it.** It was one `<button>` carrying three labels:
+
+| `loadUnlock()` | label | action |
+|---|---|---|
+| nothing | "Turn on Quick unlock" | enrol |
+| record, no `patternHash` | **"Add unlock pattern"** | pattern setup |
+| record with `patternHash` | "Remove quick unlock" | confirm → remove |
+
+A record holding a **fingerprint and no pattern** — the state right after enrolling, and his
+state — fell into row two and got **only** "Add unlock pattern". There was no way to
+re-register the fingerprint and no way to remove the record. So when the browser stopped
+holding that key, every route the app offered led back to the same refusal, and the refusal
+sent him to the one place that could not help. **The recovery message named a control that did
+not exist**, and nothing in 37 suites was checking that the two agreed.
+
+The fix is two rows: the primary row offers what is still **missing** (and hides when both
+methods are registered), and **removal is its own row, shown whenever there is a record to
+remove**. All four recovery sentences now name the row by the words that are actually on it —
+*"Open your profile menu (top right), choose "Remove quick unlock", then set it up again"* —
+and `smoke-unlock.mjs` pins the row, its handler, the two-way visibility rule, and (against
+comment-stripped source) that no sentence still says "off and on again".
+
+⚠ **The version bump here is load-bearing beyond the code.** A device that has not refreshed
+is still running the old build, and *the old build is exactly what produces the message he
+reported*: a pre-v91 `submitUnlock` called `credentials.get()` with no `allowCredentials`,
+which is a discoverable-credential request, which the browser can only answer with its own
+picker — hence "no passkeys available on this device". So the fix and the refresh are two
+halves of one repair, and the answer to him says so.
+
+**Shipped as v93.** Frontend only — `backend.gs` untouched, `API_VERSION` did not move and
+**no Apps Script paste is owed.**
+
 ---
 
-## 9. Future Roadmap (Planned)
+## 10. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -1017,6 +1017,25 @@ is left is small.
     in the avatar menu and set it up again. A device that genuinely cannot do it now gets a
     plain in-page explanation (`showMethodInactiveNote('nohardware')`) rather than four
     onboarding steps it cannot follow.
+  - ⚠️ **AND THAT INSTRUCTION NAMED A CONTROL THE APP DID NOT HAVE (found 2026-10-13, from
+    his own report).** Every recovery sentence above sends him to the profile menu to
+    re-register the method — and the menu was **one button carrying three labels**: no record
+    = "Turn on Quick unlock"; a record with no pattern = "Add unlock pattern"; a record with a
+    pattern = "Remove quick unlock". So a record holding a **fingerprint and no pattern** — the
+    state right after enrolling, and his state — showed *only* "Add unlock pattern": **no way
+    to re-register the fingerprint, and no way to remove the record.** When the browser no
+    longer held that key, every route the app offered led back to the same refusal, and the
+    refusal told him to do the one thing the menu made impossible. He described the loop
+    rather than the bug: *"my device's, i.e., currently laptop that I am using, whichever login
+    password is, I can enter that same to login in my app."*
+    Removal is now **its own row**, shown whenever a record exists, and the primary row offers
+    only what is *missing* (it hides when both methods are registered). All four recovery
+    sentences name the row by its real words: *"Open your profile menu (top right), choose
+    "Remove quick unlock", then set it up again."* `smoke-unlock.mjs` pins the row, its click
+    handler, the two-way visibility rule and — against **comment-stripped** source — that no
+    sentence still says "off and on again". **The lesson is not about WebAuthn**: a recovery
+    message is only as good as the control it names, and nothing was checking that the two
+    agreed.
   - **The sidebar lockup types itself on a loop**, as he described: mark, then the word
     typed, then both fade, then a beat, then again. A `clip-path` reveal rather than a width
     change, wrapped in `no-preference`, and the keyframes drive *out of* the composed state

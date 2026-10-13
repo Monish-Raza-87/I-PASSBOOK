@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v90';
+const APP_VERSION = 'v91';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1542,15 +1542,34 @@ const VIEW_MODES = ['list', 'board', 'grid'];
 
 // DEFAULT_VIEW is what a device that has never chosen gets, and it is the Grid as
 // of 2026-10-11. The owner: "when I click on IRS Service Desk, it should default open
-// in Grid view and from there I can use other view options." A stored choice still
-// wins — this is the DEFAULT, not a reset — so a device that has picked List keeps it
-// until it picks again, and clearing site data lands back on the Grid.
+// in Grid view and from there I can use other view options."
+//
+// ⚠ SINCE 2026-10-13 IT IS THE ARRIVAL MODE, NOT MERELY THE FALLBACK, AND THE STORED
+// CHOICE NO LONGER WINS. It shipped as a fallback only — `readViewMode()` below reads
+// VIEW_KEY and a stored value beat this line — and that is the whole reason the owner
+// reported the same thing twice, on 2026-10-11 and again on 2026-10-13: *"Still in my app
+// from login, not sure why but list view was open for default and I had to select grid to
+// go into that."* His device had chosen List before the Grid existed, so the Grid was
+// unreachable by default on the one device that mattered and no test could see it (the
+// route rule that was supposed to fix it could never fire — see showApp()).
+//
+// So `readViewMode()` is now the FIRST-PAINT value and nothing more: it decides what the
+// shell draws for the few hundred ms before the app boots, and every arrival — boot and
+// sign-in alike — lands on the Grid regardless. Choosing List still works and still
+// sticks for as long as the page is open; it just does not outlive a reload. That is what
+// he asked for, twice. If a remembered default is ever wanted instead, this is the one
+// token to put back (`setListView(listMode)` in `showApp()`).
 const DEFAULT_VIEW = 'grid';
 
 // The drawing reads back as a preference; the FILTERS below deliberately do not.
 // A priority filter surviving a reload is how someone concludes the app has lost
 // tickets — the failure the sync bar and the "no IRs match this filter" empty state
 // exist to prevent. A view mode cannot hide anything, so it is safe to remember.
+//
+// ⚠ BUT REMEMBERING IS ALL THIS DOES NOW — it is not the arrival mode. See the note on
+// DEFAULT_VIEW above: a stored 'list' on the owner's device is precisely what kept the
+// Grid off his screen, so `showApp()` lands on the Grid and this only paints the shell
+// before the app boots.
 function readViewMode() {
   try {
     const v = localStorage.getItem(VIEW_KEY);
@@ -2483,13 +2502,47 @@ async function submitUnlock(method, patternSeq) {
       setAuthError('This browser will not offer a fingerprint here. Use your email code instead.');
       return;
     }
+    // ── THE CALL THAT ASKED FOR THE WRONG KEY ────────────────────────────────────
+    // The owner, 2026-10-13: *"The fingerprint login option is not working. It has to
+    // ask for my device's login key but is either asking for some USB method or QR
+    // code scan method … and this seems to be broken."* That is exactly what this
+    // call was asking for, and the reason was one `if`.
+    //
+    // `allowCredentials` used to be attached ONLY when `rec.credentialId` was truthy.
+    // A `get()` WITHOUT it is not "any key will do" — it is a DISCOVERABLE-credential
+    // request, which the browser may only answer by offering its own picker across
+    // every transport it knows: USB security keys, a phone over QR. Enrolment mints
+    // this device's passkey with `residentKey: 'discouraged'` (see beginQuickUnlockSetup
+    // below), so the key that picker is hunting for does not exist and never did. The
+    // app was asking the wrong question and then reporting the answer as a broken
+    // fingerprint. (The rule was already written down at the top of this file; the
+    // live path simply did not follow it.)
+    //
+    // So on this path `allowCredentials` is MANDATORY, and it always names a transport
+    // — `transports` recorded at enrolment, or the device itself. With no id there is
+    // nothing to ask for and the call is not made at all: the person gets the plain
+    // sentence below instead of a picker they cannot satisfy.
     const startedAt = Date.now();
+    if (!rec.credentialId) {
+      unlockIdle();
+      setAuthError('Quick unlock is on for this account but this device has no key registered '
+                 + 'for it — turn quick unlock off and on again from your profile menu, or use '
+                 + 'your email code.');
+      return;
+    }
     try {
-      // allowCredentials from the stored id when there is one, so the prompt
-      // names the exact key this device registered.
+      // The exact key this device registered, and the transport it lives on.
       const challenge = crypto.getRandomValues(new Uint8Array(32));
-      const opts = { challenge, userVerification: 'required', timeout: 60000 };
-      if (rec.credentialId) opts.allowCredentials = [{ id: bytesFromB64url(rec.credentialId), type: 'public-key' }];
+      const opts = {
+        challenge,
+        userVerification: 'required',
+        timeout: 60000,
+        allowCredentials: [{
+          id: bytesFromB64url(rec.credentialId),
+          type: 'public-key',
+          transports: rec.transports?.length ? rec.transports : ['internal'],
+        }],
+      };
       const cred = await navigator.credentials.get({ publicKey: opts });
       // A resolved-to-null `get()` is vanishingly rare (the spec throws instead),
       // but it is not a cancellation and must not borrow that word.
@@ -2500,7 +2553,12 @@ async function submitUnlock(method, patternSeq) {
       }
     } catch (e) {
       unlockIdle();
-      setAuthError(fingerprintErrorMessage(e, !!rec.credentialId, Date.now() - startedAt));
+      // `true` and not `!!rec.credentialId`: the guard above returns unless there IS an
+      // id, so every failure reaching here was a request that named a specific key. The
+      // parameter stays because it is what tells the NotAllowedError branch whether a
+      // sub-second return means "this device lost the key" rather than "the sheet was
+      // dismissed" — a distinction the spec refuses to make for us.
+      setAuthError(fingerprintErrorMessage(e, true, Date.now() - startedAt));
       return;
     }
   }
@@ -2580,9 +2638,20 @@ function patternBusy(on) {
 //
 // It is shown IN THE PAGE and not as a toast. It is four steps long, and a toast that
 // has gone before it is read is the same as no explanation at all.
-function showMethodInactiveNote() {
+//
+// ── AND IT HAS TWO STORIES, WHICH IS WHY IT TAKES AN ARGUMENT ─────────────────
+// `'inactive'` is the story above: the method is not on this device yet, so the four
+// steps ARE the answer. `'nohardware'` is the owner's other case — the method is on
+// for the account but this browser will not offer a platform sensor here, so there is
+// nothing on this machine to switch on and the steps would be four instructions that
+// cannot be followed. The variant is a `data-variant` ATTRIBUTE and the copy for each
+// is its own `data-i18n` element (index.html), so this function writes no text at all:
+// it names the story and the cascade tells it. That is also why a language switch
+// repaints the right sentence without this function ever running again.
+function showMethodInactiveNote(variant) {
   const note = document.getElementById('auth-method-note');
   if (!note) return;
+  note.dataset.variant = variant === 'nohardware' ? 'nohardware' : 'inactive';
   note.style.display = '';
   // `role="status"` and a focused close control, so it is announced and can be put away
   // from a keyboard. Deliberately NOT a modal: nothing behind it is blocked, because the
@@ -2796,7 +2865,18 @@ async function beginQuickUnlockSetup() {
         challenge,
         rp: { name: 'I-PASSBOOK' },
         user: { id: new TextEncoder().encode(email), name: email, displayName: (currentUser && currentUser.name) || email },
-        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        // ⚠ −257 (RS256) IS ACCEPTED BESIDE −7 (ES256) ONLY SO THE RECORD IS
+        // ANSWERABLE LATER. Some Windows Hello / TPM stacks will not mint ES256, and
+        // a `create()` that throws here reads to the person as "the fingerprint is
+        // broken" when the truth is that one algorithm was unavailable on their
+        // chipset. What the credential is SIGNED with never reaches this app, so
+        // there is nothing to lose by taking either.
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+        // ⚠ THIS LINE IS WHY `allowCredentials` IS MANDATORY ON THE UNLOCK PATH.
+        // `residentKey: 'discouraged'` means the credential is NOT discoverable — it
+        // cannot be found by a prompt that does not name it. Weakening this to
+        // 'preferred' would make the wrong-shaped unlock call above happen to work,
+        // i.e. trade a rule for an accident. Left exactly as it was.
         authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' },
         attestation: 'none'
       }});
@@ -2805,8 +2885,17 @@ async function beginQuickUnlockSetup() {
         showToast((reg && reg.message) || 'Registering this device failed — try again.');
         return;
       }
+      // The TRANSPORT is recorded with the id, and it is not decoration: the unlock
+      // path sends it in `allowCredentials` so the prompt is not left to guess where
+      // the key lives. `getTransports()` is not in every engine and is not required to
+      // be honest, so its answer is taken when it comes and 'internal' — this device,
+      // which is the only thing `authenticatorAttachment: 'platform'` can have minted
+      // — is the floor beneath it. Written with `?.` because a missing transport must
+      // never be able to fail an enrolment that has already succeeded everywhere else.
+      const transports = cred.response?.getTransports?.() || [];
       saveUnlock({ email, mode: 'fingerprint', deviceToken: reg.deviceToken,
-                   credentialId: bytesToB64url(new Uint8Array(cred.rawId)) });
+                   credentialId: bytesToB64url(new Uint8Array(cred.rawId)),
+                   transports: transports.length ? transports : ['internal'] });
       syncQuickUnlockMenu();
       showToast('Fingerprint unlock is on for this device — a pattern can be added from this menu too.');
       return;
@@ -3288,13 +3377,25 @@ function wireAuthForm() {
       : !!q.patternHash;
   };
   const unlockBtn = document.getElementById('auth-unlock-btn');
-  if (unlockBtn) unlockBtn.addEventListener('click', () => {
-    if (!methodReady('fingerprint')) return showMethodInactiveNote();
+  if (unlockBtn) unlockBtn.addEventListener('click', async () => {
+    if (!methodReady('fingerprint')) return showMethodInactiveNote('inactive');
+    // ── THE SECOND STORY, AND IT IS NOT THE SAME ONE ──────────────────────────────
+    // The method IS on for this account, so the steps above are the wrong answer: they
+    // would send him to switch on something that is already on. The remaining way a tap
+    // here lands on nothing is the DEVICE — a browser with no platform authenticator, or
+    // no WebAuthn at all. That is the owner's worry, 2026-10-13, answered with a plain
+    // sentence rather than a picker he cannot satisfy (which is the other half of this
+    // same report; see submitUnlock).
+    //
+    // Cheap and safe to ask: `quickUnlockBiometricAvailable()` already resolves false
+    // for a browser with no `PublicKeyCredential` at all, and it never throws. It is the
+    // one gate that answers both halves of "can this machine do it".
+    if (!(await quickUnlockBiometricAvailable())) return showMethodInactiveNote('nohardware');
     submitUnlock('fingerprint');
   });
   const patternLink = document.getElementById('auth-pattern-link');
   if (patternLink) patternLink.addEventListener('click', () => {
-    if (!methodReady('pattern')) return showMethodInactiveNote();
+    if (!methodReady('pattern')) return showMethodInactiveNote('inactive');
     setAuthMode('pattern');
     patternForUnlock();
   });
@@ -4191,7 +4292,15 @@ function renderLayout() {
   // PHONE: the list IS a full screen, so an open pane has to replace it rather
   // than sit beside it. This is the only place the fold removes anything, and the
   // back button below is what stops it stranding anyone.
-  const listHidden = full && !desktop;
+  //
+  // ⚠ DESKTOP AND AN OPEN TICKET IS THE THIRD CASE, and it is new. The owner,
+  // 2026-10-13: *"Clicking on maximise does not mean that it open in side panel on
+  // right. it means taking full page. I want to eliminate fully the idea of having IR
+  // open in right small panel."* So a ticket takes the whole row on every width. The
+  // three other panes keep their desktop split — the dashboard deliberately sits beside
+  // the list, and that is pinned by name in smoke-ui.mjs — because an IR is a THING you
+  // are working on and they are views OF the list.
+  const listHidden = detail ? true : (full && !desktop);
   // A full-width view owns the whole row, so there is nothing left to fold into a
   // rail — and folding it there WOULD strand the user, because the rail would
   // replace the board or the grid and the detail pane behind it has no ticket in it.
@@ -4209,9 +4318,16 @@ function renderLayout() {
   // The Help & FAQ is the same pane shape a third time, and it is folded rather
   // than opened in a tab from 2026-10-08 — see the markup comment in index.html.
   if (faqView) faqView.style.display = faq ? 'flex' : 'none';
-  // The detail's back button goes to the list; the dashboard's does the same.
-  // Both are phone-only — on desktop the list never leaves the screen.
-  backBtn.style.display    = (!desktop && full) ? 'block' : 'none';
+  // The detail's back button goes to the list; the dashboard's does the same. It is
+  // shown exactly when the list is NOT on screen — the same predicate as `listHidden`
+  // above, and the same sentence: the back button is what stops the fold stranding
+  // anyone. On desktop that used to mean never; with a ticket taking the full row it
+  // now means exactly the ticket, which is the one pane that folds there.
+  //
+  // (base.css used to carry `#back-btn { display: none !important; }` for the ≥1024px
+  // case. That is gone: `!important` outranks the inline style this line writes, so it
+  // would have shown nothing on desktop no matter what was decided here.)
+  backBtn.style.display    = listHidden ? 'block' : 'none';
   document.body.classList.toggle('view-detail', detail);
   // Suppresses #detail-placeholder's "No IR selected" empty state, which shows
   // whenever body.view-detail is absent — including on the dashboard and the
@@ -4353,8 +4469,19 @@ function renderDock() {
   // The sheet first, the strip second: #ir-dock is a column anchored to the
   // bottom edge, so DOM order is screen order — the sheet sits directly on top of
   // the strip it belongs to, and the strip never moves when the sheet comes and goes.
+  // The scrim first, the sheet second, the strip third: #ir-dock is a column anchored to
+  // the bottom edge, so DOM order is screen order and no z-index is needed inside it. The
+  // scrim is emitted ALWAYS and shown by `has-window` — it is what dims and blurs the
+  // drawing behind a restored window, and it is a class rather than a re-render because
+  // renderLayout() must be able to put it away without rebuilding the strip.
+  //
+  // ⚠ IT IS A CHILD OF #ir-dock AND MUST STAY ONE. A sibling on <body> would be a
+  // selector outside smoke-industrial.mjs's SCOPES/GLOBALS/CHROME lists, and that
+  // ceiling has no headroom. As a child, `#ir-dock .dock-scrim` matches CHROME's
+  // `/^#ir-dock\b/` and the count does not move.
   el.innerHTML = dockIRs.length
-    ? (dockOpen ? dockSheetHTML(dockOpen) : '') +
+    ? `<div class="dock-scrim" data-dock="scrim"></div>` +
+      (dockOpen ? dockSheetHTML(dockOpen) : '') +
       `<div class="dock-tabs">${dockIRs.map(dockTabHTML).join('')}</div>`
     : '';
   applyDockState();
@@ -4367,14 +4494,26 @@ function renderDock() {
   if (dockOpen) loadDockTimeline(dockOpen);
 }
 
-// THE ONE WRITER of `body.has-dock`. The dock is on screen for the three IR drawings
-// and nowhere else: while the full passbook is open it stands down, because on
-// desktop the passbook is a pane beside the list and a sheet anchored to the bottom
-// edge would sit on top of the passbook's own bottom bar. `dockIRs` is memory,
-// so coming back restores the worklist intact — nothing is lost by standing down.
+// THE ONE WRITER of `body.has-dock` AND of `#ir-dock.has-window`.
+//
+// The strip is on screen for the three IR drawings AND while a ticket is maximised on
+// top of them. The owner, 2026-10-13: *"Maximising one IR does not mean that all other
+// minimised tabs gets erased from screen … at least the others should remain minimised
+// which I can come back to."* Making the maximum a full-page pane had already erased the
+// strip once, because a `currentView === 'index'` test is exactly what the maximised
+// state is not. `dockIRs` is memory, so nothing was ever lost — it was hidden, which from
+// his side of the screen is the same thing.
+//
+// ⚠ The WINDOW is a second, narrower condition, and it is a CLASS rather than a
+// re-render on purpose: this function is called from renderLayout(), which runs on every
+// layout pass, and renderDock() refetches the ticket's activity list. Toggling a class
+// hides the sheet in the maximised state without touching the DOM that is already there.
 function applyDockState() {
-  const on = dockIRs.length > 0 && currentView === 'index';
+  const on  = dockIRs.length > 0 && (currentView === 'index' || currentView === 'detail');
+  const win = !!dockOpen && currentView === 'index';
   document.body.classList.toggle('has-dock', on);
+  const el = document.getElementById('ir-dock');
+  if (el) el.classList.toggle('has-window', win);
 }
 
 // The post-hoc half of litTicket(): the list and the grid are already drawn, and only
@@ -4398,18 +4537,29 @@ function dockTabHTML(irNumber) {
   const ir  = allIRs.find(r => r.irNumber === irNumber);
   const sub = ir ? (ir.companyName || '') : '';
   const id  = escJsAttr(irNumber);
-  const open = dockOpen === irNumber;
+  // `is-open` answers "is the screen about THIS ticket?" and not "is its window up?" —
+  // so the maximised ticket's own tab is marked while its window is not on screen at
+  // all. That is the same single answer the row, the tile and the window read, and it is
+  // what makes the strip readable in all three states.
+  // Two different questions, and they are two bindings on purpose:
+  //   `lit` — "is the screen about this ticket?" (`is-open` on the tab, and the wording
+  //           of the button, because pressing it puts whatever is up DOWN). The
+  //           maximised ticket is lit while its window is not on screen at all.
+  //   `up`  — "is this ticket's WINDOW up?" (`aria-pressed`, which is a claim about the
+  //           panel the button controls and would be a lie for a maximised ticket).
+  const lit = litTicket() === irNumber;
+  const up  = dockOpen === irNumber;
   return `
-    <div class="dock-tab${open ? ' is-open' : ''}" data-dock-id="${id}">
+    <div class="dock-tab${lit ? ' is-open' : ''}" data-dock-id="${id}">
       <button type="button" class="dock-tab-name" data-dock="toggle" data-dock-id="${id}"
-              title="${escHtml(open ? t('dock.minimise') : t('dock.restore', { ir: irNumber }))}">
+              title="${escHtml(lit ? t('dock.minimise') : t('dock.restore', { ir: irNumber }))}">
         <span class="dock-tab-num">${escHtml(irNumber)}</span>
         ${sub ? `<span class="dock-tab-co">${escHtml(sub)}</span>` : ''}
       </button>
       <span class="dock-tab-btns">
         <button type="button" class="dock-btn" data-dock="toggle" data-dock-id="${id}"
-                aria-pressed="${open ? 'true' : 'false'}"
-                title="${escHtml(open ? t('dock.minimise') : t('dock.openPanel'))}">${iconSvg('panel-bottom')}</button>
+                aria-pressed="${up ? 'true' : 'false'}"
+                title="${escHtml(lit ? t('dock.minimise') : t('dock.openPanel'))}">${iconSvg('panel-bottom')}</button>
         <button type="button" class="dock-btn" data-dock="full" data-dock-id="${id}"
                 title="${escHtml(t('dock.openFull'))}">${iconSvg('expand')}</button>
         <button type="button" class="dock-btn dock-btn-close" data-dock="close" data-dock-id="${id}"
@@ -4539,12 +4689,19 @@ function closeDockTab(irNumber) {
   const i = dockIRs.indexOf(irNumber);
   if (i === -1) return;
   const wasOpen = dockOpen === irNumber;
+  // Closing the ticket that OWNS THE SCREEN is not just "remove a tab". Its tab is the
+  // only thing on screen saying which ticket the full page is about, so leaving the
+  // passbook up with its ticket gone from the strip would strand him on a screen with no
+  // way back to the worklist — the ✕ would look like it did nothing. So it goes back to
+  // the drawing first, exactly as the back button does.
+  const wasMax  = currentView === 'detail' && litTicket() === irNumber;
   dockIRs.splice(i, 1);
   // Closing the open tab hands the sheet to the tab that takes its place — the one
   // to its right, or the last one if it was the rightmost. That is the same rule the
   // strip itself follows when a tab leaves, so the sheet never jumps to a tab the eye
   // did not see move.
   if (wasOpen) dockOpen = dockIRs[i] || dockIRs[i - 1] || null;
+  if (wasMax) { showIndex(); goIndex(); }
   renderDock();
 }
 
@@ -4624,10 +4781,37 @@ function wireDock() {
     if (!btn || !el.contains(btn)) return;
     const id = btn.dataset.dockId || '';
     const act = btn.dataset.dock;
+    // The scrim is a click target that means exactly what Escape means: put the window
+    // down, keep the tab. It is not a new gesture — it is the same one, reachable with
+    // the mouse, which is what "like windows does" implies.
+    if (act === 'scrim')  { minimiseDock(); return; }
     // One action name for both directions: pressing the panel button on the tab of
-    // the ticket that is ALREADY open puts it away. That is what makes it a toggle
+    // the ticket that is ALREADY up puts it away. That is what makes it a toggle
     // rather than a second, invisible way to open the same thing again.
-    if (act === 'toggle') { dockOpen === id ? minimiseDock() : openDock(id); return; }
+    //
+    // ⚠ AND WHILE A TICKET IS MAXIMISED, THIS IS THE ONLY WAY BACK TO A TAB. A
+    // maximised ticket has no window up, so "toggle" cannot mean "put the window away";
+    // it means "put the maximum down and bring THIS ONE up as a window". On the
+    // maximised ticket's own tab that is exactly his described journey — minimise, then
+    // navigate — and on any other tab it is that journey with the two steps fused into
+    // one, which is the point of a strip that never leaves the screen. The strip is
+    // above the scrim, so every tab stays reachable while a window is up.
+    if (act === 'toggle') {
+      if (currentView === 'detail') {
+        // showIndex() FIRST and not goIndex() alone: goIndex() writes the hash, which
+        // arrives as a hashchange on a later task, and applyDockState() computes
+        // `has-window` from whatever currentView says AT THAT MOMENT. Doing it in this
+        // order means the window is up on the same frame as the click, rather than a
+        // frame or two behind it. goIndex() then makes the route agree, and its own
+        // early return (`currentView === 'index'`) keeps the drawing he left.
+        showIndex();
+        goIndex();
+        openDock(id);
+        return;
+      }
+      dockOpen === id ? minimiseDock() : openDock(id);
+      return;
+    }
     if (act === 'full')   { expandDock(id);  return; }
     if (act === 'close')  { closeDockTab(id);   return; }
   });
@@ -4849,14 +5033,29 @@ function showApp() {
   wireDock();      // the dock's one delegated listener, bound once for the session
   applyChromeState();    // ...and the sidebar / IR-list folds
   applyFiltersState();   // ...and the toolbar's filters panel, shut unless asked for
-  // THE STORED DRAWING IS APPLIED, NOT MERELY READ. `listMode` is restored at module
-  // load, but the pane's own class, `html.view-full` and the switch's pressed state
-  // are written by setListView() and by NOTHING ELSE — so before this line a device
-  // that had chosen the Board or the Grid came back to a LIST, with the switch
-  // showing List, while `listMode` said otherwise and applyListFilters() drew the
-  // grid into a pane CSS had `display: none` on. It was invisible for as long as
-  // List was what everyone landed on, and it is load-bearing the moment it is not.
-  setListView(listMode);
+  // THE DRAWING IS APPLIED, NOT MERELY READ — and on arrival it is the GRID.
+  //
+  // `listMode` is restored at module load, but the pane's own class, `html.view-full`
+  // and the switch's pressed state are written by setListView() and by NOTHING ELSE —
+  // so before this line a device that had chosen the Board or the Grid came back to a
+  // LIST, with the switch showing List, while `listMode` said otherwise and
+  // applyListFilters() drew the grid into a pane CSS had `display: none` on.
+  //
+  // ⚠ AND IT IS 'grid', NOT `listMode` — which is the fix for a bug shipped at v90, not
+  // a preference. The Service Desk's own rule (see the tickets fallthrough in
+  // handleRoute) says it opens on the Grid and could never fire: this line runs
+  // showIndex() first, which sets currentView = 'index', and handleRoute's
+  // `if (currentView === 'index') return;` guard then swallows the rule on every boot
+  // and every sign-in. What actually landed was whatever VIEW_KEY held — and on the
+  // owner's device that said 'list', because it was written before v90 existed. He met
+  // it on 2026-10-13: *"Still in my app from login … list view was open for default and
+  // I had to select grid to go into that."*
+  //
+  // VIEW_KEY is still written by setListView and still read at module load, where it is
+  // the pre-JS default for the first paint; arrival then overwrites it. So a switch to
+  // List in place lasts the session, and the next arrival is the Grid again. If he ever
+  // wants a REMEMBERED default instead, this is the one token that changes back.
+  setListView('grid');
   applyActivityState(storedFlag(ACTIVITY_KEY));
   syncNavAccess();
   // The site-wide palette allowlist, once per session. Deliberately not awaited:
@@ -8332,13 +8531,15 @@ async function moveOnByHand(irNumber, stage) {
   loadActivityLog(irNumber);
 }
 
-// How many cards a column draws before it stops and says how many it left behind.
-// `Finished` holds most of the archive — every delivered IR ever — and drawing
-// those as cards would make the board slower than the list it is a second view of.
-// The header counts are the FULL counts, so the column itself never lies about
-// what it is holding; only the drawing is capped.
-const BOARD_CAP = 25;
-
+// THE BOARD DRAWS EVERY CARD IN EVERY COLUMN. `BOARD_CAP = 25` used to sit here, for
+// the same reason the grid's cap did — and it went the same way, on the owner's
+// instruction, 2026-10-13, when he was asked whether to remove the "+N more — see
+// list" chip from the grid alone or from both: *"Remove it from both."*
+//
+// `Finished` is the column this actually concerned — it holds every delivered IR ever,
+// which is most of the archive. The board is a horizontal wall of columns and each card
+// is nine nodes where a grid tile is twelve, so the measured grid figure above is the
+// worse of the two; see the note on that render for the numbers.
 function boardCard(ir) {
   const owner = ir.assigneeName || ir.assignee || '';
   const prog  = sectionProgress(ir.done);
@@ -8385,9 +8586,7 @@ function renderBoard(records) {
   records.forEach(ir => { byCol[boardColumnOf(ir.status)].push(ir); });
 
   irBoard.innerHTML = BOARD_COLUMNS.map(col => {
-    const rows  = byCol[col.key];
-    const shown = rows.slice(0, BOARD_CAP);
-    const more  = rows.length - shown.length;
+    const rows = byCol[col.key];
     return `
     <div class="kb-col${col.quiet ? ' kb-col-quiet' : ''}">
       <div class="kb-col-head">
@@ -8396,8 +8595,7 @@ function renderBoard(records) {
       </div>
       <div class="kb-col-sub">${escHtml(col.stages.join(' · '))}</div>
       <div class="kb-col-body">
-        ${shown.map(boardCard).join('')}
-        ${more > 0 ? `<button type="button" class="kb-more">${escHtml(t('board.more', { n: more }))}</button>` : ''}
+        ${rows.map(boardCard).join('')}
       </div>
     </div>`;
   }).join('');
@@ -8407,16 +8605,26 @@ function renderBoard(records) {
 }
 
 // ── THE GRID — the same filtered rows, drawn as tiles ────────────────────────
-// How many tiles the grid draws before it stops and says how many it left behind.
+// THE GRID DRAWS EVERY MATCHED IR. The cap that used to sit here is GONE.
 //
-// The cap is load-bearing, not caution. This list is the one piece of the app whose
-// cost is proportional to the data, and it is MEASURED at ~0.1ms a row (21ms at 100
-// IRs, 122ms at 1200 — see the note on the search listener). A tile is a heavier node
-// than a row, and the search box repaints on a 150ms tick, so an uncapped grid would
-// put the whole archive through that tick on every keystroke. The board caps for the
-// same reason (BOARD_CAP). Only the DRAWING is capped: the header counts stay full,
-// so nothing lies about how many IRs there are.
-const GRID_CAP = 60;
+// It shipped as `GRID_CAP = 60`, withholding the rest behind a "+N more — see list"
+// chip. The owner, 2026-10-13, on meeting it with 454 tickets: *"grid scroll down is
+// limited and not keeps continuing till end of IRs … If I do not want to go into list
+// and continue in grid mode, then why should I be not allowed to?"* A drawing that
+// refuses to draw its own data is not a speed feature; it is a broken view with a
+// consolation prize beside it.
+//
+// Its justification was cost, so the cost was MEASURED rather than argued about
+// (Chrome, 1440x900, the app's own CSS, 454 records): building the 454 tile strings is
+// 14ms; assigning them and forcing a layout is 44ms warm and ~146ms on the coldest
+// first paint. The IR LIST has never been capped and measures ~0.06-0.1ms a row —
+// 27-45ms at 454. That comparison is what decides it: the uncapped grid costs what the
+// uncapped list has always cost, on every keystroke, so the cap was not proportionate
+// to anything the list does not already do.
+//
+// And nothing here chunks, lazily loads, or listens to scroll. The alternative to
+// this comment was a chunker; it is not needed at this size, and this project has
+// already evaluated and declined a scroll listener once (PROJECT_HISTORY §6).
 
 function gridTile(ir) {
   const owner = ir.assigneeName || ir.assignee || '';
@@ -8488,15 +8696,19 @@ function renderIRGrid(records) {
     updateListCounts(0);
     return;
   }
-  const shown = records.slice(0, GRID_CAP);
-  const more  = records.length - shown.length;
-  // A button, not a dead end — the same contract the board's "+N more" keeps. The
-  // grid caps its drawing for speed; the honest answer to "where is the rest?" is
-  // the List, which draws all of them.
-  irGrid.innerHTML = shown.map(gridTile).join('') +
-    (more > 0
-      ? `<button type="button" class="grid-more">${escHtml(t('grid.more', { n: more }))}</button>`
-      : '');
+  // Every matched IR, and then a footer that SAYS so. The footer is the owner's own
+  // ask, 2026-10-13: *"below grid where there might be empty area, you may mention
+  // something like no irs anyfurther."* Blank space under the last row is the one
+  // thing an uncapped drawing cannot distinguish from a drawing that gave up, so the
+  // blank now has a sentence in it.
+  //
+  // It spans the row (`grid-column: 1 / -1`) and carries no `overflow` — a grid row
+  // sized `min-content` with a clipped child is the v89 trap, and a footer is not the
+  // place to meet it again. It is drawn only when something WAS drawn: an empty result
+  // already says so in `.empty-state`, and "No more IRs — 0 shown" underneath that
+  // would be two screens arguing.
+  irGrid.innerHTML = records.map(gridTile).join('') +
+    `<p class="grid-foot">${escHtml(t('grid.foot', { n: records.length }))}</p>`;
   updateListCounts(records.length);
 }
 
@@ -8544,21 +8756,10 @@ if (listViewSwitch) {
     if (btn) setListView(btn.dataset.view);
   });
 }
-if (irBoard) {
-  // "+N more" is a way back to the list, not a dead end: the board caps a column's
-  // drawing for speed, and the honest answer to "where is the rest?" is the list.
-  irBoard.addEventListener('click', e => {
-    if (e.target.closest('.kb-more')) setListView('list');
-  });
-}
-if (irGrid) {
-  // The same contract, for the same reason: the grid caps its drawing too (tiles are
-  // heavier nodes than rows), so it must offer the same way out rather than leaving
-  // someone to wonder where four hundred tickets went.
-  irGrid.addEventListener('click', e => {
-    if (e.target.closest('.grid-more')) setListView('list');
-  });
-}
+// The board and the grid used to carry a delegated listener each, for the "+N more"
+// buttons their caps drew. Both caps are gone (see the notes on renderBoard and
+// renderIRGrid) and the buttons with them, so the listeners went too — a delegated
+// handler for a class nothing emits is a branch no test can reach and no user can hit.
 // Priority and sort. Both feed applyListFilters() — the ONE function the search box
 // and both filter strips already pass through — so there is one filter pipeline with
 // three drawings at the end of it, not a second filter system beside the first.

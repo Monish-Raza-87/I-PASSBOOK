@@ -3137,9 +3137,16 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      split view. JS still owns display:none/flex so inline-style reads
      in the app keep working. */
 
-  /* Desktop has no "back" affordance: the list never leaves the screen.
-     JS toggles the inline display on mobile, so this has to outrank it. */
-  #back-btn { display: none !important; }
+  /* Desktop used to carry `#back-btn { display: none !important; }` here, on the
+     reasoning that a back affordance is only for a screen the list LEFT. That
+     reasoning was right and its conclusion is now wrong: an open IR takes the full
+     row on every width (see `listHidden` in renderLayout), so desktop DOES leave the
+     list — for exactly that one pane.
+
+     ⚠ Deliberately removed rather than re-scoped, because `!important` outranks the
+     inline style renderLayout writes, so any rule left here would show nothing on
+     desktop however the decision above went. The base `display: none` on #back-btn
+     still holds until JS has an opinion. */
 
   /* Empty state for the detail pane. A sibling of #detail-view, not a child,
      so #detail-view's own display stays a truthful "a ticket is open" flag —

@@ -1096,6 +1096,22 @@
     backdrop-filter: blur(2px);
   }
 
+  /* The dock's scrim, added at v91 with the ticket window, and the SAME argument one
+     paragraph up applies word for word — which is why it is here and not in
+     components.css with the rest of the dock: this file is where the app keeps its
+     glass, and glass in two places is two answers to one question.
+
+     ⚠ Written `#ir-dock .dock-scrim` and not `.dock-scrim` on purpose. Every rule in
+     this file that is not inside a SCOPES root has to be in GLOBALS or CHROME, and that
+     ceiling is counted and low — smoke-industrial.mjs fails the moment it grows. Scoped
+     this way the selector matches CHROME's own `/^#ir-dock\b/` entry, which was written
+     for exactly this. A bare class selector here would spend headroom this family does
+     not have. */
+  #ir-dock .dock-scrim {
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+  }
+
   /* The two dropdown panels and the toast — the same family, the same fill. Each
      already floats over the page and is never more than one on screen at a time. */
   #user-menu,

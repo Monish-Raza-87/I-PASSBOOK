@@ -1235,12 +1235,18 @@ input[type="radio"] { accent-color: var(--surface-gray-10); }
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: var(--z-bottombar);
+  /* ⚠ --z-overlay (80), RAISED FROM --z-bottombar (40) AT v91, and it is not cosmetic.
+     A stacking context cannot put a child above itself, and all three pieces of the dock
+     — the scrim, the window and the strip — live in this one. The scrim has to cover the
+     app header (40) and the sidebar (30) while a window is up, so the whole dock has to
+     sit above them. It is also, finally, a reader for --z-overlay, which was declared in
+     tokens.css and used nowhere. --z-toast (100) still lands above all of it. */
+  z-index: var(--z-overlay);
   display: none;
   flex-direction: column;
-  /* The sheet is centred and narrower than the window on a laptop; the ground
-     either side of it still belongs to the page behind, so it has to keep taking
-     clicks. The two real pieces of chrome turn pointer-events back on. */
+  /* The scrim and the window turn pointer-events back on; the strip always had it. What
+     is left is the dock's own empty box, which must not eat clicks aimed at the page —
+     though while a window is up there is a scrim under the pointer anyway. */
   pointer-events: none;
 }
 body.has-dock #ir-dock { display: flex; }
@@ -1289,6 +1295,13 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
    another list; a horizontal scroll is a gesture every phone already has, and the
    strip is a strip. */
 .dock-tabs {
+  /* `position: relative` and a z-index ABOVE the scrim and the window are load-bearing,
+     not tidiness: a non-positioned child paints BEFORE any positioned sibling, so
+     without this the strip would be painted under its own scrim and every tab would be
+     unclickable exactly when it is most needed — while a window is up and he wants to
+     switch to another ticket without closing this one. */
+  position: relative;
+  z-index: 2;
   pointer-events: auto;
   flex: 0 0 auto;
   display: flex;
@@ -1395,29 +1408,67 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
 .dock-btn-close { font-size: var(--text-xl); }
 .dock-btn[aria-pressed="true"] { color: var(--accent); }
 
-/* ── The sheet ───────────────────────────────────────────────────────────────
-   Opaque, NOT glass. §9 of industrial.css gives the glass fill to panels that are
-   one small object over a page; this is 60vh of it, and a blurred list showing
-   through the activity it is summarising reads as broken, not as layered.
+/* ── The scrim ───────────────────────────────────────────────────────────────
+   THE BLURRED DRAWING BEHIND THE WINDOW. The owner, 2026-10-13: *"show me the IR above
+   screen, center placed, but smaller size than screen, behind it all irs blurr."*
+
+   It is ONE layer over the viewport, which is the only shape industrial.css §9
+   sanctions: that section excludes the list and the grid from glass precisely because
+   `backdrop-filter` is a compositor layer PER ELEMENT, so 454 blurred tiles would be
+   recomposited on every scroll frame. One scrim is one layer, blurred once, and it sits
+   still. The blur itself is declared beside the app's other one, in §9's `@supports`
+   block — glass belongs in one place, and that place is that file.
+
+   Emitted by renderDock() as a child of #ir-dock and shown by `has-window`, so it exists
+   whether or not a window is up and is never a second writer's business. Its z-index is
+   0 and its siblings 1 and 2: the strip has to stay ABOVE it, because the strip is how
+   he reaches the other minimised tickets while a window is up. */
+.dock-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: none;
+  background: rgb(0 0 0 / 0.45);
+}
+#ir-dock.has-window .dock-scrim { display: block; }
+
+/* ── The window ───────────────────────────────────────────────────────────────
+   Opaque, NOT glass. §9 gives the glass fill to the SCRIM above; a blurred list showing
+   through the activity the window is summarising would read as broken, not as layered.
+
+   CENTRED AND SMALLER THAN THE SCREEN ON EVERY SIDE — that is the whole request
+   ("above screen, center placed, but smaller size than screen"). It was a bottom sheet:
+   full width, anchored to the bottom edge, reading as a panel rather than a window.
+
+   `position: fixed` and out of flow, so #ir-dock's own box is just the strip and the
+   window can sit in the middle of the viewport. `has-window` is what shows it, which is
+   how the maximised state puts it away WITHOUT a re-render — see applyDockState().
 
    The max-height is what makes the whole chain work: it is the only DEFINITE
    height in here, and without it the body below would grow to fit its content and
-   the sheet would run off the top of the window. */
+   the window would run off the top of the screen. 70vh at the tallest, so the strip at
+   the bottom edge and the drawing either side of it stay in sight. */
 .dock-sheet {
+  display: none;
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
   pointer-events: auto;
-  align-self: center;
-  width: 100%;
-  max-width: 68rem;
-  max-height: 60vh;
-  display: flex;
+  width: min(56rem, calc(100vw - 2rem));
+  max-height: min(70vh, 40rem);
   flex-direction: column;
   background: var(--ind-panel);
   border: 1px solid var(--ind-line);
-  border-bottom: 0;
   box-shadow: var(--elevation-lg);
 }
-@media (max-width: 1023px) {
-  .dock-sheet { max-width: none; max-height: 85vh; border-left: 0; border-right: 0; }
+#ir-dock.has-window .dock-sheet { display: flex; }
+@media (max-width: 639px) {
+  /* THE SAME CENTRED WINDOW ON A PHONE, at his instruction when he was asked. Smaller
+     than the screen on every side is the whole point of it, and a window that filled a
+     390px screen would be the bottom sheet again with a different name. */
+  .dock-sheet { width: calc(100vw - 1.5rem); max-height: 75vh; }
 }
 
 .dock-sheet-head {
@@ -1521,7 +1572,7 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
 /* ── Phone ───────────────────────────────────────────────────────────────────
    Thumb-sized buttons, one tab to the row, and the same 16px floor on a select
    that the list's own selects get — iOS zooms the whole page on a focused control
-   below it, and the sheet is the last place anyone wants the page to jump. */
+   below it, and the window is the last place anyone wants the page to jump. */
 @media (max-width: 639px) {
   .dock-tab { flex: 1 1 100%; min-width: 12rem; max-width: none; }
   .dock-btn { width: 2.5rem; height: 2.5rem; }

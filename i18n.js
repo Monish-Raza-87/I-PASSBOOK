@@ -114,9 +114,10 @@
     'board.notStarted':    'Not started',
     'board.paused':        'Paused',
     'board.finished':      'Finished',
-    'board.more':          '+{n} more — see list',
     'grid.label':          'IR grid',
-    'grid.more':           '+{n} more — see list',
+    // The end of the grid, in the blank space under the last tile. It is not a way out
+    // of anything — the grid draws every matched IR — it is the sentence that says so.
+    'grid.foot':           'No more IRs — {n} shown',
 
     // ── The ticket dock ──────────────────────────────────────────────────────
     // The strip along the bottom holding every ticket he has opened, and the sheet
@@ -224,6 +225,8 @@
     // state). Guidance that sends someone looking for a control that does not exist is
     // worse than the silence it replaced.
     'auth.methodInactive.say':      'This login method activates after you enable it from your login.',
+    'auth.methodInactive.sayNoHardware': 'Quick unlock cannot start on this device.',
+    'auth.methodInactive.whyNoHardware': 'It is switched on for your account, but this browser is not offering a fingerprint or face sensor here. Tap your avatar in the top right and choose “Turn off Quick unlock”, then turn it on again to register this device — or just use your email code, which always works.',
     'auth.methodInactive.step1':    'Sign in to I-PASSBOOK with your email and the code we send you.',
     'auth.methodInactive.step2':    'Tap your avatar in the top right corner of the app.',
     'auth.methodInactive.step3':    'Choose “Turn on Quick unlock” and follow the prompt on this device. Set up your fingerprint — and a pattern as well, if you want one.',
@@ -562,9 +565,8 @@
     'board.notStarted':    'शुरू नहीं हुआ',
     'board.paused':        'रुका हुआ',
     'board.finished':      'पूरा हुआ',
-    'board.more':          '+{n} और — सूची देखें',
     'grid.label':          'IR ग्रिड',
-    'grid.more':           '+{n} और — सूची देखें',
+    'grid.foot':           'और कोई IR नहीं — {n} दिखाए गए',
 
     // ── The ticket dock ──────────────────────────────────────────────────────
     'dock.restore':        '{ir} फिर खोलें',
@@ -636,6 +638,11 @@
     // in English is worse than the silence this note replaced.
     'auth.methodInactive.step3':   '“Turn on Quick unlock” चुनें और इस डिवाइस पर दिए निर्देश का पालन करें। अपना फ़िंगरप्रिंट सेट करें — और चाहें तो पैटर्न भी।',
     'auth.methodInactive.step4':   'बस इतना ही। इस स्क्रीन पर वापस आएँ और दोनों तरीके तैयार हैं।',
+    // "Turn off Quick unlock" stays in English for the same reason step3 keeps "Turn on
+    // Quick unlock" in English: it is the literal label of a row in app.js, and the note
+    // must name what is actually on screen.
+    'auth.methodInactive.sayNoHardware': 'इस डिवाइस पर क्विक अनलॉक शुरू नहीं हो सकता।',
+    'auth.methodInactive.whyNoHardware': 'यह आपके खाते के लिए चालू है, लेकिन यह ब्राउज़र यहाँ फ़िंगरप्रिंट या फ़ेस सेंसर नहीं दे रहा है। ऊपर दाएँ कोने में अपने अवतार पर टैप करें और “Turn off Quick unlock” चुनें, फिर इस डिवाइस को रजिस्टर करने के लिए इसे दोबारा चालू करें — या सिर्फ़ अपने ईमेल कोड का इस्तेमाल करें, जो हमेशा काम करता है।',
     'auth.methodInactive.dismiss': 'समझ गया',
     'auth.usePassword':    'अस्थायी पासवर्ड से पहली साइन-इन',
     'auth.password':       'पासवर्ड',
@@ -835,7 +842,7 @@
     return Object.prototype.hasOwnProperty.call(STRINGS, key) ? STRINGS[key] : null;
   }
 
-  // `t('list.title')` → 'IRs'. `t('board.more', { n: 3 })` → '+3 more — see list'.
+  // `t('list.title')` → 'IRs'. `t('grid.foot', { n: 454 })` → 'No more IRs — 454 shown'.
   //
   // A key with no string returns THE KEY, and warns once. That is deliberately
   // ugly: a raw 'list.title' on screen is unmistakably a bug, whereas a silent

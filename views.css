@@ -2514,6 +2514,16 @@
 .method-note-say { margin: 0; font-size: var(--text-sm); color: var(--ink-gray-9); }
 .method-note-steps { margin: 8px 0 0; padding-left: 1.15rem; display: grid; gap: 6px; }
 .method-note-steps li { font-size: var(--text-sm); color: var(--ink-gray-7); line-height: 1.45; }
+/* The note's SECOND story, chosen by `data-variant` and not by code. `.method-note-hw`
+   is written for the device that cannot offer a sensor here (see index.html); it is
+   hidden until its variant is asked for, and the variant's other half — the say and
+   the four steps — is hidden from it. Two `display` swaps, no JS text writing, and a
+   language switch still repaints both strings from their own `data-i18n`. */
+.method-note-hw { display: none; }
+.method-note[data-variant="nohardware"] .method-note-say,
+.method-note[data-variant="nohardware"] .method-note-steps { display: none; }
+.method-note[data-variant="nohardware"] .method-note-hw { display: block; }
+.method-note-why { margin: 8px 0 0; font-size: var(--text-sm); color: var(--ink-gray-7); line-height: 1.45; }
 #auth-method-note-close { margin-top: 8px; }
 #auth-pattern { display: block; }
 #pattern-canvas,
@@ -2726,20 +2736,10 @@
 }
 .kb-card-foot .ir-assignee.is-unassigned { font-style: italic; opacity: 0.7; }
 
-/* The one way out of a capped column, and it is honest about what it is: a way
-   back to the list, where every IR in the column can be reached. */
-.kb-more {
-  margin-top: 0.25rem;
-  padding: 0.4rem;
-  border: 1px dashed var(--outline-gray-2);
-  border-radius: var(--radius-3);
-  background: transparent;
-  color: var(--ink-gray-6);
-  font-family: inherit;
-  font-size: var(--text-2xs);
-  cursor: pointer;
-}
-.kb-more:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+/* `.kb-more` was the way out of a capped column. The cap is gone (see renderBoard), and
+   a column now ends where its cards end — so there is nothing to style here. The one
+   end-of-list note in the app is the GRID's `.grid-foot`, because the grid is the drawing
+   with blank space under it; a column of cards ends at its last card and needs no note. */
 
 /* One column at a time on a phone, which is the honest cost of a board at 390px.
    Narrower columns mean the next one is visible at the edge, so the sideways
@@ -2900,21 +2900,23 @@
   text-transform: uppercase;
 }
 
-/* The one way past the cap, spanning the row so it reads as a note about the whole
-   grid rather than as a sixtieth tile. It goes to the LIST — the drawing that holds
-   every IR — which is the same honest answer `.kb-more` gives. */
-.grid-more {
+/* THE END OF THE GRID, SAID OUT LOUD. It spans the row so it reads as a note about the
+   whole drawing rather than as one more tile, and it is what fills the blank space
+   under a grid that is shorter than the pane — the one thing an uncapped drawing still
+   cannot say for itself.
+
+   It replaces `.grid-more`, the button that used to sit here and offered a way past the
+   cap. The cap is gone (see renderIRGrid), so there is nothing to be past, and this is
+   no longer a control at all: no border to invite a click, no `cursor`, no hover. It is
+   a paragraph. */
+.grid-foot {
   grid-column: 1 / -1;
-  padding: 0.5rem;
-  border: 1px dashed var(--outline-gray-2);
-  border-radius: var(--radius-3);
-  background: transparent;
-  color: var(--ink-gray-6);
-  font-family: inherit;
+  margin: 0.25rem 0 0;
+  padding: 1rem 0.5rem 0.5rem;
+  color: var(--ink-gray-5);
   font-size: var(--text-xs);
-  cursor: pointer;
+  text-align: center;
 }
-.grid-more:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
 
 /* ── Priority + sort, the two selects under the strips ───────────────────────────
    `.list-select`, not `.form-input`: these are filters on the toolbar, sized to sit
@@ -2967,6 +2969,19 @@ body.has-dock #index-view.is-board .ir-board  { padding-bottom: calc(var(--dock-
     padding-bottom: calc(var(--bottombar-h) + var(--safe-b) + var(--dock-tab-h));
   }
 }
+
+/* ── The strip over a MAXIMISED ticket ────────────────────────────────────────
+   The strip is `position: fixed`, so nothing makes room for it and the passbook's own
+   bottom edge would sit under it. #detail-view is the pane to pad rather than any of
+   its children: it is `flex: 1; min-height: 0` in a `border-box` world, so a
+   padding-bottom shortens its content column by exactly that much and the whole column
+   — banner, overview, sections and activity — stops above the strip. Padding one child
+   (#ir-activity, the bottom-most) would fix the last block and leave the sections
+   scroller running under the tabs.
+
+   No `--bottombar-h` here: on a phone the strip already sits ABOVE that bar, and
+   #panes stops there too, so the overlap is the strip's own height on both. */
+body.has-dock #detail-view { padding-bottom: var(--dock-tab-h); }
 
 /* ══════════════════════════════════════════════════════════
    POLISH — level: NOTICEABLE

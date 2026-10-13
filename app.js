@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v93';
+const APP_VERSION = 'v94';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -994,7 +994,7 @@ function isAdmin() {
   if (email === `dev@${CONFIG.ALLOWED_DOMAIN}` && shouldUseDevAuthBypass()) return true;
   return false;
 }
-// Kept as an alias so existing Section B code reads naturally.
+// Kept as an alias so existing Section A (inward) code reads naturally.
 const isInwardAdmin = isAdmin;
 
 // ─── ACCESS CONTROL (view + comment for everyone; edit from departments) ──────
@@ -1010,17 +1010,25 @@ const isInwardAdmin = isAdmin;
 // transient getMyAccess failure) the worst case is a disabled Save button the
 // user retries — never an unauthorised write, and never a locked-out screen.
 // The backend enforces independently, so a wrong guess here costs a button.
-// The six LIVE sections, letters B–G. There is no Section A: its content moved to
-// the Overview panel, whose data still lives under the `sec-a` key in APP_DATA
-// (see OVERVIEW_KEY below). `sec-h` and `sec-i` no longer exist either — they were
-// merged into `sec-f` (Quality Test Report) and `sec-g` (PDI Report/Dispatch
-// Record), and backend.gs migrated their rows.
-const SECTION_IDS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+// The six LIVE sections, in the order their tabs are read. ⚠ The IDS ARE PERMISSION
+// KEYS, so they do NOT match the letters shown to a person: the letters were renumbered
+// A–G on 2026-10-13, and `sec-cost` was split out of `sec-d`. Use sectionLetter() for
+// anything a person reads — see SECTION_LABELS.
+//
+// There is no Section A here: the Overview panel carries it, and its data still lives
+// under the `sec-a` key in APP_DATA (see OVERVIEW_KEY below). `sec-h` and `sec-i` no
+// longer exist either — they were merged into `sec-f` (Quality Test Report) and `sec-g`
+// (PDI Report/Dispatch Record), and backend.gs migrated their rows.
+const SECTION_IDS = ['sec-b','sec-c','sec-d','sec-cost','sec-e','sec-f','sec-g'];
 // The Overview panel is not a section — it has no tab, no letter and no
 // completion state — but it is still a record in APP_DATA, still gated, and
 // still resolved by field prefix. Keeping the original `sec-a` id means existing
 // rows, drafts and AUDIT_LOG history all keep working untouched.
 const OVERVIEW_KEY = 'sec-a';
+// Costing, split out of Investigation on 2026-10-13 and shown as Section D. Named once
+// because two places care about its identity specifically and would otherwise both
+// spell it: the blank-close question in closeSection, and the move gate below.
+const COSTING_SECTION_ID = 'sec-cost';
 function myAccess() {
   if (currentUser && currentUser.access) return currentUser.access;
   const viewOnly = {};
@@ -1040,6 +1048,40 @@ function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 // Overview fields. A department can hold it without editing any section, which
 // is exactly what CR and Management do. Admin always has it.
 function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
+
+// Does the DEPLOYED backend know this section at all? Admins are handed every
+// SECTION_KEYS entry by getEffectiveAccess (backend.gs), so a key that is MISSING is
+// proof the running server predates the section — not a statement about permissions.
+//
+// ⚠ The __fallback test is load-bearing. myAccess() hands back a synthetic profile
+// built from SECTION_IDS before real access has arrived, and that profile HAS the key —
+// so without this, the guard would answer "the server knows it" on every early render
+// and the notice would flicker on and off. No answer yet is not evidence of an old
+// server, so it says yes and stays quiet; the pane is read-only during that window
+// anyway, because the fallback grants view and never edit.
+function backendKnowsSection(secId) {
+  const a = myAccess();
+  if (a.__fallback) return true;
+  return Object.prototype.hasOwnProperty.call(a.permissions || {}, secId);
+}
+
+// The one-line explanation painted into a section the server does not know about yet.
+// ⚠ Worded exactly this way on purpose: for an ADMIN an un-pasted backend does NOT
+// fail — saveSection skips the ACL check for admins — so a notice promising failure
+// would be a lie the owner could disprove in one click. It says what is true: everyone
+// else is affected, and an administrator has to paste.
+function paintSectionServerNote(pane, show) {
+  let note = pane.querySelector('.section-server-note');
+  if (!show) { if (note) note.remove(); return; }
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'section-server-note';
+    const title = pane.querySelector('.section-title');
+    if (title && title.parentNode === pane) title.insertAdjacentElement('afterend', note);
+    else pane.insertBefore(note, pane.firstChild);
+  }
+  note.textContent = t('section.serverStale');
+}
 
 // ─── SENTINEL STORES ─────────────────────────────────────────────────────────
 // App-owned records that live outside the 9 workflow sections. They are saved
@@ -1137,7 +1179,7 @@ function appState(irNumber) {
 
 // The stage the app holds for this ticket, or '' when it holds none — which means
 // the ticket has never been opened here and the merge will give it the Sheet's
-// starting stage instead. Deliberately separate from appState(): saving Section B
+// starting stage instead. Deliberately separate from appState(): saving Section A
 // is a real edit but not triage, and it must not be mistaken for one.
 //
 // It reads `status`, not a `statusOwned` flag. The flag belonged to the era when
@@ -1424,14 +1466,15 @@ const PRIORITY_RANK = Object.fromEntries(TICKET_PRIORITIES.map((p, i) => [p, i])
 
 // Runtime option lists (defaults merged with any saved overrides).
 let inwardOptions = JSON.parse(JSON.stringify(INWARD_OPTIONS_DEFAULTS));
-// Image-evidence control state (used by Section D + E/F/G/H/I uploads):
+// Image-evidence control state (used by every section that takes a file):
 // evidenceState[fieldId] = [{ caption, link, file, url, type, name }].
 // `link` = Drive URL of an already-uploaded file ('' while pending upload); `file`/`url`
 // hold the local File + object URL for files not yet uploaded to Drive. `type`
 // is 'image' | 'pdf' (controls preview); `name` is the original filename.
 let evidenceState = {};
 // Dispatch-checklist state for the open IR: { [fieldId]: { [particular]: status } }.
-// Section H verifies dispatched goods against the items received in Section B.
+// Section H (retired — now part of G) verifies dispatched goods against the items
+// received in Section A.
 let dispatchChecklistState = {};
 
 // ─── SECTION C — IQC VISUAL INSPECTION CONFIG ──────────────────────────────────
@@ -5079,14 +5122,34 @@ function syncNavAccess() {
 // Three tabs, one backend call. `listUsers` returns every account AND every
 // department in a single response, so switching tabs never re-fetches and the
 // People matrix can draw people × departments from one consistent snapshot.
-const SECTION_LABELS = { 'sec-b':'B','sec-c':'C','sec-d':'D','sec-e':'E','sec-f':'F','sec-g':'G' };
+// The DISPLAYED letter for each section — NOT derived from its id, and deliberately
+// not equal to it any more. The letters were renumbered A–G on 2026-10-13 (Inward
+// became A, and Costing was split out of Investigation as D), but the IDS could not
+// move with them: `sec-b`…`sec-g` are the PERMISSION KEYS, stored per department in
+// _store/access.json and matched against SECTION_KEYS in backend.gs. Renumbering an id
+// would silently re-grant or un-grant access. So the letters moved and the ids stayed,
+// exactly as OVERVIEW_KEY = 'sec-a' already plays it, and for the same reason the
+// merged g_*/i_* field ids were left alone.
+//
+// Everything that shows a letter to a person MUST come through sectionLetter() below.
+// `sec-cost` is proof of why: deriving the letter from the id would print "COST".
+const SECTION_LABELS = { 'sec-b':'A','sec-c':'B','sec-d':'C','sec-cost':'D',
+                         'sec-e':'E','sec-f':'F','sec-g':'G' };
+// The letter for an id. The fallback is for ids that are NOT live sections — the
+// retired `sec-h`/`sec-i`, which AUDIT_LOG history still names, must keep reading
+// exactly as they always did.
+function sectionLetter(secId) {
+  return SECTION_LABELS[secId] || String(secId || '').replace(/^sec-/, '').toUpperCase();
+}
 // Human names for the tick grids. Kept as a literal rather than derived from
 // SECTIONS (defined much further down, and lazily) so the admin UI never depends
-// on the section-form builder having been evaluated.
+// on the section-form builder having been evaluated — and because it feeds the
+// board's column headings, the admin restore notice and the activity timeline.
 const SECTION_SHORT = {
   'sec-b': 'Inward Checklist',
-  'sec-c': 'IQC Visual Inspection',
+  'sec-c': 'Visual Inspection (IQC)',
   'sec-d': 'Investigation',
+  'sec-cost': 'Costing',
   'sec-e': 'Production (Rework)',
   'sec-f': 'Quality Test Report',
   'sec-g': 'PDI Report/Dispatch Record',
@@ -6313,8 +6376,14 @@ function fyLabel(startYear) { return startYear + '-' + String((startYear + 1) % 
 // independently, so `month` narrows across every year and `fy` narrows across every
 // month. Both set is their intersection, not a contradiction.
 const INSIGHTS_ALL = 'all';
-let insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
-                        category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+// Every axis clear, in ONE place. The state below, "Clear filters" and the predicate
+// all read this, so a seventh axis cannot be added to the row and forgotten in one of
+// the three — and "no filter on this axis" has a single definition rather than three
+// spellings of the same object literal.
+const ALL_FILTERS = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
+                      category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL,
+                      model: INSIGHTS_ALL };
+let insightsFilters = { ...ALL_FILTERS };
 
 // The dropdowns' option lists, computed over the WHOLE list and never over the
 // filtered rows: a select built from filtered rows would drop every other option the
@@ -6322,7 +6391,7 @@ let insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_
 // segmentCounts() reading allIRs.
 function insightsFacets(irs) {
   const rows = Array.isArray(irs) ? irs : [];
-  const years = new Set(), months = new Set(), customers = new Set(), drones = new Set();
+  const years = new Set(), months = new Set(), customers = new Set(), drones = new Set(), models = new Set();
   let undated = 0;
   rows.forEach(ir => {
     const fy = irFiscalYear(ir.dateRaisedISO);
@@ -6330,12 +6399,14 @@ function insightsFacets(irs) {
     else { years.add(fy); months.add(irMonthNumber(ir.dateRaisedISO)); }
     if (ir.customerName) customers.add(String(ir.customerName));
     if (ir.droneId) drones.add(String(ir.droneId));
+    if (ir.droneModel) models.add(String(ir.droneModel));
   });
   return {
     years: [...years].sort((a, b) => b - a),
     months: [...months].sort((a, b) => a - b),
     customers: [...customers].sort((a, b) => a.localeCompare(b)),
     drones: [...drones].sort((a, b) => a.localeCompare(b)),
+    models: [...models].sort((a, b) => a.localeCompare(b)),
     undated,
   };
 }
@@ -6392,24 +6463,34 @@ function insightsOpt(v, sel, label) {
 // ─── THE ONE FILTER PREDICATE ────────────────────────────────────────────────
 // Every number on the dashboard is counted from the rows this returns. It is a
 // named function rather than a filter inline in insightsSummary() for one reason:
-// the charts below were added later, and a second copy of these six comparisons
+// the charts below were added later, and a second copy of these comparisons
 // is a second chance to get one of them wrong — at which point the bar chart
 // disagrees with the total printed directly above it, and neither looks broken.
 function insightsMatches(ir, filters) {
   const f = filters || {};
   if (!ir) return false;
+  // An axis ABSENT from the filter object means "no filter on that axis", exactly like
+  // INSIGHTS_ALL. That is not tidiness — it is the difference between a filter and a
+  // blank page. `undefined !== INSIGHTS_ALL` is TRUE, so without this a caller handing
+  // in an object built before the model axis existed would have every row failed at the
+  // new comparison and the dashboard would read zero, with every dropdown saying "All"
+  // and no error anywhere. Two suites build exactly such an object, so it is not
+  // hypothetical. "No filter on this axis" now has one meaning however the object was
+  // built. (ALL_FILTERS is the single list of the axes.)
+  const open = v => v === undefined || v === INSIGHTS_ALL;
   // String() on both sides: a select hands back a string, and a Set-derived
   // option list holds numbers. Comparing them raw would match nothing at all,
   // silently, for FY and Month only.
-  if (f.fy !== INSIGHTS_ALL && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
-  if (f.month !== INSIGHTS_ALL && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
-  if (f.status !== INSIGHTS_ALL && statusCategory(ir.status) !== f.status) return false;
-  if (f.category !== INSIGHTS_ALL) {
+  if (!open(f.fy) && String(irFiscalYear(ir.dateRaisedISO)) !== String(f.fy)) return false;
+  if (!open(f.month) && String(irMonthNumber(ir.dateRaisedISO)) !== String(f.month)) return false;
+  if (!open(f.status) && statusCategory(ir.status) !== f.status) return false;
+  if (!open(f.category)) {
     if (f.category === UNCATEGORISED) { if (ir.category) return false; }
     else if (ir.category !== f.category) return false;
   }
-  if (f.customer !== INSIGHTS_ALL && String(ir.customerName || '') !== f.customer) return false;
-  if (f.drone !== INSIGHTS_ALL && String(ir.droneId || '') !== f.drone) return false;
+  if (!open(f.customer) && String(ir.customerName || '') !== f.customer) return false;
+  if (!open(f.drone) && String(ir.droneId || '') !== f.drone) return false;
+  if (!open(f.model) && String(ir.droneModel || '') !== f.model) return false;
   return true;
 }
 
@@ -6673,6 +6754,7 @@ function renderInsights() {
   if (f.month !== INSIGHTS_ALL && !fx.months.some(m => String(m) === String(f.month))) f.month = INSIGHTS_ALL;
   if (f.customer !== INSIGHTS_ALL && !fx.customers.includes(f.customer)) f.customer = INSIGHTS_ALL;
   if (f.drone !== INSIGHTS_ALL && !fx.drones.includes(f.drone)) f.drone = INSIGHTS_ALL;
+  if (f.model !== INSIGHTS_ALL && !fx.models.includes(f.model)) f.model = INSIGHTS_ALL;
 
   const sum = insightsSummary(allIRs, f);
   const filtered = sum.matched !== sum.total;
@@ -6723,9 +6805,12 @@ function renderInsights() {
       ${filterRow('ins-customer', 'Reported by',
         insightsOpt(INSIGHTS_ALL, f.customer, 'All reporters') +
         fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
-      ${filterRow('ins-drone', 'Drone SN',
-        insightsOpt(INSIGHTS_ALL, f.drone, 'All drones') +
+      ${filterRow('ins-drone', 'UAS SN',
+        insightsOpt(INSIGHTS_ALL, f.drone, 'All UAS SN') +
         fx.drones.map(d => insightsOpt(d, f.drone)).join(''))}
+      ${filterRow('ins-model', 'UAS MODEL',
+        insightsOpt(INSIGHTS_ALL, f.model, 'All models') +
+        fx.models.map(m => insightsOpt(m, f.model)).join(''))}
       <button type="button" class="btn btn-sm btn-secondary" id="ins-clear"
               ${filtered ? '' : 'disabled'}>Clear filters</button>
     </div>
@@ -6896,7 +6981,8 @@ if (insightsView) {
   insightsView.addEventListener('change', e => {
     const id = e.target && e.target.id;
     const map = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
-                  'ins-category': 'category', 'ins-customer': 'customer', 'ins-drone': 'drone' };
+                  'ins-category': 'category', 'ins-customer': 'customer',
+                  'ins-drone': 'drone', 'ins-model': 'model' };
     if (!map[id]) return;
     insightsFilters[map[id]] = e.target.value;
     renderInsights();
@@ -6911,8 +6997,7 @@ if (insightsView) {
       return;
     }
     if (e.target && e.target.id === 'ins-clear') {
-      insightsFilters = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
-                          category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL };
+      insightsFilters = { ...ALL_FILTERS };
       renderInsights();
     }
   });
@@ -7406,8 +7491,8 @@ function renderLog() {
         <button type="button" class="btn" id="log-push"${canPush && logState.target ? '' : ' disabled'}>Push to IR</button>
       </div>
       <p class="log-note">${canPush
-        ? 'Appends the summary to Section D → Description of Investigation (it never overwrites what is already written), stamps the Analysis Date if it is empty, and stores the full report on the section.'
-        : 'You do not have edit rights on Section D, so the report cannot be pushed from this account.'}</p>
+        ? 'Appends the summary to Section C → Description of Investigation (it never overwrites what is already written), stamps the Analysis Date if it is empty, and stores the full report on the section.'
+        : 'You do not have edit rights on Section C, so the report cannot be pushed from this account.'}</p>
       ${logState.pushed ? `<p class="log-note">Pushed into <b>${escHtml(logState.pushed)}</b>. Open it to read the note that was written.</p>` : ''}
     </div>`);
   }
@@ -7485,14 +7570,14 @@ async function pushLogToIR() {
   const irNumber = logState.target;
   if (!report) { showToast('Analyse a log first.'); return; }
   if (!irNumber) { showToast('Choose the IR to push into.'); return; }
-  if (!canEditSection('sec-d')) { showToast('You do not have edit rights on Section D.'); return; }
+  if (!canEditSection('sec-d')) { showToast('You do not have edit rights on Section C.'); return; }
   if (logState.busy) return;
 
   logState.busy = true;
   renderLog();
   try {
     // Open the IR itself rather than writing behind the screen. The engineer sees
-    // what landed in Section D, which is the only trustworthy confirmation of a
+    // what landed in Section C, which is the only trustworthy confirmation of a
     // write. replaceState keeps the URL honest without firing a second hashchange
     // on top of the open done here.
     history.replaceState(null, '', '#/tickets/' + encodeURIComponent(irNumber));
@@ -7509,7 +7594,7 @@ async function pushLogToIR() {
     if (dateEl && !dateEl.value) dateEl.value = stamp;
 
     // Hand the stored report to the section so collectSectionValues() carries it
-    // through this save AND every later Section D save, instead of dropping it.
+    // through this save AND every later Section C save, instead of dropping it.
     currentSectionData['sec-d'] = currentSectionData['sec-d'] || {};
     currentSectionData['sec-d'].d_logAnalysis = logReportForStore(report, logState.fileName, logState.fileSize);
 
@@ -7774,6 +7859,21 @@ const INTAKE_FIELDS = [
   { field: 'dateRaised',              needle: 'Timestamp',                    label: 'Raised on',                 kind: 'datetime' },
   { field: 'incidentDate',            needle: 'Date of Incident',             label: 'Date of incident',          kind: 'date' },
   { field: 'droneId',                 needle: 'Drone Serial No',              label: 'Drone serial no.',          kind: 'text' },
+  // The airframe model, column S ("Select the Drone Model"). Read for the first
+  // time on 2026-10-13 — until then it fell into `extra`, the "other columns"
+  // audit block, and no screen of the app could group by model.
+  //
+  // ⚠ The Form writes this SAME question into a second column (W) with the same
+  // header, and the duplicate is a trap rather than a curiosity: `buildIntakeMap`
+  // resolves a column with findIndex, so only the first is consumed and the second
+  // is reported as unmapped and drawn on every card as well. See the duplicate
+  // pass in buildIntakeMap.
+  //
+  // The values are shown EXACTLY as the Sheet holds them — uncleaned. Several are
+  // Form typos ("STIVER" for STRIVER) and some are not airframes at all (RS2,
+  // DJI, AGISOFT). Mapping them onto a tidy SKU list would be the app inventing
+  // data it was never given; the honest fix is the Sheet.
+  { field: 'droneModel',              needle: 'Drone Model',                  label: 'Drone model',               kind: 'text' },
   { field: 'companyName',             needle: 'Where Do You Work',            label: 'Company',                   kind: 'text' },
   { field: 'customerName',            needle: "Who's Reporting",              label: 'Reported by',               kind: 'text' },
   { field: 'contactPhone',            derive: true,                           label: 'Contact phone',             kind: 'text' },
@@ -7811,6 +7911,19 @@ function buildIntakeMap(headers) {
     const i = idxOf(n);
     if (i >= 0) consumed.add(i);
   });
+  // The Form writes a few questions into TWO columns under the SAME header — "Select
+  // the Drone Model" is in S and W today. `findIndex` above takes the first, so the
+  // second stayed unconsumed and was then drawn on every card as a second, unlabelled
+  // copy of a fact the card already carries. A header the Form emits twice is one fact
+  // in two columns, so the leftover copy is consumed too.
+  //
+  // Scoped to EXACT matches deliberately: the needle pass uses `includes`, and
+  // consuming every column that merely RESEMBLES a consumed one (a header reading
+  // "Summary notes" against the consumed "Summary") would silently swallow genuine
+  // extra columns — which are exactly what `unmapped` exists to report.
+  const consumedHeaders = new Set();
+  consumed.forEach(i => { if (headers[i]) consumedHeaders.add(headers[i]); });
+  headers.forEach((h, i) => { if (h && !consumed.has(i) && consumedHeaders.has(h)) consumed.add(i); });
   const unmapped = [];
   headers.forEach((h, i) => { if (h && !consumed.has(i)) unmapped.push(h); });
   return { map, consumed, unmapped };
@@ -7912,6 +8025,7 @@ function mapSheetRows(rows) {
     records.push({
       irNumber,
       droneId:       cell(row, map.droneId),
+      droneModel:    cell(row, map.droneModel),
       dateRaised:    toDisplayDate(ts),
       dateRaisedISO: toISODate(ts),
       // NO status off the Sheet — not even as a starting value. `status` is app-owned
@@ -7937,7 +8051,7 @@ function mapSheetRows(rows) {
       // cut would have been the same split-brain one field over.
       initialStatus: stat,
       incidentDate:  toISODate(inc),
-      // Section A locked intake fields (sourced from the customer form, columns M/N/Q/R)
+      // Overview locked intake fields (sourced from the customer form, columns M/N/Q/R)
       incidentLocationWeather: cell(row, map.incidentLocationWeather),
       evidenceFormN:            cell(row, map.evidenceFormN),
       evidenceFormQ:            cell(row, map.evidenceFormQ),
@@ -8395,15 +8509,34 @@ function progressSteps(ir, prog) {
 //
 // The headings are the app's OWN short names (SECTION_SHORT), so the column a card
 // sits in and the tab it lives on say the same words.
+// The section columns, in workflow order, with the app status each one owns.
+// COSTING IS DELIBERATELY ABSENT. A column has to own at least one workflow status or
+// it can never hold a card — and no status means "Costing", so a D column would sit
+// permanently empty and read as a broken board. Costing gates the move out of
+// Investigation instead; see SECTION_MOVE_GATES.
+//
+// The ids are listed rather than taken from SECTION_IDS precisely so that this
+// exclusion is visible here, at the one place it is decided.
+const BOARD_SECTION_COLUMNS = [
+  { id: 'sec-b', stage: 'Inward' },
+  { id: 'sec-c', stage: 'Inspection' },
+  { id: 'sec-d', stage: 'Investigation' },
+  { id: 'sec-e', stage: 'Production' },
+  { id: 'sec-f', stage: 'Quality Test' },
+  { id: 'sec-g', stage: 'PDI/Dispatch' },
+];
 const BOARD_COLUMNS = [
   { key: 'start', title: t('board.notStarted'),         stages: ['Open', 'Remote Support'] },
   { key: 'hold',  title: t('board.paused'),             stages: ['On Hold'] },
-  { key: 'B', title: 'B · ' + SECTION_SHORT['sec-b'],   stages: ['Inward'] },
-  { key: 'C', title: 'C · ' + SECTION_SHORT['sec-c'],   stages: ['Inspection'] },
-  { key: 'D', title: 'D · ' + SECTION_SHORT['sec-d'],   stages: ['Investigation'] },
-  { key: 'E', title: 'E · ' + SECTION_SHORT['sec-e'],   stages: ['Production'] },
-  { key: 'F', title: 'F · ' + SECTION_SHORT['sec-f'],   stages: ['Quality Test'] },
-  { key: 'G', title: 'G · ' + SECTION_SHORT['sec-g'],   stages: ['PDI/Dispatch'] },
+  // The key is the section's DISPLAYED letter, DERIVED rather than typed. A card's
+  // column is matched back to a section by that letter (paintBoardMoveOffer), so a
+  // hand-typed letter that drifted from SECTION_LABELS would attach the move-on offer
+  // — and the costing gate below — to the WRONG SECTION, silently, with nothing on
+  // screen to show it had happened. Deriving makes the drift impossible.
+  ...BOARD_SECTION_COLUMNS.map(c => {
+    const letter = sectionLetter(c.id);
+    return { key: letter, title: letter + ' · ' + SECTION_SHORT[c.id], stages: [c.stage] };
+  }),
   { key: 'done', title: t('board.finished'),            stages: ['Delivered', 'Other'], quiet: true },
 ];
 
@@ -8453,6 +8586,24 @@ function boardNextColumn(key) {
   return { label: isSection ? next.key : next.title, stage: next.stages[0] };
 }
 
+// ─── ONE SECTION THAT GATES ANOTHER'S MOVE ────────────────────────────────────
+// Sections that must ALSO be closed before the section owning the current stage is
+// offered its move on. The owner's decision, 2026-10-13: a ticket may not reach
+// E. Production until D. Costing is closed.
+//
+// It is a prerequisite of the OFFER rather than a new workflow status, because costing
+// owns no status (see BOARD_SECTION_COLUMNS). This is the rule the offer already
+// follows one level down — "an offer to move on from a section nobody finished would be
+// the app volunteering a claim about work that has not happened" — applied one step
+// further out: an offer to move to Production before costing is settled would volunteer
+// a ticket into a stage whose precondition is unmet.
+//
+// ⚠ Triage remains the override. This gates the app's own offer, never the backend's
+// status write — a CR can still move a ticket by hand when a real situation demands it,
+// exactly as boardNextColumn's comment says of every other column. A hard server-side
+// refusal would strand tickets, and it is not what was asked for.
+const SECTION_MOVE_GATES = { 'sec-d': ['sec-cost'] };
+
 // Paint — or clear — the offer in every section's close row. It is rebuilt on each
 // paint rather than toggled in place, because the target moves with the status:
 // after one press this section's button goes and the next section's appears.
@@ -8464,6 +8615,9 @@ function paintBoardMoveOffer(irNumber) {
   // and Finished, which are not sections.
   const owner   = SECTION_IDS.find(id => SECTION_LABELS[id] === colKey) || null;
   const next    = owner ? boardNextColumn(colKey) : null;
+  // What still has to be closed before this move is allowed.
+  const gates   = owner ? (SECTION_MOVE_GATES[owner] || []) : [];
+  const blocked = gates.filter(g => !done.includes(g));
 
   SECTION_IDS.forEach(secId => {
     const holder = document.querySelector('#' + secId + ' .sec-close-row');
@@ -8472,7 +8626,20 @@ function paintBoardMoveOffer(irNumber) {
     // Only the section that owns the current stage is offered, and only once its own
     // work is actually closed — an offer to move on from a section nobody finished
     // would be the app volunteering a claim about work that has not happened.
-    if (secId !== owner || !next || !done.includes(secId)) { if (btn) btn.remove(); return; }
+    if (secId !== owner || !next || !done.includes(secId)) {
+      if (btn) btn.remove();
+      paintMoveGateNote(holder, null, null);
+      return;
+    }
+    // ...and only once everything gating this move is closed too. The offer is withheld
+    // WITH ITS REASON NAMED: a control that simply fails to appear reads as a bug, and
+    // whoever could clear it has no way to learn what is missing.
+    if (blocked.length) {
+      if (btn) btn.remove();
+      paintMoveGateNote(holder, blocked, next);
+      return;
+    }
+    paintMoveGateNote(holder, null, null);
     if (!btn) {
       btn = document.createElement('button');
       btn.type = 'button';
@@ -8486,6 +8653,21 @@ function paintBoardMoveOffer(irNumber) {
     btn.title = t('move.hint', { stage: next.stage });
     btn.onclick = () => moveOnByHand(irNumber, next.stage);
   });
+}
+
+// The sentence shown in place of a withheld move-on offer, naming every section that
+// still has to be closed and the column it is holding up. Rebuilt each paint so it
+// cannot disagree with the button it stands in for.
+function paintMoveGateNote(holder, blocked, next) {
+  let note = holder.querySelector('.move-gate-note');
+  if (!blocked || !blocked.length) { if (note) note.remove(); return; }
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'move-gate-note';
+    holder.appendChild(note);
+  }
+  const names = blocked.map(id => sectionLetter(id) + ' · ' + (SECTION_SHORT[id] || id)).join(', ');
+  note.textContent = t('move.gated', { column: next.label, sections: names });
 }
 
 // The one place a section press writes the workflow status, and the only thing in
@@ -8630,7 +8812,7 @@ function gridTile(ir) {
   //
   // There is no warranty field and no model field on an IR, so the tile carries
   // neither: the serial is the only product identifier a record actually has, and
-  // "in warranty" lives inside Section D where a tile cannot reach it.
+  // "in warranty" lives inside Section C where a tile cannot reach it.
   return `
     <div class="ir-tile${late ? ' is-late' : ''}${sel}"
          data-id="${escJsAttr(ir.irNumber)}" onclick="openDock('${escJsAttr(ir.irNumber)}')"${who}>
@@ -9408,7 +9590,7 @@ async function openPassbook(irNumber) {
   restoreDrafts();
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
-  renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section B draft values
+  renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section A draft values
   // The pinned Overview needs the saved data (a_crmOwner/a_contactPhone, and the
   // legacy activity log), so it renders only after loadSectionData has landed.
   renderOverview();
@@ -9544,7 +9726,8 @@ function intakeBodyHTML(ir) {
 }
 
 // ─── OVERVIEW PANEL ──────────────────────────────────────────────────────────
-// What used to be Section A, in the form it should always have had. It is pinned
+// The Overview — what Section A was before the letters moved on 2026-10-13, in the
+// form it should always have had. It is pinned
 // above the section tabs and is not a section: no letter, no tab, no completion
 // state, and it is never drafted (it sits outside #sections-wrapper).
 //
@@ -10496,7 +10679,7 @@ document.getElementById('sections-wrapper').addEventListener('input', e => {
   markSectionDirty(sec.id);
   clearTimeout(draftTimer);
   draftTimer = setTimeout(() => saveDraft(sec.id), 400);
-  // Editing Section B (Inward) changes which goods Section H must verify against —
+  // Editing Section A (Inward) changes which goods Section H must verify against —
   // debounce a refresh of the dispatch checklist so it stays in sync.
   if (sec.id === 'sec-b') {
     clearTimeout(dispatchRefreshTimer);
@@ -10559,6 +10742,23 @@ function showSection(sectionId) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.section-content').forEach(s => s.classList.remove('active'));
   tab.classList.add('active');
+  // Bring the tab into the STRIP's own view. There are eight tabs and the strip is
+  // wider than a phone screen, so the active one can be scrolled out of sight — and
+  // one of the two callers selects a section nobody pressed: the applicability rule
+  // below moves a person off a tab their category just switched off. Left alone, the
+  // tab lights up off-screen while the strip goes on showing its neighbours, so the
+  // section is right and nothing on screen says WHICH section it is.
+  //
+  // `inline: 'start'` rather than 'nearest': 'nearest' scrolls the MINIMUM, which on a
+  // 390px strip leaves a wide tab like "B: Visual Inspection" showing only its first
+  // few letters. Starting it flush left is what the strip's own `scroll-snap-align:
+  // start` already means, and it is the behaviour that makes the active tab read the
+  // same wherever it was pressed. `block: 'nearest'` cannot move the page: the strip
+  // is `position: sticky`, so it is always in view vertically. No behaviour option —
+  // a smooth scroll on open would animate a strip the person has not touched yet.
+  if (typeof tab.scrollIntoView === 'function') {
+    tab.scrollIntoView({ block: 'nearest', inline: 'start' });
+  }
   const pane = document.getElementById(sectionId);
   if (pane) pane.classList.add('active');
 }
@@ -10590,11 +10790,13 @@ document.querySelectorAll('.tab').forEach(tab => {
 // rather than a JSON-key rewrite. Field id → section id is resolved by
 // FIELD_SECTION_INDEX below, never by guessing the prefix.
 //
-// There is no `sec-a` entry: Section A became the Overview panel, which is not a
-// section and has no form.
+// There is no `sec-a` entry. Section A is the INWARD CHECKLIST now — the letters
+// moved A–G on 2026-10-13 while the ids stayed put — and the Overview panel, which
+// is not a section and has no form, is what the OLD Section A became. Its record
+// still lives under the `sec-a` key; see OVERVIEW_KEY.
 const SECTIONS = {
   'sec-b': {
-    title: 'Section B — inward checklist (inventory)',
+    title: 'Section A — inward checklist (inventory)',
     fields: [
       { id: 'b_inwardDate', label: 'Inward date',  type: 'date' },
       { id: 'b_inwardBy',   label: 'Inward by (name)', type: 'text', placeholder: 'Person who performed the inward' },
@@ -10605,7 +10807,7 @@ const SECTIONS = {
     ]
   },
   'sec-c': {
-    title: 'Section C — IQC visual inspection',
+    title: 'Section B — visual inspection (IQC)',
     fields: [
       { id: 'c_iqcDate',      label: 'Inspection date', type: 'date' },
       { id: 'c_iqcBy',        label: 'Inspected by',    type: 'text', placeholder: 'IQC inspector name' },
@@ -10614,15 +10816,16 @@ const SECTIONS = {
       { id: 'c_remarks',      label: 'Remarks', type: 'textarea', placeholder: 'Overall inspection remarks, observations, summary...' },
     ]
   },
-  // Section D — Investigation, in two parts:
-  //  Part A. Investigation (Flight Data Analysis) — signed off by the QC Manager.
-  //  Part B. Cost Analysis (Repair Estimate & Lead Time) — signed off by the Purchase Manager.
-  // The damage-report sub-section is deferred (later development).
+  // Section C — Investigation (Flight Data Analysis), once the "Part A" half of
+  // Section D. Its "Part B" — Cost Analysis (Repair Estimate & Lead Time) — is now
+  // `sec-cost`, a section of its own, because those two halves were signed off by two
+  // different roles (QC Manager and Purchase Manager) and a shared sign-off is not a
+  // shared section. The damage-report sub-section is deferred (later development).
   'sec-d': {
-    title: 'Section D — investigation',
+    title: 'Section C — investigation',
     fields: [
-      // ── Part A — Investigation ──
-      { id: 'd_partA',            label: 'Part A — investigation',          type: 'divider' },
+      // No "Part A" divider any more: the section IS the investigation now that costing
+      // has its own tab, so a band announcing the obvious would only be noise.
       { id: 'd_analysisBy',     label: 'Analysis performed by', type: 'text', placeholder: 'Engineer / analyst name' },
       { id: 'd_analysisDate',   label: 'Analysis date',         type: 'date' },
       // Written ONLY by the Log Analyser's "Push to IR" — there is no input for it,
@@ -10636,13 +10839,33 @@ const SECTIONS = {
       { id: 'd_rootCause',      label: 'Root cause',             type: 'textarea', placeholder: 'The underlying cause identified...' },
       { id: 'd_correctiveAction',  label: 'Corrective action',   type: 'textarea', placeholder: 'Action taken to correct the issue / fix this unit...' },
       { id: 'd_preventiveAction',  label: 'Preventive action',   type: 'textarea', placeholder: 'Action to prevent recurrence across systems / process...' },
-
-      // ── Part B — Cost Analysis (Repair Estimate & Lead Time) ──
-      { id: 'd_partB',              label: 'Part B — cost analysis (repair estimate &amp; lead time)', type: 'divider' },
+      // The warranty question BELONGS here, not with the costing. Deciding whether a
+      // repair is covered is part of concluding the investigation; deciding what to
+      // charge for it is the separate, and separately signed-off, act that follows.
+      // It was moved up from the old Part B on 2026-10-13 for exactly that reason —
+      // it is also why Costing can be legitimately EMPTY (a covered repair).
       { id: 'd_warrantyQualified',  label: 'Is this repair qualified for cover under warranty? (yes/no)', type: 'select', options: ['', 'Yes', 'No'] },
-      { id: 'd_repairTable',        label: 'Particulars for repair / replace', type: 'costTable' },
-      { id: 'd_leadTime',           label: 'Estimated lead time', type: 'text', placeholder: 'e.g. 7–10 working days' },
-      { id: 'd_goAhead',            label: 'Received go ahead by the customer?', type: 'select', options: ['', 'Yes', 'No'] },
+    ]
+  },
+  // Costing — split out of Investigation on 2026-10-13, letter D. It is the "Part B"
+  // that used to sit at the bottom of Section D, and it became a section of its own
+  // because docs/03 already recorded that its half is signed off by a DIFFERENT role
+  // (the Purchase Manager) from the investigation half (Technical Support / QC).
+  //
+  // ⚠ The three field ids keep their `d_` prefix on purpose. Renaming a field id
+  // orphans every __NUDGES__ comment anchored to it and splits its AUDIT_LOG history
+  // across two names — see the note above SECTIONS. FIELD_SECTION_INDEX rebuilds from
+  // this registry, so `d_repairTable` resolves to `sec-cost` with no rename anywhere.
+  //
+  // This section can be closed EMPTY: a warranty repair is not charged for. Its Close
+  // button is therefore never disabled for being blank, and closing a blank one asks a
+  // confirmation first (see closeSection).
+  'sec-cost': {
+    title: 'Section D — costing (repair estimate & lead time)',
+    fields: [
+      { id: 'd_repairTable',  label: 'Particulars for repair / replace', type: 'costTable' },
+      { id: 'd_leadTime',     label: 'Estimated lead time', type: 'text', placeholder: 'e.g. 7–10 working days' },
+      { id: 'd_goAhead',      label: 'Received go ahead by the customer?', type: 'select', options: ['', 'Yes', 'No'] },
     ]
   },
   'sec-e': {
@@ -10681,7 +10904,7 @@ const SECTIONS = {
     fields: [
       { id: 'h_pdiDocs',     label: 'PDI report (image or PDF)', type: 'imageEvidence' },
       { id: 'h_pdiRemarks',  label: 'PDI remarks',         type: 'textarea', placeholder: 'Packing instructions, special notes...' },
-      { id: 'h_dispatchChecklist', label: 'Cross check particulars — received (Section B) vs packed for dispatch', type: 'dispatchChecklist' },
+      { id: 'h_dispatchChecklist', label: 'Cross check particulars — received (Section A) vs packed for dispatch', type: 'dispatchChecklist' },
       { id: 'h_pdiResult',   label: 'PDI result',          type: 'select', options: ['Pass – Ready to Dispatch','Fail – Return to QC'] },
 
       // ── Part B — Dispatch ──
@@ -10799,6 +11022,21 @@ function applySectionAccessGating() {
     const view = canViewSection(secId);
     const edit = canEditSection(secId);
     const comment = canCommentSection(secId);
+    // ⚠ Has the DEPLOYED backend ever heard of this section? Admins are handed every
+    // SECTION_KEYS entry by getEffectiveAccess, so a missing key is not a permissions
+    // statement — it is proof the running server predates the section. That matters
+    // because saveSection skips the ACL check entirely for an admin and getPassbook's
+    // read filter does too: on an un-pasted backend this section looks perfect to the
+    // one person who cannot see the problem, and gives everyone else an empty pane and
+    // a Forbidden. This app has been bitten by exactly that shape before.
+    //
+    // So a section the server does not know is shown but never writable — the same
+    // treatment a view-only section already gets, which is why this reuses that path
+    // rather than inventing a second one. The read path still fills it, so nothing
+    // looks lost. The notice is painted below.
+    const unknown = !backendKnowsSection(secId);
+    const canEditHere = edit && !unknown;
+    paintSectionServerNote(pane, view && unknown);
 
     // Tab + pane visibility
     if (tab) tab.style.display = view ? '' : 'none';
@@ -10820,15 +11058,15 @@ function applySectionAccessGating() {
     // able to close a section any more than they could save one.
     const closeBtn = document.getElementById('close-' + secId);
     if (closeBtn) {
-      closeBtn.disabled = !edit;
-      closeBtn.style.opacity = edit ? '' : '0.5';
-      closeBtn.style.cursor = edit ? '' : 'not-allowed';
-      closeBtn.title = edit ? '' : 'You have view-only access to this section';
+      closeBtn.disabled = !canEditHere;
+      closeBtn.style.opacity = canEditHere ? '' : '0.5';
+      closeBtn.style.cursor = canEditHere ? '' : 'not-allowed';
+      closeBtn.title = canEditHere ? '' : 'You have view-only access to this section';
     }
 
     // View-only → disable every editable control in the pane (locked intake
     // fields are already readonly; this catches the editable ones).
-    if (view && !edit) {
+    if (view && !canEditHere) {
       pane.querySelectorAll('input, textarea, select, button').forEach(el => {
         if (el.id === 'nudge-bell' || el.classList.contains('sec-nudge-btn')) return;
         // Exporting a section is a read: a view-only user may still download it or
@@ -10902,7 +11140,12 @@ function applySectionAccessGating() {
 // into a section: a deep link, a back-navigation and a restored view all land on the
 // pane directly. And the Close button is disabled with it, because Close is the only
 // WRITE control a section has — the same reason it is what the edit grant gates.
-const REMOTE_SUPPORT_KEEPS = ['sec-d'];   // Investigation — the one a remote job needs
+// A remote-support job does not come back to the workshop, so it has no production,
+// no QC and no dispatch. It DOES still need investigation and its costing — and the
+// costing was inside `sec-d` until 2026-10-13, so `sec-cost` is listed here to keep
+// those jobs exactly as they were: two kept sections where they had one, because the
+// one held two halves.
+const REMOTE_SUPPORT_KEEPS = ['sec-d', 'sec-cost'];
 
 function categoryInapplicableSections(ir) {
   if (!ir || ir.category !== 'REMOTE SUPPORT') return [];
@@ -10950,7 +11193,7 @@ function buildField(field, irNumber, sectionId) {
   let control = '';
 
   // The auto-fill map that used to live here populated the ten locked intake
-  // fields of Section A. Those fields are not built any more — the Overview panel
+  // fields of the old Section A. Those fields are not built any more — the Overview panel
   // renders them from currentIR directly, read-only — so there is nothing left to
   // pre-fill and no field here is intake-sourced.
   const val = '';
@@ -11003,7 +11246,8 @@ function buildField(field, irNumber, sectionId) {
     `).join('');
     control = `<div>${rows}</div>`;
   } else if (field.type === 'costTable') {
-    // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B:
+    // Repair/Replace estimate table mirroring the I-PASSBOOK sheet Section D Part B.
+    // It is now the whole of Section D · Costing (id `sec-cost`):
     // columns # | Item description | Qty | Unit cost | Total cost (auto = Qty ×
     // Unit cost) | Remark, with a Total row INSIDE the same grid, under the Total
     // cost column.
@@ -11130,9 +11374,9 @@ function buildField(field, irNumber, sectionId) {
       </div>`;
   } else if (field.type === 'dispatchChecklist') {
     // Dispatch-vs-received-goods checklist. Items are sourced dynamically from
-    // Section B (Inward) at render time, so the operator verifies the exact same
+    // Section A (Inward) at render time, so the operator verifies the exact same
     // goods go back out. Rendered empty here; filled by renderDispatchChecklist()
-    // once Section B data is available (on load / when B is edited).
+    // once Section A data is available (on load / when it is edited).
     control = `<div class="dispatch-checklist" id="${id}" data-field="${id}"></div>`;
   } else if (field.type === 'url') {
     control = `
@@ -11239,7 +11483,7 @@ function buildLegacyActivityRow(row) {
   `;
 }
 
-// ─── COST TABLE (Section D Part B) ────────────────────────────────────────────
+// ─── COST TABLE (Section D · Costing, id `sec-cost`) ──────────────────────────
 // Repair/Replace estimate rows: Item description | Qty | Unit cost | Total cost
 // (auto = Qty × Unit cost) | Remark, with a Total row under the table.
 //
@@ -11714,12 +11958,40 @@ async function loadSectionData(irNumber) {
     const res  = await fetch(url);
     const data = await res.json();
     if (data.status === 'ok' && data.sections) {
+      // NOT mutated below, and not to be: this object is exactly what the backend
+      // said, and openPassbook unions its keys straight into the ticket's `done` list
+      // — so inventing a key here would mark a section COMPLETE that nobody saved.
       currentSectionData = data.sections;
-      // Populate form fields
+      // Populate form fields.
+      //
+      // The section to populate is the one that DECLARES the field, never the one
+      // the record happened to store it under. Those differ whenever a field moves
+      // home — `d_repairTable` and friends were in `sec-d` until 2026-10-13 and are
+      // in `sec-cost` now, and every ticket saved before then still holds them one
+      // section over. Handing the STORED id to populateFieldValue would resolve no
+      // field (it looks the type up in SECTIONS[secId]), fall through to a generic
+      // `el.value =`, and leave a cost table — a wrapper of rows, not an input —
+      // blank. The pane would then look like a section nobody had filled in.
+      //
+      // This is the file's own rule one more time: resolve a field's home by INDEX,
+      // never by prefix and never by where it was found (see FIELD_SECTION_INDEX).
+      //
+      // A value at its TRUE home is written FIRST, so that a field briefly stored in
+      // both places — between a Costing save and the next Investigation save — shows
+      // what the new section holds, and a stale copy cannot overwrite it.
+      const pending = [];
       Object.entries(data.sections).forEach(([secId, fields]) => {
         Object.entries(fields).forEach(([fieldId, value]) => {
-          populateFieldValue(secId, fieldId, value);
+          const home = FIELD_SECTION_INDEX[fieldId] || secId;
+          pending.push({ fieldId, value, home, atHome: home === secId });
         });
+      });
+      pending.sort((a, b) => (b.atHome ? 1 : 0) - (a.atHome ? 1 : 0));
+      const placed = new Set();
+      pending.forEach(({ fieldId, value, home }) => {
+        if (placed.has(fieldId)) return;   // the true home already had its say
+        placed.add(fieldId);
+        populateFieldValue(home, fieldId, value);
       });
     }
   } catch {
@@ -12002,7 +12274,7 @@ function collectSectionValues(sectionId) {
     } else if (field.type === 'logAnalysis') {
       // Carried through, not collected. There is no input to read — the value lives
       // only in the section data the analyser wrote it to, and dropping it here
-      // would mean a perfectly ordinary Section D save quietly deleted the report.
+      // would mean a perfectly ordinary Section C save quietly deleted the report.
       const held = currentSectionData?.[sectionId]?.[field.id];
       if (held) fieldValues[field.id] = held;
     } else if (field.type === 'dispatchChecklist') {
@@ -12078,6 +12350,39 @@ function collectSectionValues(sectionId) {
       if (el) fieldValues[field.id] = el.value;
     }
   }
+
+  // ── Fields that have MOVED to another section, still stored here ─────────────
+  // The backend REPLACES a section object — `var next = fields;` in saveSection — so a
+  // declared field missing from this payload is a DELETION. That is exactly what
+  // restoreField relies on, and it is why this has to exist: `d_repairTable`,
+  // `d_leadTime` and `d_goAhead` stopped being declared by `sec-d` on 2026-10-13 when
+  // Costing became `sec-cost`, and every ticket saved before then still holds them
+  // here. Without this, the first ordinary Investigation save after the split would
+  // destroy every stored estimate, silently.
+  //
+  // It is the same rule `d_logAnalysis` already follows a few lines up — "dropping it
+  // here would mean a perfectly ordinary Section C save quietly deleted the report" —
+  // applied to whichever fields move next, which is why it is written as a rule about
+  // the INDEX rather than as a list naming these three.
+  //
+  // ⚠ The two conditions read STORED data and stored data only:
+  //   • the record still holds the field — so it really would be lost;
+  //   • the field's NEW home has not persisted a copy yet. That is backend truth, not
+  //     a cache: loadSectionData deliberately never writes into currentSectionData, so
+  //     a key there means a save landed it.
+  // Gate this on anything else — a module flag, or a value the load path invented — and
+  // the two halves cancel out and that first save loses the data. Gated this way it is
+  // self-limiting: once the new home has been saved, this stops, and the record sheds
+  // the dead keys on its own next save. Nothing to migrate, nothing to run.
+  const storedHere = currentSectionData?.[sectionId] || {};
+  Object.keys(storedHere).forEach(fieldId => {
+    if (fieldValues[fieldId] !== undefined) return;      // still declared by this section
+    const home = FIELD_SECTION_INDEX[fieldId];
+    if (!home || home === sectionId) return;             // never moved, or not ours to carry
+    if (currentSectionData?.[home]?.[fieldId] !== undefined) return;   // a newer copy exists
+    fieldValues[fieldId] = storedHere[fieldId];
+  });
+
   return { fieldValues, fileFields };
 }
 
@@ -12163,7 +12468,7 @@ function refreshDraftBanner() {
     <button type="button" class="draft-banner-btn" onclick="discardAllDrafts()">Discard restored drafts</button>`;
 }
 function discardAllDrafts() {
-  // Drop drafts, rebuild forms fresh (re-applies Section A auto-fill), then
+  // Drop drafts, rebuild forms fresh (re-applies the Overview's auto-fill), then
   // re-apply the saved backend data so the UI reflects the last saved state.
   Object.keys(SECTIONS).forEach(clearDraft);
   buildSectionForms(currentIR.irNumber);
@@ -12331,6 +12636,22 @@ function setAutosaveNote(unitId, state) {
 }
 
 // ─── CLOSING A SECTION ────────────────────────────────────────────────────────
+// Is Costing empty? Answered from the COLLECTED values, never the DOM, so the question
+// closeSection asks is about exactly the payload the save will send — a question about
+// anything else could be answered about the wrong thing.
+//
+// Emptiness has two shapes here, because the section's three fields produce two: the
+// `costTable` yields an array, blank when it has no rows (it drops wholly blank ones as
+// it collects them); the text box and the select yield strings. Costing is a real section
+// that is legitimately left blank, so this decides only whether to ASK — never whether to
+// block.
+function isBlankCosting() {
+  const { fieldValues } = collectSectionValues(COSTING_SECTION_ID);
+  return Object.keys(fieldValues).every(fieldId => {
+    const value = fieldValues[fieldId];
+    return Array.isArray(value) ? value.length === 0 : !String(value || '').trim();
+  });
+}
 // The one remaining button, and the only thing in the app that appends to
 // `done[]`. Closing is the gate the Inspector speaks at: it is the moment a
 // section is declared finished, which is why it is the only moment worth
@@ -12338,6 +12659,22 @@ function setAutosaveNote(unitId, state) {
 async function closeSection(sectionId, irNumber) {
   const section = SECTIONS[sectionId];
   if (!section || !irNumber) return;
+  // Costing can be closed EMPTY, and that is a real answer rather than an oversight:
+  // a repair covered under warranty, or anything else not charged for, has no figures
+  // to enter. So the Close button is never disabled for being blank — but a section
+  // closed with nothing in it is indistinguishable, on the ticket afterwards, from one
+  // somebody forgot, so the one question worth asking is asked here.
+  //
+  // Asked of the COLLECTED values, not of the DOM: those are what the save below will
+  // actually send, and a question about anything else could be answered about the
+  // wrong thing. `costTable` reports an empty table as [], hence the length test.
+  if (sectionId === COSTING_SECTION_ID && isBlankCosting()) {
+    if (!confirm(
+      'Section D — Costing is empty.\n\n' +
+      'Nothing is being charged for this IR — usually because the repair is covered ' +
+      'under warranty, or is otherwise not chargeable.\n\n' +
+      'Close it anyway?')) return;
+  }
   // A close posted while the section's auto-save is still in flight would race it:
   // two writes, and the close's diff computed against whatever the first one had
   // already stored. The user is told rather than left wondering why the tap did
@@ -12369,7 +12706,7 @@ async function closeSection(sectionId, irNumber) {
     await syncIRStateAfterSectionSave(sectionId, irNumber);
     markSectionClosed(sectionId);
     loadActivityLog(irNumber);
-    showToast(`Section ${sectionId.replace('sec-', '').toUpperCase()} closed.`);
+    showToast(`Section ${sectionLetter(sectionId)} closed.`);
   } catch (err) {
     // NOT 'error', which reads "retrying" — nothing retries a close, because closing
     // is a deliberate act and the app will not declare a section finished on the
@@ -12396,7 +12733,7 @@ function markSectionReopened(sectionId) {
   if (tab) tab.classList.remove('is-closed');
 }
 function closeLabel(sectionId) {
-  return t('section.close', { letter: sectionId.replace('sec-', '').toUpperCase() });
+  return t('section.close', { letter: sectionLetter(sectionId) });
 }
 // Which sections this IR has already closed, painted from app-owned state. Called
 // wherever the IR's state is applied so the button is right on open, not only
@@ -12546,10 +12883,10 @@ async function postSectionSave(sectionId, irNumber, opts) {
 }
 
 // The explicit save, kept for the one caller that is a deliberate act rather than a
-// keystroke: pushing a Log Analyser report into Section D (see the analyser's
+// keystroke: pushing a Log Analyser report into Section C (see the analyser's
 // "Push to IR"). It gives button feedback because that caller has a button in front
-// of the user; it does NOT close the section, because writing a report into D is
-// not the same statement as declaring D finished.
+// of the user; it does NOT close the section, because writing a report into C is
+// not the same statement as declaring C finished.
 async function saveSection(sectionId, irNumber) {
   const btn = document.getElementById('save-' + sectionId);
   const section = SECTIONS[sectionId];
@@ -12561,7 +12898,7 @@ async function saveSection(sectionId, irNumber) {
   if (_savesInFlight.has(sectionId)) return;
   _savesInFlight.add(sectionId);
 
-  const btnLabel = `Save Section ${sectionId.replace('sec-', '').toUpperCase()}`;
+  const btnLabel = `Save Section ${sectionLetter(sectionId)}`;
   if (btn) { btn.textContent = 'Saving…'; btn.className = 'btn saving'; btn.disabled = true; }
   setAutosaveNote(sectionId, 'saving');
 
@@ -12582,7 +12919,7 @@ async function saveSection(sectionId, irNumber) {
     // For sections with image evidence, pull the freshly-uploaded Drive URLs
     // back into the in-memory state so captions stay paired with images.
     refreshEvidenceLinksAfterSave(sectionId, irNumber);
-    // Saving Section B changes the goods Section H verifies against — refresh
+    // Saving Section A changes the goods Section H verifies against — refresh
     // the dispatch checklist so it lists exactly what was received.
     if (sectionId === 'sec-b') renderDispatchChecklist('h_dispatchChecklist');
     loadActivityLog(irNumber);
@@ -12618,7 +12955,7 @@ async function saveSection(sectionId, irNumber) {
 // from closeSection and from nowhere else.
 function syncIRStateAfterSectionSave(sectionId, irNumber) {
   // Status is no longer mirrored from a section form. The IR Status dropdown lived
-  // in Section A, which is gone; status is now written only by the Triage modal
+  // in the old Section A, which is gone; status is now written only by the Triage modal
   // (see applyTriage), which owns `status`/`statusOwned`/`statusAt` itself. A
   // section save that happens to post a status key must not be able to move the
   // workflow clock.
@@ -13090,7 +13427,7 @@ async function drawSectionPdf(model, media, lib) {
   return await doc.save();
 }
 
-// `IR409 - Section B.pdf`, with everything a filesystem would object to removed.
+// `IR409 - Section A.pdf`, with everything a filesystem would object to removed.
 // The reserved characters are a list rather than a character class on purpose: this
 // file's comment stripper reads a double quote inside a regex literal as the start
 // of a string and then loses its place for the rest of the file.
@@ -13100,7 +13437,7 @@ function sanitizeFileName(s) {
   return out.replace(/[\x00-\x1f\x7f]/g, '-').replace(/\s+/g, ' ').trim() || 'export';
 }
 function exportFileName(irNumber, sectionId) {
-  const letter = String(sectionId || '').replace(/^sec-/, '').toUpperCase();
+  const letter = sectionLetter(sectionId);
   return sanitizeFileName(`${irNumber || 'IR'} - Section ${letter}`) + '.pdf';
 }
 
@@ -13277,17 +13614,17 @@ function removeEvidenceImage(fieldId, idx) {
   saveDraft(sectionIdFromFieldId(fieldId));
 }
 
-// ─── SECTION H — DISPATCH CHECKLIST (verify against Section B goods received) ──
-// Renders one row per good actually received in Section B (Inward), each with a
+// ─── SECTION H — DISPATCH CHECKLIST (verify against the Section A goods received) ──
+// Renders one row per good actually received in Section A (Inward), each with a
 // dropdown to confirm the same item is being dispatched back. The goods list is
-// read live from the Section B table (so unsaved B edits show) then from saved
-// data. Re-rendered whenever Section B changes; prior dispatch selections are
+// read live from the Section A table (so unsaved edits show) then from saved
+// data. Re-rendered whenever Section A changes; prior dispatch selections are
 // preserved across re-renders via dispatchChecklistState.
 function renderDispatchChecklist(fieldId) {
   const wrap = document.getElementById(fieldId);
   if (!wrap) return;
 
-  // Source goods from Section B — live DOM first, then saved data.
+  // Source goods from Section A — live DOM first, then saved data.
   let inward = null;
   const bWrap = document.getElementById('b_inwardTable');
   if (bWrap) {
@@ -13309,7 +13646,7 @@ function renderDispatchChecklist(fieldId) {
   const saved = dispatchChecklistState[fieldId] || {};
 
   if (!items.length) {
-    wrap.innerHTML = '<div class="dispatch-empty">No goods recorded in Section B (Inward) yet. Fill &amp; save Section B first — every received particular will then appear here for the cross-check (pack exactly the same, nothing less or more).</div>';
+    wrap.innerHTML = '<div class="dispatch-empty">No goods recorded in Section A (Inward) yet. Fill &amp; save Section A first — every received particular will then appear here for the cross-check (pack exactly the same, nothing less or more).</div>';
     return;
   }
   // Tabular failsafe: each received particular (with model + qty received) sits
@@ -13338,7 +13675,7 @@ function renderDispatchChecklist(fieldId) {
   wrap.innerHTML = `
     <div class="cc-note">Pack exactly the goods received during Inward — nothing less, nothing more. Mark each particular below.</div>
     <table class="crosscheck-table">
-      <thead><tr><th>Particular (as received — Section B)</th><th>Qty received</th><th>Packed for dispatch?</th></tr></thead>
+      <thead><tr><th>Particular (as received — Section A)</th><th>Qty received</th><th>Packed for dispatch?</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="crosscheck-summary" id="${fieldId}-summary"></div>`;
@@ -14518,8 +14855,12 @@ function fieldSectionFor(fieldId) {
 // Sections that no longer exist. History predating the merge still names them, and
 // relabelling that history with the surviving section would misattribute the work
 // that was actually done under the old letter.
+//
+// ⚠ "Old Section A" and not "formerly Section A": from 2026-10-13 Section A IS the
+// inward checklist, so the old wording would now say something false about the app's
+// own history — the one thing this table exists to get right.
 const HISTORICAL_SECTION_NAMES = {
-  'sec-a': 'Overview (formerly Section A)',
+  'sec-a': 'Overview (old Section A)',
   'sec-h': 'PDI (now part of G)',
   'sec-i': 'Dispatch (now part of G)',
 };
@@ -15043,10 +15384,24 @@ async function putFieldValueBack(i) {
 async function submitFieldRestore(value) {
   const v = fieldHistView;
   if (!v) return;
+  // ⚠ The section the write belongs in is decided by WHERE THE VALUE ACTUALLY IS, not
+  // by where the registry says the field lives. Those differ on any ticket that has not
+  // been re-saved since a field moved home: `v.sectionId` is the registry's answer
+  // (fieldSectionFor), and for `d_repairTable` that is now `sec-cost` — while the record
+  // still holds it under `sec-d`. restoreField guards `expectCurrent` against
+  // `data[sectionId]` (backend.gs), so posting the registry's answer makes it compare a
+  // value that is not there and REFUSE EVERY RESTORE with "This field changed while you
+  // were looking". Registry home first, so a ticket already saved the new way is
+  // unaffected; the stored location is the fallback, and only when it really holds it.
+  const stored = currentSectionData || {};
+  const home = FIELD_SECTION_INDEX[v.fieldId] || v.sectionId;
+  const sectionId = (stored[home] && stored[home][v.fieldId] !== undefined) ? home
+                  : (stored[v.sectionId] && stored[v.sectionId][v.fieldId] !== undefined) ? v.sectionId
+                  : home;
   const fd = new FormData();
   fd.append('action', 'restoreField');
   fd.append('irNumber', v.irNumber);
-  fd.append('sectionId', v.sectionId);
+  fd.append('sectionId', sectionId);
   fd.append('fieldId', v.fieldId);
   fd.append('value', value);
   // The newest value the audit trail reported for this field. The backend refuses the
@@ -15057,7 +15412,7 @@ async function submitFieldRestore(value) {
   // Display names only. The backend has no form registry and cannot resolve a field
   // id to a label, so the two labels travel with the request for the admin notice.
   fd.append('labels', JSON.stringify({
-    sectionLabel: sectionDisplayName(v.sectionId),
+    sectionLabel: sectionDisplayName(sectionId),
     fieldLabel: fieldLabelFor(v.fieldId),
   }));
   try {
@@ -15070,7 +15425,7 @@ async function submitFieldRestore(value) {
     await loadSectionData(v.irNumber);
     renderOverviewEditable();
     await loadActivityLog(v.irNumber);
-    openHistoryModal({ fieldId: v.fieldId, sectionId: v.sectionId });
+    openHistoryModal({ fieldId: v.fieldId, sectionId: sectionId });
   } catch {
     // Deliberately NOT "nothing was changed": a request that reached the backend and
     // then lost its response looks identical from here to one that never left, and
@@ -15339,11 +15694,11 @@ function closeHistoryModal() {
 // what that cost when it was read back.
 function getDemoIRs() {
   return [
-    { irNumber: 'IR409', droneId: 'S25P014',  dateRaised: '2025-10-01', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Sreenivas Pai', contactPhone: '7828148298', companyName: 'AgriKart Pvt Ltd', contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',    incidentDate: '2025-09-28' },
-    { irNumber: 'IR408', droneId: 'S100-003', dateRaised: '2025-09-28', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Meera Iyer',     contactPhone: '9845012345', companyName: 'FarmVista Solutions', contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
-    { irNumber: 'IR407', droneId: 'S25P017',  dateRaised: '2025-09-20', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Arjun Deshpande', contactPhone: '9900112233', companyName: 'SkyHarvest Corp',     contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',             incidentDate: '2025-09-18' },
-    { irNumber: 'IR406', droneId: 'S25P010',  dateRaised: '2025-09-15', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Kavya Reddy',    contactPhone: '9765432100', companyName: 'GreenField Agri',     contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
-    { irNumber: 'IR405', droneId: 'S25P040',  dateRaised: '2025-09-10', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Imran Sheikh',   contactPhone: '9123456780', companyName: 'DroneWorks India',    contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
+    { irNumber: 'IR409', droneId: 'S25P014', droneModel: 'SIGMA 100',  dateRaised: '2025-10-01', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Sreenivas Pai', contactPhone: '7828148298', companyName: 'AgriKart Pvt Ltd', contactEmail: 'ops@agrikart.in',      issueType: 'Hardware Damage',   issueDesc: 'Drone arm cracked during landing', spoc: 'Monish Raza', initialStatus: 'In Production',    incidentDate: '2025-09-28' },
+    { irNumber: 'IR408', droneId: 'S100-003', droneModel: 'SIGMA 100', dateRaised: '2025-09-28', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Meera Iyer',     contactPhone: '9845012345', companyName: 'FarmVista Solutions', contactEmail: 'support@farmvista.com', issueType: 'Firmware Issue',    issueDesc: 'GPS lock failure mid-flight',      spoc: 'Ravi Singh',  initialStatus: 'QC Investigation', incidentDate: '2025-09-25' },
+    { irNumber: 'IR407', droneId: 'S25P017', droneModel: 'SIGMA 75',  dateRaised: '2025-09-20', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Arjun Deshpande', contactPhone: '9900112233', companyName: 'SkyHarvest Corp',     contactEmail: 'tech@skyharvest.in',   issueType: 'Battery Issue',     issueDesc: 'Battery swelling after 50 cycles', spoc: 'Adhik Nair',  initialStatus: 'Open',             incidentDate: '2025-09-18' },
+    { irNumber: 'IR406', droneId: 'S25P010', droneModel: 'STRIVER',  dateRaised: '2025-09-15', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Kavya Reddy',    contactPhone: '9765432100', companyName: 'GreenField Agri',     contactEmail: 'field@greenfield.co',  issueType: 'Operational Query', issueDesc: 'Propeller vibration at high RPM',   spoc: 'Monish Raza', initialStatus: 'Delivered',        incidentDate: '2025-09-12' },
+    { irNumber: 'IR405', droneId: 'S25P040', droneModel: 'SIGMA 55',  dateRaised: '2025-09-10', summaryLink: 'https://docs.google.com/document/d/DEMO_SUMMARY_LINK', customerName: 'Imran Sheikh',   contactPhone: '9123456780', companyName: 'DroneWorks India',    contactEmail: 'service@droneworks.in', issueType: 'RMA / Return',      issueDesc: 'Complete unit returned for RMA',   spoc: 'Ravi Singh',  initialStatus: 'Closed',           incidentDate: '2025-09-08' },
   ];
 }
 

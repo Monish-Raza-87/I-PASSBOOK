@@ -993,7 +993,7 @@
   .act-remark      { grid-area: remark; }
 }
 
-/* ── Section B — Inward particulars ────────────────────────── */
+/* ── Section A — Inward particulars (id `sec-b`) ────────── */
 .inward-table-wrapper,
 .iqc-table-wrapper {
   border: 1px solid var(--outline-gray-1);
@@ -1024,7 +1024,7 @@
 .inward-qty { text-align: center; }
 .inward-row .form-input { padding: 0 0.45rem; height: 28px; font-size: var(--text-sm); }
 
-/* ── Section C — IQC inspection ────────────────────────────── */
+/* ── Section B — Visual inspection / IQC (id `sec-c`) ───── */
 .iqc-table-body { display: flex; flex-direction: column; }
 .iqc-table-header,
 .iqc-row {
@@ -1132,6 +1132,33 @@
    it, so it must not borrow the word "retrying". */
 .autosave-note[data-state="failed"] { color: var(--ink-red-7); font-weight: var(--weight-semibold); }
 
+/* ── Two notes that explain a control the app is withholding ──────────────
+   .section-server-note — the deployed backend does not carry this section yet
+                          (Costing, 2026-10-13), so the pane is read-only.
+   .move-gate-note      — the board's move-on offer is withheld until a
+                          prerequisite section is closed.
+   Both NAME the thing instead of leaving a control silently missing: a withheld
+   button with no sentence beside it reads as a bug, not as a rule. The server
+   note is amber because it is an instruction to a person; the gate note is quiet
+   because it is a statement about the ticket. */
+.section-server-note {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--st-paused-bd);
+  border-radius: var(--radius-4);
+  background: var(--st-paused-bg);
+  color: var(--st-paused-fg);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.move-gate-note {
+  flex: 1 1 100%;
+  margin: 0.15rem 0 0;
+  color: var(--ink-gray-6);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 .btn-close-section.is-closed {
   background: var(--surface-gray-1);
   color: var(--ink-gray-5);
@@ -1144,7 +1171,7 @@
   font-weight: var(--weight-semibold);
 }
 
-/* ── Section D — image evidence ────────────────────────────── */
+/* ── Image evidence — shared by the sections that take uploads ── */
 .image-evidence { display: flex; flex-direction: column; gap: 0.55rem; }
 .image-evidence-list { display: flex; flex-direction: column; gap: 0.6rem; }
 .evidence-item {
@@ -1200,7 +1227,7 @@
 .evidence-pdf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-pdf-open { font-size: var(--text-xs); color: var(--accent); font-weight: var(--weight-medium); white-space: nowrap; }
 
-/* ── Section H — dispatch checklist + cross-check ──────────── */
+/* ── Section H, retired — dispatch checklist + cross-check, now in G ── */
 .dispatch-checklist { display: flex; flex-direction: column; gap: 0.45rem; }
 .dispatch-row {
   display: flex;
@@ -1421,7 +1448,7 @@
 
 /* ══════════════════════════════════════════════════════════
    IR OVERVIEW — pinned panel above the tabs
-   Section A's content in the form it should always have had.
+   The old Section A's content, in the form it should always have had.
    Not a section, not a tab, never hidden by the tab handler.
    ══════════════════════════════════════════════════════════ */
 .overview-panel {
@@ -2473,12 +2500,16 @@
   color: var(--ink-gray-5);
   font-variant-numeric: tabular-nums;
 }
-.ir-progress.p1 .ir-progress-bar::after { width: 16.666%; }
-.ir-progress.p2 .ir-progress-bar::after { width: 33.333%; }
-.ir-progress.p3 .ir-progress-bar::after { width: 50%; }
-.ir-progress.p4 .ir-progress-bar::after { width: 66.666%; }
-.ir-progress.p5 .ir-progress-bar::after { width: 83.333%; }
-.ir-progress.p6 .ir-progress-bar::after { width: 100%; }
+/* Seven counted sections since Costing became its own section on 2026-10-13, so the
+   ladder is n/7. `progressChip` emits `p${done}` and an inline `style=` is not allowed
+   here, so a count with no matching class is a SILENTLY EMPTY bar — no error, no bar. */
+.ir-progress.p1 .ir-progress-bar::after { width: 14.286%; }
+.ir-progress.p2 .ir-progress-bar::after { width: 28.571%; }
+.ir-progress.p3 .ir-progress-bar::after { width: 42.857%; }
+.ir-progress.p4 .ir-progress-bar::after { width: 57.143%; }
+.ir-progress.p5 .ir-progress-bar::after { width: 71.429%; }
+.ir-progress.p6 .ir-progress-bar::after { width: 85.714%; }
+.ir-progress.p7 .ir-progress-bar::after { width: 100%; }
 .ir-progress.is-complete .ir-progress-bar::after { background: var(--ink-green-7); }
 .ir-progress.is-complete .ir-progress-text { color: var(--ink-green-7); font-weight: var(--weight-semibold); }
 

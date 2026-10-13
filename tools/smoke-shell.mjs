@@ -1231,11 +1231,27 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // four steps that turn the method on. Asserted on BOTH halves: a note with no steps is the
   // sentence he already had, and steps that do not reach a real control are worse than none.
   ok('...and tapping a door this device has not got explains how to get it, in four steps',
-    /function showMethodInactiveNote\(\)/.test(appCode) &&
-    /if \(!methodReady\('fingerprint'\)\) return showMethodInactiveNote\(\);/.test(appCode) &&
-    /if \(!methodReady\('pattern'\)\) return showMethodInactiveNote\(\);/.test(appCode) &&
+    /function showMethodInactiveNote\(variant\)/.test(appCode) &&
+    /if \(!methodReady\('fingerprint'\)\) return showMethodInactiveNote\('inactive'\);/.test(appCode) &&
+    /if \(!methodReady\('pattern'\)\) return showMethodInactiveNote\('inactive'\);/.test(appCode) &&
     (empForm.match(/data-i18n="auth\.methodInactive\.step[1-4]"/g) || []).length === 4 &&
     /data-i18n="auth\.methodInactive\.say">This login method activates after you enable it from your login\.<\/p>/.test(empForm));
+  // …and its SECOND story, for the device that has the method switched on but cannot use
+  // it. The owner hit exactly this on 2026-10-13: the fingerprint button, on a machine the
+  // browser will not offer a sensor on. Sending him four steps that turn the method on
+  // again would be four instructions he cannot follow, so the variant hides the steps and
+  // says the true thing instead. Asserted as a shape — the variant is named, the steps and
+  // the say are hidden from it by the stylesheet, its own two strings exist in both tables,
+  // and the unlock tap is the one that asks the device before it asks the backend.
+  ok('...and the device that cannot offer a sensor gets a sentence, not four steps it cannot follow',
+    /if \(!\(await quickUnlockBiometricAvailable\(\)\)\) return showMethodInactiveNote\('nohardware'\);/.test(appCode) &&
+    /data-variant="inactive"/.test(empForm) &&
+    /id="auth-method-note-say-hw" data-i18n="auth\.methodInactive\.sayNoHardware"/.test(empForm) &&
+    /id="auth-method-note-why" data-i18n="auth\.methodInactive\.whyNoHardware"/.test(empForm) &&
+    /\.method-note\[data-variant="nohardware"\] \.method-note-say,\s*\n\s*\.method-note\[data-variant="nohardware"\] \.method-note-steps \{ display: none; \}/.test(viewsCss) &&
+    /\.method-note\[data-variant="nohardware"\] \.method-note-hw \{ display: block; \}/.test(viewsCss) &&
+    (i18nJs.match(/auth\.methodInactive\.sayNoHardware/g) || []).length === 2 &&
+    (i18nJs.match(/auth\.methodInactive\.whyNoHardware/g) || []).length === 2);
   // The guidance is only worth having if it points at controls that exist. So the label
   // is read OUT OF the menu that owns it — syncQuickUnlockMenu changes that row's wording
   // with the device's state — and the note is then required to say the same words. A note

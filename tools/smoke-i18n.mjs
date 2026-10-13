@@ -194,9 +194,9 @@ ok('every priority the app offers has a word too',
 head('t(), status() and applyStatic() behave the way callers assume');
 
 ok('t() returns the string', L.t('list.title') === 'IRs');
-ok('t() fills its slots', L.t('board.more', { n: 3 }) === '+3 more — see list', L.t('board.more', { n: 3 }));
+ok('t() fills its slots', L.t('grid.foot', { n: 3 }) === 'No more IRs — 3 shown', L.t('grid.foot', { n: 3 }));
 ok('t() leaves a slot alone when no value is given, rather than writing "undefined"',
-  L.t('board.more') === '+{n} more — see list', L.t('board.more'));
+  L.t('grid.foot') === 'No more IRs — {n} shown', L.t('grid.foot'));
 ok('t() returns the KEY when it has no string — visibly wrong, never blank',
   L.t('totally.made.up') === 'totally.made.up');
 ok('...and it says so once per key, so the failure is findable in a console',
@@ -452,7 +452,7 @@ ok('...and the app then reads in Hindi',
   HS.t('list.title') === 'IR' && HS.t('auth.continue') === 'जारी रखें',
   [HS.t('list.title'), HS.t('auth.continue')]);
 ok('...with the slots still filled from the call site',
-  HS.t('board.more', { n: 3 }) === '+3 और — सूची देखें', HS.t('board.more', { n: 3 }));
+  HS.t('grid.foot', { n: 3 }) === 'और कोई IR नहीं — 3 दिखाए गए', HS.t('grid.foot', { n: 3 }));
 ok('...and a status word folds a retired Sheet value into its Hindi stage',
   HS.I18N.status('QC Investigation') === 'जाँच', HS.I18N.status('QC Investigation'));
 ok('a stored "ur" is refused as a choice and reconciled to English on load, not left dangling',

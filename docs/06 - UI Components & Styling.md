@@ -444,6 +444,18 @@ three for free, and no drawing can show a set the others do not.
   drawing — `is-board` or `is-grid`, neither for the List — and `setListView()` is its
   only writer. The buttons, the pane class and the repaint therefore cannot disagree.
   An unrecognised mode normalises back to `list`, never to a blank pane.
+- **The Service Desk ARRIVES on the Grid** (2026-10-13). `showApp()` ends its arrival with
+  `setListView('grid')`, whatever this device last chose. It shipped at v90 as
+  `setListView(listMode)` — the value read from `VIEW_KEY` — on the reasoning that a
+  remembered drawing should win, and that is what kept the Grid off the owner's screen: his
+  device had chosen List before the Grid existed, and `handleRoute`'s own "opens on the Grid"
+  rule could never fire, because `showApp()` calls `showIndex()` (which sets `currentView =
+  'index'`) *before* `handleRoute()`, whose first line returns early on `'index'`. So
+  `VIEW_KEY` now supplies only the pre-boot first paint, and every arrival lands on the Grid.
+  Choosing List still works and still sticks for the length of the session; it just does not
+  outlive a reload. The guard in `handleRoute` is **kept** — it is what stops a mid-session
+  flip to List being stamped back to Grid. `smoke-ui.mjs` pins both halves, because deleting
+  either one is a plausible-looking repair that puts the bug back.
 - **A view that needs the workspace takes it.** At ≥1024px `#index-view` is a fixed
   `--list-w` rail (400px), and nine columns of cards — or a grid — do not fit in 400px.
   `html.view-full` makes the pane take the whole row and steps the sidebar, the
@@ -451,16 +463,13 @@ three for free, and no drawing can show a set the others do not.
   views**, not one each: "this drawing takes the whole row" is a single fact, and two
   parallel classes would be two places for it to drift. Everything behind it is
   desktop-scoped, so a phone (where both views are already a full screen) is untouched.
-- **The Board** is nine columns from `BOARD_COLUMNS`, capped at `BOARD_CAP = 25` cards
-  per column with the column's FULL count in its header, plus a `.kb-more` button back
-  to the List. Its own sideways scroll bar is described below.
+- **The Board** is nine columns from `BOARD_COLUMNS`, with the column's FULL count in its
+  header and every card drawn. Its own sideways scroll bar is described below.
 
 **The Grid** (2026-10-11 — *"I also want a grid view option. As of now we have list and
 board. but grid in my view will have better UI for users"*) is the same rows as square
 tiles, `repeat(auto-fill, minmax(17.5rem, 1fr))` — so a narrow pane falls to one column
-with no breakpoint behind it — capped at `GRID_CAP = 60` for the same reason the board
-caps: the list's cost is measured proportional to data (~0.1 ms/row, see
-[07](07 - Known Issues & TODO.md)) and the search path repaints on every 150 ms tick.
+with no breakpoint behind it.
 `.ir-tile` reuses the app's own parts rather than inventing any: `.ir-title`, the shared
 `getBadgeClass()` badge, `statusLabel()`, the shared `progressChip()`, the `.prio` dot
 and **`initialsOf()`** for the monogram — the one reader that helper has left since the
@@ -469,6 +478,24 @@ never `customerName`, Col L, which is the *person*), the serial, the category, p
 the Overdue flag, the completion chip and the age; the reporter's name is the tile's
 `title`. Clicking a tile opens the **existing ticket pane** — the mockup's slide-out
 drawer was rejected, and a second ticket screen is what `smoke-board.mjs` pins against.
+
+**Neither drawing caps anything as of 2026-10-13.** `GRID_CAP = 60` and `BOARD_CAP = 25`
+per column are gone, and the `.grid-more` / `.kb-more` chips with them. They had been
+justified by cost, and the cost was then *measured* at 454 IRs: 454 tiles cost ~14 ms to
+build and ~44 ms to assign and lay out, warm — which is what the uncapped **List** has
+always cost on every keystroke (~0.06–0.1 ms/row). The cap was not proportionate to
+anything the list does not already do, so it was deleted rather than tuned. There is
+deliberately **no chunker, no `IntersectionObserver` and no scroll listener**; this
+project has evaluated and declined that cost once already
+([PROJECT_HISTORY §6](../PROJECT_HISTORY.md)).
+
+**The end-of-list note.** Blank space under the last row is the one thing an uncapped
+drawing cannot distinguish from a drawing that gave up, so the blank now has a sentence
+in it: `grid.foot` — *"No more IRs — {n} shown"* — drawn by `renderIRGrid()` as the last
+child, spanning the row (`grid-column: 1 / -1`). Two rules it keeps: it is drawn **only
+when something was drawn** (an empty result already says so in the shared `.empty-state`,
+and "0 shown" underneath it would be two screens arguing), and it carries **no
+`overflow`** — a grid row sized `min-content` with a clipped child is the v89 trap.
 
 Two things the mockup asked for that an IR cannot give, and they are stated rather than
 faked: there is **no warranty field** on a record (the only warranty value is a Section D
@@ -507,36 +534,68 @@ filter surviving a reload is how someone concludes the app has lost tickets.
 
 ### The ticket dock (`#ir-dock`)
 A strip along the bottom of the window holding every ticket the owner has opened, and the
-bottom sheet that one of them can raise. His words, after checking Gmail himself: *"bottom
+window that one of them can raise. His words, after checking Gmail himself: *"bottom
 sheet, where it can be minimised… such that I can minimise and keep multiple IRs on my
 worklist on screen minimised."* And, on the shape of the minimised tabs: *"seated adjacent to
 each other in bottom, i.e., a line one next to other, facing us (the user)"* — a **row**, not
 Gmail's vertical stack.
 
+**Three states, and v91 is the change that made all three exist** (2026-10-13 — *"a window
+manager"*, after meeting v90's bottom sheet):
+
+| State | `currentView` | What binds it | On screen |
+|---|---|---|---|
+| Minimised | `index` | in `dockIRs`, not `dockOpen` | a tab in the strip |
+| **Restored** | `index` | `dockOpen` | a centred window + a scrim + the strip |
+| **Maximised** | `detail` | `currentIR` | the passbook, **full page** |
+
 - **The tab** — name left, ellipsised, then **three buttons right-aligned in his order**:
   the mid-size panel, the full view, and close. The name is *also* a button, so the whole tab
-  body brings its sheet back rather than only the three small corners.
-- **The sheet** — one at a time, ~60vh (85vh on a phone), read view plus quick actions, with
-  the three buttons repeated at its foot. **The sheet is not a second ticket screen**: its
-  activity list is `buildTimeline()` + `renderTimelineInto()`, the exact pair the passbook's
-  own `#ir-timeline` calls; its quick actions write through the single store writer
-  `patchIRState()`, whose tail already repaints the drawing underneath; and they render
-  **only** when `canEditSection()` passes, or a view-only user is shown controls that cannot
-  work. **Expand calls `goTicket()`** — the existing passbook and no new one. All three
-  drawings open it (`openDock()`), and it works on a phone.
+  body brings its window back rather than only the three small corners.
+- **The window** — centred, `min(56rem, 100vw - 2rem)` by `min(70vh, 40rem)`: **smaller than
+  the screen on every side**, so the drawing behind it stays visible, which is the request
+  (*"show me the IR above screen, center placed, but smaller size than screen"*). The
+  definite-height chain is the same `max-height` + `min-height: 0; overflow-y: auto` pair as
+  everywhere else, so the window's own activity list scrolls rather than the page.
+- **The scrim** — one dimming layer, `rgb(0 0 0 / 0.45)` plus the app's one sanctioned
+  `backdrop-filter: blur(2px)` (in industrial.css's `@supports` block, beside
+  `.inward-options-modal`). It is a **child of `#ir-dock`** and not a `<body>` sibling, because
+  `smoke-industrial.mjs` counts non-scoped selectors in `industrial.css` against a ceiling of
+  22 and `#ir-dock` is already in its `CHROME` list — as a child the count does not move.
+  Clicking the scrim **minimises**, which is what `Escape` already did; no new semantics.
+- **The strip survives maximise.** `applyDockState()` (`app.js`) is the one writer of **two**
+  classes: `body.has-dock` (the strip is on screen) and `#ir-dock.has-window` (the window is
+  up). At v90 one flag did both, so maximising a ticket erased every other tab. `has-window` is
+  a **class and not a re-render**: `renderLayout()` runs on every layout pass and
+  `renderDock()` refetches the timeline, so wiring them together would put a network call
+  inside a layout pass.
+- **A maximised ticket takes the whole row.** `listHidden` in `renderLayout()` is
+  `detail ? true : (full && !desktop)` — an IR is a thing you are working on, and the panes
+  that keep the desktop split (dashboard, analyser, FAQ) are views *of* the list. The back
+  arrow is the *same predicate*, because that is all it is: the way back from a fold.
+- **The sheet is not a second ticket screen.** Its activity list is `buildTimeline()` +
+  `renderTimelineInto()`, the exact pair the passbook's own `#ir-timeline` calls; its quick
+  actions write through the single store writer `patchIRState()`, whose tail already repaints
+  the drawing underneath; and they render **only** when `canEditSection()` passes, or a
+  view-only user is shown controls that cannot work. **Expand calls `goTicket()`** — the
+  existing passbook and no new one. All three drawings open it (`openDock()`), and it works on
+  a phone.
 - **The rightmost button is not labelled "Save".** He called it *save and close*, and there is
   nothing to save: the sheet holds no editable fields and every quick action has already
   written. The button closes, and it cannot lose a change.
 - **Not a route.** `#/tickets/IR470` still means *full screen* — it is what a nudge and an
   emailed link land on — so the dock never writes the hash and the hash never opens a sheet.
-  A consequence, stated rather than discovered: **browser Back does not close the sheet.**
+  A consequence, stated rather than discovered: **browser Back does not close the window.**
   Close is ✕; `Escape` **minimises** (non-destructive) under the same fire-only-while-open
   guard the customer door uses.
 - **`#ir-dock` is a static child of `<body>`**, like the other floating chrome — never inside
   `#index-view`, which is overflow-free by assertion and re-shaped by `list-collapsed`.
-  `applyDockState()` is the **one writer** of `body.has-dock`: the dock is on screen for the
-  three drawings and nowhere else, standing down while the passbook, dashboard, analyser or
-  FAQ owns the screen. `dockIRs` is memory, so coming back restores the worklist intact.
+  `dockIRs` is memory, so coming back restores the worklist intact.
+- ⚠ **`#ir-dock` carries `--z-overlay` (80), not `--z-bottombar`.** A stacking context cannot
+  put a child above itself, so the scrim, the window and the strip had to rise as a family to
+  cover the header (40) and the sidebar (30). Inside the dock the order is scrim `0`, window
+  `1`, strip `2` — and the strip needs `position: relative; z-index: 2`, or a non-positioned
+  child paints *under* its own scrim and every tab becomes unclickable while a window is up.
 
 ⚠ **`#toast` had to be taught about the strip, and the hidden state is the half that bites.**
 `#toast` has **no `opacity: 0` rest state** — base.css hides it purely with
@@ -859,14 +918,23 @@ keystroke, so no fold state may live inside the list.
   place allowed to write it:
 
   ```js
-  const listHidden = detail && (!desktop || storedFlag(LIST_KEY));
+  const listHidden = detail ? true : (full && !desktop);
   indexView.style.display = listHidden ? 'none' : 'flex';
   ```
 
-  The `detail &&` guard is the point: on desktop the list hides **only** while a
-  detail pane is open and the user asked for the room, and on mobile the two are
-  separate full screens so an open detail always hides the list. A user can
-  therefore never fold themselves onto an empty index screen.
+  Two clauses, and they are two different reasons. `detail ? true` is 2026-10-13: an open
+  ticket takes the whole row **on every width**, because *"I want to eliminate fully the idea
+  of having IR open in right small panel."* The `full && !desktop` half is the older rule — on
+  a phone the dashboard, analyser and FAQ are separate full screens, so each of them hides the
+  list there and keeps it beside them on a desktop. A user can therefore never fold themselves
+  onto an empty index screen, and neither clause is a second flag.
+
+  The back arrow reads the **same predicate** —
+  `backBtn.style.display = listHidden ? 'block' : 'none'` — because whatever hides the list is
+  what reveals the way back. ⚠ `base.css` used to carry `#back-btn { display: none !important; }`
+  in its ≥1024px block, on the reasoning that desktop never leaves the list. That stopped being
+  true for a ticket, and `!important` outranks the inline style written here, so the rule was
+  removed rather than re-scoped.
 
 `applyChromeState()` sets both from storage and re-runs `renderLayout()` rather than
 duplicating the rule; `showApp()` calls it once, before the first paint.

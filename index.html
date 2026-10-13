@@ -479,15 +479,27 @@
               <button type="button" class="btn btn-secondary" id="auth-pattern-link" data-i18n="auth.usePattern">Continue with pattern</button>
               <!-- The explanation, IN THE PAGE rather than in a tooltip or a toast: it
                    is four steps long, and a toast that has gone before it is read is the
-                   same as no explanation at all. -->
-              <div class="method-note" id="auth-method-note" style="display:none" role="status">
+                   same as no explanation at all.
+
+                   ⚠ TWO VARIANTS, ONE ELEMENT, AND `data-variant` IS THE SWITCH.
+                   `inactive` is the case this note was built for — the method is not on
+                   this device yet, so the four steps are the whole answer. `nohardware`
+                   is the case the owner hit on 2026-10-13: the method IS switched on for
+                   the account, but this browser is not offering a sensor here, so there
+                   are no steps to follow on this machine and the `<ol>` is hidden. The
+                   copy for each lives in its own `data-i18n` element and CSS does the
+                   choosing, so no code writes text and a language switch repaints both
+                   from the attributes like every other string on this screen. -->
+              <div class="method-note" id="auth-method-note" style="display:none" role="status" data-variant="inactive">
                 <p class="method-note-say" id="auth-method-note-say" data-i18n="auth.methodInactive.say">This login method activates after you enable it from your login.</p>
+                <p class="method-note-say method-note-hw" id="auth-method-note-say-hw" data-i18n="auth.methodInactive.sayNoHardware">Quick unlock cannot start on this device.</p>
                 <ol class="method-note-steps">
                   <li data-i18n="auth.methodInactive.step1">Sign in to I-PASSBOOK with your email and the code we send you.</li>
                   <li data-i18n="auth.methodInactive.step2">Tap your avatar in the top right corner of the app.</li>
                   <li data-i18n="auth.methodInactive.step3">Choose “Turn on Quick unlock” and follow the prompt on this device. Set up your fingerprint — and a pattern as well, if you want one.</li>
                   <li data-i18n="auth.methodInactive.step4">That is all. Come back to this screen and both methods are ready.</li>
                 </ol>
+                <p class="method-note-why method-note-hw" id="auth-method-note-why" data-i18n="auth.methodInactive.whyNoHardware">It is switched on for your account, but this browser is not offering a fingerprint or face sensor here. Tap your avatar in the top right and choose “Turn off Quick unlock”, then turn it on again to register this device — or just use your email code, which always works.</p>
                 <button type="button" class="link-btn link-sm" id="auth-method-note-close" data-i18n="auth.methodInactive.dismiss">Got it</button>
               </div>
             </div>

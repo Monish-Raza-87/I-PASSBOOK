@@ -34,6 +34,14 @@ const html = read('../index.html');
 const viewsCss = read('../views.css');
 const baseCss = read('../base.css');
 
+// app.js WITH ITS COMMENTS REMOVED — the text a "this thing is GONE" assertion has to
+// read. Every removal in this file (both caps, `.kb-more`, `.grid-more`, the dead twin)
+// leaves a comment behind that NAMES the thing removed and explains why, which is what
+// these notes are for; an absence check run against raw text therefore fails on the
+// note explaining the absence. Hoisted here rather than declared at first use because
+// the earliest of those checks is in section 3.
+const appNoComments = appJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+
 // The language table, evaluated rather than regexed out of the source: its own
 // values contain escaped apostrophes, and a regex that has to know that is a test
 // that breaks the day someone writes one.
@@ -153,16 +161,21 @@ ok('...and casing does not change the answer',
 ok('a value nobody recognises still gets the first column, never none',
   T.boardColumnOf('Something New') === 'start' && T.boardColumnOf('') === 'start');
 
-// ── A column's count is the truth even when its drawing is capped ────────────
-head('a capped column still counts everything it holds');
-ok('the drawing is capped', /const BOARD_CAP\s*=\s*\d+/.test(appJs));
-ok('...and the header prints the FULL count, not the drawn one',
-  /class="kb-col-count">\$\{rows\.length\}/.test(appJs));
-ok('...and the capped cards are the ones actually drawn',
-  /const shown = rows\.slice\(0, BOARD_CAP\)/.test(appJs) && /\$\{shown\.map\(boardCard\)/.test(appJs));
-ok('...and what was left behind is stated, with a way back to the list',
-  /more > 0 \? `<button type="button" class="kb-more">\$\{escHtml\(t\('board\.more', \{ n: more \}\)\)\}<\/button>`/.test(appJs),
-  (appJs.match(/[^\n]*kb-more[^\n]*/) || [''])[0]);
+// ── A column draws every card it holds, and counts the same number ───────────
+// This block used to assert the OPPOSITE — that the drawing was capped at
+// BOARD_CAP and offered a `.kb-more` way out. The owner removed the cap on
+// 2026-10-13 ("Remove it from both"), so the assertion is rewritten rather than
+// deleted: the failure it guards is real and unchanged, only inverted. A drawing that
+// withholds rows is still a drawing that must not quietly under-report, and the way
+// that is now possible is a cap creeping back in.
+head('a column draws every card it holds, and says the same number twice');
+ok('there is no cap left anywhere in the board', !/BOARD_CAP/.test(appNoComments),
+  (appJs.match(/[^\n]*BOARD_CAP[^\n]*/) || [''])[0]);
+ok('...the header prints the FULL count, and it is the same array that gets drawn',
+  /class="kb-col-count">\$\{rows\.length\}/.test(appNoComments) &&
+  /\$\{rows\.map\(boardCard\)\.join\(''\)\}/.test(appNoComments));
+ok('...and there is no "left behind" control, because nothing is left behind',
+  !/kb-more/.test(appNoComments) && !/board\.more/.test(appNoComments));
 
 // ── The switch re-draws the SAME rows, and is CSS-driven ─────────────────────
 head('List | Board | Grid is a switch over one filtered set of rows');
@@ -576,7 +589,6 @@ ok('...and choosing the board re-measures once the fold has been applied',
 head('the grid draws the same rows as tiles, from fields an IR actually has');
 
 const gridCode = [
-  (appJs.match(/const GRID_CAP\s*=\s*\d+;/) || [''])[0],
   (appJs.match(/function gridTile\(ir\)[\s\S]*?\n\}/) || [''])[0],
   (appJs.match(/function renderIRGrid\(records\)[\s\S]*?\n\}/) || [''])[0],
 ].join('\n');
@@ -587,17 +599,18 @@ const gridCode = [
 // absence — a test that reads comments is reading the wrong text.
 const gridSrc = gridCode.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
 ok('the grid has its own renderer, beside the board\'s', gridCode.length > 0);
-// The cap is the REASON this view is affordable at all: the list's cost is measured
-// proportional to data (~0.1ms/row, docs/07), a tile is a heavier node than a row,
-// and the search path repaints on every 150ms tick. The board caps for the same
-// reason. Asserted as an inequality so a future "just raise it" is a decision.
-ok('and it caps what it draws, so a search keystroke cannot repaint 453 tiles',
-  /const GRID_CAP = (\d+);/.test(appJs) && Number(RegExp.$1) > 0 && Number(RegExp.$1) <= 60,
-  (appJs.match(/const GRID_CAP = \d+;/) || [''])[0]);
-ok('...and what it left behind is stated, with a way back to the list',
-  /const shown = records\.slice\(0, GRID_CAP\)/.test(appJs) &&
-  /more > 0/.test(appJs) &&
-  /class="grid-more">\$\{escHtml\(t\('grid\.more', \{ n: more \}\)\)\}/.test(appJs));
+// The cap that lived here is GONE — see the note on renderIRGrid, and the measured
+// numbers in it: 454 tiles cost 44ms warm, which is what the uncapped LIST has always
+// cost. The assertion is inverted rather than deleted, because the failure it guards
+// (a drawing that withholds its own rows and under-reports) is the one the owner met;
+// the risk now is the cap coming back, not the chip going missing.
+ok('the grid draws EVERY matched IR — no cap, and nothing held back',
+  !/GRID_CAP/.test(appNoComments) &&
+  /irGrid\.innerHTML = records\.map\(gridTile\)\.join\(''\)/.test(appNoComments),
+  (appJs.match(/[^\n]*GRID_CAP[^\n]*/) || [''])[0]);
+ok('...and says so in the blank space under the last row, spanning it',
+  /class="grid-foot"/.test(appNoComments) && /t\('grid\.foot', \{ n: records\.length \}\)/.test(appNoComments) &&
+  !/grid-more/.test(appNoComments));
 
 // ⚠ `companyName`, NEVER `customerName`. The intake form has two name-shaped columns
 // — Col L is the PERSON who reported it, Col R is the COMPANY — and access is scoped
@@ -648,11 +661,10 @@ const dockCode = (appJs.match(
   /\/\* ══ THE IR DOCK ═+[\s\S]*?\nfunction wireDock\(\)[\s\S]*?\n\}/) || [''])[0];
 const dockSrc  = dockCode.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
 
-// Comments stripped FIRST, and for the fourth time in this file. `escJsAttr`'s own doc
-// comment shows a call site as its example, so it holds one more `onclick="openTicket…"`
-// than the app really has and a retired name could sit in prose forever. A test that
-// reads comments is reading the wrong text — this file has already learned that twice.
-const appNoComments = appJs.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\n)\s*\/\/[^\n]*/g, '$1');
+// (`appNoComments` is declared at the top of this file — see the note there. The
+// `escJsAttr` doc comment shows a call site as its example, so raw text holds one more
+// `onclick="openTicket…"` than the app really has and a retired name could sit in prose
+// forever. A test that reads comments is reading the wrong text.)
 ok('all three drawings open the SAME ticket surface, and it is the only way in',
   (appNoComments.match(/onclick="openDock\('\$\{escJsAttr\(ir\.irNumber\)\}'\)"/g) || []).length === 3 &&
   !/onclick="goTicket\(/.test(appNoComments) &&
@@ -790,7 +802,7 @@ ok('the two selects are raised to 16px on a phone, like the search field',
 // was written after: the list "had" `overflow-y: auto` for weeks and could not
 // scroll one pixel.
 const { T: G, byId: gById } = loadApp(
-  'renderIRGrid, gridTile, GRID_CAP, get irGrid() { return irGrid; }',
+  'renderIRGrid, gridTile, get irGrid() { return irGrid; }',
   { capture: true });
 const gridEl = gById.get('ir-grid');
 ok('the test is holding the same grid element the app is', !!gridEl && G.irGrid === gridEl);
@@ -813,30 +825,36 @@ ok('...it carries the status badge the list uses, not a colour of its own',
 ok('...and the priority, the assignee monogram and the age',
   /prio prio-urgent/.test(oneTile) && /AN/.test(oneTile) && /ir-age/.test(oneTile));
 
-G.renderIRGrid([]);
-ok('an empty result says so, in the words the list and the board already use',
-  /class="empty-state"/.test(gridEl.innerHTML), gridEl.innerHTML.slice(0, 120));
-
 const many = Array.from({ length: 200 }, (_, i) => ({ ...tileIR, irNumber: 'IR' + i }));
 G.renderIRGrid(many);
 // ⚠ `class="ir-tile[" ]` and not `class="ir-tile` — the tile's OWN children are
 // `.ir-tile-top`, `.ir-tile-subject`, `.ir-tile-meta`, `.ir-tile-foot`, `.ir-tile-state`,
 // `.ir-tile-who`, `.ir-tile-avatar` and `.ir-tile-co`, so a prefix match counted all nine
-// of them per tile. It read 540 against a cap of 60 — a number that would have passed
-// for the wrong reason the day it happened to line up.
+// of them per tile. It once read 540 against a cap of 60 — a number that would have
+// passed for the wrong reason the day it happened to line up.
 const TILE_RE = /class="ir-tile[" ]/g;
 const drawn = (gridEl.innerHTML.match(TILE_RE) || []).length;
-ok('the cap is what is DRAWN, and exactly the cap',
-  drawn === G.GRID_CAP, { drawn, cap: G.GRID_CAP });
-ok('...and the rest is offered as a way back to the list, with the count in it',
-  /class="grid-more"/.test(gridEl.innerHTML) && /grid-more/.test(appJs) &&
-  gridEl.innerHTML.indexOf('grid-more') > gridEl.innerHTML.indexOf('class="ir-tile'));
-// The header count is the FULL count while only the drawing is capped — the board's
-// own rule, and the reason a capped view can never quietly under-report.
+// Rendered, not counted in source: "no cap" is a claim about what the function DOES with
+// 200 records, and the only way to test it is to hand it 200 and count. This is the
+// assertion that replaced `drawn === GRID_CAP` when the cap was removed on 2026-10-13.
+ok('200 records in, 200 tiles out — nothing is withheld',
+  drawn === 200, { drawn });
+ok('...and the foot names the same number that was drawn, after the last tile',
+  /class="grid-foot"/.test(gridEl.innerHTML) &&
+  /200 shown/.test(gridEl.innerHTML) &&
+  gridEl.innerHTML.indexOf('grid-foot') > gridEl.innerHTML.indexOf('class="ir-tile'));
+// A FOOTER UNDER A DRAWING THAT DOES NOT EXIST is the failure this pair guards: an empty
+// result already says "no IRs match" in `.empty-state`, and a second line saying "No more
+// IRs — 0 shown" under it would be two screens arguing about the same nothing.
+G.renderIRGrid([]);
+ok('an empty result keeps the shared empty state, and gets NO foot',
+  /class="empty-state"/.test(gridEl.innerHTML) && !/grid-foot/.test(gridEl.innerHTML),
+  gridEl.innerHTML.slice(0, 120));
 G.renderIRGrid(many.slice(0, 3));
-ok('a short result draws every tile and offers no way out',
+ok('a short result draws every tile, and still says it is the end',
   (gridEl.innerHTML.match(TILE_RE) || []).length === 3 &&
-  !/grid-more/.test(gridEl.innerHTML),
+  /class="grid-foot"/.test(gridEl.innerHTML) &&
+  /3 shown/.test(gridEl.innerHTML),
   (gridEl.innerHTML.match(TILE_RE) || []).length);
 
 console.log(fails === 0 ? '\nALL PASS\n' : `\n${fails} FAILURE(S)\n`);

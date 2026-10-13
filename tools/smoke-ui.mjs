@@ -26,6 +26,12 @@ const indexSrc = fs.readFileSync(INDEX, 'utf8');
 const viewsCode = fs.readFileSync(new URL('../views.css', import.meta.url), 'utf8');
 const componentsCode = fs.readFileSync(new URL('../components.css', import.meta.url), 'utf8');
 const baseSrc = fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8');
+// base.css WITH ITS COMMENTS REMOVED. The two assertions about `#back-btn` below are
+// absence checks — "no rule still hides the arrow with !important" — and the file now
+// carries a comment that QUOTES the rule it deliberately gave up (base.css:3140). An
+// absence check run against raw text therefore fails on the note explaining the
+// absence, which is the same class of mistake as a probe measuring the wrong thing.
+const baseCode = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
 const swSrc   = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 
 // Comments are prose ABOUT the change, and several of them name the thing that was
@@ -441,6 +447,27 @@ r.ok('a phone never folds the list, because there the list IS the screen', (() =
   return !folded;
 })(), 'below lg the fold is inert, and the rail never appears');
 
+// ── AND THE SERVICE DESK OPENS ON THE GRID, WHATEVER THIS DEVICE LAST CHOSE ────
+// This is a bug that shipped at v90 and survived two days of daily use, so it is worth
+// the room. `handleRoute` has said "the Service Desk opens on the Grid" since v90 — and
+// it could NEVER fire: showApp() calls showIndex() (which sets `currentView = 'index'`)
+// before its own handleRoute(), and handleRoute's first line returns early when the view
+// is already 'index'. So the route rule was swallowed on every boot and every sign-in,
+// and what actually landed was `setListView(listMode)` — the value read from VIEW_KEY,
+// which on the owner's device still said 'list' from before the Grid existed. He reported
+// it twice, on 2026-10-11 and again on 2026-10-13: *"Still in my app from login, not sure
+// why but list view was open for default and I had to select grid to go into that."*
+//
+// The fix is the one token on the arrival line, and the guard in handleRoute is KEPT —
+// it is what stops a mid-session flip to List being stamped back to Grid. Both halves are
+// asserted, because deleting either one is a plausible-looking repair that puts the bug
+// back.
+r.ok('the Service Desk opens on the Grid, and the stored drawing cannot override it',
+  /showIndex\(\);[\s\S]{0,4000}?setListView\('grid'\);/.test(appCode) &&
+  !/showIndex\(\);[\s\S]{0,4000}?setListView\(listMode\);/.test(appCode) &&
+  /if \(currentView === 'index'\) return;/.test(appCode),
+  (appCode.match(/setListView\((?:'grid'|listMode)\);/g) || []).join(' '));
+
 r.ok('the rail carries the count and its own way back', (() => {
   const rail = indexCode.slice(indexCode.indexOf('id="list-rail"'));
   return /id="list-rail"[\s\S]{0,400}?id="list-rail-restore"/.test(indexCode) &&
@@ -745,18 +772,42 @@ r.ok('the empty state is suppressed over it, in both directions', (() => {
   T.renderLayout();
   return suppressed && !T.bodyClasses.contains('view-insights');
 })());
-r.ok('the back button answers to the pane that OWNS the screen, not the detail alone',
+r.ok('the back button answers to the pane that OWNS the screen, and to the fold that STRANDS someone',
   // It used to be `(!desktop && detail)`. That was right while the dashboard kept
   // the list on a phone; once the list folds, a phone needs a way back off the
   // dashboard too. The Log Analyser is the third pane that owns the screen, for the
   // same reason, so `full` grew a third term rather than a second flag — and the
   // Help & FAQ a fourth on 2026-10-08, when it stopped being a page in another tab.
-  // Each one is a term and never a second flag. Desktop is still excluded —
-  // `#back-btn` is display:none !important there, because the list never leaves the
-  // screen.
-  /backBtn\.style\.display\s*=\s*\(!desktop && full\)/.test(appCode) &&
-  /const full\s*=\s*detail \|\| insights \|\| log \|\| faq;/.test(appCode),
+  // Each one is a term and never a second flag.
+  //
+  // ── 2026-10-13: THE PREDICATE STOPPED BEING "full ON A PHONE" ────────────────
+  // It is now the SAME predicate that hides the list — `listHidden` — because that is
+  // the only thing the button actually is: the way back from a fold. A ticket folds the
+  // list on EVERY width as of v91 (the owner: *"Clicking on maximise does not mean that
+  // it open in side panel on right. it means taking full page. I want to eliminate fully
+  // the idea of having IR open in right small panel."*), so on desktop a maximised
+  // ticket now folds too — and without this the back arrow would have been drawn on the
+  // phone and missing exactly where the fold had just started happening. Two literals in
+  // the code and one idea: whatever hides the list is what reveals the way back.
+  //
+  // ⚠ The `!important` it used to defer to is GONE from base.css. `#back-btn { display:
+  // none !important }` in the ≥1024px block outranked the inline style written here, so
+  // the arrow was invisible on desktop whatever this line said. Asserted as an absence
+  // in the stylesheet below, because the rule coming back would silently undo this.
+  /backBtn\.style\.display\s*=\s*listHidden \? 'block' : 'none';/.test(appCode) &&
+  /const listHidden\s*=\s*detail \? true : \(full && !desktop\);/.test(appCode) &&
+  /const full\s*=\s*detail \|\| insights \|\| log \|\| faq;/.test(appCode) &&
+  !/#back-btn\s*\{[^}]*!important/.test(baseCode),
   (appCode.match(/backBtn\.style\.display[^\n]*/) || [''])[0]);
+// …and the list-hidden rule itself: a ticket takes the whole row on desktop, and the
+// three panes that are NOT tickets keep the split that smoke-ui pins by name above.
+r.ok('a maximised ticket takes the whole row, and only a ticket does',
+  !/const listHidden\s*=\s*[^\n]*\binsights\b/.test(appCode) &&
+  !/const listHidden\s*=\s*[^\n]*\blog\b/.test(appCode) &&
+  !/const listHidden\s*=\s*[^\n]*\bfaq\b/.test(appCode));
+r.ok('...and no stylesheet still tries to hide the back arrow with !important',
+  !/#back-btn\s*\{[^}]*!important/.test(baseCode) &&
+  /#back-btn\s*\{\s*display:\s*none;/.test(baseCode));
 r.ok('the pane is marked in the static shell with a non-sec id and no section class',
   /<div id="insights-view">/.test(indexCode) && !/insights-view[\s\S]{0,200}section-content/.test(indexCode));
 r.ok('the nav item is a plain hash link with no JS binding',

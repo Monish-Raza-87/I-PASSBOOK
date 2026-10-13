@@ -445,7 +445,105 @@ const G8 = drive(FP_ONLY, { calls: 0 });
 r.ok('the dead second gesture is gone, not merely unused',
   G8.T.deadGestureType === 'undefined', G8.T.deadGestureType);
 
-// ── 7. ENROLMENT — the half of this feature no test had ever run ─────────────
+// ── 6(h). WHICH KEY THE PROMPT IS TOLD TO ASK FOR ─────────────────────────────
+//
+// The owner, 2026-10-13: *"The fingerprint login option is not working. It has to ask
+// for my device's login key but is either asking for some USB method or QR code scan
+// method, not sure what is it and this seems to be broken."*
+//
+// That is not a broken fingerprint. It is a `credentials.get()` that did not name a
+// credential. Without `allowCredentials`, a request is asking for a DISCOVERABLE
+// credential, and the only thing a browser can do with that is offer its own picker
+// across every transport it knows — USB security keys, a phone over QR. Enrolment mints
+// this device's key with `residentKey: 'discouraged'`, so the key that picker is hunting
+// for cannot exist. The app was asking the wrong question and then reporting the answer
+// as a fault in his finger.
+//
+// The `allowCredentials` WAS there — behind `if (rec.credentialId)`. So the failing state
+// is a record that says the method is on but carries no id, which is exactly what the
+// picker appeared for. Two properties are pinned here, and they are the two halves of the
+// fix: the no-id state never reaches `get()` at all, and every call that DOES reach it
+// names the key and its transport. Nothing in this suite could see either one before,
+// which is why this shipped.
+r.head('the fingerprint prompt is told exactly which key to ask for');
+const recGet = () => { const calls = []; return { calls, get: async (o) => { calls.push(o); throw domErr('NotAllowedError'); } }; };
+// The app's own base64url decoder, re-implemented here for the same reason the pattern
+// hash is (see the top of this file): "the id that went out is the id that was stored"
+// has to be an agreement between two independent computations, not a tautology.
+const bytesOf = (s) => {
+  const raw = Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  return Array.from(raw);
+};
+
+// (i) NO ID. The state the owner was in. There is nothing to ask for, so nothing is asked.
+const noId = recGet();
+const H1 = drive({ email: 'monish.raza@indrones.com', mode: 'fingerprint',
+                   deviceToken: 'a'.repeat(32) }, { calls: 0 }, undefined, {
+  PublicKeyCredential: FP_CFG,
+  navigator: { userAgent: 'node', onLine: true, credentials: { get: noId.get } },
+});
+await H1.T.submitUnlock('fingerprint');
+r.ok('a record with no credential id never opens a prompt at all — an unnamed request is a picker',
+  noId.calls.length === 0, { calls: noId.calls.length });
+r.ok('...and says which state the device is in, and how to leave it',
+  /no key registered/.test(errorText(H1.byId)) && /profile menu/.test(errorText(H1.byId)),
+  errorText(H1.byId));
+r.ok('...and points at the door that does open, rather than ending in a dead end',
+  /email code/.test(errorText(H1.byId)), errorText(H1.byId));
+
+// (ii) AN ID. The call names it, and names where it lives.
+const withId = recGet();
+const H2 = drive(FP_ONLY, { calls: 0 }, undefined, {
+  PublicKeyCredential: FP_CFG,
+  navigator: { userAgent: 'node', onLine: true, credentials: { get: withId.get } },
+});
+await H2.T.submitUnlock('fingerprint');
+const sent = (withId.calls[0] || {}).publicKey || {};
+r.ok('a named key is sent as allowCredentials — the request is never left discoverable',
+  Array.isArray(sent.allowCredentials) && sent.allowCredentials.length === 1 &&
+  sent.allowCredentials[0].type === 'public-key',
+  JSON.stringify(sent.allowCredentials));
+r.ok('...and it is the id this device stored, byte for byte',
+  String(sent.allowCredentials[0].id) === String(bytesOf(FP_ONLY.credentialId)),
+  { got: String(sent.allowCredentials[0].id), want: String(bytesOf(FP_ONLY.credentialId)) });
+r.ok('...and it names a TRANSPORT even for a record written before transports were stored',
+  String(sent.allowCredentials[0].transports) === 'internal',
+  sent.allowCredentials[0].transports);
+r.ok('...and the rest of the request is untouched: a challenge, and a required user check',
+  sent.challenge && sent.challenge.length === 32 && sent.userVerification === 'required',
+  { challenge: !!(sent.challenge), uv: sent.userVerification });
+
+// (iii) THE STORED TRANSPORT WINS when there is one — the record is the authority on
+// where its own key lives, and `internal` is only the floor beneath it.
+const withTr = recGet();
+const H3 = drive(Object.assign({}, FP_ONLY, { transports: ['internal', 'hybrid'] }), { calls: 0 }, undefined, {
+  PublicKeyCredential: FP_CFG,
+  navigator: { userAgent: 'node', onLine: true, credentials: { get: withTr.get } },
+});
+await H3.T.submitUnlock('fingerprint');
+r.ok('a record that knows its transports sends them, and is not flattened to the floor',
+  String(((withTr.calls[0] || {}).publicKey || {}).allowCredentials[0].transports) === 'internal,hybrid',
+  ((withTr.calls[0] || {}).publicKey || {}).allowCredentials[0].transports);
+
+// (iv) THE RECORD IS WRITTEN WITH THE TRANSPORT IN IT. The unlock path can only send a
+// transport that enrolment stored, so the write is asserted where it happens. Enrolment
+// itself needs a platform authenticator this suite does not have; what it CAN read is
+// that the stored record has the field, and that the field can only ever hold a
+// transport — a `getTransports()` that lies, or is absent, still leaves a real one.
+r.ok('enrolment writes the transports beside the id, so the unlock path has something to send',
+  /transports: transports\.length \? transports : \['internal'\]/.test(appJs) &&
+  /cred\.response\?\.getTransports\?\.\(\)/.test(appJs));
+r.ok('...and it accepts either signature algorithm, so a chipset without ES256 is not a broken fingerprint',
+  /pubKeyCredParams: \[\{ type: 'public-key', alg: -7 \}, \{ type: 'public-key', alg: -257 \}\]/.test(appJs));
+// …and the one line that makes `allowCredentials` mandatory is NOT weakened to compensate
+// for it. `residentKey: 'discouraged'` is why a nameless request can never work here, and
+// turning it to 'preferred' would make the old bug look fixed while leaving the request
+// in the shape that produced the USB/QR picker.
+r.ok('...and the non-discoverable credential stays non-discoverable — the rule is not traded for an accident',
+  /residentKey: 'discouraged'/.test(appJs) && /authenticatorAttachment: 'platform'/.test(appJs) &&
+  /userVerification: 'required'/.test(appJs));
+
+
 //
 // Sections 1 and 2 above assert the setup overlay by READING app.js, and for a good
 // reason: the overlay could not be built under the harness at all. `openPatternSetup`
@@ -550,9 +648,17 @@ r.ok('...and the pattern record IS saved, because that path is a real enrolment'
 // (c) THE HAPPY PATH STILL WORKS. Everything above is a failure branch, and a suite
 // that only drives failures cannot tell a fixed error message from a feature that has
 // stopped working altogether.
+//
+// The double carries `response.getTransports()` because the real `create()` result
+// always does — `PublicKeyCredential.response` is required by the interface, and
+// `getTransports()` is the W3C method that answers where the key lives. Leaving it out
+// was how this suite stayed green while the app stored a credential with no transport on
+// it, i.e. while the unlock prompt was left to guess. The value is deliberately a real
+// answer and not 'internal', so the fallback below is not what is being measured here.
 const S3 = setupCase({
   biometric: true,
-  create: async () => ({ rawId: new Uint8Array([1, 2, 3, 4]) }),
+  create: async () => ({ rawId: new Uint8Array([1, 2, 3, 4]),
+                         response: { getTransports: () => ['internal', 'hybrid'] } }),
   fetch: jsonReply({ status: 'ok', deviceToken: 'e'.repeat(32) }),
 });
 await S3.T.beginQuickUnlockSetup();
@@ -561,7 +667,23 @@ r.ok('a device that CAN enrol still does, and stores the credential id it was gi
   rec3.mode === 'fingerprint' && rec3.deviceToken === 'e'.repeat(32) &&
   rec3.credentialId === 'AQIDBA' && rec3.email === 'monish.raza@indrones.com',
   rec3);
+r.ok('...and stores the transport the platform reported, beside the id',
+  String(rec3.transports) === 'internal,hybrid', rec3.transports);
 r.ok('...and no pattern overlay is opened over a successful enrolment',
   !S3.seen.ov, !!S3.seen.ov);
+
+// (d) AND THE FALLBACK IS REAL, not a comment: a platform whose `getTransports()` is
+// absent — which is every engine before the method was added, and is why the app reads it
+// with `?.` — must still enrol, with the transport floored at the device itself.
+const S4 = setupCase({
+  biometric: true,
+  create: async () => ({ rawId: new Uint8Array([9, 9]) }),
+  fetch: jsonReply({ status: 'ok', deviceToken: 'f'.repeat(32) }),
+});
+await S4.T.beginQuickUnlockSetup();
+const rec4 = S4.T.loadUnlock() || {};
+r.ok('a platform with no getTransports() enrols anyway, floored at the device itself',
+  rec4.mode === 'fingerprint' && rec4.credentialId === 'CQk' &&
+  String(rec4.transports) === 'internal', rec4);
 
 r.finish();

@@ -314,7 +314,207 @@ window.
 
 ---
 
-## 7. Future Roadmap (Planned)
+## 7. The window, the whole grid, and the door that asked for the wrong key (2026-10-13)
+
+Eight notes arrived two days after v90 went live. Two were acceptance — *"for dock — ok."* —
+and six were defects, four of them in the dock that had just been accepted. They are really
+one story: **v90 shipped a bottom sheet where the owner had asked for a window manager.**
+
+A window has three states, and his complaint was that two of them did not exist:
+
+| State | `currentView` | What binds it | On screen |
+|---|---|---|---|
+| Minimised | `index` | in `dockIRs`, not `dockOpen` | a tab in the strip |
+| **Restored** | `index` | `dockOpen` | a centred window + a scrim + the strip |
+| **Maximised** | `detail` | `currentIR` | the passbook, **full page** |
+
+### 7.1 A maximised ticket takes the full page, and the strip survives it
+
+*"Clicking on maximise does not mean that it open in side panel on right. it means taking
+full page. I want to eliminate fully the idea of having IR open in right small panel."*
+
+`listHidden` in `renderLayout()` was `full && !desktop`. It is now `detail ? true : (full &&
+!desktop)` — an open ticket takes the whole row on **every** width. Insights, Log and FAQ keep
+their deliberate desktop split, because those are views *of* the list and an IR is a thing you
+are working on.
+
+The back arrow became the *same predicate* — `backBtn.style.display = listHidden ? 'block' :
+'none'` — because that is the only thing the button actually is: the way back from a fold.
+⚠ `base.css` carried `#back-btn { display: none !important; }` in its ≥1024px block, and
+`!important` outranks an inline style, so the arrow would have been invisible on exactly the
+width where the fold had just started happening. Removed, and the removal is asserted as an
+absence.
+
+*"Maximising one IR does not mean that all other minimised tabs gets erased from screen."*
+`applyDockState()` is now the one writer of **two** classes: `body.has-dock` (the strip exists)
+and `#ir-dock.has-window` (the window is up). At v90 one flag did both, so maximising closed
+the world. `has-window` is a **class and not a re-render** on purpose — `renderLayout()` runs on
+every layout pass and `renderDock()` refetches the timeline, so wiring them together would put
+a network call inside a layout pass. `dockOpen` is deliberately *kept* while maximised, so Back
+returns to the drawing with the same window up.
+
+And a click on any tab while a ticket is maximised now puts the maximum down and raises the
+clicked one — his described journey (minimise, then navigate) in **one** click.
+
+### 7.2 The window is centred, and the drawing behind it is blurred
+
+*"Either show me the IR above screen, center placed, but smaller size than screen, behind it
+all irs blurr, with other tab buttons of minimise and maximise, like windows does."*
+
+`.dock-sheet` stopped being a bottom sheet and became a centred window: `position: fixed;
+left/top: 50%; transform: translate(-50%,-50%); width: min(56rem, 100vw - 2rem); max-height:
+min(70vh, 40rem)` — smaller than the screen on every side, so the blurred drawing is visible
+around it, which is the request.
+
+Two things about the scrim are load-bearing:
+
+- **It is a CHILD of `#ir-dock`**, not a `<body>` sibling, and the reason is a test budget:
+  `smoke-industrial.mjs` counts non-scoped selectors in `industrial.css` against a ceiling of
+  22, and `#ir-dock` is already in its `CHROME` list. As a child, `#ir-dock .dock-scrim` matches
+  and the count does not move; as a sibling it would have spent the last of the headroom.
+- **`#ir-dock` itself moved from `--z-bottombar` (40) to `--z-overlay` (80).** A stacking context
+  cannot put a child above itself, so the scrim, the window and the strip had to rise as a
+  family to cover the header (40) and the sidebar (30). `--z-overlay` was declared for this and
+  had no reader until now. Inside the dock: scrim 0, window 1, strip 2 — and the strip needs
+  `position: relative; z-index: 2` or a non-positioned child paints *under* its own scrim and
+  every tab becomes unclickable while the window is up.
+
+**One blur on one scrim layer.** industrial.css §9 forbids glass on the IR list because
+`backdrop-filter` is a compositor layer per element and 300+ blurred tiles would recomposite
+every scroll frame. A single scrim is the shape that section sanctions, and the blur lives in
+its existing `@supports` block beside `.inward-options-modal`.
+
+**Measured, 1440×900** (Chrome, CDP, `--hide-scrollbars` so geometry is the instrument):
+window 896×282 at (272, 309) in 1440×900 — strictly inside on all four sides; scrim 1440×900
+with computed `backdrop-filter: blur(2px)`; `#index-view` still `display: flex` behind it; a
+click on the scrim minimises and the three tabs survive. Force 90 rows into `.dock-sheet-body`
+and the sheet stops at **630px** — exactly `min(70vh, 40rem)` — while the body scrolls 4248
+against 582 and `scrollTop` takes, with `documentElement.scrollHeight` still 900. The v87/v89
+definite-height chain holds.
+
+### 7.3 The grid draws every IR, and says when it has
+
+*"grid scroll down is limited and not keeps continuing till end of IRs, it says a button +394
+more - see list. this is not correct. If I do not want to go into list and continue in grid
+mode, then why should I be not allowed to?"*
+
+`GRID_CAP = 60` and `BOARD_CAP = 25`-per-column are **gone**, both, on his instruction when he
+was asked whether to remove the "+N more — see list" chip from the grid alone or from both:
+*"Remove it from both."* 60 + 394 is his 454 IRs — the cap was exactly what he was looking at.
+
+**The cap's justification was cost, so the cost was measured rather than argued about.** The
+published 13.4ms figure had been measured *through* the cap, so the uncapped cost was unknown:
+
+| Drawing | Cost |
+|---|---|
+| 454 tiles — building the strings | 14ms |
+| 454 tiles — assign + forced layout, warm | 44ms |
+| 454 tiles — assign + forced layout, coldest first paint | ~146ms |
+| 454 tiles — same, re-measured on the live v91 page | 78ms |
+| The **uncapped IR list**, per keystroke | 27–45ms (0.06–0.1ms a row) |
+
+That comparison is what decides it, and it is recorded here because *"the cap was there for
+performance"* stops being checkable the moment the cap is gone. The uncapped grid costs what
+the uncapped **list has always cost, on every keystroke** — so the cap was not proportionate to
+anything the list does not already do. No chunker, no `IntersectionObserver`, no scroll
+listener: this project has evaluated and declined that cost once already (§6, Option 3).
+
+**The end-of-list note.** *"below grid where there might be empty area, you may mention
+something like no irs anyfurther."* Blank space under the last row is the one thing an uncapped
+drawing cannot distinguish from a drawing that gave up, so the blank now has a sentence in it:
+`grid.foot` → *"No more IRs — {n} shown"* / *"और कोई IR नहीं — {n} दिखाए गए"*. It spans the row
+(`grid-column: 1 / -1`) and carries no `overflow` — a grid row sized `min-content` with a
+clipped child is the v89 trap. Drawn only when something *was* drawn: an empty result already
+says so in `.empty-state`, and "No more IRs — 0 shown" underneath it would be two screens
+arguing.
+
+The two delegated click handlers the caps needed went with the chips — a handler for a class
+nothing emits is a branch no test can reach and no user can hit.
+
+**Verified, 1440×900:** 454 records out of `renderIRGrid` → **454 tiles**, the foot the last
+child and below the last tile row, `#ir-grid` scrolling 14426 against 783 **with
+`documentElement.scrollHeight` still 900** — an uncapped grid is exactly the shape that breaks
+a definite-height chain, and it does not.
+
+### 7.4 The Service Desk arrives on the Grid
+
+*"Still in my app from login, not sure why but list view was open for default and I had to
+select grid to go into that."* — the **second** time he had reported this.
+
+`handleRoute` has said "the Service Desk opens on the Grid" since v90 and it **could never
+fire**. `showApp()` calls `showIndex()` — which sets `currentView = 'index'` — *before* its own
+`handleRoute()`, and `handleRoute`'s first line returns early when the view is already
+`'index'`. So the route rule was swallowed on every boot and every sign-in, and what actually
+landed was `setListView(listMode)`: the value read from `VIEW_KEY`, which on the owner's device
+still said `'list'` from before the Grid existed. `DEFAULT_VIEW = 'grid'` only ever applied to a
+device that had never chosen, which is the one device that did not need it.
+
+One token: `setListView('grid')`. The guard in `handleRoute` is **kept** — it is what stops a
+mid-session flip to List being stamped back to Grid. The consequence, stated rather than
+discovered: a stored choice no longer outlives a reload. That is what he asked for, twice.
+
+**Verified in a real browser** with `listMode` seeded to `'list'` *before* the app's own script
+ran (a sentinel in the same seed proves the seed landed): after boot, `listMode` reads `'grid'`,
+`#index-view` carries `is-grid`, the List row computes `display: none`, and the switch agrees —
+`grid: aria-selected=true, .active`. Flipping to List in place still works and still sticks for
+the length of the session.
+
+### 7.5 The fingerprint door asks for the right key
+
+*"The fingerprint login option is not working. It has to ask for my device's login key but is
+either asking for some USB method or QR code scan method, not sure what is it and this seems
+to be broken."*
+
+That is not a broken fingerprint. `submitUnlock()` attached `allowCredentials` **only when
+`rec.credentialId` was truthy** — and a `credentials.get()` *without* it is not "any key will
+do": it is a **discoverable-credential** request, which a browser may only answer by offering
+its own picker across every transport it knows (USB security keys, a phone over QR). Enrolment
+mints this device's passkey with `residentKey: 'discouraged'`, so the key that picker hunts for
+cannot exist. The app was asking the wrong question and reporting the answer as a fault in his
+finger. The rule was already written down at the top of `app.js`; the live path simply did not
+follow it — and **no suite asserted the shape**, which is why it shipped.
+
+- `allowCredentials` is now **mandatory on this path**, always carrying `transports:
+  rec.transports?.length ? … : ['internal']`.
+- With **no** `credentialId` the call is **not made at all**; he gets a sentence naming the
+  state and the way out instead of a picker he cannot satisfy.
+- Enrolment records `transports` from `cred.response?.getTransports?.()` (floored at
+  `['internal']`) and accepts **RS256 beside ES256**, so a chipset that will not mint ES256 is
+  no longer read as a broken fingerprint. `authenticatorSelection` is **unchanged** —
+  `platform` + `userVerification: 'required'` + `residentKey: 'discouraged'` is the reason
+  `allowCredentials` is mandatory, and weakening it to `'preferred'` would trade a rule for an
+  accident.
+
+**The plain explanation** (his chosen answer, when asked what a device with no built-in
+sensor should do): `#auth-method-note` gained a second variant. `showMethodInactiveNote
+('inactive')` keeps the four steps — the method is not on this device yet. `'nohardware'`
+swaps the say, hides the `<ol>` (there are no steps to follow on a machine that cannot do it)
+and explains that turning quick unlock off and on again re-registers the device. The variant is
+a `data-variant` attribute and each string is its own `data-i18n` element, so no code writes
+text and a language switch repaints the right sentence without the function ever running again.
+
+⚠ **I cannot test a platform authenticator.** Suites pin the *shape* — `smoke-unlock.mjs` now
+drives a record with no id (no prompt is opened) and a record with one (the exact id, byte for
+byte, with its transport). Only the owner, on his own device, can test the real thing, and the
+instruction worth repeating to him is: **"if it still asks for a USB key, turn quick unlock off
+in your avatar menu and set it up again."**
+
+### Verification
+
+37 suites green. Then driven in a real browser at 1440×900, 390×844 and through a seeded
+pre-boot `localStorage` — geometry probes via CDP `--eval`, since Chrome runs
+`--hide-scrollbars` and a screenshot can never show a scrollbar. Every number quoted above is
+from those runs. On the phone: window 366×333 at (12, 255) in 390×844 — centred and smaller than
+the screen on every side, **not** full-screen; the strip one row, scrolled by its own
+`overflow-x`, clear of the app's own bottom bar; `scrollWidth === innerWidth` with a window up;
+`#detail-view` padding-bottom resolves to the strip's own height.
+
+**Shipped as v91.** Frontend only — `backend.gs` untouched, `API_VERSION` did not move and
+**no Apps Script paste is owed.**
+
+---
+
+## 8. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

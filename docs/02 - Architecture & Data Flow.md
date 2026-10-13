@@ -117,11 +117,11 @@ store layout.
   a sync bar (`#sync-status`) showing the last status message, a "Synced HH:MM"
   stamp and a manual Refresh. Silent staleness is what sends people back to the
   Sheet, so it is deliberately always visible.
-- **Passbook detail** — the 📋 Report tab plus the six lettered sections (B–G) and
+- **Passbook detail** — the 📋 Report tab plus the seven lettered sections (A–G) and
   the Overview. On desktop it opens beside the list (split pane); below 1024px it is
   a full screen with a Back button.
 - **Insights** — counts over the same IRs (FY, month, status, category, customer,
-  drone), a read-only third pane rather than a panel inside the detail one, so
+  drone serial, **and drone model**), a read-only third pane rather than a panel inside the detail one, so
   `#detail-view`'s display keeps meaning "an IR is open". No new endpoint: the whole
   list is already in memory.
 - Routing is hash-based (`#/tickets`, `#/tickets/IR409`, `#/insights`, `#/legacy`) so

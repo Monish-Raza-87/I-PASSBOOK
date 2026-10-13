@@ -280,7 +280,7 @@
    cannot drift into a comparison against something the app no longer draws. */
 .pv-app .ir-progress { display: inline-flex; align-items: center; gap: 5px; }
 .pv-app .ir-progress-bar { display: block; width: 30px; height: 4px; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
-.pv-app .ir-progress-bar::after { display: block; width: 66.666%; height: 100%; content: ""; border-radius: inherit; background: var(--ink-gray-6); }
+.pv-app .ir-progress-bar::after { display: block; width: 57.143%; height: 100%; content: ""; border-radius: inherit; background: var(--ink-gray-6); }
 .pv-app .ir-progress-text { color: var(--ink-gray-5); font-size: var(--text-2xs); line-height: 1; font-variant-numeric: tabular-nums; }
 
 /* ── the tabs, once with the state carried on them ──
@@ -434,19 +434,24 @@
         <ul class="steps">
           
           <li class="step-item is-done is-linked">
-            <span class="step-n">B</span>
+            <span class="step-n">A</span>
             <span class="step-short">Inward</span>
             <span class="step-full">Inward Checklist</span>
           </li>
           <li class="step-item is-done is-linked">
-            <span class="step-n">C</span>
+            <span class="step-n">B</span>
             <span class="step-short">IQC</span>
             <span class="step-full">IQC Visual Inspection</span>
           </li>
           <li class="step-item is-done">
-            <span class="step-n">D</span>
+            <span class="step-n">C</span>
             <span class="step-short">Investigation</span>
             <span class="step-full">Investigation</span>
+          </li>
+          <li class="step-item">
+            <span class="step-n">D</span>
+            <span class="step-short">Costing</span>
+            <span class="step-full">Costing</span>
           </li>
           <li class="step-item">
             <span class="step-n">E</span>
@@ -470,9 +475,10 @@
         <div class="pv-app is-demo">
         <ul class="progress-steps">
           
+          <li class="progress-steps-item is-done"><span class="pv-sr">Section A saved</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section B saved</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section C saved</span></li>
-          <li class="progress-steps-item is-done"><span class="pv-sr">Section D saved</span></li>
+          <li class="progress-steps-item"><span class="pv-sr">Section D not saved yet</span></li>
           <li class="progress-steps-item"><span class="pv-sr">Section E not saved yet</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section F saved</span></li>
           <li class="progress-steps-item"><span class="pv-sr">Section G not saved yet</span></li>
@@ -483,20 +489,21 @@
         <div class="pv-app is-demo">
         <div class="progress-stacked">
           
+          <div class="progress"><div class="progress-bar is-done"><span class="pv-sr">Section A</span></div></div>
           <div class="progress"><div class="progress-bar is-done"><span class="pv-sr">Section B</span></div></div>
           <div class="progress"><div class="progress-bar is-done"><span class="pv-sr">Section C</span></div></div>
-          <div class="progress"><div class="progress-bar is-done"><span class="pv-sr">Section D</span></div></div>
+          <div class="progress"><div class="progress-bar"><span class="pv-sr">Section D</span></div></div>
           <div class="progress"><div class="progress-bar"><span class="pv-sr">Section E</span></div></div>
           <div class="progress"><div class="progress-bar is-done"><span class="pv-sr">Section F</span></div></div>
           <div class="progress"><div class="progress-bar"><span class="pv-sr">Section G</span></div></div>
         </div></div>
       </div>
       <div class="pv-demo pv-demo-pad">
-        <div class="pv-demo-cap"><b>What the app has today</b><span>the 4/6 chip, copied from views.css</span></div>
+        <div class="pv-demo-cap"><b>What the app has today</b><span>the 4/7 chip, copied from views.css</span></div>
         <div class="pv-app is-demo">
-        <span class="ir-progress p4" title="4 of 6 sections saved">
+        <span class="ir-progress p4" title="4 of 7 sections saved">
           <span class="ir-progress-bar"></span>
-          <span class="ir-progress-text">4/6</span>
+          <span class="ir-progress-text">4/7</span>
         </span></div>
       </div>
       <div class="pv-demo pv-demo-ticket">
@@ -505,19 +512,24 @@
         <ul class="steps">
           
           <li class="step-item is-done is-linked">
-            <span class="step-n">B</span>
+            <span class="step-n">A</span>
             <span class="step-short">Inward</span>
             <span class="step-full">Inward Checklist</span>
           </li>
           <li class="step-item is-done is-linked">
-            <span class="step-n">C</span>
+            <span class="step-n">B</span>
             <span class="step-short">IQC</span>
             <span class="step-full">IQC Visual Inspection</span>
           </li>
           <li class="step-item is-done">
-            <span class="step-n">D</span>
+            <span class="step-n">C</span>
             <span class="step-short">Investigation</span>
             <span class="step-full">Investigation</span>
+          </li>
+          <li class="step-item">
+            <span class="step-n">D</span>
+            <span class="step-short">Costing</span>
+            <span class="step-full">Costing</span>
           </li>
           <li class="step-item">
             <span class="step-n">E</span>
@@ -537,7 +549,7 @@
         </ul>
         <div class="tabs-container">
           <span class="tab">Report</span>
-          <span class="tab active">B&#8202;&#183;&#8202;Inward</span><span class="tab">C&#8202;&#183;&#8202;IQC</span><span class="tab">D&#8202;&#183;&#8202;Investigation</span><span class="tab">E&#8202;&#183;&#8202;Production</span><span class="tab">F&#8202;&#183;&#8202;Quality Test</span><span class="tab">G&#8202;&#183;&#8202;PDI/Dispatch</span>
+          <span class="tab active">A&#8202;&#183;&#8202;Inward</span><span class="tab">B&#8202;&#183;&#8202;IQC</span><span class="tab">C&#8202;&#183;&#8202;Investigation</span><span class="tab">D&#8202;&#183;&#8202;Costing</span><span class="tab">E&#8202;&#183;&#8202;Production</span><span class="tab">F&#8202;&#183;&#8202;Quality Test</span><span class="tab">G&#8202;&#183;&#8202;PDI/Dispatch</span>
         </div></div>
       </div>
       <div class="pv-demo pv-demo-ticket">
@@ -545,16 +557,17 @@
         <div class="pv-app is-demo">
         <ul class="progress-steps">
           
+          <li class="progress-steps-item is-done"><span class="pv-sr">Section A saved</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section B saved</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section C saved</span></li>
-          <li class="progress-steps-item is-done"><span class="pv-sr">Section D saved</span></li>
+          <li class="progress-steps-item"><span class="pv-sr">Section D not saved yet</span></li>
           <li class="progress-steps-item"><span class="pv-sr">Section E not saved yet</span></li>
           <li class="progress-steps-item is-done"><span class="pv-sr">Section F saved</span></li>
           <li class="progress-steps-item"><span class="pv-sr">Section G not saved yet</span></li>
         </ul>
         <div class="tabs-container">
           <span class="tab is-saved">Report</span>
-          <span class="tab active is-saved">B&#8202;&#183;&#8202;Inward</span><span class="tab is-saved">C&#8202;&#183;&#8202;IQC</span><span class="tab is-saved">D&#8202;&#183;&#8202;Investigation</span><span class="tab">E&#8202;&#183;&#8202;Production</span><span class="tab is-saved">F&#8202;&#183;&#8202;Quality Test</span><span class="tab">G&#8202;&#183;&#8202;PDI/Dispatch</span>
+          <span class="tab active is-saved">A&#8202;&#183;&#8202;Inward</span><span class="tab is-saved">B&#8202;&#183;&#8202;IQC</span><span class="tab is-saved">C&#8202;&#183;&#8202;Investigation</span><span class="tab">D&#8202;&#183;&#8202;Costing</span><span class="tab">E&#8202;&#183;&#8202;Production</span><span class="tab is-saved">F&#8202;&#183;&#8202;Quality Test</span><span class="tab">G&#8202;&#183;&#8202;PDI/Dispatch</span>
         </div></div>
       </div>
       <div class="pv-caveat">
@@ -802,7 +815,7 @@
               <strong class="toast-title">Saved</strong>
               <span class="toast-x" aria-hidden="true">&#215;</span>
             </div>
-            <div class="toast-body">Section D saved. Analysis date stamped.</div>
+            <div class="toast-body">Section C saved. Analysis date stamped.</div>
           </div>
               
           <div class="toast toast-danger">

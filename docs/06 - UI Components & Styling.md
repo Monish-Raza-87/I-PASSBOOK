@@ -513,14 +513,15 @@ when something was drawn** (an empty result already says so in the shared `.empt
 and "0 shown" underneath it would be two screens arguing), and it carries **no
 `overflow`** — a grid row sized `min-content` with a clipped child is the v89 trap.
 
-Two things the mockup asked for that an IR cannot give, and they are stated rather than
-faked: there is **no warranty field** on a record (the only warranty value is a Section D
-*form* field, which a tile cannot reach without loading every ticket's Section D), and
-there is **no model/product field** at all — the serial is the only product identifier a
-record carries. Its `Critical` priority does not exist either; the real four are Urgent,
-High, Medium, Low. Its 12–16px corners became square for free by asking for
-`var(--radius-N)` (`#index-view` re-points those tokens to `0px`), and it casts no
-shadow, because this look floats nothing.
+Two things the mockup asked for that a tile would have to be given, and they are stated
+rather than faked: there is **no warranty field** on a record (the only warranty value is
+a Section C *form* field, which a tile cannot reach without loading every ticket's
+Section C), and the **model** is not a field on the ticket's own status data — it is a
+filter read off the raw intake grid (Col S, `droneModel`; see
+[03](03 - Sections Reference.md)). Its `Critical` priority does not exist either; the
+real four are Urgent, High, Medium, Low. Its 12–16px corners became square for free by
+asking for `var(--radius-N)` (`#index-view` re-points those tokens to `0px`), and it
+casts no shadow, because this look floats nothing.
 
 ⚠ **`grid-auto-rows: min-content` on `.ir-grid` is load-bearing, and `auto` — the
 default — crushes every tile.** This is the list's own scroll bug one level down. A
@@ -746,14 +747,15 @@ enough; no code change is needed.
 
 ### Section tabs (`.tabs-container` / `.tab`)
 Horizontally scrollable, `scroll-snap-type: x mandatory`, sticky under the header
-via `--header-h`. **Seven** tabs: the read-only **📋 Report** tab first (marked
-`data-intake="1"`), then the six workflow sections (**B–G**). `app.js` binds one
-listener to the six static section `.tab` nodes. `sec-b` is the default selection.
-The retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane — old Section
-A is the Overview panel, which sits above this strip and is deliberately not part
-of it (see below).
+via `--header-h`. **Eight** tabs: the read-only **📋 Report** tab first (marked
+`data-intake="1"`), then the seven workflow sections (**A–G**). `app.js` binds one
+listener to the seven static section `.tab` nodes. `sec-b` is the default selection.
+The retired `sec-a`/`sec-h`/`sec-i` have **neither** a tab nor a pane — the OLD
+Section A is the Overview panel, which sits above this strip and is deliberately not
+part of it (see below). ⚠️ "Section A" is the **inward checklist** now (`sec-b`); only
+the *old* Section A is the Overview.
 
-Two things about this strip are load-bearing:
+Three things about this strip are load-bearing:
 
 - `applySectionAccessGating` falls back to the first visible tab with
   `.tab:not([style*="display: none"]):not([data-intake])`. The intake tab is
@@ -762,6 +764,19 @@ Two things about this strip are load-bearing:
   read-only screen.
 - `renderLayout()` writes inline `display` on the panes, and the gating code reads
   those inline values back. See *App shell* above.
+
+A third is about being able to **read** the strip. Eight tabs are wider than a phone
+screen, so `showSection()` scrolls the tab it just activated into the strip's own view —
+`inline: 'start'`, because the strip's CSS already says `scroll-snap-align: start` and
+`'nearest'` scrolls the minimum, which on a 390px screen leaves a wide tab like *"B:
+Visual Inspection"* showing only its first few letters. This matters because one of
+`showSection`'s two callers selects a section **nobody pressed**:
+`applySectionAccessGating` moves a person off a tab their category has just switched
+off. Without the scroll, the tab lights up outside the window while the strip goes on
+showing its neighbours — the section is right, and nothing on screen says which one it
+is. `block: 'nearest'` cannot move the page, because the strip is `position: sticky` and
+so is always in view vertically. Pinned in `smoke-workflow.mjs`; a source-text suite
+could never see it, since it exists only in a laid-out browser.
 
 ### Overview panel (`#ir-overview`) — what was Section A
 Pinned **above** the tab strip, so it is always visible and always one click from a
@@ -982,7 +997,7 @@ keystroke, so no fold state may live inside the list.
 duplicating the rule; `showApp()` calls it once, before the first paint.
 
 ### Section export row — `.sec-export-row`
-Every section B–G ends with two buttons under Save: **⬇ Download**
+Every section A–G ends with two buttons under Save: **⬇ Download**
 (`#download-sec-<x>`) and **⬇ Download and share** (`#share-sec-<x>`). Both build the
 section as a real PDF file; the second hands it to the device share sheet. See
 `docs/03` → *Per-section export* for what goes into the document.

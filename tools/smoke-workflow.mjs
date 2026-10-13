@@ -27,7 +27,13 @@
 
 import { loadApp, makeReporter } from './harness.mjs';
 
-const TABS = ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-f', 'sec-g'];
+const TABS = ['sec-b', 'sec-c', 'sec-d', 'sec-cost', 'sec-e', 'sec-f', 'sec-g'];
+
+// The two a Remote Support job keeps, and the rest. Named once and derived from the
+// app's own rule below, because the split of 2026-10-13 turned "one kept section" into
+// two and every assertion in section 6 was written against a list of six.
+const KEEPS = ['sec-d', 'sec-cost'];
+const LOST = TABS.filter(id => !KEEPS.includes(id));
 
 // A transport, because Allot CAPS persists through FormData. Without one the app
 // cannot build the body at all (saveSentinel calls `new FormData()`), so a suite
@@ -288,12 +294,16 @@ ok('the Sheet\'s Priority column is not read either — Allot CAPS is the only w
 // ── 6. A REMOTE SUPPORT job has five fewer steps ──────────────────────────────
 // New machinery, and off-not-hidden is the decision: a tab that vanishes reads as a
 // permission problem and sends someone to an admin to ask for access they have.
-head('Remote Support switches off every section but Investigation');
+// ⚠ "Five fewer" and "keeps Investigation" both changed on 2026-10-13: costing was the
+// second half of `sec-d`, so a remote job keeps TWO sections now where it kept one.
+head('Remote Support switches off every section but Investigation and its Costing');
 
-ok('Investigation is the one a remote job keeps', T.REMOTE_SUPPORT_KEEPS.join(',') === 'sec-d',
-  T.REMOTE_SUPPORT_KEEPS);
+// The literal is pinned here AND matched against the app's own rule below: the list is
+// a deliberate decision, and a rule that no longer agrees with it is the bug.
+ok('Investigation and its costing are what a remote job keeps',
+  T.REMOTE_SUPPORT_KEEPS.join(',') === KEEPS.join(','), T.REMOTE_SUPPORT_KEEPS);
 ok('a remote ticket loses exactly the other five',
-  T.categoryInapplicableSections({ category: 'REMOTE SUPPORT' }).join(',') === 'sec-b,sec-c,sec-e,sec-f,sec-g',
+  T.categoryInapplicableSections({ category: 'REMOTE SUPPORT' }).join(',') === LOST.join(','),
   T.categoryInapplicableSections({ category: 'REMOTE SUPPORT' }));
 ok('every other category loses nothing',
   ['CRASH', 'GENERAL MAINTENANCE', 'REPAIR', '', undefined].every(
@@ -338,27 +348,35 @@ T.currentIR = remoteIR;
 T.applyCategoryApplicability();
 
 ok('the five sections that do not apply are marked off',
-  TABS.filter(id => id !== 'sec-d').every(id => tabs[id].classList.contains(OFF_CLASS)),
-  TABS.filter(id => !tabs[id].classList.contains(OFF_CLASS)));
+  LOST.every(id => tabs[id].classList.contains(OFF_CLASS)),
+  LOST.filter(id => !tabs[id].classList.contains(OFF_CLASS)));
 ok('Investigation is NOT marked off', !tabs['sec-d'].classList.contains(OFF_CLASS));
+ok('...and neither is the costing that used to be its second half',
+  !tabs['sec-cost'].classList.contains(OFF_CLASS));
 ok('...and the tab is still THERE, not hidden — off is not "missing"',
   TABS.every(id => tabs[id].style.display !== 'none'));
 ok('...and it says why, on hover', tabs['sec-b'].title === 'Not part of a Remote Support job',
   tabs['sec-b'].title);
 ok('...and says the same to a screen reader',
   tabs['sec-b'].getAttribute('aria-disabled') === 'true' &&
-  tabs['sec-d'].getAttribute('aria-disabled') === 'false');
+  KEEPS.every(id => tabs[id].getAttribute('aria-disabled') === 'false'),
+  KEEPS.map(id => id + '=' + tabs[id].getAttribute('aria-disabled')));
 ok('the pane is switched off too, because the tab is not the only way in',
-  TABS.filter(id => id !== 'sec-d').every(id => panes[id].classList.contains('is-inapplicable')) &&
-  !panes['sec-d'].classList.contains('is-inapplicable'));
+  LOST.every(id => panes[id].classList.contains('is-inapplicable')) &&
+  KEEPS.every(id => !panes[id].classList.contains('is-inapplicable')),
+  KEEPS.filter(id => panes[id].classList.contains('is-inapplicable')));
 // Close is the ONLY write control a section has, which is why the edit grant gates
 // it — and why the applicability rule must gate it too, or a switched-off section
 // would still be closable from the pane.
 ok('Close is disabled with the same reason',
-  TABS.filter(id => id !== 'sec-d').every(id => closeBtn(id).disabled === true &&
-    closeBtn(id).title === 'Not part of a Remote Support job'));
+  LOST.every(id => closeBtn(id).disabled === true &&
+    closeBtn(id).title === 'Not part of a Remote Support job'),
+  LOST.filter(id => !closeBtn(id).disabled || closeBtn(id).title !== 'Not part of a Remote Support job'));
 ok('...while Investigation keeps a working Close',
   closeBtn('sec-d').disabled === false && closeBtn('sec-d').title === '');
+ok('...and Costing keeps one too, or the split would have quietly dropped it',
+  closeBtn('sec-cost').disabled === false && closeBtn('sec-cost').title === '',
+  [closeBtn('sec-cost').disabled, closeBtn('sec-cost').title]);
 
 // Standing in a section that goes off — the category can change under an open tab,
 // because Allot CAPS writes it.
@@ -366,8 +384,35 @@ T.showSection('sec-b');
 ok('the ticket is standing in a section before it goes off',
   activeTab() === 'sec-b', activeTab());
 T.applyCategoryApplicability();
+// `sec-d` is the destination because it is the FIRST of the kept pair, which is the
+// app's own choice — not because Investigation is the only one left.
 ok('...and is moved to the section that stays, rather than left in a dead pane',
-  activeTab() === 'sec-d' && panes['sec-d'].classList.contains('active'), activeTab());
+  activeTab() === T.REMOTE_SUPPORT_KEEPS[0] && panes['sec-d'].classList.contains('active'), activeTab());
+
+// WHERE the tab has to be to be read at all. There are eight tabs and the strip is
+// wider than a phone screen, so the active one can sit outside the strip's own scroll
+// window — and the redirect just above is one of the two paths that select a section
+// nobody pressed. Every switch therefore scrolls the active tab into the strip's view.
+//
+// `inline: 'start'`, not 'nearest': the strip's own CSS says `scroll-snap-align: start`,
+// and 'nearest' scrolls the MINIMUM, which on a 390px strip leaves a wide tab like
+// "B: Visual Inspection" showing only its first few letters. Pinned here because no
+// source-text suite can see it — the behaviour only exists in a laid-out browser, and
+// the harness's own elements have no scrollIntoView at all (which the guard in the app
+// is what makes safe).
+const scrolled = [];
+TABS.forEach(id => { tabs[id].scrollIntoView = opts => scrolled.push({ id, opts }); });
+T.showSection('sec-g');
+const lastScroll = scrolled[scrolled.length - 1];
+ok('switching section brings THAT tab into the strip\'s view',
+  scrolled.length >= 1 && lastScroll.id === 'sec-g', scrolled.map(s => s.id));
+ok('...starting it flush left, matching the strip\'s own snap alignment',
+  lastScroll.opts.inline === 'start' && lastScroll.opts.block === 'nearest', lastScroll.opts);
+ok('...and never animating a strip the person has not touched',
+  lastScroll.opts.behavior === undefined, lastScroll.opts);
+// Removed again so the rest of the file drives a stand-in exactly as it did before —
+// these elements are the harness's, shared with every assertion below.
+TABS.forEach(id => { delete tabs[id].scrollIntoView; });
 
 // And the other way: a category change must take the marking OFF again, or a
 // re-triaged ticket would keep five sections switched off for good. This goes through
@@ -380,8 +425,18 @@ ok('...and is moved to the section that stays, rather than left in a dead pane',
 // the one rule under test.
 head('re-triaging takes the sections back on, Close included');
 
+// ⚠ The admin's permission MAP is part of that fixture since 2026-10-13, and `{}` no
+// longer stands in for "an admin, so it does not matter". The app now reads the map to
+// answer a second, unrelated question — has the deployed backend ever HEARD of this
+// section? (`backendKnowsSection`) — and an admin is handed every `SECTION_KEYS` entry
+// by `getEffectiveAccess`, so a key the payload does not mention is proof the running
+// server predates that section, not a permissions statement. A fixture with `{}` is
+// therefore not an admin at all: it is an admin facing a backend older than every
+// section, whose Close the app correctly disables. Built from the app's own SECTION_IDS
+// so a section added later cannot leave this fixture describing a backend that lacks it.
+const ALL_EDIT = Object.fromEntries(T.SECTION_IDS.map(id => [id, 'edit']));
 T.setUser({ email: 'monish.raza@indrones.com', sessionToken: 't',
-            access: { role: 'admin', permissions: {}, departments: [], triage: true } });
+            access: { role: 'admin', permissions: ALL_EDIT, departments: [], triage: true } });
 T.currentIR = remoteIR;
 T.applySectionAccessGating();
 ok('a remote ticket is switched off, and its Close with it',

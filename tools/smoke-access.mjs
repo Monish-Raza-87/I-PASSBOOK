@@ -64,9 +64,9 @@ r.ok('and no Customer Relations seed row remains',
   (appJs.match(/[^\n]*Customer Relations[^\n]*/) || [''])[0]);
 
 // ── Everyone gets view + comment, everywhere ──────────────────────────────────
-r.head('a plain account: view + comment on all six sections');
+r.head('a plain account: view + comment on all seven sections');
 T.setUser(plainUser());
-r.ok('the section list is the six survivors', SECTIONS.length === 6 && SECTIONS.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', SECTIONS);
+r.ok('the section list is the seven survivors', SECTIONS.length === 7 && SECTIONS.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', SECTIONS);
 r.ok('canView all six', SECTIONS.every(s => T.canViewSection(s)),
   SECTIONS.filter(s => !T.canViewSection(s)));
 r.ok('canComment all six (comment comes WITH view)',

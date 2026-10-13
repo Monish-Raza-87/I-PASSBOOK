@@ -144,18 +144,24 @@
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             'Move to {column} →',
     'move.hint':           'Sets the status to {stage} and starts its clock',
+    'move.gated':          'Move to {column} unlocks when {sections} is closed.',
 
     // ── Sections, as they are titled and as their tabs name them ─────────────
+    // The letters here are the DISPLAYED ones (A–G), which no longer match the ids —
+    // see SECTION_LABELS in app.js. Costing became D when it was split out of
+    // Investigation, so `section.c` is Investigation and `section.cost` is Costing.
     'section.clientReport': 'Client\'s Original Report',
     'section.overview':     'Overview',
-    'section.b':            'Section B — Inward Checklist (Inventory)',
-    'section.c':            'Section C — IQC Visual Inspection',
-    'section.d':            'Section D — Investigation',
+    'section.b':            'Section A — Inward Checklist (Inventory)',
+    'section.c':            'Section B — Visual Inspection (IQC)',
+    'section.d':            'Section C — Investigation',
+    'section.cost':         'Section D — Costing (Repair Estimate & Lead Time)',
     'section.e':            'Section E — Production (Rework)',
     'section.f':            'Section F — Quality Test Report',
     'section.g':            'Section G — PDI Report/Dispatch Record',
     'section.close':        'Mark Section {letter} completed',
     'section.closed':       'Section closed',
+    'section.serverStale':  'The server has not been updated for this section yet. Nobody but an administrator can save here until an administrator pastes the current backend.',
 
     // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
     'status.open':          'Open',
@@ -514,9 +520,11 @@
   //   · IDENTIFIERS AND CODES — the IR number, the drone ID, the two email addresses,
   //     the phone-number mask, the `{letter}` of a section tab. These are strings the
   //     backend compares and the store holds; they are data wearing a label's clothes.
-  //     The section tab is the sharpest case — the button says "Section B" and the tab
-  //     above it says B, so the letter must survive translation or the label points at
-  //     something that is not on screen.
+  //     The section tab is the sharpest case — the Close button says "Section D" on
+  //     the costing tab and the tab above it says D, so the letter must survive
+  //     translation or the label points at something that is not on screen. The letter
+  //     comes from `sectionLetter()`, never from the id: the ids are permission keys
+  //     and did not move when the letters did (see SECTION_LABELS in app.js).
   //   · THE EXPANSION OF THE NAME — 'app.fullName' is the answer to "what does
   //     I-PASSBOOK stand for", and it only answers that in the alphabet the acronym is
   //     spelled in. Translated, it stops being an expansion and becomes a sentence.
@@ -590,20 +598,23 @@
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             '{column} पर ले जाएँ →',
     'move.hint':           'स्थिति {stage} करता है और उसकी घड़ी शुरू करता है',
+    'move.gated':          '{sections} बंद होने पर {column} पर ले जाना खुलेगा।',
 
     // ── Sections, as they are titled and as their tabs name them ─────────────
     // The single Latin letter after "सेक्शन" is the section's own tab label, not an
     // English word — see the note above the table.
     'section.clientReport': 'ग्राहक की मूल रिपोर्ट',
     'section.overview':     'अवलोकन',
-    'section.b':            'सेक्शन B — इनवर्ड चेकलिस्ट (इन्वेंटरी)',
-    'section.c':            'सेक्शन C — IQC दृश्य निरीक्षण',
-    'section.d':            'सेक्शन D — जाँच',
+    'section.b':            'सेक्शन A — इनवर्ड चेकलिस्ट (इन्वेंटरी)',
+    'section.c':            'सेक्शन B — दृश्य निरीक्षण (IQC)',
+    'section.d':            'सेक्शन C — जाँच',
+    'section.cost':         'सेक्शन D — लागत (मरम्मत अनुमान और समय)',
     'section.e':            'सेक्शन E — उत्पादन (रिवर्क)',
     'section.f':            'सेक्शन F — गुणवत्ता परीक्षण रिपोर्ट',
     'section.g':            'सेक्शन G — PDI रिपोर्ट / डिस्पैच रिकॉर्ड',
     'section.close':        'सेक्शन {letter} को पूर्ण चिह्नित करें',
     'section.closed':       'सेक्शन बंद',
+    'section.serverStale':  'अभी सर्वर पर यह सेक्शन अपडेट नहीं हुआ है। जब तक कोई एडमिनिस्ट्रेटर नया बैकएंड पेस्ट नहीं करता, एडमिनिस्ट्रेटर के अलावा कोई यहाँ सहेज नहीं सकता।',
 
     // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
     // Read through status(), so these are the words on every badge, pill and board

@@ -127,6 +127,30 @@ ok('mapped columns are NOT reported as unmapped',
   !T.lastSheetAudit.unmapped.includes('SPOC') && !T.lastSheetAudit.unmapped.includes('IR Number'),
   T.lastSheetAudit.unmapped);
 
+head('a question the Form writes into TWO columns is one fact, not two');
+// "Select the Drone Model" is column S and column W in the live Sheet — the same
+// question, asked twice by the Form. `findIndex` takes the first match, so the
+// second stayed unconsumed and was drawn on every card as a second, unlabelled copy
+// of a value the card already carries. The map must read the FIRST, and both
+// columns must be consumed.
+const DUP_H = HEADERS.concat(['Select the Drone Model', 'Select the Drone Model',
+                              'Mention the Drone Model Used']);
+const DUP_R = ROW.concat(['SIGMA 100', 'SIGMA 100', 'IGNORED']);
+const dup = T.mapSheetRows([DUP_H, DUP_R])[0];
+ok('the model is read from the Form\'s own question', dup.droneModel === 'SIGMA 100', dup.droneModel);
+ok('...from the FIRST of the two, which is the one the Form filled', T.buildIntakeMap(DUP_H).map.droneModel === 18,
+  T.buildIntakeMap(DUP_H).map.droneModel);
+ok('...and the duplicate is NOT named as an unaccounted column',
+  !T.lastSheetAudit.unmapped.includes('Select the Drone Model'), T.lastSheetAudit.unmapped);
+ok('...so the card carries the model once, not twice',
+  dup.extra.filter(x => x.label === 'Select the Drone Model').length === 0,
+  dup.extra.map(x => x.label));
+// The match is EXACT on purpose. A column that merely resembles a consumed one is a
+// genuine extra column, and swallowing it would hide it from the audit — which is
+// the only place a Form change is ever reported.
+ok('...while a column that only resembles it is still reported',
+  T.lastSheetAudit.unmapped.includes('Mention the Drone Model Used'), T.lastSheetAudit.unmapped);
+
 head('a blank unknown column adds no noise');
 const blankExtra = one(HEADERS, ROW.map((v, i) => (i === 14 ? '' : v)));
 ok('blank "Internal Notes" is omitted', blankExtra.extra.length === 2, blankExtra.extra);

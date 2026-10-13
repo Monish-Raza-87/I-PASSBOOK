@@ -217,23 +217,34 @@ r.ok('parts: and a jump list that reaches all four',
 // reads CSS and HTML as text and never evaluates app.js. So the literal is the one
 // thing here that can rot silently — and it is checked against the app's own
 // SECTION_IDS rather than against itself.
+// The seven section letters, read from SECTION_LABELS rather than cut off the id.
+// ⚠ `id.replace(/^sec-/, '').toUpperCase()` was the original derivation and it is
+// exactly the one the app had to delete on 2026-10-13: the ids are permission keys
+// and never moved when the letters did, so `sec-cost` would have read "COST" —
+// which is not a letter, and would have had this suite demanding the board draw it.
+const labelBlock = (read('../app.js').match(/const SECTION_LABELS\s*=\s*\{([\s\S]*?)\n?\s*\};/) || [])[1] || '';
+const appLetters = Object.fromEntries([...labelBlock.matchAll(/'(sec-[a-z-]+)'\s*:\s*'([A-Z])'/g)]
+  .map(m => [m[1], m[2]]));
 const sectionIds = [...((read('../app.js').match(/const SECTION_IDS\s*=\s*\[([^\]]*)\]/) || [])[1] || '').matchAll(/'([a-z-]+)'/g)].map(m => m[1]);
-// The strip is drawn on three demos, so the letters arrive in whole sixes; the
-// mod-6 check is what keeps a seventh step from being quietly ignored by the Set.
+// The strip is drawn on three demos, so the letters arrive in whole sevens; the
+// mod-7 check is what keeps an eighth step from being quietly ignored by the Set.
 const allLetters = [...PARTS.matchAll(/class="step-n">([A-Z])<\/span>/g)].map(m => m[1]);
 const boardLetters = [...new Set(allLetters)];
-const expectedLetters = sectionIds.map(id => id.replace(/^sec-/, '').toUpperCase()).join(',');
-r.ok('parts: the six steps are the app\'s six sections, in the app\'s order',
-  sectionIds.length === 6 && allLetters.length % 6 === 0 && boardLetters.join(',') === expectedLetters,
-  `app=${expectedLetters} board=${boardLetters.join(',')} (${allLetters.length / 6} strips)`);
+const expectedLetters = sectionIds.map(id => appLetters[id] || '').join(',');
+r.ok('parts: the seven steps are the app\'s seven sections, in the app\'s order',
+  sectionIds.length === 7 && !expectedLetters.includes(',,') && !/^,|,$/.test(expectedLetters) &&
+  allLetters.length % 7 === 0 && boardLetters.join(',') === expectedLetters,
+  `app=${expectedLetters} board=${boardLetters.join(',')} (${allLetters.length / 7} strips)`);
 // The board shows the chip the app draws today beside the new ideas, and that
 // chip is a copy of views.css. smoke-list-intel.mjs already pins progressChip's
 // markup; this pins the other half — that the board's copy is of the real thing.
+// Compared against views.css's OWN .p4 rather than against a remembered number, so
+// the assertion survives the count changing from six sections to seven.
 const views = read('../views.css');
 const boardFill = (partsSkin.match(/\.ir-progress-bar::after\s*\{[^}]*width:\s*([0-9.]+%)/) || [])[1];
-r.ok('parts: the copied 4/6 chip still fills 66.666%, as views.css does',
-  boardFill === '66.666%' && views.includes('.ir-progress.p4 .ir-progress-bar::after { width: 66.666%; }'),
-  `board=${boardFill}`);
+const viewsFill = n => (views.match(new RegExp(`\\.ir-progress\\.p${n} \\.ir-progress-bar::after\\s*\\{\\s*width:\\s*([0-9.]+%)`)) || [])[1];
+r.ok('parts: the copied 4/7 chip still fills what views.css fills for 4',
+  !!boardFill && boardFill === viewsFill(4), `board=${boardFill} views=${viewsFill(4)}`);
 // And the comparison against "what the app has today" has to be fair: the pill is
 // reproduced WITH base.css's max-width, because without it it stretches to the
 // column and looks far worse than the thing it is standing in for.
@@ -537,23 +548,38 @@ r.ok('...and the legend, the caption and the switch demo all say the same total'
   (BOARD.match(new RegExp(`class="pv-kb-lcount">${colSum}<`, 'g')) || []).length === 1,
   `sum=${colSum}`);
 
-// The six section letters and names, checked against SECTION_IDS / SECTION_SHORT
-// rather than against the literal list in the builder — that literal is the one
-// thing on this page that can rot silently, and this is what stops it.
+// The section letters and names, checked against the app's BOARDLIST rather than
+// against the literal list in the builder — that literal is the one thing on this
+// page that can rot silently, and this is what stops it.
 // The board prints each section under the app's OWN short name (so the column
 // heading and the tab a user taps are the same words), which is why the heading is
 // matched here and not a paraphrase of it.
-const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z])':\s*'([^']+)'/g)].map(m => [m[1].replace('sec-', '').toUpperCase(), m[2]]));
-const liveSections = sectionIds.map(id => id.replace('sec-', '').toUpperCase());
+//
+// ⚠ SIX columns and SEVEN sections, and that is not a slip. `BOARD_SECTION_COLUMNS`
+// is the app's own list of the sections that own a workflow stage, and COSTING IS
+// DELIBERATELY ABSENT from it: a column has to own at least one status or no card
+// can ever land in it, so a D column would sit permanently empty. Reading the list
+// from app.js rather than from SECTION_IDS is what keeps that deliberate exclusion
+// distinguishable from an oversight — if Costing ever gets a column, the list grows
+// and this suite demands the board follow it.
+const boardListBlock = (appJs.match(/const BOARD_SECTION_COLUMNS\s*=\s*\[([\s\S]*?)\n\];/) || [])[1] || '';
+const boardIds = [...boardListBlock.matchAll(/'(sec-[a-z-]+)'/g)].map(m => m[1]);
+const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z-]+)':\s*'([^']+)'/g)].map(m => [m[1], m[2]]));
+const liveSections = boardIds.map(id => appLetters[id] || '');
 const colLetters = boardCols.map(c => (c.title.match(/^([A-G]) · /) || [])[1]).filter(Boolean);
-r.ok('...and the six section columns drawn are the app\'s six live sections',
-  colLetters.join(',') === liveSections.join(','), `${colLetters.join(',')} vs ${liveSections.join(',')}`);
+r.ok('...and the section columns drawn are the app\'s own live section columns',
+  boardIds.length > 0 && colLetters.join(',') === liveSections.join(','),
+  `${colLetters.join(',')} vs ${liveSections.join(',')}`);
 r.ok('...and each is named with the app\'s own short name for it',
-  liveSections.every(l => shortNames[l] && boardCols.some(c => c.title === `${l} · ${shortNames[l]}`)),
-  liveSections.filter(l => !shortNames[l]));
+  boardIds.every(id => shortNames[id] && boardCols.some(c => c.title === `${appLetters[id]} · ${shortNames[id]}`)),
+  boardIds.filter(id => !shortNames[id] ||
+    !boardCols.some(c => c.title === `${appLetters[id]} · ${shortNames[id]}`)));
+r.ok('...and the one section the app gives no column is the one that owns no status',
+  !colLetters.includes(appLetters['sec-cost']),
+  `costing=${appLetters['sec-cost']} drawn=${colLetters.join(',')}`);
 // ...and nothing the app has RETIRED is drawn as if it were current.
 r.ok('...and no retired section is drawn as a live column',
-  !colLetters.some(l => !liveSections.includes(l)) && !/formerly Section A/.test(BOARD));
+  !colLetters.some(l => !liveSections.includes(l)) && !/old Section A|formerly Section A/.test(BOARD));
 // The two end columns are the honest part: they exist because four of the
 // fourteen statuses name no section at all, and without them those IRs would be
 // nowhere. They must be columns like any other, carrying a count, and not a
@@ -564,19 +590,19 @@ r.ok('...and the four statuses that name no section still get a column each',
   boardCols[8].title === 'Finished' && boardCols[8].n > 0,
   boardCols.map(c => `${c.title}=${c.n}`).join(' '));
 
-// The chip. A board draws every count there is, so it needs all six fills — the
-// parts board carries only .p4 because it only ever draws 4/6. Copied from
-// views.css:1786-1791, and compared against it declaration by declaration.
+// The chip. A board draws every count there is, so it needs all seven fills — the
+// parts board carries only .p4 because it only ever draws 4/7. Copied from
+// views.css, and compared against it declaration by declaration.
 const chipWid = n => (views.match(new RegExp(`\\.ir-progress\\.p${n} \\.ir-progress-bar::after\\s*\\{\\s*width:\\s*([0-9.]+%)`)) || [])[1];
 const boardWid = n => (boardSkin.match(new RegExp(`\\.pv-kb-card \\.ir-progress\\.p${n} \\.ir-progress-bar::after\\s*\\{\\s*width:\\s*([0-9.]+%)`)) || [])[1];
-r.ok('board: all six progress fills are copies of views.css, not recollections',
-  [1, 2, 3, 4, 5, 6].every(n => chipWid(n) && chipWid(n) === boardWid(n)),
-  [1, 2, 3, 4, 5, 6].map(n => `p${n}: views=${chipWid(n)} board=${boardWid(n)}`).join(' | '));
+r.ok('board: all seven progress fills are copies of views.css, not recollections',
+  [1, 2, 3, 4, 5, 6, 7].every(n => chipWid(n) && chipWid(n) === boardWid(n)),
+  [1, 2, 3, 4, 5, 6, 7].map(n => `p${n}: views=${chipWid(n)} board=${boardWid(n)}`).join(' | '));
 // A card that draws a count the board cannot fill would render as an empty track
 // with a number beside it — a silent, plausible-looking wrong.
 const drawnCounts = [...BOARD.matchAll(/class="ir-progress p(\d)/g)].map(m => Number(m[1]));
-r.ok('...and no card draws a count outside 0-6',
-  drawnCounts.length > 0 && drawnCounts.every(n => n >= 0 && n <= 6), [...new Set(drawnCounts)].sort().join(','));
+r.ok('...and no card draws a count outside 0-7',
+  drawnCounts.length > 0 && drawnCounts.every(n => n >= 0 && n <= 7), [...new Set(drawnCounts)].sort().join(','));
 // p0 is real and deliberate: progressChip() emits `p${done}` and done can be 0,
 // and NEITHER sheet defines a .p0 rule — so a 0/6 card draws an empty track with
 // "0/6" beside it, which is exactly the app's own behaviour. Asserting the

@@ -1,4 +1,5 @@
-// Smoke test for the section contract after the restructure: six sections, B–G.
+// Smoke test for the section contract after the restructure: seven sections, A–G
+// (Costing was split out of Investigation on 2026-10-13 and took the letter D).
 //
 //   node tools/smoke-sections.mjs
 //
@@ -46,19 +47,19 @@ const T = loadApp(`
 `);
 
 // ── The list itself ───────────────────────────────────────────────────────────
-r.head('six sections, letters B–G, in order');
-r.ok('SECTION_IDS is the six survivors',
-  T.SECTION_IDS.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', T.SECTION_IDS);
+r.head('seven sections, letters A–G, in order');
+r.ok('SECTION_IDS is the seven survivors',
+  T.SECTION_IDS.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', T.SECTION_IDS);
 r.ok('SECTIONS has exactly those keys',
   Object.keys(T.SECTIONS).join(',') === T.SECTION_IDS.join(','), Object.keys(T.SECTIONS));
 r.ok('every section has a letter', T.SECTION_IDS.every(s => T.SECTION_LABELS[s]),
   T.SECTION_IDS.map(s => s + '=' + T.SECTION_LABELS[s]));
-r.ok('the letters are B–G with no A, H or I',
-  T.SECTION_IDS.map(s => T.SECTION_LABELS[s]).join('') === 'BCDEFG',
+r.ok('the letters are A–G in the order the tabs read, with no H or I',
+  T.SECTION_IDS.map(s => T.SECTION_LABELS[s]).join('') === 'ABCDEFG',
   T.SECTION_IDS.map(s => T.SECTION_LABELS[s]));
 r.ok('every section has a short name', T.SECTION_IDS.every(s => T.SECTION_SHORT[s]),
   T.SECTION_IDS.filter(s => !T.SECTION_SHORT[s]));
-r.ok('the short names are the six the owner reads',
+r.ok('the short names are the ones the owner reads',
   T.SECTION_SHORT['sec-f'] === 'Quality Test Report' &&
   T.SECTION_SHORT['sec-g'] === 'PDI Report/Dispatch Record',
   [T.SECTION_SHORT['sec-f'], T.SECTION_SHORT['sec-g']]);
@@ -310,8 +311,8 @@ r.ok('both new paths set the in-flight guard, not merely test it',
 r.head('the section footer is a Close button, and the old Save buttons are gone');
 r.ok('every section has exactly one close button and no save button',
   T.SECTION_IDS.every(id => html.includes(`id="close-${id}"`) && !html.includes(`id="save-${id}"`)) &&
-  (html.match(/class="btn btn-close-section"/g) || []).length === 6,
-  (html.match(/id="(save|close)-sec-[a-z]"/g) || []));
+  (html.match(/class="btn btn-close-section"/g) || []).length === T.SECTION_IDS.length,
+  (html.match(/id="(save|close)-sec-[a-z-]"/g) || []));
 r.ok('each close button has its own indicator slot for the code to write into',
   T.SECTION_IDS.every(id => html.includes(`id="autosave-${id}"`)) &&
   T.SECTION_IDS.every(id => html.includes(`autosave-note`)),

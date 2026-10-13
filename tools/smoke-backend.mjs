@@ -84,8 +84,16 @@ r.head('the owner\'s security decisions');
 // on a v9 deployment that request answers `unknownAction` — so the timeline would
 // render without its email rows and look like an empty history rather than a missing
 // deploy. The version is how the app tells those two apart.
-r.ok('API_VERSION is 10 — a ticket\'s own email correspondence',
-  /API_VERSION:\s*10\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+//
+// v11 = `sec-cost`, Costing split out of `sec-d` on 2026-10-13 and shown as Section D.
+// ⚠ This one is NOT independent the way v10 was: an older backend answers with a
+// permission map that has no `sec-cost` key at all, so `getEffectiveAccess` grants
+// nobody edit on it — except an admin, whom `saveSection` skips the ACL for and
+// whom `getPassbook`'s read filter also exempts. The owner would therefore see Costing
+// working perfectly while every colleague got a read-only pane, which is why the app
+// reads this key's presence and says so (backendKnowsSection in app.js).
+r.ok('API_VERSION is 11 — Costing is a section of its own',
+  /API_VERSION:\s*11\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -388,12 +396,15 @@ r.ok('a real IR number is shape-checked before it reaches the filesystem',
   /assertRealIR\(irNumber\)/.test(sv) && /\^IR\\d\+\$/.test(fnBody('assertRealIR')),
   (fnBody('assertRealIR').match(/[^\n]*IR\\d[^\n]*/) || [''])[0]);
 
-r.head('the section keys are the six the frontend uses');
+r.head('the section keys are the seven the frontend uses');
 const keys = (code.match(/SECTION_KEYS\s*=\s*\[([^\]]*)\]/) || [])[1] || '';
 const list = keys.split(',').map(s => s.trim().replace(/'/g, '')).filter(Boolean);
-r.ok('six section keys', list.length === 6, list);
-r.ok('they are sec-b … sec-g in order',
-  list.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', list);
+r.ok('seven section keys', list.length === 7, list);
+// ⚠ The ORDER is the order the frontend builds its panes in, and `sec-cost` sits
+// between `sec-d` and `sec-e` because that is where Costing reads on screen — the
+// IDS are permission keys and never moved when the displayed letters did.
+r.ok('they are the seven ids in order, costing between investigation and production',
+  list.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', list);
 // The Overview is not a section but IS a gated record, and it keeps the historical
 // id `sec-a` so its key in sections/IR409.json and its audit lines survive untouched.
 r.ok('the Overview keeps the id sec-a, outside SECTION_KEYS',
@@ -2006,6 +2017,28 @@ r.ok('Purchase and Inventory are not merged into one department',
 r.ok('Triage is granted to CR and Management alone',
   /TRIAGE_DEPARTMENTS\s*=\s*\['cr',\s*'management'\]/.test(code),
   (code.match(/var TRIAGE_DEPARTMENTS[^\n]*/) || [''])[0]);
+// ⚠ THE EASY ONE TO MISS, and the one that costs a colleague their edit rights with
+// nothing on screen to say so. Five departments held `sec-d` while costing was its
+// Part B; after the split they hold only the investigation half unless `sec-cost` was
+// added to each. And this table is an UPSERT — a later re-seed DELETES any grant
+// it does not list — so the list and the live grants must stay in step BOTH ways.
+r.head('every department that held investigation also holds costing');
+const seedGrant = dept => {
+  const m = sg.match(new RegExp("'" + dept + "':\\s*\\[([^\\]]*)\\]"));
+  return m ? [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]) : null;
+};
+['production', 'qc', 'purchase', 'inventory', 'engineering'].forEach(dept => {
+  const g = seedGrant(dept);
+  r.ok(dept + ' keeps sec-d AND gained sec-cost',
+    !!g && g.includes('sec-d') && g.includes('sec-cost'), g);
+});
+// The departments that must NOT have gained it: Flight Test holds quality tests only,
+// and IQC / CR / Compliance / Management hold no section at all.
+r.ok('flight-test was not handed costing with it',
+  (seedGrant('flight-test') || []).indexOf('sec-cost') < 0, seedGrant('flight-test'));
+['iqc', 'cr', 'compliance', 'management'].forEach(dept => {
+  r.ok(dept + ' still holds no section at all', (seedGrant(dept) || []).length === 0, seedGrant(dept));
+});
 
 r.head('seedMemberships only ever ADDS');
 // setUserDepartments REPLACES one person's whole list — correct for an admin

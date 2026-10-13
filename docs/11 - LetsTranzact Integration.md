@@ -52,7 +52,7 @@ The two sections LetsTranzact cares about exist and are fully specified already 
 `docs/03 - Sections Reference.md` is the authority. The fields, as the app stores
 them:
 
-**Inward — Section B (`sec-b`), "Inward Checklist (Inventory)"**
+**Inward — Section A (`sec-b`), "Inward Checklist (Inventory)"**
 
 | Key | Label |
 |---|---|

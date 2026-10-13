@@ -22,7 +22,7 @@ const T = loadApp(`
   buildTimeline, parseAuditTimestamp, SUPPRESSED_AUDIT_FIELDS, TIMELINE_KINDS,
   renderTimelineInto, sectionDisplayName, iconSvg, ICON_PATHS,
   restoreOfferFor, fieldCurrentFrom, RESTORABLE_KINDS, VALUE_BEARING_KINDS,
-  shortMailbox,
+  SECTION_SHORT, sectionLetter, shortMailbox,
   renderInto: (el, tl, opts) => renderTimelineInto(el, tl, opts),
 `);
 
@@ -402,8 +402,15 @@ r.ok('and the builder only ever emits one of them', (() => {
 ], [comment({})]).map(x => x.kind));
 
 r.head('pre-merge history is labelled by what it was, not relabelled');
-r.ok('a sec-a row reads as the Overview',
-  T.sectionDisplayName('sec-a') === 'Overview (formerly Section A)', T.sectionDisplayName('sec-a'));
+// ⚠ The wording here is load-bearing since 2026-10-13. "Section A" is the INWARD
+// checklist now — the letters moved A–G — so a row that said "formerly Section A"
+// would be describing the Overview as something it never was. The old letter is named
+// as OLD, and the pair below keeps the two meanings from merging again.
+r.ok('a sec-a row reads as the Overview, and says the letter is an OLD one',
+  T.sectionDisplayName('sec-a') === 'Overview (old Section A)', T.sectionDisplayName('sec-a'));
+r.ok('...because Section A is the inward checklist now',
+  T.sectionLetter('sec-b') === 'A' && T.SECTION_SHORT['sec-b'] === 'Inward Checklist',
+  T.sectionLetter('sec-b') + ' · ' + T.SECTION_SHORT['sec-b']);
 r.ok('a sec-h row keeps its old letter', /PDI/.test(T.sectionDisplayName('sec-h')), T.sectionDisplayName('sec-h'));
 r.ok('a sec-i row keeps its old letter', /Dispatch/.test(T.sectionDisplayName('sec-i')), T.sectionDisplayName('sec-i'));
 r.ok('a live section uses its current short name',

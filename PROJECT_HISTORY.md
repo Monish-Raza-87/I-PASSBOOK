@@ -685,6 +685,143 @@ halves of one repair, and the answer to him says so.
 
 ---
 
+## 9. The letters move A–G, Costing becomes a section, and Insights counts models (2026-10-13)
+
+### What he asked for
+
+Two asks in one message, the first conditioned on safety — *"a small rename, if it is safe
+and not breaking anything"*:
+
+> *"INWARD to be named section A i.e. currently it is written B. INWARD … similarly, B.
+> VISUAL INSPECTION, C. INVESTIGATION, D. COSTING, E. PRODUCTION, F. QUALITY TESTS,
+> G. PDI/DISPATCH. So … apart from changing names of section, it also splits current
+> investigation section's two parts, A and B, into two different sections. Our current
+> "Part B — cost analysis (repair estimate & lead time)" goes as a new section,
+> D. COSTING. In INSIGHTS, still UAS MODELS filter is not there. It has DRONE SN but not
+> MODELS. Also, name of filters should be "UAS SN" and "UAS MODEL"."*
+
+He was right that it is not a rename. It is a **split**, and the split is right on the
+merits rather than only on his word: `docs/03` had already recorded that Section D's two
+halves are **signed off by two different roles** — Part A by the Technical Support
+(QC Manager), Part B by the **Purchase Manager**. Two sign-offs by two people is a section
+boundary. It was only ever one section because the Sheet said so.
+
+### ⚠ The trap that shaped the whole change
+
+The section letters are **also the permission keys** — `sec-b`…`sec-g` in
+`_store/access.json`, `SECTION_KEYS` in `backend.gs`. So the obvious reading of the ask
+(*renumber the sections*) would have **silently re-granted rights**: `sec-c`, freed by
+moving IQC's letter to B, becomes free for a new section to inherit every department's
+existing edit grant on QC inspection. Nothing would have failed. It would simply have
+worked, with the wrong people holding the wrong doors.
+
+So the **ids did not move; only the displayed letter did** — the same trick
+`OVERVIEW_KEY = 'sec-a'` already plays, and the same reason the merged `g_*`/`i_*` field
+ids were deliberately left alone. One table (`SECTION_LABELS`) and one function
+(`sectionLetter(id)`) now own the letter, and it is **never derived from the id**. The one
+place that had derived it — `BOARD_COLUMNS`' keys — was inverted, because
+`paintBoardMoveOffer` resolves a column back to a section *by letter*: type the letters by
+hand, leave Investigation's key at `'D'` while `sec-cost` also maps to `'D'`, and the
+move-on offer silently attaches to the wrong ticket record.
+
+### Three decisions he made when asked
+
+- **Costing counts in the progress bar** — the bar becomes 7 sections, A–G.
+- **The warranty question moves out of Costing and into Investigation**, below
+  *Preventive action*. Costing is therefore not always applicable: a warranty repair, or
+  anything not charged for, legitimately has no cost figures.
+- **Costing must be finished before a ticket moves on to Production.**
+
+Three consequences follow directly. Because Costing can be *legitimately blank*, its
+**Close button is never disabled for being empty** — closing a blank Costing asks one
+confirmation instead. Because the warranty question stays in Investigation, it needs **no
+data migration at all** — it was always stored in `sec-d` and it stays there. And "costing
+first" is a **gate on the Board's own offer**, not a new workflow stage, which is the cheap
+answer and the one that does not invent a status.
+
+### The data half, where the quiet bug was
+
+Backend `saveSection` **replaces** a section object, and a declared field absent from the
+payload counts as *deleted* — `restoreField` depends on that. So the moment `sec-d`
+stopped declaring the three cost fields, the next ordinary Investigation save would have
+**destroyed every stored estimate on every ticket**, silently, with no error and nothing to
+notice until someone opened a costing page and found it gone.
+
+Two lines prevent it, and both read **only stored data**: the Costing pane resolves a
+field's home through `FIELD_SECTION_INDEX` (never from the stored section, which is what
+would draw a blank pane while the values sat one section over), and an Investigation save
+**carries the three legacy keys forward** unchanged while the stored record still holds
+them. Gated on stored data it is self-limiting — the moment the values stop living in
+`sec-d`, the carry-forward goes inert on its own. Gating on anything the load path
+*invented* would have cancelled the two halves and let the data-loss bug back in.
+
+The precedent was already in the same function: `d_logAnalysis` is carried through, not
+collected, with the comment *"dropping it here would mean a perfectly ordinary Section D
+save quietly deleted the report."* This is that same rule, applied to three more fields.
+
+### The one manual step it costs him
+
+`sec-cost` is the first genuinely **new** section id since the restructure — `sec-a` is the
+Overview, `sec-h`/`sec-i` are retired and explicitly rejected by `saveSection`. A new id
+needs **three lines in `backend.gs`** (`SECTION_KEYS`, `SEED_GRANTS`, `API_VERSION` 10 → 11),
+so it owes **one paste into both `/exec` deployments**.
+
+⚠ The trap that paste sets, and the reason the frontend ships with an explicit guard:
+`saveSection` skips the permission check entirely for an **admin**, and `getPassbook`'s read
+filter also exempts admins. So on an un-pasted backend **the owner sees Costing work
+perfectly while everyone else gets an empty pane and `Forbidden` on save** — the exact
+failure shape this repo has been bitten by before (*"blank Overview for 18 people, looks
+fine to the one person looking"*). The Costing pane therefore renders **read-only with a
+plain notice** until the backend answers that it knows the key, and the notice is worded
+honestly: for the admin an un-pasted backend does not fail, so a notice promising failure
+would be a lie he could disprove in one click. Blocking him is still right — it is the
+forcing function that gets the paste done.
+
+### Verification
+
+`node tools/smoke-all.mjs` green across all 37 suites, with the affected suites updated
+deliberately rather than loosened — **a red build here is a coupling I did not predict,
+not a suite to relax.** The couplings it did find were real and are now pinned:
+
+- `smoke-preview.mjs` had baked in the very derivation this change deletes
+  (`id.replace(/^sec-/,'').toUpperCase()` → `"COST"`). It now reads `SECTION_LABELS` and
+  `BOARD_SECTION_COLUMNS` out of `app.js` text, so it **enforces** the deliberate exclusion
+  of the Costing board column instead of re-deriving the id.
+- `tools/build-ui-options.mjs`, a generator that never evaluates `app.js`, now carries
+  section **ids** alongside letters, so `'sec-' + letter` can never be reconstructed again.
+- `smoke-workflow.mjs`'s admin fixture was given a realistic permission map: `permissions:
+  {}` no longer describes any admin the server can produce, because the v94
+  `backendKnowsSection` guard correctly reads a missing key as *"the backend predates this
+  section"* and disables every Close.
+
+One defect was found by **driving the app in a real browser**, and no source-text suite
+could have found it: the tab strip is wider than a phone screen, and the active tab was
+never scrolled into view. That mattered because one of `showSection`'s two callers selects
+a section **nobody pressed** — `applySectionAccessGating` moves a person off a tab their
+category has just switched off — so on a phone the tab lit up outside the window while the
+strip went on showing its neighbours: the right section, with nothing on screen saying
+which one it was. It is one line in `showSection` (`inline: 'start'`, matching the strip's
+own `scroll-snap-align`, **not** `'nearest'`, which leaves a wide tab showing its first few
+letters), inert on a wide screen where the strip has nothing to scroll, and now pinned in
+`smoke-workflow.mjs` — the harness's own elements have no `scrollIntoView` at all, which is
+why nothing had ever noticed.
+
+The same probe also caught **two of my own assertions measuring nothing**: the section
+inputs do not exist until `buildSectionForms()` has run, so "the Costing pane is blank"
+passed for a reason that had nothing to do with the code under test; and
+`pane.scrollWidth` disagreed with every element it was supposed to describe. *A reproducible
+probe can still measure the wrong thing.*
+
+**Shipped as v94.** Frontend first, as always. The backend paste is **owed** — three lines
+pasted into **both** `/exec` deployments as a **New version**, with the primary still
+ending `jQXatfT/exec`, and then the Section D (Costing) edit boxes ticked by hand in
+**User Access → Departments**, because the seed only applies to a fresh run and a re-seed
+would strip hand-ticked boxes. The consequences of each — the legacy cost values that stay
+under `sec-d`, and the gate that is Triage-overridable — are recorded in
+[07 — Known Issues & TODO](docs/07 - Known Issues & TODO.md).
+
+---
+
 ## 10. Future Roadmap (Planned)
 
 ### Log Analysis Visualization

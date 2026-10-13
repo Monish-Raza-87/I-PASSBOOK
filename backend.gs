@@ -164,7 +164,21 @@ var CONFIG = {
   // way they were not at v8: a v9 frontend meeting a v8 backend simply gets no roster
   // and keeps the directory it already has, and a v8 frontend meeting a v9 backend
   // never calls it at all.
-  API_VERSION: 10,
+  //
+  // v10 = THE EMAIL INDEX. `listIRThreads` reads the Email_Index tab built by a script
+  // that lives outside this repo, so the per-ticket activity timeline can show the mail
+  // threads for an IR. Read-only, one action, no changed response.
+  //
+  // v11 = COSTING IS A SECTION. `SECTION_KEYS` gained `sec-cost`, split out of `sec-d`
+  // on 2026-10-13 and shown to users as Section D; `SEED_GRANTS` gained it for the five
+  // departments that already held `sec-d`. ⚠ Unlike v6/v7/v9 this one is NOT independent:
+  // an older backend does not know the id, so `getEffectiveAccess` grants nobody edit on
+  // it — EXCEPT an admin, whom `saveSection` skips the ACL for entirely and whom
+  // `getPassbook`'s read filter also exempts. So on an un-pasted deployment the owner
+  // sees Costing work perfectly while everyone else gets a read-only pane. The frontend
+  // carries a guard that reads this key's presence and says so rather than letting the
+  // difference be discovered by a colleague; see backendKnowsSection in app.js.
+  API_VERSION: 11,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -3768,12 +3782,19 @@ function doPost(e) {
 // SESSIONS — server-issued session tokens, so a signed-in device stays signed in
 // without repeated sign-in prompts. Kept in `_store/sessions.json`.
 // ──────────────────────────────────────────────────────────────────────────────
-// The six LIVE sections, letters B–G. Section A became the Overview panel and is
-// deliberately NOT in this list — nothing grants "edit on Section A" any more,
-// because the panel is governed by the Triage flag instead.
+// The seven LIVE sections, letters A–G — Section A among them, as the inward
+// checklist. What is deliberately NOT in this list is the OLD Section A, which
+// became the Overview panel: nothing grants "edit on Section A" for it any more,
+// because the panel is governed by the Triage flag instead. That panel's record
+// still lives under the `sec-a` key (see OVERVIEW_KEY below) — the same id, and
+// none of the same meaning.
+//
+// `sec-cost` was split out of `sec-d` on 2026-10-13 and is shown as Section D; the
+// letters renumbered around it (inward is now A, investigation now C). The IDs are
+// PERMISSION KEYS and did not move with the letters — see the ACCESS section below.
 //
 // `sec-h` and `sec-i` are retired; see SEC_TARGET_MAP below.
-var SECTION_KEYS = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
+var SECTION_KEYS = ['sec-b','sec-c','sec-d','sec-cost','sec-e','sec-f','sec-g'];
 
 // The Overview panel's record id. It keeps the original `sec-a` so the drafts and
 // the audit history already keyed on it keep working untouched. It is NOT a
@@ -6661,25 +6682,37 @@ var SEED_DEPARTMENTS = [
 
 // ──────────────────────────────────────────────────────────────────────────────
 // SEEDED GRANTS — the owner's mapping, supplied 2026-09-16. Changing it is their
-// call, not a maintenance decision. Section letters are the CURRENT ones (B–G).
+// call, not a maintenance decision. Section letters are the CURRENT ones (A–G),
+// after Costing was split out of Investigation on 2026-10-13.
 // ──────────────────────────────────────────────────────────────────────────────
-//   Production   B C D E G      QC         B C D F     Flight Test  F
-//   Purchase     D              Inventory  B D G       Engineering  D
+//   Production   A B C D E G    QC         A B C D F   Flight Test  F
+//   Purchase     C D            Inventory  A C D G     Engineering  C D
 //   CR           — (Triage)     Management — (Triage)  IQC / Compliance  —
+//
+// ⚠ COSTING (`sec-cost`, shown as Section D) had to be added to every department
+// that already held `sec-d`. When it was one section, a grant on `sec-d` covered
+// both halves — the investigation AND its repair estimate. After the split they are
+// two keys, and a department left holding only `sec-d` would silently lose costing
+// edit. `purchase` is the Part B signer, which is the whole reason Section D exists
+// as a section at all — see docs/03.
+//
+// ⚠ THIS UPSERT DELETES grants not in the list below (see seedDepartments), so a
+// re-seed after a by-hand tick in the Departments tab would strip the `sec-cost`
+// boxes the owner ticked himself. Keep this list and the live grants in step.
 //
 // An empty list is a REAL answer, not an omission: CR and Management hold Triage
 // and edit no section at all — that is what makes this a second axis rather than a
 // seventh permission key. IQC and Compliance hold neither.
 var SEED_GRANTS = {
-  'production':  ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-g'],
-  'qc':          ['sec-b', 'sec-c', 'sec-d', 'sec-f'],
+  'production':  ['sec-b', 'sec-c', 'sec-d', 'sec-cost', 'sec-e', 'sec-g'],
+  'qc':          ['sec-b', 'sec-c', 'sec-d', 'sec-cost', 'sec-f'],
   'flight-test': ['sec-f'],
   'iqc':         [],
-  'purchase':    ['sec-d'],
-  'inventory':   ['sec-b', 'sec-d', 'sec-g'],
+  'purchase':    ['sec-d', 'sec-cost'],
+  'inventory':   ['sec-b', 'sec-d', 'sec-cost', 'sec-g'],
   'cr':          [],
   'compliance':  [],
-  'engineering': ['sec-d'],
+  'engineering': ['sec-d', 'sec-cost'],
   'management':  []
 };
 

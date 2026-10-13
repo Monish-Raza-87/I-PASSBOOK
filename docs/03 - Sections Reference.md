@@ -1,17 +1,37 @@
 # 03 — Sections Reference
 
-All **6** passbook sections, **B–G**, defined in the `SECTIONS` object in `app.js`.
+All **7** passbook sections, **A–G**, defined in the `SECTIONS` object in `app.js`.
 This was nine sections (`sec-a`…`sec-i`) until the restructure: old Section A became
 the **Overview panel**, and two pairs merged — QC + Flight Test into one **Quality
 Test Report**, PDI + Dispatch into one **PDI Report/Dispatch Record**.
+
+⚠️ **The letters are not the ids.** On 2026-10-13 the displayed letters moved down one
+(A–G) so that **Costing** could become a section of its own, and the **ids deliberately
+did not move with them** — a section id is a permission key (`SECTION_KEYS` in
+`backend.gs`, the `permissions` map in `_store/access.json`), so renumbering ids would
+have silently re-granted rights. The chart reads:
+
+| id (never shown, never renumbered) | letter | tab |
+|---|---|---|
+| `sec-b` | **A** | Inward |
+| `sec-c` | **B** | Visual Inspection |
+| `sec-d` | **C** | Investigation |
+| `sec-cost` | **D** | Costing |
+| `sec-e` | **E** | Production |
+| `sec-f` | **F** | Quality Tests |
+| `sec-g` | **G** | PDI/Dispatch |
+
+The letter comes from `SECTION_LABELS` via `sectionLetter(secId)` — one table, one
+function, and **never** derived from the id. This file uses the **displayed letter**
+throughout, because that is what a reader sees on screen.
 
 Two tabs are not sections:
 
 - **📋 Report** — the read-only view of the client's original Google Form
   submission. No fields, no save button, no entry in `SECTIONS`. Documented in
   [06 — UI Components & Styling](06 - UI Components & Styling.md).
-- **The Overview panel** — Section A's content, pinned above the tab strip rather
-  than behind a tab. See below.
+- **The Overview panel** — the old Section A's content, pinned above the tab strip
+  rather than behind a tab. See below.
 
 ### Draft auto-preservation (all sections)
 Any edit within a section is auto-persisted to `localStorage` as a draft keyed
@@ -250,19 +270,24 @@ fails a restore that already committed.
 
 ---
 
-## The Overview panel (what was Section A)
+## The Overview panel (what was Section A, the OLD one)
 **Data key:** `sec-a` — **not a section**
 
 The Overview is **not a section**. It has no letter, no tab, no pane, and no entry
 in `SECTION_IDS` or `SECTIONS`. It is a panel pinned above the tab strip, so it is
 always visible, and it is always one click from a save.
 
+⚠️ **"Section A" means the inward checklist now.** When the letters moved A–G on
+2026-10-13, the letter `A` passed to `sec-b`. The Overview keeps its id (`sec-a`) and
+its name, so anything calling it "Section A" today is naming a different screen — the
+timeline's historical label reads `Overview (old Section A)` for exactly this reason.
+
 **Why it kept the id `sec-a`.** Renaming the data key would have forced a second
 migration for no user-visible gain. Keeping it preserves at zero cost the existing
 `a_crmOwner`/`a_contactPhone` values in the ticket's own store file, the drafts keyed
 `ipb_draft_<ir>_sec-a`, the `a_*` → `sec-a` field resolution, the backend's
 locked-intake strip, and the meaning of existing audit lines. No UI ever shows
-the letter "A".
+the letter "A" for it.
 
 Three structural properties, each load-bearing:
 
@@ -353,6 +378,7 @@ what each column means (the backend's old `IR_REPO_*_COL` constants are gone; se
 |---|---|---|
 | `irNumber` | Col B — IR Number | `IR Number` |
 | `droneId` | Col K — Mention the Drone Serial No (S250XX) | `Drone Serial No` |
+| `droneModel` | Col S — Select the Drone Model | `Drone Model` |
 | `dateRaised` / `dateRaisedISO` | Col C — Timestamp | `Timestamp` |
 | `incidentDate` | Col I — Date of Incident | `Date of Incident` |
 | `companyName` | Col R — Where Do You Work? | `Where Do You Work` |
@@ -370,7 +396,14 @@ what each column means (the backend's old `IR_REPO_*_COL` constants are gone; se
 | *priority* | — | the Sheet column is **consumed but deliberately not read**: priority is app-owned |
 
 Anything the Form writes that this table does not name lands in `extra[]` and is
-surfaced on the 📋 Report tab rather than dropped.
+surfaced on the 📋 Report tab rather than dropped. That includes *duplicate* headers:
+the Form writes **"Select the Drone Model" into both Col S and Col W**, which is one
+fact in two columns and not two facts — `findIndex` reads the first, and
+`buildIntakeMap` then consumes any leftover column whose header is **textually
+identical** to one it already consumed. The match is exact on purpose: the search
+itself is a substring match, so consuming every partial match would silently swallow
+genuine extra columns (a `Summary notes` column is a different column, and stays
+reported).
 
 ### The automated timeline
 Every activity in an IR is recorded for context, from four sources, so nobody has to
@@ -405,8 +438,8 @@ order are deliberately different things.
 
 ---
 
-## Section B — Inward Checklist (Inventory)
-**ID:** `sec-b`
+## Section A — Inward Checklist (Inventory)
+**ID:** `sec-b` ⚠️ *(the letter is A; the id kept its old value — see the chart at the top)*
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
@@ -467,8 +500,8 @@ every section — see [Per-section export](#per-section-export-download--downloa
 
 ---
 
-## Section C — IQC Visual Inspection
-**ID:** `sec-c`
+## Section B — Visual Inspection / IQC
+**ID:** `sec-c` ⚠️ *(the letter is B, not C)*
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
@@ -515,7 +548,7 @@ Each check row has a **Result** dropdown (`PASS` / `FAIL` / `NA`) and a **Remark
 The bottom `c_remarks` textarea holds overall remarks. Photos and PDFs of the inspection
 are attached with `c_iqcPhotos`.
 
-### Admin customization (Section C)
+### Admin customization (Section B)
 Admins (`ADMIN_EMAILS` — `monish.raza@indrones.com`,
 plus the `?dev=1` user for testing) see a **⚙ Manage Inspection Points & Dropdowns**
 button under the IQC table. The modal edits:
@@ -527,30 +560,36 @@ Changes persist to GAS under irNumber `__CONFIG__` / sectionId `iqc-config` (sha
 across users) and to `localStorage` (per-device fallback); `loadIqcConfig()` runs at
 app start and re-renders any open IQC table while preserving entered results/remarks.
 Runtime state lives in `iqcZones` / `iqcResultOptions`; defaults are
-`IQC_ZONES_DEFAULTS` / `IQC_RESULT_OPTIONS_DEFAULTS`. (Section B's inward options use
+`IQC_ZONES_DEFAULTS` / `IQC_RESULT_OPTIONS_DEFAULTS`. (Section A's inward options use
 the same admin set — see `isAdmin()`.)
 
 ---
 
-## Section D — Investigation
-**ID:** `sec-d`
+## Section C — Investigation
+**ID:** `sec-d` ⚠️ *(the letter is C, not D)*
 
-Section D is built in two parts, each signed off by a different role:
-- **Part A — Investigation** (flight-data analysis) → signed off by the
-  **Technical Support (QC Manager)**.
-- **Part B — Cost Analysis** (repair estimate & lead time) → signed off by the
-  **Purchase Manager**.
+Investigation is the flight-data analysis. It is signed off by the **Technical Support
+(QC Manager)**.
 
-In the original I-PASSBOOK sheet the two signatures sit side-by-side; here they
-are split — the QC Manager signature appears at the end of Part A and the
-Purchase Manager signature at the end of Part B. The damage-report sub-section
-from the sheet is deferred (later development).
+It was **Part A** of one Section D until 2026-10-13, when costing was split out into a
+section of its own: the two halves were always signed off by two **different** roles —
+Part A by Technical Support, Part B by the **Purchase Manager** — and two sign-offs by
+two people is a section boundary. It was only ever one section because the sheet said
+so. **Costing is now `sec-cost`, letter D.**
 
-### Part A — Investigation
+⚠️ **The cost half moved out; the warranty question came here.**
+`d_warrantyQualified` ("Is this repair qualified for cover under warranty?") now sits in
+Investigation, directly below **Preventive action**. Answering the warranty question is
+not the same act as recording a cost, and Costing is legitimately empty when a repair is
+warranty-covered. Its id — and therefore its stored data — did **not** change: it always
+lived under `sec-d`, so nothing migrated and no audit line moved.
+
+The damage-report sub-section from the sheet is deferred (later development).
+
+### Investigation fields
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
-| `d_partA` | Part A — Investigation | divider | Sub-section heading band (no value) |
 | `d_analysisBy` | Analysis Performed By | text | Engineer / analyst name |
 | `d_analysisDate` | Analysis Date | date | |
 | `d_intro` | _(none)_ | analysisNote | Read-only dynamic line: "Dear customer, analysis of **IRXXX** for your system with ID **XXXXX** has been completed. Its findings are as below." — `IRXXX` → `currentIR.irNumber`, `XXXXX` → `currentIR.droneId` |
@@ -559,9 +598,10 @@ from the sheet is deferred (later development).
 | `d_rootCause` | Root Cause | textarea | |
 | `d_correctiveAction` | Corrective Action | textarea | |
 | `d_preventiveAction` | Preventive Action | textarea | |
+| `d_warrantyQualified` | Is This Repair Qualified For Cover Under Warranty? (Yes/No) | select | Options: _(blank)_, Yes, No. **Moved here from the costing half on 2026-10-13**; label matches the Format worksheet row exactly |
 
 ### Per-section export (Download / Download and share)
-Every section B–G ends with a `.sec-export-row` holding two buttons:
+Every section A–G ends with a `.sec-export-row` holding two buttons:
 
 | Button | id | What it does |
 |---|---|---|
@@ -587,12 +627,14 @@ Built with the vendored **pdf-lib** (`vendor/pdf-lib.min.js`), in three layers:
   dropping it silently.
 - **Any user may export.** A view-only user's pane disables every control, so the two
   buttons carry `.sec-export-btn` and are exempted from that gating — exporting is a read.
-- Filenames are `IR409 - Section B.pdf`, sanitised against path separators and reserved
-  characters.
+- Filenames are `IR409 - Section A.pdf`, sanitised against path separators and reserved
+  characters. The letter is `sectionLetter(sectionId)` — **never** the id, which is why
+  an Investigation export says "Section C" and a Costing export says "Section D".
 
 ### Image evidence (`imageEvidence` type)
 Each entry is an image **or PDF** plus a free-text **Name / context** caption. This
-control is shared by Section D and by the upload fields in Sections E / F / G / H / I.
+control is shared by Section C (`d_evidence`) and by the upload fields in Sections D
+through G, plus the retired H / I ids.
 Control state lives in `evidenceState[fieldId]` (reset on `openPassbook`):
 
 ```
@@ -629,30 +671,64 @@ evidenceState['d_evidence'] = [
   other fields); the local image/PDF files themselves are not (consistent with the
   all-sections note that files/photos must be re-attached).
 
-### Part B — Cost Analysis (Repair Estimate & Lead Time)
+## Section D — Costing
+**ID:** `sec-cost` — **new on 2026-10-13**
 
-Mirrors Section D Part B of the I-PASSBOOK sheet — the repair/replace estimate
-columns (Particulars / Qty / Rate / Cost / Remark), the warranty qualification
-question, the lead time, and the Purchase Manager sign-off.
+Mirrors the sheet's "Part B — Cost Analysis (Repair Estimate & Lead Time)": the
+repair/replace estimate columns (Particulars / Qty / Rate / Cost / Remark), the lead
+time, and the **Purchase Manager** sign-off. It is signed off by a different role from
+Investigation, which is why it became a section.
+
+⚠️ **This is the one section whose id is new, not merely relettered.** There was no free
+id — `sec-a` is the Overview, `sec-h` and `sec-i` are retired and explicitly rejected by
+`saveSection` — so `sec-cost` was minted, and it is the only reason this change costs a
+backend paste (see [04](04 - Backend API Reference.md)). Until that paste lands, the
+pane renders read-only with a plain notice rather than offering a Save that can only
+answer `Forbidden`.
+
+⚠️ **Costing may legitimately be blank.** A warranty repair, or anything not charged for,
+has no cost figures. So the Close button is **never disabled for being empty** — closing
+a blank Costing asks one confirmation instead: *"Section D — Costing is empty. Nothing is
+being charged for this IR … Close it anyway?"* Closing it, blank and confirmed, counts
+exactly like a filled one. Costing can be empty; it cannot be skipped by accident.
+
+⚠️ **Costing gates the move to Production.** The Board has **no Costing column** — no
+workflow status means "Costing", so a D column would sit permanently empty and read as
+broken. Instead, the app withholds its *move on to E · Production* offer until Costing
+is closed, and **names the reason**. Triage remains the deliberate override.
 
 | Field ID | Label | Type | Notes |
 |---|---|---|---|
-| `d_partB` | Part B — Cost Analysis (Repair Estimate & Lead Time) | divider | Sub-section heading band (no value) |
-| `d_warrantyQualified` | Is This Repair Qualified For Cover Under Warranty? (Yes/No) | select | Options: _(blank)_, Yes, No. Label matches the Format worksheet row exactly |
 | `d_repairTable` | Particulars For Repair / Replace | costTable | See the `costTable` type below |
 | `d_leadTime` | Estimated Lead Time | text | e.g. "7–10 working days" |
 | `d_goAhead` | Received Go Ahead By The Customer? | select | Options: _(blank)_, Yes, No. Customer approval of the estimate (Format tab row 55) |
 
-> **Note on Part B field types:** the Format worksheet's Section D region uses
-> heavy cell-merging, so Google's public CSV endpoint blanks out most of the
-> merged cells (the warranty row text and the input types aren't readable via
-> the link-shared feed). Field labels and order were confirmed from the cells
-> that *are* visible — the repair-table header (row 47: Particulars/Qty/Rate/
-> Cost/Remark at U/W/X/Y/Z), "Received Go Ahead By The Customer" (row 55), and
-> the two signatures (row 60: Technical Support (QC Manager) at U, Purchase
-> Manager at X). The warranty, lead-time and go-ahead **input types** (select
-> Yes/No vs. text vs. date) were inferred — if the sheet uses a different
-> control for any of these, tell me and I'll adjust.
+> **The field ids deliberately keep their `d_` prefix.** A field id is what the stored
+> data, the audit trail and every `__NUDGES__` comment are anchored to, so renaming them
+> would split one field's history across two names. The section a field belongs to is
+> resolved through `FIELD_SECTION_INDEX`, which is rebuilt from `SECTIONS` — so these
+> three ids resolve to `sec-cost` automatically.
+>
+> **The warranty question is not in this list.** It moved to Investigation (above) and
+> its data never left `sec-d`.
+>
+> **Legacy values stay where they are.** Tickets saved before the split still hold these
+> three values under `sec-d`. The Costing pane reads them through (the home is resolved
+> through `FIELD_SECTION_INDEX`, never assumed from the stored section), and an
+> Investigation save **carries them forward** rather than deleting them — a section save
+> *replaces* the section object, so a declared field missing from the payload counts as
+> deleted. There is no migration; see [07](07 - Known Issues & TODO.md) for the
+> consequences.
+
+> **Where these labels and their order came from.** The Format worksheet's costing region
+> uses heavy cell-merging, so Google's public CSV endpoint blanks out most of the merged
+> cells (the warranty row text and the input types are not readable via the link-shared
+> feed). Labels and order were confirmed from the cells that *are* visible — the
+> repair-table header (row 47: Particulars/Qty/Rate/Cost/Remark at U/W/X/Y/Z),
+> "Received Go Ahead By The Customer" (row 55), and the two signatures (row 60:
+> Technical Support (QC Manager) at U, Purchase Manager at X). The lead-time and
+> go-ahead **input types** (select Yes/No vs. text vs. date) were inferred — if the sheet
+> uses a different control, say so and it changes.
 
 ### Cost estimate table (`costTable` type)
 A repeatable repair/replace estimate table mirroring the sheet's Part B layout.
@@ -691,7 +767,7 @@ always has inputs ready. The PDF/CSV export uses the same displayed names —
 ---
 
 ## Section E — Production (Rework)
-**ID:** `sec-e`
+**ID:** `sec-e` ⚠️ *(the letter is E; the id never moved)*
 
 | Field ID | Label | Type |
 |---|---|---|
@@ -699,7 +775,7 @@ always has inputs ready. The PDF/CSV export uses the same displayed names —
 | `e_prodRemarks` | Rework Details / Remarks | textarea |
 
 Stripped to just the route/job card upload (shared `imageEvidence` — image **or** PDF,
-preview + 📷 capture, see Section D "Image evidence") and a rework remark.
+preview + 📷 capture, see Section C "Image evidence") and a rework remark.
 
 ---
 
@@ -768,7 +844,7 @@ what was checked, then where it went.
 | `h_pdiDocs` | PDI Report (Image or PDF) | imageEvidence | upload + 📷 capture | old Section H |
 | `h_pdiRemarks` | PDI Remarks | textarea | | old Section H |
 | `h_pdiChecklist` | PDI Checklist | checklist | 8 items (see below) | old Section H |
-| `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section B) | dispatchChecklist | dynamic, from Section B | old Section H |
+| `h_dispatchChecklist` | Dispatch Checklist — verify same goods as received (Section A) | dispatchChecklist | dynamic, from Section A | old Section H |
 | `h_pdiResult` | PDI Result | select | Pass – Ready to Dispatch / Fail – Return to QC | old Section H |
 | `i_dispatchDate` | Dispatch Date | date | | old Section I |
 | `i_dispatchBy` | Dispatched By | text | | old Section I |
@@ -790,10 +866,10 @@ what was checked, then where it went.
 8. Branding / Labels Intact
 
 **Dispatch checklist (`dispatchChecklist` type).** Auto-built from the goods actually
-received in Section B (`b_inwardTable`) — one row per received particular, each with a
+received in Section A (`b_inwardTable`) — one row per received particular, each with a
 dropdown: ✔ Dispatched (same qty) / ⚠ Short (less qty) / ✘ Missing / N/A. Ensures exactly
-the same items received go back out. The list reads the live Section B table (then saved
-data) and re-renders whenever Section B is edited or saved; prior selections are preserved.
+the same items received go back out. The list reads the live Section A table (then saved
+data) and re-renders whenever Section A is edited or saved; prior selections are preserved.
 Placed before the PDI e-signature. Saved as `{ [particular]: status }`.
 
 > A "Delivery & Feedback" section was **planned, never built**, and is shelved for
@@ -809,7 +885,7 @@ Placed before the PDI e-signature. Saved as `{ [particular]: status }`.
 | Holds | Section | Field id prefixes | Why it is not a rename |
 |---|---|---|---|
 | `sec-f` | Quality Test Report | `f_*`, `g_*` | `g_*` ids are comment anchors and audit history |
-| `sec-g` | PDI Report/Dispatch Record | `h_*`, `i_*` | same, and `h_dispatchChecklist` is read by the Section B table |
+| `sec-g` | PDI Report/Dispatch Record | `h_*`, `i_*` | same, and `h_dispatchChecklist` is read by the Section A (inward) table |
 
 ### Drive folders keep their historical names
 A merged section keeps the folder of its **first-listed source**, so new uploads land

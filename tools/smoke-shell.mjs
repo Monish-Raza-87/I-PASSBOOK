@@ -53,17 +53,19 @@ const tabSection = attr => (attr.match(/data-section="([^"]+)"/) || [])[1];
 const tabIds = tabs.map(tabSection).filter(Boolean);
 const sectionTabs = tabIds.filter(id => id !== 'sec-intake');
 
-ok('exactly 6 section tabs', sectionTabs.length === 6, sectionTabs);
+ok('exactly 7 section tabs', sectionTabs.length === 7, sectionTabs);
 ok('the 📋 Report tab is present and marked data-intake',
   /data-section="sec-intake"[^>]*data-intake="1"/.test(html), tabs);
 ok('the intake tab is first, so the report reads as the cover page',
   tabIds[0] === 'sec-intake', tabIds);
 ok('the intake tab carries no section pane in SECTIONS\' shape (it is not savable)',
   !/\n\s*'sec-intake':/.test(appJs));
-// The merged section letters are a hard contract: the owner's department mapping is
-// written against B–G, so a letter drifting here silently mis-grants access.
-ok('the letters are B–G in order, with no A/H/I',
-  sectionTabs.join(',') === 'sec-b,sec-c,sec-d,sec-e,sec-f,sec-g', sectionTabs);
+// The displayed letters are a hard contract: the owner's department mapping is
+// written against them, so a letter drifting here silently mis-grants access. The
+// IDS do not move with the letters — they are the permission keys — which is why
+// `sec-cost` sits between `sec-d` and `sec-e` while showing the letter D.
+ok('the tabs are the seven ids in order, with no A/H/I',
+  sectionTabs.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', sectionTabs);
 
 // The gating fallback must skip the intake tab or it would always win it: the
 // intake pane is never hidden, so it is always "the first visible tab".
@@ -73,14 +75,14 @@ ok('the active-tab fallback excludes the intake tab',
 head('section panes');
 const SECTION_IDS = (appJs.match(/const SECTION_IDS = \[([^\]]+)\]/) || [])[1];
 const sectionIds = SECTION_IDS.split(',').map(s => s.trim().replace(/'/g, '')).filter(Boolean);
-ok('SECTION_IDS has 6 entries', sectionIds.length === 6, sectionIds);
+ok('SECTION_IDS has 7 entries', sectionIds.length === 7, sectionIds);
 
 const paneIds = [...html.matchAll(/<div id="(sec-[a-z]+)" class="section-content/g)].map(m => m[1]);
 ok('every SECTION_ID has a pane', sectionIds.every(s => paneIds.includes(s)), { sectionIds, paneIds });
 ok('every SECTION_ID has a tab', sectionIds.every(s => tabIds.includes(s)), { sectionIds, tabIds });
 ok('the intake pane exists', paneIds.includes('sec-intake'), paneIds);
-ok('panes are exactly the 6 sections + the intake view',
-  paneIds.length === 7 && paneIds.filter(p => p !== 'sec-intake').length === 6, paneIds);
+ok('panes are exactly the 7 sections + the intake view',
+  paneIds.length === 8 && paneIds.filter(p => p !== 'sec-intake').length === 7, paneIds);
 
 // ── The Overview panel ────────────────────────────────────────────────────────
 // Three structural rules, each of which breaks the app in a way that is invisible

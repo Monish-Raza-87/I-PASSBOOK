@@ -322,15 +322,16 @@ const screenTicket = () => `
         </div>
         <div class="tabs-container">
           <span class="tab">Report</span>
-          <span class="tab active">B: Inward</span>
-          <span class="tab">C: IQC</span>
-          <span class="tab">D: Investigation</span>
+          <span class="tab active">A: Inward</span>
+          <span class="tab">B: Visual Inspection</span>
+          <span class="tab">C: Investigation</span>
+          <span class="tab">D: Costing</span>
           <span class="tab">E: Production</span>
-          <span class="tab">F: Quality Test</span>
+          <span class="tab">F: Quality Tests</span>
           <span class="tab">G: PDI/Dispatch</span>
         </div>
         <div class="section-content">
-          <h2 class="section-title">Section B — Inward Checklist (Inventory)</h2>
+          <h2 class="section-title">Section A — Inward Checklist (Inventory)</h2>
           <div class="form-group">
             <label class="form-label">Inward Date</label>
             <input class="form-input" type="text" value="09-Sep-2026" readonly />
@@ -343,7 +344,7 @@ const screenTicket = () => `
             <label class="form-label">Remarks</label>
             <textarea class="form-input" rows="3" readonly>Battery pack swollen on cell 3. Received with charger and case. No visible impact damage to the airframe.</textarea>
           </div>
-          <button type="button" class="btn">Save Section B</button>
+          <button type="button" class="btn">Save Section A</button>
           <div class="sec-export-row">
             <button type="button" class="btn btn-secondary">Download</button>
             <button type="button" class="btn btn-secondary">Download and share</button>
@@ -1465,7 +1466,7 @@ const chooserPage = () => `<!doctype html>
       And the third, which is a workflow question wearing a layout costume. You asked for a kanban;
       what a kanban actually settles is <i>how a card moves between columns</i>, and the app has
       already answered two thirds of that in its own source comments. The board shows both sets of
-      columns it could use &mdash; the four the app counts today, and the six sections the ticket's
+      columns it could use &mdash; the four the app counts today, and the sections the ticket's
       tab strip is already named after &mdash; and then one event, drawn three ways, with what each
       rule does to the ageing clock.
     </p>
@@ -1500,22 +1501,30 @@ const chooserPage = () => `<!doctype html>
 // the --check staleness gate without a line of new machinery; what it adds is D's
 // own skin, so the pieces arrive in the language that was approved.
 
-// The six steps, mirroring SECTION_IDS / SECTION_LABELS / SECTION_SHORT in
+// The seven steps, mirroring SECTION_IDS / SECTION_LABELS / SECTION_SHORT in
 // app.js. Written out rather than imported, because this file reads CSS and HTML
 // as text and never evaluates app.js.
+//
+// ⚠ Each row carries its ID and its letter as two separate facts, because since
+// 2026-10-13 one cannot be derived from the other: the ids are permission keys and
+// never moved when the displayed letters did, so `sec-cost` is shown as D and the
+// old `'sec-' + letter.toLowerCase()` would name a different section — the same
+// derivation the app itself had to delete.
 const BOARD_STEPS = [
-  ['B', 'Inward', 'Inward Checklist'],
-  ['C', 'IQC', 'IQC Visual Inspection'],
-  ['D', 'Investigation', 'Investigation'],
-  ['E', 'Production', 'Production (Rework)'],
-  ['F', 'Quality Test', 'Quality Test Report'],
-  ['G', 'PDI/Dispatch', 'PDI Report/Dispatch Record'],
+  ['sec-b',    'A', 'Inward',        'Inward Checklist'],
+  ['sec-c',    'B', 'IQC',           'IQC Visual Inspection'],
+  ['sec-d',    'C', 'Investigation', 'Investigation'],
+  ['sec-cost', 'D', 'Costing',       'Costing'],
+  ['sec-e',    'E', 'Production',    'Production (Rework)'],
+  ['sec-f',    'F', 'Quality Test',  'Quality Test Report'],
+  ['sec-g',    'G', 'PDI/Dispatch',  'PDI Report/Dispatch Record'],
 ];
-// A deliberately UNEVEN passbook: B, C, D and F are saved, E never was. That hole
-// is the entire reason the strip below cannot use Tabler's own shortcut — a tidy
+// A deliberately UNEVEN passbook: A, B, C and F are saved, F's neighbour E never
+// was — and D, the costing split out of Investigation, is open too. That hole is
+// the entire reason the strip below cannot use Tabler's own shortcut — a tidy
 // four-in-a-row would hide the problem the page exists to show.
 const BOARD_DONE = ['sec-b', 'sec-c', 'sec-d', 'sec-f'];
-const stepDone = i => BOARD_DONE.includes('sec-' + BOARD_STEPS[i][0].toLowerCase());
+const stepDone = i => BOARD_DONE.includes(BOARD_STEPS[i][0]);
 // "this step is done AND so is the next one" — which is what makes the line
 // between them solid. Computed here rather than in CSS because the connector
 // belongs to the item on its LEFT and a selector cannot look backwards.
@@ -1530,7 +1539,7 @@ const stepLinked = i => stepDone(i) && i + 1 < BOARD_STEPS.length && stepDone(i 
 // make — see the note on the skin below.
 const stepsStrip = () => `
         <ul class="steps">
-          ${BOARD_STEPS.map(([letter, short, full], i) => `
+          ${BOARD_STEPS.map(([, letter, short, full], i) => `
           <li class="step-item${stepDone(i) ? ' is-done' : ''}${stepLinked(i) ? ' is-linked' : ''}">
             <span class="step-n">${letter}</span>
             <span class="step-short">${short}</span>
@@ -1543,7 +1552,7 @@ const stepsStrip = () => `
 // so both are on the board and you pick.
 const compactSteps = () => `
         <ul class="progress-steps">
-          ${BOARD_STEPS.map(([letter], i) => `
+          ${BOARD_STEPS.map(([, letter], i) => `
           <li class="progress-steps-item${stepDone(i) ? ' is-done' : ''}"><span class="pv-sr">Section ${letter}${stepDone(i) ? ' saved' : ' not saved yet'}</span></li>`).join('')}
         </ul>`;
 
@@ -1552,7 +1561,7 @@ const compactSteps = () => `
 // single row, which a smooth bar cannot.
 const stackedBar = () => `
         <div class="progress-stacked">
-          ${BOARD_STEPS.map(([letter], i) => `
+          ${BOARD_STEPS.map(([, letter], i) => `
           <div class="progress"><div class="progress-bar${stepDone(i) ? ' is-done' : ''}"><span class="pv-sr">Section ${letter}</span></div></div>`).join('')}
         </div>`;
 
@@ -1561,9 +1570,9 @@ const stackedBar = () => `
 // matches views.css, so this copy cannot drift into a comparison against
 // something the app does not actually do.
 const currentChip = () => `
-        <span class="ir-progress p4" title="4 of 6 sections saved">
+        <span class="ir-progress p4" title="4 of 7 sections saved">
           <span class="ir-progress-bar"></span>
-          <span class="ir-progress-text">4/6</span>
+          <span class="ir-progress-text">4/7</span>
         </span>`;
 
 // A tab strip, twice: once plain, once with each tab carrying its own saved
@@ -1572,7 +1581,7 @@ const currentChip = () => `
 const tabRow = withState => `
         <div class="tabs-container">
           <span class="tab${withState ? ' is-saved' : ''}">Report</span>
-          ${BOARD_STEPS.map(([letter, short], i) =>
+          ${BOARD_STEPS.map(([, letter, short], i) =>
             `<span class="tab${i === 0 ? ' active' : ''}${withState && stepDone(i) ? ' is-saved' : ''}">${letter}&#8202;&#183;&#8202;${short}</span>`).join('')}
         </div>`;
 
@@ -1773,7 +1782,7 @@ ${boardBlock('steps', 'Component 1 of 4', 'Steps and progress',
   demo('Tabler steps', 'dots and a line, with three states rather than two', stepsStrip(), 'pv-demo-pad')
 + demo('Compact steps', 'Tabler progress-steps: pill bars, no labels', compactSteps(), 'pv-demo-pad')
 + demo('Stacked bar', 'progress-stacked: one bar split into six segments', stackedBar(), 'pv-demo-pad')
-+ demo('What the app has today', 'the 4/6 chip, copied from views.css', currentChip(), 'pv-demo-pad')
++ demo('What the app has today', 'the 4/7 chip, copied from views.css', currentChip(), 'pv-demo-pad')
 + demo('Ticket, variant A', 'steps above, tabs kept — literally what you asked for', stepsStrip() + tabRow(false), 'pv-demo-ticket')
 + demo('Ticket, variant B', 'the tabs carry the state — one strip, not two', compactSteps() + tabRow(true), 'pv-demo-ticket')
 + CAVEAT_STEPS)}
@@ -1818,7 +1827,7 @@ ${boardBlock('feedback', 'Component 4 of 4', 'Spinner and toast',
             </div>
             <div class="toast-col">
               <span class="toast-tag">Proposed</span>
-              ${toastNew('', 'Saved', 'Section D saved. Analysis date stamped.')}
+              ${toastNew('', 'Saved', 'Section C saved. Analysis date stamped.')}
               ${toastNew('danger', 'Could not save', 'Backend unreachable — kept on this device.')}
               ${toastNew('success', 'Comment posted', 'Kishor was emailed automatically.')}
             </div>
@@ -1895,7 +1904,7 @@ const PARTS_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
    cannot drift into a comparison against something the app no longer draws. */
 .pv-app .ir-progress { display: inline-flex; align-items: center; gap: 5px; }
 .pv-app .ir-progress-bar { display: block; width: 30px; height: 4px; overflow: hidden; border-radius: var(--radius-9); background: var(--surface-gray-3); }
-.pv-app .ir-progress-bar::after { display: block; width: 66.666%; height: 100%; content: ""; border-radius: inherit; background: var(--ink-gray-6); }
+.pv-app .ir-progress-bar::after { display: block; width: 57.143%; height: 100%; content: ""; border-radius: inherit; background: var(--ink-gray-6); }
 .pv-app .ir-progress-text { color: var(--ink-gray-5); font-size: var(--text-2xs); line-height: 1; font-variant-numeric: tabular-nums; }
 
 /* ── the tabs, once with the state carried on them ──
@@ -2454,14 +2463,14 @@ const KB_COLUMNS = [
   { key: 'hold', title: 'Paused', stages: ['On Hold'], n: 6, cards: [
     { no: 'IR-402', sn: 'D10G-0221', cat: 'CRASH', age: '41d', who: '', done: 1, late: true },
   ] },
-  { key: 'B', letter: 'B', title: 'Inward Checklist', stages: ['Inward'], n: 4, cards: [
+  { key: 'A', letter: 'A', title: 'Inward Checklist', stages: ['Inward'], n: 4, cards: [
     { no: 'IR-415', sn: 'VTR-0011',  cat: 'GENERAL MAINTENANCE', age: '4d',  who: '',         done: 0 },
     { no: 'IR-412', sn: 'D25G-0114', cat: 'CRASH',               age: '19d', who: 'A. Sharma', done: 1, late: true },
   ] },
-  { key: 'C', letter: 'C', title: 'IQC Visual Inspection', stages: ['Inspection'], n: 3, cards: [
+  { key: 'B', letter: 'B', title: 'Visual Inspection (IQC)', stages: ['Inspection'], n: 3, cards: [
     { no: 'IR-411', sn: 'H25P-0029', cat: 'REPAIR', age: '8d', who: 'P. Nair', done: 1 },
   ] },
-  { key: 'D', letter: 'D', title: 'Investigation', stages: ['Investigation'], n: 7, cards: [
+  { key: 'C', letter: 'C', title: 'Investigation', stages: ['Investigation'], n: 7, cards: [
     { no: 'IR-409', sn: 'H25P-0032', cat: 'REPAIR', age: '23d', who: 'R. Kumar',  done: 2, late: true },
     { no: 'IR-408', sn: 'S25P-0044', cat: 'CRASH',  age: '25d', who: 'A. Sharma', done: 2, late: true },
   ] },
@@ -2505,7 +2514,7 @@ const kbCard = (c) => {
                   <div class="ir-meta"><span class="ir-sn">${esc(c.sn)}</span><span class="ir-dot">·</span><span class="ir-cat">${esc(c.cat)}</span></div>
                   <div class="pv-kb-card-foot">
                     <span class="ir-assignee${c.who ? '' : ' pv-kb-unassigned'}">${c.who ? esc(c.who) : 'Unassigned'}</span>
-                    <span class="ir-progress p${c.done}${c.done >= 6 ? ' is-complete' : ''}" title="${c.done} of 6 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">${c.done}/6</span></span>
+                    <span class="ir-progress p${c.done}${c.done >= 7 ? ' is-complete' : ''}" title="${c.done} of 7 sections saved"><span class="ir-progress-bar"></span><span class="ir-progress-text">${c.done}/7</span></span>
                   </div>
                 </div>`;
 };
@@ -2560,9 +2569,10 @@ const CAVEAT_BOARD = `
 const CAVEAT_MOVES = `
       <div class="pv-caveat">
         <b>The app has already answered two of these three, in its own source.</b>
-        From the comment on <b>ownedStatus()</b>: <i>"saving Section B is not triage, so an IR whose
-        Section B was saved must go on following the Sheet's Col D until somebody changes the status
-        here."</i> And from <b>syncIRStateAfterSectionSave()</b>: <i>"Status is no longer mirrored
+        From the comment on <b>ownedStatus()</b>: <i>"saving Section B is a real edit but not
+        triage, and it must not be mistaken for one"</i> &mdash; Section B being the inward
+        checklist, whose id never moved even when the letter did. And from
+        <b>syncIRStateAfterSectionSave()</b>: <i>"Status is no longer mirrored
         from a section form… A section save that happens to post a status key must not be able to
         move the workflow clock."</i> Both sentences exist because someone already tried rule 2 and
         took it out. The reason is the clock: <b>statusAt</b>, which is what "In status 3d" and the
@@ -2589,26 +2599,26 @@ ${CAVEAT_BOARD}
   <section class="pv-block" id="moves">
     <span class="pv-kicker">The one decision the board needs from you</span>
     <h2 class="pv-block-title">When a section is saved, does the card move?</h2>
-    <p class="pv-block-note">One event, drawn three ways: <b>Ravi saves Section D on IR-409</b>,
-    which is sitting in the Investigation column with 2 of 6 sections saved.</p>
+    <p class="pv-block-note">One event, drawn three ways: <b>Ravi saves Section C on IR-409</b>,
+    which is sitting in the Investigation column with 2 of 7 sections saved.</p>
 
     <div class="pv-demo">
       <div class="pv-demo-cap"><b>Rule 1 — a person moves it, in Allot CAPS</b><span>what the app does today</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 1: the card does not move', [
-        kbCol(kbOf('C')),
-        kbCol(kbOf('D'), { cls: 'pv-kb-col-here' }),
+        kbCol(kbOf('B')),
+        kbCol(kbOf('C'), { cls: 'pv-kb-col-here' }),
         kbCol(kbOf('E')),
       ])}</div>
     </div>
     <p class="pv-block-note"><b>Nothing moves.</b> Saving a section is not a stage change, so IR-409
-    stays in D until somebody opens Allot CAPS. The cost is that the board is only as current as the
+    stays in C until somebody opens Allot CAPS. The cost is that the board is only as current as the
     last person to triage — and this is the rule the app's own comments argue for.</p>
 
     <div class="pv-demo">
       <div class="pv-demo-cap"><b>Rule 2 — it moves itself on save</b><span>the rule the app tried and removed</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 2: the card advances on save', [
-        kbCol(kbOf('D'), { cards: [kbOf('D').cards[1]], n: 6 }),
-        kbCol(kbOf('E'), { cards: [kbOf('D').cards[0], kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
+        kbCol(kbOf('C'), { cards: [kbOf('C').cards[1]], n: 6 }),
+        kbCol(kbOf('E'), { cards: [kbOf('C').cards[0], kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
         kbCol(kbOf('F')),
       ])}</div>
     </div>
@@ -2622,9 +2632,9 @@ ${CAVEAT_BOARD}
     <div class="pv-demo">
       <div class="pv-demo-cap"><b>Rule 3 — it advances, and anyone can push it back</b><span>the one worth talking about</span></div>
       <div class="pv-demo-pad">${kbBoard('Rule 3: advance on save, drag to correct', [
-        kbCol(kbOf('C')),
-        kbCol(kbOf('D'), { cards: [kbOf('D').cards[1], { ghost: 'IR-409 can be dragged back here' }], n: 6 }),
-        kbCol(kbOf('E'), { cards: [Object.assign({}, kbOf('D').cards[0], { just: true }), kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
+        kbCol(kbOf('B')),
+        kbCol(kbOf('C'), { cards: [kbOf('C').cards[1], { ghost: 'IR-409 can be dragged back here' }], n: 6 }),
+        kbCol(kbOf('E'), { cards: [Object.assign({}, kbOf('C').cards[0], { just: true }), kbOf('E').cards[0]], n: 6, cls: 'pv-kb-col-here' }),
       ])}</div>
     </div>
     <p class="pv-block-note"><b>It advances, and the person who knows better drags it back.</b>
@@ -2671,7 +2681,7 @@ ${CAVEAT_MOVES}
         category, the raised date, and <b>ir.done[]</b>. Adopting a board is a rendering pass, not a
         data change.</p></div>
       <div class="pv-lic-row"><b>A ten-line map is the only new code</b><span class="yes">Small</span>
-        <p>The app folds its ten workflow stages into four buckets today. Pointing them at your six
+        <p>The app folds its ten workflow stages into four buckets today. Pointing them at your
         sections instead is a pure function with no backend, no new field and no write — and which
         status goes in which column is written out under each column heading above, where you can
         check it against the ticket.</p></div>
@@ -2685,6 +2695,13 @@ ${CAVEAT_MOVES}
       <div class="pv-lic-row"><b>No subtasks, no swimlanes, no WIP limits</b><span class="no">Not shown</span>
         <p>Real kanban tools put cards inside cards and cap how many may sit in a column. Neither maps
         onto anything the app stores, so neither is drawn. If you want one, say which.</p></div>
+      <div class="pv-lic-row"><b>D is missing from the columns, on purpose</b><span class="warn">By design</span>
+        <p>You asked for Costing to be its own section, and it is — but a column has to own at least
+        one workflow <i>status</i> or no card can ever land in it, and no status means "Costing". A D
+        column would therefore sit permanently empty and read as a broken board. Costing gates the
+        move out of Investigation instead: the offer to move a card on to E simply does not appear
+        until Section D is closed, and it says why. Nothing is hidden by this — the ticket stays
+        visible in C while the costing is being done.</p></div>
       <div class="pv-lic-row"><b>On your phone it is one column at a time</b><span class="warn">Sideways</span>
         <p>A board is wide by nature. On the phone it scrolls sideways inside its own frame — the page
         itself never scrolls — so you see one column and the edge of the next. That is the honest cost
@@ -2743,7 +2760,7 @@ const BOARD_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
    ELEMENT. So .pv-app .ir-meta reached nothing, and the board drew app
    vocabulary with rules that applied to none of it. It showed, and only by
    looking: the meta line ran together as "H25P-0032·REPAIR" because .ir-meta's
-   flex gap was missing, the 2/6 chip's bar had no width or height because
+   flex gap was missing, the 2/7 chip's bar had no width or height because
    .ir-progress-bar's were missing, and the IR number was not bold because
    .ir-title's weight was missing. Every card on the page and every assertion in
    this repo stayed green, because "the rule exists" and "the rule applies" are
@@ -2830,27 +2847,30 @@ const BOARD_SKIN = OPTIONS.find(o => o.key === 'd').skin + `
 .pv-kb-viewseg-n { color: var(--ink-gray-6); font-variant-numeric: tabular-nums; }
 .pv-kb-viewseg.is-on .pv-kb-viewseg-n { color: var(--accent); }
 
-/* The progress chip's base and its six fills, copied declaration for declaration
-   from views.css:1772-1791. The parts board carries only .p4 because it only ever
-   draws 4/6; a board draws every count there is, so it has to carry all six — or
-   five of them would render as an empty track with a number beside it.
+/* The progress chip's base and all seven fills, copied declaration for declaration
+   from views.css. The parts board carries only .p4 because it only ever draws 4/7;
+   a board draws every count there is, so it has to carry all seven — or six of them
+   would render as an empty track with a number beside it.
+   (Seven, not six, since 2026-10-13: Costing became the section that made the
+   count 7, and a p7 with no rule is a 7/7 card drawn as an empty track.)
 
    The width:0 base is not decoration and it is the one rule here that was found
-   by MEASURING rather than by reading. views.css sets it (:1776) and D's skin
-   REPLACES it with 66.666%, because the parts board only ever draws a 4/6 chip —
+   by MEASURING rather than by reading. views.css sets it and D's skin
+   REPLACES it with 57.143%, because the parts board only ever draws a 4/7 chip —
    but D's rule is scoped to .pv-app and a board card is not inside the app shell,
-   so nothing set a width for a card at all. A 0/6 chip then computed to
+   so nothing set a width for a card at all. A 0/7 chip then computed to
    width:auto, which inside a 30px overflow-hidden track is a FULL bar: the board
-   would have drawn "0/6" beside a bar that looked complete. Nothing errors, the
+   would have drawn "0/7" beside a bar that looked complete. Nothing errors, the
    CSS is valid, and every test passed. It showed up as a single "auto" in a list
    of computed ::after widths in a headless browser, and nowhere else. */
 .pv-kb-card .ir-progress-bar::after { width: 0; }
-.pv-kb-card .ir-progress.p1 .ir-progress-bar::after { width: 16.666%; }
-.pv-kb-card .ir-progress.p2 .ir-progress-bar::after { width: 33.333%; }
-.pv-kb-card .ir-progress.p3 .ir-progress-bar::after { width: 50%; }
-.pv-kb-card .ir-progress.p4 .ir-progress-bar::after { width: 66.666%; }
-.pv-kb-card .ir-progress.p5 .ir-progress-bar::after { width: 83.333%; }
-.pv-kb-card .ir-progress.p6 .ir-progress-bar::after { width: 100%; }
+.pv-kb-card .ir-progress.p1 .ir-progress-bar::after { width: 14.286%; }
+.pv-kb-card .ir-progress.p2 .ir-progress-bar::after { width: 28.571%; }
+.pv-kb-card .ir-progress.p3 .ir-progress-bar::after { width: 42.857%; }
+.pv-kb-card .ir-progress.p4 .ir-progress-bar::after { width: 57.143%; }
+.pv-kb-card .ir-progress.p5 .ir-progress-bar::after { width: 71.429%; }
+.pv-kb-card .ir-progress.p6 .ir-progress-bar::after { width: 85.714%; }
+.pv-kb-card .ir-progress.p7 .ir-progress-bar::after { width: 100%; }
 
 @media (max-width: 639px) {
   /* Narrower columns so the next one is genuinely visible rather than a sliver —

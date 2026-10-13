@@ -171,7 +171,7 @@ noticed — that parked-human step was the actual onboarding bug.
 
 | Level | Who has it | Comes from |
 |---|---|---|
-| **View + comment** | every signed-in account, on all six sections **and the Overview** | the default in `getEffectiveAccess` — *nothing* records it |
+| **View + comment** | every signed-in account, on all seven sections **and the Overview** | the default in `getEffectiveAccess` — *nothing* records it |
 | **Edit** | a section, for the people whose departments grant it | `access.json` → `departments` + `memberships` |
 
 Comment travels with view — there is no separate comment level to grant. The
@@ -533,12 +533,14 @@ user could loop it and take out password recovery for the whole company.
   write. Per-row actions: reset password, enable/disable. A customer's row carries a
   green `customer · <Company>` badge, holds **no ticks**, and says in a full-width row
   that department access does not apply to them and where to manage them instead.
-- **Departments** — the department → section grant grid (six checkboxes, **B–G**)
-  plus a **Triage** checkbox rendered after them and labelled `TR`, so it reads as a
+- **Departments** — the department → section grant grid (seven checkboxes, **A–G**,
+  with the labels taken from `sectionLetter()`) plus a **Triage** checkbox rendered after them and labelled `TR`, so it reads as a
   different kind of thing, plus a member count. *"Need one person to edit one
   section? Create a department with just that person in it."* The collector reads
   `.acc-grant[data-key]` generically, so the Triage box is saved with no change to
-  the collector — it only needed the extra label.
+  the collector — it only needed the extra label. ⚠️ The new **Costing** box starts
+  **unticked for every department** and is ticked by hand: the seed (`SEED_GRANTS`) only
+  applies to a fresh `seedDepartments` run, which would strip hand-ticked boxes.
 - **Create people** — single add, a bulk textarea (one email per line, split on
   `[\s,;]+`, deduped, **skip-and-report** so one typo cannot abort a 19-person
   run), and the one-time credentials panel.

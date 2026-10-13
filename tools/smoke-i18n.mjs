@@ -146,7 +146,8 @@ ok('every {slot} a string declares is supplied by a data-i18n-var-* or a call si
   [...declared].every(s => supplied.has(s) || codeSlots.has(s)),
   { declared: [...declared], supplied: [...supplied], codeSlots: [...codeSlots] });
 ok('the close buttons supply their letter, so no button shows a bare {letter}',
-  (html.match(/data-i18n="section\.close" data-i18n-var-letter="[A-G]"/g) || []).length === 6);
+  (html.match(/data-i18n="section\.close" data-i18n-var-letter="[A-G]"/g) || []).length === 7,
+  (html.match(/data-i18n="section\.close" data-i18n-var-letter="[A-G]"/g) || []));
 
 // ── The workflow statuses, mapped one for one ────────────────────────────────
 head('every workflow status has a word, and no word has no status');
@@ -340,8 +341,12 @@ ok('the board\'s own empty sentence is its own — the list\'s says "create one 
 ok('the autosave indicator asks the table for all four of its states',
   ['common.saved', 'common.saving', 'common.notSaved', 'common.retrying']
     .every(k => appJs.includes(`t('${k}')`)));
+// The letter comes from sectionLetter(), NOT from the id: the ids are permission
+// keys and never moved when the displayed letters did, so `sec-cost` would otherwise
+// have rendered "Section COST completed" on its own Close button.
 ok('the close button label is built from the table, not concatenated',
-  /t\('section\.close', \{ letter: sectionId\.replace\('sec-', ''\)\.toUpperCase\(\) \}\)/.test(appJs));
+  /t\('section\.close', \{ letter: sectionLetter\(sectionId\) \}\)/.test(appJs),
+  (appJs.match(/[^\n]*section\.close[^\n]*/) || [''])[0]);
 ok('...and no section button is left with a hand-written label',
   !/`Mark Section \$\{/.test(appJs));
 
@@ -421,10 +426,16 @@ ok('the name, its expansion, and the two identifiers the user types are not tran
 ok('the two legal labels are names too — the Hindi table carries them untranslated',
   hi['landing.termsTos'] === 'Terms & Conditions' &&
   hi['landing.termsPrivacy'] === 'Privacy Policy');
-ok('...and the section letter stays Latin, because the tab above the button says "B"',
+// The Hindi key names keep the OLD letters (section.b is Section A) because they key
+// the table, not the tab — the ids never moved when the displayed letters did. So the
+// pairs are written out here rather than generated from a letter range: generating
+// them is exactly the derivation the app itself had to stop doing.
+ok('...and the section letter stays Latin, because the tab above the button says it',
   hi['section.close'].includes('{letter}') &&
-  ['B', 'C', 'D', 'E', 'F', 'G'].every(L => String(hi['section.' + L.toLowerCase()]).includes(L)),
-  ['B', 'C', 'D', 'E', 'F', 'G'].filter(L => !String(hi['section.' + L.toLowerCase()]).includes(L)));
+  [['b', 'A'], ['c', 'B'], ['d', 'C'], ['cost', 'D'], ['e', 'E'], ['f', 'F'], ['g', 'G']]
+    .every(([key, L]) => String(hi['section.' + key]).includes(L)),
+  [['b', 'A'], ['c', 'B'], ['d', 'C'], ['cost', 'D'], ['e', 'E'], ['f', 'F'], ['g', 'G']]
+    .filter(([key, L]) => !String(hi['section.' + key]).includes(L)));
 // The desk's address, in the two sentences that carry it. It reaches a reader ONLY
 // through this table (app.js is asserted free of it), so a translation that dropped it
 // would leave a person with an instruction and no address.

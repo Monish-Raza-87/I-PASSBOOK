@@ -552,18 +552,22 @@ ok('no undefined or NaN leaked into the report', !/undefined|NaN/.test(intake), 
 ok('the intake pane has no editable control',
   !/<(input|textarea|select)\b/.test(intake), (intake.match(/<(input|textarea|select)\b/g) || []).slice(0, 4));
 
-head('the six sections, and the Overview above them');
+head('the seven sections, and the Overview above them');
 const tabStrip = (dom.match(/id="section-tabs">([\s\S]*?)<div id="sections-wrapper"/) || [])[1] || '';
-const SIX = ['sec-b','sec-c','sec-d','sec-e','sec-f','sec-g'];
-ok('seven tabs in the strip (six sections + Report)',
+// Seven since Costing was split out of Investigation on 2026-10-13. `sec-cost`
+// carries a hyphen, which is why every list of ids here is written out rather than
+// generated from a letter range.
+const SIX = ['sec-b','sec-c','sec-d','sec-cost','sec-e','sec-f','sec-g'];
+ok('eight tabs in the strip (seven sections + Report)',
   // `class="tab( |")` and not `class="tab` — the loose form also counts a tab's
   // own inner glyph span (`class="tab-icon"`), which is not a tab.
-  (tabStrip.match(/class="tab(?=[ "])/g) || []).length === 7,
+  (tabStrip.match(/class="tab(?=[ "])/g) || []).length === 8,
   (tabStrip.match(/class="tab(?=[ "])/g) || []).length);
 ok('every section tab is present',
   SIX.every(s => tabStrip.includes(`data-section="${s}"`)));
-ok('Section B is the default tab', /class="tab active" data-section="sec-b"/.test(tabStrip));
-ok('the six section panes are intact',
+ok('Section A is the default tab',
+  /class="tab active" data-section="sec-b"/.test(tabStrip));
+ok('the seven section panes are intact',
   SIX.every(s => dom.includes(`id="${s}" class="section-content`)));
 // The three retired ids must leave no trace at all — not a tab, not a pane. A
 // leftover `sec-g` pane next to the merged `sec-f` pane is the exact shape of a

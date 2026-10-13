@@ -150,32 +150,40 @@ If the Overview is in your way, hide it. The app remembers that you prefer it hi
 
 ## Beat 6 — The seven sections (6 min)
 
-**Show:** click through the tabs in order: **B: Inward**, **C: IQC**,
-**D: Investigation**, **E: Production**, **F: Quality Test**, **G: PDI/Dispatch**.
+**Show:** click through the tabs in order: **A: Inward**, **B: Visual Inspection**,
+**C: Investigation**, **D: Costing**, **E: Production**, **F: Quality Tests**,
+**G: PDI/Dispatch**.
 Do not fill anything in — just show each one and name it.
 
 **Say:**
 "The work itself happens in these tabs, and they follow the unit through the
 building in order.
 
-**B: Inward** — the unit arrives. Inward date, who received it, the stock transfer
+**A: Inward** — the unit arrives. Inward date, who received it, the stock transfer
 number, what was actually in the box, and photos of it as received.
 *Photograph the unit before you touch it.* That photo is the only record of how it
 arrived.
 
-**C: IQC** — visual inspection. The checklist is split into zones, and each line gets
-a **PASS**, **FAIL** or **NA**. Do not leave a line blank because it looked fine —
-mark it PASS. Blank looks the same as forgotten.
+**B: Visual Inspection** — the IQC check. The checklist is split into zones, and each
+line gets a **PASS**, **FAIL** or **NA**. Do not leave a line blank because it looked
+fine — mark it PASS. Blank looks the same as forgotten.
 
-**D: Investigation** — this is where the technical answer goes. Who analysed it, when,
+**C: Investigation** — this is where the technical answer goes. Who analysed it, when,
 what the root cause was, and what we are doing about it — the corrective action, and
-the preventive action so it does not happen again. There is also a cost side: whether
-it is covered under warranty, the parts and labour as a table you can add rows to,
-and whether the customer has given the go-ahead. The total adds itself up.
+the preventive action so it does not happen again. It ends by answering one question:
+is this repair covered under warranty? That answer decides whether the next tab has
+anything in it at all.
+
+**D: Costing** — the money, and it is a tab of its own because a different person signs
+it off. The parts and labour go in as a table you can add rows to, the total adds itself
+up, you put the estimated lead time, and you record whether the customer has given the
+go-ahead. **If the repair is covered under warranty, this tab is legitimately empty** —
+and if you close it empty the app will ask you to confirm that nothing is being charged,
+so it can never be skipped by accident.
 
 **E: Production** — the route card and what was actually reworked.
 
-**F: Quality Test** — the QC report, then the flight test: the report itself and two
+**F: Quality Tests** — the QC report, then the flight test: the report itself and two
 ticks to confirm the flight logs and the post-processing data were checked.
 
 **G: PDI/Dispatch** — the last gate. The PDI result is either **Pass – Ready to
@@ -187,14 +195,17 @@ number, and the date the client received it."
 ## Beat 7 — Saving, drafts, and photos (2 min)
 
 **Show:** type into a field, then click **+ Add image / PDF** and **📷 Capture photo**.
-Do not save — point at the section's Save button.
+Then point at the **Mark Section X completed** button at the foot of the tab.
 
 **Say:**
 "Two things about how saving works.
 
-First, every section has its own Save button. You save the section you worked on, not
-the whole ticket. While you are typing, a draft is kept automatically, so a dropped
-connection or a closed tab does not lose your paragraph.
+First, **there is no Save button any more.** What you type is saved by itself a moment
+after you stop typing, so a dropped connection or a closed tab does not lose your
+paragraph. The button at the bottom is not Save — it is **Mark Section X completed**.
+Press it when the section is genuinely finished. That is what moves the completion count
+on the ticket, and that is what tells the Board this stage is done. So do not press it
+just because you looked at the tab.
 
 Second — evidence. Every section that needs it takes photos and PDFs. **📷 Capture
 photo** opens your camera directly, which is the fast way to do it from the shop
@@ -332,9 +343,10 @@ it changes nothing about the data."
 **One. Everyone signed in can read every section and comment on anything.** There are
 no secret tickets.
 
-**Two. Editing is granted by department.** If you are in QC, you can edit sections B,
-C, D and F. If you are not, those sections are read-only to you — the fields are
-greyed out and the Save button is turned off. That is not the app being broken.
+**Two. Editing is granted by department.** If you are in QC, you can edit the visual
+inspection, the investigation and the quality tests. If you are not, those sections are
+read-only to you — the fields are
+greyed out and the buttons are turned off. That is not the app being broken.
 
 **Three. Triage is separate.** Status, assignee, priority and category, plus the two
 Overview boxes, are governed by Triage, not by which sections you can edit.

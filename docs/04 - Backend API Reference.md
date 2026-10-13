@@ -15,7 +15,7 @@ There is **no per-user permission list**. The whole model is two sentences:
   **Overview** (`sec-a`), which is not one of the sections and so needed naming
   explicitly in `getPassbook`'s filter — see below.
 - **Edit comes from departments.** A user holds zero or more departments; a
-  department grants edit on a subset of the **six** sections (**B–G**). The mapping
+  department grants edit on a subset of the **seven** sections (**A–G**). The mapping
   is many-to-many in both directions — one person may hold several departments, one
   department holds many people.
 - **Triage is a separate axis.** Editing the Overview (ticket owner, status) is

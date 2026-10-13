@@ -484,8 +484,12 @@ r.ok('the Summary APPENDS to the investigation text, never replaces it',
   /ta\.value = existing \? existing \+ '\\n\\n' \+ block : block;/.test(appSrc));
 r.ok('...and the Analysis Date is only stamped when it is empty',
   /if \(dateEl && !dateEl\.value\) dateEl\.value = stamp;/.test(appSrc));
-r.ok('the push is gated on edit rights for Section D, not just on being signed in',
-  /if \(!canEditSection\('sec-d'\)\) \{ showToast\('You do not have edit rights on Section D\.'\); return; \}/.test(appSrc));
+// The gating is on the ID (`sec-d` is the permission key) while the sentence names
+// the LETTER the tabs show — investigation is Section C since 2026-10-13, and a
+// message that named the wrong section would send the reader to the wrong tab.
+r.ok('the push is gated on edit rights for the investigation section, not just on being signed in',
+  /if \(!canEditSection\('sec-d'\)\) \{ showToast\('You do not have edit rights on Section C\.'\); return; \}/.test(appSrc),
+  (appSrc.match(/canEditSection\('sec-d'\)/) || [''])[0]);
 
 // ── 12. The analyser invents no styling ──────────────────────────────────────
 r.head('the analyser borrows the app\'s styling rather than starting a fifth one');

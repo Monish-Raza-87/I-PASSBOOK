@@ -1096,7 +1096,8 @@
           <div id="draft-banner" class="draft-banner" style="display:none"></div>
 
           <!-- ====== IR OVERVIEW (pinned, above the tabs) ======
-               Section A's content, in the form it should always have had: the
+               The Overview — the old Section A's content, in the form it
+               should always have had: the
                client's intake facts read-only, the two fields CRM owns, and the
                legacy hand-typed log read-only. It is NOT a section and NOT a tab.
 
@@ -1142,11 +1143,12 @@
                fallback (it is never hidden, so it would always win). -->
           <div class="tabs-container" id="section-tabs">
             <div class="tab tab-intake" data-section="sec-intake" data-intake="1"><span class="tab-icon" aria-hidden="true"></span>Report</div>
-            <div class="tab active" data-section="sec-b">B: Inward</div>
-            <div class="tab" data-section="sec-c">C: IQC</div>
-            <div class="tab" data-section="sec-d">D: Investigation</div>
+            <div class="tab active" data-section="sec-b">A: Inward</div>
+            <div class="tab" data-section="sec-c">B: Visual Inspection</div>
+            <div class="tab" data-section="sec-d">C: Investigation</div>
+            <div class="tab" data-section="sec-cost">D: Costing</div>
             <div class="tab" data-section="sec-e">E: Production</div>
-            <div class="tab" data-section="sec-f">F: Quality Test</div>
+            <div class="tab" data-section="sec-f">F: Quality Tests</div>
             <div class="tab" data-section="sec-g">G: PDI/Dispatch</div>
           </div>
 
@@ -1160,13 +1162,13 @@
               <div id="sec-intake-body"></div>
             </div>
 
-            <!-- Section B: Inward Checklist -->
+            <!-- Section A: Inward Checklist -->
             <div id="sec-b" class="section-content active">
-              <h2 class="section-title" data-i18n="section.b">Section B — Inward Checklist (Inventory)</h2>
+              <h2 class="section-title" data-i18n="section.b">Section A — Inward Checklist (Inventory)</h2>
               <div id="sec-b-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-b"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-b" data-i18n="section.close" data-i18n-var-letter="B">Mark Section B completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-b" data-i18n="section.close" data-i18n-var-letter="A">Mark Section A completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-b">⬇ Download</button>
@@ -1174,13 +1176,13 @@
               </div>
             </div>
 
-            <!-- Section C: IQC Inspection -->
+            <!-- Section B: Visual Inspection (IQC) -->
             <div id="sec-c" class="section-content">
-              <h2 class="section-title" data-i18n="section.c">Section C — IQC Visual Inspection</h2>
+              <h2 class="section-title" data-i18n="section.c">Section B — Visual Inspection (IQC)</h2>
               <div id="sec-c-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-c"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-c" data-i18n="section.close" data-i18n-var-letter="C">Mark Section C completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-c" data-i18n="section.close" data-i18n-var-letter="B">Mark Section B completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-c">⬇ Download</button>
@@ -1188,17 +1190,31 @@
               </div>
             </div>
 
-            <!-- Section D: Investigation -->
+            <!-- Section C: Investigation -->
             <div id="sec-d" class="section-content">
-              <h2 class="section-title" data-i18n="section.d">Section D — Investigation</h2>
+              <h2 class="section-title" data-i18n="section.d">Section C — Investigation</h2>
               <div id="sec-d-form"></div>
               <div class="sec-close-row">
                 <span class="autosave-note" id="autosave-sec-d"></span>
-                <button type="button" class="btn btn-close-section" id="close-sec-d" data-i18n="section.close" data-i18n-var-letter="D">Mark Section D completed</button>
+                <button type="button" class="btn btn-close-section" id="close-sec-d" data-i18n="section.close" data-i18n-var-letter="C">Mark Section C completed</button>
               </div>
               <div class="sec-export-row">
                 <button type="button" class="btn btn-secondary" id="download-sec-d">⬇ Download</button>
                 <button type="button" class="btn btn-secondary" id="share-sec-d">⬇ Download and share</button>
+              </div>
+            </div>
+
+            <!-- Section D: Costing (split out of Investigation 2026-10-13) -->
+            <div id="sec-cost" class="section-content">
+              <h2 class="section-title" data-i18n="section.cost">Section D — Costing (Repair Estimate &amp; Lead Time)</h2>
+              <div id="sec-cost-form"></div>
+              <div class="sec-close-row">
+                <span class="autosave-note" id="autosave-sec-cost"></span>
+                <button type="button" class="btn btn-close-section" id="close-sec-cost" data-i18n="section.close" data-i18n-var-letter="D">Mark Section D completed</button>
+              </div>
+              <div class="sec-export-row">
+                <button type="button" class="btn btn-secondary" id="download-sec-cost">⬇ Download</button>
+                <button type="button" class="btn btn-secondary" id="share-sec-cost">⬇ Download and share</button>
               </div>
             </div>
 

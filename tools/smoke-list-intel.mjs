@@ -59,8 +59,8 @@ const ir = (over = {}) => ({ irNumber: 'IR500', status: 'Open', ...over });
 // ── Stage 3: the completion count ─────────────────────────────────────────────
 r.head('the completion count');
 
-r.ok('the denominator is the six live sections, pinned to SECTION_IDS',
-  T.sectionProgress([]).total === 6 && T.sectionProgress([]).total === T.SECTION_IDS.length,
+r.ok('the denominator is the seven live sections, pinned to SECTION_IDS',
+  T.sectionProgress([]).total === 7 && T.sectionProgress([]).total === T.SECTION_IDS.length,
   { total: T.sectionProgress([]).total, live: T.SECTION_IDS.length });
 
 r.ok('two saved sections count two',
@@ -89,24 +89,29 @@ r.ok('a store row full of junk cannot render more than 6',
 r.ok('every live id saved is exactly the total',
   T.sectionProgress(T.SECTION_IDS).done === T.SECTION_IDS.length);
 
-const chip = T.progressChip({ done: 3, total: 6 });
+const chip = T.progressChip({ done: 3, total: 7 });
 r.ok('the chip writes the count and the p3 fill class',
-  chip.includes('ir-progress p3') && chip.includes('>3/6<') && chip.includes('3 of 6 sections saved'),
+  chip.includes('ir-progress p3') && chip.includes('>3/7<') && chip.includes('3 of 7 sections saved'),
   chip);
 r.ok('a full passbook is marked complete and says so',
-  T.progressChip({ done: 6, total: 6 }).includes('is-complete') &&
-  T.progressChip({ done: 6, total: 6 }).includes('All 6 sections saved'));
+  T.progressChip({ done: 7, total: 7 }).includes('is-complete') &&
+  T.progressChip({ done: 7, total: 7 }).includes('All 7 sections saved'));
+// ⚠ A count with no matching fill class is a SILENTLY EMPTY bar, so the ladder has
+// to reach the total. Seven counted sections since Costing joined on 2026-10-13.
+r.ok('the fill ladder reaches the denominator — p7 exists, so 7/7 is not a grey track',
+  T.progressChip({ done: 7, total: 7 }).includes('ir-progress p7'),
+  T.progressChip({ done: 7, total: 7 }));
 // The card is asserted elsewhere to carry no attribute the renderer did not
 // write, so the fill must not arrive as an inline style.
 r.ok('the fill is a class, never an inline style',
-  !chip.includes('style=') && !T.progressChip({ done: 6, total: 6 }).includes('style='), chip);
+  !chip.includes('style=') && !T.progressChip({ done: 7, total: 7 }).includes('style='), chip);
 
 r.ok('a legacy-only record with nothing saved gets NO chip',
-  T.wantProgress({ isLegacyOnly: true }, { done: 0, total: 6 }) === false);
+  T.wantProgress({ isLegacyOnly: true }, { done: 0, total: 7 }) === false);
 r.ok('...but a legacy-only record WITH saved sections does',
-  T.wantProgress({ isLegacyOnly: true }, { done: 2, total: 6 }) === true);
+  T.wantProgress({ isLegacyOnly: true }, { done: 2, total: 7 }) === true);
 r.ok('a normal record always gets one',
-  T.wantProgress({}, { done: 0, total: 6 }) === true);
+  T.wantProgress({}, { done: 0, total: 7 }) === true);
 
 // ── Stage 4: the clock ────────────────────────────────────────────────────────
 r.head('the clock, and what it measures');
@@ -242,9 +247,9 @@ T.renderIRList(T.allIRs);
 const card = byId.get('ir-list').innerHTML;
 
 r.ok('a started ticket shows its count and fill class',
-  /ir-progress p2/.test(card) && />2\/6</.test(card), card.match(/ir-progress[^"]*"[^>]*>[\s\S]{0,60}/));
-r.ok('an untouched ticket shows 0/6 — the count is honest, not hidden',
-  /ir-progress p0/.test(card) && />0\/6</.test(card));
+  /ir-progress p2/.test(card) && />2\/7</.test(card), card.match(/ir-progress[^"]*"[^>]*>[\s\S]{0,60}/));
+r.ok('an untouched ticket shows 0/7 — the count is honest, not hidden',
+  /ir-progress p0/.test(card) && />0\/7</.test(card));
 r.ok('the overdue ticket is flagged, the fresh one is not',
   (card.match(/badge-danger/g) || []).length === 1, card.match(/badge-danger/g));
 r.ok('the flag\'s tooltip names the limit for that ticket\'s priority',
@@ -284,23 +289,23 @@ r.ok('the header shows the same age, flagged late',
 // and can afford to say "3 of 6 sections saved" in words. Same `done[]`, same
 // count — the two must never disagree, which is what the second assertion pins.
 const bannerSteps = (banner.match(/<span class="progress-step(?: is-done)?"><\/span>/g) || []);
-r.ok('the header flags overdue and shows a six-segment steps bar',
-  /badge-danger/.test(banner) && bannerSteps.length === 6 &&
+r.ok('the header flags overdue and shows a seven-segment steps bar',
+  /badge-danger/.test(banner) && bannerSteps.length === 7 &&
   (banner.match(/progress-step is-done/g) || []).length === 3, banner);
 r.ok('...and it words it "saved", never "complete"',
-  /3 of 6 sections saved/.test(banner) && !/complete/i.test(banner), banner);
+  /3 of 7 sections saved/.test(banner) && !/complete/i.test(banner), banner);
 r.ok('the header and the card agree on the count for the same ticket',
   (() => {
     T.renderIRList([T.currentIR]);
     const card = byId.get('ir-list').innerHTML;
-    return /3 of 6 sections saved/.test(banner) && /ir-progress p3/.test(card) &&
-      />3\/6</.test(card) && T.sectionProgress(T.currentIR.done).done === 3;
+    return /3 of 7 sections saved/.test(banner) && /ir-progress p3/.test(card) &&
+      />3\/7</.test(card) && T.sectionProgress(T.currentIR.done).done === 3;
   })(), banner + ' | ' + byId.get('ir-list').innerHTML);
 
 // ── The legacy-only merge ─────────────────────────────────────────────────────
 // Legacy stubs are appended to allIRs AFTER setAllIRs() has merged app-owned
 // state. Without the merge being re-applied, a legacy IR that HAS been triaged
-// in the app renders as untouched — and with Stage 3 on the card, as "0/6" over
+// in the app renders as untouched — and with Stage 3 on the card, as "0/7" over
 // a ticket with saved sections.
 r.head('a legacy-only IR keeps the app-owned state it has');
 T.allIRs = [];
@@ -317,8 +322,8 @@ r.ok('its app-owned CATEGORY survives into the list',
   !legacyCard.includes('ir-cat">REPAIR<'), legacyCard.slice(0, 300));
 r.ok('its app-owned STATUS survives, not the stub\'s "Open"',
   /Production/.test(legacyCard) && !/>Open</.test(legacyCard), legacyCard.slice(0, 300));
-r.ok('its saved section is counted — not 0/6',
-  /ir-progress p1/.test(legacyCard) && />1\/6</.test(legacyCard),
+r.ok('its saved section is counted — not 0/7',
+  /ir-progress p1/.test(legacyCard) && />1\/7</.test(legacyCard),
   (legacyCard.match(/ir-progress[^"]*"[^>]*>/g) || [''])[0]);
 // The stub itself carries no date. The app-owned statusAt on this one IS a real
 // clock, so the age it shows must be the app's "in status", not a raise date the

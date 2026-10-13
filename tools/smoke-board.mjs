@@ -73,8 +73,20 @@ const bcEnd = bcStart < 0 ? -1 : appJs.indexOf('\n];', bcStart);
 const boardCols = bcStart < 0 ? '' : appJs.slice(bcStart, bcEnd + 3);
 ok('the board declares its columns', boardCols.length > 0, bcStart);
 
-const placed = [...boardCols.matchAll(/stages:\s*\[([^\]]*)\]/g)]
-  .flatMap(m => [...m[1].matchAll(/'([^']+)'/g)].map(x => x[1]));
+// The columns are EVALUATED, not read back out of the source. Six of the nine are
+// built from BOARD_SECTION_COLUMNS through a .map(), so the only `stages:` a regex
+// could collect from them is the placeholder `[c.stage]` — and a suite that collected
+// THAT would be asserting the shape of the code rather than what the board does with a
+// status, and would pass vacuously the moment the map was rewritten. Loading the real
+// array asserts the thing the comment above claims: which stages the board can place.
+const BC = loadApp('BOARD_COLUMNS, BOARD_SECTION_COLUMNS, boardColumnOf, boardColumnOwns, ' +
+                  'sectionLetter, SECTION_LABELS, SECTION_SHORT');
+const columns = BC.BOARD_COLUMNS;
+const colOf = key => columns.find(c => c.key === key);
+
+ok('there are nine columns', columns.length === 9, columns.map(c => c.key));
+
+const placed = columns.flatMap(c => c.stages);
 // The ONE stage-less value a column has to keep a place for. 'Other' is not in
 // IR_STATUS_VALUES and must not be: nothing new can be set to it. But old tickets
 // hold it, canonicalStage returns it unchanged, and a card in no column is a card
@@ -90,23 +102,26 @@ ok('the nine columns place all ten, each exactly once',
 ok('...and the retired Other keeps a column of its own there too',
   placed.filter(s => s === KEPT_NON_STAGE).length === 1, placed);
 
-const colCount = (boardCols.match(/\{\s*key:/g) || []).length;
-ok('there are nine columns', colCount === 9, colCount);
-
 // ── The section columns wear the app's own short names ───────────────────────
 head('a section column is named the way its tab is');
 
-const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z])':\s*'([^']+)'/g)]
+// `sec-cost` carries a hyphen, which the old `sec-[a-z]` class could not match — the
+// id spelling had to reach the fixture too, or costing would have been invisible here.
+const shortNames = Object.fromEntries([...appJs.matchAll(/'(sec-[a-z-]+)':\s*'([^']+)'/g)]
   .map(m => [m[1], m[2]]));
-ok('SECTION_SHORT still names all six sections', Object.keys(shortNames).length >= 6, shortNames);
-// The title is built from SECTION_SHORT rather than typed out, so the two cannot
-// drift: a renamed section renames its column for free.
-const built = ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-f', 'sec-g']
-  .filter(id => boardCols.includes(`SECTION_SHORT['${id}']`));
-ok('every section column builds its heading from SECTION_SHORT',
-  built.length === 6, built);
-ok('...and the letter is prefixed, so the heading reads like the tab',
-  /'B · '\s*\+\s*SECTION_SHORT\['sec-b'\]/.test(boardCols));
+ok('SECTION_SHORT still names every section, costing included',
+  Object.keys(shortNames).length >= 7 && !!shortNames['sec-cost'], Object.keys(shortNames));
+// The heading is assembled from SECTION_SHORT and the DISPLAYED letter rather than
+// typed out, so a renamed section renames its column for free and a moved letter
+// cannot strand one. Asserted against the BUILT columns, not against the source.
+const bsec = BC.BOARD_SECTION_COLUMNS;
+ok('every section column builds its heading from SECTION_SHORT and its own letter',
+  bsec.length === 6 &&
+  bsec.every(c => columns.some(col => col.title === BC.sectionLetter(c.id) + ' · ' + BC.SECTION_SHORT[c.id])),
+  bsec.map(c => c.id + '=' + (colOf(BC.sectionLetter(c.id)) || {}).title));
+ok('...and the key IS that letter, so a column resolves back to the right section',
+  bsec.every(c => { const col = colOf(BC.sectionLetter(c.id)); return !!col && col.stages[0] === c.stage; }),
+  columns.map(c => c.key + ':' + c.stages.join('+')));
 
 // ── The two end columns exist because some stages name no section ────────────
 head('the stages that name no section still get a column each');
@@ -142,11 +157,14 @@ ok('none of the ten needs folding — every one is already a stage',
 // The mapping, stated in full rather than as a property, because it is a DECISION:
 // two old words folding to one stage is intended (QC and Flight Test both mean
 // Quality Test), and a change to any single row should be a conscious edit here.
+// The letters are the DISPLAYED ones after the 2026-10-13 split — inward is A,
+// investigation is C — while the ids behind them never moved. Costing (shown as D)
+// owns no status, so nothing here maps to it.
 const COLUMN = {
   'Open': 'start', 'Remote Support': 'start', 'On Hold': 'hold',
-  'Inward': 'B', 'Inspection': 'C', 'Investigation': 'D', 'Production': 'E',
+  'Inward': 'A', 'Inspection': 'B', 'Investigation': 'C', 'Production': 'E',
   'Quality Test': 'F', 'PDI/Dispatch': 'G', 'Delivered': 'done', 'Other': 'done',
-  'Hold': 'hold', 'Visual Inspection': 'C', 'QC Investigation': 'D',
+  'Hold': 'hold', 'Visual Inspection': 'B', 'QC Investigation': 'C',
   'QC': 'F', 'Flight Test': 'F', 'PDI': 'G', 'Approval': 'G', 'Close': 'done',
 };
 Object.entries(COLUMN).forEach(([value, col]) => {
@@ -300,8 +318,26 @@ ok('the offer is repainted wherever the facts behind it change',
   /paintBoardMoveOffer\(irNumber\)/.test((appJs.match(/function paintClosedSections[\s\S]*?\n\}/) || [''])[0]) &&
   /paintBoardMoveOffer\(ir\.irNumber\)/.test((appJs.match(/function renderBannerMeta[\s\S]*?\n\}/) || [''])[0]));
 ok('every section has a close row for it to appear in',
-  (html.match(/class="sec-close-row"/g) || []).length === 6 &&
-  (html.match(/id="close-sec-[a-g]"/g) || []).length === 6);
+  (html.match(/class="sec-close-row"/g) || []).length === 7 &&
+  (html.match(/id="close-sec-[a-z-]+"/g) || []).length === 7,
+  (html.match(/id="close-sec-[a-z-]+"/g) || []));
+
+// Costing gates the move out of Investigation — the owner's decision of 2026-10-13.
+head('a ticket cannot reach Production until Costing is closed');
+ok('the prerequisite exists as a table, read by the offer that acts on it',
+  /const SECTION_MOVE_GATES = \{ 'sec-d': \['sec-cost'\] \};/.test(appJs),
+  (appJs.match(/const SECTION_MOVE_GATES[^\n]*/) || [''])[0]);
+ok('the offer is withheld while anything gating the move is still open',
+  /const blocked = gates\.filter\(g => !done\.includes\(g\)\);/.test(appJs));
+ok('...and the reason is NAMED in the row, never left as a button that fails to appear',
+  /paintMoveGateNote\(holder, blocked, next\)/.test(appJs) &&
+  /t\('move\.gated', \{ column: next\.label, sections: names \}\)/.test(appJs));
+ok('...and it names the section the way the tabs do',
+  /blocked\.map\(id => sectionLetter\(id\) \+ ' · ' \+ \(SECTION_SHORT\[id\] \|\| id\)\)/.test(appJs));
+ok('...and the note is cleared everywhere the offer is, so the two cannot disagree',
+  (appJs.match(/paintMoveGateNote\(holder, null, null\)/g) || []).length === 2);
+ok('the gate is on the app\'s own offer, never on the status write',
+  moveBody.length > 0 && !/SECTION_MOVE_GATES/.test(moveBody));
 
 // ── House rules the new UI has to obey ──────────────────────────────────────
 head('the new UI obeys the app\'s own rules');

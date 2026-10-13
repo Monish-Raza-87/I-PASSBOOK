@@ -84,9 +84,9 @@ r.head('the dropdowns are built from the whole list, not the filtered rows');
 // was chosen, leaving the reader unable to change their mind — the same reason
 // segmentCounts() counts allIRs rather than what is on screen.
 const fx = T.insightsFacets([
-  { irNumber: 'IR1', dateRaisedISO: '2025-09-01', customerName: 'Acme', droneId: 'D-1' },
-  { irNumber: 'IR2', dateRaisedISO: '2026-05-01', customerName: 'Beta', droneId: 'D-2' },
-  { irNumber: 'IR3', dateRaisedISO: '2025-01-01', customerName: 'Acme', droneId: 'D-1' },
+  { irNumber: 'IR1', dateRaisedISO: '2025-09-01', customerName: 'Acme', droneId: 'D-1', droneModel: 'SIGMA 100' },
+  { irNumber: 'IR2', dateRaisedISO: '2026-05-01', customerName: 'Beta', droneId: 'D-2', droneModel: 'SIGMA 75' },
+  { irNumber: 'IR3', dateRaisedISO: '2025-01-01', customerName: 'Acme', droneId: 'D-1', droneModel: 'SIGMA 100' },
   { irNumber: 'IR4' },                                   // legacy stub: no ISO date
   { irNumber: 'IR5', dateRaisedISO: '' },                // demo record: empty ISO
 ]);
@@ -94,9 +94,14 @@ r.ok('years newest first', fx.years.join(',') === '2026,2025,2024', fx.years);
 r.ok('only months that actually occur', fx.months.join(',') === '1,5,9', fx.months);
 r.ok('customers deduped and sorted', fx.customers.join(',') === 'Acme,Beta', fx.customers);
 r.ok('drones deduped and sorted', fx.drones.join(',') === 'D-1,D-2', fx.drones);
+// The model is the SECOND device axis and it is not the serial: one serial is one
+// machine, one model is a fleet. Deduped and sorted the same way, and a row with no
+// model contributes nothing rather than an empty option in the dropdown.
+r.ok('models deduped and sorted, and a row without one adds no option',
+  fx.models.join(',') === 'SIGMA 100,SIGMA 75', fx.models);
 r.ok('the undated count is surfaced, not swallowed', fx.undated === 2, fx.undated);
 r.ok('an empty list yields empty facets, not a crash',
-  JSON.stringify(T.insightsFacets([])) === '{"years":[],"months":[],"customers":[],"drones":[],"undated":0}',
+  JSON.stringify(T.insightsFacets([])) === '{"years":[],"months":[],"customers":[],"drones":[],"models":[],"undated":0}',
   T.insightsFacets([]));
 r.ok('a non-list yields the same', T.insightsFacets(null).undated === 0);
 
@@ -104,12 +109,12 @@ r.ok('a non-list yields the same', T.insightsFacets(null).undated === 0);
 r.head('the summary counts every row, including the ones it cannot place');
 const FIXTURE = [
   // FY 2025-26 (Apr 2025 – Mar 2026)
-  { irNumber: 'IRa', dateRaisedISO: '2025-09-10', status: 'Production',   category: 'REPAIR',            subCategory: 'GPS',      subCategoryNote: '',        customerName: 'Acme', droneId: 'D-1' },
-  { irNumber: 'IRb', dateRaisedISO: '2025-09-20', status: 'Delivered',    category: 'REPAIR',            subCategory: 'OTHERS',   subCategoryNote: 'Cracked canopy', customerName: 'Acme', droneId: 'D-2' },
-  { irNumber: 'IRc', dateRaisedISO: '2026-02-01', status: 'Hold',         category: 'CRASH',             subCategory: '',         subCategoryNote: '',        customerName: 'Beta', droneId: 'D-3' },
-  { irNumber: 'IRd', dateRaisedISO: '2026-03-31', status: 'Open',         category: 'GENERAL MAINTENANCE', subCategory: '',       subCategoryNote: '',        customerName: 'Beta', droneId: 'D-4' },
+  { irNumber: 'IRa', dateRaisedISO: '2025-09-10', status: 'Production',   category: 'REPAIR',            subCategory: 'GPS',      subCategoryNote: '',        customerName: 'Acme', droneId: 'D-1', droneModel: 'SIGMA 100' },
+  { irNumber: 'IRb', dateRaisedISO: '2025-09-20', status: 'Delivered',    category: 'REPAIR',            subCategory: 'OTHERS',   subCategoryNote: 'Cracked canopy', customerName: 'Acme', droneId: 'D-2', droneModel: 'SIGMA 75' },
+  { irNumber: 'IRc', dateRaisedISO: '2026-02-01', status: 'Hold',         category: 'CRASH',             subCategory: '',         subCategoryNote: '',        customerName: 'Beta', droneId: 'D-3', droneModel: 'SIGMA 100' },
+  { irNumber: 'IRd', dateRaisedISO: '2026-03-31', status: 'Open',         category: 'GENERAL MAINTENANCE', subCategory: '',       subCategoryNote: '',        customerName: 'Beta', droneId: 'D-4', droneModel: 'STRIVER' },
   // FY 2026-27
-  { irNumber: 'IRe', dateRaisedISO: '2026-04-01', status: 'Close',        category: 'REMOTE SUPPORT',    subCategory: '',         subCategoryNote: '',        customerName: 'Gamma', droneId: 'D-5' },
+  { irNumber: 'IRe', dateRaisedISO: '2026-04-01', status: 'Close',        category: 'REMOTE SUPPORT',    subCategory: '',         subCategoryNote: '',        customerName: 'Gamma', droneId: 'D-5', droneModel: 'SIGMA 55' },
   // Unplaceable rows — counted, and named.
   { irNumber: 'IRf', status: 'Remote Support' },                       // no ISO date, no category
   { irNumber: 'IRg', dateRaisedISO: '2025-11-05', status: 'Other',      category: 'REPAIR', subCategory: 'WING' },  // retired sub-category
@@ -154,6 +159,23 @@ r.head('Month filters INDEPENDENTLY of the fiscal year');
 // "September" while FY 2025-26 was selected could only ever mean Sep 2025; the
 // point is that it can also mean every September on record.
 const F = (over) => Object.assign({}, ALL_ON, over);
+// ⚠ THE TRAP THIS SUITE IS ONE EDIT AWAY FROM. `insightsMatches` tests
+// `f.x !== INSIGHTS_ALL`, so an object that OMITS a key hands it `undefined` — which
+// is `!== INSIGHTS_ALL` — and every row is filtered out. A dashboard of zeroes with
+// no error anywhere, from a caller that merely built its filter object before the
+// axis existed. So an absent key has to mean the same thing as `INSIGHTS_ALL`: there
+// is no filter on this axis. Asserted here rather than only in the fixtures, because
+// two suites build exactly such an object and both would otherwise have to be
+// rewritten whenever an axis is added.
+r.ok('a filter object that OMITS a key filters nothing on that key',
+  T.insightsSummary(FIXTURE, { fy: T.INSIGHTS_ALL, month: T.INSIGHTS_ALL, status: T.INSIGHTS_ALL,
+                               category: T.INSIGHTS_ALL, customer: T.INSIGHTS_ALL }).matched === 7,
+  T.insightsSummary(FIXTURE, { fy: T.INSIGHTS_ALL, month: T.INSIGHTS_ALL, status: T.INSIGHTS_ALL,
+                               category: T.INSIGHTS_ALL, customer: T.INSIGHTS_ALL }).matched);
+r.ok('an empty filter object matches everything, too',
+  T.insightsSummary(FIXTURE, {}).matched === 7, T.insightsSummary(FIXTURE, {}).matched);
+r.ok('...while an EXPLICIT all on every axis says the same thing',
+  T.insightsSummary(FIXTURE, ALL_ON).matched === 7);
 r.ok('FY 2025 alone → the five FY 2025-26 rows',
   T.insightsSummary(FIXTURE, F({ fy: 2025 })).matched === 5, T.insightsSummary(FIXTURE, F({ fy: 2025 })).matched);
 r.ok('FY 2026 alone → the one FY 2026-27 row',
@@ -198,6 +220,17 @@ r.ok('the uncategorised sentinel filters to the rows with none',
   T.insightsSummary(FIXTURE, F({ category: T.UNCATEGORISED })).matched);
 r.ok('customer filters exactly', T.insightsSummary(FIXTURE, F({ customer: 'Acme' })).matched === 2);
 r.ok('drone filters exactly', T.insightsSummary(FIXTURE, F({ drone: 'D-3' })).matched === 1);
+// The model axis, added 2026-10-13. The Sheet writes the model in column S and the
+// app read it nowhere, so the fleet could not be counted at all.
+r.ok('model filters to the whole fleet, not to one machine',
+  T.insightsSummary(FIXTURE, F({ model: 'SIGMA 100' })).matched === 2,
+  T.insightsSummary(FIXTURE, F({ model: 'SIGMA 100' })).matched);
+r.ok('a model with one ticket filters to one', T.insightsSummary(FIXTURE, F({ model: 'STRIVER' })).matched === 1);
+r.ok('model and drone combine', T.insightsSummary(FIXTURE, F({ model: 'SIGMA 100', drone: 'D-1' })).matched === 1);
+r.ok('a model that is in no row matches nothing rather than everything',
+  T.insightsSummary(FIXTURE, F({ model: 'SIGMA 999' })).matched === 0);
+r.ok('the rows with no model at all are matched by no model filter',
+  T.insightsSummary(FIXTURE, F({ model: 'SIGMA 55' })).matched === 1);
 r.ok('customer + category combine',
   T.insightsSummary(FIXTURE, F({ customer: 'Acme', category: 'CRASH' })).matched === 0,
   T.insightsSummary(FIXTURE, F({ customer: 'Acme', category: 'CRASH' })).matched);
@@ -306,6 +339,14 @@ T.insightsFilters = Object.assign({}, ALL_ON);
 T.renderInsights();
 const painted = byId.get('insights-body').innerHTML;
 r.ok('with data it paints the filters', painted.includes('ins-fy') && painted.includes('ins-drone'));
+// Two device axes, and they are named for what they are: the serial is the machine,
+// the model is the fleet. "DRONE SN" named neither of them clearly enough for the
+// owner to find the model filter he was looking for.
+r.ok('the device filters are named "UAS SN" and "UAS MODEL"',
+  painted.includes('>UAS SN<') && painted.includes('>UAS MODEL<'),
+  (painted.match(/insights-filter-label[^>]*>[^<]*/g) || []).join(' | '));
+r.ok('...and the pane really wires the model dropdown',
+  painted.includes('ins-model') && painted.includes('All models'));
 r.ok('a card per category', T.IR_CATEGORIES.every(k => painted.includes('data-cat="' + k + '"')));
 r.ok('the match line reports the real numbers', /<strong>7<\/strong> of 7/.test(painted),
   (painted.match(/insights-total[\s\S]{0,180}/) || [''])[0]);

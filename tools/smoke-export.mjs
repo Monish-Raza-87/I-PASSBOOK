@@ -222,13 +222,16 @@ r.ok('an IQC row with no name falls back to its zone id', (() => {
   return !!t && t.rows[0][0] === 'z1' && t.rows[0][1] === 'Pass';
 })(), T.sectionPdfModel('sec-c', { c_iqcTable: { z1: { result: 'Pass' } } }, null).blocks.filter(b => b.kind === 'table'));
 r.ok('the cost table renders its five columns in order', (() => {
-  const m = T.sectionPdfModel('sec-d', { d_repairTable: [{ particular: 'Motor', qty: '2', rate: '100', cost: '200', remark: 'r' }] }, null);
+  // ⚠ Costing is its own section since 2026-10-13; `d_repairTable` resolves to
+  // `sec-cost` through the registry, and asking `sec-d` for it now returns no table
+  // at all rather than an empty one.
+  const m = T.sectionPdfModel('sec-cost', { d_repairTable: [{ particular: 'Motor', qty: '2', rate: '100', cost: '200', remark: 'r' }] }, null);
   const t = m.blocks.find(b => b.kind === 'table');
   // The headings are the words the owner asked for — "Particular" and "Rate" were
   // the old table's vocabulary and read as jargon next to a cost and a remark. The
   // stored KEYS are untouched, so every existing IR's rows still render.
   return t.columns.join('|') === 'Item description|Qty|Unit cost|Total cost|Remark' && t.rows[0].join('|') === 'Motor|2|100|200|r';
-})(), (T.sectionPdfModel('sec-d', { d_repairTable: [{ particular: 'Motor' }] }, null).blocks.find(b => b.kind === 'table') || {}).rows);
+})(), (T.sectionPdfModel('sec-cost', { d_repairTable: [{ particular: 'Motor' }] }, null).blocks.find(b => b.kind === 'table') || {}).rows);
 r.ok('the dispatch checklist renders particular -> status', (() => {
   const m = T.sectionPdfModel('sec-g', { h_dispatchChecklist: { 'Airframe': 'Packed' } }, null);
   const t = m.blocks.find(b => b.kind === 'table');
@@ -250,7 +253,7 @@ r.ok('a table given the wrong shape entirely does not throw', (() => {
   try { T.sectionPdfModel('sec-b', { b_inwardTable: 'nonsense' }, null); return true; } catch (e) { return 'threw: ' + e.message; }
 })());
 r.ok('a cost table given an object rather than an array does not throw', (() => {
-  try { T.sectionPdfModel('sec-d', { d_repairTable: { a: 1 } }, null); return true; } catch (e) { return 'threw: ' + e.message; }
+  try { T.sectionPdfModel('sec-cost', { d_repairTable: { a: 1 } }, null); return true; } catch (e) { return 'threw: ' + e.message; }
 })());
 
 r.head('Section D keeps the customer note, as text rather than as markup');
@@ -351,10 +354,14 @@ T.sectionData = {};
 
 // ── 6. What the file is called ────────────────────────────────────────────────
 r.head('the exported file is named after the IR and the section');
-r.ok('IR409 section B', T.exportFileName('IR409', 'sec-b') === 'IR409 - Section B.pdf', T.exportFileName('IR409', 'sec-b'));
+// The letters moved on 2026-10-13 (inward is A, investigation is C) while the ids
+// did not, so a filename that read the ID would now say "Section COST".
+r.ok('IR409 section B is named for its LETTER, which is A', T.exportFileName('IR409', 'sec-b') === 'IR409 - Section A.pdf', T.exportFileName('IR409', 'sec-b'));
+r.ok('the split-out costing section exports as Section D, never "Section COST"',
+  T.exportFileName('IR409', 'sec-cost') === 'IR409 - Section D.pdf', T.exportFileName('IR409', 'sec-cost'));
 r.ok('section G is a G, not a sec-g', T.exportFileName('IR409', 'sec-g') === 'IR409 - Section G.pdf', T.exportFileName('IR409', 'sec-g'));
 r.ok('no IR number still produces a usable name',
-  T.exportFileName('', 'sec-c') === 'IR - Section C.pdf' && T.exportFileName(null, 'sec-c') === 'IR - Section C.pdf',
+  T.exportFileName('', 'sec-c') === 'IR - Section B.pdf' && T.exportFileName(null, 'sec-c') === 'IR - Section B.pdf',
   [T.exportFileName('', 'sec-c'), T.exportFileName(null, 'sec-c')]);
 r.ok('a path separator cannot escape the filename',
   T.sanitizeFileName('a/b') === 'a-b' && T.sanitizeFileName('a\\b') === 'a-b' && T.sanitizeFileName('a:b') === 'a-b',
@@ -438,14 +445,25 @@ r.head('an attachment that cannot be read is named, never merged');
 
 r.head('the awkward content a real section holds does not break the writer');
 {
-  const nasty = T.sectionPdfModel('sec-d', {
+  // ⚠ The long paragraph and the table are in TWO different sections now:
+  // `d_investigation` stayed in `sec-d` and `d_repairTable` went to `sec-cost` with
+  // the rest of the costing. Asserted as two documents rather than one, which is what
+  // the app actually draws — and the table is the half that has to spill.
+  const para = T.sectionPdfModel('sec-d', {
     d_investigation: 'a'.repeat(400) + '\n\nsecond para',
-    d_repairTable: Array.from({ length: 30 }, (_, i) => ({ particular: 'Item ' + i, qty: '1', rate: '10', cost: '10', remark: 'ok' })),
+  }, { irNumber: 'IR409', droneId: 'DRN-7' });
+  let outPara = null;
+  try { outPara = await TL.drawSectionPdf(para, { images: new Map(), attachments: [] }, SB); }
+  catch (e) { outPara = 'threw: ' + e.message; }
+  r.ok('a long paragraph still produces a PDF', isPdf(outPara), typeof outPara === 'string' ? outPara : outPara && outPara.length);
+
+  const nasty = T.sectionPdfModel('sec-cost', {
+    d_repairTable: Array.from({ length: 90 }, (_, i) => ({ particular: 'Item ' + i, qty: '1', rate: '10', cost: '10', remark: 'ok' })),
   }, { irNumber: 'IR409', droneId: 'DRN-7' });
   let out = null;
   try { out = await TL.drawSectionPdf(nasty, { images: new Map(), attachments: [] }, SB); }
   catch (e) { out = 'threw: ' + e.message; }
-  r.ok('a long paragraph and a 30-row table still produce a PDF', isPdf(out), typeof out === 'string' ? out : out && out.length);
+  r.ok('a 90-row cost table still produces a PDF', isPdf(out), typeof out === 'string' ? out : out && out.length);
   if (isPdf(out)) {
     const doc = await SB.PDFDocument.load(out);
     r.ok('and it spilled onto another page rather than being cut off', doc.getPageCount() > 1, doc.getPageCount());
@@ -561,17 +579,19 @@ TL.evidence = {};
 
 // ── 10. Exporting is a READ, so it is never gated ─────────────────────────────
 r.head('Download and Download-and-share are on every section, and no user is locked out of them');
-const EXPORTABLE = ['b', 'c', 'd', 'e', 'f', 'g'];
-const dlHits = indexSrc.match(/id="download-sec-[a-g]">[^<]*</g) || [];
-const shHits = indexSrc.match(/id="share-sec-[a-g]">[^<]*</g) || [];
+// Written out rather than generated from a letter range: `sec-cost` is a real id
+// that no `[a-g]` class can match, which is exactly how it would go unnoticed.
+const EXPORTABLE = ['b', 'c', 'd', 'cost', 'e', 'f', 'g'];
+const dlHits = indexSrc.match(/id="download-sec-[a-z-]+">[^<]*</g) || [];
+const shHits = indexSrc.match(/id="share-sec-[a-z-]+">[^<]*</g) || [];
 r.ok('every section has a Download button in the markup',
   EXPORTABLE.every(x => new RegExp('id="download-sec-' + x + '"').test(indexSrc)),
   EXPORTABLE.filter(x => !new RegExp('id="download-sec-' + x + '"').test(indexSrc)));
 r.ok('and every section has a Download-and-share button',
   EXPORTABLE.every(x => new RegExp('id="share-sec-' + x + '"').test(indexSrc)),
   EXPORTABLE.filter(x => !new RegExp('id="share-sec-' + x + '"').test(indexSrc)));
-r.ok('that is six of each, not a vacuous match', dlHits.length === 6 && shHits.length === 6,
-  [dlHits.length, shHits.length]);
+r.ok('that is seven of each, not a vacuous match', dlHits.length === 7 && shHits.length === 7,
+  [dlHits.length, shHits.length, dlHits]);
 r.ok('both sit under the section\'s own button row, in an export row',
   EXPORTABLE.every(x => new RegExp('close-sec-' + x + '[\\s\\S]{0,400}?class="sec-export-row"').test(indexSrc)),
   EXPORTABLE.filter(x => !new RegExp('close-sec-' + x + '[\\s\\S]{0,400}?class="sec-export-row"').test(indexSrc)));

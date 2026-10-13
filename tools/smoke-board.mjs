@@ -33,6 +33,7 @@ const appJs = read('../app.js');
 const html = read('../index.html');
 const viewsCss = read('../views.css');
 const baseCss = read('../base.css');
+const componentsCss = read('../components.css');
 
 // app.js WITH ITS COMMENTS REMOVED — the text a "this thing is GONE" assertion has to
 // read. Every removal in this file (both caps, `.kb-more`, `.grid-more`, the dead twin)
@@ -670,16 +671,53 @@ ok('all three drawings open the SAME ticket surface, and it is the only way in',
   !/onclick="goTicket\(/.test(appNoComments) &&
   !/onclick="openPassbook\(/.test(appNoComments) &&
   !/drawer|openDrawer/.test(appNoComments));
-// The dock must not grow a renderer of its own. It builds its activity list with the
-// passbook's own buildTimeline() and draws it with the app's only container-parameterised
-// renderer — the same two calls refreshActivityLog() makes — and it must define neither.
-ok('...and the dock is a preview, not a second ticket screen: it renders the app\'s own timeline',
+// The dock must not grow a renderer of its own — that rule has not moved, only the two
+// things it reuses. It used to draw the passbook's activity list; on 2026-10-13 the owner
+// replaced that with two blocks of his own asking (*"it should show 'Allot CAPS' options
+// and 'Report' details … Activity log is not required"*), and BOTH of them are builders
+// the full screens already call: triageFieldsHTML() for the form the Allot CAPS dialog
+// draws, intakeBodyHTML() for the report the 📋 Report tab draws. The window passes its
+// own id prefix ('dock-') so the two forms cannot collide in the DOM.
+//
+// ⚠ THE FOUR `function …` GUARDS BELOW ARE THE HALF THAT MATTERS. A window that carried
+// its own copy of the report would be a second report, kept in step by nothing — the
+// failure it guards is still a failure, and it is now guarded against the builders that
+// exist rather than the ones that used to.
+ok('...and the dock is a preview, not a second ticket screen: every block is the app\'s own builder',
   dockCode.length > 0 &&
-  /const all = buildTimeline\(irNumber, entries, nudges, 0, mail\);/.test(dockSrc) &&
-  /renderTimelineInto\(node, all\.slice\(-ACTIVITY_LIMIT\)/.test(dockSrc) &&
-  !/function buildTimeline\s*\(/.test(dockCode) &&
-  !/function renderTimelineInto\s*\(/.test(dockCode) &&
-  !/function renderTimeline\b/.test(dockCode));
+  // Both blocks, by the call the app really makes — and both with the dock's prefix, so
+  // a form drawn here can never be the dialog's own form reached by the wrong id.
+  /triageFieldsHTML\(ir, 'dock-'\)/.test(dockSrc) &&
+  /intakeBodyHTML\(ir\)/.test(dockSrc) &&
+  // The save goes through the app's own applyTriage with the dock's prefix — the ticket
+  // first, then 'dock-'. Two arguments and not one, because the window can be up on a
+  // ticket that is not the one the passbook holds.
+  /applyTriage\([^,]+,\s*'dock-'\)/.test(dockSrc) &&
+  // ...and it defines NEITHER. Nothing in this window is built here.
+  !/function triageFieldsHTML\s*\(/.test(dockCode) &&
+  !/function triageFieldsHTML\s*\(/.test(dockSrc) &&
+  !/function intakeBodyHTML\s*\(/.test(dockCode) &&
+  !/function applyTriage\s*\(/.test(dockCode) &&
+  // The activity list is genuinely gone, not merely unrendered: neither the builder nor
+  // the fetch that fed it survives anywhere in the dock.
+  !/function loadDockTimeline\s*\(/.test(dockSrc) &&
+  !/loadDockTimeline\(/.test(dockSrc) &&
+  !/buildTimeline\(/.test(dockSrc) &&
+  !/dock-timeline/.test(dockSrc));
+// ⚠ THE WINDOW'S SAVE BUTTON IS A TRAP NO GEOMETRY PROBE COULD REPORT. `.btn` is
+// `width: 100%` (components.css:19) — a form button fills its column — so the window's
+// Save rendered as a full-width yellow BAND inside `.dock-allot-foot`, whose
+// `justify-content: flex-end` cannot shrink it back: a flex item begins at its auto
+// width, and here the auto width IS 100%. Every measurement still said "a button in the
+// footer"; only the screenshot said band. `.btn-sm` does NOT escape this — it sizes
+// height, padding, font and radius, and nothing else. The fix is the same one the
+// Allot CAPS dialog already carries (`.inward-options-foot .btn`, components.css:897),
+// and this pins that the window keeps it.
+ok('...and the window\'s Save escapes the full-width default, as the dialog\'s does',
+  /\.inward-options-foot \.btn \{ width: auto; \}/.test(componentsCss) &&
+  /\.dock-allot-foot \{ display: flex; justify-content: flex-end; \}/.test(componentsCss) &&
+  /\.dock-allot-foot \.btn \{ width: auto; \}/.test(componentsCss) &&
+  /^\.btn \{[\s\S]{0,400}?width: 100%;/m.test(componentsCss));
 ok('...and Expand reaches the existing passbook and nothing else',
   /function expandDock\(irNumber\) \{\s*goTicket\(irNumber\);\s*\}/.test(dockSrc));
 

@@ -620,7 +620,14 @@ r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() 
   B.view = 'index';
   B.setFlag(B.LIST_KEY, true);          // the list is folded…
   B.setListView('board');
-  const hiddenSidebar = /html\.view-full #sidebar \{ display: none; \}/.test(baseSrc);
+  // ⚠ THE SIDEBAR IS NO LONGER STEPPED ASIDE, and this is the assertion that used to
+  // say it was. The owner, 2026-10-13, having scrolled the Grid to IR001: *"in grid view
+  // the left bar of service desk is not visible. Even grid view should have left tab of
+  // service desk with option to expand or collapse it."* So the rule that hid it is
+  // GONE, and its absence is the claim — a `view-full` that removes the only way out of
+  // itself is the bug, not the feature.
+  const keepsSidebar = !/html\.view-full #sidebar\b[^}]*display:\s*none/.test(
+    baseSrc.replace(/\/\*[\s\S]*?\*\//g, ''));
   const full = B.htmlEl.classList.contains('view-full');
   const unfolded = !B.htmlEl.classList.contains('list-collapsed');
   const mode = B.listMode;
@@ -636,13 +643,15 @@ r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() 
   B.setListView('list');
   B.setFlag(B.LIST_KEY, false);
   r.ok('choosing Board gives it the workspace', full && mode === 'board');
-  r.ok('...and the stylesheet steps the sidebar, the placeholder and the fold aside',
-    hiddenSidebar &&
+  r.ok('...and the stylesheet steps the placeholder aside and widens the pane, but KEEPS the sidebar',
+    keepsSidebar &&
     /html\.view-full #index-view \{ flex: 1 1 auto; width: auto; \}/.test(baseSrc) &&
     /html\.view-full #detail-placeholder \{ display: none; \}/.test(baseSrc) &&
-    // Both fold controls go with them — a toggle for a column that is not on
-    // screen is a dead control, which is how this one read in the browser.
-    /html\.view-full #list-toggle,\s*\n\s*html\.view-full #sidebar-toggle \{ display: none; \}/.test(baseSrc));
+    // The sidebar's own fold control stays on screen with it: the room is given up by
+    // choosing to fold the bar, not by the drawing taking it. The LIST's control still
+    // goes — this view has no narrow list column to fold.
+    /html\.view-full #list-toggle \{ display: none; \}/.test(baseSrc) &&
+    !/html\.view-full #sidebar-toggle/.test(baseSrc.replace(/\/\*[\s\S]*?\*\//g, '')));
   r.ok('...and the fold stands down, because a rail over the board is a stranding',
     unfolded);
   r.ok('...and going back to List restores both the fold and the sidebar',
@@ -655,7 +664,7 @@ r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() 
     (() => {
       const css = baseSrc.replace(/\/\*[\s\S]*?\*\//g, '');
       const at = css.indexOf('@media (min-width: 1024px) {');
-      const view = css.indexOf('html.view-full #sidebar');
+      const view = css.indexOf('html.view-full #index-view');
       return at >= 0 && view > at;
     })());
 }

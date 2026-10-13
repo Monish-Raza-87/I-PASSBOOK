@@ -458,11 +458,27 @@ three for free, and no drawing can show a set the others do not.
   either one is a plausible-looking repair that puts the bug back.
 - **A view that needs the workspace takes it.** At ≥1024px `#index-view` is a fixed
   `--list-w` rail (400px), and nine columns of cards — or a grid — do not fit in 400px.
-  `html.view-full` makes the pane take the whole row and steps the sidebar, the
-  "No IR selected" placeholder and both fold toggles aside. **It is one class for both
-  views**, not one each: "this drawing takes the whole row" is a single fact, and two
-  parallel classes would be two places for it to drift. Everything behind it is
-  desktop-scoped, so a phone (where both views are already a full screen) is untouched.
+  `html.view-full` makes the pane take the whole row and steps the "No IR selected"
+  placeholder and the **list's** fold toggle aside. **It is one class for both views**,
+  not one each: "this drawing takes the whole row" is a single fact, and two parallel
+  classes would be two places for it to drift. Everything behind it is desktop-scoped, so
+  a phone (where both views are already a full screen) is untouched.
+
+  ⚠ **IT DOES NOT HIDE THE SIDEBAR, AND BETWEEN 2026-10-11 AND 2026-10-13 IT DID.** The
+  rule `html.view-full #sidebar { display: none }` stepped the Service Desk bar aside with
+  the placeholder, on the reasoning that a drawing which takes the whole row should not be
+  sharing it. That was my reasoning, never the owner's, and on 2026-10-13 he met its
+  consequence: he scrolled the Grid down to IR001 and could not reach the Service Desk at
+  all — *"in grid view the left bar of service desk is not visible. Even grid view should
+  have left tab of service desk with option to expand or collapse it."* The bar is how a
+  person moves between Insights, the Log, the FAQ and a ticket; a view that removes it is a
+  view with no way out of itself. So it stays, and the **room** is taken by choice instead
+  — its own toggle folds it to the 56px rail, which is the same fold the IR list has and
+  the same one a maximised ticket already lives with. `#sidebar-toggle` therefore stays on
+  screen in these two views too: a fold control is precisely what a view this wide needs.
+  Measured at 1440×900: sidebar 232px → 44px on fold, grid pane 1208px → 1396px.
+  `smoke-ui.mjs` now asserts the **absence** of that rule (against comment-stripped source)
+  as well as the three `html.view-full` rules that remain.
 - **The Board** is nine columns from `BOARD_COLUMNS`, with the column's FULL count in its
   header and every card drawn. Its own sideways scroll bar is described below.
 
@@ -556,7 +572,8 @@ manager"*, after meeting v90's bottom sheet):
   the screen on every side**, so the drawing behind it stays visible, which is the request
   (*"show me the IR above screen, center placed, but smaller size than screen"*). The
   definite-height chain is the same `max-height` + `min-height: 0; overflow-y: auto` pair as
-  everywhere else, so the window's own activity list scrolls rather than the page.
+  everywhere else, so the window's own contents scroll rather than the page (measured at
+  1440×900: `scrollHeight` 1158 against `clientHeight` 582).
 - **The scrim** — one dimming layer, `rgb(0 0 0 / 0.45)` plus the app's one sanctioned
   `backdrop-filter: blur(2px)` (in industrial.css's `@supports` block, beside
   `.inward-options-modal`). It is a **child of `#ir-dock`** and not a `<body>` sibling, because
@@ -573,16 +590,41 @@ manager"*, after meeting v90's bottom sheet):
   `detail ? true : (full && !desktop)` — an IR is a thing you are working on, and the panes
   that keep the desktop split (dashboard, analyser, FAQ) are views *of* the list. The back
   arrow is the *same predicate*, because that is all it is: the way back from a fold.
-- **The sheet is not a second ticket screen.** Its activity list is `buildTimeline()` +
-  `renderTimelineInto()`, the exact pair the passbook's own `#ir-timeline` calls; its quick
-  actions write through the single store writer `patchIRState()`, whose tail already repaints
-  the drawing underneath; and they render **only** when `canEditSection()` passes, or a
-  view-only user is shown controls that cannot work. **Expand calls `goTicket()`** — the
-  existing passbook and no new one. All three drawings open it (`openDock()`), and it works on
-  a phone.
-- **The rightmost button is not labelled "Save".** He called it *save and close*, and there is
-  nothing to save: the sheet holds no editable fields and every quick action has already
-  written. The button closes, and it cannot lose a change.
+- **The window is not a second ticket screen.** ⚠ **What it holds changed on 2026-10-13.**
+  v91's sheet carried the ticket's **activity list** (`buildTimeline()` +
+  `renderTimelineInto()`) over two one-field quick-sets (`dockSetStatus`,
+  `dockSetPriority`). He rejected all three of those in one sentence: *"the data it is
+  showing in small tab is not correct, it should show 'Allot CAPS' options and 'Report'
+  details to give IR's overview. Activity log is not required."* So the window now holds
+  exactly two blocks, in that order:
+
+  | Block | Built by | Shown when |
+  |---|---|---|
+  | **Allot CAPS** | `triageFieldsHTML(ir, 'dock-')` | `canTriage()` |
+  | **Report** | `intakeBodyHTML(ir)` | always — read-only by construction |
+
+  Both are the **app's own builders**, the same two calls the full-screen Allot CAPS dialog
+  and the 📋 Report tab make — `smoke-board.mjs` pins that the dock defines *neither*, so
+  there is no second copy of the form or the report to drift. The window passes an **id
+  prefix** (`'dock-'`) so the two forms can never collide in the DOM; the dialog's own ids are
+  byte-identical to before, which is what keeps every suite naming `triage-assignee` reading
+  true. `applyTriage(irNumber, p)` likewise takes the prefix, and takes the **ticket** rather
+  than reading `currentIR` — a window can be up on a ticket the passbook is not holding.
+  **Expand still calls `goTicket()`** — the existing passbook and no new one. All three
+  drawings open it (`openDock()`), and it works on a phone (measured at 390×844: the same
+  centred window, 366×633, strictly inside the viewport).
+- **Saving from the window does not close it.** The dialog's Save calls
+  `closeTriageModal()` because the dialog *is* the task; the window's calls `renderDock()`
+  instead, because the window is a place he is working and closing it on every field would
+  lose his worklist position. Both go through the one `applyTriage()`.
+- ⚠ **The window's Save needs `width: auto`.** `.btn` is `width: 100%` — a form button fills
+  its column — so a Save inside `.dock-allot-foot` renders as a full-width yellow **band**
+  unless the footer escapes it, which `justify-content: flex-end` cannot do on its own (a
+  flex item starts at its auto width, and here that width *is* 100%). `.btn-sm` does not
+  escape it either: it sizes height, padding, font-size and radius only. The dialog's footer
+  carries the same escape (`.inward-options-foot .btn`), and `smoke-board.mjs` pins the
+  window's. This was found by looking at a screenshot, not by geometry — every measurement
+  said "a button in the footer".
 - **Not a route.** `#/tickets/IR470` still means *full screen* — it is what a nudge and an
   emailed link land on — so the dock never writes the hash and the hash never opens a sheet.
   A consequence, stated rather than discovered: **browser Back does not close the window.**

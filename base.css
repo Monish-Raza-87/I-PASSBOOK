@@ -3069,17 +3069,27 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      Two parallel classes would have been two places for the same fact to drift, so
      there is one, and setListView() is its only writer.
 
-     Choosing either view: the sidebar and the "No IR selected" placeholder step
-     out, and this pane stops being a fixed 400px column. The fold controls go with
-     them — on these drawings there is no list to fold, and the rail would cover
-     them up. Switching back to List brings everything straight back. */
-  html.view-full #sidebar { display: none; }
+     Choosing either view: the "No IR selected" placeholder steps out and this pane
+     stops being a fixed 400px column, so the drawing gets everything the list would
+     have had. Switching back to List brings the placeholder straight back.
+
+     ⚠ THE SIDEBAR USED TO STEP OUT WITH THEM, AND NO LONGER DOES. That was my
+     reasoning, never the owner's, and on 2026-10-13 he met its consequence: he
+     scrolled the Grid down to IR001 and could not reach the Service Desk at all —
+     *"in grid view the left bar of service desk is not visible. Even grid view should
+     have left tab of service desk with option to expand or collapse it."* The bar is
+     how a person moves between Insights, the Log, the FAQ and a ticket; a view that
+     removes it is a view with no way out of itself. So it stays, and the ROOM is taken
+     by choice instead — its own toggle folds it to the 56px rail, which is the same
+     fold the IR list has and the same one a maximised ticket already lives with.
+     `#sidebar-toggle` therefore stays on screen here too: a fold control is precisely
+     what a view this wide now needs. */
   html.view-full #index-view { flex: 1 1 auto; width: auto; }
   html.view-full #detail-placeholder { display: none; }
-  /* Both fold controls go: the list has no left to give up, and the sidebar's own
-     toggle would sit there switching a sidebar that is not on screen. */
-  html.view-full #list-toggle,
-  html.view-full #sidebar-toggle { display: none; }
+  /* The LIST's fold control still goes: this view has no narrow list column to fold.
+     The pane holds the drawing itself, and folding THAT to the list's rail would
+     replace the board or the grid with a count. */
+  html.view-full #list-toggle { display: none; }
 
   /* ── The IR list's fold: to a rail, never to nothing ──────
      The service-desk sidebar folds to a 56px rail and keeps a way back; the IR

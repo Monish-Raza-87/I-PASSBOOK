@@ -123,17 +123,23 @@
     // The strip along the bottom holding every ticket he has opened, and the sheet
     // above it. Seven labels, and not one of them is a new vocabulary: 'openFull' is
     // the whole passbook, 'close' is the close, 'minimise' is what the second press
-    // on the same button does. The quick actions deliberately carry NO keys — they
-    // read "Stage" and "Priority", the same two words the Triage dialog has used
-    // since it was written, and a translated "Stage" on this sheet beside an English
-    // one in the dialog would be two names for one control.
+    // on the same button does.
+    //
+    // The window's two blocks carry a heading each and NOTHING inside them is keyed:
+    // Allot CAPS is the form the full-screen dialog draws, from the same builder
+    // (triageFieldsHTML), and its field labels — "Status", "Assigned to", "Priority",
+    // "Category" — are the English words that dialog has used since it was written. A
+    // translated "Stage" on this sheet beside an English one in the dialog would be two
+    // names for one control. The Report block is the client's own submission, which is
+    // in whatever language the customer typed it in.
     'dock.restore':        'Bring {ir} back',
     'dock.openPanel':      'Open in a panel',
     'dock.openFull':       'Open the whole passbook',
     'dock.close':          'Close this ticket',
     'dock.minimise':       'Minimise',
-    'dock.activity':       'Activity',
-    'dock.showing':        '{n} of {total}',
+    'dock.allot':          'Allot CAPS',
+    'dock.report':         'Report',
+    'dock.save':           'Save',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             'Move to {column} →',
@@ -574,8 +580,12 @@
     'dock.openFull':       'पूरा पासबुक खोलें',
     'dock.close':          'यह टिकट बंद करें',
     'dock.minimise':       'छोटा करें',
-    'dock.activity':       'गतिविधि',
-    'dock.showing':        '{total} में से {n}',
+    // "Allot CAPS" stays English: it is a proper noun in this app and the full-screen
+    // dialog's own heading is the same two words. The field labels inside it are
+    // English for the same reason — see the note on the English table above.
+    'dock.allot':          'Allot CAPS',
+    'dock.report':         'रिपोर्ट',
+    'dock.save':           'सहेजें',
 
     // ── Moving a card on, by hand ────────────────────────────────────────────
     'move.to':             '{column} पर ले जाएँ →',

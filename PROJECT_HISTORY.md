@@ -514,7 +514,126 @@ the screen on every side, **not** full-screen; the strip one row, scrolled by it
 
 ---
 
-## 8. Future Roadmap (Planned)
+## 8. The bar that came back, and the window that was showing the wrong thing (2026-10-13)
+
+v91 shipped in the morning and the owner lived with it for a few hours. Two notes came back,
+and they are two unrelated faults — one a rule I had written on my own reasoning, one a
+window whose contents he had already told me were wrong.
+
+His words:
+
+> *"On loggin in I landed into Grid but view and it is scrolling down till IR001 but in grid
+> view the left bar of service desk is not visible. Even grid view should have left tab of
+> service desk with option to expand or collapse it. When clicking on any IR, it opens a small
+> tab making the behind screen blurr. only when we click on 'open the whole passbook' button,
+> the whole IR opens, understood but the data it is showing in small tab is not correct, it
+> should show 'Allot CAPS' options and 'Report' details to give IR's overview. Activity log is
+> not required."*
+
+### The Service Desk bar belongs to every view
+
+`html.view-full` — the single class meaning *"this drawing takes the workspace"* — had carried
+`#sidebar { display: none }` since v89. The reasoning was mine and it sounded fine: a board or a
+grid that takes the whole row should not be sharing it with a navigation bar.
+
+It is wrong, and the way it is wrong is worth writing down. `renderLayout()` never touches
+`#sidebar`, so the deletion was the whole fix — one rule, in one file. But the *reason* is the
+part that generalises: **the Service Desk bar is how a person moves between Insights, the Log,
+the FAQ and a ticket.** A view that removes it is a view with no way out of itself. Scrolling
+the Grid down to IR001 put him in exactly that position.
+
+So the bar stays, and the **room** is taken by choice instead — its own `#sidebar-toggle` folds
+it to the 56px rail, which is the same fold the IR list has and the same one a maximised ticket
+already lives with. `#sidebar-toggle` therefore stays on screen in these two views as well: a
+fold control is precisely what a view this wide now needs. `#list-toggle` still goes — the pane
+holds the drawing, and folding *that* to the list's rail would replace a grid with a count.
+
+Measured at 1440×900 in a real browser: sidebar `232×900` at `x=0`, `display: flex`;
+`#index-view` `1208×856` at `x=232` — exactly the viewport less the bar. Folding: sidebar 232 →
+**44**, grid 1208 → **1396**. Unfolding returns both.
+
+⚠ Below 1024px `#sidebar-toggle` is `display: none` (it is the bottom bar there, and
+`width: 100%` would fight a rail width), so a probe that calls `.click()` on it at 390px will
+still set `rail-collapsed` and read as *"the fold does nothing on a phone"*. That is the probe
+clicking a hidden button, not a defect. It caught me once.
+
+### The window now shows the ticket, not the ticket's history
+
+v91's sheet carried the ticket's **activity list** over two one-field quick-sets. He had asked
+for a window; what he got was a third view of the same timeline. His replacement, in one
+sentence: the **Allot CAPS** options and the client's **Report** — *"to give IR's overview"* —
+and **no** activity log.
+
+The tempting build is a window-shaped form: fewer fields, tighter, "just for the window". That
+is a second form, kept in step with the first by nothing, and it is the failure this codebase
+already pins against. So the window renders **the app's own two builders**:
+
+| Block | Builder | Shown when |
+|---|---|---|
+| **Allot CAPS** | `triageFieldsHTML(ir, 'dock-')` | `canTriage()` |
+| **Report** | `intakeBodyHTML(ir)` | always — read-only by construction |
+
+Getting one builder to serve two places is the whole of the work, and the mechanism is an **id
+prefix**. `triageFieldsHTML(ir, p)`, `applyTriage(irNumber, p)`, the assignee combo
+(`renderAssigneeOptions`, `closeAssigneeOptions`, `onAssigneeKeydown`, `pickTriageAssignee`,
+`commitAssigneeInput`), `wireTriageCategoryRows` and the three `assigneeOptionHtml` row
+handlers all take `p`, defaulting to `''`. The dialog's prefix is the empty string, so **every
+id it has ever had is byte-identical** — which is what keeps every existing suite that names
+`triage-assignee` reading true, and is why the prefix was chosen over renaming anything.
+
+Two things fell out of doing it honestly:
+
+- **`applyTriage` now takes the ticket, not `currentIR`.** A window can be up on a ticket the
+  passbook is not holding, and writing the passbook's ticket would be a silent wrong-field bug.
+- **Saving from the window does not close it.** The dialog calls `closeTriageModal()` because
+  the dialog *is* the task; the window calls `renderDock()` instead, because closing on every
+  field would lose his worklist position. One `applyTriage`, two tails.
+
+Deleted with it, and each with a tombstone comment saying why: `loadDockTimeline()`,
+`dockSetStatus()`, `dockSetPriority()`, the `[data-dock-set]` handler in `wireDock()`, and the
+`dock.activity` / `dock.showing` i18n keys in both tables. ⚠ The removal also removed a waste
+that was invisible: the window used to fetch the ticket's **400-entry audit log** on every
+open, for a list nobody had asked for. `loadActivityLog()` is now called only when the
+passbook is actually showing that ticket, so **a window opens without a single round trip**.
+
+### The Save button that was a yellow band
+
+Caught by looking, not by measuring. `.btn` is `width: 100%` — a form button fills its column —
+so the window's Save rendered as a full-width yellow **band** inside `.dock-allot-foot`.
+`justify-content: flex-end` cannot shrink it back: a flex item starts at its auto width, and
+here that width *is* 100%. `.btn-sm` does not escape it either — it sizes height, padding,
+font-size and radius and nothing else. The dialog's own footer already carried the escape
+(`.inward-options-foot .btn { width: auto }`); the window needed the same line.
+
+**Every geometry probe said "a button in the footer."** Only the screenshot said band. This is
+the second time this project has paid for judging a layout without rendering it, and the reason
+`smoke-board.mjs` now pins the escape is that no probe can be written that would have.
+
+### Verification
+
+All 37 suites green (4,400+ cases). Browser probes at 1440×900 and 390×844 via CDP `--eval`
+(Chrome runs `--hide-scrollbars`, so geometry is the instrument for anything about scrolling):
+
+- **Item A:** sidebar visible and `display: flex` in Grid; fold 232 → 44 and grid 1208 → 1396;
+  `#list-toggle` and the placeholder correctly hidden; `html.view-full` set.
+- **Item B:** window `896×630` at (272, 135) in 1440×900 — inside the viewport on all four
+  sides and smaller than the screen on every side. All six Allot CAPS fields present plus the
+  Save; `.dock-report` carries 13 `.intake-row`; `#dock-timeline` and `.dock-quick` gone; the
+  scrim covers the viewport with `backdrop-filter: blur(2px)`; `#ir-dock` at `z-index: 80`;
+  `#index-view` still `display: flex` behind it; `.dock-sheet-body` scrolls (1158 vs 582) and
+  `scrollTop` takes. Phone 390×844: the **same** centred window, `366×633` at (12, 106),
+  `scrollWidth === innerWidth`.
+- **The three states still hand off:** three tabs docked → maximise → `#index-view` hidden,
+  `#detail-view` fills the row, hash `#/tickets/IR409`, `#ir-activity` present (the existing
+  passbook, not a new one), and **three tabs still in the strip**; clicking a *different* tab
+  puts the maximum up as a window in **one** click with all three tabs intact.
+
+**Shipped as v92.** Frontend only — `backend.gs` untouched, `API_VERSION` did not move and
+**no Apps Script paste is owed.**
+
+---
+
+## 9. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -190,9 +190,16 @@ ok('...so CR is never shown a blank box on a ticket that has a status',
 head('saving Allot CAPS re-stamps the clock only for a real movement');
 
 const triageAs = async (ir, pick) => {
-  // The ticket goes into the list as well as the detail view, because that is what
-  // a real open is: `currentIR` is a reference into `allIRs`, so the merge that runs
+  // The ticket goes into the list, because that is what a real open is: `applyTriage`
+  // takes the IR NUMBER and looks the record up in `allIRs`, so the merge that runs
   // inside the save is what refreshes the row the NEXT save compares against.
+  //
+  // ⚠ It no longer takes the ticket FROM `currentIR`, and that is the point of the
+  // change: since 2026-10-13 the same save serves the full-screen dialog AND a docked
+  // ticket's window, and a window can be up on a ticket the passbook is not holding. A
+  // save that read `currentIR` would write Allot CAPS onto the wrong IR the moment
+  // someone allotted from a window. `currentIR` is still set here because the app keeps
+  // it for its own reasons, but nothing below depends on it.
   T.allIRs = [ir];
   T.currentIR = ir;
   Object.keys(fake).forEach(k => delete fake[k]);
@@ -202,7 +209,7 @@ const triageAs = async (ir, pick) => {
   fake['triage-category'] = fakeEl(pick.category || 'CRASH');
   fake['triage-subcategory'] = fakeEl(pick.subCategory || '');
   fake['triage-subcat-note'] = fakeEl('');
-  await T.applyTriage();
+  await T.applyTriage(ir.irNumber);
   return T.irState[ir.irNumber] || {};
 };
 

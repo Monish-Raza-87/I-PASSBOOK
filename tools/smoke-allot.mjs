@@ -40,6 +40,7 @@ const T = loadApp(`
   TRIAGE_LABEL, TRIAGE_SHORT, CATEGORY_LABELS,
   priorityLabel, priorityWindow,
   assigneeRows, assigneeMatches, assigneeOptionHtml, assigneeDisplayName, resolveTriageAssignee,
+  triageFieldsHTML,
   setUser: u => { currentUser = u; },
   get teamDirectory() { return teamDirectory; },
   setDirectory: e => { teamDirectory = e; },
@@ -89,19 +90,29 @@ r.ok('the admin UI label was renamed with it, and the short code was not',
 // ── 2. The "Assigned to" picker ───────────────────────────────────────────────
 r.head('the assigned-to picker is a combo, and its store value is an email');
 
+// ⚠ THESE FOUR ASSERT THE BUILT FORM, NOT THE SOURCE. They used to grep app.js for the
+// literal markup, which stopped being a thing that exists on 2026-10-13: the four fields
+// are built by triageFieldsHTML(ir, p) and drawn in TWO places — the full-screen dialog
+// and a docked ticket's window — with the ids carrying an id PREFIX. A source grep would
+// now have to allow for `${id('triage-assignee')}`, which is a regex that asserts the
+// shape of my string building rather than the shape of the control. Reading the form
+// the dialog actually gets is both truer and stronger: it is the same call the app makes.
+const formHtml = T.triageFieldsHTML(
+  { irNumber: 'IR700', status: '', category: '', done: [] }, '');
+
 r.ok('the box is a combobox pointing at its list',
-  /id="triage-assignee"[^>]*role="combobox"/.test(appJs) &&
-  /aria-controls="triage-assignee-list"/.test(appJs));
+  /id="triage-assignee"[^>]*role="combobox"/.test(formHtml) &&
+  /aria-controls="triage-assignee-list"/.test(formHtml));
 r.ok('the stored value lives in a hidden input of its own',
-  /id="triage-assignee-email"/.test(appJs) && /<input type="hidden" id="triage-assignee-email"/.test(appJs));
+  /id="triage-assignee-email"/.test(formHtml) && /<input type="hidden" id="triage-assignee-email"/.test(formHtml));
 r.ok('the list is a listbox, and it is built from the one option builder',
-  /id="triage-assignee-list"[^>]*role="listbox"/.test(appJs) &&
-  /list\.innerHTML = assigneeOptionHtml\(query\);/.test(appJs));
+  /id="triage-assignee-list"[^>]*role="listbox"/.test(formHtml) &&
+  /list\.innerHTML = assigneeOptionHtml\(query, p\);/.test(appJs));
 r.ok('applyTriage reads the hidden email, never the typed name',
-  /const email\s+= document\.getElementById\('triage-assignee-email'\)\?\.value/.test(appJs) &&
-  !/const email\s+= document\.getElementById\('triage-assignee'\)\?\.value/.test(appJs));
+  /const email\s+= el\('triage-assignee-email'\)\?\.value/.test(appJs) &&
+  !/const email\s+= el\('triage-assignee'\)\?\.value/.test(appJs));
 r.ok('the old native select is gone, so there is exactly one control',
-  !/<select class="form-input" id="triage-assignee">/.test(appJs));
+  !/<select class="form-input" id="triage-assignee">/.test(formHtml));
 
 r.head('the filter is a function of its argument, not of the DOM');
 const dir = T.teamDirectory;
@@ -134,8 +145,11 @@ r.ok('Unassigned is FIRST, before any name',
   htmlAll.indexOf('combo-item') < htmlAll.indexOf('>Unassigned<') &&
   htmlAll.indexOf('>Unassigned<') < htmlAll.indexOf(dir[0].name),
   htmlAll.slice(0, 220));
+// Two arguments now — the email, and the id prefix of the form the row belongs to. The
+// dialog's prefix is the empty string, so this is the dialog's own row and it resolves to
+// the empty email exactly as it always did.
 r.ok('the Unassigned row resolves to the empty email, not a person',
-  /pickTriageAssignee\(''\)/.test(htmlAll));
+  /pickTriageAssignee\('',''\)/.test(htmlAll), (htmlAll.match(/onclick="[^"]*"/) || [''])[0]);
 r.ok('a filtered list still offers the way back',
   T.assigneeOptionHtml('rav').indexOf('>Unassigned<') !== -1);
 r.ok('an unmatched query says so instead of showing an empty box',
@@ -169,12 +183,12 @@ r.ok('and no assignee displays nothing, which is what the placeholder is for',
   T.assigneeDisplayName('') === '' && T.assigneeDisplayName(null) === '');
 
 r.head('the picker cannot lie about what a save would write');
-r.ok('blur commits a resolvable entry', /function commitAssigneeInput\(\)/.test(appJs) &&
+r.ok('blur commits a resolvable entry', /function commitAssigneeInput\(p = ''\)/.test(appJs) &&
   /if \(r\) \{[\s\S]{0,120}hidden\.value = r\.email;/.test(appJs));
 r.ok('...and REVERTS the rest, so the box never shows a name the save ignores',
   /box\.value = assigneeDisplayName\(hidden \? hidden\.value : ''\)/.test(appJs));
 r.ok('Escape closes without changing the value',
-  /e\.key === 'Escape'[\s\S]{0,60}closeAssigneeOptions\(\)/.test(appJs));
+  /e\.key === 'Escape'[\s\S]{0,60}closeAssigneeOptions\(p\)/.test(appJs));
 r.ok('Enter is only swallowed when a row is actually highlighted',
   /e\.key === 'Enter'[\s\S]{0,160}assigneeSuggestIndex >= 0 && items\[assigneeSuggestIndex\]/.test(appJs));
 

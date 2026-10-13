@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v91';
+const APP_VERSION = 'v92';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -4420,13 +4420,20 @@ function goTicket(irNumber) {
    that I can minimise and keep multiple IRs on my worklist on screen minimised."
 
    THE ONE RULE IS THAT THIS IS NOT A SECOND TICKET SCREEN. The sheet carries no
-   editable section, and its activity list is built by buildTimeline() and drawn by
-   renderTimelineInto() — the app's only container-parameterised renderer, already
-   shared by the passbook's timeline and the History modal. That pairing is the
-   whole of the reuse argument: the list on this sheet IS the list on the passbook,
-   from the same two functions. Expand is goTicket(), the existing full-screen path.
-   The moment a fact here needs a renderer of its own, that fact belongs on the
-   passbook instead, and putting it here is how the two drift apart.
+   editable SECTION — no A–G checklist, no evidence upload, no draft — and every block
+   in it is drawn by a builder the passbook already uses: the Allot CAPS form by
+   triageFieldsHTML(), the client's report by intakeBodyHTML(), both saved through the
+   same applyTriage() and renderIntake() the full screens use. Expand is goTicket(), the
+   existing full-screen path. So the rule is not "nothing may be here"; it is "nothing
+   may be built here". The moment a fact here needs a renderer of its own, that fact
+   belongs on the passbook instead, and putting it here is how the two drift apart.
+
+   ⚠ WHAT IS IN IT CHANGED ON 2026-10-13. It was a one-line overview over the ticket's
+   activity list; he read it with 454 tickets in front of him and said *"the data it is
+   showing in small tab is not correct, it should show 'Allot CAPS' options and 'Report'
+   details to give IR's overview. Activity log is not required."* The timeline is gone —
+   it was also the only part of this window that cost a network read, so a window now
+   opens with nothing fetched at all.
 
    NOT A ROUTE, on purpose. `#/tickets/IR470` still means FULL SCREEN: it is what an
    emailed link and a nudge land on, and neither should start opening a floating
@@ -4441,7 +4448,6 @@ function goTicket(irNumber) {
 
 let dockIRs = [];   // irNumbers, left to right — the strip's order
 let dockOpen    = null; // the one ticket whose sheet is up, or null
-let dockSeq     = 0;    // makes a slow fetch for an abandoned sheet a no-op
 
 // WHICH DRAWING IS LIT — the one question, asked in one place. A row or tile is lit
 // when the screen is currently about that ticket, and there are exactly two ways
@@ -4488,10 +4494,13 @@ function renderDock() {
   // Opening a sheet changes no layout, so renderLayout() does not run — the drawing
   // underneath has to be told whose sheet just came up. See litTicket().
   applyTicketMark();
-  // The timeline is the one part that is fetched rather than computed from what is
-  // already in memory, so it is loaded after the frame is up rather than before it:
-  // the facts, the stage and the quick actions are all readable immediately.
-  if (dockOpen) loadDockTimeline(dockOpen);
+  // The window's Allot CAPS form shows Sub-category only under REPAIR, and that is kept
+  // honest by a `change` listener on the Category select. The dialog wires its own copy
+  // in openTriageModal(); this rebuilds the window from a string, so the listener has to
+  // be put back on every render. Nothing else in the window is fetched or wired — the
+  // report and the facts are already in memory, which is why a window now opens without
+  // a single round trip.
+  if (dockOpen) wireTriageCategoryRows('dock-');
 }
 
 // THE ONE WRITER of `body.has-dock` AND of `#ir-dock.has-window`.
@@ -4616,26 +4625,31 @@ function dockSheetHTML(irNumber) {
     age ? `<span title="${escHtml(ageTitle(ir, age))}">${escHtml(ageLabel(age))}</span>` : '',
   ].filter(Boolean);
 
-  // THE QUICK ACTIONS ARE GATED, or a view-only user is shown two controls that
-  // cannot work. It is the same gate the board's own "move on" button passes, and
-  // the same one the Triage dialog is behind — status, assignee and priority are one
-  // person's job, so they are one permission.
-  const quick = canTriage() ? `
-    <div class="dock-quick">
-      <label class="dock-field">
-        <span class="dock-field-lbl">Stage</span>
-        <select class="list-select" data-dock-set="status">
-          ${IR_STATUS_VALUES.map(v => `<option value="${escHtml(v)}"${v === stage ? ' selected' : ''}>${escHtml(statusLabel(v))}</option>`).join('')}
-        </select>
-      </label>
-      <label class="dock-field">
-        <span class="dock-field-lbl">Priority</span>
-        <select class="list-select" data-dock-set="priority">
-          <option value=""${!ir.priority ? ' selected' : ''}>${escHtml(t('list.priorityNone'))}</option>
-          ${TICKET_PRIORITIES.map(v => `<option value="${escHtml(v)}"${v === ir.priority ? ' selected' : ''}>${escHtml(priorityLabel(v))}</option>`).join('')}
-        </select>
-      </label>
-    </div>` : '';
+  // ── WHAT THE WINDOW IS FOR ───────────────────────────────────────────────────
+  // The owner, 2026-10-13: *"the data it is showing in small tab is not correct, it
+  // should show 'Allot CAPS' options and 'Report' details to give IR's overview.
+  // Activity log is not required."*
+  //
+  // So the window carries the two things a person decides a ticket with, and the
+  // timeline that used to fill it is gone. The timeline was the wrong answer twice
+  // over: it is the longest thing about a ticket and the least useful at a glance, and
+  // it cost a network read on every open — it was the only part of this window that was
+  // fetched rather than computed from what the app already holds.
+  //
+  // THE ALLOT FORM IS GATED, or a view-only user is shown five controls that cannot
+  // work. It is the same `canTriage()` the board's "move on" button and the full-screen
+  // dialog pass. The REPORT is not gated, because the passbook's 📋 Report tab has never
+  // been — the client's own words are readable by everyone who can see the ticket at
+  // all (see canViewSection's note on `sec-intake`).
+  const allot = canTriage() ? `
+        <div class="dock-block">
+          <div class="dock-block-head"><span class="dock-block-title">${escHtml(t('dock.allot'))}</span></div>
+          <div class="dock-allot triage-body">${triageFieldsHTML(ir, 'dock-')}</div>
+          <div class="dock-allot-foot">
+            <button type="button" class="btn btn-primary btn-sm"
+                    onclick="applyTriage('${escJsAttr(irNumber)}','dock-')">${escHtml(t('dock.save'))}</button>
+          </div>
+        </div>` : '';
 
   return `
     <section class="dock-sheet" role="dialog" aria-label="${escHtml(irNumber)}">
@@ -4643,12 +4657,11 @@ function dockSheetHTML(irNumber) {
       <div class="dock-sheet-body" tabindex="-1">
         ${subject ? `<p class="dock-subject">${escHtml(subject)}</p>` : ''}
         <div class="dock-facts">${facts.map(f => `<span class="dock-fact">${f}</span>`).join('')}</div>
-        ${quick}
-        <div class="dock-activity-head">
-          <span class="dock-activity-title">${escHtml(t('dock.activity'))}</span>
-          <span class="dock-activity-count" id="dock-timeline-count"></span>
+        ${allot}
+        <div class="dock-block">
+          <div class="dock-block-head"><span class="dock-block-title">${escHtml(t('dock.report'))}</span></div>
+          <div class="dock-report">${intakeBodyHTML(ir)}</div>
         </div>
-        <div class="dock-timeline" id="dock-timeline"></div>
       </div>
     </section>`;
 }
@@ -4711,63 +4724,14 @@ function expandDock(irNumber) {
   goTicket(irNumber);
 }
 
-// The sheet's activity list, which is the passbook's list. Same two functions, same
-// order, same 400-row read; only the element it lands in is different.
-async function loadDockTimeline(irNumber) {
-  const seq = ++dockSeq;
-  const el  = document.getElementById('dock-timeline');
-  if (!el) return;
-  el.innerHTML = `<div class="hist-list"><div class="nudge-empty">Loading…</div></div>`;
-  // Fired together and for the same reason loadActivityLog fires them together: they
-  // are two reads of two different stores, and the slower is the sheet.
-  const mailPromise = fetchIRThreads(irNumber);
-  let entries = [];
-  try { entries = await fetchAuditEntries(irNumber, 400, true); } catch { entries = []; }
-  const mail = await mailPromise.catch(() => []);
-  // Two tickets can have been opened and closed while this was in flight; the seq
-  // is what makes the late answer a no-op rather than a stale list under a new title.
-  if (seq !== dockSeq || dockOpen !== irNumber) return;
-  const node = document.getElementById('dock-timeline');
-  if (!node) return;
-  // The whole list, then sliced here — never by passing the limit in, so the count
-  // can report the TRUE total. "40 of 128" is honest; a bare "40" is not.
-  const all = buildTimeline(irNumber, entries, nudges, 0, mail);
-  renderTimelineInto(node, all.slice(-ACTIVITY_LIMIT), {
-    emptyText: 'No activity recorded yet for this IR.',
-  });
-  const count = document.getElementById('dock-timeline-count');
-  if (count) count.textContent = !all.length ? ''
-    : (all.length > ACTIVITY_LIMIT
-        ? t('dock.showing', { n: ACTIVITY_LIMIT, total: all.length })
-        : String(all.length));
-}
-
-// The stage write, and the ONLY thing in the dock that moves a clock. It is
-// moveOnByHand's shape exactly — including its guard, so re-choosing the stage the
-// ticket is already on is not a movement and must not fake a fresh `statusAt`, which
-// is what "in status 3d" and every overdue limit are measured from.
-//
-// patchIRState already repaints the drawing underneath (it calls applyListFilters),
-// so the row, card or tile behind the sheet changes under it for free.
-async function dockSetStatus(irNumber, stage) {
-  if (!canTriage() || !stage) return;
-  if (canonicalStage((irState[irNumber] || {}).status) === stage) return;
-  await patchIRState(irNumber, {
-    status: stage,
-    statusOwned: true,
-    statusAt: Date.now(),
-    statusBy: myEmail() || 'unknown',
-  });
-  renderDock();
-}
-
-// Priority has no clock and no owner flag, so this is the whole of it — the same
-// patch the Triage dialog sends for the one field.
-async function dockSetPriority(irNumber, priority) {
-  if (!canTriage()) return;
-  await patchIRState(irNumber, { priority: priority || '' });
-  renderDock();
-}
+// ⚠ THERE IS NO `loadDockTimeline` ANY MORE, AND NO `dockSetStatus` / `dockSetPriority`.
+// The window used to carry the passbook's activity list and two one-field quick-sets;
+// it now carries the Allot CAPS form and the client's Report (see dockSheetHTML). The
+// activity list went on the owner's instruction — *"Activity log is not required"* — and
+// the two quick-sets went with it, because Stage and Priority are two of that form's
+// fields now and a ticket must not have two controls that can set the same value and
+// two different save paths to set it through. `dockSeq` went with the timeline: it
+// existed to make a late audit fetch a no-op, and nothing in the window is fetched.
 
 // Bound ONCE, on the element that outlives every repaint. Every control in the strip
 // and the sheet is a [data-dock] button, so one delegated listener covers both and
@@ -4814,14 +4778,6 @@ function wireDock() {
     }
     if (act === 'full')   { expandDock(id);  return; }
     if (act === 'close')  { closeDockTab(id);   return; }
-  });
-  // Change, not input: a select fires `input` on every arrow key while the menu is
-  // still open, and a write per keystroke is a store round trip per keystroke.
-  el.addEventListener('change', e => {
-    const sel = e.target.closest('[data-dock-set]');
-    if (!sel || !dockOpen) return;
-    if (sel.dataset.dockSet === 'status')   dockSetStatus(dockOpen, sel.value);
-    if (sel.dataset.dockSet === 'priority') dockSetPriority(dockOpen, sel.value);
   });
   // Escape MINIMISES. It is the customer door's shape — fire only while there is
   // something to close, so the key is never swallowed on a screen that has nothing
@@ -8722,10 +8678,18 @@ function setListView(mode) {
     pane.classList.toggle('is-grid',  listMode === 'grid');
   }
   // The board draws the same rows across nine columns and the grid draws them as
-  // tiles across the pane, and BOTH need the width: `html.view-full` hides the
-  // sidebar and the "No IR selected" placeholder and lets this pane take the whole
-  // row. Without it a desktop grid would be laid out inside the list's own 400px
-  // column and would be ONE TILE WIDE — the exact opposite of what a grid is for.
+  // tiles across the pane, and BOTH need the width: `html.view-full` steps the
+  // "No IR selected" placeholder aside, drops the list's own fold control and lets
+  // this pane take the whole row. Without it a desktop grid would be laid out inside
+  // the list's own 400px column and would be ONE TILE WIDE — the exact opposite of
+  // what a grid is for.
+  //
+  // ⚠ IT DOES NOT HIDE THE SIDEBAR, AND USED TO. The Service Desk bar stays up in
+  // these two views and folds to its 56px rail by choice instead — see the note on
+  // `html.view-full #index-view` in base.css for why. This comment claimed otherwise
+  // for two days after the rule was deleted, which is exactly how a wrong comment
+  // survives: nothing reads it.
+  //
   // The class is inert below lg — every rule behind it is desktop-scoped — because
   // on a phone both of these views are already a full screen.
   //
@@ -9475,11 +9439,23 @@ function intakeValueHtml(kind, raw) {
 function renderIntake() {
   const body = document.getElementById('sec-intake-body');
   if (!body) return;
-  const ir = currentIR;
-  if (!ir || !ir.irNumber) {
+  if (!currentIR || !currentIR.irNumber) {
     body.innerHTML = '<p class="intake-audit">No IR selected.</p>';
     return;
   }
+  body.innerHTML = intakeBodyHTML(currentIR);
+}
+
+// ⚠ THE REPORT'S MARKUP, BUILT ONCE. It is drawn in two places — the passbook's 📋
+// Report tab, and the docked ticket's window (the owner, 2026-10-13: *"it should show
+// 'Allot CAPS' options and 'Report' details to give IR's overview"*). Two hand-written
+// copies of fourteen rows is how the window would come to show the client something
+// different from what the tab shows, so there is one builder and both call it.
+//
+// It takes the RECORD rather than reading `currentIR`, because the window is not always
+// about the ticket the passbook holds. Read-only by construction: nothing here writes.
+function intakeBodyHTML(ir) {
+  if (!ir || !ir.irNumber) return '<p class="intake-audit">No IR selected.</p>';
 
   // `intake` holds the raw cells for a Sheet-sourced IR. Legacy and demo
   // records have no Sheet row, so fall back to the parsed fields the record does
@@ -9534,8 +9510,7 @@ function renderIntake() {
     : `<p class="intake-audit">No Sheet row for this IR — showing only the fields the app holds. ` +
       `Records from before the app (${iconSvg('legacy')} Legacy) live in the old workbook.</p>`;
 
-  body.innerHTML =
-    `<div class="intake-head">
+  return `<div class="intake-head">
        <p class="intake-note">Read-only — exactly what the client submitted through the Google Form. The app never edits these values.</p>
        ${openLink}
      </div>` +
@@ -9912,12 +9887,12 @@ function openTriageModal() {
   if (!canTriage()) { showToast('You do not have Allot CAPS access — ask an admin to grant it'); return; }
   if (document.getElementById('triage-modal')) return;
   const ir     = currentIR;
-  // The label is a separate argument because the VALUE is a stored key and must
-  // stay exactly as the Sheet wrote it — only the text between the tags is ours.
-  const opt    = (v, sel, label) => `<option value="${escHtml(v)}"${v === sel ? ' selected' : ''}>${escHtml(label == null ? v : label)}</option>`;
   const modal  = document.createElement('div');
   modal.className = 'inward-options-modal';
   modal.id = 'triage-modal';
+  // The rows come from triageFieldsHTML() with the EMPTY prefix, which is what makes
+  // every id in here (`triage-status`, `triage-assignee`, …) exactly what it has always
+  // been. The same builder draws the docked ticket's window with the 'dock-' prefix.
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
@@ -9925,13 +9900,42 @@ function openTriageModal() {
         <button type="button" class="inward-options-close" onclick="closeTriageModal()">&times;</button>
       </div>
       <p class="inward-options-hint">Recorded here in the passbook, not in the client's Google Sheet — the Sheet keeps the customer's original report untouched. Assigning someone sends them a notification.</p>
-      <div class="inward-options-body triage-body">
+      <div class="inward-options-body triage-body">${triageFieldsHTML(ir, '')}</div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" onclick="closeTriageModal()">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyTriage('${escJsAttr(ir.irNumber)}','')">Save</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  wireTriageCategoryRows('');
+}
+
+// ─── THE ALLOT CAPS FORM, BUILT ONCE ──────────────────────────────────────────
+// Four fields and their two conditional children, as a STRING, every id and every
+// inline handler carrying an id PREFIX. There are two places a person allots a ticket
+// — the full-screen dialog above, and a docked ticket's own window — and two
+// hand-written copies of this markup is how the two drift apart the first time a field
+// is added. `p` is '' for the dialog, so nothing it has ever had moves.
+//
+// The prefix travels into the HANDLERS as well as the ids, because the assignee picker
+// is three globals that find their own elements by id. See the note above them.
+function triageFieldsHTML(ir, p = '') {
+  const id  = n => escHtml(p + n);
+  // The prefix as it appears INSIDE a handler's single quotes. escJsAttr() because a
+  // prefix is a string literal in an attribute, and the rule for those is the same here
+  // as anywhere else in this app.
+  const pj  = escJsAttr(p);
+  // The label is a separate argument because the VALUE is a stored key and must stay
+  // exactly as the Sheet wrote it — only the text between the tags is ours.
+  const opt = (v, sel, label) => `<option value="${escHtml(v)}"${v === sel ? ' selected' : ''}>${escHtml(label == null ? v : label)}</option>`;
+  const repair = ir.category === 'REPAIR';
+  return `
         <label class="triage-row"><span>Status</span>
           <!-- The TEN are what this offers and nothing else. An IR holding a
                retired word opens on the stage it now means (canonicalStage), so CR
                sees one honest answer rather than a blank box, and saving writes the
                stage — which is how an old IR is re-aligned, in the app. -->
-          <select class="form-input" id="triage-status">${IR_STATUS_VALUES.map(v => opt(v, canonicalStage(ir.status))).join('')}</select>
+          <select class="form-input" id="${id('triage-status')}">${IR_STATUS_VALUES.map(v => opt(v, canonicalStage(ir.status))).join('')}</select>
         </label>
         <label class="triage-row"><span>Assigned to</span>
           <!-- A type-to-search picker rather than a <select>: the team directory is
@@ -9941,64 +9945,56 @@ function openTriageModal() {
                the visible box holds a NAME, which is what a person reads and
                types, while the store must keep the EMAIL, which is the key every
                notification and permission lookup is done by. -->
-          <div class="combo" id="triage-assignee-combo">
-            <input type="text" class="form-input" id="triage-assignee" autocomplete="off"
+          <div class="combo" id="${id('triage-assignee-combo')}">
+            <input type="text" class="form-input" id="${id('triage-assignee')}" autocomplete="off"
                    spellcheck="false" role="combobox" aria-expanded="false"
-                   aria-controls="triage-assignee-list" aria-label="Assigned to"
+                   aria-controls="${id('triage-assignee-list')}" aria-label="Assigned to"
                    placeholder="Type a name to search…"
                    value="${escHtml(assigneeDisplayName(ir.assignee))}"
-                   oninput="renderAssigneeOptions(this.value)"
-                   onfocus="renderAssigneeOptions(this.value)"
-                   onkeydown="onAssigneeKeydown(event)"
-                   onblur="commitAssigneeInput()" />
-            <input type="hidden" id="triage-assignee-email" value="${escHtml(ir.assignee || '')}" />
-            <div class="combo-list" id="triage-assignee-list" role="listbox" aria-label="Team members"></div>
+                   oninput="renderAssigneeOptions(this.value,'${pj}')"
+                   onfocus="renderAssigneeOptions(this.value,'${pj}')"
+                   onkeydown="onAssigneeKeydown(event,'${pj}')"
+                   onblur="commitAssigneeInput('${pj}')" />
+            <input type="hidden" id="${id('triage-assignee-email')}" value="${escHtml(ir.assignee || '')}" />
+            <div class="combo-list" id="${id('triage-assignee-list')}" role="listbox" aria-label="Team members"></div>
           </div>
         </label>
         <label class="triage-row"><span>Priority</span>
-          <select class="form-input" id="triage-priority">
+          <select class="form-input" id="${id('triage-priority')}">
             <option value="">— None —</option>${TICKET_PRIORITIES.map(v => opt(v, ir.priority || '', priorityLabel(v))).join('')}
           </select>
         </label>
         <label class="triage-row"><span>Category</span>
-          <select class="form-input" id="triage-category">
+          <select class="form-input" id="${id('triage-category')}">
             <option value="">— Choose —</option>${IR_CATEGORIES.map(v => opt(v, ir.category || '', categoryLabel(v))).join('')}
           </select>
         </label>
         <!-- Sub-category exists ONLY under REPAIR. Both rows stay in the DOM and are
              shown/hidden, rather than being added and removed, so the two selects
              never lose the listener wired below by being replaced. -->
-        <label class="triage-row" id="triage-subcat-row"${ir.category === 'REPAIR' ? '' : ' style="display:none"'}>
+        <label class="triage-row" id="${id('triage-subcat-row')}"${repair ? '' : ' style="display:none"'}>
           <span>Sub-category</span>
-          <select class="form-input" id="triage-subcategory">
+          <select class="form-input" id="${id('triage-subcategory')}">
             <option value="">— Choose —</option>${REPAIR_SUBCATEGORIES.map(v => opt(v, ir.subCategory || '', subCategoryLabel(v))).join('')}
           </select>
         </label>
-        <label class="triage-row" id="triage-subcat-note-row"${ir.category === 'REPAIR' && ir.subCategory === REPAIR_OTHERS ? '' : ' style="display:none"'}>
+        <label class="triage-row" id="${id('triage-subcat-note-row')}"${repair && ir.subCategory === REPAIR_OTHERS ? '' : ' style="display:none"'}>
           <span>Mention it</span>
-          <input type="text" class="form-input" id="triage-subcat-note" maxlength="120"
+          <input type="text" class="form-input" id="${id('triage-subcat-note')}" maxlength="120"
                  placeholder="What was repaired?" value="${escHtml(ir.subCategoryNote || '')}" />
-        </label>
-      </div>
-      <div class="inward-options-foot">
-        <button type="button" class="btn" onclick="closeTriageModal()">Cancel</button>
-        <button type="button" class="btn btn-primary" onclick="applyTriage()">Save</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-  wireTriageCategoryRows();
+        </label>`;
 }
 
 // Keeps the two conditional rows honest as the CR changes their mind. The rule is
 // one-directional on purpose: leaving REPAIR CLEARS the sub-category and its note,
 // so a stale "BATTERY" can never ride along under CRASH — which is exactly the kind
 // of value that would silently corrupt the Insights counts later.
-function wireTriageCategoryRows() {
-  const catRow  = document.getElementById('triage-category');
-  const subRow  = document.getElementById('triage-subcat-row');
-  const subSel  = document.getElementById('triage-subcategory');
-  const noteRow = document.getElementById('triage-subcat-note-row');
-  const noteIn  = document.getElementById('triage-subcat-note');
+function wireTriageCategoryRows(p = '') {
+  const catRow  = document.getElementById(p + 'triage-category');
+  const subRow  = document.getElementById(p + 'triage-subcat-row');
+  const subSel  = document.getElementById(p + 'triage-subcategory');
+  const noteRow = document.getElementById(p + 'triage-subcat-note-row');
+  const noteIn  = document.getElementById(p + 'triage-subcat-note');
   if (!catRow || !subRow || !subSel) return;
 
   const sync = () => {
@@ -10029,6 +10025,14 @@ function wireTriageCategoryRows() {
 // is lower-cased and every value handed back is the email. Nothing else in the
 // app may be given a name where an email belongs — the assignment notification
 // and the permission lookup both key on it.
+//
+// ⚠ EVERY FUNCTION HERE TAKES AN ID PREFIX, `p`, DEFAULTING TO ''. These three
+// helpers find their own elements by id, and the Allot CAPS form is rendered in TWO
+// places — the full-screen dialog (`#triage-assignee`) and a docked ticket's window
+// (`#dock-triage-assignee`). The prefix is how one builder serves both without the
+// two copies drifting the first time a field is added. It defaults to '' so the
+// dialog's markup and every id it has ever had are unchanged, which is what keeps the
+// suites that name `triage-assignee` reading true.
 
 // Directory rows, name-sorted, the way the old <select> was ordered — the order
 // people already have in their heads. Sorted on a COPY so the stored array is
@@ -10063,12 +10067,12 @@ function assigneeDisplayName(email) {
 // render handler is what lets a test assert the list's content — above all that
 // the Unassigned row is ALWAYS present, because a picker you cannot type your way
 // back to "nobody" in is a picker that can only ever add assignees.
-function assigneeOptionHtml(query) {
+function assigneeOptionHtml(query, p = '') {
   const rows = assigneeMatches(query);
   const row  = (email, name, sub) => `
     <button type="button" class="combo-item" role="option" data-email="${escJsAttr(email)}"
             onmousedown="event.preventDefault()"
-            onclick="pickTriageAssignee('${escJsAttr(email)}')">
+            onclick="pickTriageAssignee('${escJsAttr(email)}','${escJsAttr(p)}')">
       <span class="combo-item-name">${escHtml(name)}</span>
       ${sub ? `<span class="combo-item-mail">${escHtml(sub)}</span>` : ''}
     </button>`;
@@ -10084,20 +10088,20 @@ function assigneeOptionHtml(query) {
 // parked in the DOM would be wiped by the rebuild.
 let assigneeSuggestIndex = -1;
 
-function renderAssigneeOptions(query) {
-  const list = document.getElementById('triage-assignee-list');
-  const box  = document.getElementById('triage-assignee');
+function renderAssigneeOptions(query, p = '') {
+  const list = document.getElementById(p + 'triage-assignee-list');
+  const box  = document.getElementById(p + 'triage-assignee');
   if (!list) return;
   assigneeSuggestIndex = -1;
-  list.innerHTML = assigneeOptionHtml(query);
+  list.innerHTML = assigneeOptionHtml(query, p);
   list.dataset.open = '1';
   list.style.display = 'block';
   if (box) box.setAttribute('aria-expanded', 'true');
 }
 
-function closeAssigneeOptions() {
-  const list = document.getElementById('triage-assignee-list');
-  const box  = document.getElementById('triage-assignee');
+function closeAssigneeOptions(p = '') {
+  const list = document.getElementById(p + 'triage-assignee-list');
+  const box  = document.getElementById(p + 'triage-assignee');
   assigneeSuggestIndex = -1;
   if (!list) return;
   list.dataset.open = '0';
@@ -10105,8 +10109,8 @@ function closeAssigneeOptions() {
   if (box) box.setAttribute('aria-expanded', 'false');
 }
 
-function assigneeOptionButtons() {
-  const list = document.getElementById('triage-assignee-list');
+function assigneeOptionButtons(p = '') {
+  const list = document.getElementById(p + 'triage-assignee-list');
   if (!list || typeof list.querySelectorAll !== 'function') return [];
   return Array.from(list.querySelectorAll('.combo-item'));
 }
@@ -10120,9 +10124,9 @@ function highlightAssigneeOptions(items) {
 // ↑/↓ move, Enter takes, Escape closes. Enter is only swallowed when a row is
 // actually highlighted: otherwise the key must reach the form, where it is the
 // ordinary "submit" a person expects from a text field.
-function onAssigneeKeydown(e) {
+function onAssigneeKeydown(e, p = '') {
   if (!e) return;
-  const items = assigneeOptionButtons();
+  const items = assigneeOptionButtons(p);
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     if (!items.length) return;
     if (typeof e.preventDefault === 'function') e.preventDefault();
@@ -10134,20 +10138,20 @@ function onAssigneeKeydown(e) {
   } else if (e.key === 'Enter') {
     if (assigneeSuggestIndex >= 0 && items[assigneeSuggestIndex]) {
       if (typeof e.preventDefault === 'function') e.preventDefault();
-      pickTriageAssignee(items[assigneeSuggestIndex].dataset.email || '');
+      pickTriageAssignee(items[assigneeSuggestIndex].dataset.email || '', p);
     }
   } else if (e.key === 'Escape') {
-    closeAssigneeOptions();
+    closeAssigneeOptions(p);
   }
 }
 
-function pickTriageAssignee(email) {
+function pickTriageAssignee(email, p = '') {
   const e = String(email || '').trim();
-  const hidden = document.getElementById('triage-assignee-email');
-  const box    = document.getElementById('triage-assignee');
+  const hidden = document.getElementById(p + 'triage-assignee-email');
+  const box    = document.getElementById(p + 'triage-assignee');
   if (hidden) hidden.value = e;
   if (box) box.value = e ? assigneeDisplayName(e) : '';
-  closeAssigneeOptions();
+  closeAssigneeOptions(p);
 }
 
 // What a typed box resolves to, or null when it resolves to nothing. Null is the
@@ -10171,9 +10175,9 @@ function resolveTriageAssignee(text) {
 // resolves is committed; anything that does not is REVERTED to whatever the
 // hidden input already holds, so the box can never display a name the save would
 // not honour — the one failure that would look like it worked.
-function commitAssigneeInput() {
-  const box    = document.getElementById('triage-assignee');
-  const hidden = document.getElementById('triage-assignee-email');
+function commitAssigneeInput(p = '') {
+  const box    = document.getElementById(p + 'triage-assignee');
+  const hidden = document.getElementById(p + 'triage-assignee-email');
   if (!box) return;
   const r = resolveTriageAssignee(box.value);
   if (r) {
@@ -10182,22 +10186,29 @@ function commitAssigneeInput() {
   } else {
     box.value = assigneeDisplayName(hidden ? hidden.value : '');
   }
-  closeAssigneeOptions();
+  closeAssigneeOptions(p);
 }
 
 function closeTriageModal() { document.getElementById('triage-modal')?.remove(); }
 
-async function applyTriage() {
-  if (!currentIR) return;
-  const irNumber = currentIR.irNumber;
-  const status   = document.getElementById('triage-status')?.value     || '';
+// ⚠ ONE SAVE, TWO FORMS. `p` is the id prefix of whichever Allot CAPS form is being
+// saved — '' for the full-screen dialog, 'dock-' for a docked ticket's window — and the
+// ticket is passed in rather than read from `currentIR`, because a window can be up on
+// a ticket that is not the one the passbook is holding. Everything below it is the same
+// write, the same two mandatory checks and the same notification on both paths; a
+// second save function is how the two would come to disagree about what is required.
+async function applyTriage(irNumber, p = '') {
+  const ir = allIRs.find(r => r.irNumber === irNumber);
+  if (!ir) return;
+  const el       = n => document.getElementById(p + n);
+  const status   = el('triage-status')?.value     || '';
   // The assignee's key is the HIDDEN input, not the box a person types in: the
   // box holds a name to read and the store holds an email to mail and gate by,
   // and applyTriage must never be handed the former.
-  const email    = document.getElementById('triage-assignee-email')?.value || '';
-  const priority = document.getElementById('triage-priority')?.value   || '';
-  const category = document.getElementById('triage-category')?.value   || '';
-  const prev     = String(currentIR.assignee || '').toLowerCase();
+  const email    = el('triage-assignee-email')?.value || '';
+  const priority = el('triage-priority')?.value   || '';
+  const category = el('triage-category')?.value   || '';
+  const prev     = String(ir.assignee || '').toLowerCase();
   const member   = teamPeople().find(d => String(d.email).toLowerCase() === email.toLowerCase());
 
   // Category is MANDATORY. It is the one triage field the list filter and the
@@ -10209,13 +10220,13 @@ async function applyTriage() {
     return;
   }
   const isRepair = category === 'REPAIR';
-  const subCategory = isRepair ? (document.getElementById('triage-subcategory')?.value || '') : '';
+  const subCategory = isRepair ? (el('triage-subcategory')?.value || '') : '';
   if (isRepair && !subCategory) {
     showToast('Choose a Sub-category for a REPAIR');
     return;
   }
   const subCategoryNote = (isRepair && subCategory === REPAIR_OTHERS)
-    ? (document.getElementById('triage-subcat-note')?.value || '').trim()
+    ? (el('triage-subcat-note')?.value || '').trim()
     : '';
   // OTHERS is the escape hatch from the nine components: it exists so CR can name a
   // fault the list does not cover. Saving it empty turns the hatch into a blank, and
@@ -10240,11 +10251,14 @@ async function applyTriage() {
   // and comparing the raw word would read that as a change on every single save —
   // stamping a fresh `statusAt` and wiping the real time-in-status of exactly the
   // old tickets the fold-in is meant to carry forward.
-  if (status && status !== canonicalStage(currentIR.status)) {
+  if (status && status !== canonicalStage(ir.status)) {
     patch.statusAt = Date.now();
     patch.statusBy = myEmail() || 'unknown';
   }
-  closeTriageModal();
+  // The dialog closes itself on Save. The dock's window does NOT: it is the ticket's own
+  // window, it is redrawn below so its head badges and its form reflect what was just
+  // written, and closing it would take away the one thing the save was about.
+  if (!p) closeTriageModal();
   await patchIRState(irNumber, patch);
   // The category decides which sections apply, and Allot CAPS is where it is set —
   // so the tabs have to be re-decided here, not only when a ticket is opened.
@@ -10259,7 +10273,14 @@ async function applyTriage() {
   // of applyCategoryApplicability() is one of these two.
   applySectionAccessGating();
   showToast('Allot CAPS saved');
-  loadActivityLog(irNumber);
+  // Redraw the window first so the ticket's own badges (stage, priority) and its form
+  // show what was just saved rather than what it looked like a moment ago.
+  if (p) renderDock();
+  // Only the passbook's timeline is refreshed, and only when the passbook is the thing
+  // showing this ticket. Called unconditionally it fetched 400 audit entries for a
+  // ticket nobody had open — a store round trip per save from the window, for a list
+  // that is not built any more.
+  if (currentIR && currentIR.irNumber === irNumber) loadActivityLog(irNumber);
 
   // Assignment notifies through the comment machinery already in place — the
   // bell, the unread badge, the 90s poll and the email all work unchanged.

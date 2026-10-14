@@ -75,6 +75,12 @@
     // element itself.
     'app.fullName':        'INDRONES PRODUCT AFTER SALES SERVICE BOOK',
 
+    // The accessible name of the replay control on the sign-in screen's brand panel. It
+    // says what the button DOES rather than merely labelling it, because it is invisible
+    // to anyone who is not looking for it — the tooltip is the only thing that tells a
+    // pointer user what the faint glyph in the corner is for.
+    'intro.replay':        'Replay the intro film',
+
     // ── Navigation ───────────────────────────────────────────────────────────
     'nav.serviceDesk':     'Service desk',
     'nav.administration':  'Administration',
@@ -162,6 +168,11 @@
     'section.close':        'Mark Section {letter} completed',
     'section.closed':       'Section closed',
     'section.serverStale':  'The server has not been updated for this section yet. Nobody but an administrator can save here until an administrator pastes the current backend.',
+    // v95 — edit is the default for every staff account, so a read-only section now has
+    // exactly one ordinary cause: a department switched it off. The note NAMES the
+    // department, because an admin bypasses the check and can never see this pane.
+    'section.editOff':        'Editing is switched off for this section. {dept} is set so that its people cannot edit here. You can still read it, comment on it and download it.',
+    'section.editOffTooltip': 'Editing is switched off for this section by {dept}.',
 
     // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
     'status.open':          'Open',
@@ -546,6 +557,7 @@
     // ── The app itself ───────────────────────────────────────────────────────
     'app.name':            'I-PASSBOOK',
     'app.fullName':        'INDRONES PRODUCT AFTER SALES SERVICE BOOK',
+    'intro.replay':        'इंट्रो फ़िल्म दोबारा चलाएँ',
 
     // ── Navigation ───────────────────────────────────────────────────────────
     'nav.serviceDesk':     'सेवा डेस्क',
@@ -615,6 +627,8 @@
     'section.close':        'सेक्शन {letter} को पूर्ण चिह्नित करें',
     'section.closed':       'सेक्शन बंद',
     'section.serverStale':  'अभी सर्वर पर यह सेक्शन अपडेट नहीं हुआ है। जब तक कोई एडमिनिस्ट्रेटर नया बैकएंड पेस्ट नहीं करता, एडमिनिस्ट्रेटर के अलावा कोई यहाँ सहेज नहीं सकता।',
+    'section.editOff':        'इस सेक्शन में संपादन बंद है। {dept} के लिए यह सेट किया गया है, इसलिए उसके लोग यहाँ संपादन नहीं कर सकते। आप इसे पढ़ सकते हैं, टिप्पणी कर सकते हैं और डाउनलोड कर सकते हैं।',
+    'section.editOffTooltip': 'इस सेक्शन में संपादन {dept} द्वारा बंद किया गया है।',
 
     // ── The workflow stages (IR_STATUS_VALUES) ────────────────────────────────
     // Read through status(), so these are the words on every badge, pill and board

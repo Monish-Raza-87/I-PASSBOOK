@@ -1132,16 +1132,25 @@
    it, so it must not borrow the word "retrying". */
 .autosave-note[data-state="failed"] { color: var(--ink-red-7); font-weight: var(--weight-semibold); }
 
-/* ── Two notes that explain a control the app is withholding ──────────────
-   .section-server-note — the deployed backend does not carry this section yet
-                          (Costing, 2026-10-13), so the pane is read-only.
-   .move-gate-note      — the board's move-on offer is withheld until a
-                          prerequisite section is closed.
-   Both NAME the thing instead of leaving a control silently missing: a withheld
-   button with no sentence beside it reads as a bug, not as a rule. The server
-   note is amber because it is an instruction to a person; the gate note is quiet
-   because it is a statement about the ticket. */
-.section-server-note {
+/* ── Three notes that explain a control the app is withholding ────────────
+   .section-server-note   — the deployed backend does not carry this section yet
+                            (Costing, 2026-10-13), so the pane is read-only.
+   .section-edit-off-note — a department has switched edit off for this section
+                            (v95), so the pane is read-only for that person. It
+                            NAMES the department, because an admin bypasses the
+                            check and would otherwise never see this state at all.
+   .move-gate-note        — the board's move-on offer is withheld until a
+                            prerequisite section is closed.
+   All three NAME the thing instead of leaving a control silently missing: a
+   withheld button with no sentence beside it reads as a bug, not as a rule. The
+   server and edit-off notes are amber because both are an instruction to a person;
+   the gate note is quiet because it is a statement about the ticket.
+   ⚠ A painter looks its own note up BY CLASS, so these must stay distinct — two
+   painters sharing one class would delete each other's element. And the two amber
+   notes are mutually exclusive by construction: applySectionAccessGating shows the
+   server note and stands the edit-off note down, so they never stack. */
+.section-server-note,
+.section-edit-off-note {
   margin: 0.5rem 0 0.75rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--st-paused-bd);

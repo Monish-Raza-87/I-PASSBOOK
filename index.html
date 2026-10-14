@@ -289,6 +289,34 @@
         <p class="landing-full" id="landing-full" data-i18n="app.fullName">INDRONES PRODUCT AFTER SALES SERVICE BOOK</p>
       </header>
 
+      <!-- ── THE REPLAY CONTROL ──
+           The intro film plays once per VERSION, and a plain refresh deliberately does not
+           replay it — so demonstrating the app to somebody meant clearing site data or
+           waiting for the next release. This is the way back in: a small control that
+           restarts the film on a deliberate click. The owner asked for it on 2026-10-14,
+           and asked for it in these words: *"somewhere not easily visible, clickable on
+           purpose only."* Faintness is therefore the whole of the hiding, never
+           display:none — it is a real control and a keyboard has to be able to reach it.
+
+           IT SITS OUTSIDE .brand-stage ON PURPOSE. The stage is aria-hidden decoration, and
+           a focusable control inside it would be one no screen reader could reach. It also
+           carries no new attribute on #auth-container — tools/render-fixture.mjs and
+           tools/build-ui-options.mjs slice this page out of the file from that tag by EXACT
+           STRING, so an added attribute there would silently ship a fixture of a page that
+           does not exist.
+
+           THE GLYPH IS AN EMPTY SPAN, like every other one in this file. index.html never
+           runs initIcons(), so an <svg> written here would be a drawing that exists in
+           exactly one place and cannot be reached by the icon table — which is what
+           smoke-ui.mjs's "ONE icon source" assertion exists to forbid. app.js paints it
+           from ICON_PATHS ('replay') when it wires this button, which happens on a screen
+           app.js is already running for. Its accessible name comes from data-i18n-aria,
+           so it is still a named button with no glyph at all in a JS-off page. -->
+      <button type="button" class="brand-replay" id="brand-replay"
+              data-i18n-aria="intro.replay" data-i18n-title="intro.replay">
+        <span class="brand-replay-glyph"></span>
+      </button>
+
     </div><!-- /.auth-brand-panel -->
 
     <!-- ── THE CORNER ──

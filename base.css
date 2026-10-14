@@ -325,6 +325,65 @@ code, pre, kbd { font-family: var(--font-mono); }
   align-items: center;
 }
 
+/* ── THE REPLAY CONTROL ────────────────────────────────────────────────────────
+   Restarts the intro film on a deliberate click, because it plays once per VERSION and
+   a refresh does not bring it back. The owner asked for it on 2026-10-14 in these words:
+   *"somewhere not easily visible, clickable on purpose only."*
+
+   FAINTNESS IS THE ENTIRE HIDING MECHANISM, and that is deliberate rather than lazy:
+   `display: none` or `visibility: hidden` would take a real control away from a keyboard
+   and a screen reader, and this is a control somebody has to be able to find on purpose.
+   opacity 0.22 leaves it visible if you look, and `:focus-visible` brings it fully back so
+   tabbing to it is not tabbing to a ghost.
+
+   It is positioned against the PANEL, not the stage, so it survives the two layouts that
+   matter: at ≥1024px the panel is the left half and it sits in that half's lower corner,
+   and on a phone the panel is a short block above the doors and it sits under the head.
+   The panel is the only ancestor both of those have in common — see index.html for why
+   it is not inside the aria-hidden stage.
+
+   ⚠ ITS INK COMES FROM THE PANEL'S GROUND, NOT FROM THE FORM'S, and this was measured
+   rather than reasoned about. `--ink-gray-7` is the ink of the FORM's surface, and on the
+   left half that surface is nowhere: each ground repaints the panel (`--ind-black` under
+   `dark` and `yellow`, `--ind-paper-alt` under `light` and `horizon`) and the two fused
+   grounds let a screen-wide ramp show through. In light theme `--ink-gray-7` is a dark
+   grey, so on the `dark` ground it was #383838 at 22% over #0b0b0b — a dark grey on black,
+   which is nothing at all — and the same token on the `light` ground was the only one of
+   the six that happened to read.
+
+   SO EACH GROUND DECLARES `--panel-ink` and the fallback below is the case where no ground
+   block applies: under 1024px, where the panel has no ground of its own and takes the page's.
+   That fallback is right in all four phone combinations, checked by looking at each one —
+   the narrow ramp is bright yellow where the control lands, and light theme's own
+   `--ink-gray-7` is a dark grey; dark theme's is a light one on a dark field. */
+.brand-replay {
+  position: absolute;
+  right: 0.75rem;
+  bottom: 0.75rem;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--panel-ink, var(--ink-gray-7));
+  opacity: 0.22;
+  cursor: pointer;
+  transition: opacity 160ms var(--ease), color 160ms var(--ease);
+}
+.brand-replay:hover,
+.brand-replay:focus-visible { opacity: 1; }
+.brand-replay:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+/* The slot is an EMPTY SPAN in index.html and app.js fills it from ICON_PATHS — the
+   same one-source rule every other glyph in the app follows. So the box is sized on
+   the span AND on the svg inside it: the svg carries `.icon`, whose own rule is a
+   relative `width: 1em`, and an em inside a grid-placed span is not the 15px this
+   control was drawn at. */
+.brand-replay-glyph,
+.brand-replay-glyph .icon { display: block; width: 15px; height: 15px; }
+
 /* ── THE PANEL'S GROUND — TWO BUILT, ONE SHIPPED ───────────────────────────────
    THE OWNER ASKED TO SEE BOTH BEFORE ONE IS CHOSEN, so both are built and the
    `data-ground` attribute on the panel picks between them. When he has looked, the
@@ -365,6 +424,7 @@ code, pre, kbd { font-family: var(--font-mono); }
 @media (min-width: 1024px) {
   .auth-brand-panel[data-ground="dark"] {
     --panel-node-core: var(--ind-white);
+    --panel-ink: var(--ind-white);
     background: var(--ind-black);
   }
   .auth-brand-panel[data-ground="dark"] .brand-still {
@@ -373,6 +433,7 @@ code, pre, kbd { font-family: var(--font-mono); }
 
   .auth-brand-panel[data-ground="light"] {
     --panel-node-core: var(--ind-paper-alt);
+    --panel-ink: var(--ind-black);
     background: var(--ind-paper-alt);
     border-right: 1px solid var(--ind-paper-rule);
   }
@@ -439,6 +500,7 @@ code, pre, kbd { font-family: var(--font-mono); }
      dressed by the shared LIT RIGHT HALF block below. */
   .auth-brand-panel[data-ground="yellow"] {
     --panel-node-core: var(--ind-white);
+    --panel-ink: var(--ind-white);
     background: var(--ind-black);
   }
   .auth-brand-panel[data-ground="yellow"] .brand-still {
@@ -511,6 +573,7 @@ code, pre, kbd { font-family: var(--font-mono); }
   }
   .auth-brand-panel[data-ground="horizon"] {
     --panel-node-core: var(--ind-paper-alt);
+    --panel-ink: var(--ind-black);
     background: var(--ind-paper-alt);
   }
   .auth-brand-panel[data-ground="horizon"] .brand-still {
@@ -813,6 +876,22 @@ code, pre, kbd { font-family: var(--font-mono); }
      master, on white node cores. */
   .auth-brand-panel[data-ground^="fuse"] {
     --panel-node-core: var(--ind-white);
+    /* ⚠ DARK INK HERE, AND IT IS THE OPPOSITE OF WHAT THE RAMPS LOOK LIKE ELSEWHERE.
+       The panel on these two grounds has no background at all — the ramp is painted
+       screen-wide on #auth-container — so the ink cannot be read off the ground block,
+       it has to be read off THE RAMPS THEMSELVES, measured at the corner the control
+       actually occupies (the panel's lower-right, both of them sampled off a render at
+       1280x900 and at 1024x900, which agree):
+
+         --ind-fuse-feather  lands on #d5a300, the amber,  not the near-black end
+         --ind-fuse-silver   lands on #f8f7ef, the 50.5% off-white step
+
+       Both are LIGHT, so both take the dark ink. The near-black is at the ramp's 0-45%,
+       which is the panel's LEFT edge; the control is 53% along a 96deg line, and because
+       the panel's share of the width and the line's own tilt both scale with the viewport
+       that reading holds at every desktop width rather than only at the one it was
+       measured at. */
+    --panel-ink: var(--ind-black);
   }
   .auth-brand-panel[data-ground^="fuse"] .brand-still {
     background-image: url("assets/brand-panel-dark.png");
@@ -998,8 +1077,21 @@ code, pre, kbd { font-family: var(--font-mono); }
   [data-theme="dark"] .auth-brand-panel[data-ground="light"],
   [data-theme="dark"] .auth-brand-panel[data-ground="horizon"] {
     --panel-node-core: var(--ind-white);
+    --panel-ink: var(--ind-white);
     background: var(--ind-black);
     border-right: 1px solid var(--surface-gray-1);
+  }
+
+  /* ⚠ THE FUSED GROUNDS INVERT BACK IN THE DARK THEME, and this is the one place where
+     `--panel-ink` is not the light-theme answer. The two ramps above are set on
+     `#auth-container` under `:root:not([data-theme="dark"])` — in the dark theme they are
+     not painted at all, and the panel stands on the dark theme's own field instead, which
+     was sampled at #1a1713 on both fused grounds. The block above gives them the DARK ink
+     because in light theme their corner is the bright end of the ramp; with nothing of
+     that ramp left the same value measures #161411 on #1a1713, which is a difference of
+     four and no control at all. */
+  [data-theme="dark"] .auth-brand-panel[data-ground^="fuse"] {
+    --panel-ink: var(--ind-white);
   }
   [data-theme="dark"] .auth-brand-panel[data-ground="light"] .brand-still,
   [data-theme="dark"] .auth-brand-panel[data-ground="horizon"] .brand-still {

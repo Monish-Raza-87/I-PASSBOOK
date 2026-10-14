@@ -358,7 +358,7 @@ window.FAQ_CONTENT = {
           "blocks": [
             {
               "t": "p",
-              "html": "Everyone signed in can read and comment on every ticket and its six sections, and\nthe Overview. That is the same for all accounts."
+              "html": "Everyone signed in can read and comment on every ticket and its seven sections, and\nthe Overview. That is the same for all accounts, staff and customers alike — a\ncustomer is the one exception to the next answer, and sees only their own company's\ntickets."
             }
           ]
         },
@@ -367,16 +367,24 @@ window.FAQ_CONTENT = {
           "blocks": [
             {
               "t": "p",
-              "html": "Editing. Whether you can change a section is set per account, per department, and\na section can be given to more than one department so that more than one team can\nwork on it."
+              "html": "Nothing, by default. Every account can edit every section. That is deliberate: the\napp keeps a full history of every change and an administrator can restore any\nprevious version, so a mistake is traceable and reversible rather than preventable."
+            },
+            {
+              "t": "p",
+              "html": "It can still be taken away. A department can switch editing off for a section, and a\nsection switched off by any one of your departments stays off, whatever your other\ndepartments say."
             }
           ]
         },
         {
-          "q": "I can read a section but the Save button will not work.",
+          "q": "I can read a section but I cannot change anything.",
           "blocks": [
             {
               "t": "p",
-              "html": "Then that section has not been granted to a department you belong to. It is yours\nto read and comment on, not to change. Ask an administrator if you should have it."
+              "html": "Then a department you belong to has editing switched off for that section, and the\nline above the form names which one. It is still yours to read, comment on and\ndownload. Ask an administrator if you should be able to change it."
+            },
+            {
+              "t": "p",
+              "html": "If the line instead says the server has not been updated, that is a different thing —\nrestarting the app will not help, and an administrator has to publish the current\nbackend."
             }
           ]
         },
@@ -385,7 +393,7 @@ window.FAQ_CONTENT = {
           "blocks": [
             {
               "t": "p",
-              "html": "Allot CAPS — Customer Relations and Management. It is a separate permission from\nsection editing: a person can be able to work a section without being able to\nchange the stage the ticket is at."
+              "html": "Allot CAPS — Customer Relations and Management. It is a separate permission from\nsection editing: a person can be able to work a section without being able to\nchange the stage the ticket is at, and switching section editing off never affects\nit."
             }
           ]
         }

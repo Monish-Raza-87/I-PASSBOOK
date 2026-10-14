@@ -822,7 +822,137 @@ under `sec-d`, and the gate that is Triage-overridable — are recorded in
 
 ---
 
-## 10. Future Roadmap (Planned)
+## 10. Edit for everyone, a switch that takes it away, and a film you can replay (2026-10-14)
+
+### What he asked for
+
+Three asks, and only the first two are this release:
+
+> *"By default all users will have view and edit access of all the sections … restricting
+> edit permission is not a good thing for us as of now … Nonetheless, we have the
+> functionality to change accesses and in future if we find its need, we will do so."*
+
+> *"let us give edit access to all employees for now with functionality to revoke edit
+> permission if required at any later point of time … our department grid remains relevant
+> at the same time we have control button in our hand."*
+
+> *"a replay button for the intro video on the sign-in page"* — a refresh does not replay
+> the film, and he wants it to play first when he is introducing the app to someone.
+> Placed, at his word, *"over the left panel, sitting somewhere not easily visible,
+> clickable on purpose only."*
+
+The third ask — a **Company & Contact register** to replace the duplicated IR-derived
+company dropdown — is **v96**, held until he sends the company list only he can give.
+The split is deliberate: one paste should cover v94 and v95 together rather than two.
+
+### ⚠ The trap that shaped the whole design
+
+**Nothing in this codebase could represent a denial.** Every reader of a department's
+rights was truthiness-only — `departmentCapabilities`, `getEffectiveAccess` — so
+"switch a section off for these people" had no encoding at all. Worse, two writers would
+have erased any attempt to bolt one on:
+
+- `seedDepartments` was an **upsert that deleted** every section key of a named
+  department its own mapping did not reproduce. A revoke stored inside `grants` would be
+  wiped by the next re-seed and the department would quietly get edit back.
+- `saveDepartment` **replaces the whole record**, so an ordinary Save is the write-side
+  twin of the same trap.
+
+Both are defeated by one placement: **the revoke is a sibling key on the department
+record, not a value inside `grants`.** Neither the seed's loop nor a Save that does not
+mention it can reach it. `revokes[s] === true` means *for the people in this department,
+edit on section `s` is off*; absent key, absent map and `{}` all mean "takes nothing
+away", which is also why the change needed **no migration** — `revokes` starts absent
+everywhere, which reads as edit on all seven.
+
+### The rule that makes the owner's own use case work
+
+**Deny wins.** Two departments, one switching Section F off and one not, and the person
+loses edit on Section F. Without that, adding someone to a revoking department would do
+nothing while they held any other, and *"switch one person off"* — the thing he actually
+asked for — would not work at all. The one honest limitation is the other direction:
+department-only **can** switch one person off and **cannot** switch one person back on.
+If that is ever hit, the fix is a per-person allow-override, deliberately not built.
+
+### The half that is invisible to whoever is testing it
+
+An **admin bypasses `canEdit` entirely.** A pane whose edit a department has switched off
+looks perfectly normal to him and is dead for everybody else — this repo's recurring
+failure, and undetectable from the admin's side. So `getMyAccess` gained **`revokedBy`**
+(`{ "sec-f": ["Production"] }`), **explanatory only** — the gate is still `permissions`,
+where the section has already arrived as `'view'`. The affected person gets a one-line
+note in the pane naming the department, and the Close tooltip names it too; the admin
+gets the mirror of the same fact as an `edit off: Section F` suffix on the department
+card, since he can never feel it on the pane. Both are **suppressed when nobody is
+named** — detectability is not attribution, and only the server may say *who* switched
+it off.
+
+### The load-bearing ordering
+
+`getEffectiveAccess` builds each section as `'view'` **before** its `try` and raises it
+to `'edit'` **inside** it. That was tidiness when the default was a read; the default is
+now a *write*, so the `catch` is the only thing between an unreadable `access.json` and a
+company-wide edit grant. A refactor that hoisted the loop out of the `try` — which would
+look like a simplification — would fail open. `smoke-backend.mjs` pins the order, not
+just the words. The frontend's own fallback stays view-only for the same reason.
+
+`saveDepartment` also gained a rule of its own: **absence is not consent.** A shell
+cached from before the flip posts section `grants` and never mentions `revokes`; reading
+that silence as `{}` would silently restore edit to everyone in the department. Present
+but empty **replaces**; absent is **refused** outright.
+
+### The seed's last destructive write is gone
+
+`seedDepartments` is now **add-only** — it creates what is missing and touches nothing
+else, not `revokes`, not `triage`, not `active` — matching the philosophy its companion
+`seedMemberships()` has documented since it was written. Re-running it can no longer take
+edit away from anyone or hand it back, and the report says so in words and points at the
+real control. `SEED_GRANTS` is **kept in the source, labelled `HISTORICAL — no longer
+read`**: it is the only in-repo record of what the pre-v95 model granted, so it is the
+rollback reference, and deleting it would destroy that. `TRIAGE_DEPARTMENTS` stays live —
+the seed still uses it on create.
+
+### The replay control, and the bug only a measurement could find
+
+`paintBrandPanel()` plays the film once per **version**; a refresh deliberately does not
+replay it. The replay is a small button inside the panel, at `opacity: .22`, full on
+`:hover`/`:focus-visible`, still a real focusable control — a deliberate click beats
+reduced-motion, because an explicit replay is consent in a way an autoplay is not. The
+play sequence was extracted into `playBrandFilm()` so the replay and the first paint run
+**the same code**, and the wire-up sits **before** the early returns so it works on a
+device that has already seen the film.
+
+⚠ **It shipped invisible, and reading the CSS said it was fine.** `.brand-replay` took
+its ink from `--ink-gray-7` — the ink of the **form's** surface — and on the left half
+that surface is nowhere: each ground repaints the panel, and on the `dark` ground the
+token resolved to `#383838` at 22% over `#0b0b0b`, which is nothing at all. Of the six
+grounds exactly one happened to read. The fix is a `--panel-ink` custom property
+**declared per ground**, with `--ink-gray-7` as the below-1024px fallback where the panel
+has no ground of its own; the two fused grounds take dark ink in the light theme and
+**invert back** under `[data-theme="dark"]`, where their ramps are not painted at all.
+Every one of the six grounds × two themes, plus the four phone combinations, was then
+**sampled off a render** — a ring pixel differing from its local ground by roughly
+0.22 × (ink − ground) — rather than judged by reading the sheet.
+
+### Verification
+
+`node tools/smoke-all.mjs` green across all 37 suites, with the access suites **rewritten
+deliberately** rather than loosened: the default is now all-edit, a revoke takes one away,
+and deny-wins is its own named case. `smoke-store` grew the keystone — revoke `sec-d`
+through the real store, prove `restoreField` is refused, **re-run the seed and prove the
+revoke survives** — which is the whole design in one test. The `render-fixture` departments
+fixture was still speaking the pre-v95 shape (`grants: {}`); a fixture inventing an API the
+server no longer has renders perfectly while describing a server that is gone, so it now
+posts a full `revokes` boolean map.
+
+**Shipped as v95.** Frontend first, as always. The backend paste is **owed** — and it is
+more urgent than usual, because a department Save on a **pre-v95** backend silently wipes
+`grants` and turns off `triage`. The paste goes into **both** `/exec` deployments as a
+**New version**, with the primary still ending `jQXatfT/exec`, and is confirmed by `ping`.
+
+---
+
+## 11. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

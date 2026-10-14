@@ -327,7 +327,7 @@ divergent copy of the intake facts. That guard is why the panel is safe to make
 writable at all.
 
 ### Authorization — Triage, not a department
-Editing the Overview is gated on the **`Triage`** flag, not on department grants —
+Editing the Overview is gated on the **`Triage`** flag, not on the department revokes —
 "who owns the ticket header" is one question, and CR held `sec-a` edit before. A
 department may triage while editing no section at all; that is exactly what CR and
 Management get. See [10 — Auth & Access Model](10 - Auth & Access Model.md).

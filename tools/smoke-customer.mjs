@@ -286,11 +286,25 @@ r.ok('triage is off — the Overview board is a staff surface', eff.triage === f
 r.ok('no departments, so no grant can be reached through the membership map',
   Array.isArray(eff.departments) && eff.departments.length === 0);
 
+// ⚠ THIS FLIPPED IN v95 and the assertion is now the OPPOSITE of what it was. Edit used to
+// be granted department by department, so a staff account with no editable department came
+// out 'view' on everything. Since v95 edit is the DEFAULT — every staff account can edit
+// every section, and no department is needed to get it. What this suite cares about is the
+// CONTRAST, which is unchanged and is the whole point of the row: staff and customer are
+// different roles, and this loop is the last place the two are described side by side.
 const staffEff = JSON.parse(a.call("JSON.stringify(getEffectiveAccess('" + STAFF + "'))"));
-r.ok('a staff account is unchanged — view on everything, and no company',
+r.ok('a staff account is the other role — EDIT on everything, and no company',
   staffEff.role === 'user' && staffEff.customerOf === '' &&
-  ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-f', 'sec-g'].every(s => staffEff.permissions[s] === 'view'),
+  ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-f', 'sec-g'].every(s => staffEff.permissions[s] === 'edit'),
   JSON.stringify(staffEff.permissions));
+// ...and the customer's 'none' above is therefore not a smaller permission level. It is a
+// different word for a different role: 'none' is refused by canView, so a customer is not
+// a staff member who is merely switched off. If the two ever collapse into one another,
+// this pair of assertions is where it shows.
+r.ok('...so "none" for a customer is a role, not a revoked staff member',
+  ['sec-b', 'sec-c', 'sec-d', 'sec-e', 'sec-f', 'sec-g'].every(s => eff.permissions[s] === 'none') &&
+  staffEff.permissions['sec-b'] === 'edit',
+  { customer: eff.permissions['sec-b'], staff: staffEff.permissions['sec-b'] });
 
 const admEff = JSON.parse(a.call("JSON.stringify(getEffectiveAccess('" + ADMIN + "'))"));
 r.ok('the admin still bypasses everything', admEff.role === 'admin' && admEff.customerOf === '');

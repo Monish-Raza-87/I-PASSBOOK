@@ -1,18 +1,33 @@
-// Smoke test for the access model: view + comment for everyone, edit from
-// departments, admins bypass everything.
+// Smoke test for the access model: EDIT for every staff account, an off-switch per
+// department, customers a separate role, admins bypassing everything.
 //
 //   node tools/smoke-access.mjs
 //
-// The owner's rule is two levels only — "view and comment are for everyone, i.e.
-// comment comes with view, and edit comes with access provided". This suite is
-// the executable form of that sentence.
+// ⚠ THE MODEL INVERTED IN v95 AND THIS FILE WAS REWRITTEN WITH IT. It used to open
+// with "view + comment for everyone, edit from departments" and build its central
+// fixture as a staff account with 'view' everywhere. That profile is now what a person
+// whose sections have all been switched OFF looks like — it is the RARE end of the
+// range, not the ordinary one. The owner's instruction of 2026-10-14 was: *"by default
+// all users will have view and edit access of all the sections … let us give edit
+// access to all employees for now with functionality to revoke edit permission if
+// required at any later point of time."* So the two fixtures below are inverted, and
+// the assertions that hung off the old one are rebuilt rather than reworded.
 //
-// The most valuable assertion here is the LAST one. `myAccess()` returns a
-// fallback while getMyAccess is still in flight (first paint, or a transient
-// backend failure). That fallback has to fail CLOSED on writes and OPEN on reads:
-// a disabled Save button is recoverable, an unauthorised write is not. Getting it
-// backwards is a silent, invisible, security-shaped bug — nothing about the UI
-// would look wrong.
+// WHERE THE RULE ACTUALLY LIVES. The resolution of departments into a permission map —
+// including DENY WINS, the rule that one department switching a section off beats every
+// department that leaves it on — happens in the BACKEND, in getEffectiveAccess(). This
+// suite is the frontend's half: given a resolved map, does every control answer it the
+// same way. The resolution itself is proved against the real store in smoke-store.mjs
+// (the keystone there revokes sec-d on a department and reads the map back) and in
+// smoke-backend.mjs (the shape of departmentCapabilities). Nothing here re-implements it.
+//
+// The most valuable assertion here is still the fallback one. `myAccess()` returns a
+// fallback while getMyAccess is still in flight (first paint, or a transient backend
+// failure). That fallback has to fail CLOSED on writes and OPEN on reads: a disabled
+// Save button is recoverable, an unauthorised write is not. ⚠ And the stakes ROSE in
+// v95: the real profile is now edit-everywhere, so a fallback that guessed edit would
+// turn "permissions have not arrived yet" into "everyone can write", for the whole
+// company, for the duration of an outage.
 
 import fs from 'node:fs';
 import { loadApp, makeReporter } from './harness.mjs';
@@ -23,22 +38,37 @@ const appJs = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
 const T = loadApp(`
   SECTION_IDS, OVERVIEW_KEY, ADMIN_EMAILS, isAdmin, myAccess,
-  canViewSection, canCommentSection, canEditSection, canTriage,
+  canViewSection, canCommentSection, canEditSection, canTriage, sectionRevokedBy,
   setUser: u => { currentUser = u; },
   clearUserAccess: () => { if (currentUser) delete currentUser.access; },
 `);
 
 const SECTIONS = T.SECTION_IDS;
 
-// A plain staff account: view everywhere, edit nowhere, no Triage. This is what
-// every account looks like the moment the admin creates it.
-const plainUser = () => {
+const permsOf = level => {
   const perms = {};
-  SECTIONS.forEach(s => { perms[s] = 'view'; });
+  SECTIONS.forEach(s => { perms[s] = level; });
   perms[T.OVERVIEW_KEY] = 'view';
-  return { name: 'Plain', email: 'plain@indrones.com', sessionToken: 't',
-           access: { role: 'user', permissions: perms, departments: [], triage: false } };
+  return perms;
 };
+
+// THE ORDINARY ACCOUNT, as of v95: an admin creates it and it can edit every section
+// straight away, with no department and no grant of any kind. That is the default the
+// owner asked for, and it is what the fixture below is named for.
+const staffUser = (over = {}) => ({
+  name: 'Staff', email: 'staff@indrones.com', sessionToken: 't',
+  access: Object.assign({ role: 'user', permissions: permsOf('edit'),
+                          departments: [], triage: false, revokedBy: {} }, over),
+});
+
+// THE OTHER END: every section switched off by a department. Built by flipping the whole
+// map rather than by naming one section, so a later section that is added to SECTION_IDS
+// arrives already revoked here instead of silently becoming editable in the fixture.
+const revokedUser = (over = {}) => ({
+  name: 'Revoked', email: 'revoked@indrones.com', sessionToken: 't',
+  access: Object.assign({ role: 'user', permissions: permsOf('view'),
+                          departments: ['QC'], triage: false, revokedBy: {} }, over),
+});
 
 // ── Who is an admin ───────────────────────────────────────────────────────────
 r.head('the admin list');
@@ -63,96 +93,105 @@ r.ok('and no Customer Relations seed row remains',
   !/name:\s*'Customer Relations'/i.test(appJs),
   (appJs.match(/[^\n]*Customer Relations[^\n]*/) || [''])[0]);
 
-// ── Everyone gets view + comment, everywhere ──────────────────────────────────
-r.head('a plain account: view + comment on all seven sections');
-T.setUser(plainUser());
+// ── Everyone gets view + comment + EDIT, everywhere ───────────────────────────
+r.head('a brand-new staff account: view + comment + EDIT on all seven sections');
+T.setUser(staffUser());
 r.ok('the section list is the seven survivors', SECTIONS.length === 7 && SECTIONS.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', SECTIONS);
 r.ok('canView all six', SECTIONS.every(s => T.canViewSection(s)),
   SECTIONS.filter(s => !T.canViewSection(s)));
 r.ok('canComment all six (comment comes WITH view)',
   SECTIONS.every(s => T.canCommentSection(s)),
   SECTIONS.filter(s => !T.canCommentSection(s)));
-r.ok('canEdit NONE of them', !SECTIONS.some(s => T.canEditSection(s)),
-  SECTIONS.filter(s => T.canEditSection(s)));
-r.ok('and cannot Triage', T.canTriage() === false);
+// ⚠ INVERTED IN v95. This asserted `canEdit NONE of them`, and that sentence was true
+// for exactly as long as edit came from a department. It now comes from the account
+// being a staff account at all — so an account with NO departments edits everything,
+// and an assertion that it does not would be the old model re-asserted by accident.
+r.ok('and canEdit ALL of them — the v95 default needs no department and no grant',
+  SECTIONS.every(s => T.canEditSection(s)),
+  SECTIONS.filter(s => !T.canEditSection(s)));
+// The one thing the default does NOT carry. Edit on all seven sections is not edit on
+// the ticket header: status, assignee and priority are a separate axis with its own
+// department flag, and if the two ever collapsed a brand-new account could re-status
+// every IR in the building.
+r.ok('and still cannot Triage — the default is seven sections, not the ticket header',
+  T.canTriage() === false);
 // Retired ids are not sections any more, and no permission map carries them — so a
 // stale bookmark or a cached shell asking for one gets a clean "no", not a crash.
 r.ok('the retired ids are not in the section list',
   ['sec-a', 'sec-h', 'sec-i'].every(s => !SECTIONS.includes(s)), SECTIONS);
 
-// ── Edit arrives from a department, and only on the granted section ───────────
-r.head('a department grants edit on exactly its own sections');
-T.setUser({
-  email: 'iqc@indrones.com', sessionToken: 't',
-  access: {
-    role: 'user',
-    permissions: Object.assign({}, plainUser().access.permissions, { 'sec-c': 'edit' }),
-    departments: ['IQC'],
-  },
-});
-r.ok('sec-c is editable', T.canEditSection('sec-c') === true);
-r.ok('and NOTHING else is', !SECTIONS.filter(s => s !== 'sec-c').some(s => T.canEditSection(s)),
-  SECTIONS.filter(s => s !== 'sec-c' && T.canEditSection(s)));
-r.ok('view is unaffected on the other five',
-  SECTIONS.filter(s => s !== 'sec-c').every(s => T.canViewSection(s)));
-// The independence case, and the one that matters most: holding a section grant must
-// NOT confer Triage. If the two were conflated, granting a QC inspector section F
-// would also hand them the ticket header — status, assignee, priority — for every IR.
-r.ok('a section grant does NOT confer Triage', T.canTriage() === false);
+// ── The one account that cannot edit: everything switched off ──────────────────
+r.head('a department that unticked every section takes edit away, and the sections stay VISIBLE');
+T.setUser(revokedUser());
+r.ok('the premise holds — nothing is editable', !SECTIONS.some(s => T.canEditSection(s)),
+  SECTIONS.filter(s => T.canEditSection(s)));
+// ⚠ THE LEVER TAKES EDIT, NEVER THE SECTION. A revoked person can still read every
+// pane and still comment on it; only the write controls go dead. If a revoke ever hid
+// a tab, the app would be answering "you may not edit this" with "this does not exist",
+// and the person would have no way to tell which had happened.
+r.ok('every section is still VIEWABLE — a revoke never hides a tab',
+  SECTIONS.every(s => T.canViewSection(s)), SECTIONS.filter(s => !T.canViewSection(s)));
+r.ok('and still commentable', SECTIONS.every(s => T.canCommentSection(s)),
+  SECTIONS.filter(s => !T.canCommentSection(s)));
 
-// Multiple departments union rather than override — the many-to-many rule.
-r.head('two departments union their grants');
-T.setUser({
-  email: 'multi@indrones.com', sessionToken: 't',
-  access: {
-    role: 'user',
-    permissions: Object.assign({}, plainUser().access.permissions, { 'sec-c': 'edit', 'sec-e': 'edit' }),
-    departments: ['IQC', 'Production'],
-  },
-});
-r.ok('both granted sections are editable',
-  T.canEditSection('sec-c') && T.canEditSection('sec-e'));
-r.ok('the other four are not',
-  SECTIONS.filter(s => !['sec-c', 'sec-e'].includes(s)).every(s => !T.canEditSection(s)),
-  SECTIONS.filter(s => !['sec-c', 'sec-e'].includes(s) && T.canEditSection(s)));
+// ── A write right on one section does not leak to the next ─────────────────────
+r.head('the resolved map is what the frontend obeys, one key per section');
+// The frontend receives a map the backend has already resolved, and this is the shape
+// of it. What is being proved here is NOT the resolution (that is getEffectiveAccess,
+// proved in smoke-store.mjs) but that the frontend reads it KEY BY KEY and invents
+// nothing — no "has any edit at all, therefore edit everywhere", which is the mistake
+// a union-across-departments model invites and deny-wins exists to defeat.
+T.setUser(staffUser({
+  permissions: Object.assign(permsOf('edit'), { 'sec-c': 'view' }),
+  departments: ['IQC', 'Production'],
+  revokedBy: { 'sec-c': ['IQC'] },
+}));
+r.ok('the revoked section is not editable', T.canEditSection('sec-c') === false);
+r.ok('...and the other six are untouched by it',
+  SECTIONS.filter(s => s !== 'sec-c').every(s => T.canEditSection(s)),
+  SECTIONS.filter(s => s !== 'sec-c' && !T.canEditSection(s)));
+r.ok('view is unaffected on the revoked section',
+  T.canViewSection('sec-c') && T.canCommentSection('sec-c'));
+// The independence case, and the one that matters most: holding edit on seven sections
+// must NOT confer Triage. If the two were conflated, an ordinary editor would also get
+// the ticket header — status, assignee, priority — for every IR.
+r.ok('an edit right on any section does NOT confer Triage', T.canTriage() === false);
 r.ok('the department list is carried for the UI',
   T.myAccess().departments.join(',') === 'IQC,Production', T.myAccess().departments);
+// The attribution the pane's note is painted from. Absent must read as "nobody said",
+// which is a different sentence from "no department did it" — see the sweep below.
+r.ok('and the revoking department is carried by name, so the person can be told',
+  T.sectionRevokedBy('sec-c').join(',') === 'IQC', T.sectionRevokedBy('sec-c'));
+r.ok('a section nobody revoked attributes to nobody',
+  T.sectionRevokedBy('sec-b').length === 0, T.sectionRevokedBy('sec-b'));
 
 // ── Triage is a SECOND axis, and the two do not leak into each other ─────────
-r.head('CR and Management hold Triage without editing any section');
-// The owner's mapping: "CR — adhik.nair, monish.raza; Management — ravi, harshad"
-// with no section letters at all. So the real-world profile is triage:true and
-// every section at view. Both directions are asserted, because a conflation in
-// either one is a silent privilege change.
-T.setUser({
-  email: 'adhik.nair@indrones.com', sessionToken: 't',
-  access: {
-    role: 'user',
-    permissions: Object.assign({}, plainUser().access.permissions),   // no 'edit' anywhere
-    departments: ['CR'],
-    triage: true,
-  },
-});
+r.head('CR and Management hold Triage, and Triage is not what gives them their sections');
+// ⚠ THIS SECTION INVERTED IN v95 TOO, and in the direction that is easy to miss. It used
+// to prove "a Triage holder edits NO section" — the CR profile was triage:true with every
+// section at view, so the two axes were distinguishable by their VALUES. They no longer
+// are: a CR account now edits all seven sections AND holds Triage, exactly like everybody
+// else's edit rights plus one extra flag. So the risk has flipped end for end. What must
+// be proved now is the OTHER direction of the leak — that holding edit on every section
+// does not, by itself, hand anyone the ticket header. The fixture below is the ordinary
+// staff account with `triage` left at false, and the assertions run both ways.
+T.setUser(staffUser({ email: 'adhik.nair@indrones.com', departments: ['CR'] }));
+r.ok('the ordinary account edits all seven sections', SECTIONS.every(s => T.canEditSection(s)));
+r.ok('and Triage is still NOT granted — the sections did not carry it', T.canTriage() === false);
+// Now the CR profile as the backend actually builds it: the same map, plus the flag. The
+// backend also raises the Overview's own key to 'edit' (getEffectiveAccess:
+// `if (triage) perms[OVERVIEW_KEY] = 'edit'`), so the payload a Triager receives carries
+// it — one canEdit() seam gates the Overview like any other record, no second check.
+T.setUser(staffUser({
+  email: 'adhik.nair@indrones.com',
+  permissions: Object.assign(permsOf('edit'), { 'sec-a': 'edit' }),
+  departments: ['CR'], triage: true,
+}));
 r.ok('Triage is granted', T.canTriage() === true);
-r.ok('and NOT one section is editable', !SECTIONS.some(s => T.canEditSection(s)),
-  SECTIONS.filter(s => T.canEditSection(s)));
-// The backend raises the Overview's own key to 'edit' for a Triage holder
-// (getEffectiveAccess: `if (triage) perms[OVERVIEW_KEY] = 'edit'`), so the payload a
-// CR account actually receives carries it. One canEdit() seam gates the Overview
-// like any other record — no second check to keep in sync.
-T.setUser({
-  email: 'adhik.nair@indrones.com', sessionToken: 't',
-  access: {
-    role: 'user',
-    permissions: Object.assign({}, plainUser().access.permissions, { 'sec-a': 'edit' }),
-    departments: ['CR'],
-    triage: true,
-  },
-});
 r.ok('the Overview rides the same flag, so its two fields are writable',
   T.canEditSection(T.OVERVIEW_KEY) === true, T.myAccess().permissions[T.OVERVIEW_KEY]);
 r.ok('but the Overview is readable by everyone, Triage or not',
-  (() => { T.setUser(plainUser()); return T.canViewSection('sec-a'); })(),
+  (() => { T.setUser(staffUser()); return T.canViewSection('sec-a'); })(),
   T.myAccess().permissions['sec-a']);
 // Belt and braces: the frontend does not rely on that map alone. The Overview's
 // write path is gated on canTriage() itself, so a payload that forgot to raise the
@@ -166,25 +205,16 @@ r.ok('but the Overview is readable by everyone, Triage or not',
 r.ok('the Overview save is gated on canTriage(), not on the permission map',
   /if \(!canTriage\(\)\) \{ showToast\('You need Allot CAPS access/.test(appJs),
   (appJs.match(/[^\n]*canTriage\(\)[^\n]*/) || []).slice(0, 4));
-T.setUser({
-  email: 'adhik.nair@indrones.com', sessionToken: 't',
-  access: {
-    role: 'user',
-    permissions: Object.assign({}, plainUser().access.permissions),   // no 'edit' anywhere
-    departments: ['CR'],
-    triage: true,
-  },
-});
 // `triage` absent from the profile (an older cached payload) must read as false —
 // `undefined === true` is false, but the fallback literal makes it explicit.
 T.setUser({
   email: 'old-payload@indrones.com', sessionToken: 't',
-  access: { role: 'user', permissions: Object.assign({}, plainUser().access.permissions), departments: [] },
+  access: { role: 'user', permissions: permsOf('edit'), departments: [] },
 });
 r.ok('a profile with no triage field at all is NOT a Triage holder', T.canTriage() === false);
 T.setUser({
   email: 'sneaky@indrones.com', sessionToken: 't',
-  access: { role: 'user', permissions: Object.assign({}, plainUser().access.permissions), departments: [], triage: 'yes' },
+  access: { role: 'user', permissions: permsOf('edit'), departments: [], triage: 'yes' },
 });
 r.ok('and a truthy-but-not-true value does not either', T.canTriage() === false, 'yes');
 
@@ -212,6 +242,15 @@ r.ok('reads are allowed — the app stays usable', SECTIONS.every(s => T.canView
 r.ok('commenting is allowed', SECTIONS.every(s => T.canCommentSection(s)));
 // THE assertion. Granting edit here would turn "permissions have not arrived yet"
 // into "everyone can write" for the duration of the outage.
+//
+// ⚠ THE STAKES OF THIS ONE ROSE IN v95, which is why the comment is longer than the
+// line. It used to be a guard against a small over-grant: the real profile was view,
+// so a fallback that guessed edit gave away a little more than it should have. The
+// real profile is now EDIT ON EVERY SECTION, so the same fallback would give away
+// exactly the same thing as the real thing — for the whole company, for the whole of
+// an outage, with every Save button looking normal. And the fallback is not a rare
+// path: it is what paints on first load and on every refresh, for as long as
+// getMyAccess takes. It must keep answering 'view'.
 r.ok('editing is NOT — never grant a write from a guess',
   !SECTIONS.some(s => T.canEditSection(s)), SECTIONS.filter(s => T.canEditSection(s)));
 // Same rule for the second axis, and it needs its own assertion: Triage is what
@@ -237,11 +276,7 @@ r.ok('and a view everywhere else',
 // opened nothing and said nothing. An admin never sees it: admins skip the sweep.
 r.head('a view-only screen disables the WRITE buttons, not just the fields');
 
-const D = loadApp(`
-  applySectionAccessGating, canEditSection,
-  setUser: u => { currentUser = u; },
-  document,
-`);
+const i18nSrc = fs.readFileSync(new URL('../i18n.js', import.meta.url), 'utf8');
 
 const VSEC = 'sec-b';
 // A fake element carrying only the surface applySectionAccessGating touches.
@@ -271,23 +306,73 @@ const fakeEl = (...classes) => ({
   classList: fakeClassList(...classes),
 });
 
+// The pane, and the NOTES the gate paints into it.
+//
+// ⚠ A note is written by className and then looked up again BY THAT CLASS, and the two
+// painters — "the server does not know this section" and "a department switched edit
+// off" — must never find each other's element, or whichever runs second deletes the
+// first one's work. So this double keeps real children and answers a class selector
+// against them. The harness's default `querySelector` returns null, which would make
+// both of these vacuous: each painter would build a fresh node every pass and no
+// assertion could tell a painted note from a missing one.
+let paneNotes = [];
+const fakePane = () => ({
+  id: VSEC, style: {}, dataset: {},
+  classList: fakeClassList(),
+  querySelectorAll: () => sweepEls,
+  querySelector: sel => {
+    if (sel.charAt(0) !== '.') return null;
+    const cls = sel.slice(1);
+    if (cls !== 'section-edit-off-note' && cls !== 'section-server-note') return null;
+    return paneNotes.find(n => n.className === cls) || null;
+  },
+  firstChild: null,
+  insertBefore(node) { paneNotes.push(node); return node; },
+});
+// `document.createElement` is the one the app uses to BUILD a note, so it is replaced
+// through the harness's own hook rather than by patching the app. A created node
+// removes ITSELF from the same list the pane searches, which is what makes
+// `paint…Note(pane, false)` — "this no longer applies, take it down" — testable.
+const makeNote = tag => ({
+  tagName: String(tag).toUpperCase(), className: '', textContent: '',
+  remove() { const i = paneNotes.indexOf(this); if (i > -1) paneNotes.splice(i, 1); },
+});
+
+const D = loadApp(`
+  applySectionAccessGating, canEditSection,
+  setUser: u => { currentUser = u; },
+  document,
+`, { preload: i18nSrc, createElement: makeNote });
+
 let sweepEls = [];
 let fakeSave = null;
+let thePane = null;
 D.document.querySelector = () => null;
 D.document.getElementById = id => {
-  if (id === VSEC) {
-    return { id: VSEC, style: {}, dataset: {},
-             classList: fakeClassList(),
-             querySelectorAll: () => sweepEls, querySelector: () => null };
-  }
+  if (id === VSEC) return thePane;
   if (id === 'close-' + VSEC) return fakeSave;
   if (id === 'autosave-' + VSEC) return null;
   return null;                      // every other pane: the `if (!pane) return` guard
 };
 
-const sweepAs = perms => {
+// ⚠ THE FIXTURE IS BUILT THE WAY THE BACKEND NOW BUILDS IT: edit everywhere, then the
+// named sections flipped to view. It used to be `{ [VSEC]: 'view' }` — a map that had no
+// 'edit' in it at all, which was a faithful picture of the old model and is now a
+// picture of an account whose sections have ALL been switched off. A suite that kept
+// that fixture would go on passing while testing a profile nobody has.
+//
+// `revokedBy` is passed alongside because the pane's note is painted from it, and the
+// two states it distinguishes are the point: a section switched off by a NAMED
+// department, and a section that is view-only for a reason the server did not name
+// (an older backend, a customer, the fallback profile).
+const sweepAs = (revokes, revokedBy) => {
+  const perms = permsOf('edit');
+  Object.keys(revokes || {}).forEach(s => { perms[s] = revokes[s]; });
   D.setUser({ email: 'u@indrones.com', sessionToken: 't',
-              access: { role: 'user', permissions: perms, departments: [], triage: false } });
+              access: { role: 'user', permissions: perms, departments: [], triage: false,
+                        revokedBy: revokedBy || {} } });
+  thePane = fakePane();
+  paneNotes = [];
   sweepEls = [
     fakeEl('btn-add-evidence'),      // 0  + Add image / PDF
     fakeEl('btn-add-evidence'),      // 1  📷 Capture photo
@@ -302,12 +387,13 @@ const sweepAs = perms => {
   D.applySectionAccessGating();
   return { add: sweepEls[0], cap: sweepEls[1], comment: sweepEls[2],
            addRow: sweepEls[3], field: sweepEls[4], file: sweepEls[5],
-           hist: sweepEls[6], save: fakeSave };
+           hist: sweepEls[6], save: fakeSave,
+           note: paneNotes.find(n => n.className === 'section-edit-off-note') || null };
 };
 
-const vo = sweepAs({ [VSEC]: 'view' });
+const vo = sweepAs({ [VSEC]: 'view' }, { [VSEC]: ['QC'] });
 r.ok('the premise holds — this user really is view-only here',
-  D.canEditSection(VSEC) === false && D.canEditSection('sec-c') === false);
+  D.canEditSection(VSEC) === false && D.canEditSection('sec-c') === true);
 r.ok('"+ Add image / PDF" is DISABLED — it is a write',
   vo.add.disabled === true, vo.add);
 r.ok('"📷 Capture photo" is disabled too — same act, same gate',
@@ -320,7 +406,28 @@ r.ok('every write button agrees with Close, which is what makes the click silent
   vo.addRow.disabled === vo.save.disabled,
   { add: vo.add.disabled, save: vo.save.disabled, addRow: vo.addRow.disabled });
 r.ok('...and it says WHY, like Close does, instead of hovering like a live button',
-  /view-only/.test(vo.add.title) && /view-only/.test(vo.cap.title), vo.add.title);
+  vo.add.title.length > 0 && vo.add.title === vo.cap.title && /QC/.test(vo.add.title),
+  vo.add.title);
+// ⚠ AND IT NAMES THE DEPARTMENT, which is the whole reason the revoke can be diagnosed
+// at all. The admin who flips the switch bypasses canEdit entirely and can never see the
+// pane they changed, so if the affected person is not told in words, the ONLY symptom is a
+// Save button that does nothing — no error, no dialog, which is the failure shape this
+// repo keeps being bitten by. `revokedBy` comes from the server, so the note is painted
+// only when the server actually said who; see the unattributed case below.
+r.ok('the tooltip NAMES the department that switched it off, rather than saying "view-only"',
+  /QC/.test(vo.add.title) && /QC/.test(vo.cap.title) &&
+  /QC/.test(vo.addRow.title || ''), { add: vo.add.title, addRow: vo.addRow.title });
+r.ok('and the same sentence is painted into the pane itself, so it is not hidden in a tooltip',
+  !!vo.note && /QC/.test(vo.note.textContent), vo.note && vo.note.textContent);
+// The note must never claim MORE than the server said. An attribution of [] means "nobody
+// told us" — an admin, a customer, a backend older than v95 — and guessing a department
+// from a map that merely lacks 'edit' would put a colleague's name on a change they did
+// not make. So the note stands down entirely and the generic sentence is used instead.
+const voAnon = sweepAs({ [VSEC]: 'view' }, {});
+r.ok('with nobody named, the pane note is NOT painted at all — no guess is made',
+  voAnon.note === null, voAnon.note);
+r.ok('...and the tooltip falls back to the plain sentence, with no invented department',
+  /view-only/.test(voAnon.add.title) && !/QC/.test(voAnon.add.title), voAnon.add.title);
 r.ok('the disabled button is styled disabled, not merely inert',
   vo.add.style.opacity === '0.5' && vo.add.style.cursor === 'not-allowed', vo.add.style);
 // Not an over-correction: commenting is NOT editing, and comment comes with view.
@@ -339,13 +446,21 @@ r.ok('the ordinary field is disabled (unchanged behaviour)', vo.field.disabled =
 r.ok('the hidden file inputs are disabled (this is what made the click a no-op)',
   vo.file.disabled === true);
 
-const ed = sweepAs({ [VSEC]: 'edit' });
+const ed = sweepAs({ 'sec-c': 'view' }, { 'sec-c': ['IQC'] });
 r.ok('an EDITOR gets live buttons — the sweep does not run at all',
   ed.add.disabled === false && ed.cap.disabled === false && ed.save.disabled === false,
   { add: ed.add.disabled, save: ed.save.disabled });
 r.ok('...and no view-only tooltip is left on them', ed.add.title === '', ed.add.title);
-r.ok('a neighbouring section with no grant does not disable this one\'s buttons',
-  D.canEditSection('sec-c') === false && ed.add.disabled === false);
+r.ok('...nor a note, because this pane is not the one that was switched off',
+  ed.note === null, ed.note);
+// The revoke is PER SECTION, and this is the assertion that says so. The pane under test
+// is `sec-b`, which is editable; `sec-c` is the one switched off. A sweep that read one
+// key and applied it to the whole screen — or that took "some section is view-only" as its
+// condition — would be invisible until the day two sections disagreed, because until then
+// every pane answered the same way. Here they disagree on purpose.
+r.ok('a DIFFERENT section being switched off does not disable this one\'s buttons',
+  D.canEditSection('sec-c') === false && ed.add.disabled === false,
+  { secC: D.canEditSection('sec-c'), add: ed.add.disabled });
 
 r.head('the restore control is gated where it is RENDERED, and gated again on click');
 // The history modal is created with document.createElement and appended to

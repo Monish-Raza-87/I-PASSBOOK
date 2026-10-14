@@ -3867,36 +3867,55 @@ function doLogout(sessionToken) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ACCESS CONTROL — two levels, and only two.
+// ACCESS CONTROL — edit is the DEFAULT, and a department can take it away.
 //
 //   VIEW + COMMENT  — every signed-in user, on every section. Nothing to store.
-//   EDIT            — granted by DEPARTMENT membership only.
+//   EDIT            — every signed-in user too, until a department REVOKES it.
+//
+// This is the v95 inversion. Until then a department GRANTED edit on a subset of
+// the sections and everybody else read. Now everyone edits everything, and the
+// department grid is the OFF-SWITCH: unticking a box is how edit is withdrawn. The
+// owner's reason is in docs/10 — audit plus restore already cover the risk, and the
+// capability stays in hand for later.
 //
 // Departments are MANY-TO-MANY in both directions: a person may hold several
-// departments, a department holds many people, and each department grants edit on
-// a subset of the six sections. So a person's edit rights are the UNION of their
-// departments' grants. All of it lives in ONE file, `_store/access.json`:
+// departments, a department holds many people. DENY WINS — if ANY department a
+// person holds revokes a section, they lose edit on it, whatever their other
+// departments say. Without that rule a revoke would be inert for anyone holding a
+// second department, and the owner's own use case — switch one person off, by
+// putting them in a department of their own and unticking it — would not work at
+// all. All of it lives in ONE file, `_store/access.json`:
 //
 //   {
-//     "departments": { "qc": { name, active, grants: {"sec-c": true}, triage,
+//     "departments": { "qc": { name, active, revokes: {"sec-f": true}, triage,
+//                              grants: {"sec-c": true},   ← LEGACY, read by nothing
 //                              updatedAt, updatedBy } },
 //     "memberships": { "angad.kumbhar@indrones.com": ["qc", "flight-test"] }
 //   }
+//
+// `revokes` is a SEPARATE KEY from `grants`, and that is load-bearing rather than
+// tidy. Two writers would otherwise reach a revoke stored inside `grants`:
+// seedDepartments() deletes any section key not in its own list, and saveDepartment()
+// replaces the whole record. Either would silently hand edit back. A sibling key that
+// neither of them writes is out of reach of both. `grants` is now frozen history —
+// written through untouched so a rollback stays possible, and read by nothing.
 //
 // Memberships are a LIST PER PERSON rather than an edge table, so reading one
 // person's departments is one key read. That is the whole shape of the win: the
 // sheet version needed a full scan of USER_DEPARTMENTS for every single access
 // check, and getEffectiveAccess runs on every authenticated request.
 //
-// TRIAGE is a SECOND, INDEPENDENT AXIS beside the section grants. A department
-// may hold it without granting edit on any section — which is exactly what CR and
-// Management do. It governs the ticket header (status, assignee, priority, category)
-// and the Overview panel's two fields. It is kept OUT of `grants` so no code that
-// walks the section grants can mistake Triage for a section.
+// TRIAGE is a SECOND, INDEPENDENT AXIS beside the section revokes. A department
+// may hold it without revoking anything — which is exactly what CR and Management
+// do — and it is the ONE thing that still makes the Overview editable. It governs
+// the ticket header (status, assignee, priority, category) and the Overview panel's
+// two fields. It is kept OUT of BOTH maps so no code that walks either can mistake
+// Triage for a section. The Overview is never revocable: it is not a SECTION_KEYS
+// entry, so a department cannot take it from another.
 //
 // This file holds AUTHORITY, so it must never be reachable through saveSection's
 // sentinel path: a sentinel irNumber skips every ACL check in saveSection, so a
-// sentinel that resolved here would let any signed-in user rewrite the grant
+// sentinel that resolved here would let any signed-in user rewrite the revoke
 // matrix and hand themselves edit everywhere. It is not in SENTINEL_SECTIONS and
 // must not be added there.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -3975,20 +3994,32 @@ function getUserDepartments(email) {
   return out;
 }
 
-// What a person's departments grant them, on BOTH axes.
+// What a person's departments take AWAY, on BOTH axes.
 //
 // Returned together rather than from two functions because they come from the same
 // departments and the same memberships: asking two questions about one record
 // invites the two answers to disagree.
 //
-//   grants  { 'sec-c': true, … }  — the union of section edits
-//   triage  true                  — this person may edit the ticket header and
-//                                   the Overview panel
+//   revokes { 'sec-f': ['Production', …] } — edit is OFF on these sections. The
+//                                            department NAMES ride along so the
+//                                            affected person can be told WHO switched
+//                                            it off; they are explanatory and gate
+//                                            nothing — `getEffectiveAccess` reads the
+//                                            section as 'view' and that is the answer.
+//   triage  true                           — this person may edit the ticket header
+//                                            and the Overview panel
 //
-// Deactivated departments grant nothing on either axis, which is how a department
-// is retired without deleting its history.
+// DENY WINS: a section lands here if ANY held department revokes it, whatever the
+// person's other departments say. Nothing in this file can grant a section back, so
+// there is no union to compute — only a set to union.
+//
+// Deactivated departments do nothing on either axis, which is how a department is
+// retired without deleting its history.
+//
+// `grants` is deliberately NOT returned. It is frozen legacy data now, and returning
+// it would invite the truthiness read that used to live here to come back.
 function departmentCapabilities(email) {
-  var out = { grants: {}, triage: false };
+  var out = { revokes: {}, triage: false };
   var keys = getUserDepartments(email);
   if (!keys.length) return out;          // short-circuit: no departments, no 2nd read
   var depts = accessStore().departments;
@@ -3996,8 +4027,14 @@ function departmentCapabilities(email) {
     var d = depts[k];
     if (!d) return;                      // a membership naming a department that is gone
     if (String(d.active === undefined ? 'yes' : d.active).trim().toLowerCase() === 'no') return;
-    var g = d.grants || {};
-    SECTION_KEYS.forEach(function (s) { if (g[s]) out.grants[s] = true; });
+    var r = d.revokes || {};
+    var label = String(d.name || k);
+    SECTION_KEYS.forEach(function (s) {
+      if (!r[s]) return;
+      if (!out.revokes[s]) out.revokes[s] = [];
+      // One department naming a section twice is one line in the note, not two.
+      if (out.revokes[s].indexOf(label) < 0) out.revokes[s].push(label);
+    });
     if (d.triage) out.triage = true;
   });
   return out;
@@ -4005,13 +4042,23 @@ function departmentCapabilities(email) {
 
 // Resolve a user's role + per-section permissions + Triage. There is no 'none' any
 // more: view+comment is universal, so the only questions this answers are which
-// sections are editable and whether the holder may triage.
+// sections are still editable and whether the holder may triage.
+//
+// EDIT IS THE DEFAULT and a revoke is what removes it — the v95 inversion. The map
+// below is therefore still BUILT as 'view' and then RAISED to 'edit' for every section
+// no held department has switched off. The 'view' default is not a leftover: it is
+// built BEFORE the department read so that a throw inside that read still leaves a
+// usable, minimum-privilege profile. That ordering matters more now than it did when
+// 'view' was the answer for everyone anyway — today a fallback that guessed 'edit'
+// would turn "access.json is unreadable" into "the whole company may write", for the
+// duration of the outage.
 //
 // A CUSTOMER is the one exception, and it is a different KIND of answer: they are
 // scoped to rows, so every section key comes back 'none' and the existing canView()
-// seam in getPassbook does the withholding with no new filter code. Admin is tested
-// FIRST — an admin is never also a customer, so a stale row in the customers map
-// cannot quietly narrow the owner's own view of the repository.
+// seam in getPassbook does the withholding with no new filter code. They are NOT
+// covered by edit-for-everyone — "all users" in that rule means staff, not clients.
+// Admin is tested FIRST — an admin is never also a customer, so a stale row in the
+// customers map cannot quietly narrow the owner's own view of the repository.
 function getEffectiveAccess(email) {
   email = (email || '').toLowerCase().trim();
   if (isAdminEmail(email)) {
@@ -4021,7 +4068,8 @@ function getEffectiveAccess(email) {
     // permission key like any other. Without it, getPassbook's canView() filter
     // would drop the `sec-a` row for every non-admin — see getPassbook.
     all[OVERVIEW_KEY] = 'edit';
-    return { role: 'admin', permissions: all, departments: [], triage: true, customerOf: '' };
+    return { role: 'admin', permissions: all, departments: [], triage: true,
+             customerOf: '', revokedBy: {} };
   }
 
   // A customer's scope is read BEFORE the section map is built, because it changes
@@ -4038,28 +4086,41 @@ function getEffectiveAccess(email) {
     // read-only for them — no Triage — so the two inputs it carries are disabled by
     // the same canEdit seam every other field uses.
     none[OVERVIEW_KEY] = 'view';
-    return { role: 'customer', permissions: none, departments: [], triage: false, customerOf: company };
+    return { role: 'customer', permissions: none, departments: [], triage: false,
+             customerOf: company, revokedBy: {} };
   }
 
-  // Default: view + comment everywhere. Built BEFORE the department read so that
-  // any failure below still leaves a usable, minimum-privilege profile — the
-  // catch fails open on reads and closed on writes, never to locked-out. `triage`
-  // is set early for the same reason: a throw must not leave it undefined-but-true.
+  // Default: view + comment everywhere, then EDIT on every section no department has
+  // switched off. Built BEFORE the department read so that any failure below still
+  // leaves a usable, minimum-privilege profile — the catch fails open on reads and
+  // closed on writes, never to locked-out. `triage` is set early for the same reason:
+  // a throw must not leave it undefined-but-true.
   var perms = {};
   SECTION_KEYS.forEach(function (s) { perms[s] = 'view'; });
   perms[OVERVIEW_KEY] = 'view';
   var depts = [];
   var triage = false;
+  var revokedBy = {};
   try {
     depts = getUserDepartments(email);
     var caps = departmentCapabilities(email);
-    SECTION_KEYS.forEach(function (s) { if (caps.grants[s]) perms[s] = 'edit'; });
+    SECTION_KEYS.forEach(function (s) {
+      // A revoke leaves the key at 'view' — the section stays VISIBLE and commentable
+      // and the pane keeps its tab. That is the difference between taking edit away
+      // and taking the section away, and it is why getPassbook's canView() filter
+      // needs no change: 'view' is still viewable.
+      if (caps.revokes[s]) { revokedBy[s] = caps.revokes[s]; return; }
+      perms[s] = 'edit';
+    });
     triage = caps.triage === true;
-  } catch (e) { /* keep view-only, no triage */ }
+  } catch (e) { /* keep view-only, no triage, no attribution */ }
   // Triage also turns the Overview's two inputs editable, through the SAME
   // canEdit() seam every section uses — so the frontend needs no special case.
+  // The Overview is NEVER revoked: it is not in SECTION_KEYS, so neither the write
+  // end nor the read end of the revoke map can name it.
   if (triage) perms[OVERVIEW_KEY] = 'edit';
-  return { role: 'user', permissions: perms, departments: depts, triage: triage, customerOf: '' };
+  return { role: 'user', permissions: perms, departments: depts, triage: triage,
+           customerOf: '', revokedBy: revokedBy };
 }
 
 // Refuse a customer at a door that is staff-only. Named rather than inlined so the
@@ -4092,6 +4153,13 @@ function getMyAccess(email) {
     permissions: access.permissions,
     departments: access.departments,
     triage: access.triage === true,
+    // Which departments switched edit OFF on which sections — `{ 'sec-f': ['Production'] }`.
+    // EXPLANATORY ONLY: the gate is `permissions`, and a section a revoke touched comes
+    // back 'view' in there. This exists so the affected person can be told who did it
+    // and, more to the point, be told ANYTHING — an admin bypasses canEdit entirely, so
+    // the admin who set the switch can never see the pane it changed. Absent for an
+    // admin and for a customer, both of whom have no revokes to report.
+    revokedBy: access.revokedBy || {},
     // '' for everyone who is not a customer. The portal reads this to decide it is
     // talking to the right backend at all — see the v8 note on API_VERSION.
     customerOf: access.customerOf || '',
@@ -4193,15 +4261,18 @@ function listUsers(authEmail) {
 
   var departments = Object.keys(store.departments).map(function (key) {
     var d = store.departments[key] || {};
-    var grants = {};
-    SECTION_KEYS.forEach(function (s) { grants[s] = !!(d.grants && d.grants[s]); });
+    // A FULL boolean map over SECTION_KEYS, exactly as `grants` used to be, so the
+    // grid can read one cell per section without caring whether the key is absent.
+    // `true` means the department has switched that section OFF.
+    var revokes = {};
+    SECTION_KEYS.forEach(function (s) { revokes[s] = !!(d.revokes && d.revokes[s]); });
     return {
       key: key,
       name: String(d.name || key),
       active: String(d.active === undefined ? 'yes' : d.active).toLowerCase() !== 'no',
-      grants: grants,
-      // The second axis on the same record. Kept OUT of `grants` so no code that
-      // walks the section grants can mistake Triage for a section.
+      revokes: revokes,
+      // The second axis on the same record. Kept OUT of both maps so no code that
+      // walks either can mistake Triage for a section.
       triage: !!d.triage,
       members: counts[key] || 0
     };
@@ -4496,37 +4567,64 @@ function setUserStatus(params, authEmail) {
   });
 }
 
-// POST saveDepartment (admin) — create or update one department's section grants.
+// POST saveDepartment (admin) — create a department, or update the sections it
+// switches OFF.
+//
+// The grid posts TICKS, and a tick means "edit is ON". What is STORED is the
+// complement, so `params.revokes` names the sections switched off.
 function saveDepartment(params, authEmail) {
   requireAdmin(authEmail);
   var name = (params.name || '').toString().trim();
   var key  = deptKeyFromName((params.key || '').toString().trim() || name);
   if (!name && !key) return { status: 'error', message: 'A department needs a name.' };
   if (!key) return { status: 'error', message: 'Could not derive a key from that name — use letters or digits.' };
-  var grants = {};
-  try { grants = JSON.parse(params.grants || '{}'); } catch (e) { grants = {}; }
 
-  var sectionGrants = {};
-  SECTION_KEYS.forEach(function (s) { if (grants[s]) sectionGrants[s] = true; });
+  // ⚠ `params.revokes` ABSENT is NOT the same as '{}'. Absent means the client does not
+  // speak this field at all — a shell cached from before the v95 flip, whose grid still
+  // posts section grants. Treating absent as '{}' would CLEAR every revoke and silently
+  // hand edit back to everyone in the department, which is the worst outcome available
+  // anywhere in this change; and honouring the old grants instead would leave an admin
+  // unticking a box and nothing happening, which is the second worst. So a body that
+  // does not mention `revokes` is REFUSED rather than guessed at — the same shape as
+  // saveSection's own "Reload the app" guard on a stale shell.
+  if (params.revokes === undefined || params.revokes === null) {
+    return { status: 'error',
+             message: 'This Access screen is out of date and cannot change permissions safely. Reload the app, then try again.' };
+  }
+  var posted = {};
+  try { posted = JSON.parse(params.revokes || '{}'); } catch (e) { posted = {}; }
+
+  // Filtered to SECTION_KEYS at the WRITE end, so a hand-crafted body cannot store a
+  // revoke against OVERVIEW_KEY and take the Overview away from a Triager.
+  // departmentCapabilities() filters again on the way out — either end alone would do,
+  // and both, because the keys this map may name are exactly the keys a reader may act on.
+  var sectionRevokes = {};
+  SECTION_KEYS.forEach(function (s) { if (posted[s]) sectionRevokes[s] = true; });
 
   return withRowLockOrThrow(function () {
     var store = readJsonLocked('access.json') || { departments: {}, memberships: {} };
     if (!store.departments) store.departments = {};
     if (!store.memberships) store.memberships = {};
     var existed = !!store.departments[key];
+    var prev    = store.departments[key] || {};
     store.departments[key] = {
       name:      name || key,
       active:    (params.active === 'no' ? 'no' : 'yes'),
-      grants:    sectionGrants,
-      // Triage is read from the SAME `grants` object the UI posts, because that is
-      // how the grant grid submits it — but stored OUTSIDE `grants`, so no code
-      // walking the section grants can mistake it for a section.
-      triage:    !!grants['triage'],
+      revokes:   sectionRevokes,
+      // Triage is its own posted field now, stored OUTSIDE both maps so no code walking
+      // them can mistake Triage for a section. It used to be read out of the posted
+      // `grants`; that was the last consumer of the field, and it is gone.
+      triage:    params.triage === true || String(params.triage) === 'true',
+      // ⚠ CARRIED THROUGH UNTOUCHED, never rebuilt from params. `grants` is frozen
+      // legacy data that nothing reads, and the only reason it survives at all is that
+      // a rollback to the pre-v95 backend needs it intact. Rebuilding it from a body
+      // that no longer posts it would quietly destroy that rollback.
+      grants:    prev.grants || {},
       updatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
       updatedBy: authEmail
     };
-    // Replaces ONE key. Writing the whole departments object from `grants` would
-    // delete every other department, and with it every grant in the company.
+    // Replaces ONE key. Writing the whole departments object would delete every other
+    // department, and with it every revoke in the company.
     writeJsonLocked('access.json', store);
     return { status: 'ok', key: key, message: (existed ? 'Saved ' : 'Created ') + key };
   });
@@ -6632,7 +6730,7 @@ function clipRow(cells) {
 // ONE-TIME SETUP — run these from the Apps Script editor, in this order.
 //
 //   initializeStore()      creates _store/ and seeds the empty files
-//   seedDepartments()      writes the owner's department → section grants
+//   seedDepartments()      creates any MISSING department (ADD ONLY — never changes one)
 //   seedMemberships()      adds one department edge per person
 //   bootstrapAdmin()       creates the admin account, prints its temp password
 //   seedAccounts()         creates one account per seeded member, prints temp passwords
@@ -6681,28 +6779,26 @@ var SEED_DEPARTMENTS = [
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
-// SEEDED GRANTS — the owner's mapping, supplied 2026-09-16. Changing it is their
-// call, not a maintenance decision. Section letters are the CURRENT ones (A–G),
-// after Costing was split out of Investigation on 2026-10-13.
+// HISTORICAL — the owner's grant mapping, supplied 2026-09-16. THE VALUES ARE NO
+// LONGER READ BY ANYTHING; only the KEYS are still used, as the list of departments
+// a fresh install should create.
 // ──────────────────────────────────────────────────────────────────────────────
+// Until v95 this drove what a department could edit: getEffectiveAccess() read the
+// live grants it seeded. Since v95 edit is the DEFAULT for every staff account, so
+// there is nothing left to grant — the Departments grid is now an OFF-SWITCH, and
+// `revokes` (see accessStore) is where that lives. Keeping the values rather than
+// deleting them because they are the only in-repo record of what the old model
+// actually granted, and a rollback to the pre-v95 backend needs them still correct.
+// Reproduced here in full, in the CURRENT letters (A–G, after Costing was split out
+// of Investigation on 2026-10-13):
+//
 //   Production   A B C D E G    QC         A B C D F   Flight Test  F
 //   Purchase     C D            Inventory  A C D G     Engineering  C D
 //   CR           — (Triage)     Management — (Triage)  IQC / Compliance  —
 //
-// ⚠ COSTING (`sec-cost`, shown as Section D) had to be added to every department
-// that already held `sec-d`. When it was one section, a grant on `sec-d` covered
-// both halves — the investigation AND its repair estimate. After the split they are
-// two keys, and a department left holding only `sec-d` would silently lose costing
-// edit. `purchase` is the Part B signer, which is the whole reason Section D exists
-// as a section at all — see docs/03.
-//
-// ⚠ THIS UPSERT DELETES grants not in the list below (see seedDepartments), so a
-// re-seed after a by-hand tick in the Departments tab would strip the `sec-cost`
-// boxes the owner ticked himself. Keep this list and the live grants in step.
-//
-// An empty list is a REAL answer, not an omission: CR and Management hold Triage
-// and edit no section at all — that is what makes this a second axis rather than a
-// seventh permission key. IQC and Compliance hold neither.
+// An empty list is a REAL answer, not an omission: CR and Management hold Triage and
+// edited no section at all — that is what makes Triage a second axis rather than a
+// seventh permission key. IQC and Compliance held neither.
 var SEED_GRANTS = {
   'production':  ['sec-b', 'sec-c', 'sec-d', 'sec-cost', 'sec-e', 'sec-g'],
   'qc':          ['sec-b', 'sec-c', 'sec-d', 'sec-cost', 'sec-f'],
@@ -6716,8 +6812,10 @@ var SEED_GRANTS = {
   'management':  []
 };
 
-// Departments that may Triage. Same cells as a section grant ('edit'/''), separate
-// axis. CR and Management: they own the ticket header, not any section's content.
+// Departments that may Triage. A SEPARATE axis from the section maps, and since v95
+// it is the only thing that still makes the Overview editable. Still live: a NEW
+// department of one of these names is created holding Triage. It says nothing about a
+// department that already exists — the seed never rewrites one.
 var TRIAGE_DEPARTMENTS = ['cr', 'management'];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -6751,71 +6849,49 @@ function seedDepartments() {
     if (!store.memberships) store.memberships = {};
 
     var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
-    var created = [], updated = [], unchanged = [], dropped = [];
+    var created = [], kept = [];
 
     Object.keys(SEED_GRANTS).forEach(function (key) {
-      var desiredSecs   = SEED_GRANTS[key];
-      var desiredTriage = TRIAGE_DEPARTMENTS.indexOf(key) > -1;
-      var name          = seedDeptName(key);
-      var existing      = store.departments[key];
-
-      if (!existing) {
-        var grants = {};
-        SECTION_KEYS.forEach(function (s) { if (desiredSecs.indexOf(s) > -1) grants[s] = true; });
-        store.departments[key] = { name: name, active: 'yes', grants: grants,
-                                   triage: desiredTriage, updatedAt: ts, updatedBy: 'seed' };
-        created.push(key + (desiredSecs.length ? '' : ' (no sections)') + (desiredTriage ? ' +Triage' : ''));
+      if (store.departments[key]) {
+        // ⚠ ADD ONLY. This used to UPSERT — rewriting `grants`, `active` and `triage`
+        // to match SEED_GRANTS and DELETING any section key that list did not name.
+        // That is intolerable now: since v95 the Departments grid IS the off-switch, so
+        // a re-seed would restore edit that somebody had deliberately taken away. It
+        // now creates what is missing and touches NOTHING that exists — not the
+        // permissions, not Triage, not the active flag — which is the rule
+        // seedMemberships() has always followed. A seed that removes things is not a
+        // seed.
+        kept.push(key);
         return;
       }
 
-      // UPSERT, not "already there, skip". `present` used to mean "nothing to do", so
-      // a half-granted or wrong department was never corrected — which is the whole
-      // failure mode this seeds against.
-      var have = existing.grants || {};
-      var deltas = [];
-      SECTION_KEYS.forEach(function (s) {
-        var want = desiredSecs.indexOf(s) > -1;
-        var cur  = !!have[s];
-        if (cur === want) return;
-        if (want) { have[s] = true; deltas.push('+' + s); }
-        else {
-          delete have[s];
-          // Losing a grant is the one thing a rewrite can do silently, so it is
-          // reported separately and loudly rather than as just another delta.
-          dropped.push(key + ': ' + s);
-          deltas.push('-' + s);
-        }
-      });
-      var haveTriage = !!existing.triage;
-      if (haveTriage !== desiredTriage) deltas.push(desiredTriage ? '+Triage' : '-Triage');
-
-      existing.name      = name;
-      existing.active    = 'yes';
-      existing.grants    = have;
-      existing.triage    = desiredTriage;
-      existing.updatedAt = ts;
-      existing.updatedBy = 'seed';
-      store.departments[key] = existing;
-
-      if (deltas.length) updated.push(key + ': ' + deltas.join(', '));
-      else unchanged.push(key);
+      // A NEW department is created with edit ON everywhere, which is the v95 default
+      // and therefore an EMPTY revoke set. Triage comes from TRIAGE_DEPARTMENTS — still
+      // live for exactly this, and for nothing else.
+      store.departments[key] = {
+        name:      seedDeptName(key),
+        active:    'yes',
+        revokes:   {},
+        triage:    TRIAGE_DEPARTMENTS.indexOf(key) > -1,
+        updatedAt: ts,
+        updatedBy: 'seed'
+      };
+      created.push(key);
     });
 
-    // ONE key per department, written as one file. Any department in the store that
-    // SEED_GRANTS does not name is left untouched rather than deleted — a seed that
-    // removes things is not a seed.
+    // ONE key per department, written as one file. A department SEED_GRANTS does not
+    // name is left untouched rather than deleted, and since v95 that is now true of the
+    // named ones too.
     writeJsonLocked('access.json', store);
 
     var lines = [];
-    lines.push(created.length  ? 'Created (' + created.length + '): ' + created.join('; ') : 'Created: none');
-    lines.push(updated.length  ? 'Updated (' + updated.length + '): ' + updated.join('; ') : 'Updated: none');
-    lines.push('Unchanged: ' + (unchanged.length ? unchanged.join(', ') : 'none'));
-    lines.push(dropped.length
-      ? 'DROPPED GRANTS (' + dropped.length + ') — read these before you trust the matrix: ' + dropped.join('; ')
-      : 'DROPPED GRANTS: none.');
+    lines.push(created.length ? 'Created (' + created.length + '): ' + created.join(', ') : 'Created: none');
+    lines.push(kept.length ? 'Left untouched (' + kept.length + '): ' + kept.join(', ') : 'Left untouched: none');
     lines.push('');
-    lines.push('IQC and Compliance are seeded with no grants and no members — intentional.');
-    lines.push('The grants are live as soon as this returns; tick any changes in the app.');
+    lines.push('ADD ONLY — this never changes a department that already exists. Not its');
+    lines.push('permissions, not its Triage, not its active flag.');
+    lines.push('Every staff account can edit every section by default. To take that away,');
+    lines.push('untick a section for a department in User Access → Departments.');
     return lines.join('\n');
   }));
 }

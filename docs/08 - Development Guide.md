@@ -261,11 +261,14 @@ picture. See [05 — Configuration & Secrets](05 - Configuration & Secrets.md) f
      makes its three subfolders, sets the folder **Private (not link-shared)**, and
      seeds the empty files. It is idempotent by guard, not by accident: an existing
      file is left exactly as it is. **Confirm `_store/` appeared and is not shared.**
-   - `seedDepartments()` — writes the owner's department → section grants, plus
-     `Triage` for CR and Management. It reports `created` / `updated` (naming the
-     delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`, and critically a **`dropped`
-     list** — any existing grant the new mapping does not reproduce. **Read the
-     dropped list.** A rewrite is the one thing that can lose a grant silently.
+   - `seedDepartments()` — since v95 it **creates what is missing and touches
+     nothing else**: not `revokes`, not `triage`, not `active`. Departments are the
+     off-switch now, so an existing one is the owner's live setting and a re-seed must
+     not be able to take edit away from anyone or hand it back. It reports `created`
+     for what it added and, in words, that everything else was left alone — ending on
+     a pointer to the real control (*"To take edit away, untick a section in User
+     Access → Departments"*). `Triage` is still set on **create** for CR and
+     Management. Nothing to read and no `dropped` list to fear: there is no rewrite.
    - `seedMemberships()` — adds one department edge per person. It **only ever
      adds** and says so; nothing is removed. Emails with no account are printed —
      the edge is correct and harmless, but those people cannot sign in yet.
@@ -605,7 +608,7 @@ node tools/smoke-intake.mjs     # one suite
 | `tools/smoke-shell.mjs` | Derives the ids `app.js` reads **from its source** and asserts each exists in `index.html`; tab/pane counts; the `<script>` contract; stylesheet cascade order; token-only CSS; and the two-step purge UI |
 | `tools/smoke-ir-state.mjs` | `__IRS__` load / merge / ownership |
 | `tools/smoke-intake.mjs` | The Sheet column map, the 📋 Report rendering, and escaping — including the ticket-list card, rendered from the public Form's serial field and from `__IRS__` status/priority. Asserts on rendered output (no injected attribute, no `javascript:` anchor), not on the source |
-| `tools/smoke-access.mjs` | The access model: view+comment for everyone, edit only where a department grants it, admin bypass, and the un-loaded-access fallback failing **closed on writes** |
+| `tools/smoke-access.mjs` | The access model: view+comment for everyone, **edit for every staff account by default**, a department's revoke taking it away, **deny-wins** as its own case, admin bypass, and the un-loaded-access fallback failing **closed on writes** |
 | `tools/smoke-session.mjs` | Uses `splitStorage`: the token is in `localStorage` and survives a `sessionStorage` wipe; `clearLocalAuth()` empties both stores and stops the nudge poll; the poll **restarts** after an in-page re-login; and `confirmSessionAlive()` resolves **true** when fetch rejects |
 | `tools/smoke-backend.mjs` | Regex over `backend.gs`, which cannot run in Node: deleted machinery is really gone, the owner's constants hold, the router dispatches nothing outside `try`, the must-change branch returns before any session is minted, the sentinel **allowlist** is an allowlist, **every** `MailApp.sendEmail` site is quota-checked (walked to its enclosing function — a flat scan would pass on a truncated window), and **no positional column layout survives**: every `SpreadsheetApp.` site is walked to its enclosing function and must be one of the two read-only inputs, and every store function is asserted free of `getRange`/`getRows`/`appendRow`/`setValues`/`USER_HEADS`/`userCol`/`ensureHeaders`. Its `fnBody()` helper requires `(` after a function name, so `createUser` cannot silently match `createUserRow`. Phase 1's shape is pinned here too, including the rehearsal's load-bearing property — that **no helper it is built from may name a live store path**, which is what makes "it rehearses on a copy" structural rather than a promise. |
 | `tools/smoke-store.mjs` | **Executes** the real `backend.gs` under a fake Drive platform in `node:vm` and calls the store functions for real — the only suite that can prove *behaviour* here. It pins both halves of the lock claim (the read is inside it, and a racing save is refused rather than lost), the one-key write (`__IRS__` patch leaves IR410 intact; `iqc-config` leaves `team-directory`), `readJson`'s throw-don't-fallback contract, the audit landing **after** the data write and per-ticket, `getPassbook` through the index, the name-lookup-miss that no longer forks a ticket, `assertRealIR` refusing a path-shaped IR, `purgeUsers` backing up before it destroys, `sessionCheck` failing **open**, and uploads landing in the root IR folder with only the **file** link-shared. Phase 1 runs here too: the journal line written by the very save it describes, the export's bounded file count, the rotation over 400 days, the failure path — and **the restore rehearsal** driven over a real archive, asserting the live store is byte-for-byte unchanged, that a missing file *and* a corrupt file are both caught, and that the ticket index comes back **rebuilt** (its ids resolve in the copy) rather than copied. |

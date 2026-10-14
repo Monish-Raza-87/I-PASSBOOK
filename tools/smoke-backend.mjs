@@ -315,17 +315,32 @@ r.head('Triage is a second axis, not a seventh grant');
 // (status, assignee, priority) and none of the six section forms. If Triage were
 // modelled as a seventh entry in SECTION_KEYS it would also become a grantable
 // section — write access to a form nobody meant to open.
+// ── The two axes, from one read ────────────────────────────────────────────────
+// ⚠ THE FIRST AXIS INVERTED IN v95. It used to be `grants` — what a department GAVE.
+// It is now `revokes` — what a department TAKES AWAY — because edit is the default for
+// every staff account and a department's only remaining job on this axis is the
+// off-switch. What did NOT change is the shape the assertions below are about: ONE read
+// of access.json answering both axes, with the section loop bounded by SECTION_KEYS so
+// Triage can never be walked as if it were a section.
 const cap = fnBody('departmentCapabilities');
-r.ok('the two axes are returned as one object', /\{\s*grants:\s*\{\},\s*triage:\s*false\s*\}/.test(cap),
-  (cap.match(/grants:\s*\{\},\s*triage[^\n]*/) || [''])[0]);
+r.ok('the two axes are returned as one object',
+  /\{\s*revokes:\s*\{\},\s*triage:\s*false\s*\}/.test(cap),
+  (cap.match(/revokes:\s*\{\},\s*triage[^\n]*/) || [''])[0]);
 r.ok('triage is read in the same pass, from its own field', /out\.triage\s*=\s*true/.test(cap),
   (cap.match(/[^\n]*out\.triage[^\n]*/) || [''])[0]);
 r.ok('the section loop stays bounded by SECTION_KEYS, so Triage is not in it',
-  /SECTION_KEYS\.forEach[\s\S]{0,80}out\.grants\[s\]/.test(cap),
+  /SECTION_KEYS\.forEach[\s\S]{0,80}out\.revokes\[s\]/.test(cap),
   (cap.match(/[^\n]*SECTION_KEYS\.forEach[^\n]*/) || [''])[0]);
-r.ok('triage is stored OUTSIDE grants, so nothing walking grants can mistake it for a section',
-  !/grants\[.triage.\]/.test(cap) && /d\.triage/.test(cap),
+r.ok('triage is stored OUTSIDE the section map, so nothing walking it can mistake Triage for a section',
+  !/revokes\[.triage.\]/.test(cap) && /d\.triage/.test(cap),
   (cap.match(/[^\n]*triage[^\n]*/g) || []).slice(0, 3));
+// The revoke is read off the DEPARTMENT RECORD, and this is what keeps it safe from the
+// two writers that would otherwise erase it. `grants` is frozen legacy data now: a reader
+// that went back to it would read a map nothing writes any more, and — worse — would be
+// reading the exact field the old seed used to rewrite.
+r.ok('the revoke is read from the department record, and `grants` is not read at all',
+  /d\.revokes/.test(cap) && !/d\.grants/.test(cap),
+  (cap.match(/[^\n]*d\.(revokes|grants)[^\n]*/g) || []).slice(0, 3));
 r.ok('a deactivated department grants neither axis',
   /toLowerCase\(\)\s*===\s*'no'\)\s*return/.test(cap), (cap.match(/[^\n]*'no'[^\n]*/) || [''])[0]);
 r.ok('it short-circuits before a second read when there are no departments',
@@ -1983,19 +1998,34 @@ r.head('every password path revokes the devices as well as the sessions');
 });
 
 // ── Seeding the owner's mapping ───────────────────────────────────────────────
-r.head('seedDepartments upserts ONE KEY per department and names what it drops');
-// `have[key]` used to mean merely "present", so a half-granted row was never
-// corrected. And the one thing a rewrite can silently lose is an existing grant
-// the new mapping does not reproduce — so it is printed, loudly. This is the
-// direct application of "a response is not a backup".
+r.head('seedDepartments is ADD ONLY — it creates a missing department and touches nothing else');
+// ⚠ THIS INVERTED IN v95, and the reason is the whole point of the change. The seed used
+// to UPSERT: it rewrote each named department to the grant list above and DELETED every
+// section key of that department its own list did not name. Under a model where edit is
+// the default and a department can switch it OFF, that loop is a live hazard — a revoke
+// stored anywhere the loop walks would be silently erased by the next run and edit would
+// quietly come back to the whole department, with nothing on screen to say so. So the seed
+// now creates only, which is also exactly seedMemberships' own documented philosophy.
+//
+// The "prints what it DROPPED" assertions that used to live here are gone with the
+// behaviour they described: a seed that never overwrites has nothing to drop, and keeping
+// the wording would be asserting that the destructive path is still there.
 const sd = fnBody('seedDepartments');
-r.ok('it compares the desired grants against the existing ones',
-  /deltas/.test(sd), (sd.match(/[^\n]*deltas[^\n]*/) || []).slice(0, 2));
-r.ok('it reports created / updated / unchanged', /created/.test(sd) && /updated/.test(sd) && /unchanged/.test(sd));
-r.ok('it prints a DROPPED GRANTS section', /DROPPED GRANTS/.test(sd),
-  (sd.match(/[^\n]*DROPPED GRANTS[^\n]*/) || [''])[0]);
-r.ok('and it lists what was dropped, not merely that something was',
-  /dropped\.push\(/.test(sd) && /dropped\.join/.test(sd));
+r.ok('it creates only what is MISSING and leaves an existing department untouched',
+  // Multi-line, because the guard and its two branches are one statement written over
+  // four source lines — and `[\s\S]` rather than `.*` so the \r\n endings cannot defeat it.
+  /if \(store\.departments\[key\]\) \{[\s\S]{0,60}?kept\.push\(key\);[\s\S]{0,20}?return;/.test(sd),
+  (sd.match(/[^\n]*store\.departments\[key\][^\n]*/) || ['']).slice(0, 2));
+r.ok('...and therefore never writes a revoke, a grant, a triage flag or an active flag onto one',
+  !/store\.departments\[key\]\.(revokes|grants|triage|active)/.test(sd) &&
+  !/delete store\.departments\[key\]/.test(sd),
+  (sd.match(/[^\n]*store\.departments\[key\]\.[^\n]*/) || ['none — correct'])[0]);
+r.ok('it reports created / left untouched instead',
+  /Created \(/.test(sd) && /Left untouched/.test(sd),
+  (sd.match(/[^\n]*(Created|Left untouched)[^\n]*/g) || []).slice(0, 2));
+r.ok('and it says in words that the seed cannot take edit away, and points at the control that can',
+  /ADD ONLY/.test(sd) && /untick a section/i.test(sd),
+  (sd.match(/[^\n]*ADD ONLY[^\n]*/) || [''])[0]);
 r.ok('it writes ONE key per department, as one file',
   /store\.departments\[key\] = /.test(sd) && /writeJsonLocked\('access\.json', store\)/.test(sd),
   (sd.match(/[^\n]*store\.departments\[key\][^\n]*/) || [''])[0]);

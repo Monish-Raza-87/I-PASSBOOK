@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v94';
+const APP_VERSION = 'v95';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -596,8 +596,13 @@ function loginBackend(email, password, code) {
         currentUser.sessionToken = data.sessionToken;
         // backend nests the access payload under data.access (the getMyAccess
         // return). Without this, currentUser.access would be all-undefined.
+        //
+        // ⚠ Every field is listed EXPLICITLY, so a new one that is not added here is
+        // silently dropped and the app behaves as though the server never sent it.
+        // `revokedBy` (v95) names the departments that switched edit off, and losing it
+        // costs the person the only explanation they would get for a dead Save button.
         const a = (data && data.access) || {};
-        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
+        currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true, revokedBy: a.revokedBy || {} };
         currentUser.sessionError = null;   // clear any stale reason on a real mint
         persistSession(data.sessionToken);
         return data;
@@ -856,6 +861,10 @@ function refreshMyAccess() {
           // Absent on an older backend means no Triage — the fail-closed default,
           // which is the right direction for a permission.
           triage: data.triage === true,
+          // Absent on an older backend, or for an admin, or for a customer. All three
+          // mean "nobody to name", which is exactly what an empty map says — so this
+          // needs no special case, and the note it drives simply stays silent.
+          revokedBy: data.revokedBy || {},
         };
         return data;
       }
@@ -997,19 +1006,31 @@ function isAdmin() {
 // Kept as an alias so existing Section A (inward) code reads naturally.
 const isInwardAdmin = isAdmin;
 
-// ─── ACCESS CONTROL (view + comment for everyone; edit from departments) ──────
+// ─── ACCESS CONTROL (edit for everyone; a department can switch it off) ───────
 // `currentUser.access` is populated by loginBackend / refreshMyAccess:
-//   { role: 'admin'|'user', permissions: { 'sec-b':'edit', … }, departments: [], triage: bool }
+//   { role: 'admin'|'user', permissions: { 'sec-b':'edit', … }, departments: [],
+//     triage: bool, revokedBy: { 'sec-f': ['Production'] } }
+//
+// ⚠ EDIT IS THE DEFAULT (v95). Every staff account edits every section, and a
+// department UNTICKS a box to take that away — see docs/10. So `permissions` reads
+// 'view' for a section a department switched off, and every existing canEditSection()
+// call site is already correct with no change: the switch is folded into the map on
+// the server, and the map is the single seam.
+//
+// `revokedBy` is EXPLANATORY ONLY and gates nothing — it exists so the affected person
+// can be told who did it, because an admin bypasses canEdit and can never see the pane.
 //
 // `triage` is a SEPARATE axis, not a seventh permission key: a department can hold
-// it without editing any section (CR and Management do). `permissions[OVERVIEW_KEY]`
+// it without revoking anything (CR and Management do). `permissions[OVERVIEW_KEY]`
 // still exists so the Overview's inputs gate through the ordinary canEdit() seam.
 //
 // The fallback below must fail CLOSED on writes and OPEN on reads: view+comment
 // everywhere, edit nowhere. If access hasn't arrived yet (first paint, a
 // transient getMyAccess failure) the worst case is a disabled Save button the
 // user retries — never an unauthorised write, and never a locked-out screen.
-// The backend enforces independently, so a wrong guess here costs a button.
+// The backend enforces independently, so a wrong guess here costs a button. That
+// trade got MORE lopsided in v95, not less: the real profile is now edit-everywhere,
+// so a fallback that guessed 'edit' would be guessing the wide-open answer.
 // The six LIVE sections, in the order their tabs are read. ⚠ The IDS ARE PERMISSION
 // KEYS, so they do NOT match the letters shown to a person: the letters were renumbered
 // A–G on 2026-10-13, and `sec-cost` was split out of `sec-d`. Use sectionLetter() for
@@ -1037,7 +1058,14 @@ function myAccess() {
   // `triage: false` is spelled out rather than left undefined so the
   // fail-closed intent is visible at the call site: this profile is what the app
   // uses before real access arrives, and it must never confer Triage.
-  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], triage: false, __fallback: true };
+  //
+  // ⚠ And it must stay VIEW-ONLY now that the real profile is EDIT everywhere. It
+  // used to match the common case; today it is the low-privilege answer against a
+  // high-privilege default, so a fallback that guessed 'edit' would turn "permissions
+  // have not arrived yet" into "everyone can write" for the duration of an outage.
+  // The window is short and the cost of being wrong is asymmetric, which is the whole
+  // argument. `revokedBy` is empty for the same reason: nothing here was revoked.
+  return { role: isAdmin() ? 'admin' : 'user', permissions: viewOnly, departments: [], triage: false, revokedBy: {}, __fallback: true };
 }
 function canViewSection(secId)    { const a = myAccess(); if (a.role === 'admin') return true; const v = a.permissions && a.permissions[secId]; return v === 'view' || v === 'comment' || v === 'edit'; }
 // Comment comes WITH view — every signed-in user can comment on every section.
@@ -1081,6 +1109,39 @@ function paintSectionServerNote(pane, show) {
     else pane.insertBefore(note, pane.firstChild);
   }
   note.textContent = t('section.serverStale');
+}
+
+// Which departments switched edit OFF on this section, from the server's own answer —
+// `{ 'sec-f': ['Production'] }` in getMyAccess. EXPLANATORY, never the gate: the gate
+// is `permissions`, and the section is already 'view' there. Empty array means nobody
+// said, which is the answer for an admin, a customer, a staff member whose backend
+// predates v95, and the synthetic fallback profile — and for all of those the note
+// stays silent rather than guessing.
+function sectionRevokedBy(secId) {
+  const a = myAccess();
+  const r = a.revokedBy && a.revokedBy[secId];
+  return Array.isArray(r) ? r : [];
+}
+
+// The one-line explanation painted into a section whose edit rights a department has
+// switched off. A DISTINCT class from the server note above, because two painters that
+// looked each other up by the same class would delete each other's element.
+//
+// ⚠ Why this exists at all: an ADMIN bypasses canEdit entirely (backend.gs saveSection),
+// so the person who flips the switch can never see the pane it changed. If the affected
+// person is not told in words — naming the department — the only symptom is a Save
+// button that does nothing, which is the failure this repo keeps being bitten by.
+function paintSectionEditOffNote(pane, show, deptNames) {
+  let note = pane.querySelector('.section-edit-off-note');
+  if (!show) { if (note) note.remove(); return; }
+  if (!note) {
+    note = document.createElement('p');
+    note.className = 'section-edit-off-note';
+    const title = pane.querySelector('.section-title');
+    if (title && title.parentNode === pane) title.insertAdjacentElement('afterend', note);
+    else pane.insertBefore(note, pane.firstChild);
+  }
+  note.textContent = t('section.editOff', { dept: (deptNames || []).join(', ') });
 }
 
 // ─── SENTINEL STORES ─────────────────────────────────────────────────────────
@@ -1885,7 +1946,7 @@ function finishAuth(email, d) {
   currentUser.sessionToken = d.sessionToken;
   // The backend nests the access payload under data.access (getMyAccess).
   const a = (d && d.access) || {};
-  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true };
+  currentUser.access = { role: a.role, permissions: a.permissions, departments: a.departments || [], triage: a.triage === true, revokedBy: a.revokedBy || {} };
   currentUser.sessionError = null;
   persistSession(d.sessionToken);
   persistUser(currentUser);
@@ -2091,30 +2152,11 @@ function stopBrandTyping() {
 // and no video at all.
 let _brandPainted = false;
 
-function paintBrandPanel() {
-  const panel = document.querySelector('.auth-brand-panel');
-  const video = document.getElementById('brand-video');
-  if (!panel) return;
-  // Once per page. showAuth() runs again on a session expiry and on every sign-out, and
-  // a second play() would restart a video this person has already watched.
-  if (_brandPainted) return;
-  _brandPainted = true;
-
-  // ⚠ IT PLAYS ON A PHONE TOO, WHICH IT DID NOT UNTIL NOW. The owner was shown both
-  // and asked for it by name: "turn it on for mobile too." The cost is stated where it
-  // belongs rather than hidden here — 1.56 MB, once per VERSION and not once per load,
-  // because deliveredForThisVersion() below is what the second and every later arrival
-  // is refused on. What a phone must NOT do is download it before the form is usable,
-  // and it cannot: the element is preload="none", so the bytes are asked for by play()
-  // and not by the markup.
-  if (!video) return;
-  if (introDeliveredForThisVersion()) return;
-  // Reduced motion is a real instruction, not a hint: no video, and the heartbeat holds
-  // at rest (the global animation guard in base.css does that half). Delivery is
-  // deliberately NOT recorded — this device has not been shown the intro, so it is
-  // still owed it.
-  if (prefersReducedMotion()) return;
-
+// The play sequence itself, shared by the once-per-version autoplay and by the REPLAY
+// control below. Split out rather than duplicated because the two differ in exactly one
+// thing — whether the film is allowed to start unasked — and a second copy would drift on
+// the part that actually matters: when delivery is recorded.
+function playBrandFilm(panel, video) {
   let settled = false;
   let fallback = null;
   const rest = () => {
@@ -2136,6 +2178,7 @@ function paintBrandPanel() {
   // person may sign in at three seconds and `ended` will never fire at all — recording
   // only on `ended`, which is what the splash could afford to do, would replay the intro
   // on every single load for exactly the people who use the app most.
+  // markIntroDelivered() is idempotent, so a replay arriving here again is a no-op.
   video.play().then(() => {
     markIntroDelivered();
     // Painted only now that there is really something to show: the element fades in on
@@ -2149,6 +2192,70 @@ function paintBrandPanel() {
     markIntroDelivered();
     rest();
   });
+}
+
+// The REPLAY control on the brand panel — for showing the app to somebody, where the
+// second impression matters as much as the first and a plain refresh deliberately does
+// not replay the film. Wired ONCE, and wired BEFORE the early returns in
+// paintBrandPanel(), so it still works on a device that has already been shown the
+// intro. That is every device this control is for: on one that has not seen it, the
+// autoplay does the job anyway.
+let _brandReplayWired = false;
+function wireBrandReplay() {
+  if (_brandReplayWired) return;
+  const btn = document.getElementById('brand-replay');
+  if (!btn) return;
+  _brandReplayWired = true;
+  // The glyph comes from ICON_PATHS like every other one in the app — this screen is
+  // the one place initIcons() never reaches, because it runs from showApp() and a
+  // signed-out visitor never gets there. Painting it here rather than writing an <svg>
+  // into index.html is what keeps the icon table the SINGLE source of a glyph; the
+  // guard is the same one initIcons() uses, so a second sign-out is a no-op.
+  const glyph = btn.querySelector('.brand-replay-glyph');
+  if (glyph && !glyph.querySelector('svg')) glyph.innerHTML = iconSvg('replay');
+  btn.addEventListener('click', () => {
+    const panel = document.querySelector('.auth-brand-panel');
+    const video = document.getElementById('brand-video');
+    if (!panel || !video) return;
+    // ⚠ A DELIBERATE CLICK OUTRANKS REDUCED MOTION, which is why that check is NOT in
+    // playBrandFilm(): the preference is about motion nobody asked for, and pressing
+    // "replay" is asking. Rewound first, so the film restarts rather than resuming —
+    // and so a source that then fails to load rests on the still instead of freezing on
+    // its last frame. A seek on a video that is not yet seekable throws, and play()
+    // restarts from the beginning anyway, so the throw is swallowed rather than fatal.
+    try { video.currentTime = 0; } catch (e) { /* not seekable yet — play() restarts it */ }
+    playBrandFilm(panel, video);
+  });
+}
+
+function paintBrandPanel() {
+  const panel = document.querySelector('.auth-brand-panel');
+  const video = document.getElementById('brand-video');
+  if (!panel) return;
+  // Before the early returns, deliberately — see wireBrandReplay().
+  wireBrandReplay();
+  // Once per page. showAuth() runs again on a session expiry and on every sign-out, and
+  // a second play() would restart a video this person has already watched.
+  if (_brandPainted) return;
+  _brandPainted = true;
+
+  // ⚠ IT PLAYS ON A PHONE TOO, WHICH IT DID NOT UNTIL NOW. The owner was shown both
+  // and asked for it by name: "turn it on for mobile too." The cost is stated where it
+  // belongs rather than hidden here — 1.56 MB, once per VERSION and not once per load,
+  // because deliveredForThisVersion() below is what the second and every later arrival
+  // is refused on. What a phone must NOT do is download it before the form is usable,
+  // and it cannot: the element is preload="none", so the bytes are asked for by play()
+  // and not by the markup.
+  if (!video) return;
+  if (introDeliveredForThisVersion()) return;
+  // Reduced motion is a real instruction, not a hint: no video, and the heartbeat holds
+  // at rest (the global animation guard in base.css does that half). Delivery is
+  // deliberately NOT recorded — this device has not been shown the intro, so it is
+  // still owed it. ⚠ The REPLAY control above deliberately does not consult this: it is
+  // a click, and a click is the one thing that turns "no motion" into "motion I asked for".
+  if (prefersReducedMotion()) return;
+
+  playBrandFilm(panel, video);
 }
 
 function showAuth() {
@@ -5595,7 +5702,7 @@ function renderPeopleTab() {
   panels.innerHTML = `
     <div class="access-section">
       <h3>Who is in which department</h3>
-      <p class="access-hint">Tick the departments a person belongs to. <strong>Everyone</strong> signed in can view and comment on every section — a tick here only adds <strong>edit</strong> rights, on the sections that department owns (set in the <em>Departments</em> tab).</p>
+      <p class="access-hint">Tick the departments a person belongs to. <strong>Everyone</strong> signed in can edit every section by default, and a department takes edit <em>away</em> on the sections its box is unticked in the <em>Departments</em> tab — so a tick here can remove rights as well as add them.</p>
       <div class="acc-matrix-wrap">
         <table class="acc-matrix">
           <thead><tr><th>Person</th>${head}</tr></thead>
@@ -5659,7 +5766,12 @@ function setStatusAction(email, status) {
   });
 }
 
-// ─── TAB 2: department → section grants ──────────────────────────────────────
+// ─── TAB 2: what each department may edit ─────────────────────────────────────
+// ⚠ THE TICK MEANS "EDIT IS ON". Everything stored is the COMPLEMENT — `revokes`
+// names the sections switched off — so a fresh department opens with every box
+// ticked, which is the v95 default and reads correctly as "everyone can edit".
+// The classes and data attributes below (`acc-grant`, `data-key`, `data-sec`) are
+// pinned by smoke tests; only what goes IN them changed.
 function renderDepartmentsTab() {
   const panels = document.getElementById('access-panels');
   if (!panels) return;
@@ -5667,15 +5779,20 @@ function renderDepartmentsTab() {
   const cards = depts.map(d => {
     const ticks = SECTION_IDS.map(s => `
       <label class="acc-sec" title="${escHtml(SECTION_SHORT[s])}">
-        <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="${s}"${d.grants && d.grants[s] ? ' checked' : ''} />
+        <input type="checkbox" class="acc-grant" data-key="${escHtml(d.key)}" data-sec="${s}"${d.revokes && d.revokes[s] ? '' : ' checked'} />
         <span>${SECTION_LABELS[s]}</span>
         <span class="acc-sec-name">${escHtml(SECTION_SHORT[s])}</span>
       </label>`).join('');
+    // The admin's only view of the switch they just flipped. An admin bypasses
+    // canEdit entirely, so a revoked section looks perfectly normal when THEY open
+    // it — this sub-line is the one place the state is visible to them at all, and
+    // it says nothing when nothing is off rather than printing "edit off: none".
+    const off = SECTION_IDS.filter(s => d.revokes && d.revokes[s]).map(s => `Section ${SECTION_LABELS[s]}`);
     return `<div class="access-user-card" data-key="${escHtml(d.key)}">
       <div class="access-user-top">
         <div>
           <div class="access-email-line">${escHtml(d.name || d.key)}</div>
-          <div class="acc-matrix-sub">${d.members || 0} ${d.members === 1 ? 'person' : 'people'}${d.active ? '' : ' · inactive'}</div>
+          <div class="acc-matrix-sub">${d.members || 0} ${d.members === 1 ? 'person' : 'people'}${d.active ? '' : ' · inactive'}${off.length ? ' · edit off: ' + escHtml(off.join(', ')) : ''}</div>
         </div>
         <div class="access-user-controls">
           <button type="button" class="btn btn-sm acc-save-dept" data-key="${escHtml(d.key)}">Save</button>
@@ -5696,9 +5813,9 @@ function renderDepartmentsTab() {
   panels.innerHTML = `
     <div class="access-section">
       <h3>What each department may edit</h3>
-      <p class="access-hint">Tick the sections a department owns. People in that department get <strong>edit</strong> on exactly those sections, and view + comment everywhere else.</p>
-      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and category</em> — and edit the Overview panel — without granting edit on any section. That is what Customer Relations and Management hold.</div>
-      <div class="access-hint">Need one person to edit one section? Create a department with just that person in it.</div>
+      <p class="access-hint"><strong>Everyone</strong> can already edit every section, and read and comment on everything. So a ticked box is the normal state — <strong>untick</strong> a box to take edit away from the people in this department.</p>
+      <div class="access-hint"><strong>TR</strong> is a separate switch, not a section: it lets a department change an IR's <em>status, assignee, priority and category</em>, and edit the Overview panel. That is what Customer Relations and Management hold.</div>
+      <div class="access-hint">Need edit switched off for just one person? Put them in a department of their own and untick the section there. When two departments disagree, the one that switches a section <em>off</em> wins.</div>
       <div id="access-dept-list">${cards || '<div class="access-empty">No departments yet.</div>'}</div>
       <div class="access-add-row" style="margin-top:0.75rem;">
         <input type="text" id="access-new-dept" class="form-input" placeholder="New department name" />
@@ -5715,29 +5832,41 @@ function renderDepartmentsTab() {
     if (!name) { showToast('Enter a department name'); return; }
     const existing = (accessCache.departments || []).find(d => (d.name || '').toLowerCase() === name.toLowerCase());
     if (existing) { showToast('That department already exists'); return; }
-    adminPost('saveDepartment', { name: name, grants: '{}' }).then(d => {
+    // A NEW department revokes nothing — edit stays on everywhere, which is the
+    // default. `revokes: '{}'` is posted explicitly rather than omitted: the backend
+    // refuses a body that does not mention the field, because absent is how a stale
+    // shell announces itself and guessing there could clear a real revoke.
+    adminPost('saveDepartment', { name: name, revokes: '{}', triage: 'false' }).then(d => {
       showToast((d && d.message) || 'Created');
       loadAccessData();
     });
   });
 }
 
-function readDeptGrants(key) {
-  const grants = {};
-  document.querySelectorAll(`.acc-grant[data-key="${key}"]`).forEach(t => { grants[t.dataset.sec] = t.checked ? 'edit' : ''; });
-  return grants;
+// What the grid says, turned back into what is stored: the COMPLEMENT of the ticks,
+// because a tick means "edit is ON". Triage is its own field and rides along.
+function readDeptState(key) {
+  const revokes = {};
+  let triage = false;
+  document.querySelectorAll(`.acc-grant[data-key="${key}"]`).forEach(t => {
+    if (t.dataset.sec === 'triage') { triage = t.checked; return; }
+    if (!t.checked) revokes[t.dataset.sec] = true;
+  });
+  return { revokes: revokes, triage: triage };
 }
 function saveDepartmentAction(key) {
   const d = (accessCache.departments || []).find(x => x.key === key);
+  const state = readDeptState(key);
   adminPost('saveDepartment', {
     key: key,
     name: (d && d.name) || key,
     active: (d && d.active === false) ? 'no' : 'yes',
-    grants: JSON.stringify(readDeptGrants(key)),
+    revokes: JSON.stringify(state.revokes),
+    triage: state.triage ? 'true' : 'false',
   }).then(r => { showToast((r && r.message) || 'Saved'); loadAccessData(); });
 }
 function deleteDepartmentAction(key) {
-  if (!confirm('Delete the department "' + key + '"?\n\nEveryone in it loses the edit rights it granted. This cannot be undone.')) return;
+  if (!confirm('Delete the department "' + key + '"?\n\nAnyone who was in it gets edit back on any section it had switched off. This cannot be undone.')) return;
   adminPost('deleteDepartment', { key: key }).then(d => { showToast((d && d.message) || 'Deleted'); loadAccessData(); });
 }
 
@@ -11036,7 +11165,26 @@ function applySectionAccessGating() {
     // looks lost. The notice is painted below.
     const unknown = !backendKnowsSection(secId);
     const canEditHere = edit && !unknown;
+    // WHO took edit away on this section, from the server's own attribution. Only asked
+    // when edit is actually off, so the common case costs nothing. An admin gets [] here
+    // — getMyAccess hands an admin an empty map — and therefore never sees the note, which
+    // is correct rather than a gap: an admin bypasses canEdit entirely and cannot feel the
+    // switch they just flipped.
+    const revokedBy = edit ? [] : sectionRevokedBy(secId);
+    // ⚠ NEVER BOTH NOTES. "The server predates this section" is the more actionable of
+    // the two — nothing the person does in the pane helps until it is pasted — so it wins
+    // the space and the revoke note stands down.
     paintSectionServerNote(pane, view && unknown);
+    paintSectionEditOffNote(pane, view && !unknown && revokedBy.length > 0, revokedBy);
+
+    // ONE sentence for every tooltip on this pane, naming which of the two causes it is.
+    // A view-only screen with no explanation is the failure this whole block exists to
+    // prevent: the control does nothing when pressed and the person has no way to find out
+    // why, so they report it as a broken button.
+    const why = unknown
+      ? t('section.serverStale')
+      : (revokedBy.length ? t('section.editOffTooltip', { dept: revokedBy.join(', ') })
+                          : 'You have view-only access to this section');
 
     // Tab + pane visibility
     if (tab) tab.style.display = view ? '' : 'none';
@@ -11061,7 +11209,7 @@ function applySectionAccessGating() {
       closeBtn.disabled = !canEditHere;
       closeBtn.style.opacity = canEditHere ? '' : '0.5';
       closeBtn.style.cursor = canEditHere ? '' : 'not-allowed';
-      closeBtn.title = canEditHere ? '' : 'You have view-only access to this section';
+      closeBtn.title = canEditHere ? '' : why;
     }
 
     // View-only → disable every editable control in the pane (locked intake
@@ -11088,7 +11236,7 @@ function applySectionAccessGating() {
         // admin never sees it (admins skip this whole block).
         if (el.classList.contains('btn-add-row') || el.classList.contains('btn-add-evidence')) {
           el.disabled = true; el.style.opacity = '0.5'; el.style.cursor = 'not-allowed';
-          el.title = 'You have view-only access to this section';
+          el.title = why;
           return;
         }
         if (el.classList.contains('field-nudge-btn')) {
@@ -14984,6 +15132,16 @@ const ICON_PATHS = {
   // buttons sit next to each other and mean genuinely different things: one previews,
   // one navigates, and they must be tellable apart at a glance.
   expand:         '<path d="M14 4h6v6"/><path d="M20 4l-6.5 6.5"/><path d="M10 20H4v-6"/><path d="M4 20l6.5-6.5"/>',
+
+  // ── The intro replay control, 2026-10-14 ──────────────────────────────────────
+  // A ring with a quarter missing and an arrowhead on the end of the stroke — the one
+  // picture everybody already reads as "again". Deliberately NOT `chevron` (a caret
+  // that means "go in" on every other control in this app) and not `clock`, which is
+  // the ticket's own history button a few screens away and means reading the past
+  // rather than starting something over. Drawn in strokes like the rest of the table,
+  // and every point is on the ring, so a `currentColor` hover cannot make it look
+  // heavier than its neighbours.
+  replay:         '<path d="M12 4a8 8 0 1 1-8 8"/><path d="M1 15l3-3 3 3"/>',
 };
 
 // iconSvg(name, extraClass?) → inline SVG markup, or '' for a name that is not in

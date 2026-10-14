@@ -171,12 +171,98 @@ noticed — that parked-human step was the actual onboarding bug.
 
 | Level | Who has it | Comes from |
 |---|---|---|
-| **View + comment** | every signed-in account, on all seven sections **and the Overview** | the default in `getEffectiveAccess` — *nothing* records it |
-| **Edit** | a section, for the people whose departments grant it | `access.json` → `departments` + `memberships` |
+| **View + comment** | every signed-in account, on all seven sections **and the Overview** | the floor in `getEffectiveAccess` — *nothing* records it |
+| **Edit** | **every staff account, by default** | the same function, with the floor raised to `'edit'` |
+| **Edit, switched off** | a section, for the people in a department that has unticked it | `access.json` → `departments[].revokes` + `memberships` |
 
 Comment travels with view — there is no separate comment level to grant. The
 owner's words: *"Just two — view and edit. view and comment are for everyone.
 i.e., comment comes with view. and edit comes with access provided."*
+
+### Edit is the default, and a department's only job is to take it away
+
+**This inverted on 2026-10-14** and the old shape is worth naming, because it is what a
+future session would otherwise restore. Until v95 a department *granted* the sections
+its people might edit, and a person in no department could edit nothing. The owner
+replaced that with the off-switch — his words: *"let us give edit access to all
+employees for now with functionality to revoke edit permission if required at any
+later point of time … our department grid remains relevant at the same time we have
+control button in our hand."*
+
+So the department record carries a **`revokes` map** instead of a `grants` map, and the
+**grid tick means "edit is ON"**. The tick is the normal state; unticking it is the
+whole control. A tick is also the *complement* of what is stored — see below.
+
+| Case | Rule |
+|---|---|
+| Two departments, one switching `S` off, one not | The person **loses** edit on `S`. **Deny wins.** |
+| A person in no department | Keeps edit on all seven. |
+| A department with no `revokes` key (every existing one) | Takes nothing away. |
+| A department marked inactive | Applies **neither** axis — revokes nothing, triages nothing. |
+| `sec-a` (the Overview) | Never revocable; it is not in `SECTION_KEYS`, so neither end of the revoke map can name it. |
+| A customer | Unchanged: every section `'none'`, the Overview `'view'`. |
+| An admin | Bypasses the whole thing. |
+
+**Deny-wins is not a preference.** Without it, adding someone to a revoking department
+would do nothing while they hold any other department, and the owner's own use case —
+*switch one person off* — would not work at all.
+
+**The one honest limitation.** Department-only *can* switch one person off (deny-wins
+does it) and it **cannot** switch one person back on. "Department A needs Section F,
+department B does not" is not expressible for the same person; the only escape is
+removing them from the revoking department, which affects its other members. If that is
+ever hit, the fix is a per-person allow-override, deliberately not built.
+
+### The revoke is a SIBLING key, and that is what makes it survive
+
+`revokes` sits beside `grants` and `triage` on the department record rather than inside
+any of them, and the whole design rests on that one placement. Two writers would
+otherwise erase it:
+
+- **`seedDepartments`** used to *delete* every section key of a named department that
+  was not in its own mapping, so a revoke stored in `grants` would be wiped by the next
+  re-seed and the department would quietly get edit back. It is now **add-only** — see
+  "Departments".
+- **`saveDepartment` replaces the whole record**, so an ordinary Save is the write-side
+  twin of the same trap.
+
+`grants` is now **frozen legacy data**: carried through the save untouched, read by
+nothing. It is kept rather than deleted because it is the only record of what the old
+model granted, so it is the rollback reference.
+
+**Absence is not consent.** `saveDepartment` refuses a body that does not mention
+`revokes` at all — *"This Access screen is out of date — reload the app…"* — rather than
+reading the absence as `{}`. A shell cached from before the flip posts section `grants`
+instead, and treating that silence as "revoke nothing" would silently restore edit to
+everyone in the department. Present but empty **replaces**; absent **refuses**. Same
+shape as `saveSection`'s own "Reload the app".
+
+### The person it affects has to be told, by name
+
+⚠ **This screen has one viewer who can never feel the change and one who can.** An admin
+bypasses `canEdit` entirely, so a pane whose edit a department has switched off looks
+perfectly normal to him and is dead for everybody else. That is this repo's recurring
+failure — a control that works for the one person testing it — and it is not detectable
+from the admin's side at all.
+
+The backend therefore reports **`revokedBy`** — `{ 'sec-f': ['Production', …] }` — beside
+`permissions` in `getMyAccess`, and it is **explanatory only**: the gate stays
+`permissions`, where the section already arrives as `'view'`. Two things are painted from
+it, and only when the payload actually named somebody:
+
+- a one-line note **in the pane itself**, under the section title, in a distinct class
+  (`.section-edit-off-note`; the server-stale note looks itself up by its own class, so
+  two painters cannot delete each other's element);
+- the tooltip on the disabled Close and on the add-row.
+
+With nobody named — an admin, a customer, a backend that predates v95, or the synthetic
+fallback profile — **the note is not painted at all** and the tooltip falls back to the
+plain sentence. Detectability is not attribution: *"this section is read-only"* is a fact,
+*"Production switched it off"* is a claim, and only the server may make it.
+
+The admin gets the mirror of the same fact, since he cannot see the pane: the department
+card's own sub-line gains a suffix only when something is off — `5 people · edit off:
+Section F`.
 
 **Edit is many-to-many in both directions.** One person may hold several
 departments; one department holds many people. `memberships` is therefore
@@ -189,9 +275,9 @@ reason it was before: it forces a schema change every time a department is added
 ### Triage is a second axis, not a seventh section
 
 Editing the **Overview** — the customer's owner and contact phone, and the ticket
-status — is gated on a **`triage`** flag stored as a **sibling of `grants`** in the
-department record, not as a section grant. It is granted to **CR** (who owned the
-ticket header before) and to **Management** (who asked for it).
+status — is gated on a **`triage`** flag stored as a **sibling of `grants` and
+`revokes`** in the department record, not as a section grant. It is granted to **CR**
+(who owned the ticket header before) and to **Management** (who asked for it).
 
 Do not model it as a seventh grant — and note that the storage makes that hard to do
 by accident: `triage` is not inside `grants`, so nothing iterating section grants can
@@ -216,17 +302,20 @@ save is rejected without the flag.
 > and the cutover check in [08](08 - Development Guide.md) signs in as a CR *and* a
 > Production account rather than trusting the admin's view.
 
-### Why the grants are not in a sentinel store
+### Why the revokes are not in a sentinel store
 
 There is an admin-editable team directory persisted to a `__CONFIG__` sentinel,
-which is a tempting home for department assignment. **Do not put a grant there.**
-`__`-prefixed irNumbers skip *every* ACL check in `saveSection`, so a grant stored
+which is a tempting home for department assignment. **Do not put access state there.**
+`__`-prefixed irNumbers skip *every* ACL check in `saveSection`, so a revoke stored
 as a sentinel could be rewritten through `saveSection` by the very people it is
-meant to restrain. Grants live in `access.json` inside `_store/`, which is reached
+meant to restrain. `revokes` lives in `access.json` inside `_store/`, which is reached
 only through `accessStore()` and the admin actions, all behind `requireAdmin` — and
 `_store/` itself is Private, so it is not readable through the Drive UI either.
 
-### The fallback fails closed
+The same argument is why the flip did not move access state *out* of the store: the
+one reader every path funnels through is the thing keeping the write surface small.
+
+### The fallback fails closed — and it matters MORE since v95
 
 `myAccess()` returns a provisional object while `getMyAccess` is in flight (first
 paint, or a transient backend failure). It grants **view everywhere and edit
@@ -234,6 +323,14 @@ nowhere**. The asymmetry is the point: a disabled Save button is recoverable, an
 unauthorised write is not. It previously failed open on edit, which turned
 "permissions have not arrived yet" into "everyone can write". The backend enforces
 independently, so a wrong guess costs a button — never a bad write.
+
+⚠ **The same ordering is load-bearing in the BACKEND, and it is more delicate now.**
+`getEffectiveAccess` builds the per-section map as `'view'` **before** its `try`, and
+raises it to `'edit'` **inside** it. That was a tidiness when the default was a read;
+now the default is a *write*, so the `catch` is the only thing between an unreadable
+`access.json` and a company-wide edit grant. A refactor that hoisted the loop out of the
+`try` — which would look like a simplification — would fail open. `tools/smoke-backend.mjs`
+pins the order, not just the words.
 
 ### A customer is a scope, not a third level
 
@@ -642,13 +739,28 @@ snapshot is a real file instead.
 Production · QC · Flight Test · IQC · Purchase · Inventory · CR · Compliance ·
 Engineering · Management
 
-Departments are created in the admin UI and carry their own section grants. The
-**seeded** grants are the owner's mapping, not an inference — a wrong guess here
-grants write access silently, so for a release the grid was deliberately seeded
-*empty* and the mapping was requested in writing. It arrived, and now lives in
-`SEED_GRANTS` in `backend.gs`:
+Departments are created in the admin UI, and since v95 their only job on the section
+axis is the **off-switch** (see above). The department *names* come from a seed; nothing
+else about them does.
 
-| Department | Sections | Also |
+**`seedDepartments()` is ADD ONLY, and it is now the last destructive writer to have
+been removed.** Until v95 it was an upsert: it created missing departments, rewrote the
+`grants` of existing ones to match `SEED_GRANTS`, and **deleted** any key its mapping did
+not reproduce — printing a `dropped` list of what it had taken away. That is why
+`SEED_GRANTS` had to be treated as the owner's own written mapping rather than an
+inference. It now **creates what is MISSING and touches nothing else** — not `grants`,
+not `revokes`, not `triage`, not `active` — which matches the philosophy its companion
+`seedMemberships()` has documented since it was written: *add, and say so.* Re-running it
+can therefore no longer take edit away from anyone, and the report says that in words and
+points at the control that can (*"To take edit away, untick a section in User Access →
+Departments"*).
+
+`SEED_GRANTS` is **kept in the source and labelled `HISTORICAL — no longer read`.** It is
+the only in-repo record of what the pre-v95 model granted, so deleting it would destroy
+the rollback reference. The mapping it holds — the owner's, given in writing for the
+release that needed it — was:
+
+| Department | Granted, pre-v95 | Also |
 |---|---|---|
 | Production | B, C, D, E, G | |
 | QC | B, C, D, F | |
@@ -660,15 +772,13 @@ grants write access silently, so for a release the grid was deliberately seeded
 | Management | — | **Triage** |
 | IQC, Compliance | — | |
 
-Changing it is the owner's call; edit `SEED_GRANTS` and re-run `seedDepartments()`.
+`TRIAGE_DEPARTMENTS` stays live: the seed still uses it to set `triage` on a department
+it creates. Under the new model that table is the *only* part of the old mapping with a
+job, and it is right that it is the only part still read.
 
-**`seedDepartments()` is an upsert, never a blind append, and it reports what it
-did.** The distinction matters: "the row is present" is not "the row is correct",
-so a half-granted department would otherwise never be repaired. It prints
-`created` / `updated` (naming the delta, e.g. `qc: +sec-f, -sec-g`) / `unchanged`,
-and — critically — a **`dropped` list**: any grant the new mapping does not
-reproduce. A grants rewrite is the one operation that can lose a grant without
-anyone noticing, so the thing it might lose is printed rather than assumed.
+**Rollback, if the off-switch ever has to go:** tick every box back (a Save posts
+`revokes: '{}'`), then restore the previous files. The frozen `grants` are still there and
+still describe the old model exactly.
 
 `seedMemberships()` writes the person↔department edges from `SEED_MEMBERSHIPS`.
 It **only ever adds** and says so in its report ("Nothing removed"), because it must
@@ -680,18 +790,22 @@ are deliberately omitted**, and the report says so, so the omission is visibly
 intentional.
 
 Two people hold two departments on purpose, and both are faithful rather than
-clever: the owner gave **one list for Purchase and Inventory**, and since
-`inventory` and `purchase` have *different* grants (B/D/G vs D), the three people
-get **both edges** rather than a merged department or a guess about who belongs
-where. Both are reversible in the Departments tab in seconds.
+clever: the owner gave **one list for Purchase and Inventory**, and since the two
+departments were granted *different* sections (B/D/G vs D), the three people get
+**both edges** rather than a merged department or a guess about who belongs where.
+Both are reversible in the Departments tab in seconds. Under the new model those two
+edges do what they always did — but now they *hold edit on*, and the only way they
+could take it away is for one of the two departments to switch a section off.
 
 ### Deleting a department takes its memberships with it
 
 `deleteDepartment` removes the department key **and** filters that key out of every
 membership list, deleting a list that becomes empty. Otherwise a dangling membership
-would resurrect the department's grants the moment its key was recreated —
+would resurrect the department's settings the moment its key was recreated —
 silently, and under the same name. The access matrix and the department record are
-in the **same file**, so this is one locked write, not two that can half-fail.
+in the **same file**, so this is one locked write, not two that can half-fail. The
+confirm text flipped with the model: deleting a department now **restores** edit on
+anything it had switched off, and says so.
 
 ### The re-lettering hazard is gone
 

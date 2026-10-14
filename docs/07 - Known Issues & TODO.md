@@ -175,7 +175,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
   - **Regression guards:** `smoke-backend.mjs` asserts `listIRs` uses `getDisplayValues()` (never `getValues()`), reads no store, and injects no status; `smoke-list-intel.mjs` asserts an empty repository renders as empty rather than falling through to the sample cards.
   - **The app names no sheet any more, and the legacy records came back (2026-10-03).** Phase 0's last two halves. First, the addresses: `IR_REPO_SHEET_ID`, `IR_REPO_TAB` and `LEGACY_SHEET_ID` are **gone from `app.js`**, along with the five demo records that carried the Repository URL as a `summaryLink` — because the frontend no longer reads either file, and an address in a public repo is a standing hazard (change a sharing setting by accident and the data is public instantly, with no deploy and no sign on screen). The backend keeps both addresses; it reads the files as their owner. Second, the **legacy view is rebuilt** from backend data: `listLegacyIRs` returns tab names only (no `embedUrl` — the frame can never load against a restricted file, so the URL was removed rather than left to rot), and a new token-gated `getLegacyIR` returns **one tab at a time** as a displayed grid, which `openLegacyRecord` renders read-only as label/value rows — never a `<table>`, because a legacy tab is wide and a phone answers a table with sideways scrolling. The dead iframe machinery (`openLegacyModal`, `legacyTick`, `_legacyLoaded`) is deleted, not kept dark. **`smoke-list-intel.mjs` now carries the guard the plan asked for**: it fails if a `gviz`/`tqx=out` fetch, a `docs.google.com/spreadsheets/d/…` address, or a sheet id ever returns to `app.js`.
   - ✅ **The rest of the workbook has been seen, and nothing is owed here (2026-10-06).** Only the tabs named like an IR are reachable in the app — `listLegacyIRs` matches `/^IR\s*(\d+)/i` and **skips every other tab without saying so**. The workbook is restricted and reads from this environment 401, so the only way to find out what else was in it was a function the owner runs once, and he has run it: `inventoryLegacyWorkbook()` reported **170 tabs — 161 named like an IR and 9 others**, four of those empty, and only `INDEX`, `S100 TC` (a Root Cause Analysis) and `STRIVER 003` (a two-column parts list) holding data. It also settled a trap worth remembering: **row 1 is a department band, not the field labels**, and the form has two generations (a 50-column one and an older 30-column one). The function stays committed — it is **not an action** (no route, so it adds no API surface and does not move `API_VERSION`), reads the workbook and nothing else, and prints one log line per tab through `report()`. Its companion, `legacyPeekLines()`, is **retired**: it existed only to print the non-IR tabs' rows, and those are now known, so `PEEK_TABS` is `[]` and no customer row is printed again. **Run it again only if a new tab appears while the workbook is restricted.**
-- ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department grants are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
+- ⚠️ **Sentinel stores are world-readable and world-writable by any signed-in user.** `__`-prefixed irNumbers skip the per-section ACL check, so an **assignee is advisory, not access-controlled** — any signed-in user can reassign any ticket. Consistent with how comments and the team directory already behave, but "assignment" implies authority it does not have. `SENTINEL_SECTIONS` + `assertSentinelWritable()` bound *which* stores exist and what shape their keys take, so a caller can no longer invent a store — or aim a write at one that was never meant to be writable — but writes *within* an allowed store are still open to everyone, by design. (This is also why the department revokes are **not** sentinels — see [10](10 - Auth & Access Model.md). If one ever were, it could be rewritten by the very people it restrains.)
 - ⚠️ **Everyone signed in can view every section, including Investigation and the Overview** — customer names, contact emails and root-cause analysis. This is a **deliberate owner decision**, not an oversight: *"Once anyone signin in, provide view access to everyone by default. its not about who."* Edit is what is controlled. If it ever needs re-tightening, the seam survives — `canView` still exists and `getPassbook`'s per-section filter is one line. The Overview is the one row that had to be **explicitly** exempted from that filter, because it is not in `SECTION_KEYS` — see the bug note in [10](10 - Auth & Access Model.md). ⚠️ **`sec-cost` (Costing) starts at *view* for everyone too**, and that is the same universal default — the seed only applies to a fresh `seedDepartments` run, so its edit boxes are ticked by hand. Until then the Costing pane is visibly read-only, not silently empty.
   - **There is now exactly ONE exception, and it is not a level: a customer account** (added 2026-10-07). An account scoped to a company in `access.json`'s `customers` map comes back from `getEffectiveAccess` with **every section `'none'`** and the Overview at `'view'`, so it sees its own company's IRs and nothing else. This does not weaken the decision above for staff — it is about accounts that are not staff at all. The withholding needs **no new filter code**: it rides the existing `canView()` in `getPassbook`. What *is* new is `refuseCustomer(access, what)` on the endpoints with no per-record ACL (`saveSection`, the comment thread, `getAuditLog`, `getLegacyIR`, `listLegacyIRs`) — and **that check is the whole control** on those, because the audit log trusts the caller's token for the repository and the legacy reads take an arbitrary IR number. `API_VERSION` 8 exists because an older backend would answer a customer's token with everything.
   - ✅ **The invite panel offered the wrong column, and it is fixed — 2026-10-08.** The company dropdown in **User Access → Customers** is what an admin picks to scope a customer, and it was built from `ir.customerName` — Col L, **"Who's Reporting?"**, the *person* who raised the fault. The backend scopes rows by `companyName` — Col R, **"Where Do You Work?"** — so the two never agreed. Nothing failed loudly: the account was created, the invitation mailed, and the customer's portal came back **empty**, with nothing on screen saying why. Both columns exist on every real ticket (`splitNamePhone` even splits the phone off Col L), so this was not a missing field, just the wrong one. One identifier in `knownCompanies()`; `tools/smoke-invite.mjs` now pins the column against the backend's own `companyColumnIndex` needles rather than against the Insights facet it happened to share a bug with. The demo records in `getDemoIRs()` carried a company name in `customerName` and no `companyName` at all, which is how the wrong shape got taught in the first place — they now carry both columns, as the form does.
@@ -680,16 +680,23 @@ is left is small.
    never by a deploy date. The backend half is unchanged in this release — it is still
    **`v85` frontend / `API_VERSION 9` backend.**
 
-   ⏳ **`v86` is BUILT AND NOT YET PUBLISHED (as of 2026-10-10).** `APP_VERSION` and
-   `CACHE_NAME` both read `v86`; all 37 smoke suites pass; the generated `preview/*.html`
-   have been rebuilt against it. It carries the eight items listed under *Done since this
-   list was written* — most of them the owner's own 2026-10-10 list. **Two of them need a
-   paste as well as a push**, because they live in `backend.gs`: the Google door's
-   transition page (its mark's dark treatment) and nothing else. The frontend goes first,
-   as always; the paste goes to **both** `/exec` deployments as a **New version**, and the
-   primary `/exec` must still end `jQXatfT/exec`. **This paragraph is the one to update
-   once it ships; the v85 record above should be left standing as the last confirmed
-   published build.**
+   ✅ **`v86`–`v94` all shipped.** The published build is **`v94`** (gh-pages `d559e77`,
+   `sw.js` answering `ipassbook-v94`): the section letters A–G with Costing as its own
+   section (`v94`), the closed-loop profile menu (`v93`), the Service Desk bar and the
+   ticket window (`v92`), the dock (`v90`), the IR grid (`v89`), the fused sign-in panel
+   (`v88`+`v89` as one deploy). **`v93` and `v94` each owe a backend paste** and both are
+   still outstanding — and item 6 below is the paste that carries all three at once.
+
+   ⏳ **`v95` is BUILT AND NOT YET PUBLISHED (as of 2026-10-14).** `APP_VERSION` and
+   `CACHE_NAME` both read `v95`; all 37 smoke suites pass. It carries two things: **edit
+   for every staff account by default, with a department's unticked box as the off-switch**
+   (see [10](10 - Auth & Access Model.md) — the model inverted), and the **replay control
+   for the intro film** on the sign-in screen's left panel. The frontend goes first, as
+   always, and Part 2 changed `index.html` **inside `#auth-container`**, so
+   `node tools/build-ui-options.mjs` must be re-run before the deploy or the `preview/`
+   fixtures are sliced from a tag that no longer matches. `API_VERSION` was deliberately
+   **not** bumped: v95 adds no action and no section id, which is this repo's stated
+   trigger, and `11` already separates a pasted backend from the owed live paste.
 
    > ⚠ **`--push` PUSHES `gh-pages` ONLY. IT DOES NOT PUSH THE SOURCE BRANCH.** The tool
    > reads the served files out of `DEPLOY_SOURCE` and commits them to `gh-pages`
@@ -754,6 +761,27 @@ is left is small.
    whole reason to wait. Deleting is right-click → Delete on each tab in the IR
    workbook. Leaving them costs only clutter, so this is housekeeping, not a fix.
    Drive usage is worth a look at the same time (see "Erase archived IR folders").
+6. ⚠️ **THE `v95` PASTE IS OWED, AND IT IS MORE URGENT THAN THE OTHERS.** Paste the whole
+   current `backend.gs` into **both** `/exec` deployments — the primary and the
+   domain-scoped Google door — as a **New version**, with the primary still ending
+   `jQXatfT/exec`. **Never "New deployment"**, which mints a different `/exec` and breaks
+   every installed client. It carries `v93`'s recovery fix and `v94`'s `sec-cost` along
+   with `v95`, so one paste clears all three. The editor is
+   https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit
+   → **Deploy → Manage deployments → ✏️ → New version**.
+
+   **Why it cannot wait.** Since v95 the Departments grid reads `revokes`. On a
+   **pre-v95** backend that key does not exist yet, so an ordinary **Save** in User
+   Access → Departments silently **wipes `grants` and turns off `triage`** for that
+   department. Nothing errors and the screen says it saved. The paste closes that window,
+   and it is exactly the window between publishing the frontend and pasting.
+
+   To confirm it took, run **`ping`** — the deployment URL with `?action=ping` appended
+   (`ping` is in the pre-auth map, so it answers without a token) — and read
+   **`apiVersion 11`**. Then open **User Access → Departments** and confirm the grid paints
+   with every box **ticked** (a tick means *edit is ON*), which is the state a person in no
+   department is already in. Untick one box on a test department, Save, reload, and confirm
+   it stays unticked — that is the whole feature, end to end.
 - [ ] Push notifications for IR status changes
 - [ ] Photo gallery view for saved file links
 - [ ] Form validation with required fields

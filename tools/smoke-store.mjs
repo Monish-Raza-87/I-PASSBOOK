@@ -540,10 +540,19 @@ const ADMIN = 'monish.raza@indrones.com';
 // than assumed, and so a later save-as-a-department-user would be meaningful.
 ctx.seedDepartments();
 ctx.seedMemberships();
-r.ok('seedDepartments wrote access.json as department records, not rows',
+r.ok('seedDepartments creates department records with an EMPTY revoke set',
   (function () { const a = fresh('access.json');
-    return a.departments.qc && a.departments.qc.grants['sec-b'] === true &&
-           a.departments.cr.triage === true && a.departments.cr.grants['sec-b'] !== true; })(),
+    return a.departments.qc && a.departments.qc.revokes &&
+           Object.keys(a.departments.qc.revokes).length === 0 &&
+           a.departments.cr.triage === true; })(),
+  fresh('access.json').departments);
+// ⚠ The seed no longer writes `grants` at all. Since v95 it is frozen legacy data that
+// nothing reads; the only reason the field survives on existing departments is that a
+// rollback to the pre-v95 backend needs it, and saveDepartment carries it through. A seed
+// that started writing it again would be the beginning of the two disagreeing.
+r.ok('...and writes no grants at all — `grants` is frozen legacy data',
+  (function () { const a = fresh('access.json');
+    return Object.keys(a.departments).every(k => !a.departments[k].grants); })(),
   fresh('access.json').departments);
 r.ok('seedMemberships wrote one LIST per person, not an edge table',
   (function () { const m = fresh('access.json').memberships;
@@ -551,9 +560,16 @@ r.ok('seedMemberships wrote one LIST per person, not an edge table',
            m['angad.kumbhar@indrones.com'].indexOf('qc') > -1 &&
            m['angad.kumbhar@indrones.com'].indexOf('flight-test') > -1; })(),
   fresh('access.json').memberships);
-r.ok('a department user gets edit on a granted section through the new store',
-  ctx.getEffectiveAccess('angad.kumbhar@indrones.com').permissions['sec-b'] === 'edit',
-  ctx.getEffectiveAccess('angad.kumbhar@indrones.com').permissions);
+// The v95 inversion, asserted through the real store: edit everywhere, and NO department
+// is needed to get it. A brand-new address with no memberships at all is the strongest
+// form of this — it cannot be edit by accident of some other grant.
+r.ok('EVERY staff account edits every section — the v95 default needs no department',
+  (function () { const p = ctx.getEffectiveAccess('nobody-at-all@indrones.com').permissions;
+    return ctx.SECTION_KEYS.every(s => p[s] === 'edit'); })(),
+  ctx.getEffectiveAccess('nobody-at-all@indrones.com').permissions);
+r.ok('...and the Overview is NOT part of it — it stays Triage-gated',
+  ctx.getEffectiveAccess('nobody-at-all@indrones.com').permissions[ctx.OVERVIEW_KEY] === 'view',
+  ctx.getEffectiveAccess('nobody-at-all@indrones.com').permissions);
 
 // ── 1. Two sections on one IR, in two separate executions ─────────────────────
 r.head('a section save writes ONE key of the ticket file, and a second save keeps the first');
@@ -1789,16 +1805,74 @@ r.ok('a stale expectCurrent is refused', /changed while you were looking/.test(s
 r.ok('...and nothing at all was written', unchangedAfter(staleMsg));
 
 // 3. NO EDIT RIGHT. A restore IS a write, so it needs the same right as typing a new
-// value in — a view-only reader may look at the history and may not rewind it.
+// value in — somebody whose department has switched the section off may look at the
+// history and may not rewind it.
+//
+// ⚠ THIS IS ALSO THE KEYSTONE FOR THE v95 INVERSION, and it lives here rather than in
+// smoke-access because it goes through the REAL store rather than a hand-built object.
+// Edit is the default for everyone now, so the ONLY way to produce a caller without the
+// right is to untick a box — and the honest test of that is to write it the way the app
+// writes it and read it back through getEffectiveAccess.
 ctx.saveSection('__IRS__', 'IR900', { status: 'Production' }, [], ADMIN);
+const noEdit = 'angad.kumbhar@indrones.com';
+// ⚠ The membership has to be RE-SEEDED here, and that is not a convenience.
+// purgeUsers() ran earlier in this very file (§10, the "treat this as new development"
+// reset) and it removes every account except the admins — access.json has carried only
+// the admin's membership ever since. seedMemberships() is ADD ONLY, so re-running it
+// here restores the edge the earlier section destroyed without disturbing anything the
+// sections between then and now have written.
+ctx.seedMemberships();
+ctx.saveDepartment({ key: 'qc', name: 'QC', revokes: JSON.stringify({ 'sec-d': true }), triage: 'false' }, ADMIN);
 reexec();
-const viewOnly = 'angad.kumbhar@indrones.com';   // seeded by smoke-access's department map
-r.ok('the caller really is view-only on sec-d',
-  ctx.getEffectiveAccess(viewOnly).permissions['sec-d'] !== 'edit',
-  ctx.getEffectiveAccess(viewOnly).permissions);
-const forbMsg = refuse(() => ctx.restoreField('IR900', 'sec-d', 'd_findings', 'bearing worn', 'bearing worn', viewOnly, {}));
+r.ok('a department that unticked a section really does take edit away',
+  ctx.getEffectiveAccess(noEdit).permissions['sec-d'] === 'view',
+  ctx.getEffectiveAccess(noEdit).permissions);
+r.ok('...and is NAMED as the reason, so the person can be told who did it',
+  (ctx.getEffectiveAccess(noEdit).revokedBy['sec-d'] || []).indexOf('QC') > -1,
+  ctx.getEffectiveAccess(noEdit).revokedBy);
+// Triage is the other axis and must be untouched by any of this. QC never held it.
+r.ok('...while switching a section off does not touch the Triage axis',
+  ctx.getEffectiveAccess(noEdit).triage === false, ctx.getEffectiveAccess(noEdit).triage);
+const forbMsg = refuse(() => ctx.restoreField('IR900', 'sec-d', 'd_findings', 'bearing worn', 'bearing worn', noEdit, {}));
 r.ok('a caller without edit right is refused by name',
   /Forbidden: you do not have edit access to sec-d/.test(forbMsg || ''), forbMsg);
+
+// ⚠ AND THE REVOKE SURVIVES A RE-SEED. This is the whole reason `revokes` is a SIBLING
+// key of `grants` rather than a value inside it: seedDepartments used to UPSERT and delete
+// any section key its own list did not name, so a revoke stored in the grant map would be
+// wiped by the next run and edit would quietly come back to the whole department — with no
+// error and nothing on screen to say so. This assertion is what says that trap is closed.
+ctx.seedDepartments();
+reexec();
+r.ok('RE-SEEDING DOES NOT PUT EDIT BACK — the revoke outlives the seed',
+  ctx.getEffectiveAccess(noEdit).permissions['sec-d'] === 'view',
+  ctx.getEffectiveAccess(noEdit).permissions);
+r.ok('...and the seed did not resurrect a populated `grants` map either',
+  Object.keys((fresh('access.json').departments.qc || {}).grants || {}).length === 0,
+  fresh('access.json').departments.qc);
+
+// ⚠ ABSENCE IS NOT CONSENT. A shell cached from before the flip posts `grants` and does
+// not mention `revokes` at all. Reading that as "{}" would clear the revoke above and hand
+// edit back to the whole department, so it is REFUSED instead — and the refusal must not
+// have written anything.
+//
+// ⚠ saveDepartment REPORTS a refusal, it does not THROW one: it returns
+// `{status:'error', message}`, which is the shape every POST handler in this backend
+// shares, so `refuse()` above (which only catches throws) cannot see it.
+const staleBody = ctx.saveDepartment({ key: 'qc', name: 'QC', grants: JSON.stringify({ 'sec-b': true }) }, ADMIN);
+r.ok('a body that does not mention `revokes` at all is refused, not guessed at',
+  staleBody && staleBody.status === 'error' && /out of date/.test(staleBody.message || ''),
+  staleBody);
+r.ok('...and that refusal left the stored revoke exactly where it was',
+  fresh('access.json').departments.qc.revokes['sec-d'] === true,
+  fresh('access.json').departments.qc.revokes);
+
+// Put it back: the rest of this suite runs with this account able to edit.
+ctx.saveDepartment({ key: 'qc', name: 'QC', revokes: '{}', triage: 'false' }, ADMIN);
+reexec();
+r.ok('and unticking then re-ticking is a round trip — edit comes back',
+  ctx.getEffectiveAccess(noEdit).permissions['sec-d'] === 'edit',
+  ctx.getEffectiveAccess(noEdit).permissions);
 
 // 4. A SENTINEL STORE. A `__…__` store has a different key shape and its own
 // allowlist gate, so restoring into one is a different action, not a smaller one.

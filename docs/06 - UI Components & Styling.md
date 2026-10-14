@@ -687,8 +687,8 @@ IR's Triage, and no read site consults it any more.
 `TICKET_PRIORITIES` and `IR_CATEGORIES` are app-owned — the customer Form has
 neither column. Status options come from the single `IR_STATUS_VALUES` list, so
 the modal and the banner pill can never drift apart. Gated on **`canTriage()`**,
-which is a **separate axis from the section grants**: CR and Management hold it
-while editing no section at all, and a department that edits Section C does not
+which is a **separate axis from the section revokes**: CR and Management hold it
+while switching no section off, and a department that switches Section C off does not
 thereby get it. It replaced a `canEditSection('sec-a')` read when Section A stopped
 being a section — the audience is unchanged, plus Management.
 

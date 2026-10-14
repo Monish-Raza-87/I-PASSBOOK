@@ -11,17 +11,20 @@ The backend is a **Google Apps Script (GAS) web app** deployed from `backend.gs`
 There is **no per-user permission list**. The whole model is two sentences:
 
 - **Every signed-in account can view and comment on everything.** Nothing is stored
-  to record this; it is the default inside `getEffectiveAccess`. That now includes the
+  to record this; it is the default inside `getEffectiveAccess`. That includes the
   **Overview** (`sec-a`), which is not one of the sections and so needed naming
   explicitly in `getPassbook`'s filter — see below.
-- **Edit comes from departments.** A user holds zero or more departments; a
-  department grants edit on a subset of the **seven** sections (**A–G**). The mapping
-  is many-to-many in both directions — one person may hold several departments, one
-  department holds many people.
+- **Edit is the default too, and comes from nothing.** Since v95 the same floor is
+  raised to `'edit'` for every staff account; a person in no department may edit all
+  seven sections. What a department does is the **opposite** of granting: it may
+  **switch edit off** on a subset of the seven for its own people. The mapping is
+  many-to-many in both directions — one person may hold several departments, one
+  department holds many people — and **deny wins**: any held department revoking a
+  section takes it away, whatever the others say.
 - **Triage is a separate axis.** Editing the Overview (ticket owner, status) is
-  gated on the **`Triage`** flag in `DEPARTMENTS`, not on a section grant, and is
-  granted to **CR** and **Management**. A department may triage while editing no
-  section at all — which is exactly what those two get. Do not model it as a
+  gated on the **`Triage`** flag in `DEPARTMENTS`, not on a section revoke, and is
+  granted by the seed to **CR** and **Management**. A department may triage while
+  switching no section off — which is exactly what those two do. Do not model it as a
   seventh section.
 
 `ADMIN_EMAILS` → `{ role: 'admin', permissions: { every section: 'edit' }, triage: true }`,
@@ -29,11 +32,11 @@ and admins bypass every check **by role, not by the permission map** — an admi
 `getMyAccess` failed still gets edit, or they would be locked out of their own
 provisioning screen.
 
-Grants live in `access.json`, in `_store/` — never in a sentinel store (see below):
+Access state lives in `access.json`, in `_store/` — never in a sentinel store (see below):
 
 | Key | Shape |
 |---|---|
-| `departments` | `{ "cr": { name, active, grants: { "sec-b": true, … }, triage: true }, … }`. A section appears in `grants` only when the department has **edit**; `triage` is a sibling of `grants`, deliberately outside it. |
+| `departments` | `{ "cr": { name, active, revokes: { "sec-b": true, … }, triage: true }, … }`. A section appears in `revokes` only when the department has switched edit **off** for its people — absent, absent key and `{}` all mean "takes nothing away", so a record written before v95 revokes nothing and needs no migration. `triage` is a sibling of `revokes`, deliberately outside it. `grants` is still carried on old records as **frozen legacy** — `saveDepartment` passes it through untouched and nothing reads it. |
 | `memberships` | `{ "someone@indrones.com": ["production", "qa"], … }` — **a list per person**, so reading one person's departments is one key read rather than a scan of an edge list. |
 | `customers` | `{ "ops@agrikart.in": "AgriKart Pvt Ltd", … }` — a **scope**, not a permission. The value is a company name and it is the whole setting. Read by `customerCompany(email)`, the only reader of that map. |
 
@@ -50,15 +53,31 @@ number. Clearing a scope is **refused** for an outside address rather than writt
 because "no company" means *every* IR. See
 [10](10 - Auth & Access Model.md#a-customer-is-a-scope-not-a-third-level).
 
-There is no positional read and no column offset to keep in sync: a section grant is
-a key, and `triage` lives in its own field precisely so that nothing iterating
-`grants` can mistake it for a seventh section.
+There is no positional read and no column offset to keep in sync: a revoke is a key,
+and `triage` lives in its own field precisely so that nothing iterating `revokes` can
+mistake it for a seventh section. Both ends filter to `SECTION_KEYS`, so a hand-edited
+file carrying `sec-a` cannot reach the Overview.
 
 `canView(perms, sec)` accepts any non-empty level and `canComment` follows it;
 `canEdit` requires exactly `edit`. The frontend mirrors this in `canViewSection` /
 `canCommentSection` / `canEditSection`, plus `canTriage()` for the second axis.
 `departmentCapabilities(email)` reads **both** axes in one pass (one read of
 `access.json`, one function) and is the only department reader in the access path.
+
+> ⚠️ **`getEffectiveAccess` builds the per-section map as `'view'` *before* its `try`,
+> and raises it to `'edit'` *inside* it.** Since v95 the default is a *write*, so the
+> `catch` is the only thing standing between an unreadable `access.json` and a
+> company-wide edit grant. A refactor that hoisted the loop out of the `try` — which
+> would look like a simplification — fails open. `tools/smoke-backend.mjs` pins the
+> order, not just the words.
+
+`getMyAccess` returns one field beside `permissions` and `triage`: **`revokedBy`** —
+`{ "sec-f": ["Production"] }` — naming which department switched which section off.
+It is **explanatory only**; the gate is `permissions`, where the section has already
+arrived as `'view'`. The frontend paints a note from it (and a tooltip) so the person
+who lost edit is told *who* took it, and the admin — who bypasses `canEdit` and
+therefore cannot feel the change on any pane — sees the same fact as an `edit off:`
+suffix on the department card. Both are suppressed when nobody is named.
 
 > ⚠️ **The frontend's fallback (no `access` yet — first paint, or a transient
 > `getMyAccess` failure) grants view + comment everywhere and edit *nowhere*.**
@@ -151,7 +170,7 @@ per-cell length ceiling to hit silently.
 > the allowlist is what makes zero-redeploy keys possible, and also means these are
 > shared scratch space, not access-controlled storage. Never put anything
 > sensitive in one — and **never put a permission in one.** That is why the
-> department grants live in `access.json` inside `_store/`: a grant stored as a
+> department revokes live in `access.json` inside `_store/`: an off-switch stored as a
 > sentinel could be rewritten through `saveSection` by the very people it is meant
 > to restrain. (`access.json` is not a sentinel; it is reached only through
 > `accessStore()` and the admin actions, all behind `requireAdmin`.)

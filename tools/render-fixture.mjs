@@ -221,9 +221,20 @@ const ACCESS_USERS = [
   { email: 'support@farmvista.com', name: 'Vikram Iyer', status: 'active', isAdmin: false,
     departments: [], customerOf: 'FarmVista Solutions', lastLoginAt: '05-Oct-2026 09:30' },
 ];
+// ⚠ `revokes`, NOT `grants`, and a FULL boolean map over SECTION_KEYS — which is what
+// listUsers actually returns (backend.gs). `grants` was the v94 shape; a fixture still
+// speaking it would read as "revokes undefined" in the grid, where every box comes out
+// TICKED, which is the correct default and therefore renders perfectly while describing
+// a server that no longer exists. Production revokes Section F so the card's own
+// sub-line — the only place the admin can SEE what he cannot feel, because he bypasses
+// canEdit entirely — is exercised here.
 const ACCESS_DEPTS = [
-  { key: 'qa', name: 'Quality', grants: {} },
-  { key: 'prod', name: 'Production', grants: {} },
+  { key: 'qa',   name: 'Quality',    triage: false, members: 3, active: true,
+    revokes: { 'sec-b': false, 'sec-c': false, 'sec-d': false, 'sec-cost': false,
+               'sec-e': false, 'sec-f': false, 'sec-g': false } },
+  { key: 'prod', name: 'Production', triage: false, members: 5, active: true,
+    revokes: { 'sec-b': false, 'sec-c': false, 'sec-d': false, 'sec-cost': false,
+               'sec-e': false, 'sec-f': true,  'sec-g': false } },
 ];
 
 T.accessCache = { users: ACCESS_USERS, departments: ACCESS_DEPTS, apiVersion: 8 };
@@ -268,6 +279,14 @@ const accessCustomers = byId.get('access-panels').innerHTML;
 T.accessTab = 'people';
 T.renderPeopleTab();
 const accessPeople = byId.get('access-panels').innerHTML;
+// ⚠ THE DEPARTMENTS PANEL IS THE ONE THIS FIXTURE EXISTS FOR IN v95, and it was missing
+// until now. It is the only screen in the app where the admin can SEE a revoke — he
+// bypasses `canEdit` entirely, so the pane a revoked colleague is looking at is a pane he
+// can never be shown. The card's own sub-line ("5 people · edit off: Section F") is that
+// view, and it is built from `d.revokes`, which is exactly the field whose shape moved.
+T.accessTab = 'depts';
+T.renderDepartmentsTab();
+const accessDepts = byId.get('access-panels').innerHTML;
 
 const withPanel = html => accessShellTemplate.replace(
   '<div class="access-body" id="access-panels"><div class="access-loading">Loading…</div></div>',
@@ -291,10 +310,19 @@ ${css}
 ${withPanel(accessPeople)}
 </body></html>`);
 
+const accessDeptsFile = path.join(outDir, 'access-depts.html');
+fs.writeFileSync(accessDeptsFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>user access — departments</title>
+${css}
+</head><body>
+${withPanel(accessDepts)}
+</body></html>`);
+
 console.log(outFile);
 console.log(`  insights ${insights.length} bytes · banner ${banner.length} · list ${list.length}`);
 console.log(accessFile);
-console.log(`  customers panel ${accessCustomers.length} bytes · people panel ${accessPeople.length}`);
+console.log(`  customers panel ${accessCustomers.length} bytes · people panel ${accessPeople.length} · departments panel ${accessDepts.length}`);
 console.log(doorFile);
 console.log(`  door ${doorBlock.length} bytes`);
 

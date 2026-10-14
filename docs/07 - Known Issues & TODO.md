@@ -687,16 +687,23 @@ is left is small.
    (`v88`+`v89` as one deploy). **`v93` and `v94` each owe a backend paste** and both are
    still outstanding — and item 6 below is the paste that carries all three at once.
 
-   ⏳ **`v95` is BUILT AND NOT YET PUBLISHED (as of 2026-10-14).** `APP_VERSION` and
-   `CACHE_NAME` both read `v95`; all 37 smoke suites pass. It carries two things: **edit
-   for every staff account by default, with a department's unticked box as the off-switch**
-   (see [10](10 - Auth & Access Model.md) — the model inverted), and the **replay control
-   for the intro film** on the sign-in screen's left panel. The frontend goes first, as
-   always, and Part 2 changed `index.html` **inside `#auth-container`**, so
-   `node tools/build-ui-options.mjs` must be re-run before the deploy or the `preview/`
-   fixtures are sliced from a tag that no longer matches. `API_VERSION` was deliberately
-   **not** bumped: v95 adds no action and no section id, which is this repo's stated
-   trigger, and `11` already separates a pasted backend from the owed live paste.
+   ✅ **`v95` IS PUBLISHED — 2026-10-14, gh-pages `e05164b`.** `APP_VERSION` and
+   `CACHE_NAME` both read `v95`; all 37 smoke suites pass. Read on the live site after the
+   push, never off a deploy date: `sw.js` answering `ipassbook-v95`, `app.js` answering
+   `APP_VERSION = 'v95'`, `index.html` carrying `id="brand-replay"`, `base.css` carrying ten
+   `--panel-ink`, `i18n.js` carrying `intro.replay` twice. It carries two things: **edit for
+   every staff account by default, with a department's unticked box as the off-switch** (see
+   [10](10 - Auth & Access Model.md) — the model inverted), and the **replay control for the
+   intro film** on the sign-in screen's left panel. Its backend half **landed the same day** —
+   see item 6 below. `API_VERSION` was deliberately **not** bumped by v95: it adds no action
+   and no section id, which is this repo's stated trigger.
+
+   > **A process note worth keeping.** Part 2 changed `index.html` **inside
+   > `#auth-container`**, which is the exact string `render-fixture.mjs` and
+   > `build-ui-options.mjs` slice from. So `node tools/build-ui-options.mjs` had to be
+   > re-run before the deploy or the `preview/` fixtures would have been sliced from a tag
+   > that no longer matched. The tag is a **slice anchor**, and adding an attribute to it is
+   > a silent break — the plan forbade touching that tag, and it held.
 
    > ⚠ **`--push` PUSHES `gh-pages` ONLY. IT DOES NOT PUSH THE SOURCE BRANCH.** The tool
    > reads the served files out of `DEPLOY_SOURCE` and commits them to `gh-pages`
@@ -761,27 +768,38 @@ is left is small.
    whole reason to wait. Deleting is right-click → Delete on each tab in the IR
    workbook. Leaving them costs only clutter, so this is housekeeping, not a fix.
    Drive usage is worth a look at the same time (see "Erase archived IR folders").
-6. ⚠️ **THE `v95` PASTE IS OWED, AND IT IS MORE URGENT THAN THE OTHERS.** Paste the whole
-   current `backend.gs` into **both** `/exec` deployments — the primary and the
-   domain-scoped Google door — as a **New version**, with the primary still ending
-   `jQXatfT/exec`. **Never "New deployment"**, which mints a different `/exec` and breaks
-   every installed client. It carries `v93`'s recovery fix and `v94`'s `sec-cost` along
-   with `v95`, so one paste clears all three. The editor is
-   https://script.google.com/home/projects/1HBTlKzgMInqvt_yCUCwsA0RmrvetIylFyPxpHA_ch5mEpvOhDYbTBUj9/edit
-   → **Deploy → Manage deployments → ✏️ → New version**.
+6. ✅ **DONE 2026-10-14 — THE `v95` PASTE LANDED, ON BOTH DEPLOYMENTS.** The owner pasted the
+   whole `backend.gs` into both `/exec` deployments as a **New version** (primary still ending
+   `jQXatfT/exec`). **The primary is confirmed by a pre-auth read of `ping`**, which answered
+   `{"status":"ok","apiVersion":11,…}` — appended to the deployment URL as `?action=ping`, which
+   needs no token because `ping` is in the pre-auth map. It carried **three releases at once**:
+   v93's profile-menu recovery fix, v94's `sec-cost` section, and v95's revoke model.
 
-   **Why it cannot wait.** Since v95 the Departments grid reads `revokes`. On a
-   **pre-v95** backend that key does not exist yet, so an ordinary **Save** in User
-   Access → Departments silently **wipes `grants` and turns off `triage`** for that
-   department. Nothing errors and the screen says it saved. The paste closes that window,
-   and it is exactly the window between publishing the frontend and pasting.
+   > ⚠ **The 404 rule is ONE-DIRECTIONAL, and this is where it pays off.** A 404 on
+   > `CONFIG.GAS_URL` proves nothing — a live deployment answers one (see
+   > `backend-exec-can-vanish`). But a **200 carrying the right payload is real positive
+   > evidence**, and that asymmetry is the only reason this could be closed from here at all.
 
-   To confirm it took, run **`ping`** — the deployment URL with `?action=ping` appended
-   (`ping` is in the pre-auth map, so it answers without a token) — and read
-   **`apiVersion 11`**. Then open **User Access → Departments** and confirm the grid paints
-   with every box **ticked** (a tick means *edit is ON*), which is the state a person in no
-   department is already in. Untick one box on a test department, Save, reload, and confirm
-   it stays unticked — that is the whole feature, end to end.
+   > ⚠ **The old second step — "then tick the Section D (Costing) boxes by hand" — is
+   > OBSOLETE.** It was written when a new section id started at *view* for everyone. Since
+   > v95 edit is the default, so `sec-cost` starts at *edit* like every other section and
+   > nothing needs ticking. Do not go looking for boxes to tick.
+
+   > **The Google door's half is still unread from here.** `/a/macros/indrones.com/…` redirects
+   > an anonymous read to `google.com/a/indrones.com/ServiceLogin`, and that redirect is *not*
+   > evidence either way. The owner's own browser, already inside the domain, reads it.
+   > Nothing in the app depends on the two deployments agreeing, so this is a record, not a risk.
+
+   **Why it could not wait, kept because the shape recurs.** The v95 frontend's Departments grid
+   reads `revokes`. On a **pre-v95** backend that key did not exist, so an ordinary **Save** in
+   User Access → Departments would have silently **wiped `grants` and turned off `triage`** for
+   that department — no error, and the screen said it saved. That is the real cost of
+   frontend-first whenever the frontend learns a **new field**, as opposed to a new value.
+
+   **Still unproven, and only the field can prove it:** no staff account has yet reported meeting
+   the new *"edit was switched off by …"* note. To see it end to end: open **User Access →
+   Departments**, untick one box, Save, reload — it must stay unticked. That is the whole
+   feature.
 - [ ] Push notifications for IR status changes
 - [ ] Photo gallery view for saved file links
 - [ ] Form validation with required fields

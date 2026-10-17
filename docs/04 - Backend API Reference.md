@@ -1170,7 +1170,18 @@ empty for the same reason.
 
 ```javascript
 var CONFIG = {
-  // IR Repository sheet — the file and the tab, and NOTHING positional.
+  // ⚠ NO FILE IDS LIVE HERE SINCE v13 (2026-10-17). This repo is PUBLIC, so every
+  // Google file id and the external address list were moved out of the source:
+  //
+  //   irRepoSheetId, legacySheetId, clientDirectorySheetId, externalEmails
+  //       -> `_store/ids.json`, read by storeIds() / requireStoreId()
+  //   the `_store/` root folder id
+  //       -> the STORE_ROOT_FOLDER_ID Script Property (it cannot go in ids.json:
+  //          reading that file needs the folder first — see getRootFolder())
+  //
+  // See docs/05 for how they are set, and for why `ping` CANNOT confirm a v13 deploy.
+
+  // IR Repository sheet — the TAB, and NOTHING positional.
   //
   // There used to be an IR_REPO_*_COL constant per column here. They are gone
   // (2026-10-03): they were a second, positional copy of the sheet's layout, and
@@ -1178,29 +1189,24 @@ var CONFIG = {
   // columns by HEADER SUBSTRING, so a reworded Form question or an inserted column
   // cannot silently shift every field by one. listIRs now hands over the grid and
   // lets that one table decide what each column means.
-  IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
   IR_REPO_TAB:      'Form Responses',
 
   // The app's store — JSON files in the owner's Drive folder, under _store/
-  DRIVE_ROOT_FOLDER_ID: '1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK',
   STORE_FOLDER_NAME:    '_store',
 
-  // The two READ-ONLY input Sheets. Nothing in the app writes to either.
-  LEGACY_SHEET_ID:  '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
-
-  // The company-and-contact directory, read by seedCompanyContacts() ONLY. It is
-  // NOT read on any request path. ⚠ The id sits in a PUBLIC repo, so the sheet
-  // itself MUST stay Restricted (link-sharing NONE) — a sign-in page where rows
-  // should be means it has been shared. The backend reads it through
-  // SpreadsheetApp.openById as its own account, so the file never needs a link.
-  CLIENT_DIRECTORY_SHEET_ID: '1R1cMpHVvid5ptDyZNHuMIOALGsZVpGqum5wH2FkLU2U',
+  // The READ-ONLY input Sheets, and the company-and-contact directory read by
+  // seedCompanyContacts() ONLY (never on a request path). Their IDS are in
+  // `_store/ids.json`; only the TAB NAMES are here, and a tab name is not an
+  // address. ⚠ Those sheets MUST still stay Restricted (link-sharing NONE) — the
+  // ids being out of the repo only means a mistake here stops being reachable by
+  // anyone who read this repository. A sign-in page where rows should be means the
+  // share setting has changed.
   CLIENT_DIRECTORY_TAB:      'Drones',
 
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
-  EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 12,           // 12 = the company register; see the version list in backend.gs
+  API_VERSION: 13,           // 13 = no file ids in the source; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 
@@ -1337,7 +1343,8 @@ pre-flight/cutover split collapses into "run five functions, then deploy".
 | `inventoryEmailIndex()` | **read-only, editor-run** | The same survey shape as the row above, aimed at the piece of the legacy data the app has **no code for**: a crawl over two mailboxes that produced **2393 rows / 646 threads covering 370 of 452 IRs**, referred to as `Email_Index`. **Run once, 2026-10-09, and it answered everything** — see the result below. Before that run neither the tab's home, its columns nor its header row was known, because the crawl was run from an editor and never committed: no `Email_Index` string, no `GmailApp` use and no column definition existed anywhere in this repository. **A reader built against a guessed schema would be `ContentService.MimeType.HTML` again**, so this answers the three questions instead of assuming them. It cannot be pointed at a fixed id, because the id is part of what is unknown: it **searches the Drive** for spreadsheets named like an index (trying `title contains` and falling back to `name contains`), then inventories each one — every tab as name, dimensions, count of rows holding anything, and the header row. It prints **the account it ran as** first, because the two mailboxes belong to different accounts and a file one can see the other frequently cannot, so a zero-result search is an answer about identity before it is about naming. **It never touches Gmail** — crawling the mailboxes again would put a `GMAIL` scope on the deployment and every account on it would have to re-authorise the whole app for a one-off survey; Drive and Sheets are scopes the app already holds. Not an action (no route, no `API_VERSION` move), and it writes nothing: no store, no Drive write, no mail. It is the sixth `SpreadsheetApp.` site, counted deliberately in `tools/smoke-backend.mjs` |
 
 **What the one run found (2026-10-09).** `Email_Index` is a **second tab in the spreadsheet
-the app already opens** — `CONFIG.IR_REPO_SHEET_ID` (`1MPcWvgZ…`), the same file whose
+the app already opens** — `_store/ids.json` → `irRepoSheetId` (it was `CONFIG.IR_REPO_SHEET_ID`
+until v13), the same file whose
 `CONFIG.IR_REPO_TAB` ('Form Responses') is the client intake read on every boot. Reading it
 therefore needs **no new file, no sharing change, no new OAuth scope and no extra
 permission**: one `getSheetByName('Email_Index')` beside a call the app already makes. The

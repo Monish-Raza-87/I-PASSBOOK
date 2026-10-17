@@ -98,8 +98,8 @@ r.head('the owner\'s security decisions');
 // rather than assumed here: the register only ever narrows WHICH names an admin may
 // pick from, and the scope it writes is still the plain string the v11 backend already
 // understood — so an old backend keeps resolving every scope it is handed.
-r.ok('API_VERSION is 12 — the company register',
-  /API_VERSION:\s*12\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 13 — no file ids in the source',
+  /API_VERSION:\s*13\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -113,25 +113,85 @@ r.ok('customer.relations is not in it', !admins.includes('customer.relations'), 
 
 r.head('the allowlist is gone, the external exception is not');
 r.ok('no ALLOWED_EMAILS array remains', !/ALLOWED_EMAILS\s*[:=]/.test(code));
-r.ok('EXTERNAL_EMAILS exists and holds uavgarage',
-  /EXTERNAL_EMAILS:\s*\[[^\]]*uavgarage\.com/.test(code),
-  (code.match(/EXTERNAL_EMAILS:[^\n]*/) || [''])[0]);
+// ⚠ THE EXTERNAL ADDRESS LEFT THE SOURCE ON 2026-10-17. It is a third party's real
+// mailbox and this repo is PUBLIC. The assertion is inverted on purpose: it now
+// forbids the value rather than requiring it. The DOMAIN is what is checked, because
+// the domain is the identifier — a test that pinned the local part would pass while
+// the address leaked through a second file.
+r.ok('no external address is hard-coded any more',
+  // ⚠ THE LITERAL IS DELIBERATELY NOT WRITTEN HERE. A guard that names the value it
+  // forbids re-publishes it — and this file is in the same PUBLIC repository as the
+  // source. That is not a hypothetical: it is the exact shape of the mistake this
+  // release exists to undo. The check is generic instead, so it also catches an
+  // address that arrives by a route nobody listed.
+  !/@(?!indrones\.com)[a-z0-9.-]+\.[a-z]{2,}/i.test(code.replace(/\/\/[^\n]*/g, '')),
+  (code.replace(/\/\/[^\n]*/g, '').match(/[^\n]*@(?!indrones\.com)[a-z0-9.-]+\.[a-z]{2,}[^\n]*/i) || ['none — correct'])[0]);
+r.ok('the recipient guard reads it from the store instead',
+  /storeIds\(\)\.externalEmails/.test(code));
 
 r.head('the store is the owner\'s Drive folder, and there is no app spreadsheet');
 // The whole point of the migration: the ONLY spreadsheet left is the client's Form
 // Responses (an input) and the legacy workbook (a read-only archive). A surviving
 // PASSBOOK_SHEET_ID would mean the store did not actually move.
-r.ok('DRIVE_ROOT_FOLDER_ID is the owner\'s folder',
-  /DRIVE_ROOT_FOLDER_ID:\s*'1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK'/.test(code),
-  (code.match(/DRIVE_ROOT_FOLDER_ID:[^\n]*/) || [''])[0]);
+//
+// ⚠ AND FROM v13 THE FOLDER ID IS NOT IN THE SOURCE EITHER. This assertion used to
+// pin the literal; it now forbids it, because a Drive folder id in a PUBLIC repo plus
+// a share setting that slips is exactly the leak that put the intake sheet on the open
+// internet for two days in October 2026. The property it moved to is asserted by name
+// so a rename cannot silently disconnect the bootstrap.
+r.ok('no Drive folder id is hard-coded any more',
+  // ⚠ NO LITERAL ID HERE, for the reason given at the address check above: pinning the
+  // value would put it straight back into the repository. The generic sweep further
+  // down is what actually enforces this; this line pins the CONFIG name and the fact
+  // that the property is the only route.
+  !/DRIVE_ROOT_FOLDER_ID/.test(code),
+  (code.match(/[^\n]*DRIVE_ROOT_FOLDER_ID[^\n]*/) || ['none — correct'])[0]);
+r.ok('the root folder comes from a Script Property, named in one place',
+  /ROOT_FOLDER_PROPERTY = 'STORE_ROOT_FOLDER_ID'/.test(code) &&
+  /PropertiesService\.getScriptProperties\(\)\.getProperty\(ROOT_FOLDER_PROPERTY\)/.test(code));
 r.ok('the store folder is named _store',
   /STORE_FOLDER_NAME:\s*'_store'/.test(code), (code.match(/STORE_FOLDER_NAME:[^\n]*/) || [''])[0]);
 r.ok('PASSBOOK_SHEET_ID is gone', !/PASSBOOK_SHEET_ID/.test(code),
   (code.match(/PASSBOOK_SHEET_ID[^\n]*/) || [''])[0]);
 r.ok('DATA_TAB (the APP_DATA tab) is gone', !/\bDATA_TAB\b/.test(code),
   (code.match(/[^\n]*DATA_TAB[^\n]*/) || [''])[0]);
-r.ok('the two read-only INPUT sheets are still configured',
-  /IR_REPO_SHEET_ID:/.test(code) && /LEGACY_SHEET_ID:/.test(code));
+// The two read-only INPUT sheets are still configured — by NAME OF KEY, not by value.
+// They live in `_store/ids.json` now, and the accessors are what must exist.
+r.ok('the two read-only INPUT sheets are resolved from the store',
+  /requireStoreId\('irRepoSheetId'\)/.test(code) && /requireStoreId\('legacySheetId'\)/.test(code));
+
+// ── The identifier move itself (v13) ──────────────────────────────────────────
+r.head('v13: no Sheet or Drive file id survives in the source');
+// A belt-and-braces sweep: every Google file id is 25+ chars of base64-ish text. Any
+// one of them sitting in a string literal in this file is the bug this release exists
+// to prevent, however it got there.
+// A belt-and-braces sweep: every Google file id is a long base64-ish run that carries
+// at least one DIGIT. The digit requirement is what makes this usable — this file has
+// plenty of long alphanumeric string literals that are not ids (an alphabet constant,
+// a camelCase setting name), and a sweep that flagged those would be switched off
+// within a week rather than read. It is a heuristic and it can be beaten; what it is
+// for is catching an id that arrives by a route nobody listed.
+const idLike = (code.match(/['"][A-Za-z0-9_-]{30,}['"]/g) || []).filter(s => /\d/.test(s));
+r.ok('no 25+ character id-shaped string literal anywhere in backend.gs',
+  idLike.length === 0, idLike.slice(0, 5).join(', '));
+// ids.json is a PLAIN store file. It must never be added to SENTINEL_SECTIONS, which
+// is the client-facing __CONFIG__ door every signed-in account can read.
+r.ok('ids.json is not reachable through the __CONFIG__ sentinel',
+  !/__IDS__|'ids\.json'/.test(code.slice(code.indexOf('var SENTINEL_SECTIONS'),
+                                        code.indexOf('var SENTINEL_SECTIONS') + 400)));
+r.ok('storeIds() answers {} for a missing key and never throws',
+  /function storeIds\(\)/.test(code) && /readJson\(STORE_IDS_FILE\) \|\| \{\}/.test(code));
+r.ok('requireStoreId() names the key AND the fix in its error',
+  /function requireStoreId\(name\)/.test(code) &&
+  /seedStoreIds\(\) once from the Apps Script editor/.test(code));
+r.ok('the ids content is cached, so the hot read path pays no extra Drive call',
+  /storeIdsCacheKey\(\)/.test(code) && /STORE_ID_TTL_SECONDS/.test(code));
+r.ok('seedStoreIds() refuses to clobber a non-empty file without force',
+  /alreadyHas\.length && !force/.test(code) && /seedStoreIds\(true\)/.test(code));
+r.ok('seedStoreIds() deletes its own seeding property',
+  /deleteProperty\(SEED_IDS_PROPERTY\)/.test(code));
+r.ok('isMailRecipientAllowed fails closed but the address list is printed by the seed',
+  /externalEmails \|\| \[\]/.test(code) && /STORE_ID_KEYS/.test(code));
 
 // ── Deleted machinery ─────────────────────────────────────────────────────────
 r.head('the self-signup and request-access machinery is gone');
@@ -567,8 +627,8 @@ r.head('mail uses the already-granted scope');
 r.ok('MailApp.sendEmail is used', /MailApp\.sendEmail/.test(code));
 r.ok('no UrlFetchApp anywhere (it broke Google Sign-In once)',
   !/UrlFetchApp/.test(code), (code.match(/UrlFetchApp[^\n]*/) || [''])[0]);
-r.ok('the recipient guard consults EXTERNAL_EMAILS',
-  /isMailRecipientAllowed/.test(code));
+r.ok('the recipient guard exists and reads the store, not the source',
+  /isMailRecipientAllowed/.test(code) && /storeIds\(\)\.externalEmails/.test(code));
 
 r.head('the mail cap covers every sender, not just auth');
 // The first version of this fix put the quota check inside sendAuthMail only, so
@@ -1178,7 +1238,7 @@ r.ok('it exists, and it is NOT routed in doGet or doPost — so it adds no API s
 // standing in for is the routing one asserted directly above, so the assertion is
 // narrower now, not weaker.
 r.ok('it READS the workbook and touches nothing else — no store, no Drive, no mail',
-  /SpreadsheetApp\.openById\(CONFIG\.LEGACY_SHEET_ID\)/.test(inv) &&
+  /SpreadsheetApp\.openById\(requireStoreId\('legacySheetId'\)\)/.test(inv) &&
   !/writeJson|writeIR|appendAudit|MailApp|DriveApp|getStoreFolder|findStoreFile|Utilities\./.test(inv),
   (inv.match(/[^\n]*(writeJson|DriveApp|MailApp|getStoreFolder)[^\n]*/) || ['none — correct'])[0]);
 r.ok('it uses getDisplayValues, never getValues',
@@ -1201,8 +1261,11 @@ r.ok('every line goes through report(), so the output lands in the execution log
 // The output is pasted around by hand. It must not carry the workbook's address,
 // for the same reason app.js must not: the file is restricted, and its id is not
 // something to spread. The name and the tab names are what makes it checkable.
+// ⚠ Since v13 the id is not merely unprinted — it is not in the SOURCE at all, so the
+// count is 0 rather than 1. A `CONFIG.LEGACY_SHEET_ID` creeping back here is the leak.
 r.ok('it prints no workbook id and no address — the name and the tabs are the proof',
-  (inv.match(/CONFIG\.LEGACY_SHEET_ID/g) || []).length === 1 &&
+  (inv.match(/CONFIG\.LEGACY_SHEET_ID/g) || []).length === 0 &&
+  (inv.match(/requireStoreId\('legacySheetId'\)/g) || []).length === 1 &&
   !/docs\.google\.com|spreadsheets\/d\//.test(inv) &&
   /ss\.getName\(\)/.test(inv));
 r.ok('a single unreadable tab becomes a line, not a lost run',
@@ -2225,7 +2288,7 @@ r.ok('the order is initializeStore → seedDepartments → seedMemberships → b
   /initializeStore\(\)[\s\S]{0,400}seedDepartments\(\)[\s\S]{0,400}seedMemberships\(\)[\s\S]{0,400}bootstrapAdmin\(\)/.test(banner),
   (banner.match(/[^\n]*initializeStore[^\n]*/) || [''])[0]);
 r.ok('AND THE SAME ORDER IS PRINTED where the editor will actually see it',
-  /Next: seedDepartments\(\) → seedMemberships\(\) → bootstrapAdmin\(\) → seedAccounts\(\)/.test(fnBody('initializeStore')),
+  /Next: seedStoreIds\(\) → seedDepartments\(\) → seedMemberships\(\) → bootstrapAdmin\(\) → seedAccounts\(\)/.test(fnBody('initializeStore')),
   (fnBody('initializeStore').match(/[^\n]*Next:[^\n]*/) || [''])[0]);
 r.ok('the banner says the cutover ordering problem is GONE, not just that it changed',
   /no cutover ordering problem any more/i.test(banner),

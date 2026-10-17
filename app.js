@@ -102,7 +102,8 @@ const CONFIG = {
   // primary to domain-only would have Google refuse the request before our code
   // runs — and that would kill the password door too, for exactly the people who
   // need it: a shared machine with no Google session, and the external address in
-  // the backend's CONFIG.EXTERNAL_EMAILS.
+  // the backend's `_store/ids.json` → externalEmails (it was CONFIG.EXTERNAL_EMAILS
+  // until v13, when the ids left the source — see docs/05).
   //
   // THIS URL IS OPENED, NEVER FETCHED. It is the one thing about this feature that
   // is easy to get wrong, and the first version of it did: fetching this URL from

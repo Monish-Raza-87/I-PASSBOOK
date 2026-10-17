@@ -459,12 +459,13 @@ The app's data is **JSON files in Drive**, owned by `monish.raza@indrones.com`, 
 one folder:
 
 ```
-1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK/          ← CONFIG.DRIVE_ROOT_FOLDER_ID
+<STORE_ROOT_FOLDER_ID>/                     ← Script Property, since v13
 ├── IR409/  IR410/  …                       ← uploads, one FOLDER per ticket
 └── _store/                                 ← Restricted. Staff never open this.
     ├── users.json      sessions.json       codes.json      attempts.json
     ├── access.json     { departments: {…}, memberships: {…} }
     ├── irs.json        { "IR409": {status, assignee, priority, category, …}, … }
+    ├── ids.json        the Sheet + Drive file ids. NOT in git — see docs/05
     ├── config.json     { "team-directory": …, "inward-options": …, "iqc-config": … }
     ├── kb.json         { "<key>": {…} }
     ├── comments.json   { "all": { "items": [ … ] } }
@@ -476,7 +477,7 @@ one folder:
     ├── backup.json     the last nightly export's outcome — read by getBackupHealth
     └── backups/        <store>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
 
-1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK/I-PASSBOOK backups/    ← SIBLING of _store/
+<STORE_ROOT_FOLDER_ID>/I-PASSBOOK backups/    ← SIBLING of _store/
 ├── 2026-10-03/       raw/ (restore source) · csv/ · a Sheet · _manifest.json
 │                     14 daily · 8 weekly · 12 monthly · one a year, forever
 └── _rehearsal/       what rehearseRestore() rebuilt from the newest archive.

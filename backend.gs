@@ -7,7 +7,8 @@
 //     Serves every action the app makes, including password sign-in with its
 //     emailed code. Its /exec URL is the one in the frontend's CONFIG.GAS_URL and
 //     must NOT change. It has to stay on "Anyone": an address outside the domain
-//     (see CONFIG.EXTERNAL_EMAILS), and any machine with no Google session, can
+//     (see the externalEmails key in `_store/ids.json`), and any machine with no
+//     Google session, can
 //     only get in through this door, and a domain restriction blocks the request
 //     at Google's edge before this script ever runs.
 //
@@ -30,8 +31,21 @@
 // ============================================================
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CONFIG — Update DRIVE_ROOT_FOLDER_ID before deploying
+// CONFIG — NO FILE IDS LIVE HERE ANY MORE
 // ──────────────────────────────────────────────────────────────────────────────
+// ⚠ THIS FILE IS IN A PUBLIC REPOSITORY. Every Sheet and Drive FOLDER ID that used
+// to sit in this block has been moved out of the source and into private storage,
+// because a public ID plus a share setting that slips is exactly how the intake
+// sheet became readable to the world for two days in October 2026.
+//
+//   · the four Sheet/Drive identifiers -> `_store/ids.json`, read by storeIds()
+//     and requireStoreId() below; seeded once by seedStoreIds() from the editor.
+//   · the `_store/` root folder ID  -> the STORE_ROOT_FOLDER_ID Script Property.
+//     It CANNOT live in ids.json: you cannot read that file without already
+//     knowing which folder holds it. See getRootFolder().
+//
+// The TAB NAMES below stay: a tab name is not an address and gives nothing away.
+// If you are adding a new file id, put it in `_store/ids.json` — never here.
 var CONFIG = {
   // The IR Repository sheet (Form Responses tab) — source of new IR records.
   //
@@ -43,7 +57,8 @@ var CONFIG = {
   // same layout is one copy too many, and the row[13] kind of read is exactly how
   // a sheet layout rots. listIRs now hands over the grid and lets that one table
   // decide what each column means.
-  IR_REPO_SHEET_ID: '1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4',
+  //
+  // The FILE ID is `_store/ids.json` → `irRepoSheetId` (requireStoreId).
   IR_REPO_TAB:      'Form Responses',
   // The email crawl's own tab, in the SAME spreadsheet as the intake above. Written
   // by a script that lives OUTSIDE this repo — see listIRThreads for why that decides
@@ -58,29 +73,35 @@ var CONFIG = {
   // READ ONCE, BY seedCompanyContacts(). Nothing at runtime reads it: the register is
   // `_store/companies.json`, and this sheet is an INPUT to building it, exactly as the
   // intake sheet is. So a wrong or emptied value here costs a seed run and never a
-  // customer's tickets. Leave it '' and that seed reports "not configured" rather
-  // than throwing.
+  // customer's tickets. Leave the key out of ids.json and that seed reports "not
+  // configured" rather than throwing.
   //
-  // ⚠ THIS ID SITS IN A PUBLIC REPOSITORY, so the sheet behind it MUST stay Restricted
-  // (no "anyone with the link"). It is a client directory — names, contact people and
+  // ⚠ THE ID WAS IN A PUBLIC REPOSITORY UNTIL 2026-10-17 and is now `_store/ids.json`
+  // → `clientDirectorySheetId`. It is a client directory — names, contact people and
   // mailboxes — and the ID in public plus a link-share is exactly how the intake sheet
-  // became readable to the world for two days in October 2026. If the seed's first
-  // run reports a login page instead of rows, that is what has happened.
-  CLIENT_DIRECTORY_SHEET_ID: '1R1cMpHVvid5ptDyZNHuMIOALGsZVpGqum5wH2FkLU2U',
+  // became readable to the world for two days in October 2026. The sheet must STILL
+  // stay Restricted; moving the id only means a mistake here stops being reachable by
+  // anyone who read this repo. If the seed's first run reports a login page instead of
+  // rows, the share setting is what has changed.
   CLIENT_DIRECTORY_TAB:      'Drones',
 
   // ── THE APP'S OWN STORE ──────────────────────────────────────────────────────
   // There is no app spreadsheet any more. Everything the app owns — accounts,
   // sessions, the access matrix, every saved section, the audit trail — lives as
-  // JSON files in `_store/` inside the folder below. The ONLY spreadsheet left is
-  // the client's Form Responses sheet above, which is an INPUT, never a store.
+  // JSON files in `_store/` inside the folder named by the STORE_ROOT_FOLDER_ID
+  // Script Property. The ONLY spreadsheet left is the client's Form Responses
+  // sheet, which is an INPUT, never a store.
   //
-  // This folder belongs to monish.raza@indrones.com, who owns it outright, so the
+  // The folder belongs to monish.raza@indrones.com, who owns it outright, so the
   // store is not inside an account that several people share. The script must be
   // deployed from THAT account (Deploy → Execute as: Me), because it writes here
   // as whoever runs it.
-  DRIVE_ROOT_FOLDER_ID: '1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK',
-  // The store's own folder, a SIBLING of the per-IR upload folders (IR409/, …).
+  //
+  // ⚠ THE FOLDER ID LIVES IN A SCRIPT PROPERTY, NOT HERE, and cannot move into
+  // `_store/ids.json`: reading that file needs the folder first. A missing or
+  // mistyped property fails EVERY action, including backupPulse — the one read
+  // built to work when sign-in is broken. Set it once, from the editor.
+  // The store's own folder is a SIBLING of the per-IR upload folders (IR409/, …).
   // It must stay Restricted: the upload FILES are set to anyone-with-link one by
   // one, so their links keep working while this one holds password hashes. See
   // initializeStore().
@@ -212,7 +233,18 @@ var CONFIG = {
   // frontend meeting a v12 backend simply never calls the two new actions and shows the
   // old IR-derived dropdown; nothing regresses, because the register only ever narrows
   // the list of names an admin picks FROM — the scope written is still a plain string.
-  API_VERSION: 12,
+  // v13 = NO FILE IDs IN THE SOURCE. The four Sheet/Drive identifiers and the external
+  // address list left `CONFIG` for `_store/ids.json`, and the `_store/` root folder id
+  // left it for the STORE_ROOT_FOLDER_ID Script Property — because this file is in a
+  // PUBLIC repository and a public id plus a slipping share setting is a leak (see the
+  // note on storeIds()). Readers now go through storeIds() / requireStoreId().
+  //
+  // ⚠ THIS ONE HAS A DEPLOY PREREQUISITE, unlike every version before it. Code alone is
+  // not a working deploy: the Script Property must be set and seedStoreIds() run, or
+  // EVERY store-backed action fails with a named error. And `ping` CANNOT confirm the
+  // deploy — it is pre-auth and touches no store, so it answers 13 happily with the
+  // property unset. Confirm with `listIRs` instead. See docs/05.
+  API_VERSION: 13,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -249,16 +281,20 @@ var CONFIG = {
   // NON-Indrones addresses that are allowed to exist as accounts. There is no
   // self-signup any more, so this is NOT an allowlist — it exists so the
   // @indrones.com recipient guard in sendNudgeEmail doesn't silently lock these
-  // people out of their own comment notifications. Add one email per line.
-  EXTERNAL_EMAILS: [
-    'kishor.salunkhe@uavgarage.com',
-  ],
-
+  // people out of their own comment notifications.
+  //
+  // ⚠ MOVED to `_store/ids.json` → `externalEmails` (2026-10-17): a third party's
+  // real mailbox was in a public repository. isMailRecipientAllowed() is the ONLY
+  // runtime reader, and it fails CLOSED — if the key goes missing the address is
+  // simply denied and the mail never arrives, with no error anywhere. seedStoreIds()
+  // prints what it wrote so this is checkable in one place.
+  //
   // Legacy I-PASSBOOK sheet (the pre-app workbook used till ~IR441). Each IR is
   // its own tab named like "IR310 | S25P023". Surfaced read-only in the app so
   // the team doesn't have to look in two places. Tabs not matching /^IR\d+/
   // (Flow chart, index, format) are ignored.
-  LEGACY_SHEET_ID: '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
+  //
+  // ⚠ MOVED to `_store/ids.json` → `legacySheetId` (2026-10-17).
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -308,10 +344,11 @@ function requireAuth(e) {
 // THE STORE — the app's own data, as JSON files in Google Drive
 // ──────────────────────────────────────────────────────────────────────────────
 // There is no app spreadsheet any more. Everything the app owns lives under
-// `_store/` inside CONFIG.DRIVE_ROOT_FOLDER_ID:
+// `_store/` inside the folder named by the STORE_ROOT_FOLDER_ID Script Property:
 //
 //   users.json   sessions.json  codes.json   attempts.json
 //   access.json  irs.json       config.json  kb.json   comments.json
+//   ids.json     the Sheet and Drive FILE IDS, so the source carries none
 //   sections/    IR409.json → { 'sec-b': {…}, 'sec-f': {…} }   +  index.json
 //   audit/       IR409.jsonl — one JSON object per line, append-only
 //   backups/     <label>-<yyyy-MM-dd-HHmmss>.json — always a NEW file
@@ -336,6 +373,101 @@ var STORE_AUDIT_DIR    = 'audit';
 var STORE_BACKUP_DIR   = 'backups';
 var STORE_INDEX        = 'sections/index.json';
 
+// ── THE FILE IDS, AND WHY THEY ARE NOT IN THE SOURCE ──────────────────────────
+//
+// ⚠ `backend.gs` IS IN A PUBLIC REPOSITORY. A Sheet id is not a secret in the way
+// a password is — with the sheet Restricted, an id lands you on Google's "you need
+// access" page — but an id in public plus a share setting that slips is a LEAK, and
+// that is not hypothetical here: the intake sheet was readable by anyone for two
+// days in October 2026 exactly that way. So the ids live in private storage and the
+// source carries none of them.
+//
+//   · `_store/ids.json` holds the Sheet ids and the external address list. It is a
+//     PLAIN store file — deliberately NOT `config.json`, which is the client-facing
+//     `__CONFIG__` sentinel that every signed-in account can read. Nothing routes
+//     to this file, so the app cannot read it at all.
+//   · the `_store/` ROOT FOLDER id is the one value that cannot live in that file,
+//     because reading the file needs the folder first. It is the
+//     STORE_ROOT_FOLDER_ID Script Property. See getRootFolder().
+//
+// Two accessors, not one, because the callers genuinely differ:
+//
+//   storeIds()        — memoised, never throws for a MISSING KEY. Answers `{}` when
+//                       the file has not been seeded. readJson still throws for a
+//                       corrupt or empty file: "unreadable" and "not configured"
+//                       must never collapse into one answer.
+//   requireStoreId()  — throws a NAMED error for a reader that cannot do its job
+//                       without the value. Without this, an absent id reaches the
+//                       platform as openById(undefined), which answers
+//                       "Invalid argument: id" — true, useless, and it takes out
+//                       BOTH the IR list and the ticket view, because both come
+//                       through intakeGrid().
+//
+// The rule for a new reader: if the value is required, requireStoreId(); if the
+// reader has a documented "not configured" answer (seedCompanyContacts does), read
+// storeIds() and keep that answer.
+var STORE_IDS_FILE = 'ids.json';
+var ROOT_FOLDER_PROPERTY = 'STORE_ROOT_FOLDER_ID';
+
+var _storeIdsMemo = null;
+
+// The parsed `_store/ids.json`, or `{}`. Memoised per execution for the same reason
+// `_storeMemo` is: one frontend save fires four backend calls.
+//
+// The CONTENT is cached in CacheService as well as the id, because this file changes
+// approximately never and it sits in the path of the hottest read there is
+// (intakeGrid). Without that, every request that needs a Sheet id pays getFileById
+// plus a blob download. The cache is a SPEED-UP AND NOTHING ELSE, exactly as the id
+// cache is: every use is inside try/catch, and any failure falls back to the real
+// read. A cache that is empty, broken or missing costs latency, never correctness.
+//
+// It is also the one store read that is NOT done through readJsonLocked — no caller
+// reads an id inside a lock (verified: every reader is an unlocked read, and
+// getRootFolder, which IS called inside locks, takes its value from a property and
+// never from here). If that ever changes, this must be re-derived, not re-guessed.
+function storeIds() {
+  if (_storeIdsMemo) return _storeIdsMemo;
+
+  try {
+    var cached = CacheService.getScriptCache().get(storeIdsCacheKey());
+    if (cached) { _storeIdsMemo = JSON.parse(cached); return _storeIdsMemo; }
+  } catch (e) { /* no cache, or a cache that will not answer: read the file */ }
+
+  var ids = readJson(STORE_IDS_FILE) || {};
+  _storeIdsMemo = ids;
+
+  try {
+    CacheService.getScriptCache().put(storeIdsCacheKey(), JSON.stringify(ids), STORE_ID_TTL_SECONDS);
+  } catch (e) { /* a cache that cannot be written costs latency, never correctness */ }
+
+  return _storeIdsMemo;
+}
+
+function storeIdsCacheKey() {
+  return 'ids:' + STORE_IDS_FILE;
+}
+
+// Drop the cached ids, so the NEXT execution re-reads the file. Called by
+// seedStoreIds(): a seed run whose result is not visible until the cache expires
+// would look broken for six hours.
+function forgetStoreIds() {
+  _storeIdsMemo = null;
+  try { CacheService.getScriptCache().remove(storeIdsCacheKey()); }
+  catch (e) { /* as above */ }
+}
+
+// A required identifier, or a thrown error that NAMES the key and the fix. The error
+// text is the whole point: it is what turns "Invalid argument: id" into something an
+// operator can act on.
+function requireStoreId(name) {
+  var v = storeIds()[name];
+  if (v === undefined || v === null || v === '') {
+    throw new Error('_store/' + STORE_IDS_FILE + ' has no "' + name + '". ' +
+                    'Run seedStoreIds() once from the Apps Script editor.');
+  }
+  return v;
+}
+
 // Per-execution store memo, exactly as `_ssMemo` used to memoise the spreadsheet.
 // Apps Script gives every execution a fresh global scope, so this cannot leak an
 // open store across requests; it exists because one frontend save fires four
@@ -345,9 +477,40 @@ var _rootFolderMemo = null;
 var _storeFolderMemo = null;
 var _subfolderMemo  = {};   // subfolder name → Folder, for this execution only
 
+// The `_store/` OWNER folder, from the STORE_ROOT_FOLDER_ID Script Property.
+//
+// ⚠ THE MISSING PROPERTY IS THE WORST FAILURE THIS BACKEND HAS. Get it wrong and
+// every action fails — including backupPulse, which is routed PRE-AUTH on purpose
+// so that "did the backup run?" survives sign-in breaking, and which reads the store
+// itself. So the error below says exactly what to set and where, and nothing else in
+// this file may call getRootFolder without expecting it.
 function getRootFolder() {
-  if (!_rootFolderMemo) _rootFolderMemo = DriveApp.getFolderById(CONFIG.DRIVE_ROOT_FOLDER_ID);
+  if (!_rootFolderMemo) {
+    var id = null;
+    try { id = PropertiesService.getScriptProperties().getProperty(ROOT_FOLDER_PROPERTY); }
+    catch (e) { /* fall through to the same error as a missing property */ }
+    if (!id) {
+      throw new Error('The "' + ROOT_FOLDER_PROPERTY + '" Script Property is not set, so the app cannot find ' +
+                      'its own store. Open the Apps Script editor → Project Settings → Script Properties and set ' +
+                      ROOT_FOLDER_PROPERTY + ' to the Drive folder that contains `' + CONFIG.STORE_FOLDER_NAME + '/`.');
+    }
+    _rootFolderMemo = DriveApp.getFolderById(id);
+  }
   return _rootFolderMemo;
+}
+
+// The root folder's id, for the store-id cache key. Reads the PROPERTY, never the
+// folder object: storeIdKey() is called on the cache path, and resolving a Folder
+// there would add a Drive call to every store read to fetch a string we already have.
+function rootFolderId() {
+  var id = null;
+  try { id = PropertiesService.getScriptProperties().getProperty(ROOT_FOLDER_PROPERTY); }
+  catch (e) { /* as above */ }
+  if (!id) {
+    throw new Error('The "' + ROOT_FOLDER_PROPERTY + '" Script Property is not set. ' +
+                    'See getRootFolder() for what to set and where.');
+  }
+  return id;
 }
 
 // The `_store/` folder. Never CREATED from here: a read path that quietly made the
@@ -357,8 +520,11 @@ function getStoreFolder() {
   if (_storeFolderMemo) return _storeFolderMemo;
   var it = getRootFolder().getFoldersByName(CONFIG.STORE_FOLDER_NAME);
   if (!it.hasNext()) {
-    throw new Error('The app store folder "' + CONFIG.STORE_FOLDER_NAME + '" was not found in Drive folder ' +
-                    CONFIG.DRIVE_ROOT_FOLDER_ID + '. Run initializeStore() once from the Apps Script editor.');
+    // Never interpolate the folder ID into a message again — that is how one got
+    // into this repo in the first place.
+    throw new Error('The app store folder "' + CONFIG.STORE_FOLDER_NAME + '" was not found in the Drive folder ' +
+                    'named by the ' + ROOT_FOLDER_PROPERTY + ' Script Property. ' +
+                    'Run initializeStore() once from the Apps Script editor.');
   }
   _storeFolderMemo = it.next();
   return _storeFolderMemo;
@@ -430,7 +596,7 @@ function storeNameFor(path) {
 var STORE_ID_TTL_SECONDS = 21600;   // the platform's own maximum: six hours
 
 function storeIdKey(path) {
-  return 'sfid:' + CONFIG.DRIVE_ROOT_FOLDER_ID + ':' + path;
+  return 'sfid:' + rootFolderId() + ':' + path;
 }
 
 function rememberedStoreId(path) {
@@ -1723,10 +1889,19 @@ function initializeStore() {
   getStoreSubfolder(STORE_BACKUP_DIR, true);
 
   var seeded = [];
+  // `ids.json` is seeded EMPTY, never with a plausible-looking placeholder: a
+  // placeholder would be mistaken for real config and would send a reader at a sheet
+  // that does not exist. An empty file means every required reader throws its named
+  // error until seedStoreIds() has run, which is the honest state.
+  //
+  // Consequence worth knowing: because it IS seeded, readJson('ids.json') answers `{}`
+  // and never null on a normal install, so "not configured" must be tested by KEY and
+  // never by the file being absent.
   [['users.json', {}], ['sessions.json', { tokens: {} }], ['codes.json', { entries: [] }],
    ['attempts.json', {}], ['access.json', { departments: {}, memberships: {} }],
    ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
    ['devices.json', { devices: {} }], ['companies.json', { companies: {} }],
+   [STORE_IDS_FILE, {}],
    [STORE_INDEX, { irs: {} }]
   ].forEach(function (pair) {
     if (findStoreFile(pair[0], false)) return;
@@ -1737,9 +1912,116 @@ function initializeStore() {
   var out = 'Store folder: ' + store.getName() + ' (id ' + store.getId() + ')\n' +
             'Sharing: PRIVATE (not link-shared)\n' +
             'Seeded: ' + (seeded.length ? seeded.join(', ') : '(nothing — every file already existed)') + '\n' +
-            'Next: seedDepartments() → seedMemberships() → bootstrapAdmin() → seedAccounts()';
+            'Next: seedStoreIds() → seedDepartments() → seedMemberships() → bootstrapAdmin() → seedAccounts()';
   report(out);
   return out;
+}
+
+// ── seedStoreIds() — the Sheet and Drive ids, once, from the editor ───────────
+//
+// ⚠ RUN THIS ONCE, AND RUN IT FIRST. Until it does, `_store/ids.json` is empty and
+// every reader that needs an id throws its named error — the IR list, the ticket
+// view, the email timeline and the legacy records all answer "ids.json has no
+// irRepoSheetId" rather than a platform message.
+//
+// HOW TO SUPPLY THE VALUES. Put a Script Property named SEED_STORE_IDS holding a
+// JSON object, run this function, then the property deletes itself:
+//
+//   { "irRepoSheetId": "…", "legacySheetId": "…",
+//     "clientDirectorySheetId": "…", "externalEmails": ["someone@example.com"] }
+//
+// It is read from a PROPERTY and then deleted on purpose. The alternative — typing
+// the ids into this function — would put them straight back into a public repository
+// the moment anyone committed, which is the whole thing this change exists to stop.
+// One authority afterwards: `_store/ids.json`.
+//
+// ⚠ These values are NOT in git and never have been since 2026-10-17. If they are
+// lost, they are recoverable from the sheets themselves (the id is in the sheet's
+// URL) — so the cost of losing them is a re-paste, never data loss.
+var SEED_IDS_PROPERTY = 'SEED_STORE_IDS';
+
+// The keys seedStoreIds() will accept. Anything else in the blob is reported and
+// ignored rather than written: a typo'd key that silently wrote nothing would look
+// exactly like a successful seed.
+var STORE_ID_KEYS = ['irRepoSheetId', 'legacySheetId', 'clientDirectorySheetId', 'externalEmails'];
+
+function seedStoreIds(force) {
+  var props = PropertiesService.getScriptProperties();
+  var raw = props.getProperty(SEED_IDS_PROPERTY);
+  if (!raw) {
+    return report('No "' + SEED_IDS_PROPERTY + '" Script Property found.\n' +
+                  'Set it (Project Settings → Script Properties) to a JSON object with the keys:\n  ' +
+                  STORE_ID_KEYS.join(', ') + '\nThen run seedStoreIds() again.');
+  }
+
+  var incoming;
+  try { incoming = JSON.parse(raw); }
+  catch (e) { return report('The "' + SEED_IDS_PROPERTY + '" property is not valid JSON (' + e.message + '). Nothing was changed.'); }
+  if (!incoming || typeof incoming !== 'object') {
+    return report('The "' + SEED_IDS_PROPERTY + '" property must be a JSON OBJECT. Nothing was changed.');
+  }
+
+  // A CLOBBER GUARD. ids.json changes approximately never, and a half-remembered
+  // re-run is exactly how a working set of ids gets replaced by an empty one. So an
+  // existing non-empty file is only replaced when the caller says so explicitly.
+  var existing = readJson(STORE_IDS_FILE) || {};
+  var alreadyHas = STORE_ID_KEYS.filter(function (k) { return existing[k] !== undefined; });
+  if (alreadyHas.length && !force) {
+    return report('_store/' + STORE_IDS_FILE + ' already holds ' + alreadyHas.join(', ') + '.\n' +
+                  'Nothing was changed. To replace it on purpose, run  seedStoreIds(true)');
+  }
+
+  var unknown = Object.keys(incoming).filter(function (k) { return STORE_ID_KEYS.indexOf(k) < 0; });
+
+  // MERGE, never replace: a seed that carries only the ids it knows about must not
+  // drop the ones already stored.
+  var next = {};
+  STORE_ID_KEYS.forEach(function (k) { if (existing[k] !== undefined) next[k] = existing[k]; });
+  STORE_ID_KEYS.forEach(function (k) { if (incoming[k] !== undefined) next[k] = incoming[k]; });
+
+  var missing = STORE_ID_KEYS.filter(function (k) { return next[k] === undefined || next[k] === ''; });
+
+  writeJson(STORE_IDS_FILE, next);
+  forgetStoreIds();   // so THIS execution and the next one see it, not the six-hour-old cache
+
+  // The property deletes itself ONLY on a write that actually happened. A failed or
+  // refused run leaves the blob in place so the operator can fix it and retry without
+  // re-pasting the values.
+  try { props.deleteProperty(SEED_IDS_PROPERTY); }
+  catch (e) { /* it stays; harmless, and re-running is now a no-op because of the guard */ }
+
+  var lines = ['_store/' + STORE_IDS_FILE + ' written.'];
+  lines.push('Set: ' + STORE_ID_KEYS.filter(function (k) { return next[k] !== undefined && next[k] !== ''; })
+                              .map(function (k) { return k + (Array.isArray(next[k]) ? ' (' + next[k].join(', ') + ')' : ''); })
+                              .join(', ') || '(nothing)');
+  if (missing.length) {
+    lines.push('⚠ STILL MISSING: ' + missing.join(', ') + ' — the reader that needs it will throw until it is set.');
+  }
+  if (unknown.length) lines.push('⚠ IGNORED (not a known key): ' + unknown.join(', '));
+  lines.push('The "' + SEED_IDS_PROPERTY + '" Script Property has been deleted.');
+
+  var out = lines.join('\n');
+  report(out);
+  return out;
+}
+
+// Set the ONE value that cannot live in ids.json: the `_store/` root folder.
+// Editor-run, like seedStoreIds(), and separate from it because it must exist BEFORE
+// any store file can be read — including the ids file itself.
+//
+//   setStoreRootFolder('1abc…')     // the Drive folder that CONTAINS `_store/`
+function setStoreRootFolder(id) {
+  id = String(id || '').trim();
+  if (!id) {
+    var cur = null;
+    try { cur = PropertiesService.getScriptProperties().getProperty(ROOT_FOLDER_PROPERTY); } catch (e) {}
+    return report(ROOT_FOLDER_PROPERTY + ' is ' + (cur ? 'set.' : 'NOT set.') +
+                  '\nCall setStoreRootFolder(\'<the Drive folder id>\') to set it.');
+  }
+  PropertiesService.getScriptProperties().setProperty(ROOT_FOLDER_PROPERTY, id);
+  _rootFolderMemo = null;
+  _storeFolderMemo = null;   // the next read must resolve against the NEW folder
+  return report(ROOT_FOLDER_PROPERTY + ' set.\nNow run seedStoreIds() (if you have not), then initializeStore().');
 }
 
 // The ONE place a stored value becomes a Date.
@@ -3056,7 +3338,7 @@ function doLoginPassword(params) {
 // It is deliberately additive. `doLoginPassword` above is untouched and stays a
 // first-class door — the recovery path for a machine with no Google session (a
 // shared laptop, a lab PC, a phone signed into a personal account), and the ONLY
-// door for the external address in CONFIG.EXTERNAL_EMAILS, which no domain-
+// door for the external address in `_store/ids.json` → externalEmails, which no domain-
 // restricted deployment will admit. The forced first-login change still stands in
 // password mode, and this door REFUSES a temp-password account and points it at
 // that door rather than quietly handing it a session: minting one here would be the
@@ -5144,7 +5426,7 @@ function listIRs(authEmail) {
 // three actions now read it and a second copy of "open, find the tab, get the range"
 // is a second place for a bounds bug.
 function intakeGrid() {
-  var ss  = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID);
+  var ss  = SpreadsheetApp.openById(requireStoreId('irRepoSheetId'));
   var tab = ss.getSheetByName(CONFIG.IR_REPO_TAB);
   if (!tab) throw new Error('Tab "' + CONFIG.IR_REPO_TAB + '" not found in IR Repository.');
 
@@ -5189,7 +5471,7 @@ function irKey(v) {
 // THE EMAIL HISTORY — one ticket's correspondence, read from `Email_Index`.
 //
 // WHAT THIS IS. `Email_Index` is a tab of the SAME spreadsheet `intakeGrid` already
-// opens (`CONFIG.IR_REPO_SHEET_ID`), so this reads a file the app was already
+// opens (`_store/ids.json` → irRepoSheetId), so this reads a file the app was already
 // reading: no new folder, no sharing change, no OAuth scope, no second permission.
 // It is the one genuinely large piece of legacy context the app had no code for —
 // 2393 messages across two mailboxes, covering 370 of the 452 tickets — and it is
@@ -5244,7 +5526,11 @@ var EMAIL_THREAD_CAP = 300;
 var EMAIL_CACHE_TTL_SECONDS = 3600;
 
 function emailThreadsKey(ticket) {
-  return 'irth:' + CONFIG.IR_REPO_SHEET_ID + ':' + ticket;
+  // requireStoreId() FIRST, never inside the concatenation. If it threw here it would
+  // be swallowed by the caller's try/catch and a failed lookup would be CACHED under
+  // the literal key 'irth:undefined:IR409' — one misconfigured deploy poisoning the
+  // cache for a ticket, and two deployments sharing a namespace they should not.
+  return 'irth:' + requireStoreId('irRepoSheetId') + ':' + ticket;
 }
 
 // The cached answer for one ticket, or null. A null covers both "not cached" and
@@ -5286,7 +5572,7 @@ function listIRThreads(irNumber) {
 // The read itself, once the cache has missed. Never call this directly: it pays a
 // full spreadsheet open and a full grid scan, and an absent ticket is not rare.
 function readEmailThreadsFromSheet(want) {
-  var tab = SpreadsheetApp.openById(CONFIG.IR_REPO_SHEET_ID).getSheetByName(CONFIG.IR_EMAIL_TAB);
+  var tab = SpreadsheetApp.openById(requireStoreId('irRepoSheetId')).getSheetByName(CONFIG.IR_EMAIL_TAB);
   // A missing tab is a real state while the crawl is being rebuilt, and it must answer
   // "no email" rather than throw: an exception here would take the whole ticket view
   // down over a feature that is context, not content.
@@ -6140,7 +6426,14 @@ function isMailRecipientAllowed(to) {
   if (!addr) return false;
   var suffix = '@' + CONFIG.ALLOWED_DOMAIN;
   if (addr.indexOf(suffix) === addr.length - suffix.length) return true;
-  var ext = (CONFIG.EXTERNAL_EMAILS || []).map(function (x) { return String(x).toLowerCase().trim(); });
+  // ⚠ THE ONE SILENT-FAILURE PATH IN THE IDENTIFIER MOVE. This is the ONLY runtime
+  // reader of the external address list, and it FAILS CLOSED: if the key is missing
+  // from `_store/ids.json` the expression is simply `[]`, the address is denied, and
+  // sendNudgeEmail() raises its usual "can only be sent to @indrones.com addresses"
+  // — which reads as "the mail just didn't arrive" rather than as a config fault.
+  // It must not throw (a mail path that throws leaks whether an account exists), so
+  // the discovery route is seedStoreIds(), which prints the list it wrote.
+  var ext = (storeIds().externalEmails || []).map(function (x) { return String(x).toLowerCase().trim(); });
   if (ext.indexOf(addr) > -1) return true;
   try { return !!findUser(addr); } catch (e) { return false; }
 }
@@ -6499,9 +6792,9 @@ function listLegacyIRs(authEmail) {
   // per-company boundary anywhere in it to filter on — the tabs are labelled by IR
   // number and nothing else. So the only safe answer for a customer is no.
   refuseCustomer(getEffectiveAccess(authEmail), 'legacy records');
-  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var sheetId = requireStoreId('legacySheetId');
+  var ss = SpreadsheetApp.openById(sheetId);
   var sheets = ss.getSheets();
-  var sheetId = CONFIG.LEGACY_SHEET_ID;
   var workbookUrl = 'https://docs.google.com/spreadsheets/d/' + sheetId + '/edit';
   var records = [];
   for (var i = 0; i < sheets.length; i++) {
@@ -6546,7 +6839,7 @@ function getLegacyIR(irNumber, authEmail) {
   if (!/^\d+$/.test(digits)) throw new Error('getLegacyIR needs an IR number (got "' + target + '").');
   var want = parseInt(digits, 10);
 
-  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var ss = SpreadsheetApp.openById(requireStoreId('legacySheetId'));
   var sheets = ss.getSheets();
   for (var i = 0; i < sheets.length; i++) {
     var name = sheets[i].getName();
@@ -6564,7 +6857,7 @@ function getLegacyIR(irNumber, authEmail) {
       gid:      tab.getSheetId(),
       // The direct link is offered alongside the rendered copy: for the few people
       // who have been granted access to the file, the original is one tap away.
-      openUrl:  'https://docs.google.com/spreadsheets/d/' + CONFIG.LEGACY_SHEET_ID +
+      openUrl:  'https://docs.google.com/spreadsheets/d/' + requireStoreId('legacySheetId') +
                 '/edit#gid=' + tab.getSheetId(),
       grid:     grid
     };
@@ -6641,7 +6934,7 @@ function inventoryLegacyWorkbook() {
   // workbook is not readable from outside.
   var PEEK_TABS = [];
 
-  var ss = SpreadsheetApp.openById(CONFIG.LEGACY_SHEET_ID);
+  var ss = SpreadsheetApp.openById(requireStoreId('legacySheetId'));
   var sheets = ss.getSheets();
 
   var lines = [];
@@ -7315,10 +7608,15 @@ function seedCompanies() {
 // from one column of a spreadsheet is how the register fills up with names that match
 // nothing on a ticket.
 //
-// Run seedCompanies() FIRST. This reads the sheet named by CONFIG.CLIENT_DIRECTORY_SHEET_ID.
+// Run seedCompanies() FIRST. This reads the sheet named by `_store/ids.json` →
+// `clientDirectorySheetId`.
 function seedCompanyContacts() {
-  if (!CONFIG.CLIENT_DIRECTORY_SHEET_ID) return report('Contacts: no client directory sheet configured (CONFIG.CLIENT_DIRECTORY_SHEET_ID is empty).');
-  var ss = SpreadsheetApp.openById(CONFIG.CLIENT_DIRECTORY_SHEET_ID);
+  // storeIds(), NOT requireStoreId(): this function's documented contract is to ANSWER
+  // "not configured", never to throw. An operator running the seed before setting the
+  // id needs to be told that, not handed a stack trace.
+  var dirId = storeIds().clientDirectorySheetId;
+  if (!dirId) return report('Contacts: no client directory sheet configured (add "clientDirectorySheetId" to _store/' + STORE_IDS_FILE + ').');
+  var ss = SpreadsheetApp.openById(dirId);
   var tab = ss.getSheetByName(CONFIG.CLIENT_DIRECTORY_TAB);
   if (!tab) return report('Contacts: no tab named "' + CONFIG.CLIENT_DIRECTORY_TAB + '" in the client directory sheet.');
 

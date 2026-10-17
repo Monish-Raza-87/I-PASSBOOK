@@ -5,9 +5,9 @@
 | Item | Location | Current Value | Notes |
 |---|---|---|---|
 | GAS Web App URL | `CONFIG.GAS_URL` | `https://script.google.com/macros/s/AKfycbz.../exec` | The **new** project under `monish.raza@indrones.com`. Until this is switched the app keeps talking to the old backend — which is also the rollback (see [08](08 - Development Guide.md)) |
-| Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Emails must end with this domain, plus the `EXTERNAL_EMAILS` exceptions in `backend.gs` |
+| Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` | Emails must end with this domain, plus the `externalEmails` exceptions in `_store/ids.json` (they were in `backend.gs` until v13 — see below) |
 | Dev Auth Bypass | `CONFIG.ENABLE_DEV_AUTH_BYPASS` | `true` | Set to `false` in production |
-| IR Repository sheet | `CONFIG.IR_REPO_SHEET_ID` / `IR_REPO_TAB` | `1MPcWvgZ...` / `Form Responses` | Read by the **backend** (`action=listIRs`), token-gated. The **file is restricted to the company**, and the frontend no longer reads it at all — see [07](07 - Known Issues & TODO.md) |
+| IR Repository sheet | `_store/ids.json` → `irRepoSheetId` + `CONFIG.IR_REPO_TAB` | *(not in the repo)* / `Form Responses` | Read by the **backend** (`action=listIRs`), token-gated. The **file is restricted to the company**, and the frontend no longer reads it at all — see [07](07 - Known Issues & TODO.md). The id left `app.js` in 2026-10 and left `backend.gs` in v13 |
 | Google door | `CONFIG.SSO_URL` | `https://script.google.com/a/macros/indrones.com/s/AKfycbybK8zQxCvU8-.../exec` (set 2026-09-20) | The **second** deployment's `/exec` URL. Note the `/a/macros/indrones.com/` segment — that is what marks it as the domain-scoped deployment, not the primary one. Empty is a working state: the Google button is not shown and nothing else changes. See below and [08](08 - Development Guide.md) |
 
 There is **no Google OAuth client ID**. The `CONFIG.SSO_URL` row above is not a
@@ -82,28 +82,92 @@ self-signup on either door, so there is no captcha or allowlist either. See
 
 ## What's Hardcoded in `backend.gs`
 
+> ⚠ **NOTHING SENSITIVE, SINCE v13 (2026-10-17).** Every Google file id and the
+> external address list were **removed from the source**, because this repo is
+> public. They live in `_store/ids.json` now, plus one Script Property for the
+> `_store/` root folder itself. See "Where the file ids live" below — and note that
+> the deploy now has a **prerequisite step** that `ping` cannot verify.
+
 | Item | Location | Current Value |
 |---|---|---|
-| IR Repository Sheet ID | `CONFIG.IR_REPO_SHEET_ID` | `1MPcWvgZxqiTWJMLs1dksmS9q9I14SYOgr8sWn8FelG4` — **read-only input** |
-| Legacy workbook ID | `CONFIG.LEGACY_SHEET_ID` | `14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s` — **read-only input** |
-| Drive Root Folder ID | `CONFIG.DRIVE_ROOT_FOLDER_ID` | `1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK` — the store is `_store/` inside it |
 | Store folder name | `CONFIG.STORE_FOLDER_NAME` | `_store` |
 | Allowed Domain | `CONFIG.ALLOWED_DOMAIN` | `indrones.com` |
 | Admin emails | `CONFIG.ADMIN_EMAILS` | `['monish.raza@indrones.com']` |
-| External exceptions | `CONFIG.EXTERNAL_EMAILS` | `['kishor.salunkhe@uavgarage.com']` |
-| API version | `CONFIG.API_VERSION` | `11` — bumped by any change that adds an **action** or a new section id (`11` = `sec-cost`, the Costing split). The running list with each bump's reason is the comment beside the constant in `backend.gs`. A stale cached frontend reads the number off `ping` and explains itself instead of failing obscurely — and since `backup.html` lives outside the app and cannot be told to reload, `ping` answering the expected number is how you know a paste landed |
+| API version | `CONFIG.API_VERSION` | `13` — bumped by any change that adds an **action**, a new section id, or a **deploy prerequisite** (`11` = `sec-cost`, the Costing split; `12` = the company register; `13` = the file ids leave the source). The running list with each bump's reason is the comment beside the constant in `backend.gs`. A stale cached frontend reads the number off `ping` and explains itself instead of failing obscurely — and since `backup.html` lives outside the app and cannot be told to reload, `ping` answering the expected number is how you know a paste landed. ⚠ **v13 is the exception: `ping` is pre-auth and touches no store, so it answers `13` happily while every store action is broken.** Confirm v13 with `listIRs`, or with `backupPulse` |
 | Session TTL · temp-password TTL | `CONFIG.SESSION_HOURS` · `CONFIG.TEMP_PW_TTL_DAYS` | `8.5` hours (**absolute**, never slid) · `14` days |
 | Backup folder name | `CONFIG.BACKUP_FOLDER_NAME` | `I-PASSBOOK backups` — a **sibling** of `_store/`, inside the same private root, and the one folder in there shared **`DOMAIN_WITH_LINK`** so a backup can be opened from a phone |
 | Backup run budget | `CONFIG.BACKUP_BUDGET_MS` | `240000` (4 min). The Apps Script kill at six minutes leaves **no record at all**, so the run stops itself early, while it can still write `ok: false` and mail the admin |
 | Backup rotation | `CONFIG.BACKUP_KEEP_DAILY` · `_WEEKLY` · `_MONTHLY` | `14` · `8` · `12`, then one **a year forever** |
 | Rehearsal folder name | `REHEARSAL_FOLDER_NAME` | `_rehearsal` — a scratch folder **inside** `I-PASSBOOK backups` where `rehearseRestore()` rebuilds the newest archive and reads it back. Deliberately **not named for a date**, so the rotation skips it; overwritten each run, so it never grows |
 
+### Where the file ids live (v13, 2026-10-17)
+
+`backend.gs` is in a **public repository** — it has to be, because GitHub Pages on
+the Free plan requires a public repo. An id is not a password: with the sheet
+Restricted, an id lands you on Google's "you need access" page. But an id in public
+**plus a share setting that slips is a leak**, and that is not hypothetical — the
+intake sheet was readable by anyone for two days in October 2026 exactly that way.
+So the ids left the source.
+
+| Value | Where it lives now | Read by |
+|---|---|---|
+| `_store/` **root folder id** | Script Property **`STORE_ROOT_FOLDER_ID`** | `getRootFolder()`, `rootFolderId()` |
+| IR Repository sheet id | `_store/ids.json` → `irRepoSheetId` | `intakeGrid()`, `emailThreadsKey()`, `readEmailThreadsFromSheet()` |
+| Legacy workbook id | `_store/ids.json` → `legacySheetId` | `listLegacyIRs()`, `getLegacyIR()`, `inventoryLegacyWorkbook()` |
+| Client directory sheet id | `_store/ids.json` → `clientDirectorySheetId` | `seedCompanyContacts()` only (editor-run) |
+| External address list | `_store/ids.json` → `externalEmails` | `isMailRecipientAllowed()` only |
+
+**Why the root folder cannot go in `ids.json`:** reading that file needs the folder
+first. It is the bootstrap, and a Script Property is the only mechanism here that
+does not itself need a Drive lookup. Script Properties are **per-project**, so they
+are set once and shared by both deployments.
+
+**`ids.json` is deliberately NOT `config.json`.** `config.json` is the client-facing
+`__CONFIG__` sentinel that **every signed-in account can read**; nothing routes to
+`ids.json`, so the app cannot read it at all.
+
+**Two accessors, and the difference matters:**
+
+- `storeIds()` — memoised, answers `{}` for a missing key, never throws. Used where a
+  documented "not configured" answer exists (`seedCompanyContacts`).
+- `requireStoreId(name)` — throws an error that **names the key and names
+  `seedStoreIds()`**. Without it an absent id reaches the platform as
+  `openById(undefined)` → `"Invalid argument: id"`, which is true, useless, and takes
+  out both the IR list and the ticket view.
+
+**Cost: one cached read.** `ids.json` changes approximately never, so its content is
+cached alongside the store-id cache (6h, the platform maximum). In the steady state
+the hot read path pays **no extra Drive call**; a cold cache pays one file open, on a
+path that already opens `access.json`.
+
+**⚠ One silent-failure path to know about.** `isMailRecipientAllowed()` is the only
+runtime reader of the address list and it **fails closed** — if `externalEmails` is
+missing, the third party is simply denied and their mail never arrives, with no error
+anywhere. It must not throw (a mail path that throws reveals whether an account
+exists), so the discovery route is `seedStoreIds()`, which **prints the list it
+wrote**. If that colleague reports missing mail, check `ids.json` first.
+
+### The two one-off editor functions
+
+```
+setStoreRootFolder('<the Drive folder id>')   // the folder that CONTAINS _store/
+seedStoreIds()                                // the four values below, from a Script Property
+```
+
+`seedStoreIds()` reads a Script Property named **`SEED_STORE_IDS`** holding a JSON
+object, writes `_store/ids.json`, and then **deletes that property** — so there is one
+authority and not two. It **refuses to overwrite a non-empty `ids.json`** unless called
+as `seedStoreIds(true)`, because a half-remembered re-run replacing a working set with
+an empty one is the failure mode worth guarding. If the ids are ever lost they are
+recoverable from each file's own URL, so the cost is a re-paste, never data loss.
+
 `CONFIG.PASSBOOK_SHEET_ID` and `CONFIG.DATA_TAB` are **gone**. The old
 "I-Passbook App Repository" spreadsheet is not read, written or required by
 anything in the app any more; it is left on Drive untouched as an archive.
 
-The `DRIVE_ROOT_FOLDER_ID` here **replaces** the older `1W41jpmn…` folder that
-earlier revisions of this document listed. The store must sit in `monish.raza@`'s
+The `STORE_ROOT_FOLDER_ID` Script Property here **replaces** the older `1W41jpmn…`
+folder that earlier revisions of this document listed, and then the
+`CONFIG.DRIVE_ROOT_FOLDER_ID` constant that replaced *that*. The store must sit in `monish.raza@`'s
 own Drive, not in a folder shared with `customer.relations@` — that account is used
 by several people, so anything in it is deletable by any of them.
 

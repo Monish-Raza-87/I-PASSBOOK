@@ -2,9 +2,10 @@
 
 > **Status of the Drive-store migration (Sept 2026).** Every byte the app owns now
 > lives in JSON files under `_store/` in the owner's Drive
-> (`1itfTVbllh8Mi6TD6I2_OyYp_Wj4xrLIK`), and the backend touches exactly **two**
+> (the `STORE_ROOT_FOLDER_ID` Script Property, until v13 `CONFIG.DRIVE_ROOT_FOLDER_ID`),
+> and the backend touches exactly **two**
 > Sheets — both as *inputs*: the client's `Form Responses` tab and the legacy
-> workbook. **Both halves are now live (2026-09-19):** the frontend is on `gh-pages`
+> workbook. Neither sheet id is in this repository any more either, as of v13. **Both halves are now live (2026-09-19):** the frontend is on `gh-pages`
 > at `f101611` (`CACHE_NAME` `ipassbook-v34`) and the matching `backend.gs` is pasted
 > into the live Apps Script project in place, so sign-in really does demand the
 > emailed code — the owner confirmed it end to end. **The order that got there is the
@@ -732,6 +733,58 @@ is left is small.
    > whether the source branch should be pushed with the deploy is the owner's call; it
    > has not been.
 
+   ✅ **`v97` — NO GOOGLE FILE IDS IN THE SOURCE — is BUILT (2026-10-17).** Backend-only;
+   `API_VERSION: 13`. The four Sheet/Drive identifiers and the external address list left
+   `CONFIG` for `_store/ids.json`, and the `_store/` root folder id left it for the
+   **`STORE_ROOT_FOLDER_ID` Script Property** — because `backend.gs` is in a **public**
+   repository, and a public id plus a share setting that slips is precisely how the intake
+   sheet became readable to the world for two days in October 2026. Full detail in
+   [05](05 - Configuration & Secrets.md); the reader list and the two accessors are in
+   [04](04 - Backend API Reference.md).
+
+   ⏳ **v97 has a DEPLOY PREREQUISITE, which no previous release has had.** The code alone is
+   not a working deploy: the Script Property must be set and `seedStoreIds()` run, or every
+   store-backed action throws a named error. The order is:
+
+   1. `setStoreRootFolder('<the Drive folder id>')` — the folder that **contains** `_store/`
+   2. a Script Property `SEED_STORE_IDS` holding the four values, then `seedStoreIds()`
+      (it deletes its own seeding property, and refuses to clobber a non-empty file)
+   3. *Deploy → Manage deployments → New version* for **each** of the two `/exec` deployments
+   4. confirm with **`listIRs`** — see the warning below
+
+   > ⚠ **`ping` CANNOT CONFIRM THIS ONE, AND EVERY PREVIOUS RELEASE TOLD YOU IT COULD.**
+   > `ping` is routed **pre-auth** and touches no store, so it answers `13` happily while
+   > the Script Property is unset and the entire store is unreachable. Confirm a v97 paste
+   > with an action that actually reads the store — `listIRs`, or `backupPulse`. This is the
+   > same one-directional rule as the 404 trap in [08](08 - Development Guide.md): a good
+   > answer is evidence, a bad one is not.
+
+   > ⚠ **The ids are clean going FORWARD; the four older ones are already public and stay
+   > that way.** They have been on `origin/main` since the repo began, in 8 files each, and
+   > a force-push does not recall them from a fork or a mirror. Treat them as disclosed. The
+   > move is defence in depth — it stops the NEXT mistake being reachable — and the control
+   > that actually stops access is the sheet sharing, which the owner reports is Restricted
+   > and which I have **not** verified myself.
+
+   > **A guard must not carry the value it guards.** The first version of the v97 test
+   > assertions pinned the literal ids and the external address in order to forbid them —
+   > which re-published all five into the same public repository the change was cleaning.
+   > The assertions are **shape-based** now (any 30+ character id-shaped literal carrying a
+   > digit; any non-`indrones.com` address), which is both leak-free and stronger, because
+   > it catches a value arriving by a route nobody listed.
+
+   > ⚠ **The history purge is deliberately LAST, and must not touch `gh-pages`.**
+   > `gh-pages` carries none of the values (its tree has no `backend.gs`), so rewriting it
+   > buys nothing — and `tools/deploy-ghpages.mjs` pushes **without `--force`**, so a
+   > rewritten `gh-pages` makes the next deploy fail outright. The branches that DO carry
+   > them are `main`, `category-insights`, `otp-login` and `auth-rewrite`. **One commit
+   > message carries two of them in full** (it names the live data sheet and the old master
+   > sheet in its subject/body), and a content-only filter leaves messages alone, so the
+   > rewrite needs a message pass or those survive forever. Every commit hash changes, which
+   > dangles the SHAs quoted throughout this file and `PROJECT_HISTORY.md`. That message is
+   > **not reproduced here** — quoting it to describe the purge would re-publish exactly what
+   > the purge removes, which is the same fault as a guard carrying the value it guards.
+
    > **A new file needs a SERVED line, and a stale one is worse than a missing one.**
    > `terms.html` and `privacy.html` are in `tools/deploy-ghpages.mjs`'s `SERVED` array.
    > A file that exists in the repo but not in that array is never published; a file
@@ -871,7 +924,7 @@ is left is small.
       **The run happened, and it landed better than expected (2026-10-09).**
       `inventoryEmailIndex()` was run from the editor and answered all three questions at
       once. **`Email_Index` is a second tab in the spreadsheet the app already opens** —
-      `CONFIG.IR_REPO_SHEET_ID` (`1MPcWvgZ…`), the same file as `CONFIG.IR_REPO_TAB`
+      `_store/ids.json` → `irRepoSheetId` (it was `CONFIG.IR_REPO_SHEET_ID` until v13), the same file as `CONFIG.IR_REPO_TAB`
       ('Form Responses', the client intake read on every boot). So reading it needs **no new
       file, no sharing change, no new OAuth scope and no extra permission** — it is one
       `getSheetByName('Email_Index')` beside a call the app already makes. Worth generalising:

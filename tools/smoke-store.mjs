@@ -212,16 +212,37 @@ class FakeSpreadsheet {
 const spreadsheets = [];        // every backup Sheet created in this run
 const triggers = [];            // installed time-driven triggers, as ScriptApp reports them
 
+// ⚠ THE TWO VALUES THE BACKEND NO LONGER CARRIES (v13). The root folder id is a Script
+// Property and the Sheet ids live in `_store/ids.json`, so there is nothing in CONFIG
+// to compare against any more — these are the test's OWN values, and every fake below
+// is pinned to them so a suite that passes cannot be passing against an id the code
+// has stopped using.
+const TEST_ROOT_ID   = 'test-root-folder-id';
+const TEST_IR_SHEET  = 'test-ir-repo-sheet-id';
+const TEST_LEGACY_ID = 'test-legacy-sheet-id';
+
+// The Script Properties the backend actually reads: the `_store/` root folder. Seeded,
+// because every store access resolves through it — a suite that forgot would fail at
+// its first read with the property error rather than testing anything. The store is a
+// module-level object rather than a fresh literal per call, so setProperty persists.
+const scriptPropStore = Object.assign(Object.create(null), { STORE_ROOT_FOLDER_ID: TEST_ROOT_ID });
+const scriptProps = {
+  getProperty(k) { return k in scriptPropStore ? scriptPropStore[k] : null; },
+  setProperty(k, v) { scriptPropStore[k] = String(v); },
+  deleteProperty(k) { delete scriptPropStore[k]; },
+};
+
 const ROOT = new FakeFolder('root-id', 'I-PASSBOOK');
 const allFiles = new Map();     // id -> FakeFile, for DriveApp.getFileById
 
 const DriveAppFake = {
   Access: { ANYONE_WITH_LINK: 'ANYONE_WITH_LINK', PRIVATE: 'PRIVATE', DOMAIN_WITH_LINK: 'DOMAIN_WITH_LINK' },
   Permission: { VIEW: 'VIEW', NONE: 'NONE' },
-  // The real folder id is read from CONFIG rather than hardcoded, so a test that
-  // passes cannot be passing against an id the code no longer uses.
+  // Pinned to TEST_ROOT_ID, which is what the STORE_ROOT_FOLDER_ID Script Property
+  // answers below. The real folder id used to be read from CONFIG; it cannot be, now
+  // that the source carries none.
   getFolderById(id) {
-    if (id !== ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) throw new Error('no such folder: ' + id);
+    if (id !== TEST_ROOT_ID) throw new Error('no such folder: ' + id);
     return ROOT;
   },
   // A DIRECT fetch, unlike a search. An id that is not in the map is a file that was
@@ -383,13 +404,12 @@ const ctx = {
   // reply-to live, and "who can the admin reply to" is an assertion about a restore
   // notice, not a detail.
   MailApp: { sendEmail: (to, subject, body, options) => { mails.push({ to, subject, body, options: options || null }); } },
+  // ONE backing object, not a fresh one per call. `getScriptProperties()` returning a
+  // new object each time would make every setProperty a no-op, and the root-folder
+  // property is read on the first store access of every execution — so a stub that
+  // forgets would fail the whole suite at exactly the wrong place.
   PropertiesService: {
-    getScriptProperties: () => ({
-      _p: Object.create(null),
-      getProperty(k) { return k in this._p ? this._p[k] : null; },
-      setProperty(k, v) { this._p[k] = String(v); },
-      deleteProperty(k) { delete this._p[k]; },
-    }),
+    getScriptProperties: () => scriptProps,
   },
   // `getEffectiveUser` is what the archive sweep records as the actor on an audit
   // line. It is the account a trigger runs as, which is why the sweep reads it
@@ -506,6 +526,20 @@ r.ok('and it touches Drive, not a spreadsheet, for the store',
 // ── Set up a real store ───────────────────────────────────────────────────────
 r.head('initializeStore creates _store/ and refuses to share it');
 ctx.initializeStore();
+
+// The file ids live in the store now, so the suite writes them the same way the seed
+// run does. Seeded AFTER initializeStore(): that call creates ids.json EMPTY on
+// purpose, and an empty ids file is the state every required reader refuses.
+ctx.writeJson('ids.json', { irRepoSheetId: TEST_IR_SHEET, legacySheetId: TEST_LEGACY_ID, externalEmails: [] });
+ctx.forgetStoreIds();
+r.ok('the store is the source of the file ids — nothing in CONFIG carries one',
+  ctx.requireStoreId('irRepoSheetId') === TEST_IR_SHEET && !('IR_REPO_SHEET_ID' in ctx.CONFIG));
+r.ok('a reader with the key ABSENT throws a named error, not a platform one',
+  (() => { try { ctx.writeJson('ids.json', {}); ctx.forgetStoreIds(); ctx.requireStoreId('irRepoSheetId'); return false; }
+           catch (e) { return /irRepoSheetId/.test(e.message) && /seedStoreIds\(\)/.test(e.message); }
+           finally { ctx.writeJson('ids.json', { irRepoSheetId: TEST_IR_SHEET, legacySheetId: TEST_LEGACY_ID, externalEmails: [] });
+                     ctx.forgetStoreIds(); } })(),
+  'the error must name the key and the fix');
 
 const store = ROOT.getFoldersByName('_store').next();
 r.ok('_store/ exists inside the root folder', !!store);
@@ -682,7 +716,7 @@ r.head('a store file id is remembered, so the next execution does not search for
 // Drive folder would resolve to the PREVIOUS folder's files, which is the one way a
 // remembered id could read or write the wrong store.
 r.ok('the remembered-id key names the root folder, so another folder cannot inherit it',
-  ctx.storeIdKey('users.json').indexOf(ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) > -1 &&
+  ctx.storeIdKey('users.json').indexOf(TEST_ROOT_ID) > -1 &&
   ctx.storeIdKey('users.json').indexOf('users.json') > -1, ctx.storeIdKey('users.json'));
 
 const usersStoreFile = storeFile('users.json');
@@ -3107,6 +3141,6 @@ r.ok('...so the item is decided rather than deferred: there is no search left fo
   coldOpen.length > 0 && warmOpen.length === 0 && firstSave.length > 0 && secondSave.length === 0,
   { cold: coldOpen.length, warm: warmOpen.length, firstSave: firstSave.length, secondSave: secondSave.length });
 r.ok('the store files a sign-in and a ticket both touch are all covered by the id cache',
-  ['users.json', 'irs.json', 'sections/index.json'].every(p => ctx.storeIdKey(p).indexOf(ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) > -1));
+  ['users.json', 'irs.json', 'sections/index.json'].every(p => ctx.storeIdKey(p).indexOf(TEST_ROOT_ID) > -1));
 
 r.finish();

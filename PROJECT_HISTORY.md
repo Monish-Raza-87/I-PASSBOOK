@@ -1063,7 +1063,85 @@ deployments as a **New version**.
 
 ---
 
-## 13. Future Roadmap (Planned)
+## 13. No file ids in the source — the addresses move into the Drive store (2026-10-17)
+
+### What prompted it
+
+The owner: *"I want to ask you that is it possible that we prevent even one word of data
+leak and even try to keep link not in open repository but somewhere in master folder in my
+drive."* `backend.gs` is in a **public** repository — it has to be, because GitHub Pages on
+the Free plan requires a public repo — and it carried the app's live Sheet ids, its Drive
+root folder id, and a third party's real mailbox.
+
+### What the survey found, before anything was changed
+
+| Value | Already public? |
+|---|---|
+| `IR_REPO_SHEET_ID`, `DRIVE_ROOT_FOLDER_ID`, `LEGACY_SHEET_ID`, the external address | **Yes** — on `origin/main` since the repo began, 8 files each |
+| `CLIENT_DIRECTORY_SHEET_ID` | **No** — only in `09adb26`, which was **local and unpushed** |
+| any of them on `gh-pages` | **No** — that branch's tree carries no `backend.gs` at all |
+
+The unpushed one mattered most: it is the newest and most sensitive (a client directory of
+names, contact people and mailboxes), and it could still be kept out entirely for free.
+
+### The shape of the change
+
+`backend.gs:58` already said it, about the client directory id: *"READ ONCE, BY
+`seedCompanyContacts()`. Nothing at runtime reads it."* So that one costs **zero** to move.
+The others sit on real request paths, and the honest problem is not the code but the deploy:
+**the `_store/` root folder id cannot live in `_store/ids.json`**, because reading that file
+needs the folder first. It became the **`STORE_ROOT_FOLDER_ID` Script Property** — the one
+value with a bootstrap constraint.
+
+Two accessors, deliberately: `storeIds()` answers `{}` for a missing key and never throws,
+because `seedCompanyContacts` has a documented "not configured" answer it must keep;
+`requireStoreId()` throws an error naming the key and the fix, because the alternative is
+`openById(undefined)` → `"Invalid argument: id"`, which is true, useless, and takes out both
+the IR list and the ticket view.
+
+`ids.json` is **not** `config.json`. That file is the client-facing `__CONFIG__` sentinel
+every signed-in account can read; nothing routes to `ids.json`, so the app cannot read it at
+all. Its content is cached for six hours, so the hot read path pays **no extra Drive call**
+in the steady state.
+
+### Three things found by looking rather than by reasoning
+
+1. **`isMailRecipientAllowed` is the only runtime reader of the address list, and it fails
+   SILENTLY.** Miss it and the expression is simply `[]`, the third party is denied, and the
+   mail never arrives — with no error anywhere. It must not throw (a mail path that throws
+   reveals whether an account exists), so `seedStoreIds()` prints the list it wrote.
+2. **`ping` cannot confirm this deploy.** It is routed pre-auth and touches no store, so it
+   answers `13` while the property is unset and the whole store is unreachable. Every
+   previous release's verification instruction says to confirm with `ping`; this one must
+   not. Confirm with `listIRs`.
+3. **The first version of the test guards re-published the ids.** They pinned the literal
+   values in order to forbid them — into the same public repository the change was cleaning.
+   A guard must not carry the value it guards. The assertions are shape-based now.
+
+### Honest limits, written down rather than implied
+
+This does **not** unpublish the four older values. Forks keep them, GitHub keeps unreachable
+objects for a retention window, and mirrors keep them permanently. It is **cleanup and
+defence in depth**: it stops the *next* slipping share setting from being reachable. The
+control that actually stops access is the sheet sharing.
+
+### Verification
+
+`node tools/smoke-all.mjs` green across all 37 suites, with the four VM suites
+(`smoke-store`, `smoke-customer`, `smoke-backup-pulse`, `render-doorpage`) updated to seed
+the Script Property and `ids.json` — they run the **real** backend, so a missing property
+fails them at the first store access rather than testing anything. `smoke-backend.mjs` gained
+seven assertions for the move and `smoke-list-intel.mjs` the same rule against the backend
+(it had been enforced on `app.js` only, which is how the leak survived). A repo-wide scan for
+all five values now returns nothing outside the guards — and the guards no longer name them.
+
+⚠ `API_VERSION` moves to **13**, and this is the first release with a **deploy
+prerequisite**: the Script Property, then `seedStoreIds()`, then a New version on each of the
+two deployments.
+
+---
+
+## 14. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -49,7 +49,10 @@ ctx.HtmlService = {
 ctx.ScriptApp = { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/FAKE/exec' }) };
 ctx.SpreadsheetApp = {};
 ctx.DriveApp = {};
-ctx.PropertiesService = { getScriptProperties: () => ({ getProperty: () => null, setProperty() {}, deleteProperty() {} }) };
+// ⚠ v13: the `_store/` root folder is a Script Property, not a CONFIG value, so this
+// stub must ANSWER one. Returning null makes getRootFolder() throw before the door
+// page is ever rendered — the render would fail for a config reason, not a layout one.
+ctx.PropertiesService = { getScriptProperties: () => ({ getProperty: () => 'test-root-folder-id', setProperty() {}, deleteProperty() {} }) };
 
 const src = fs.readFileSync(new URL('../backend.gs', import.meta.url), 'utf8');
 createContext(ctx);

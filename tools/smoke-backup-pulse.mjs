@@ -61,6 +61,13 @@ function runPulse(files) {
   // its own, and handing it this file's would shadow them, which is the realm bug
   // tools/harness.mjs documents at length. Only the members the platform lacks are
   // supplied.
+  //
+  // ⚠ THE ROOT FOLDER IS A SCRIPT PROPERTY SINCE v13, so this stub is not optional:
+  // getRootFolder() throws before the first file is ever looked up without it, and
+  // every case here would fail for a reason that has nothing to do with backups.
+  ctx.PropertiesService = {
+    getScriptProperties: () => ({ getProperty: () => 'test-root-folder-id', setProperty() {}, deleteProperty() {} }),
+  };
   ctx.DriveApp = {
     getFolderById: () => ({
       getFoldersByName: name => it(name === ctx.CONFIG.STORE_FOLDER_NAME ? [{ getFilesByName: n => it(n in files ? [file(n, files[n])] : []) }] : []),

@@ -105,6 +105,22 @@ const SHEET_ROWS = [
   ['2026-01-05', 'IR300', 'Investigation', 'P1', 'Ceres Drones', 'S75-01', 'Nisha', 'Compass error'],
 ];
 
+// ⚠ THE TWO VALUES THE BACKEND NO LONGER CARRIES (v13): the `_store/` root folder is a
+// Script Property and the Sheet ids live in `_store/ids.json`. These are the test's OWN
+// values — backend.gs has none, which is exactly what the release is for — and every
+// fake below is pinned to them so this suite cannot pass against an id the code has
+// stopped using.
+const TEST_ROOT_ID   = 'test-root-folder-id';
+const TEST_IR_SHEET  = 'test-ir-repo-sheet-id';
+const TEST_LEGACY_ID = 'test-legacy-sheet-id';
+
+const scriptPropStore = Object.assign(Object.create(null), { STORE_ROOT_FOLDER_ID: TEST_ROOT_ID });
+const scriptProps = {
+  getProperty(k) { return k in scriptPropStore ? scriptPropStore[k] : null; },
+  setProperty(k, v) { scriptPropStore[k] = String(v); },
+  deleteProperty(k) { delete scriptPropStore[k]; },
+};
+
 // `files` is the initial store: path -> object. Sub-folders are made on demand.
 function fresh(opts) {
   const o = opts || {};
@@ -138,7 +154,7 @@ function fresh(opts) {
 
   ctx.DriveApp = {
     getFolderById(id) {
-      if (id !== ctx.CONFIG.DRIVE_ROOT_FOLDER_ID) throw new Error('no such folder: ' + id);
+      if (id !== TEST_ROOT_ID) throw new Error('no such folder: ' + id);
       return root;
     },
     getFileById(id) {
@@ -150,7 +166,7 @@ function fresh(opts) {
   ctx.SpreadsheetApp = {
     create: () => { throw new Error('this suite has no need for a backup sheet'); },
     openById(id) {
-      if (id === ctx.CONFIG.IR_REPO_SHEET_ID) return makeSheet(grid);
+      if (id === TEST_IR_SHEET) return makeSheet(grid);
       throw new Error('the app has no spreadsheet store beyond the read-only IR repo (id ' + id + ')');
     },
   };
@@ -170,11 +186,7 @@ function fresh(opts) {
   };
   ctx.MailApp = { sendEmail: (to, subject, body, options) => mails.push({ to, subject, body, options: options || null }) };
   ctx.PropertiesService = {
-    getScriptProperties: () => ({
-      _p: Object.create(null),
-      getProperty(k) { return k in this._p ? this._p[k] : null; },
-      setProperty(k, v) { this._p[k] = String(v); },
-    }),
+    getScriptProperties: () => scriptProps,
   };
   ctx.MimeType = { PLAIN_TEXT: 'text/plain', HTML: 'text/html' };
   ctx.Session = { getEffectiveUser: () => ({ getEmail: () => '' }), getScriptTimeZone: () => 'Asia/Kolkata' };
@@ -195,6 +207,10 @@ function fresh(opts) {
   // folder is created under the name CONFIG carries, so a rename in backend.gs cannot
   // leave this double looking in the wrong drawer and testing "not found" loudly.
   const storeRoot = root.createFolder(ctx.CONFIG.STORE_FOLDER_NAME);
+  // ⚠ THE FILE IDS COME FROM THE STORE NOW (v13), so the double must seed them or every
+  // IR read throws the named "not configured" error. These are the test's own values;
+  // backend.gs carries none, which is the point of the release.
+  seed(storeRoot, 'ids.json', { irRepoSheetId: TEST_IR_SHEET, legacySheetId: TEST_LEGACY_ID, externalEmails: [] });
   Object.keys(o.files || {}).forEach(path => seed(storeRoot, path, o.files[path]));
 
   // The two IR section files, and the index that names them. The index is built HERE

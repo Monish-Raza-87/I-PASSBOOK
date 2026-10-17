@@ -561,10 +561,15 @@ r.head('Phase 0: the app has no public read path, and never gets one back');
 const appSrc = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 r.ok('no gviz CSV fetch survives', !/tqx=out/.test(appSrc),
   (appSrc.match(/[^\n]*tqx=out[^\n]*/g) || ['none — correct'])[0]);
+// ⚠ THIS USED TO NAME THE IDS IT FORBADE, and so did `smoke-backend.mjs` — which put
+// them straight back into the same PUBLIC repository the check was protecting. A guard
+// must not carry the value it guards. These are shape checks now, and they are stronger
+// for it: they also catch an id that arrives by a route nobody listed.
+const idShaped = s => (s.match(/['"][A-Za-z0-9_-]{30,}['"]/g) || []).filter(x => /\d/.test(x));
 r.ok('the app names no Google address for the IR sheet or the legacy workbook',
-  !/docs\.google\.com\/spreadsheets\/d\//.test(appSrc) &&
-  !/1MPcWvgZ|14VnWnCg/.test(appSrc),
-  (appSrc.match(/[^\n]*(docs\.google\.com\/spreadsheets|1MPcWvgZ|14VnWnCg)[^\n]*/g) || ['none — correct'])[0]);
+  !/docs\.google\.com\/spreadsheets\/d\//.test(appSrc) && idShaped(appSrc).length === 0,
+  idShaped(appSrc).slice(0, 3).join(', ') ||
+    (appSrc.match(/[^\n]*docs\.google\.com\/spreadsheets[^\n]*/g) || ['none — correct'])[0]);
 r.ok('the IR list is read ONLY through the token-gated action',
   /action=listIRs/.test(appSrc) && !/IR_REPO_SHEET_ID/.test(appSrc));
 r.ok('and the legacy records come through the token gate too',
@@ -572,6 +577,27 @@ r.ok('and the legacy records come through the token gate too',
 r.ok('no sheet address hides in the demo fixtures either',
   !/spreadsheets\/d\/[A-Za-z0-9_-]{20,}/.test(appSrc),
   (appSrc.match(/[^\n]*spreadsheets\/d\/[A-Za-z0-9_-]{20,}[^\n]*/g) || ['none — correct'])[0]);
+
+// ── The same rule, on the OTHER half (v13) ────────────────────────────────────
+// The check above is about app.js, and it passed for a year while backend.gs — in the
+// SAME public repository — carried four Google file ids and a third party's real
+// mailbox. A rule enforced on one file is a rule enforced nowhere, so the assertion is
+// repeated here against the backend, where the leak actually was.
+r.head('v13: the backend names no Google file, and no third party');
+const backendSrc = fs.readFileSync(new URL('../backend.gs', import.meta.url), 'utf8');
+// A Google file id is a long base64-ish run carrying at least one digit. The digit
+// requirement is what makes this readable rather than noisy: this file has long
+// alphanumeric constants that are not ids. It is a heuristic, and it is here to catch
+// the route nobody listed.
+const backendIds = idShaped(backendSrc);
+r.ok('no id-shaped literal in backend.gs', backendIds.length === 0, backendIds.slice(0, 5).join(', '));
+r.ok('and no real mailbox — the external address is read from the store',
+  !/@(?!indrones\.com)[a-z0-9.-]+\.[a-z]{2,}/i.test(backendSrc.replace(/\/\/[^\n]*/g, '')) &&
+  /storeIds\(\)\.externalEmails/.test(backendSrc),
+  (backendSrc.match(/[^\n]*@(?!indrones\.com)[a-z0-9.-]+\.[a-z]{2,}[^\n]*/i) || ['none — correct'])[0]);
+r.ok('the ids file is a plain store file — NOT reachable through the __CONFIG__ sentinel',
+  !/__IDS__/.test(backendSrc) &&
+  !/SENTINEL_SECTIONS[\s\S]{0,400}ids\.json/.test(backendSrc));
 
 // ── The legacy archive is WIRED — a different claim from "it exists" ──────────
 // loadLegacyIndex() was defined, tested and REACHABLE BY NOBODY from 2026-07-08

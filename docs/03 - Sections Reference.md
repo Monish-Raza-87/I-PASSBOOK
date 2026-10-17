@@ -84,9 +84,13 @@ The Comments modal shows the existing thread for that context plus a composer:
 ### Backend (`backend.gs`) — comment email
 The `sendNudgeEmail` POST action (name kept for contract stability) sends via
 `MailApp.sendEmail`, restricted to `@indrones.com` recipients plus the explicit
-`EXTERNAL_EMAILS` exceptions (so the app can't be used to mail externally) —
-`isMailRecipientAllowed()` is that guard, and `kishor.salunkhe@uavgarage.com` is the
-one address it admits. The sender's email is set as `replyTo`. Email
+`externalEmails` list in `_store/ids.json` (so the app can't be used to mail
+externally) — `isMailRecipientAllowed()` is that guard, and it **fails closed**: if the
+list is missing the address is simply denied and the mail never arrives, with no error
+anywhere. It must not throw (a mail path that throws reveals whether an account exists),
+so `seedStoreIds()` prints the list it wrote. The one admitted address used to be written
+here and in `backend.gs`; since v13 it is **not in this repository at all**. The sender's
+email is set as `replyTo`. Email
 subject/body read "you have a comment" / "mentioned you in a comment"
 (no "nudge" wording). **Requires redeploying** the Apps Script web app after
 adding this action (and completing the one-time `script.send_mail` OAuth consent —

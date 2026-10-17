@@ -393,7 +393,48 @@ refuses one by design — so the mail names the ordinary reset door. A send fail
 reported in words and never as a failed create: the account exists, which is the part
 that matters, and the admin can hand the same text over by hand.
 
+### The register: where a company name comes from (v96)
+
+The `customers` map above stores a **company name as a string**, and the backend compares
+that string against the company column of the intake sheet. Until v96 the list of names an
+admin could pick was **derived from the sheet itself** — which meant it offered whatever a
+human had typed, misspellings included, and the same organisation appeared several times
+under several spellings. Choosing the wrong one gave a customer an empty portal with no
+error anywhere.
+
+Since v96 the source of truth is **`_store/companies.json`** — the Company & Contact
+register, edited in **User Access → Customers** and documented on the wire in
+[04 — Backend API Reference](04 - Backend API Reference.md#the-company--contact-register--savecompany-deletecompany-v96).
+Three things about it matter *here*, because each one is a way the scope itself could go
+wrong:
+
+- **A scope matches the canonical name OR any of the company's aliases.** The record's
+  `sheets` array carries the exact spellings its IRs use, and one function
+  (`companySheetNames`) builds the list that **both** scoping paths read — the portal's
+  `customerIRS` and the server-side list filter `filterGridToCompany`. They cannot
+  disagree about which rows belong to a company. Without the aliases, correcting a
+  company's name would empty the portal of the customer it was corrected for.
+- **A name the register does not know still works.** `companySheetNames` returns the
+  scope **itself** when no record claims it, so every company that predates the register
+  behaves exactly as it did — the register can be adopted without a migration and without
+  a single portal going quiet.
+- **A rename follows through.** Renaming a company appends the old name to `sheets` *and*
+  rewrites the matching `customers` entries to the canonical name in the same lock. The
+  rewrite makes the register authoritative; the alias stays as the safety net for the IRs,
+  which are never rewritten. A rename that did neither would orphan the accounts that
+  pointed at the old spelling — the accounts would keep working, and the register would
+  stop describing them.
+
+**The panel still offers a spelling it has not been told about**, in a second optgroup
+labelled *Not in the register yet*, and lists those leftovers above the invite row with a
+button to fold each into a company or make it a new one. That is the tool that actually
+fixes the duplicate dropdown: the register is the answer, and the leftovers are the work.
+And because a registered company that **no IR spells** is the one remaining way to onboard
+somebody into an empty portal, inviting such a company asks first, in words, and names the
+field that fixes it — rather than refusing, because a first sale genuinely has no IR yet.
+
 ## The forced first password change
+
 
 **Enforced by the absence of a token.** When an account still has
 `mustChange = 'yes'`, `doLoginPassword` returns
@@ -646,15 +687,26 @@ user could loop it and take out password recovery for the whole company.
   *A customer is a scope* above for why the company is the whole setting.
 - **Versions** — who is on which build (see [08](08 - Development Guide.md)).
 
-### The Customers tab's company picker is derived, never invented
+### The Customers tab's company picker: the register first, the IRs underneath
 
-The dropdown is every company **already named on an IR** plus every company an account
-is **already scoped to**, unioned and sorted. It is not a stored list, because a stored
-list is a second source of truth that drifts the first time somebody types a new
-customer into the support form. An **"Other company (type it)…"** option is always
-present, so the picker can never block a genuinely new company — and choosing it reveals
-a text field instead of leaving a stale hidden value to be submitted in place of the
-choice actually made.
+**Since v96 the list is the register** — `_store/companies.json`, edited in this tab and
+described in *The register: where a company name comes from* above. It was, until v96,
+every company already named on an IR unioned with every company an account was already
+scoped to, and that union is exactly what produced the duplicate dropdown: the list was
+the sheet's own messy text, so the same organisation appeared several times under several
+spellings, and picking the wrong one scoped a customer to a string no row carried.
+
+The IR-derived names are **not gone**, because they are how a company the register has not
+been told about is discovered. They now sit in a second `optgroup`, labelled *Not in the
+register yet*, under the registered names — visibly second, still selectable, and each one
+also listed above the picker with a button to fold it into a company or make it a new one.
+That list is the tool that finishes the job: the register is the answer, and the leftovers
+are the work.
+
+An **"Other company (type it)…"** option is always present — and is preselected when there
+is nothing to pick from, which is the normal state on a first sale — so the picker can
+never block a genuinely new company. Choosing it reveals a text field rather than leaving a
+stale hidden value to be submitted in place of the choice actually made.
 
 **"Named on an IR" means the `companyName` column — Col R, "Where Do You Work?" — and
 that is not interchangeable with the column next to it.** The value an admin picks here
@@ -668,6 +720,12 @@ customer signed in, and the portal was empty, with nothing on screen saying why.
 fix is one identifier; `tools/smoke-invite.mjs` now pins it against the backend's own
 header needles rather than against another screen, because agreeing with the Insights
 "Customer" facet was never the standard that mattered.
+
+**A registered company that no IR spells is now the last silent way into an empty portal**,
+so inviting one **asks first**, in words, and names the field that fixes it (the company's
+*Other spellings*). It asks rather than refuses because a first sale genuinely has no IR
+yet, and refusing would make the one customer you cannot onboard the one you just created a
+record for.
 
 ### A customer's row cannot be emptied by the grid
 

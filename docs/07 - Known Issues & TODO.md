@@ -698,6 +698,23 @@ is left is small.
    see item 6 below. `API_VERSION` was deliberately **not** bumped by v95: it adds no action
    and no section id, which is this repo's stated trigger.
 
+   ⏳ **`v96` — the Company & Contact register — is BUILT on both halves, and NOT deployed.**
+   `APP_VERSION`/`CACHE_NAME` read `v96` and `backend.gs` reads **`API_VERSION: 12`**, all 37
+   smoke suites pass, `preview/` is rebuilt — and the two things that make it live are both
+   still owed: the frontend deploy and the **backend paste into BOTH `/exec` deployments**
+   (a New version each; primary still ends `jQXatfT/exec`), confirmed by `ping` answering
+   `12`. It ships a new store file (`_store/companies.json`), the actions `saveCompany` /
+   `deleteCompany`, and the register panel in User Access → Customers; see
+   [04](04 - Backend API Reference.md) and [10](10 - Auth & Access Model.md). **This is the
+   first release since v8 where a new field on `listUsers` matters to the frontend**, so the
+   order is the same as always: **frontend first, backend last.**
+
+   > ⚠ **A pre-v96 backend is silent, not broken.** `listUsers` would carry no `companies`,
+   > so the panel quietly falls back to the **old IR-derived company list** and every register
+   > edit lands nowhere — no error, and the screen says it saved. That is the exact failure
+   > shape of v95's `revokes`, which is why the paste is a two-step task and is not done until
+   > **`ping` answers 12**.
+
    > **A process note worth keeping.** Part 2 changed `index.html` **inside
    > `#auth-container`**, which is the exact string `render-fixture.mjs` and
    > `build-ui-options.mjs` slice from. So `node tools/build-ui-options.mjs` had to be

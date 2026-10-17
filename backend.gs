@@ -50,6 +50,25 @@ var CONFIG = {
   // how its columns are matched. Read-only here, always.
   IR_EMAIL_TAB:     'Email_Index',
 
+  // The client directory the register's CONTACTS are seeded from — "Indrones Client
+  // Information Directory (I-CID)", its `Drones` tab. One row per airframe, and it is
+  // the only place a serial number is tied to a customer, a contact PERSON, an email
+  // and a city.
+  //
+  // READ ONCE, BY seedCompanyContacts(). Nothing at runtime reads it: the register is
+  // `_store/companies.json`, and this sheet is an INPUT to building it, exactly as the
+  // intake sheet is. So a wrong or emptied value here costs a seed run and never a
+  // customer's tickets. Leave it '' and that seed reports "not configured" rather
+  // than throwing.
+  //
+  // ⚠ THIS ID SITS IN A PUBLIC REPOSITORY, so the sheet behind it MUST stay Restricted
+  // (no "anyone with the link"). It is a client directory — names, contact people and
+  // mailboxes — and the ID in public plus a link-share is exactly how the intake sheet
+  // became readable to the world for two days in October 2026. If the seed's first
+  // run reports a login page instead of rows, that is what has happened.
+  CLIENT_DIRECTORY_SHEET_ID: '1R1cMpHVvid5ptDyZNHuMIOALGsZVpGqum5wH2FkLU2U',
+  CLIENT_DIRECTORY_TAB:      'Drones',
+
   // ── THE APP'S OWN STORE ──────────────────────────────────────────────────────
   // There is no app spreadsheet any more. Everything the app owns — accounts,
   // sessions, the access matrix, every saved section, the audit trail — lives as
@@ -178,7 +197,22 @@ var CONFIG = {
   // sees Costing work perfectly while everyone else gets a read-only pane. The frontend
   // carries a guard that reads this key's presence and says so rather than letting the
   // difference be discovered by a colleague; see backendKnowsSection in app.js.
-  API_VERSION: 11,
+  //
+  // v12 = THE COMPANY REGISTER. `_store/companies.json` becomes the source of truth for
+  // who a customer may be scoped to, and scoping matches a ticket's company cell against
+  // the registered name OR any of its aliases (see companySheetNames). Two new admin
+  // actions, `saveCompany` and `deleteCompany`, and `listUsers` gains a `companies` key.
+  //
+  // ⚠ NOT INDEPENDENT, and in the opposite direction from v11: an older backend does not
+  // KNOW the register, so it scopes by the raw stored string alone. That is why every
+  // register name keeps the sheet's own spelling as an alias — a v12 register meeting a
+  // v11 backend still resolves every existing scope, because the plain string it would
+  // have used is still one of the spellings. What breaks is only a CORRECTED name that
+  // dropped its old spelling, and `saveCompany` adds that alias automatically. A v11
+  // frontend meeting a v12 backend simply never calls the two new actions and shows the
+  // old IR-derived dropdown; nothing regresses, because the register only ever narrows
+  // the list of names an admin picks FROM — the scope written is still a plain string.
+  API_VERSION: 12,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -1692,7 +1726,7 @@ function initializeStore() {
   [['users.json', {}], ['sessions.json', { tokens: {} }], ['codes.json', { entries: [] }],
    ['attempts.json', {}], ['access.json', { departments: {}, memberships: {} }],
    ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
-   ['devices.json', { devices: {} }],
+   ['devices.json', { devices: {} }], ['companies.json', { companies: {} }],
    [STORE_INDEX, { irs: {} }]
   ].forEach(function (pair) {
     if (findStoreFile(pair[0], false)) return;
@@ -3757,6 +3791,10 @@ function doPost(e) {
       // invitation. Admin-only, and it re-checks inside (see inviteCustomer).
       inviteCustomer:    function () { return inviteCustomer(params, email); },
       setCustomerCompany:function () { return setCustomerCompany(params, email); },
+      // The Company & Contact register (v96). Admin-only, like everything else that
+      // touches who may be scoped to what.
+      saveCompany:       function () { return saveCompany(params, email); },
+      deleteCompany:     function () { return deleteCompany(params, email); },
       bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
       resetUserPassword: function () { return resetUserPassword(params, email); },
       setUserStatus:     function () { return setUserStatus(params, email); },
@@ -3969,9 +4007,99 @@ function customerCompany(email) {
 // therefore normalised on BOTH sides — the stored scope and the sheet cell — and
 // never by rewriting what is stored, so the admin can still see and correct the
 // exact string they picked.
+//
+// Named separately because the register needs the KEY on its own: looking a company
+// up in `companies.json` is "does any of this record's spellings normalise to the
+// same string", which is the same question with the second value already in hand.
+function sameCompanyKey(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+}
 function sameCompany(a, b) {
-  var f = function (s) { return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim(); };
-  return f(a) !== '' && f(a) === f(b);
+  var fa = sameCompanyKey(a);
+  return fa !== '' && fa === sameCompanyKey(b);
+}
+
+// ── THE COMPANY REGISTER (`_store/companies.json`) ────────────────────────────
+// One record per OUTSIDE organisation, and the source of truth for who a customer
+// can be scoped to:
+//
+//   { "companies": { "<key>": {
+//       name:    "Acme Survey Pvt Ltd",          // canonical, and all the UI shows
+//       email, phone, address, city, state, pincode,
+//       sheets:  ["Acme Survey", "ACME SURVEY"],  // every intake spelling meaning this company
+//       contacts:[{ id, name, email, phone, active }],
+//       notes, updatedAt, updatedBy } } }
+//
+// WHY `sheets` IS THE WHOLE POINT OF THE FILE. The register is corrected by a human;
+// the intake column is free text a CUSTOMER typed, and correcting a name here does
+// not — and must not — rewrite anybody's ticket. If scoping compared against the
+// canonical name alone, renaming a company would silently empty the portal of every
+// customer already scoped to the old spelling. `sheets` is what holds the two
+// together, and `companySheetNames()` below is its ONE reader.
+//
+// The key is a slug of the name, so it is stable across a rename and a record can be
+// found by URL-ish string. Creating a second company whose slug is taken is REFUSED
+// rather than silently merged — see saveCompany.
+//
+// This file holds no authority of its own: it says which spellings are the same
+// company, and `access.json` still says who may see what. It is deliberately NOT in
+// SENTINEL_SECTIONS for the same reason access.json is not — a sentinel that resolved
+// here would let any signed-in user rewrite the register through saveSection.
+function companiesStore() {
+  var c = readJson('companies.json');
+  if (!c || typeof c !== 'object') return { companies: {} };
+  if (!c.companies || typeof c.companies !== 'object') c.companies = {};
+  return c;
+}
+
+function companyKeyFromName(name) {
+  return sameCompanyKey(name).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+}
+
+// Every spelling the intake sheet might carry for the company an account is scoped
+// to — the canonical name AND every alias — as the comparison set for `customerIRS`
+// and `filterGridToCompany`.
+//
+// A name the register has never heard of returns itself. That is not a fallback, it
+// is the state every company is in until somebody registers it: a company that exists
+// only on a ticket must go on working exactly as it did before this file existed, or
+// shipping the register would break portals it is meant to tidy.
+function companySheetNames(scopeName) {
+  var want = sameCompanyKey(scopeName);
+  if (!want) return [];
+  var map = companiesStore().companies;
+  var keys = Object.keys(map);
+  for (var i = 0; i < keys.length; i++) {
+    var c = map[keys[i]] || {};
+    var names = [c.name || ''].concat(c.sheets instanceof Array ? c.sheets : []);
+    var hit = false;
+    for (var j = 0; j < names.length && !hit; j++) hit = sameCompanyKey(names[j]) === want;
+    if (!hit) continue;
+    var out = [];
+    names.forEach(function (n) {
+      var s = String(n == null ? '' : n).trim();
+      if (s && out.indexOf(s) < 0) out.push(s);
+    });
+    return out;
+  }
+  return [String(scopeName == null ? '' : scopeName).trim()];
+}
+
+// The set form of sameCompany(), for the two callers that now match a sheet cell
+// against a company's whole alias list rather than one string.
+function matchesAnyCompany(cell, names) {
+  for (var i = 0; i < names.length; i++) if (sameCompany(cell, names[i])) return true;
+  return false;
+}
+
+// The names that are NOT a company, whatever the form's dropdown offered. Skipped by
+// the seed and by the "not yet in the register" list, because offering "NA" as an
+// organisation to scope somebody to is exactly the mess the register exists to clear.
+// Placeholder tokens only — never a real organisation, so this list can be shared.
+var COMPANY_PLACEHOLDERS = ['na', 'n/a', 'nil', 'none', 'no', '-', '--', 'test', 'testing', 'x'];
+function isCompanyPlaceholder(name) {
+  var k = sameCompanyKey(name);
+  return !k || COMPANY_PLACEHOLDERS.indexOf(k) > -1;
 }
 
 // "Flight Test" -> "flight-test". Stable keys mean renaming a department in the UI
@@ -4281,7 +4409,43 @@ function listUsers(authEmail) {
   // this comes back in the order the departments were created — which is the order
   // the Departments tab has always shown them in.
 
-  return { status: 'ok', users: users, departments: departments, apiVersion: CONFIG.API_VERSION };
+  // The company register, carried on THIS call rather than behind its own action, and
+  // deliberately: the Customers tab is the only screen that reads it, that screen already
+  // loads with `listUsers`, and a second action would be a second answer to "which
+  // companies exist" that could disagree with this one. One read, one pane, one answer.
+  //
+  // Shaped for the panel and nothing else — the alias list and the contacts come whole
+  // because the panel edits them whole, and `scopeCount` is precomputed here because the
+  // panel cannot count scopes without re-deriving the alias match, which is exactly the
+  // second implementation of companySheetNames this comment is trying to avoid.
+  var companiesStoreNow = companiesStore();
+  var companies = Object.keys(companiesStoreNow.companies).map(function (key) {
+    var c = companiesStoreNow.companies[key] || {};
+    var names = [c.name || ''].concat(c.sheets instanceof Array ? c.sheets : []);
+    var scopes = 0;
+    Object.keys(store.customers).forEach(function (e2) {
+      if (matchesAnyCompany(store.customers[e2], names)) scopes++;
+    });
+    return {
+      key: key,
+      name: String(c.name || key),
+      email: String(c.email || ''), phone: String(c.phone || ''),
+      address: String(c.address || ''), city: String(c.city || ''),
+      state: String(c.state || ''), pincode: String(c.pincode || ''),
+      notes: String(c.notes || ''),
+      sheets: (c.sheets instanceof Array ? c.sheets : []).map(function (s) { return String(s); }),
+      contacts: (c.contacts instanceof Array ? c.contacts : []).map(function (ct) {
+        return { id: String(ct.id || ''), name: String(ct.name || ''), email: String(ct.email || ''),
+                 phone: String(ct.phone || ''), active: ct.active !== false };
+      }),
+      scopeCount: scopes,
+      updatedAt: String(c.updatedAt || '')
+    };
+  });
+  companies.sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+
+  return { status: 'ok', users: users, departments: departments, companies: companies,
+           apiVersion: CONFIG.API_VERSION };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -4453,6 +4617,161 @@ function setCustomerCompany(params, authEmail) {
     writeJsonLocked('access.json', store);
     return { status: 'ok', email: email, company: company,
              message: company ? email + ' now sees ' + company + ' tickets.' : email + ' is no longer scoped to a company.' };
+  });
+}
+
+// ── THE COMPANY REGISTER, WRITTEN ─────────────────────────────────────────────
+// POST saveCompany (admin) — add a company to the register, or update one.
+//
+// ONE write of the whole record, like saveDepartment, because the record is one
+// subject: the name, the alias list and the contacts are read together by every
+// screen and a partial write would be a register that disagrees with itself.
+function saveCompany(params, authEmail) {
+  requireAdmin(authEmail);
+
+  var name = (params.name || '').toString().trim();
+  if (!name) return { status: 'error', message: 'A company needs a name.' };
+  if (isCompanyPlaceholder(name)) {
+    return { status: 'error', message: '"' + name + '" is a placeholder, not a company — the register skips those on purpose.' };
+  }
+
+  var askedKey = (params.key || '').toString().trim();
+  var key = askedKey || companyKeyFromName(name);
+  if (!key) return { status: 'error', message: 'Could not derive a key from that name — use letters or digits.' };
+
+  // Aliases arrive ONE PER LINE, never comma-separated: real company names carry
+  // commas ("Riverside Logistics Pvt Ltd, Kolkata"), and a comma-split would quietly
+  // cut one organisation into two spellings that each match nothing.
+  var aliases = String(params.sheets || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+
+  var contacts = [];
+  try { contacts = JSON.parse(params.contacts || '[]'); } catch (e) { contacts = []; }
+  if (!(contacts instanceof Array)) contacts = [];
+
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('companies.json');
+    if (!store || typeof store !== 'object') store = {};
+    if (!store.companies || typeof store.companies !== 'object') store.companies = {};
+
+    // Creating a second record for a name that is already registered is REFUSED, and
+    // that refusal is the whole point of the register: two records spelling one company
+    // differently is the mess this file exists to clear, and merging them afterwards is
+    // a manual job. So it is caught at the door, by name.
+    if (!askedKey && store.companies[key]) {
+      return { status: 'error',
+               message: '"' + store.companies[key].name + '" is already in the register. Open it and add this spelling as another name for it.' };
+    }
+    var prev = store.companies[key] || {};
+
+    // ⚠ A RENAME KEEPS THE OLD NAME AS AN ALIAS, and that is not tidiness. Every customer
+    // scoped to the old spelling is scoped to a string this file no longer calls the
+    // company's name; without the alias, correcting a typo here would empty their portal
+    // on the next load with nothing anywhere saying why. One spare spelling for ever is
+    // cheaper than explaining that.
+    if (prev.name && sameCompanyKey(prev.name) !== sameCompanyKey(name)) aliases.push(String(prev.name).trim());
+    (prev.sheets instanceof Array ? prev.sheets : []).forEach(function (s) { aliases.push(String(s).trim()); });
+
+    // The canonical name is never also an alias: it matches nothing extra and it reads
+    // as though the two were somehow different. Deduped on the NORMALISED key, so
+    // "ACME SURVEY" and "acme survey " cannot both be stored.
+    var seen = {}; seen[sameCompanyKey(name)] = true;
+    var sheets = [];
+    aliases.forEach(function (a) {
+      var k = sameCompanyKey(a);
+      if (!k || seen[k]) return;
+      seen[k] = true;
+      sheets.push(a);
+    });
+
+    var kept = [];
+    contacts.forEach(function (c) {
+      var m = String((c && c.name) || '').trim();
+      var e = String((c && c.email) || '').trim();
+      if (!m && !e) return;                       // a blank row is not a contact
+      kept.push({
+        id:    String((c && c.id) || '').trim() || ('c' + (kept.length + 1)),
+        name:  m,
+        email: e,
+        phone: String((c && c.phone) || '').trim(),
+        // Someone who has left stays on the record, marked — deleting them would lose
+        // the only note of who used to answer for this account.
+        active: !(c && (c.active === false || String(c.active) === 'false'))
+      });
+    });
+
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    store.companies[key] = {
+      name:    name,
+      email:   (params.email   || '').toString().trim(),
+      phone:   (params.phone   || '').toString().trim(),
+      address: (params.address || '').toString().trim(),
+      city:    (params.city    || '').toString().trim(),
+      state:   (params.state   || '').toString().trim(),
+      pincode: (params.pincode || '').toString().trim(),
+      notes:   (params.notes   || '').toString().trim(),
+      sheets:  sheets,
+      contacts: kept,
+      createdAt: prev.createdAt || stamp,
+      updatedAt: stamp,
+      updatedBy: authEmail
+    };
+    writeJsonLocked('companies.json', store);
+
+    // Every account whose scope named this company by one of its OTHER spellings is
+    // re-pointed at the canonical name, in the same lock. That is what makes the
+    // register the source of truth and the alias list a safety net for the tickets
+    // instead of a second, competing answer. Reading access.json costs nothing extra:
+    // one file, and readJson memoises it.
+    var moved = 0;
+    var acc = readJsonLocked('access.json');
+    if (acc && acc.customers) {
+      Object.keys(acc.customers).forEach(function (e2) {
+        var cur = String(acc.customers[e2] || '').trim();
+        if (!cur || sameCompanyKey(cur) === sameCompanyKey(name)) return;
+        if (!matchesAnyCompany(cur, sheets)) return;
+        acc.customers[e2] = name;
+        moved++;
+      });
+      if (moved) writeJsonLocked('access.json', acc);
+    }
+
+    return { status: 'ok', key: key, name: name, moved: moved,
+             message: (prev.name ? 'Saved ' : 'Added ') + name + '.' +
+                      (sheets.length ? ' It also answers to ' + sheets.length + ' other spelling(s) on the tickets.' : '') +
+                      (moved ? ' ' + moved + ' customer account(s) now read as this name.' : '') };
+  });
+}
+
+// POST deleteCompany (admin) — remove one company from the register.
+//
+// THIS DELETES A LABEL, NEVER ACCESS, and that is why it is safe to offer. It touches
+// no ticket and no customer's scope: the name simply goes back to being unregistered,
+// which companySheetNames() matches by itself, exactly as it did before this file
+// existed. The count of accounts still scoped to it is reported because they are the
+// thing an admin will next see as a scope with no record behind it, and knowing how
+// many there are is the whole of what makes that legible.
+function deleteCompany(params, authEmail) {
+  requireAdmin(authEmail);
+  var key = (params.key || '').toString().trim();
+  if (!key) return { status: 'error', message: 'Which company?' };
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('companies.json');
+    var rec = store && store.companies ? store.companies[key] : null;
+    if (!rec) return { status: 'ok', message: 'No such company: ' + key };
+    delete store.companies[key];
+    writeJsonLocked('companies.json', store);
+
+    var all = [rec.name].concat(rec.sheets instanceof Array ? rec.sheets : []);
+    var still = 0;
+    var acc = readJsonLocked('access.json');
+    if (acc && acc.customers) {
+      Object.keys(acc.customers).forEach(function (e2) {
+        if (matchesAnyCompany(String(acc.customers[e2] || ''), all)) still++;
+      });
+    }
+    return { status: 'ok', key: key,
+             message: 'Removed ' + rec.name + ' from the register.' +
+                      (still ? ' ' + still + ' customer account(s) are still scoped to it and keep seeing the same tickets — set them to a company, or leave them.' : '') };
   });
 }
 
@@ -5052,7 +5371,14 @@ function emailIndexColumns(headerRow) {
 // found by header substring, this returns {}, so a customer sees no tickets at all.
 // That is the deliberate direction: a customer seeing an empty list is a support
 // call, and a customer seeing somebody else's fleet is a breach.
+// The scope is matched through the REGISTER, not against one string: companySheetNames
+// turns it into the canonical name plus every spelling the intake sheet has used for
+// the same organisation, so correcting a company's name cannot cost a customer their
+// tickets. See companySheetNames — and note the direction of the failure is unchanged,
+// because a scope that matches nothing still returns {} rather than everything.
 function customerIRS(company) {
+  var names = companySheetNames(company);
+  if (!names.length) return {};
   var grid = intakeGrid();
   if (!grid || grid.length < 1) return {};
   var col = companyColumnIndex(grid[0]);
@@ -5063,7 +5389,7 @@ function customerIRS(company) {
   var own = {};
   for (var r = 1; r < grid.length; r++) {
     var row = grid[r] || [];
-    if (!sameCompany(row[col], company)) continue;
+    if (!matchesAnyCompany(row[col], names)) continue;
     var k = irKey(row[irCol]);
     if (k) own[k] = true;
   }
@@ -5104,15 +5430,18 @@ function companyColumnIndex(headerRow) {
 // Keep the header row, keep only the rows belonging to `company`, and give up
 // entirely if the company column cannot be found. Rows arrive as display strings
 // exactly as the sheet shows them, so both sides of the comparison are normalised
-// by sameCompany().
+// by sameCompany() — through the register's alias list, like customerIRS, so this
+// reader and that one can never disagree about which rows are a company's.
 function filterGridToCompany(grid, company) {
   if (!grid || grid.length < 1) return [];
   var col = companyColumnIndex(grid[0]);
   if (col < 0) return [];                 // cannot tell → withhold everything
+  var names = companySheetNames(company);
+  if (!names.length) return [];           // an empty scope is not "every company"
   var out = [grid[0]];
   for (var r = 1; r < grid.length; r++) {
     var row = grid[r] || [];
-    if (sameCompany(row[col], company)) out.push(row);
+    if (matchesAnyCompany(row[col], names)) out.push(row);
   }
   return out;
 }
@@ -6894,6 +7223,186 @@ function seedDepartments() {
     lines.push('untick a section for a department in User Access → Departments.');
     return lines.join('\n');
   }));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// seedCompanies() — build the register out of the spellings the intake sheet ALREADY
+// carries, so the owner corrects a list instead of typing one.
+// ──────────────────────────────────────────────────────────────────────────────
+// CREATE ONLY, like seedDepartments and seedMemberships: a company already registered
+// keeps its name, its aliases and its contacts untouched. A re-run after the owner has
+// corrected a name must not undo the correction, and that is the whole reason this is
+// not an upsert.
+//
+// IT GROUPS BY SPELLING, NOT BY MEANING. Spellings that normalise to the same string
+// become ONE company holding all of them as aliases. Two spellings that are merely
+// SIMILAR — a typo, a missing word, a division tacked on the end — become two
+// companies, because nothing in the sheet says they are the same organisation and
+// guessing would merge two real ones and hand one of them the other's tickets. Merging
+// those is a human act, done in the register: add one spelling as another name for the
+// other company. The report below lists what it created so that act is easy.
+//
+// Nothing here is written back to the repo, and no company name is hard-coded in this
+// file — every name comes out of the sheet at run time.
+function seedCompanies() {
+  var grid = intakeGrid();
+  if (!grid || grid.length < 2) return report('Companies: the intake sheet has no rows — nothing to seed.');
+  var col = companyColumnIndex(grid[0]);
+  if (col < 0) return report('Companies: could not find the company column in the intake sheet (see companyColumnIndex).');
+
+  var groups = {}, skipped = {};
+  for (var r = 1; r < grid.length; r++) {
+    var cell = (grid[r] || [])[col];
+    var raw  = String(cell == null ? '' : cell).trim();
+    if (isCompanyPlaceholder(raw)) { var p = raw || '(blank)'; skipped[p] = (skipped[p] || 0) + 1; continue; }
+    var k = sameCompanyKey(raw);
+    if (!groups[k]) groups[k] = { spellings: {}, rows: 0 };
+    groups[k].spellings[raw] = (groups[k].spellings[raw] || 0) + 1;
+    groups[k].rows++;
+  }
+
+  var store = companiesStore();
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var created = [], kept = 0;
+
+  Object.keys(groups).forEach(function (k) {
+    var g = groups[k];
+    // The canonical name is the spelling the form used MOST: it is the one an admin is
+    // likeliest to recognise, and any other rule (longest, first) picks a different
+    // name for no reason a human could predict.
+    var best = Object.keys(g.spellings).sort(function (a, b) {
+      return (g.spellings[b] - g.spellings[a]) || (a < b ? -1 : 1);
+    })[0];
+    var key = companyKeyFromName(best);
+    if (!key) return;
+    if (store.companies[key]) { kept++; return; }
+
+    var others = Object.keys(g.spellings).filter(function (s) { return sameCompanyKey(s) !== sameCompanyKey(best); });
+    store.companies[key] = {
+      name: best, email: '', phone: '', address: '', city: '', state: '', pincode: '', notes: '',
+      sheets: others,
+      contacts: [],
+      createdAt: stamp, updatedAt: stamp, updatedBy: 'seedCompanies()'
+    };
+    created.push(best + (others.length ? '  (+' + others.length + ' other spelling' + (others.length > 1 ? 's' : '') + ')' : '') + '  — ' + g.rows + ' ticket(s)');
+  });
+
+  if (created.length) writeJson('companies.json', store);
+
+  var lines = [];
+  lines.push('Companies seeded into _store/companies.json');
+  lines.push('');
+  lines.push(created.length ? 'Created (' + created.length + '):' : 'Created: none');
+  created.sort().forEach(function (c) { lines.push('  · ' + c); });
+  if (kept) lines.push('Left untouched: ' + kept + ' already in the register.');
+  var placeholders = Object.keys(skipped);
+  if (placeholders.length) lines.push('Skipped as not-a-company: ' + placeholders.join(', '));
+  lines.push('');
+  lines.push('ADD ONLY — this never changes a company already in the register.');
+  lines.push('These are SHEET SPELLINGS grouped by exact match. Two spellings that are only');
+  lines.push('SIMILAR are deliberately left as two companies — open the register in the app');
+  lines.push('and add one as "another name" for the other to merge them.');
+  return report(lines.join('\n'));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// seedCompanyContacts() — attach the contact people, emails and cities from the
+// client directory sheet to the companies seedCompanies() created.
+// ──────────────────────────────────────────────────────────────────────────────
+// ADD ONLY, and per CONTACT rather than per company: a contact whose email is already
+// on the company is left alone, and a company the register does not know is reported
+// rather than invented — a row here names a customer, and inventing an organisation
+// from one column of a spreadsheet is how the register fills up with names that match
+// nothing on a ticket.
+//
+// Run seedCompanies() FIRST. This reads the sheet named by CONFIG.CLIENT_DIRECTORY_SHEET_ID.
+function seedCompanyContacts() {
+  if (!CONFIG.CLIENT_DIRECTORY_SHEET_ID) return report('Contacts: no client directory sheet configured (CONFIG.CLIENT_DIRECTORY_SHEET_ID is empty).');
+  var ss = SpreadsheetApp.openById(CONFIG.CLIENT_DIRECTORY_SHEET_ID);
+  var tab = ss.getSheetByName(CONFIG.CLIENT_DIRECTORY_TAB);
+  if (!tab) return report('Contacts: no tab named "' + CONFIG.CLIENT_DIRECTORY_TAB + '" in the client directory sheet.');
+
+  var lastRow = tab.getLastRow(), lastCol = tab.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return report('Contacts: the client directory tab has no rows.');
+
+  var grid   = tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  // Matched by HEADER SUBSTRING, the same discipline companyColumnIndex uses: a column
+  // inserted in the sheet must not silently shift which field is read. `address` is
+  // matched before `city` is tried by its own name, because the sheet's own header is
+  // "Address/ City" — one column carrying both.
+  var header = grid[0].map(function (h) { return String(h == null ? '' : h).toLowerCase(); });
+  var find = function (needles) {
+    for (var n = 0; n < needles.length; n++)
+      for (var c = 0; c < header.length; c++) if (header[c].indexOf(needles[n]) > -1) return c;
+    return -1;
+  };
+  var colCustomer = find(['customer']);
+  var colContact  = find(['contact']);
+  var colEmail    = find(['email']);
+  var colPlace    = find(['address', 'city']);
+  if (colCustomer < 0) return report('Contacts: no "Customer" column in the client directory tab.');
+
+  var store = companiesStore();
+  var byKey = {};                                  // normalised company spelling -> register key
+  Object.keys(store.companies).forEach(function (key) {
+    var c = store.companies[key] || {};
+    [c.name || ''].concat(c.sheets instanceof Array ? c.sheets : []).forEach(function (n) {
+      var k = sameCompanyKey(n);
+      if (k && !byKey[k]) byKey[k] = key;
+    });
+  });
+
+  var added = 0, matched = 0, unknown = {}, noContact = 0;
+  var nextId = function (c) { return 'c' + ((c.contacts instanceof Array ? c.contacts.length : 0) + 1) + '-' + Date.now().toString(36); };
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var at = function (i) { return i < 0 ? '' : String(row[i] == null ? '' : row[i]).trim(); };
+    var cust = at(colCustomer);
+    if (isCompanyPlaceholder(cust)) continue;
+    var key = byKey[sameCompanyKey(cust)];
+    if (!key) { var d = cust; unknown[d] = (unknown[d] || 0) + 1; continue; }
+    matched++;
+
+    var cname = at(colContact), cemail = at(colEmail), place = at(colPlace);
+    if (isCompanyPlaceholder(cname)) { cname = ''; }               // "NA" is not a person
+    if (isCompanyPlaceholder(cemail)) { cemail = ''; }
+    var rec = store.companies[key];
+    if (!(rec.contacts instanceof Array)) rec.contacts = [];
+    if (place && !rec.city) rec.city = place;
+
+    if (!cname && !cemail) { noContact++; continue; }
+    var dupe = false;
+    rec.contacts.forEach(function (c) {
+      if (cemail && sameCompanyKey(c.email) === sameCompanyKey(cemail)) dupe = true;
+      if (!cemail && cname && sameCompanyKey(c.name) === sameCompanyKey(cname)) dupe = true;
+    });
+    if (dupe) continue;
+    rec.contacts.push({ id: nextId(rec), name: cname, email: cemail, phone: '', active: true });
+    rec.updatedAt = stamp;
+    rec.updatedBy = 'seedCompanyContacts()';
+    added++;
+  }
+
+  if (added) writeJson('companies.json', store);
+
+  var lines = [];
+  lines.push('Contacts seeded from "' + CONFIG.CLIENT_DIRECTORY_TAB + '"');
+  lines.push('');
+  lines.push('Rows read: ' + (grid.length - 1) + ' · matched a registered company: ' + matched);
+  lines.push('Contacts added: ' + added + ' · rows with no contact person: ' + noContact);
+  var unknownNames = Object.keys(unknown);
+  if (unknownNames.length) {
+    lines.push('');
+    lines.push('⚠ ' + unknownNames.length + ' company spelling(s) on this sheet are NOT in the register,');
+    lines.push('so nothing was attached to them. They appear in the app as "not yet in the register"');
+    lines.push('where they can be added or merged by hand:');
+    unknownNames.sort().forEach(function (n) { lines.push('  · ' + n + '  (' + unknown[n] + ' row(s))'); });
+  }
+  lines.push('');
+  lines.push('ADD ONLY — a contact whose email is already on the company is left alone.');
+  return report(lines.join('\n'));
 }
 
 // "flight-test" -> "Flight Test" for the display Name.

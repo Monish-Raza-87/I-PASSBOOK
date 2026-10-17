@@ -65,7 +65,10 @@ const LOCATION = {
 const BINDINGS = `
   document,
   renderCustomersTab, renderPeopleTab, renderAccessPanel, knownCompanies,
-  customerPortalLink, customerHandoverTxt, savePeopleMatrix,
+  customerPortalLink, customerHandoverTxt, savePeopleMatrix, companyFormToFields, companyToFields,
+  blankCompanyForm, companyFormFromRecord,
+  set companyForm(v) { companyForm = v; },
+  get companyForm() { return companyForm; },
   set accessCache(v) { accessCache = v; },
   get accessCache() { return accessCache; },
   set allIRs(v) { allIRs = v; },
@@ -82,17 +85,18 @@ const BINDINGS = `
 function boot(users, irs, opts) {
   const posts = [];
   const postReply = (opts && opts.postReply) || { status: 'ok' };
+  const companies = (opts && opts.companies) || [];
   const fetchStub = (url, init) => {
     const u = String(url);
     if (init && init.method === 'POST') { posts.push(init.body); return Promise.resolve({ json: () => Promise.resolve(postReply) }); }
     if (u.indexOf('action=listUsers') >= 0) {
-      return Promise.resolve({ json: () => Promise.resolve({ status: 'ok', users: users, departments: [], apiVersion: 8 }) });
+      return Promise.resolve({ json: () => Promise.resolve({ status: 'ok', users: users, departments: [], companies: companies, apiVersion: 12 }) });
     }
     return Promise.resolve({ json: () => Promise.resolve({ status: 'ok' }) });
   };
   const A = loadApp(BINDINGS, { capture: true, fetch: fetchStub,
     globals: { location: LOCATION, FormData: FormData } });
-  A.T.accessCache = { users: users, departments: [], apiVersion: 8 };
+  A.T.accessCache = { users: users, departments: [], companies: companies, apiVersion: 12 };
   A.T.allIRs = irs;
   return { A, posts };
 }
@@ -135,7 +139,7 @@ r.ok('setCustomerCompany is routed there too',
   /setCustomerCompany:\s*function \(\) \{ return setCustomerCompany\(params, email\); \}/.test(authedRoutes));
 
 // ═══════════════════════════════════════════════════════════════════════════════
-r.head('the company list is derived from the tickets, never invented');
+r.head('the company list is the REGISTER, and the IRs only ever add to it');
 // ═══════════════════════════════════════════════════════════════════════════════
 {
   const { A } = boot(STAFF.concat([CUSTOMER]), IRS);
@@ -178,6 +182,250 @@ r.head('the company list is derived from the tickets, never invented');
   r.ok('...which the panel reaches through `companyName`, never `customerName`',
     /if \(ir && ir\.companyName\) seen\.add\(String\(ir\.companyName\)\.trim\(\)\)/.test(appCode) &&
     !/if \(ir && ir\.customerName\) seen\.add/.test(appCode));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the register names a company, and its aliases are what makes its IRs reachable');
+// ═══════════════════════════════════════════════════════════════════════════════
+// A register record in the shape listUsers returns it: the canonical name plus the exact
+// spellings the intake column carries. This pair is the whole v96 design — the register is
+// the source of truth, but the Sheet's text is messy, so a scope matches the canonical
+// name OR any alias. Without the alias half, correcting a company's name would empty the
+// portal of the customer it was corrected for, silently.
+const REG = [{
+  key: 'acme-survey', name: 'Acme Survey Pvt Ltd', email: 'hello@acme.example', phone: '+91 90000 11111',
+  city: 'Pune', state: 'Maharashtra', pincode: '411001', address: '', notes: '', updatedAt: '16-Oct-2026 09:00',
+  sheets: ['Acme Survey', 'ACME SURVEY'],
+  scopeCount: 1,
+  contacts: [
+    { id: 'c1', name: 'Asha Rao', email: 'ops@acme.in', phone: '+91 90000 22222', active: true },  // has an account
+    { id: 'c2', name: 'Front desk', email: '',          phone: '+91 90000 33333', active: true },  // phone only
+  ],
+}];
+{
+  const { A } = boot(STAFF.concat([CUSTOMER]), IRS, { companies: REG });
+  const panel = A.T.document.getElementById('access-panels');
+  A.T.renderCustomersTab();
+  const html = panel.innerHTML;
+
+  r.ok('the register card is rendered, with the canonical name',
+    /acc-company/.test(html) && /Acme Survey Pvt Ltd/.test(html));
+  r.ok('...and it SHOWS the other spellings, which is what an admin is here to check',
+    /Also on IRs as:/.test(html) && /<code>Acme Survey<\/code>/.test(html) && /<code>ACME SURVEY<\/code>/.test(html));
+  r.ok('...and how many accounts the company already has',
+    /acc-company[\s\S]{0,400}1 account</.test(html));
+
+  // THE THREE CONTACT STATES, none of which may look like the others. An invite on a
+  // contact who already has an account is a re-invite; a contact with only a phone cannot
+  // be invited at all, so it must not be offered a button that would refuse.
+  r.ok('a contact whose email already has an account is offered Re-invite, not Invite',
+    /ops@acme\.in[\s\S]{0,400}Re-invite/.test(html) && !/>Invite<\/button>[\s\S]{0,80}ops@acme\.in/.test(html));
+  r.ok('...and it says so on the face of the card',
+    /has an account/.test(html));
+  r.ok('a contact with a phone but no email is offered WhatsApp and no Invite',
+    /acc-co-wa[^>]*data-phone="\+91 90000 33333"/.test(html) &&
+    !/acc-co-invite[^>]*data-name="Front desk"/.test(html));
+
+  // THE BUTTONS SIT ON ONE LINE, and this is a rule, not a preference. A bare `.btn` is
+  // `width: 100%` (components.css:14) — correct for a form's submit, wrong inside a
+  // WRAPPING action group: each button then measures itself against the very box being
+  // sized from its children, so every action resolves to the container's width and they
+  // stack, one full-width button per line, with hundreds of pixels of empty space beside
+  // them. This shipped on the first render and was found by looking at it, not by reading
+  // the CSS: at 1280px the two buttons on one contact measured 214px each inside a 1034px
+  // row. The header's own `.access-user-controls` escapes this only because it does not
+  // wrap. `width: auto` is the app's existing escape (`.btn-inline`, components.css:38 —
+  // note `.btn-sm` sizes height and padding, NOT width).
+  //
+  // ⚠ This pins the RULE; it cannot pin the pixels, and the two are not the same thing
+  // (a rule can exist and lose). The pixel half is `node tools/render-themes.mjs` on
+  // `tools/render-fixture.mjs`'s `access.html`, which is how this was caught.
+  r.ok('...and the contact row\'s action group neutralises the full-width default of .btn',
+    /\.acc-contact-how \.btn \{[^}]*width: auto/.test(viewsCss),
+    (viewsCss.match(/\.acc-contact-how[^}]*\}/g) || []).join(' | '));
+
+  // The register is the FIRST group in the dropdown and the leftovers are visibly second,
+  // in their own optgroup. Both halves matter: the register has to win, and a spelling the
+  // register has not been told about must still be pickable, or the panel would be unable
+  // to onboard anybody its seed missed.
+  r.ok('the dropdown offers the registered name, and files the stray spellings under a group',
+    /<option value="Acme Survey Pvt Ltd">/.test(html) &&
+    /<optgroup label="Not in the register yet">/.test(html) &&
+    /<option value="Acme Survey">/.test(html));
+  r.ok('...and the registered name is NOT also listed as a leftover',
+    (html.match(/<optgroup label="Not in the register yet">([\s\S]*?)<\/optgroup>/) || ['', ''])[1]
+      .indexOf('>Acme Survey Pvt Ltd<') < 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('saving a company posts the aliases, and a repaint never eats the typing');
+// ═══════════════════════════════════════════════════════════════════════════════
+{
+  // THE POST ITSELF. The form is opened BEFORE the render, so the whole block is one
+  // render and therefore one click handler on Save. That is not tidiness: the stub DOM
+  // hands back a node for any id it is asked for, so a control wired by a render that had
+  // no form in it still collects a listener — a harness artifact, where a browser throws
+  // the old node away with the markup it was in.
+  const { A, posts } = boot(STAFF, IRS, { companies: REG });
+  A.T.companyForm = A.T.blankCompanyForm();
+  A.T.renderCustomersTab();
+
+  r.ok('the form carries a name field, an alias box and a Save of its own',
+    !!A.T.document.getElementById('acc-co-name') && !!A.T.document.getElementById('acc-co-sheets') &&
+    !!A.T.document.getElementById('acc-co-save'));
+
+  fill(A, 'acc-co-name', '  Brand New Farms  ');
+  fill(A, 'acc-co-sheets', 'Brand New Farms\nBRAND NEW FARM');
+  fill(A, 'acc-co-city', 'Nashik');
+  A.T.document.getElementById('acc-co-save').dispatch('click');
+  await new Promise(res => setTimeout(res, 20));
+
+  const body = posts.length ? post(posts[0]) : {};
+  r.ok('Save posts exactly one action, and it is saveCompany', posts.length === 1 && body.action === 'saveCompany',
+    JSON.stringify({ n: posts.length, action: body.action }));
+  r.ok('...carrying the name, which the backend is what trims', String(body.name).trim() === 'Brand New Farms', body.name);
+  // THE TRAP THIS PINS. A register record holds `sheets` as an ARRAY and the form holds the
+  // same thing as a textarea string. Posting the draft through the record's serialiser
+  // sends an empty `sheets`, which the backend reads as "no other spellings" — silently
+  // un-registering every alias the company had, and taking the IRs of the very customer the
+  // edit was meant to help. So the newline-joined text is what must leave, verbatim.
+  r.ok('...and the alias box travels as the newline-joined spellings, NOT as an empty list',
+    body.sheets === 'Brand New Farms\nBRAND NEW FARM', JSON.stringify(body.sheets));
+  r.ok('...and the address fields, so the card does not lose what it just collected',
+    body.city === 'Nashik', body.city);
+  r.ok('...and a company being edited names its key, so the save updates rather than duplicates',
+    'key' in body, Object.keys(body));
+  r.ok('...and nothing secret on the wire',
+    !/password|secret|token/i.test(Object.keys(body).join(',')), Object.keys(body));
+}
+{
+  // ADDING A CONTACT ROW IS A REPAINT OF A FORM THAT IS BEING TYPED INTO. This is the
+  // assertion that catches the obvious way to write it — read the fields only at save
+  // time — where the name and the aliases vanish the moment the first contact is added.
+  // Nothing is posted here on purpose; the POST is asserted above, on a single render.
+  const { A } = boot(STAFF, IRS, { companies: REG });
+  A.T.companyForm = A.T.blankCompanyForm();
+  A.T.renderCustomersTab();
+  fill(A, 'acc-co-name', '  Brand New Farms  ');
+  fill(A, 'acc-co-sheets', 'Brand New Farms\nBRAND NEW FARM');
+  A.T.document.getElementById('acc-co-addcontact').dispatch('click');
+
+  const afterAdd = A.T.document.getElementById('acc-co-name');
+  r.ok('adding a contact row repaints the form WITHOUT losing what was typed',
+    !!afterAdd && afterAdd.value === '  Brand New Farms  ', afterAdd && afterAdd.value);
+  r.ok('...and it keeps the aliases, the field the whole register turns on',
+    A.T.document.getElementById('acc-co-sheets').value === 'Brand New Farms\nBRAND NEW FARM');
+  r.ok('...and it added exactly ONE row, not a row per repaint',
+    A.T.companyForm.contacts.length === 1, A.T.companyForm.contacts.length);
+  r.ok('...and the new row is a real row with its own three fields',
+    !!A.T.document.getElementById('acc-c-0-name') && !!A.T.document.getElementById('acc-c-0-email') &&
+    !!A.T.document.getElementById('acc-c-0-phone'));
+
+  // The serialiser the draft leaves by, driven directly: a contact survives it, and the
+  // RECORD's serialiser is a different function — posting a record's shape through the
+  // form's path, or the reverse, is the mistake this pair exists to make impossible. Both
+  // halves are asserted, so neither can quietly drift into the other.
+  const f = A.T.companyFormToFields({
+    key: '', name: 'Brand New Farms', sheetsText: 'A\nB',
+    contacts: [{ name: 'Nisha Menon', email: 'nisha@brandnew.example', phone: '+91 91111 22222' }],
+  });
+  r.ok('the draft\'s serialiser sends the aliases as text and the contacts as a JSON string',
+    f.sheets === 'A\nB' && (() => { try { return JSON.parse(f.contacts)[0].email === 'nisha@brandnew.example'; } catch (e) { return false; } })());
+  const rec = A.T.companyToFields({ key: 'k', name: 'X', sheets: ['A', 'B'], contacts: [] }, ['C']);
+  r.ok('...and the RECORD\'s serialiser is a different function, joining an array with the new spelling',
+    rec.sheets === 'A\nB\nC', JSON.stringify(rec.sheets));
+}
+{
+  // A REFUSAL MUST NOT COST THE TYPING. The backend refuses a duplicate slug and a missing
+  // name; if the form closed on that reply, the message would be asking the admin to fix
+  // text the panel had just thrown away.
+  const { A } = boot(STAFF, IRS, { companies: REG, postReply: { status: 'error', message: 'A company with that name already exists' } });
+  A.T.companyForm = A.T.blankCompanyForm();
+  A.T.renderCustomersTab();
+  fill(A, 'acc-co-name', 'Acme Survey Pvt Ltd');
+  A.T.document.getElementById('acc-co-save').dispatch('click');
+  await new Promise(res => setTimeout(res, 20));
+  const nameField = A.T.document.getElementById('acc-co-name');
+  const saveBtn = A.T.document.getElementById('acc-co-save');
+  r.ok('a refused save leaves the form open, with the text still in it',
+    !!nameField && nameField.value === 'Acme Survey Pvt Ltd', nameField && nameField.value);
+  r.ok('...and leaves the save button usable rather than stuck on "Saving…"',
+    !!saveBtn && !saveBtn.disabled, saveBtn && saveBtn.textContent);
+}
+{
+  // A COMPANY WITH NO NAME never reaches the backend: the register's key is derived from
+  // the name, so there is nothing to file it under. The refusal is local, and the proof is
+  // that no POST is made at all.
+  const { A, posts } = boot(STAFF, IRS, { companies: REG });
+  A.T.companyForm = A.T.blankCompanyForm();
+  A.T.renderCustomersTab();
+  fill(A, 'acc-co-name', '   ');
+  A.T.document.getElementById('acc-co-save').dispatch('click');
+  await new Promise(res => setTimeout(res, 20));
+  r.ok('a company with no name is refused locally, without a round trip',
+    posts.length === 0, posts.length);
+}
+{
+  // AN ABANDONED EDIT MUST NOT ALREADY HAVE CHANGED THE THING THE LIST RENDERS FROM. The
+  // form is a DRAFT of a register record, and if it held the record's own contacts array
+  // then pressing Edit and then Cancel would leave the contact the admin typed sitting in
+  // the card behind the form — changed, never saved, and impossible to explain.
+  const { A } = boot(STAFF, IRS, { companies: REG });
+  const rec = A.T.accessCache.companies[0];
+  const draft = A.T.companyFormFromRecord(rec);
+  r.ok('the draft carries the record\'s aliases as the textarea text the form edits',
+    draft.sheetsText === 'Acme Survey\nACME SURVEY' && draft.key === 'acme-survey' && draft.originalName === 'Acme Survey Pvt Ltd',
+    JSON.stringify({ sheetsText: draft.sheetsText, key: draft.key }));
+  draft.contacts.push({ id: '', name: 'Typed but never saved', email: '', phone: '', active: true });
+  draft.contacts[0].name = 'Renamed in the form only';
+  r.ok('...and its contacts are a COPY: typing in the form cannot edit the register behind it',
+    rec.contacts.length === 2 && rec.contacts[0].name === 'Asha Rao',
+    JSON.stringify(rec.contacts.map(k => k.name)));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the frontend and the backend agree on what a company name IS');
+// ═══════════════════════════════════════════════════════════════════════════════
+// The scoping comparison happens TWICE — once in the browser, to decide whether a name is
+// registered, and once in the backend, to decide which rows a customer may see. Two
+// normalisations that drift apart give a customer a portal scoped by a rule the panel
+// never showed the admin, which is exactly the silent failure this pair exists to prevent.
+// So both sides are read out of their own source and required to match.
+{
+  const appCode = read('../app.js');
+  const fnBody = (src, name) => {
+    const m = src.match(new RegExp('function ' + name + '\\s*\\([^)]*\\)\\s*\\{[\\s\\S]*?\\n\\}'));
+    return m ? m[0] : '';
+  };
+  const backendNorm = fnBody(backendGs, 'sameCompanyKey');
+  r.ok('the backend has one normaliser, and it lowercases, collapses whitespace and trims',
+    /toLowerCase\(\)/.test(backendNorm) && /replace\(\/\\s\+\/g, ' '\)/.test(backendNorm) && /trim\(\)/.test(backendNorm),
+    backendNorm);
+  const frontNorm = fnBody(appCode, 'normCompany');
+  r.ok('...and the browser normalises the same three ways, in the same order',
+    /toLowerCase\(\)/.test(frontNorm) && /replace\(\/\\s\+\/g, ' '\)/.test(frontNorm) && /trim\(\)/.test(frontNorm),
+    frontNorm);
+  // Not "the two rules look alike" but "the two rules AGREE", which is the actual claim:
+  // both functions are run here, over the same awkward inputs a real intake column holds —
+  // case, runs of spaces, leading and trailing whitespace, a non-breaking space, a null —
+  // and their answers are compared. A regex-shape check would pass on a pair that had
+  // drifted in the order of the two operations, which is precisely how they drift.
+  const run = (src, name) => (new Function(src + '\nreturn ' + name + ';'))();
+  const asKey = run(fnBody(backendGs, 'sameCompanyKey'), 'sameCompanyKey');
+  const asNorm = run(frontNorm, 'normCompany');
+  const INPUTS = ['Acme Survey', 'ACME   SURVEY', '  acme survey  ', 'Acme\nSurvey', '', null, undefined, 0];
+  const pairs = INPUTS.map(v => [asKey(v), asNorm(v)]);
+  r.ok('...and they answer IDENTICALLY on case, runs of spaces, leading/trailing space and null',
+    pairs.every(([a, b]) => a === b), JSON.stringify(pairs));
+  const pick = (src, name) => {
+    const m = src.match(new RegExp('COMPANY_PLACEHOLDERS\\s*=\\s*\\[([^\\]]*)\\]'));
+    return (m ? m[1] : '').split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  };
+  const backP = pick(backendGs), frontP = pick(appCode);
+  r.ok('the placeholder list exists on BOTH sides and is the same list',
+    backP.length > 0 && JSON.stringify(backP) === JSON.stringify(frontP), JSON.stringify({ backP, frontP }));
+  r.ok('...and it names only placeholder tokens, never an organisation',
+    frontP.every(p => /^(n\/?a|nil|none|no|-{1,2}|test(ing)?|x)$/i.test(p)), frontP);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

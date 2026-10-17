@@ -208,7 +208,8 @@ ${doorBlock}
 // The roster and the ticket list are the shape a first sale really has: an admin, an
 // active and a disabled staff member, two departments, two scoped customers, and four
 // companies on the IRs — including a long one, which is what decides whether the panel
-// survives a narrow column.
+// survives a narrow column. Since v96 the company list is the REGISTER and not the IRs,
+// so the four below are split across both halves of the panel: see ACCESS_COMPANIES.
 const ACCESS_USERS = [
   { email: 'monish.raza@indrones.com', name: 'Monish Raza', status: 'active', isAdmin: true,
     departments: [], customerOf: '', lastLoginAt: '07-Oct-2026 08:14' },
@@ -237,12 +238,33 @@ const ACCESS_DEPTS = [
                'sec-e': false, 'sec-f': true,  'sec-g': false } },
 ];
 
-T.accessCache = { users: ACCESS_USERS, departments: ACCESS_DEPTS, apiVersion: 8 };
+// The register, in the shape `listUsers` returns it. TWO of the companies on the IRs are
+// registered and two are not, which is the state this panel exists for: the leftovers are
+// what the clean-up list is for, and a fixture with none of them would photograph a panel
+// that never shows its second section. `GreenField …` is deliberately long — it is what
+// decides whether a company card survives a narrow column — and the contacts cover the
+// three cases the card has to tell APART: an email that already has an account (the button
+// must read Re-invite, not Invite), a contact with a phone but no email (WhatsApp only),
+// and one with both.
+const ACCESS_COMPANIES = [
+  { key: 'agrikart-pvt-ltd', name: 'AgriKart Pvt Ltd', email: 'hello@agrikart.in', phone: '+91 98860 11223',
+    city: 'Coimbatore', state: 'Tamil Nadu', pincode: '641004', address: '', notes: '',
+    sheets: ['AGRIKART', 'Agri Kart Pvt. Ltd.'], scopeCount: 1, updatedAt: '14-Oct-2026 10:20',
+    contacts: [ { id: 'c1', name: 'Asha Rao', email: 'ops@agrikart.in', phone: '',                active: true },
+                { id: 'c2', name: 'Front desk', email: '',              phone: '+91 90000 00000', active: true } ] },
+  { key: 'farmvista-solutions', name: 'FarmVista Solutions', email: 'support@farmvista.com', phone: '',
+    city: 'Nashik', state: 'Maharashtra', pincode: '422007', address: '', notes: '',
+    sheets: [], scopeCount: 1, updatedAt: '12-Oct-2026 16:05',
+    contacts: [ { id: 'c1', name: 'Vikram Iyer', email: 'support@farmvista.com', phone: '+91 98111 22334', active: true } ] },
+];
+
+T.accessCache = { users: ACCESS_USERS, departments: ACCESS_DEPTS, companies: ACCESS_COMPANIES, apiVersion: 12 };
 T.allIRs = [
   // Two columns, as the intake form really has them: `customerName` is the person who
-  // reported it, `companyName` is where they work. The company dropdown reads the second
-  // — see knownCompanies() — so a fixture that named only the first would render an empty
-  // dropdown here and nothing would notice.
+  // reported it, `companyName` is where they work. The register matches `companyName`
+  // — see companySheetNames() in backend.gs, and the `sheets` aliases above it — so a
+  // fixture that named only the first would render no tickets against either company and
+  // nothing would notice.
   { irNumber: 'IR601', customerName: 'Asha Rao',      companyName: 'AgriKart Pvt Ltd' },
   { irNumber: 'IR602', customerName: 'Vikram Shah',   companyName: 'FarmVista Solutions' },
   { irNumber: 'IR603', customerName: 'Nisha Menon',   companyName: 'GreenField Agri Cooperative Society' },

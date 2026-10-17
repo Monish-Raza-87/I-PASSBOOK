@@ -952,6 +952,67 @@ the reversible switch, and the action says so rather than doing it.
 Both admin actions return the same `{ status }` shape as every other write, so the
 panel's error path is the one it already has.
 
+### The Company & Contact register — `saveCompany`, `deleteCompany` (v96)
+
+Since v96 the source of truth for *who a customer may be scoped to* is
+**`_store/companies.json`**, not the company column of the intake sheet. The sheet's
+company text is what a human typed, so it holds the same organisation under several
+spellings; the register is where that mess is resolved. The panel that edits it is in
+[10 — Auth & Access Model](10 - Auth & Access Model.md).
+
+| Action | Who | Does |
+|---|---|---|
+| `saveCompany` | **admin** | Creates or updates one company **and its contacts in one write**, then sweeps any account scoped to a superseded spelling onto the canonical name. |
+| `deleteCompany` | **admin** | Deletes the register record. It deletes a **label**, never an account and never access; the reply says so and reports how many accounts were still scoped to it. |
+
+`listUsers` carries the register to the panel (see below) — there is deliberately **no
+`listCompanies`**, because a second answer to "which companies exist" is a second thing
+to keep true.
+
+**The record:**
+
+```json
+{ "companies": { "<slug>": {
+    "name": "Acme Survey Pvt Ltd",              // canonical; MANDATORY
+    "email": "", "phone": "", "address": "", "pincode": "", "city": "", "state": "",
+    "sheets": ["Acme Survey", "ACME SURVEY"],   // the exact intake-column spellings
+    "contacts": [ { "id": "c1", "name": "", "email": "", "phone": "", "active": true } ],
+    "notes": "", "updatedAt": "", "updatedBy": "" } } }
+```
+
+**`sheets` is the whole design, not a convenience.** Scoping matches the canonical name
+**or any spelling in `sheets`** — one function, `companySheetNames()`, is read by *both*
+`customerIRS` (the portal) and `filterGridToCompany` (the server-side list filter), so
+the two cannot disagree about which rows are a company's. Without it, correcting a
+misspelled company name would **empty the portal of the customer it was corrected for**,
+silently. Two further consequences:
+
+- A scope the register has never heard of resolves to **itself**, so every company that
+  predates the register keeps working byte-for-byte, and shipping the register cannot
+  empty an existing portal.
+- A **rename** appends the previous name to `sheets` *and* rewrites the matching entries
+  in `access.json.customers` to the canonical name, both inside the same lock. The
+  rewrite makes the register authoritative; the alias stays behind as the net for the
+  IRs, which are never rewritten.
+
+Aliases are split on **newlines only**, never commas — real company names contain commas.
+
+**Placeholders are not companies.** `COMPANY_PLACEHOLDERS` (`na`, `n/a`, `nil`, `none`,
+`no`, `-`, `--`, `test`, `testing`, `x`) is refused as a name on save and skipped by the
+seed. It exists on **both sides of the wire** — the frontend holds the same list and the
+same normaliser — and `tools/smoke-invite.mjs` runs both implementations over the same
+awkward inputs and requires identical answers, because two normalisers that drift give a
+customer a portal scoped by a rule the panel never showed the admin.
+
+Both seeds are **editor-run, not actions** — no route, so neither adds API surface and
+neither can be triggered from a browser:
+
+| Function | Does |
+|---|---|
+| `seedCompanies()` | Reads the live intake sheet, groups the company column through `sameCompanyKey()`, and makes the **most-used spelling** the canonical name with the others as `sheets`. **Create-only**, and it reports what it created and what it skipped. It contains **no hard-coded company name** — the algorithm is in the repo, the customer list is not. Spellings that are similar but not identical are deliberately left as two companies, to be merged by hand in the app. |
+| `seedCompanyContacts()` | Reads the client directory's `Drones` tab and attaches contact people to companies **already in the register**. **Add-only**: a contact is attached only when its email (or, with no email, its name) is not already on the company, and a city is filled only when the company has none. It reports every unknown spelling rather than inventing a company for it. |
+
+
 ### `login`
 Sign-in is **two steps**, and the password alone buys no session.
 
@@ -1127,11 +1188,19 @@ var CONFIG = {
   // The two READ-ONLY input Sheets. Nothing in the app writes to either.
   LEGACY_SHEET_ID:  '14VnWnCg-W7I8Vv97amhuwfSqiozictVMivO3F9Bed5s',
 
+  // The company-and-contact directory, read by seedCompanyContacts() ONLY. It is
+  // NOT read on any request path. ⚠ The id sits in a PUBLIC repo, so the sheet
+  // itself MUST stay Restricted (link-sharing NONE) — a sign-in page where rows
+  // should be means it has been shared. The backend reads it through
+  // SpreadsheetApp.openById as its own account, so the file never needs a link.
+  CLIENT_DIRECTORY_SHEET_ID: '1R1cMpHVvid5ptDyZNHuMIOALGsZVpGqum5wH2FkLU2U',
+  CLIENT_DIRECTORY_TAB:      'Drones',
+
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   EXTERNAL_EMAILS: ['kishor.salunkhe@uavgarage.com'],  // the one non-Indrones address
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 8,            // 8 = customer accounts; see the version list in backend.gs
+  API_VERSION: 12,           // 12 = the company register; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 

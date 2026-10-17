@@ -92,8 +92,14 @@ r.head('the owner\'s security decisions');
 // whom `getPassbook`'s read filter also exempts. The owner would therefore see Costing
 // working perfectly while every colleague got a read-only pane, which is why the app
 // reads this key's presence and says so (backendKnowsSection in app.js).
-r.ok('API_VERSION is 11 — Costing is a section of its own',
-  /API_VERSION:\s*11\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+//
+// v12 = the COMPANY REGISTER (`_store/companies.json`), plus `saveCompany` /
+// `deleteCompany` and a `companies` key on `listUsers`. Independence is asserted below
+// rather than assumed here: the register only ever narrows WHICH names an admin may
+// pick from, and the scope it writes is still the plain string the v11 backend already
+// understood — so an old backend keeps resolving every scope it is handed.
+r.ok('API_VERSION is 12 — the company register',
+  /API_VERSION:\s*12\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -1074,15 +1080,23 @@ r.head('the positional column layout is really gone, not adapted');
 // reaches from a request rather than from the editor. It stays an INPUT — the crawl
 // owns that tab and this only reads it — so the sentence above still holds, but the
 // number had to move for it, which is what the number is for.
+//
+// 7 → 8 in v96, and it is the same deliberate act a third time. The company register
+// needs the client directory sheet — the only place a serial number is tied to a
+// customer, a contact person and a city — and `seedCompanyContacts()` is the
+// editor-run, NOT-routed read that takes it. Counted rather than exempted because a
+// read of a file the app does not own is exactly the thing that must not be able to
+// appear without someone saying so.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly seven times', ssSites.length === 7, ssSites.length);
+r.ok('SpreadsheetApp is used exactly eight times', ssSites.length === 8, ssSites.length);
 // The email reader is a PAIR: listIRThreads is the caching wrapper and the only name the
 // router knows, readEmailThreadsFromSheet is the one holding the sheet call. Both are
 // named here because either could grow the call; the wrapper must never gain one, since
 // its whole job is to answer before the spreadsheet is opened at all.
 const ssAllowed = ['intakeGrid', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
                    'exportStoreToFolder', 'inventoryEmailIndex',
-                   'listIRThreads', 'readEmailThreadsFromSheet'];
+                   'listIRThreads', 'readEmailThreadsFromSheet',
+                   'seedCompanyContacts'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a named site (' + (owner ? owner.name : 'top level') + ')',
@@ -1292,12 +1306,89 @@ r.ok('and it uses getDisplayValues, never getValues',
   (fnBody('intakeGrid').match(/[^\n]*getValues\(\)[^\n]*/) || ['none — correct'])[0]);
 // A customer's list is narrowed on the SERVER. Filtering it in the browser would
 // still have posted every other customer's name, email and phone to their machine.
+// ⚠ The mechanism moved in v96 and the ASSERTION had to move with it, without the
+// property being loosened. The comparison used to be a literal `sameCompany(row, company)`;
+// it is now the company's whole alias list (a registered company is renamed without
+// rewriting anybody's ticket), so the call site reads `matchesAnyCompany`. What has to
+// stay true is the thing the old line was really protecting: the match is NORMALISED,
+// two-sided, and the "cannot tell" answer withholds everything. So the chain is asserted
+// end to end rather than the one identifier — and `matchesAnyCompany` is required to be
+// built out of `sameCompany`, so the normalisation cannot be quietly re-implemented here.
 r.ok('listIRs filters a customer\'s rows before they leave the server',
   /filterGridToCompany\(/.test(fnBody('listIRs')) &&
-  /sameCompany\(/.test(fnBody('filterGridToCompany')) &&
-  /return \[\];/.test(fnBody('filterGridToCompany')));
+  /matchesAnyCompany\(/.test(fnBody('filterGridToCompany')) &&
+  /return \[\];/.test(fnBody('filterGridToCompany')) &&
+  /sameCompany\(/.test(fnBody('matchesAnyCompany')));
 r.ok('and it fails CLOSED — an unreadable scope throws rather than sending everything',
   !/try\s*\{[\s\S]{0,200}?customerCompany/.test(fnBody('listIRs')));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the company register: one alias list, read by BOTH scoping paths');
+// ═══════════════════════════════════════════════════════════════════════════════
+// v96 replaced the IR-derived company list with `_store/companies.json`. The whole reason
+// the record carries `sheets` — the exact spellings the intake column uses — is that the
+// Sheet's company text is messy and will not match a corrected name. If a company is
+// renamed and its old spelling is not still matched, the rename EMPTIES the portal of the
+// customer it was corrected for, with no error anywhere. So the alias list is asserted as
+// a chain: one function builds the names, and every reader of the company column goes
+// through it. A second reader that reached for the canonical name alone is the bug.
+r.ok('companies.json is created by initializeStore, so the register exists on a fresh store',
+  /'companies\.json'/.test(fnBody('initializeStore')));
+r.ok('...and a missing or malformed file degrades to an empty register, never throws',
+  /companies\s*:\s*\{\s*\}/.test(fnBody('companiesStore')) &&
+  /return \{ companies: \{\} \}/.test(fnBody('companiesStore')));
+r.ok('ONE function builds a company\'s names, and it starts with the canonical name',
+  /c\.name \|\| ''/.test(fnBody('companySheetNames')) &&
+  /c\.sheets instanceof Array/.test(fnBody('companySheetNames')));
+// The fallback is the compatibility guarantee: a scope the register has never heard of
+// resolves to ITSELF, so every company that predates the register keeps working exactly as
+// it did, and shipping the register cannot empty a single existing portal.
+r.ok('...and a company the register has never heard of resolves to itself, not to nothing',
+  /return \[String\(scopeName == null \? '' : scopeName\)\.trim\(\)\]/.test(fnBody('companySheetNames')));
+r.ok('...which BOTH scoping paths call, so the two can never disagree about a company\'s rows',
+  /companySheetNames\(/.test(fnBody('customerIRS')) && /companySheetNames\(/.test(fnBody('filterGridToCompany')) &&
+  /matchesAnyCompany\(/.test(fnBody('customerIRS')) && /matchesAnyCompany\(/.test(fnBody('filterGridToCompany')));
+r.ok('...and the alias comparison is the SAME normaliser the scope store uses',
+  /sameCompany\(cell, names\[i\]\)/.test(fnBody('matchesAnyCompany')) && /sameCompanyKey\(/.test(fnBody('sameCompany')));
+r.ok('a company named only as a placeholder is not a company',
+  /COMPANY_PLACEHOLDERS/.test(fnBody('isCompanyPlaceholder')) &&
+  /COMPANY_PLACEHOLDERS\.indexOf\(k\) > -1/.test(fnBody('isCompanyPlaceholder')));
+// A slug is DERIVED from the name, and a second company may not take a slug that is
+// already in use: two records under one key would silently merge in the store, which is a
+// rename that no one asked for.
+r.ok('the register key is derived from the name, not typed by the admin',
+  /function companyKeyFromName/.test(code) &&
+  /companyKeyFromName\(name\)/.test(fnBody('saveCompany')));
+r.ok('...and creating a company whose key already exists is REFUSED, never a silent merge',
+  /askedKey/.test(fnBody('saveCompany')) && /status: 'error'/.test(fnBody('saveCompany')));
+r.ok('saveCompany and deleteCompany are admin-gated and routed on the authed map',
+  /requireAdmin\(authEmail\)/.test(fnBody('saveCompany')) &&
+  /requireAdmin\(authEmail\)/.test(fnBody('deleteCompany')) &&
+  /saveCompany:\s*function \(\) \{ return saveCompany\(params, email\); \}/.test(code) &&
+  /deleteCompany:\s*function \(\) \{ return deleteCompany\(params, email\)/.test(code));
+// THE RENAME SWEEP. The register is authoritative from v96, so a corrected name is written
+// into access.json in the SAME lock as the rename — the alias list is the safety net for
+// the tickets, and this is what stops an existing account being orphaned by a correction.
+r.ok('a rename rewrites the scopes that pointed at the old name, in the same lock',
+  /companySheetNames|sameCompany/.test(fnBody('saveCompany')) &&
+  /writeJsonLocked\('access\.json'/.test(fnBody('saveCompany')) &&
+  /withRowLockOrThrow/.test(fnBody('saveCompany')));
+r.ok('...and deleting a company says what it did NOT do — accounts are not access',
+  /scopeCount|matchesAnyCompany/.test(fnBody('deleteCompany')) &&
+  /deleteCompany/.test(code) && !/deleteUser/.test(fnBody('deleteCompany')));
+r.ok('listUsers hands the register to the panel, with each company\'s account count precomputed',
+  /companiesStore\(\)/.test(fnBody('listUsers')) && /scopeCount/.test(fnBody('listUsers')));
+// The two seeds are EDITOR-RUN, like every other bootstrap in this file: neither may be a
+// routed action, or a browser could rebuild the register under an admin's feet.
+r.ok('the register seeds are editor-run reads, not routed actions',
+  /function seedCompanies/.test(code) && /function seedCompanyContacts/.test(code) &&
+  !/seedCompanies:\s*function/.test(code) && !/seedCompanyContacts:\s*function/.test(code));
+// The one place a company name could enter the REPO is here, and it must not: the seed
+// groups whatever the live sheet holds, so a public repo carries the algorithm and never
+// the customer list.
+r.ok('the seed derives its names from the live sheet, and hard-codes none',
+  /intakeGrid\(\)/.test(fnBody('seedCompanies')) && /companyColumnIndex/.test(fnBody('seedCompanies')) &&
+  !/\b(Pvt|Private|Limited|LLP|Industries|Technologies)\b/.test(fnBody('seedCompanies')));
 
 // ─── the doors with no per-record ACL ────────────────────────────────────────
 // Narrowing a customer's LIST is not enough on its own. These five endpoints do not

@@ -1,5 +1,5 @@
 # I-PASSBOOK Project Milestone Log
-*Last Updated: 2026-10-11*
+*Last Updated: 2026-10-17*
 
 This document serves as the authoritative record of architectural changes, bug fixes, and feature blueprints implemented during the recent development cycle.
 
@@ -952,7 +952,118 @@ more urgent than usual, because a department Save on a **pre-v95** backend silen
 
 ---
 
-## 11. Future Roadmap (Planned)
+## 12. The Company & Contact register — the duplicate dropdown, fixed at the source (2026-10-17)
+
+Three owner asks came out of the 2026-10-14 session. v95 shipped the first two. This is
+the third: *"a Company & Contact register in User Access → Customers, replacing the
+duplicated IR-derived company dropdown."*
+
+### The problem it removes
+
+A customer's whole access is a **company name string** in `access.json`, compared against
+the company column of the intake sheet. Until now the list an admin could pick from was
+**derived from that same column** — so it offered whatever a human had typed. The live
+sheet holds the company text 459 times across 62 distinct values, and the same
+organisation appears under several spellings, several times over. Picking the wrong
+spelling gave a customer an **empty portal with no error anywhere**, which is the failure
+this repo has been bitten by before ([two columns that look like one](docs/10%20-%20Auth%20%26%20Access%20Model.md)).
+
+### The shape
+
+New store file **`_store/companies.json`**, added to the `initializeStore` seed list. Each
+record is a slug key and a company:
+
+```json
+{ "companies": { "<slug>": {
+    "name": "Acme Survey Pvt Ltd",              // canonical; MANDATORY
+    "email": "", "phone": "", "address": "", "pincode": "", "city": "", "state": "",
+    "sheets": ["Acme Survey", "ACME SURVEY"],   // the exact intake-column spellings
+    "contacts": [ { "id": "c1", "name": "", "email": "", "phone": "", "active": true } ],
+    "notes": "", "updatedAt": "", "updatedBy": "" } } }
+```
+
+Two admin actions, `saveCompany` and `deleteCompany`. There is deliberately **no
+`listCompanies`**: the register rides along on `listUsers`, which the modal already loads,
+so there is no second answer to *"which companies exist"*.
+
+### `sheets` is the design, not a convenience
+
+The register is the source of truth, but the sheet's text is messy and will not match a
+corrected name. So scoping matches the canonical name **or any alias** — and **one**
+function, `companySheetNames()`, builds the names that **both** scoping paths read: the
+portal's `customerIRS` and the server-side list filter `filterGridToCompany`. They cannot
+disagree about which rows are a company's.
+
+**Without the aliases, correcting a company's name would empty the portal of the customer
+it was corrected for — silently.** Two consequences follow, and both are what make the
+register safe to adopt with no migration:
+
+- A scope the register has never heard of resolves to **itself** (`[scopeName]`), so every
+  company that predates the register behaves byte-for-byte as it did.
+- A **rename** appends the old name to `sheets` **and** rewrites the matching
+  `access.json.customers` entries to the canonical name, in the **same lock**. The rewrite
+  makes the register authoritative; the alias stays as the net for the IRs, which are never
+  rewritten.
+
+Aliases split on **newlines only** — real company names contain commas, so a comma
+separator would silently split one company into two.
+
+### Seeding without publishing the customer list
+
+The register has to start from the names already on the tickets, and **this repo is
+public**. So the seed is an algorithm, not data:
+
+| Function | Does |
+|---|---|
+| `seedCompanies()` | Reads the live intake sheet, groups the company column through `sameCompanyKey()`, and makes the **most-used spelling** canonical with the rest as `sheets`. **Create-only.** Holds **no hard-coded company name** — the repo carries the algorithm, the sheet carries the list. Similar-but-different spellings are left as two companies on purpose, to be merged by hand in the app. |
+| `seedCompanyContacts()` | Attaches contact people from the client directory's `Drones` tab to companies **already in the register**. **Add-only** — a contact joins only when its email (or name, with no email) is not already there — and it reports unknown spellings rather than inventing a company for them. |
+
+Both are **editor-run**, not routed actions, so neither adds API surface. `COMPANY_PLACEHOLDERS`
+(`na`, `n/a`, `nil`, `none`, `no`, `-`, `--`, `test`, `testing`, `x`) is refused as a name on
+save and skipped by the seed — a list of placeholder tokens, never an organisation, so it can
+live in the open.
+
+### The panel
+
+`renderCustomersTab` is reworked around the register: a searchable list of company cards
+(each with its aliases shown, its account count, and its contacts — a contact whose email
+already has an account reads **Re-invite**, one with only a phone offers **WhatsApp**), and
+a second section listing **the spellings no registered company speaks for**, each with a
+button to fold it into a company or make it a new one. That second section is the tool that
+actually finishes the job the dropdown started.
+
+The invite dropdown keeps every option that worked before: registered names first, and the
+leftovers in an optgroup labelled *Not in the register yet*. And because a registered
+company that **no IR spells** is the one remaining route into an empty portal, inviting one
+asks first in words and names the field that fixes it — it does not refuse, because a first
+sale genuinely has no IR yet.
+
+The form is a **draft** in the panel's module state, not the record itself: adding or
+removing a contact row is a repaint of a form that is being typed into, so the fields are
+read back out of the DOM first. And the draft leaves by its **own** serialiser — a record
+carries `sheets` as an array and a draft carries it as a textarea string, so posting a draft
+through the record's serializer would send an empty alias list and silently un-register
+every spelling the company had.
+
+### Verification
+
+`node tools/smoke-all.mjs` green. `smoke-invite.mjs` gained the register as driven
+assertions rather than source text: the card's three contact states, the two dropdown
+groups, the repaint that must not eat the typing, the refusal that must not cost it, and the
+two serialisers asserted against each other. It also now **runs both normalisers** — the
+browser's and the backend's — over the same awkward inputs and requires identical answers,
+because two normalisers that drift give a customer a portal scoped by a rule the panel never
+showed the admin. `smoke-backend.mjs` pins the alias chain end to end, the create-refuses-a-
+duplicate-slug rule, the rename sweep, and that the seed holds no company name.
+
+⚠ `saveCompany` **bumps `API_VERSION` to 12**, and the register is not a cosmetic bump: a
+pre-v96 backend has no `companies` in `listUsers`, so the panel falls back to the old
+IR-derived list and every register edit lands nowhere. The paste goes into **both** `/exec`
+deployments as a **New version**.
+
+---
+
+## 13. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

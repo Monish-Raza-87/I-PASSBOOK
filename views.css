@@ -127,7 +127,7 @@
   gap: 0.25rem;
   padding: 0.1rem 0.45rem;
   border: 1px solid var(--outline-gray-2);
-  border-radius: 999px;
+  border-radius: var(--radius-3);
   background: var(--surface-gray-2);
   color: var(--ink-gray-7);
   font-family: inherit;
@@ -507,7 +507,7 @@
   display: block;
   width: 12px;
   height: 0.25rem;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--surface-gray-3);
 }
 .progress-step.is-done { background: var(--accent); }
@@ -2359,6 +2359,83 @@
 .ins-fix-input { width: auto; min-width: 9rem; max-width: 16rem; font-size: 16px; padding: 0.15rem 0.4rem; }
 .ins-flag-list .ins-fix .btn { width: auto; margin: 0; }
 
+/* ── THE TWO BOTS ──────────────────────────────────────────────────────────────
+   I-INSPECTOR and I-POSTMAN sit at the head of INSIGHTS, where the Inspector
+   already reports. They are panels of the same family as every other pane: a
+   hairline, the page ground, no elevation. The LED is a FILL, not a word, so it
+   may take the accent directly — industrial.css §1's rule; the state beside it is
+   the measured muted step. On a phone the grid gives each card the full width
+   rather than squeezing a pair. */
+.bots-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+.bot-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3);
+  background: var(--surface-base);
+}
+.bot-head { display: flex; align-items: center; gap: 0.45rem; }
+.bot-led {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: var(--outline-gray-3);
+}
+.bot-led.is-live { background: var(--accent); }
+.bot-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+.bot-state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-gray-6);
+}
+.bot-say { margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--ink-gray-7); }
+.bot-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  font-size: var(--text-xs);
+  color: var(--ink-gray-6);
+}
+.bot-metrics b {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-gray-9);
+}
+.bot-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.15rem; }
+/* A bare .btn is width:100%, so inside this row it would become two full-width bars. */
+.bot-actions .btn { width: auto; margin: 0; }
+.bot-digest {
+  margin: 0.6rem 0 0;
+  padding: 0.75rem 0.85rem;
+  max-height: 55vh;
+  overflow: auto;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3);
+  background: var(--surface-gray-1);
+  color: var(--ink-gray-8);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .insights-total {
   font-size: var(--text-sm);
   color: var(--ink-gray-7);
@@ -2525,14 +2602,14 @@
 .insights-card-bar {
   display: block;
   height: 3px;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--surface-gray-3);
   overflow: hidden;
 }
 .insights-card-bar-fill {
   display: block;
   height: 100%;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--accent);
 }
 
@@ -2573,7 +2650,7 @@
      as a column that failed to draw, and the reader cannot tell that from a
      month with no tickets. */
   min-height: 2px;
-  border-radius: 2px 2px 0 0;
+  border-radius: 0;
   background: var(--accent);
 }
 .chart-bar-col.is-zero .chart-bar { background: var(--surface-gray-3); }
@@ -2601,7 +2678,7 @@
   display: flex;
   height: 10px;
   margin: 0.4rem 0 0.55rem;
-  border-radius: 3px;
+  border-radius: 0;
   overflow: hidden;
   background: var(--surface-gray-2);
 }

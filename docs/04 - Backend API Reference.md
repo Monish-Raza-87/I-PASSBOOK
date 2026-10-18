@@ -2,7 +2,11 @@
 
 The backend is a **Google Apps Script (GAS) web app** deployed from `backend.gs`.
 
-**Base URL:** `https://script.google.com/macros/s/AKfycbz-borqx_TeCTh1Ibc70vv9SIHaFxRvVGs4XolbJG0EG2qEg4kVQ0hyclDOeLM8kCDP/exec`
+**Base URL:** `https://script.google.com/macros/s/AKfycbzwiZyj_eO2P-5lddbUhs-ZJBSSwt6qLa8RKCOPkyysR4d35_ahtPXfijfyejQXatfT/exec`
+
+> This is `CONFIG.GAS_URL` in `app.js` — the **primary** deployment, and the one every request uses except the Google door's first half. The **Google door** is a *second* deployment of the same script (`CONFIG.SSO_URL`), scoped to *Anyone within indrones.com*; an anonymous read of it redirects to Google sign-in, which is correct, not a fault. **Any change to `backend.gs` goes to both.**
+>
+> This line named the retired **v2** backend until 2026-10-18. That URL was the one the Drive-store cutover replaced, and it answered `Unauthorized` to every caller — the wrong address to copy, kept alive only as the rollback.
 
 ---
 

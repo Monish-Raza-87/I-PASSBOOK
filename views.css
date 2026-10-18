@@ -1846,6 +1846,185 @@
 .acc-contact-row { margin-top: 0.35rem; }
 .acc-contact-row .form-input { min-width: 140px; }
 
+/* ── Maximise ─────────────────────────────────────────────
+   The Customers screen is a register of seventy tiles and a company's own screen behind
+   them. Both are read, not filled in, so both want the whole window. It is ONE class on
+   the modal: the card already owns its width and height, so filling the screen is just
+   handing it the viewport and taking the corner radius away. `100dvh`, not `100vh` — the
+   same distinction that made the IR list scroll the page instead of its own pane. */
+.inward-options-modal.access-max .access-card {
+  width: 100vw; max-width: none;
+  height: 100dvh; max-height: none;
+  border-radius: 0;
+}
+/* Full screen turns a one-sentence hint into a 1900px line, which is unreadable in the
+   way long measure always is. The tables still take the width; only prose is capped. */
+.inward-options-modal.access-max .access-hint { max-width: 78ch; }
+/* ⚠ The BUTTON is `.access-max-btn`, never `.access-max`: that name is the MODAL's
+   maximised state (one line up), and a bare `.access-max` rule would paint the whole
+   overlay with the chip's border, padding and radius the moment anyone pressed it. */
+.access-max-btn {
+  margin-left: auto;
+  border: 1px solid var(--outline-gray-1);
+  background: var(--surface-gray-1);
+  color: var(--ink-gray-7);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--radius-3);
+  cursor: pointer;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+.access-max-btn:hover { background: var(--surface-gray-2); color: var(--ink-gray-9); }
+/* The Windows caption pair: one square when the window is small, two overlapping
+   squares — "restore down" — once it fills the screen. Both glyphs ship in the markup
+   and THIS is what picks one, off the same `.access-max` state class the press toggles,
+   so the icon cannot drift out of step with the window. */
+.access-max-ico { display: inline-flex; }
+.access-max-ico svg { display: block; }
+.access-max-ico svg + svg { display: none; }
+.inward-options-modal.access-max .access-max-ico svg { display: none; }
+.inward-options-modal.access-max .access-max-ico svg + svg { display: block; }
+
+/* ── The company register: toolbar, tiles, one company's screen ───────────── */
+.co-toolbar { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.6rem; }
+.co-toolbar #acc-co-search { flex: 1 1 220px; min-width: 0; }
+/* A bare `.btn` is `width: 100%` (components.css) — right for a form's submit, wrong in a
+   toolbar and worse beside a one-word action, where it takes the whole row and pushes the
+   search box onto a line of its own. Same escape the contact rows already use. */
+.co-toolbar .btn { width: auto; flex: 0 0 auto; }
+.co-portal .btn { width: auto; flex: 0 0 auto; }
+/* A segmented pair, because "Grid | List" is one setting with two values, not two
+   actions — two bare buttons read as two things to do. */
+.co-view-switch { display: inline-flex; border: 1px solid var(--outline-gray-1); border-radius: var(--radius-3); overflow: hidden; flex: 0 0 auto; }
+.co-view-btn {
+  border: none; background: var(--surface-base); color: var(--ink-gray-6);
+  font-family: inherit; font-size: var(--text-xs); padding: 0.4rem 0.7rem; cursor: pointer;
+}
+.co-view-btn + .co-view-btn { border-left: 1px solid var(--outline-gray-1); }
+/* The ACTIVE half. `--accent` is an INK colour in this app (palette.css maps it to
+   --ind-accent-ink, i.e. the dark-on-yellow), so filling a chip with it and writing dark
+   text on top is a black box with an invisible label — measured in a screenshot, not
+   guessed. The wash is `--accent-soft`, the same pair `.al-chip.is-on` already uses. */
+.co-view-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--ink-gray-9);
+  font-weight: var(--weight-semibold);
+  box-shadow: inset 0 0 0 1px var(--accent-soft-line, var(--outline-gray-2));
+}
+
+/* The portal address, once. It was on every card and it is the same string on every
+   card, so seventy copies said nothing seventy times. */
+.co-portal {
+  font-size: var(--text-xs); color: var(--ink-gray-6);
+  display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+  margin: 0 0 0.9rem; padding: 0.45rem 0.6rem;
+  background: var(--surface-gray-1); border-radius: var(--radius-3);
+}
+.co-portal code { overflow-wrap: anywhere; }
+
+.co-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0.6rem; }
+/* A tile is a <button>, so it arrives with the browser's own font, centring and border —
+   all three are reset here. It is a card that happens to be pressable. */
+.co-tile {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  text-align: left; font-family: inherit; cursor: pointer;
+  padding: 0.7rem 0.8rem; min-height: 118px;
+  background: var(--surface-base);
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-4);
+  color: var(--ink-gray-8);
+}
+.co-tile:hover { border-color: var(--accent); background: var(--surface-gray-1); }
+.co-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.co-tile-name { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--ink-gray-9); overflow-wrap: anywhere; }
+.co-tile-place { font-size: var(--text-xs); color: var(--ink-gray-5); }
+.co-tile-nums { display: flex; gap: 0.7rem; flex-wrap: wrap; font-size: var(--text-xs); color: var(--ink-gray-6); margin-top: auto; }
+.co-tile-nums b { color: var(--ink-gray-9); font-weight: var(--weight-semibold); }
+.co-tile-late, .co-tile-late b { color: var(--ink-red-7); }
+.co-tile-foot { font-size: var(--text-2xs); color: var(--ink-gray-4); }
+
+/* One company's own screen. It replaces the register in the same frame, so the back
+   button is the only way out and has to be the first thing in reading order. */
+.co-detail-head { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.7rem; }
+/* A bare .btn is width:100% here, which turned the back and Remove buttons into
+   full-width bars stacked above the title. They are chips in a row, not bars. */
+.co-detail-head .btn { width: auto; flex: 0 0 auto; }
+.co-detail-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
+.co-detail-name { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--ink-gray-9); overflow-wrap: anywhere; }
+.co-detail-nums { font-size: var(--text-xs); color: var(--ink-gray-5); }
+.co-detail-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--outline-gray-1); margin-bottom: 0.8rem; }
+.co-detail-tab {
+  border: 1px solid transparent; border-bottom: none;
+  border-radius: var(--radius-4) var(--radius-4) 0 0;
+  background: none; color: var(--ink-gray-6);
+  font-family: inherit; font-size: var(--text-sm);
+  padding: 0.4rem 0.75rem; cursor: pointer; margin-bottom: -1px;
+  flex: 0 0 auto; white-space: nowrap;
+}
+.co-detail-tab:hover { background: var(--surface-gray-2); color: var(--ink-gray-8); }
+.co-detail-tab.is-active {
+  color: var(--ink-gray-9); font-weight: var(--weight-medium);
+  background: var(--surface-base); border-color: var(--outline-gray-1);
+}
+
+.co-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.5rem 1rem; margin-bottom: 0.6rem; }
+.co-fact { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.co-fact > span { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-gray-4); }
+.co-fact > b { font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--ink-gray-8); overflow-wrap: anywhere; }
+.co-fact code { font-size: var(--text-xs); background: var(--surface-gray-1); padding: 0 0.25rem; border-radius: var(--radius-2); }
+.co-sub { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-gray-4); margin: 0.9rem 0 0.4rem; }
+
+.co-ir-list, .co-acts { display: flex; flex-direction: column; gap: 2px; }
+/* A ticket row is a <button> too — the whole row opens the ticket, so the row IS the
+   control, and it keeps its own grid rather than inheriting the IR list's card shape. */
+.co-ir-row {
+  display: grid; grid-template-columns: auto auto 1fr auto;
+  align-items: center; gap: 0.6rem; width: 100%;
+  text-align: left; font-family: inherit; font-size: var(--text-xs);
+  padding: 0.45rem 0.6rem; cursor: pointer;
+  background: var(--surface-base); border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3); color: var(--ink-gray-8);
+}
+.co-ir-row:hover { border-color: var(--accent); background: var(--surface-gray-1); }
+.co-ir-no { font-weight: var(--weight-semibold); color: var(--ink-gray-9); font-variant-numeric: tabular-nums; }
+.co-ir-mid { color: var(--ink-gray-6); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-ir-date { color: var(--ink-gray-4); white-space: nowrap; }
+
+.co-act { display: grid; grid-template-columns: auto auto auto 1fr; align-items: center; gap: 0.6rem; font-size: var(--text-xs); padding: 0.3rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.co-act-when { color: var(--ink-gray-4); white-space: nowrap; }
+.co-act-ir { font-weight: var(--weight-medium); color: var(--ink-gray-9); }
+.co-act-by { color: var(--ink-gray-6); overflow-wrap: anywhere; }
+
+.co-acct { display: flex; flex-direction: column; gap: 0.1rem; padding: 0.35rem 0; border-bottom: 1px solid var(--outline-gray-1); }
+.co-acct-mail { font-size: var(--text-sm); color: var(--ink-gray-8); overflow-wrap: anywhere; }
+.co-acct-meta { font-size: var(--text-xs); color: var(--ink-gray-5); }
+
+/* "Not in the register yet" starts folded. It is a clean-up list, not the work. */
+.co-unreg-toggle {
+  display: flex; align-items: center; gap: 0.4rem;
+  background: none; border: none; padding: 0.2rem 0;
+  font-family: inherit; font-size: var(--text-sm); color: var(--ink-gray-7);
+  cursor: pointer;
+}
+.co-unreg-toggle:hover { color: var(--ink-gray-9); }
+.co-unreg-caret { color: var(--ink-gray-4); }
+
+/* The company screen on a phone: the counters and the tabs must not push the body off
+   the fold, so the head stacks and the tab strip wraps rather than scrolls. */
+@media (max-width: 640px) {
+  .co-grid { grid-template-columns: 1fr; }
+  .co-detail-head { gap: 0.5rem; }
+  .co-ir-row { grid-template-columns: auto auto 1fr; }
+  .co-ir-date { display: none; }
+  .co-act { grid-template-columns: auto auto 1fr; }
+  .co-act-by { display: none; }
+}
+
 /* ── Department → section grant grid ─────────────────────── */
 .access-user-card {
   border: 1px solid var(--outline-gray-1);
@@ -2448,6 +2627,24 @@
   color: var(--ink-gray-6);
 }
 .person-row.is-unassigned .person-name { color: var(--ink-gray-7); }
+
+/* A company row on Insights is the same grid as a person row, but the row IS a button
+   (pressing it filters the rest of the page to that company). A <button> arrives with the
+   browser's own font, centring and border, so all three are reset and the row keeps the
+   bottom rule the list already draws. */
+.co-rank {
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--outline-gray-1);
+  cursor: pointer;
+}
+.co-rank:hover { background: var(--surface-gray-1); }
+.co-rank.is-selected { background: var(--accent-soft, var(--surface-gray-2)); }
+.co-rank.is-selected .person-name { font-weight: var(--weight-semibold); }
 
 
 /* ══════════════════════════════════════════════════════════

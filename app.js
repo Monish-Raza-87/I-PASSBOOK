@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v98';
+const APP_VERSION = 'v99';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -5273,6 +5273,11 @@ const TRIAGE_SHORT = 'Allot CAPS (header, status & Overview)';
 // report "Companies 0" against a register of seventy — see registerCompanies().
 let accessCache = { users: [], departments: [], companies: [], apiVersion: 0 };
 let accessTab = 'people';
+// The Customers screen is a register of seventy tiles and a company's own screen behind
+// them; both want the whole window. Maximise is a CLASS on the modal rather than a second
+// modal, so a tab switch or a repaint never loses it. It is remembered for the session —
+// an admin who filled the screen once meant it.
+let accessMax = false;
 
 // Every admin action is a POST carrying the session token, so it goes through the
 // intercepted fetch (which appends the token) — never _origFetch.
@@ -5353,12 +5358,13 @@ function openAccessModal() {
   let modal = document.getElementById('access-modal');
   if (modal) modal.remove();
   modal = document.createElement('div');
-  modal.className = 'inward-options-modal';
+  modal.className = 'inward-options-modal' + (accessMax ? ' access-max' : '');
   modal.id = 'access-modal';
   modal.innerHTML = `
     <div class="access-card">
       <div class="inward-options-head">
         <div class="inward-options-title">${iconSvg('users')} User access</div>
+        <button type="button" class="access-max-btn" id="access-max" aria-pressed="false" aria-label="Maximise" title="Fill the screen"><span class="access-max-ico" aria-hidden="true"><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="1.5" y="1.5" width="9" height="9"/></svg><svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.1"><rect x="1.5" y="4" width="6.5" height="6.5"/><path d="M4.5 4V1.5h6v6H8"/></svg></span></button>
         <button type="button" class="inward-options-close" onclick="closeAccessModal()" title="Close">&times;</button>
       </div>
       <div class="access-status" id="access-status"></div>
@@ -5373,6 +5379,30 @@ function openAccessModal() {
     </div>`;
   document.body.appendChild(modal);
   modal.addEventListener('click', e => { if (e.target === modal) closeAccessModal(); });
+
+  // Maximise repaints the head so the button can say what the NEXT press does, and
+  // toggles one class on the modal so nothing inside it is rebuilt or refetched.
+  // The two glyphs are the Windows caption pair and BOTH are in the markup; which one
+  // shows is CSS, keyed off the same `.access-max` class the press toggles — so the
+  // icon and the window can never disagree.
+  const maxBtn = document.getElementById('access-max');
+  const paintMaxBtn = () => {
+    const label = accessMax ? 'Minimise' : 'Maximise';
+    maxBtn.setAttribute('aria-pressed', String(accessMax));
+    maxBtn.setAttribute('aria-label', label);
+    maxBtn.title = accessMax ? 'Back to the smaller window' : 'Fill the screen';
+  };
+  if (maxBtn) {
+    // The card's markup is static on purpose (tools/render-fixture.mjs lifts it out of
+    // THIS FILE verbatim and refuses a second interpolation), so the remembered state is
+    // applied here rather than woven into the template.
+    paintMaxBtn();
+    maxBtn.addEventListener('click', () => {
+      accessMax = !accessMax;
+      modal.classList.toggle('access-max', accessMax);
+      paintMaxBtn();
+    });
+  }
   modal.querySelectorAll('.access-tab').forEach(btn => {
     // renderAccessPanel() IS the tab switch. Without it the four tabs highlight and
     // the body never changes — the panel was only ever painted by the FIRST load and
@@ -5412,7 +5442,13 @@ function openAccessModal() {
   if (accessTab === 'versions') loadBackupHealth();
   loadAccessData();
 }
-function closeAccessModal() { document.getElementById('access-modal')?.remove(); }
+function closeAccessModal() {
+  document.getElementById('access-modal')?.remove();
+  // A company screen or a half-typed company form does not outlive the modal. Reopening
+  // User access is a fresh arrival, and landing on somebody else's company (or on an
+  // abandoned form) reads as the app having lost the register.
+  companyOpenKey = ''; companyForm = null; companyTab = 'overview'; companyFilter = '';
+}
 
 // ─── THE ACCESS PAGE'S LOCAL COPY ────────────────────────────────────────────
 // `listUsers` is one round trip carrying every account, every department and the
@@ -5911,13 +5947,33 @@ let custNotice = null;
 // the typing would silently drop it.
 let companyForm = null;
 let companyFilter = '';
+// The Customers pane's own state, and it is deliberately a small closed set rather
+// than a route: the User Access dialog is a modal, and a modal that pushes history
+// entries would make Back close the whole thing.
+//
+// `companyOpenKey` is the one fact that decides WHICH SCREEN is showing — '' is the
+// register (grid or list), a key is that company's own screen. The editor is not a
+// place of its own: it renders INSIDE the open company's Overview, which is the fix
+// for an Edit that used to open at the top of the list and leave the reader scrolling
+// back to find the card they pressed.
+let companyView = 'grid';       // 'grid' | 'list' — the drawing, never the filtering
+let companyOpenKey = '';        // '' = the register; a key = that company's screen
+let companyTab = 'overview';    // overview | irs | people | activity
+let unregOpen = false;          // "Not in the register yet" starts folded away
 
 // The portal sits beside this app, so the app's own directory is the answer — the same
 // derivation the backend's customerPortalUrl() makes from CONFIG.APP_URL. Not a
 // constant, because this page is served from GitHub Pages and from a local preview,
 // and the link has to be the one that works from wherever it was copied.
 function customerPortalLink() {
-  return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html';
+  // `pathname` and `origin` are defaulted rather than trusted: a browser always has
+  // both, but a fixture that lifts this panel out of the source (tools/render-fixture.mjs)
+  // stubs a location with neither, and the register now PRINTS this link on every render
+  // rather than only inside an invite notice. A default says the same thing in a browser
+  // and keeps a lifted screen photographable.
+  const here = String(location.pathname || '/');
+  const origin = location.origin || (String(location.protocol || 'https:') + '//' + String(location.hostname || 'localhost'));
+  return origin + here.replace(/[^/]*$/, '') + 'customer.html';
 }
 
 // ─── THE COMPANY REGISTER (v96) ──────────────────────────────────────────────
@@ -6102,6 +6158,55 @@ function companyIRSpellings(company) {
   return [...hits];
 }
 
+// Every ticket that belongs to this company — the SAME match companyIRSpellings uses,
+// returning the rows rather than the distinct spellings. One normalisation rule, so the
+// company's screen and the "no IR spells this" warning can never disagree.
+function companyIRs(company) {
+  const names = [company.name].concat(company.sheets || []).map(normCompany);
+  return (allIRs || []).filter(ir =>
+    ir && ir.companyName && names.includes(normCompany(ir.companyName)));
+}
+
+function companyAccounts(company) {
+  const names = [company.name].concat(company.sheets || []).map(normCompany);
+  return (accessCache.users || []).filter(u =>
+    u.customerOf && names.includes(normCompany(u.customerOf)));
+}
+
+// The counters a tile can afford. `open` uses the app's own status buckets rather than
+// a hand-written list of stages, so a ticket the board treats as finished is finished
+// here too.
+function companyCounts(company) {
+  const rows = companyIRs(company);
+  let open = 0, late = 0;
+  const now = Date.now();
+  rows.forEach(ir => {
+    const cat = statusCategory(ir.status);
+    if (cat === 'open' || cat === 'paused') open++;
+    if (irOverdue(ir, now)) late++;
+  });
+  return { total: rows.length, open, late, accounts: companyAccounts(company).length };
+}
+
+// The company's recent activity, taken from what the app itself recorded — the same
+// `irState` the Overview timeline reads. No fetch and no invented timestamp: a ticket
+// the app has never touched simply does not appear.
+function companyActivity(company) {
+  const out = [];
+  companyIRs(company).forEach(ir => {
+    const s = appState(ir.irNumber);
+    if (!s || !s.updatedAt) return;
+    out.push({
+      at: s.updatedAt,
+      ir: ir.irNumber,
+      by: s.updatedBy || '',
+      status: ir.status || s.status || '',
+      assignee: s.assigneeName || s.assignee || '',
+    });
+  });
+  return out.sort((a, b) => b.at - a.at).slice(0, 40);
+}
+
 // ── one company in the register ──────────────────────────────────────────────
 // The card's job is to answer "who do I reach at this company, and does anything here
 // prove they can already get in". Both answers are on the face of it: the contact rows
@@ -6137,8 +6242,8 @@ function companyCardHtml(c) {
           ${meta ? `<div class="acc-matrix-sub">${meta}</div>` : ''}
         </div>
         <div class="access-user-controls">
+          <button type="button" class="btn btn-sm acc-co-open" data-key="${escHtml(c.key)}">Open</button>
           <button type="button" class="btn btn-sm btn-secondary acc-co-edit" data-key="${escHtml(c.key)}">Edit</button>
-          <button type="button" class="btn btn-sm btn-secondary acc-co-link">Copy portal link</button>
           <button type="button" class="btn btn-sm btn-danger acc-co-del" data-key="${escHtml(c.key)}" data-name="${escHtml(c.name)}">Remove</button>
         </div>
       </div>
@@ -6222,10 +6327,7 @@ function companyFormHtml() {
       <div class="access-add-row">
         <input type="text" id="acc-co-address" class="form-input" value="${escHtml(f.address)}" placeholder="Address (optional)" />
       </div>
-      <p class="access-hint" style="margin-top:0.2rem;">Other spellings of this company,
-        <strong>one per line</strong>. These are matched against the company column of every IR, so
-        a spelling added here is what makes a messy IR reachable. Commas are not separators —
-        real company names contain them.</p>
+      <p class="access-hint" style="margin-top:0.2rem;">Other spellings on IRs — <strong>one per line</strong></p>
       <textarea id="acc-co-sheets" class="form-input" rows="3" placeholder="ACME SURVEY&#10;Acme Survey Pvt. Ltd.">${escHtml(f.sheetsText)}</textarea>
       <p class="access-hint" style="margin-top:0.7rem;">Contact people. An invite needs the
         <strong>email</strong>; WhatsApp needs the <strong>phone</strong>.</p>
@@ -6256,9 +6358,314 @@ function inviteCustomerAt(email, name, company) {
   });
 }
 
+// ── the register drawn as tiles ──────────────────────────────────────────────
+// One tile answers the three questions the list was too long to answer: does this
+// company have tickets, how many are still open, and can I reach anyone there. The
+// detail behind it holds everything else.
+function companyTileHtml(c) {
+  const n = companyCounts(c);
+  const place = [c.city, c.state].filter(Boolean).map(escHtml).join(', ');
+  const aliases = (c.sheets || []).length;
+  return `
+    <button type="button" class="co-tile acc-co-open" data-key="${escHtml(c.key)}">
+      <span class="co-tile-name">${escHtml(c.name)}</span>
+      ${place ? `<span class="co-tile-place">${place}</span>` : '<span class="co-tile-place">—</span>'}
+      <span class="co-tile-nums">
+        <span><b>${n.total}</b> IR${n.total === 1 ? '' : 's'}</span>
+        <span><b>${n.open}</b> open</span>
+        ${n.late ? `<span class="co-tile-late"><b>${n.late}</b> late</span>` : ''}
+      </span>
+      <span class="co-tile-foot">${n.accounts ? n.accounts + ' account' + (n.accounts === 1 ? '' : 's') : 'no accounts'}${aliases ? ` · ${aliases} other spelling${aliases === 1 ? '' : 's'}` : ''}</span>
+    </button>`;
+}
+
+// ── the four bodies of a company's screen ────────────────────────────────────
+function companyOverviewHtml(c) {
+  const facts = [
+    ['Email', c.email], ['Phone', c.phone], ['Address', c.address],
+    ['City', c.city], ['State', c.state], ['PIN', c.pincode], ['Notes', c.notes],
+  ].filter(([, v]) => v);
+  const aliases = c.sheets || [];
+  const spellings = companyIRSpellings(c);
+  return `
+    <div class="co-facts">
+      ${facts.length
+        ? facts.map(([k, v]) => `<div class="co-fact"><span>${escHtml(k)}</span><b>${escHtml(v)}</b></div>`).join('')
+        : '<p class="access-hint">No contact details on the register yet.</p>'}
+    </div>
+    <div class="co-facts">
+      <div class="co-fact"><span>Other spellings on IRs</span>
+        <b>${aliases.length ? aliases.map((s, i) => `<code>${escHtml(s)}</code>`).join(' ') : 'none'}</b></div>
+      <div class="co-fact"><span>Spellings actually on the loaded IRs</span>
+        <b>${spellings.length ? spellings.map(s => `<code>${escHtml(s)}</code>`).join(' ') : 'none — no IR in the list spells this company'}</b></div>
+    </div>
+    <div class="access-add-row" style="margin-top:0.8rem;">
+      <button type="button" class="btn acc-co-edit" data-key="${escHtml(c.key)}">Edit this company</button>
+    </div>`;
+}
+
+function companyIRsHtml(c) {
+  const rows = companyIRs(c).slice().sort((a, b) =>
+    String(b.dateRaisedISO || '').localeCompare(String(a.dateRaisedISO || '')));
+  if (!rows.length) {
+    return '<div class="access-empty">No IR in the loaded list spells this company, or any of its other spellings.</div>';
+  }
+  return `<div class="co-ir-list">${rows.map(ir => `
+    <button type="button" class="co-ir-row" onclick="closeAccessModal();openDock('${escJsAttr(ir.irNumber)}')">
+      <span class="co-ir-no">${escHtml(ir.irNumber)}</span>
+      <span class="${getBadgeClass(ir.status)}">${escHtml(statusLabel(ir.status))}</span>
+      <span class="co-ir-mid">${escHtml(ir.droneModel || '')}${ir.droneModel && ir.droneId ? ' · ' : ''}${escHtml(ir.droneId || '')}</span>
+      <span class="co-ir-date">${escHtml(ir.dateRaised || '')}</span>
+    </button>`).join('')}</div>`;
+}
+
+function companyPeopleHtml(c) {
+  const users = accessCache.users || [];
+  const contacts = (c.contacts || []).map(k => {
+    const email = String(k.email || '').trim();
+    const phone = String(k.phone || '').trim();
+    const hasAccount = !!email && users.some(u => String(u.email || '').toLowerCase() === email.toLowerCase());
+    const who = [k.name, email, phone].filter(Boolean).map(escHtml).join(' · ') || '<em>no details yet</em>';
+    const buttons = [
+      email ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">${hasAccount ? 'Re-invite' : 'Invite'}</button>` : '',
+      phone ? `<button type="button" class="btn btn-sm btn-secondary acc-co-wa" data-phone="${escHtml(phone)}" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">WhatsApp</button>` : '',
+      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">Copy what to send</button>` : '',
+    ].filter(Boolean).join(' ');
+    return `<div class="acc-contact">
+      <div class="acc-contact-who">${who}${hasAccount ? ' <span class="acc-badge acc-badge-cust">has an account</span>' : ''}${k.active === false ? ' <span class="acc-badge acc-badge-off">left</span>' : ''}</div>
+      ${buttons ? `<div class="acc-contact-how">${buttons}</div>` : ''}
+    </div>`;
+  }).join('');
+  const accounts = companyAccounts(c);
+  return `
+    ${contacts ? `<div class="acc-contacts">${contacts}</div>` : '<p class="access-hint">No contact people yet — press <strong>Edit this company</strong> on the Overview to add one.</p>'}
+    <h4 class="co-sub">Sign-in accounts for this company</h4>
+    ${accounts.length
+      ? accounts.map(u => `<div class="co-acct">
+          <span class="co-acct-mail">${escHtml(u.email)}</span>
+          <span class="co-acct-meta">${escHtml(u.name || 'no name')} · ${escHtml(u.lastLoginAt || 'never signed in')}${u.status === 'disabled' ? ' · <span class="acc-badge acc-badge-off">disabled</span>' : ''}</span>
+        </div>`).join('')
+      : '<div class="access-empty">No account yet. Invite a contact above.</div>'}`;
+}
+
+function companyActivityHtml(c) {
+  const rows = companyActivity(c);
+  if (!rows.length) {
+    return '<div class="access-empty">Nothing recorded against this company\'s IRs yet. Activity appears here once an IR is triaged, categorised or closed in the app.</div>';
+  }
+  return `<div class="co-acts">${rows.map(r => `
+    <div class="co-act">
+      <span class="co-act-when">${escHtml(new Date(r.at).toLocaleString())}</span>
+      <span class="co-act-ir">${escHtml(r.ir)}</span>
+      <span class="${getBadgeClass(r.status)}">${escHtml(statusLabel(r.status))}</span>
+      <span class="co-act-by">${escHtml(r.by || 'unknown')}${r.assignee ? ' · ' + escHtml(r.assignee) : ''}</span>
+    </div>`).join('')}</div>`;
+}
+
+// ── the frame the four bodies and the editor share ───────────────────────────
+function paintCompanyScreen(panels, c) {
+  const isNew = !c;
+  const n = c ? companyCounts(c) : { total: 0, open: 0, late: 0, accounts: 0 };
+  // A NEW company has no record to show, so it opens straight into the editor. An
+  // EXISTING one shows its profile and the editor is one press away, in place.
+  const editing = isNew || !!(companyForm && c && companyForm.key === c.key);
+  const tab = isNew ? 'overview' : companyTab;
+
+  const tabBtn = (key, label) =>
+    `<button type="button" class="co-detail-tab${tab === key ? ' is-active' : ''}" data-tab="${key}" aria-selected="${tab === key}">${escHtml(label)}</button>`;
+
+  const body = editing ? companyFormHtml()
+    : tab === 'irs'      ? companyIRsHtml(c)
+    : tab === 'people'   ? companyPeopleHtml(c)
+    : tab === 'activity' ? companyActivityHtml(c)
+    : companyOverviewHtml(c);
+
+  panels.innerHTML = `
+    <div class="co-detail">
+      <div class="co-detail-head">
+        <button type="button" class="btn btn-sm btn-secondary" id="acc-co-back">← All customers</button>
+        <div class="co-detail-title">
+          <span class="co-detail-name">${escHtml(isNew ? 'Add a company' : c.name)}</span>
+          ${isNew ? '' : `<span class="co-detail-nums">${n.total} IR${n.total === 1 ? '' : 's'} · ${n.open} open${n.late ? ' · ' + n.late + ' late' : ''} · ${n.accounts} account${n.accounts === 1 ? '' : 's'}</span>`}
+        </div>
+        ${isNew ? '' : `<button type="button" class="btn btn-sm btn-danger acc-co-del" data-key="${escHtml(c.key)}" data-name="${escHtml(c.name)}">Remove</button>`}
+      </div>
+      ${isNew ? '' : `<nav class="co-detail-tabs">
+        ${tabBtn('overview', 'Overview')}${tabBtn('irs', `IRs (${n.total})`)}${tabBtn('people', `People (${(c.contacts || []).length + n.accounts})`)}${tabBtn('activity', 'Activity')}
+      </nav>`}
+      <div class="co-detail-body">${body}</div>
+    </div>`;
+
+  wireCompanyActions(panels);
+
+  const back = document.getElementById('acc-co-back');
+  if (back) back.addEventListener('click', () => {
+    companyOpenKey = ''; companyForm = null; companyTab = 'overview'; companyFilter = '';
+    renderCustomersTab();
+  });
+  panels.querySelectorAll('.co-detail-tab').forEach(b => b.addEventListener('click', () => {
+    companyTab = b.dataset.tab;
+    // A tab change is a read of the profile, so an unfinished edit is left behind
+    // rather than silently saved or silently kept.
+    companyForm = null;
+    renderCustomersTab();
+  }));
+  wireCompanyForm();
+}
+
+// ── the register's buttons; ONE copy, used by both screens ───────────────────
+function wireCompanyActions(panels) {
+  panels.querySelectorAll('.acc-co-open').forEach(b => b.addEventListener('click', () => {
+    companyOpenKey = b.dataset.key || '';
+    companyTab = 'overview';
+    companyForm = null;
+    renderCustomersTab();
+  }));
+
+  // Edit opens the company's OWN screen with the form in it, so the thing being
+  // edited is the whole frame rather than a card at the top of a long list.
+  panels.querySelectorAll('.acc-co-edit').forEach(b => b.addEventListener('click', () => {
+    const c = registerCompanies().filter(x => x.key === b.dataset.key)[0];
+    if (!c) return;
+    companyForm = companyFormFromRecord(c);
+    companyOpenKey = c.key;
+    companyTab = 'overview';
+    renderCustomersTab();
+  }));
+
+  panels.querySelectorAll('.acc-co-create').forEach(b => b.addEventListener('click', () => {
+    companyForm = blankCompanyForm();
+    companyForm.name = b.dataset.name || '';
+    companyForm.sheetsText = b.dataset.name || '';
+    companyOpenKey = COMPANY_NEW;
+    companyTab = 'overview';
+    renderCustomersTab();
+  }));
+
+  // Removing deletes a LABEL. It is the one destructive control here that cannot lose
+  // anybody's access, and the confirm says so plainly — an admin who believes Remove
+  // revokes access would go looking for a step that does not exist.
+  panels.querySelectorAll('.acc-co-del').forEach(b => b.addEventListener('click', () => {
+    const name = b.dataset.name || b.dataset.key;
+    if (!confirm('Remove "' + name + '" from the register?\n\nNo IR and no customer account is touched — the name simply stops being a registered one, and existing accounts keep working. You can add it back at any time.')) return;
+    b.disabled = true;
+    adminPost('deleteCompany', { key: b.dataset.key }).then(d => {
+      b.disabled = false;
+      showToast((d && d.message) || (d && d.status === 'ok' ? 'Removed' : 'Could not remove the company.'));
+      if (d && d.status === 'ok') {
+        if (companyForm && companyForm.key === b.dataset.key) companyForm = null;
+        if (companyOpenKey === b.dataset.key) companyOpenKey = '';
+        loadAccessData(); renderCustomersTab();
+      }
+    });
+  }));
+
+  // Folding a stray spelling in is the whole clean-up tool, and it is one action: the
+  // spelling joins the company's `sheets`, which is what makes its tickets reachable.
+  panels.querySelectorAll('.acc-co-merge').forEach(sel2 => sel2.addEventListener('change', () => {
+    const c = registerCompanies().filter(x => x.key === sel2.value)[0];
+    if (!c) return;
+    const spelling = sel2.dataset.name || '';
+    if (!spelling) return;
+    sel2.disabled = true;
+    adminPost('saveCompany', companyToFields(c, [spelling])).then(d => {
+      sel2.disabled = false;
+      showToast((d && d.message) || (d && d.status === 'ok' ? 'Folded in' : 'Could not fold that spelling in.'));
+      if (d && d.status === 'ok') loadAccessData();
+    });
+  }));
+
+  panels.querySelectorAll('.acc-co-invite').forEach(b => b.addEventListener('click', () => {
+    b.disabled = true; b.textContent = 'Inviting…';
+    inviteCustomerAt(b.dataset.email, b.dataset.name || '', b.dataset.company).then(() => {
+      b.disabled = false; b.textContent = 'Invite';
+    });
+  }));
+  panels.querySelectorAll('.acc-co-txt').forEach(b => b.addEventListener('click', () => copyText(customerHandoverTxt(b.dataset.email, b.dataset.company))));
+  panels.querySelectorAll('.acc-co-wa').forEach(b => b.addEventListener('click', () => {
+    const url = whatsappLink(b.dataset.phone, customerHandoverTxt(b.dataset.email, b.dataset.company));
+    // No number is not a dead button: it is the one case where the other button is the
+    // answer, so it says which one.
+    if (!url) { showToast('No phone number on this contact — add one under Edit, or use "Copy what to send"'); return; }
+    window.open(url, '_blank', 'noopener');
+  }));
+}
+
+// The editor's own wiring. It is a repaint-per-keystroke form, so adding or removing a
+// contact row captures what is typed first (readCompanyForm) and repaints the draft.
+function wireCompanyForm() {
+  const coAdd = document.getElementById('acc-co-addcontact');
+  if (coAdd) coAdd.addEventListener('click', () => {
+    companyForm = readCompanyForm();
+    companyForm.contacts.push({ id: '', name: '', email: '', phone: '', active: true });
+    renderCustomersTab();
+    const first = document.getElementById('acc-c-' + (companyForm.contacts.length - 1) + '-name');
+    if (first) first.focus();
+  });
+  if (companyForm) companyForm.contacts.forEach((k, i) => {
+    const drop = document.getElementById('acc-c-' + i + '-drop');
+    if (drop) drop.addEventListener('click', () => {
+      companyForm = readCompanyForm();
+      companyForm.contacts.splice(i, 1);
+      renderCustomersTab();
+    });
+  });
+
+  const coCancel = document.getElementById('acc-co-cancel');
+  if (coCancel) coCancel.addEventListener('click', () => {
+    companyForm = null;
+    // Abandoning a NEW company returns to the register; abandoning an EDIT stays on the
+    // company, which is where the reader was.
+    if (companyOpenKey === COMPANY_NEW) companyOpenKey = '';
+    companyTab = 'overview';
+    renderCustomersTab();
+  });
+
+  const coSave = document.getElementById('acc-co-save');
+  if (coSave) coSave.addEventListener('click', () => {
+    const f = readCompanyForm();
+    // Put the draft back before anything can refuse it, so a refusal never costs the
+    // typing. readCompanyForm() already returned everything that was in the fields.
+    companyForm = f;
+    if (!String(f.name || '').trim()) { showToast('A company needs a name'); return; }
+    coSave.disabled = true; coSave.textContent = 'Saving…';
+    adminPost('saveCompany', companyFormToFields(f)).then(d => {
+      if (!d || d.status !== 'ok') {
+        coSave.disabled = false; coSave.textContent = f.key ? 'Save company' : 'Add company';
+        showToast((d && d.message) || 'Could not save the company.');
+        return;
+      }
+      // Only a SUCCESS closes the form. A refusal that closed it would discard exactly the
+      // text the message is asking the admin to fix.
+      const wasNew = !f.key;
+      companyForm = null;
+      if (wasNew) companyOpenKey = '';
+      companyTab = 'overview';
+      showToast(d.message || 'Saved');
+      loadAccessData();
+      renderCustomersTab();
+    });
+  });
+}
+
+// The sentinel `companyOpenKey` takes while a NEW company is being written. A real
+// key can never be this, because companyKeyFromName strips underscores.
+const COMPANY_NEW = '__new__';
+
 function renderCustomersTab() {
   const panels = document.getElementById('access-panels');
   if (!panels) return;
+
+  // ONE company's own screen. It replaces the register in the SAME frame, which is the
+  // fix for an editor that opened at the top of a 71-card list and left the reader
+  // scrolling back to the card they had just pressed.
+  if (companyOpenKey === COMPANY_NEW) { paintCompanyScreen(panels, null); return; }
+  if (companyOpenKey) {
+    const openCo = registerCompanies().filter(c => c.key === companyOpenKey)[0];
+    if (openCo) { paintCompanyScreen(panels, openCo); return; }
+    companyOpenKey = '';   // removed from the register elsewhere — fall back to the list
+  }
+
   const companies = knownCompanies();
   const customers = (accessCache.users || []).filter(u => u.customerOf);
 
@@ -6284,38 +6691,51 @@ function renderCustomersTab() {
     .join(' ').toLowerCase().includes(needle));
   const unregistered = unregisteredCompanyNames();
 
+  // The register screen. Three things were taken OUT of it and put where they belong:
+  // the company form (it now lives inside the company's own screen), the portal link
+  // (once here, not once per card — it is the SAME link for every customer), and the
+  // unmatched spellings (folded away until asked for).
   const registerHtml = `
     <div class="access-section">
       <h3>Companies <span class="acc-badge acc-badge-cust">${reg.length}</span></h3>
-      <p class="access-hint">The register. A company named here can be picked when a customer is
-        invited, and <strong>every spelling on its IRs</strong> counts as the same company — so
-        correcting a name here never takes a customer's IRs away.</p>
-      <div class="access-add-row">
+      <div class="co-toolbar">
         <input type="text" id="acc-co-search" class="form-input" placeholder="Search companies, contacts…" value="${escHtml(companyFilter)}" />
+        <span class="co-view-switch" role="group" aria-label="How the companies are drawn">
+          <button type="button" class="co-view-btn${companyView === 'grid' ? ' is-active' : ''}" data-view="grid" aria-pressed="${companyView === 'grid'}">Grid</button>
+          <button type="button" class="co-view-btn${companyView === 'list' ? ' is-active' : ''}" data-view="list" aria-pressed="${companyView === 'list'}">List</button>
+        </span>
         <button type="button" class="btn" id="acc-co-new">Add a company</button>
       </div>
-      ${companyForm ? companyFormHtml() : ''}
+      <p class="co-portal">Customer portal — <strong>one link for every customer</strong>:
+        <code>${escHtml(customerPortalLink())}</code>
+        <button type="button" class="btn btn-sm btn-secondary" id="acc-co-portal">Copy link</button></p>
       ${!reg.length ? '<div class="access-empty">The register is empty. Press <strong>Add a company</strong>, or run <code>seedCompanies()</code> from the Apps Script editor to build it from the names already on the IRs.</div>' : ''}
-      ${reg.length && !shown.length ? '<div class="access-empty">No company matches that search.</div>' : shown.map(companyCardHtml).join('')}
+      ${reg.length && !shown.length ? '<div class="access-empty">No company matches that search.</div>' : ''}
+      ${shown.length && companyView === 'grid'
+        ? `<div class="co-grid">${shown.map(companyTileHtml).join('')}</div>`
+        : shown.map(companyCardHtml).join('')}
     </div>
     ${unregistered.length ? `
-    <div class="access-section">
-      <h3>Not in the register yet <span class="acc-badge acc-badge-temp">${unregistered.length}</span></h3>
-      <p class="access-hint">These spellings are on an IR or on an account, and no registered company
-        speaks for them. Several spellings of one company is how the customer list became a duplicate —
-        fold each one into a company, or make it a new one.</p>
-      ${unregistered.map(([name, n]) => `
-        <div class="access-user-card">
-          <div class="access-email-line">${escHtml(name)}</div>
-          <div class="acc-matrix-sub">${n} IR${n === 1 ? '' : 's'} or account${n === 1 ? '' : 's'} use this spelling</div>
-          <div class="access-add-row" style="margin:0.5rem 0 0;">
-            <button type="button" class="btn btn-sm acc-co-create" data-name="${escHtml(name)}">Make it a company</button>
-            ${reg.length ? `<select class="form-input acc-co-merge" data-name="${escHtml(name)}" aria-label="Fold ${escHtml(name)} into an existing company">
-              <option value="">…or fold it into an existing company</option>
-              ${reg.map(c => `<option value="${escHtml(c.key)}">${escHtml(c.name)}</option>`).join('')}
-            </select>` : ''}
-          </div>
-        </div>`).join('')}
+    <div class="access-section co-unreg">
+      <button type="button" class="co-unreg-toggle" id="acc-co-unreg-toggle" aria-expanded="${unregOpen}">
+        <span class="co-unreg-caret">${unregOpen ? '▾' : '▸'}</span>
+        Not in the register yet <span class="acc-badge acc-badge-temp">${unregistered.length}</span>
+      </button>
+      ${unregOpen ? `
+        <p class="access-hint">These spellings are on an IR or on an account, and no registered company
+          speaks for them. Fold each one into a company, or make it a new one.</p>
+        ${unregistered.map(([name, n]) => `
+          <div class="access-user-card">
+            <div class="access-email-line">${escHtml(name)}</div>
+            <div class="acc-matrix-sub">${n} IR${n === 1 ? '' : 's'} or account${n === 1 ? '' : 's'} use this spelling</div>
+            <div class="access-add-row" style="margin:0.5rem 0 0;">
+              <button type="button" class="btn btn-sm acc-co-create" data-name="${escHtml(name)}">Make it a company</button>
+              ${reg.length ? `<select class="form-input acc-co-merge" data-name="${escHtml(name)}" aria-label="Fold ${escHtml(name)} into an existing company">
+                <option value="">…or fold it into an existing company</option>
+                ${reg.map(c => `<option value="${escHtml(c.key)}">${escHtml(c.name)}</option>`).join('')}
+              </select>` : ''}
+            </div>
+          </div>`).join('')}` : ''}
     </div>` : ''}
   `;
 
@@ -6436,112 +6856,31 @@ function renderCustomersTab() {
     try { again.setSelectionRange(n, n); } catch (e) { /* not a text-like input here */ }
   });
 
+  // "Add a company" and "Make it a company" both open the SAME screen — the register has
+  // no form of its own any more, so there is nowhere for it to open at the top of.
   const coNew = document.getElementById('acc-co-new');
-  if (coNew) coNew.addEventListener('click', () => { companyForm = blankCompanyForm(); renderCustomersTab(); });
-
-  // "Make it a company" starts the SAME form, with the spelling already in it twice: as
-  // the name to edit, and as the ticket spelling it came from. Filling both is the point
-  // — the form opens ready to save, not ready to retype what the panel just showed.
-  panels.querySelectorAll('.acc-co-create').forEach(b => b.addEventListener('click', () => {
+  if (coNew) coNew.addEventListener('click', () => {
     companyForm = blankCompanyForm();
-    companyForm.name = b.dataset.name || '';
-    companyForm.sheetsText = b.dataset.name || '';
+    companyOpenKey = COMPANY_NEW;
+    companyTab = 'overview';
+    renderCustomersTab();
+  });
+
+  panels.querySelectorAll('.co-view-btn').forEach(b => b.addEventListener('click', () => {
+    companyView = b.dataset.view === 'list' ? 'list' : 'grid';
     renderCustomersTab();
   }));
 
-  panels.querySelectorAll('.acc-co-edit').forEach(b => b.addEventListener('click', () => {
-    const c = registerCompanies().filter(x => x.key === b.dataset.key)[0];
-    if (c) { companyForm = companyFormFromRecord(c); renderCustomersTab(); }
-  }));
+  const coPortal = document.getElementById('acc-co-portal');
+  if (coPortal) coPortal.addEventListener('click', () => copyText(customerPortalLink()));
 
-  // Removing deletes a LABEL. It is the one destructive control here that cannot lose
-  // anybody's access, and the confirm says so plainly — an admin who believes Remove
-  // revokes access would go looking for a step that does not exist.
-  panels.querySelectorAll('.acc-co-del').forEach(b => b.addEventListener('click', () => {
-    const n = b.dataset.name || b.dataset.key;
-    if (!confirm('Remove "' + n + '" from the register?\n\nNo IR and no customer account is touched — the name simply stops being a registered one, and existing accounts keep working. You can add it back at any time.')) return;
-    b.disabled = true;
-    adminPost('deleteCompany', { key: b.dataset.key }).then(d => {
-      b.disabled = false;
-      showToast((d && d.message) || (d && d.status === 'ok' ? 'Removed' : 'Could not remove the company.'));
-      if (d && d.status === 'ok') { if (companyForm && companyForm.key === b.dataset.key) companyForm = null; loadAccessData(); }
-    });
-  }));
-
-  // Folding a stray spelling in is the whole clean-up tool, and it is one action: the
-  // spelling joins the company's `sheets`, which is what makes its tickets reachable.
-  panels.querySelectorAll('.acc-co-merge').forEach(sel2 => sel2.addEventListener('change', () => {
-    const c = registerCompanies().filter(x => x.key === sel2.value)[0];
-    if (!c) return;
-    const spelling = sel2.dataset.name || '';
-    if (!spelling) return;
-    sel2.disabled = true;
-    adminPost('saveCompany', companyToFields(c, [spelling])).then(d => {
-      sel2.disabled = false;
-      showToast((d && d.message) || (d && d.status === 'ok' ? 'Folded in' : 'Could not fold that spelling in.'));
-      if (d && d.status === 'ok') loadAccessData();
-    });
-  }));
-
-  panels.querySelectorAll('.acc-co-invite').forEach(b => b.addEventListener('click', () => {
-    b.disabled = true; b.textContent = 'Inviting…';
-    inviteCustomerAt(b.dataset.email, b.dataset.name || '', b.dataset.company).then(() => {
-      b.disabled = false; b.textContent = 'Invite';
-    });
-  }));
-  panels.querySelectorAll('.acc-co-txt').forEach(b => b.addEventListener('click', () => copyText(customerHandoverTxt(b.dataset.email, b.dataset.company))));
-  panels.querySelectorAll('.acc-co-wa').forEach(b => b.addEventListener('click', () => {
-    const url = whatsappLink(b.dataset.phone, customerHandoverTxt(b.dataset.email, b.dataset.company));
-    // No number is not a dead button: it is the one case where the other button is the
-    // answer, so it says which one.
-    if (!url) { showToast('No phone number on this contact — add one under Edit, or use "Copy what to send"'); return; }
-    window.open(url, '_blank', 'noopener');
-  }));
-  panels.querySelectorAll('.acc-co-link').forEach(b => b.addEventListener('click', () => copyText(customerPortalLink())));
-
-  // Adding or removing a contact row is a REPAINT of a form that is being typed into, so
-  // whatever is in the fields is captured first and the draft is what gets repainted.
-  const coAdd = document.getElementById('acc-co-addcontact');
-  if (coAdd) coAdd.addEventListener('click', () => {
-    companyForm = readCompanyForm();
-    companyForm.contacts.push({ id: '', name: '', email: '', phone: '', active: true });
+  const coUnreg = document.getElementById('acc-co-unreg-toggle');
+  if (coUnreg) coUnreg.addEventListener('click', () => {
+    unregOpen = !unregOpen;
     renderCustomersTab();
-    const first = document.getElementById('acc-c-' + (companyForm.contacts.length - 1) + '-name');
-    if (first) first.focus();
-  });
-  if (companyForm) companyForm.contacts.forEach((k, i) => {
-    const drop = document.getElementById('acc-c-' + i + '-drop');
-    if (drop) drop.addEventListener('click', () => {
-      companyForm = readCompanyForm();
-      companyForm.contacts.splice(i, 1);
-      renderCustomersTab();
-    });
   });
 
-  const coCancel = document.getElementById('acc-co-cancel');
-  if (coCancel) coCancel.addEventListener('click', () => { companyForm = null; renderCustomersTab(); });
-
-  const coSave = document.getElementById('acc-co-save');
-  if (coSave) coSave.addEventListener('click', () => {
-    const f = readCompanyForm();
-    // Put the draft back before anything can refuse it, so a refusal never costs the
-    // typing. readCompanyForm() already returned everything that was in the fields.
-    companyForm = f;
-    if (!String(f.name || '').trim()) { showToast('A company needs a name'); return; }
-    coSave.disabled = true; coSave.textContent = 'Saving…';
-    adminPost('saveCompany', companyFormToFields(f)).then(d => {
-      if (!d || d.status !== 'ok') {
-        coSave.disabled = false; coSave.textContent = f.key ? 'Save company' : 'Add company';
-        showToast((d && d.message) || 'Could not save the company.');
-        return;
-      }
-      // Only a SUCCESS closes the form. A refusal that closed it would discard exactly the
-      // text the message is asking the admin to fix.
-      companyForm = null;
-      showToast(d.message || 'Saved');
-      loadAccessData();
-    });
-  });
+  wireCompanyActions(panels);
 }
 
 // ─── TAB 3: create people (single + bulk) ────────────────────────────────────
@@ -6983,16 +7322,54 @@ const INSIGHTS_ALL = 'all';
 // spellings of the same object literal.
 const ALL_FILTERS = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_ALL,
                       category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL,
-                      model: INSIGHTS_ALL };
+                      model: INSIGHTS_ALL, company: INSIGHTS_ALL };
 let insightsFilters = { ...ALL_FILTERS };
 
 // The dropdowns' option lists, computed over the WHOLE list and never over the
 // filtered rows: a select built from filtered rows would drop every other option the
 // moment one was chosen, leaving no way to change your mind. Same reasoning as
 // segmentCounts() reading allIRs.
+// The register record that speaks for a spelling on an IR, or null. The same rule the
+// Customers screen scopes by (name OR any alias), kept in ONE function so a company
+// cannot be one thing on the register and something else on the dashboard.
+function companyRecordFor(name) {
+  const k = normCompany(name);
+  if (!k) return null;
+  const reg = registerCompanies();
+  for (let i = 0; i < reg.length; i++) {
+    const c = reg[i];
+    if (normCompany(c.name) === k) return c;
+    if ((c.sheets || []).some(s => normCompany(s) === k)) return c;
+  }
+  return null;
+}
+
+// EVERY spelling a company filter value stands for, as a Set of normalised names.
+//
+// Memoised on the register array's own identity: insightsMatches() runs once per row
+// per chart — six times over 450 rows on one render — and resolving the register inside
+// that loop would be tens of thousands of scans for an answer that cannot change while
+// the same list is being counted. The cache key is the array object, so loading a new
+// roster drops the memo by construction rather than by a call somebody must remember.
+let _companyNamesMemo = { reg: null, value: null, set: null };
+function companyNamesFor(value) {
+  const reg = registerCompanies();
+  if (_companyNamesMemo.reg === reg && _companyNamesMemo.value === value) return _companyNamesMemo.set;
+  const rec = reg.filter(c => c.key === value)[0];
+  const set = new Set((rec ? [rec.name].concat(rec.sheets || []) : [String(value)]).map(normCompany));
+  _companyNamesMemo = { reg, value, set };
+  return set;
+}
+
 function insightsFacets(irs) {
   const rows = Array.isArray(irs) ? irs : [];
   const years = new Set(), months = new Set(), customers = new Set(), drones = new Set(), models = new Set();
+  // The company axis is keyed by the REGISTER's key where one speaks for the spelling,
+  // so a company whose tickets carry three spellings is one option, not three. Where no
+  // record speaks for it yet, the raw spelling is its own option — the dashboard has to
+  // be able to count a mess the register has not tidied, or it would hide exactly the
+  // companies that need tidying.
+  const companies = new Map();
   let undated = 0;
   rows.forEach(ir => {
     const fy = irFiscalYear(ir.dateRaisedISO);
@@ -7001,6 +7378,14 @@ function insightsFacets(irs) {
     if (ir.customerName) customers.add(String(ir.customerName));
     if (ir.droneId) drones.add(String(ir.droneId));
     if (ir.droneModel) models.add(String(ir.droneModel));
+    const raw = String(ir.companyName || '').trim();
+    if (raw) {
+      const rec = companyRecordFor(raw);
+      const value = rec ? rec.key : raw;
+      const hit = companies.get(value);
+      if (hit) hit.n++;
+      else companies.set(value, { value, label: rec ? rec.name : raw, n: 1 });
+    }
   });
   return {
     years: [...years].sort((a, b) => b - a),
@@ -7008,6 +7393,9 @@ function insightsFacets(irs) {
     customers: [...customers].sort((a, b) => a.localeCompare(b)),
     drones: [...drones].sort((a, b) => a.localeCompare(b)),
     models: [...models].sort((a, b) => a.localeCompare(b)),
+    // Biggest first: this list is a ranking before it is an alphabetical index, and the
+    // select's first screen should be the companies that actually raise work.
+    companies: [...companies.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)),
     undated,
   };
 }
@@ -7092,7 +7480,34 @@ function insightsMatches(ir, filters) {
   if (!open(f.customer) && String(ir.customerName || '') !== f.customer) return false;
   if (!open(f.drone) && String(ir.droneId || '') !== f.drone) return false;
   if (!open(f.model) && String(ir.droneModel || '') !== f.model) return false;
+  // The company axis matches through the REGISTER (name + every alias), which is the
+  // same rule the Customers screen scopes by. A plain equality test would make the
+  // filter disagree with the company's own IR count the moment an alias existed.
+  if (!open(f.company) && !companyNamesFor(f.company).has(normCompany(ir.companyName))) return false;
   return true;
+}
+
+// Which companies raised the work this page is counting, with the OTHER filters applied
+// but the company one lifted — otherwise the table would answer "one row, the company you
+// already picked" and be useless the moment it was useful. It is a PURE function like the
+// rest: rows in, counts out, and `now` handed in so the late column agrees with the tiles.
+function insightsByCompany(irs, filters, now) {
+  const f = Object.assign({}, filters || {}, { company: INSIGHTS_ALL });
+  const map = new Map();
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    if (!insightsMatches(ir, f)) return;
+    const raw = String(ir.companyName || '').trim();
+    if (!raw) return;
+    const rec = companyRecordFor(raw);
+    const value = rec ? rec.key : raw;
+    let e = map.get(value);
+    if (!e) { e = { value, label: rec ? rec.name : raw, total: 0, open: 0, late: 0 }; map.set(value, e); }
+    e.total++;
+    const cat = statusCategory(ir.status);
+    if (cat === 'open' || cat === 'paused') e.open++;
+    if (irOverdue(ir, now)) e.late++;
+  });
+  return [...map.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
 }
 
 // ─── WHAT THE CHARTS COUNT (Stage 3) ─────────────────────────────────────────
@@ -7356,6 +7771,7 @@ function renderInsights() {
   if (f.customer !== INSIGHTS_ALL && !fx.customers.includes(f.customer)) f.customer = INSIGHTS_ALL;
   if (f.drone !== INSIGHTS_ALL && !fx.drones.includes(f.drone)) f.drone = INSIGHTS_ALL;
   if (f.model !== INSIGHTS_ALL && !fx.models.includes(f.model)) f.model = INSIGHTS_ALL;
+  if (f.company !== INSIGHTS_ALL && !fx.companies.some(c => String(c.value) === String(f.company))) f.company = INSIGHTS_ALL;
 
   const sum = insightsSummary(allIRs, f);
   const filtered = sum.matched !== sum.total;
@@ -7368,6 +7784,8 @@ function renderInsights() {
   const now      = Date.now();
   const mc       = monthCounts(allIRs, f);
   const people   = assigneeCounts(allIRs, f, now);
+  const byCo     = insightsByCompany(allIRs, f, now);
+  const coShown  = byCo.slice(0, 12);
   const openNow  = people.reduce((a, r) => a + r.open, 0);
   const lateNow  = people.reduce((a, r) => a + r.late, 0);
   const maxMonth = Math.max(1, ...mc.months, mc.undated);
@@ -7406,6 +7824,14 @@ function renderInsights() {
       ${filterRow('ins-customer', 'Reported by',
         insightsOpt(INSIGHTS_ALL, f.customer, 'All reporters') +
         fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
+      <!-- The COMPANY axis reads companyName (Col R) and resolves it through the
+           register, so it is the customer an ACCOUNT is scoped to — the other half of
+           the pair the "Reported by" label above exists to keep apart. It is keyed by
+           the register record where one speaks for the spelling, so three spellings of
+           one company are one option here rather than three. -->
+      ${filterRow('ins-company', 'Company',
+        insightsOpt(INSIGHTS_ALL, f.company, 'All companies') +
+        fx.companies.map(c => insightsOpt(c.value, f.company, c.label + ' (' + c.n + ')')).join(''))}
       ${filterRow('ins-drone', 'UAS SN',
         insightsOpt(INSIGHTS_ALL, f.drone, 'All UAS SN') +
         fx.drones.map(d => insightsOpt(d, f.drone)).join(''))}
@@ -7566,6 +7992,34 @@ function renderInsights() {
             <span class="person-n${p.late ? ' is-late' : ''}">${p.late}</span>
           </div>`).join('')}
       </div>
+    </div>
+
+    <!-- Who is raising the work. The rows are BUTTONS: a number on this page is only
+         worth printing if pressing it takes you to the rows behind it, so a row sets the
+         Company filter and repaints. The counts are taken with every OTHER filter
+         applied and this axis lifted, which is the only way the table can show a
+         distribution while one of its own values is the thing being filtered on. -->
+    <div class="insights-block">
+      <h3 class="insights-h">IRs by company</h3>
+      <div class="people-head">
+        <span class="people-head-name">Company</span>
+        <span class="people-head-n">IRs</span>
+        <span class="people-head-n">${escHtml(t('insights.colOpen'))}</span>
+        <span class="people-head-n">${escHtml(t('insights.colLate'))}</span>
+      </div>
+      <div class="people-list">
+        ${coShown.length ? coShown.map(c => `
+          <button type="button" class="person-row co-rank${String(c.value) === String(f.company) ? ' is-selected' : ''}" data-company="${escHtml(c.value)}">
+            <span class="person-name">${escHtml(c.label)}</span>
+            <span class="person-n">${c.total}</span>
+            <span class="person-n">${c.open}</span>
+            <span class="person-n${c.late ? ' is-late' : ''}">${c.late}</span>
+          </button>`).join('')
+          : '<div class="access-empty">No IR in the list names a company.</div>'}
+      </div>
+      ${byCo.length > coShown.length
+        ? `<p class="chart-note">Showing the ${coShown.length} companies with the most IRs, of ${byCo.length}.</p>`
+        : ''}
     </div>`;
 }
 
@@ -7583,7 +8037,7 @@ if (insightsView) {
     const id = e.target && e.target.id;
     const map = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
                   'ins-category': 'category', 'ins-customer': 'customer',
-                  'ins-drone': 'drone', 'ins-model': 'model' };
+                  'ins-company': 'company', 'ins-drone': 'drone', 'ins-model': 'model' };
     if (!map[id]) return;
     insightsFilters[map[id]] = e.target.value;
     renderInsights();
@@ -7599,6 +8053,16 @@ if (insightsView) {
     }
     if (e.target && e.target.id === 'ins-clear') {
       insightsFilters = { ...ALL_FILTERS };
+      renderInsights();
+      return;
+    }
+    // A company row is a shortcut into its own slice of the page. Pressing the company
+    // that is ALREADY the filter clears it, so the row is a toggle rather than a trap —
+    // without that, the only way back to "all companies" is the select at the top.
+    const coRow = e.target && e.target.closest ? e.target.closest('.co-rank') : null;
+    if (coRow) {
+      const v = coRow.dataset.company || INSIGHTS_ALL;
+      insightsFilters.company = String(insightsFilters.company) === String(v) ? INSIGHTS_ALL : v;
       renderInsights();
     }
   });
@@ -8499,7 +8963,13 @@ const INTAKE_HIDDEN_NEEDLES = ['IR Number', 'Issue Status', 'Priority'];
 // account for A–D, F–I, K–N and P–R, so a column at E, J or O — or anything the
 // Form grows later — lands here instead of vanishing.
 function buildIntakeMap(headers) {
-  const idxOf = needle => headers.findIndex(h => h.includes(needle));
+  // Compared CASE- and WHITESPACE-INSENSITIVELY. The Form's questions are typed by a
+  // human in the Form editor, so a header can come back as "Select the drone model"
+  // or with a doubled space, and `includes` would then claim nothing — silently,
+  // leaving the field unmapped and its dropdown empty. The needles stay as readable
+  // prose; only the comparison is normalised.
+  const norm = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();
+  const idxOf = needle => headers.findIndex(h => norm(h).includes(norm(needle)));
   const map = {};
   const consumed = new Set();
   INTAKE_FIELDS.forEach(f => {
@@ -8575,7 +9045,10 @@ function mapSheetRows(rows) {
   const { map, consumed, unmapped } = buildIntakeMap(headers);
   lastSheetAudit = { headers, unmapped };
 
-  const idxOf = needle => headers.findIndex(h => h.includes(needle));
+  // The same normalised comparison buildIntakeMap uses, so the identity columns and
+  // the mapped ones can never disagree about what a header row says.
+  const norm = h => String(h == null ? '' : h).toLowerCase().replace(/\s+/g, ' ').trim();
+  const idxOf = needle => headers.findIndex(h => norm(h).includes(norm(needle)));
   const iIrNo = idxOf('IR Number');
   const iStat = idxOf('Issue Status');
   // No `iPrio`: the Priority column is still ACCOUNTED FOR (INTAKE_HIDDEN_NEEDLES
@@ -12081,6 +12554,20 @@ function toISODate(val) {
                      Jul:'07',Aug:'08',Sep:'09',Oct:'10',Nov:'11',Dec:'12' };
     const mon = months[m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase()];
     if (mon) return `${m[3]}-${mon}-${m[1].padStart(2, '0')}`;
+  }
+  // The Form Responses tab DISPLAYS `9/6/2023 15:56:49` — month first, proven by the
+  // rows reading `9/13/2023`, where 13 cannot be a month. Read that shape by hand
+  // instead of handing it to `new Date(string)`: for a non-ISO string that overload
+  // is implementation-defined, and Safari answers Invalid Date for exactly this one.
+  // The failure is SILENT and one-sided — every date-derived number on the dashboard
+  // empties on an iPhone while Chrome is perfectly happy — so it is not left to the
+  // browser. Measured against the live Sheet's own header and first rows, 2026-10-18.
+  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ ,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (us) {
+    const mo = +us[1], day = +us[2], y = +us[3];
+    if (mo >= 1 && mo <= 12 && day >= 1 && day <= 31) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
   }
   const d = new Date(s);                                       // Date.toString() etc.
   if (isNaN(d.getTime())) return '';

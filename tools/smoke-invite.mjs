@@ -64,7 +64,7 @@ const LOCATION = {
 
 const BINDINGS = `
   document,
-  renderCustomersTab, renderPeopleTab, renderAccessPanel, knownCompanies,
+  renderCustomersTab, renderPeopleTab, renderAccessPanel, knownCompanies, loadAccessData,
   customerPortalLink, customerHandoverTxt, savePeopleMatrix, companyFormToFields, companyToFields,
   blankCompanyForm, companyFormFromRecord,
   set companyForm(v) { companyForm = v; },
@@ -716,5 +716,30 @@ r.ok('smoke-ui.mjs names the new tab, so its "every tab has a branch" check stay
 
 r.ok('the modal and its panel body are built by the app, so this tab lives inside it',
   /<div class="access-body" id="access-panels">/.test(read('../app.js')));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the register the backend carries reaches the panel');
+// ═══════════════════════════════════════════════════════════════════════════════
+{
+  // listUsers carries `companies`, and loadAccessData used to rebuild accessCache from
+  // users / departments / apiVersion ONLY — so every register record the backend sent
+  // was discarded on arrival and the panel read "Companies 0" next to a register of
+  // seventy. Every other check in this file writes accessCache by hand, which is exactly
+  // why the whole suite stayed green through it: the bug lived in the one step none of
+  // them performed.
+  const { A } = boot(STAFF, IRS, { companies: REG });
+  A.T.accessCache = { users: [], departments: [], companies: [], apiVersion: 0 };
+  A.T.accessTab = 'customers';
+
+  await A.T.loadAccessData();
+
+  r.ok('listUsers\'s companies survive the load instead of being dropped',
+    A.T.accessCache.companies.length === REG.length,
+    'companies=' + A.T.accessCache.companies.length);
+
+  const html = A.T.document.getElementById('access-panels').innerHTML;
+  r.ok('...so the panel paints the register rather than "The register is empty"',
+    /Acme Survey Pvt Ltd/.test(html) && !/The register is empty/.test(html));
+}
 
 r.finish();

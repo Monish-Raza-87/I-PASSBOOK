@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v96';
+const APP_VERSION = 'v98';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -5268,7 +5268,10 @@ const SECTION_SHORT = {
 const TRIAGE_LABEL = 'TR';
 const TRIAGE_SHORT = 'Allot CAPS (header, status & Overview)';
 
-let accessCache = { users: [], departments: [], apiVersion: 0 };
+// `companies` is carried here for the same reason `users` is: the Customers panel reads
+// the register from THIS object, not from a second fetch. Leaving it out made the panel
+// report "Companies 0" against a register of seventy — see registerCompanies().
+let accessCache = { users: [], departments: [], companies: [], apiVersion: 0 };
 let accessTab = 'people';
 
 // Every admin action is a POST carrying the session token, so it goes through the
@@ -5396,6 +5399,9 @@ function openAccessModal() {
     accessCache = {
       users: cached.users,
       departments: cached.departments || [],
+      // Absent in a copy written before the register existed, which is why this is
+      // defaulted rather than trusted.
+      companies: cached.companies || [],
       apiVersion: cached.apiVersion || 0,
     };
     renderAccessPanel();
@@ -5439,6 +5445,7 @@ function writeAccessCache() {
     localStorage.setItem(ACCESS_CACHE_KEY, JSON.stringify({
       users: accessCache.users || [],
       departments: accessCache.departments || [],
+      companies: accessCache.companies || [],
       apiVersion: accessCache.apiVersion || 0,
     }));
   } catch { /* non-fatal: the cache is a convenience, never a requirement */ }
@@ -5493,11 +5500,17 @@ function renderAccessReconnect(reason) {
 }
 
 function loadAccessData() {
-  fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listUsers')
+  // Returns the chain, so a test can await the same load the browser starts and forgets.
+  return fetch(CONFIG.GAS_URL + (CONFIG.GAS_URL.indexOf('?') >= 0 ? '&' : '?') + 'action=listUsers')
     .then(r => r.json())
     .then(data => {
       if (data && data.status === 'ok') {
-        accessCache = { users: data.users || [], departments: data.departments || [], apiVersion: data.apiVersion || 0 };
+        accessCache = {
+          users: data.users || [],
+          departments: data.departments || [],
+          companies: data.companies || [],
+          apiVersion: data.apiVersion || 0,
+        };
         // The refresh overwrites the local copy — which is the whole reason this
         // cache needs no invalidation logic anywhere else in the app.
         writeAccessCache();

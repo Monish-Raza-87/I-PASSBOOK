@@ -29,8 +29,10 @@ const r = makeReporter();
 // be asserted on. Without it getElementById returns a fresh stub every call and
 // every "did it paint?" test would pass vacuously.
 const { T, byId } = loadApp(`
-  parseISODate, irFiscalYear, irMonthNumber, fyLabel, MONTH_LABELS,
-  insightsFacets, insightsSummary, INSIGHTS_SKELETON, renderInsights,
+  parseISODate, toISODate, irFiscalYear, irMonthNumber, fyLabel, MONTH_LABELS,
+  insightsFacets, insightsSummary, insightsMatches, insightsByCompany,
+  companyRecordFor, companyNamesFor, INSIGHTS_SKELETON, renderInsights,
+  get accessCache() { return accessCache; }, set accessCache(v) { accessCache = v; },
   categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter, setListView,
   IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS, UNCATEGORISED, CATEGORY_ALL,
   INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel, statusCategory,
@@ -59,6 +61,23 @@ r.ok('month 00 is null', T.parseISODate('2025-00-10') === null, T.parseISODate('
 r.ok('day 00 is null', T.parseISODate('2025-09-00') === null, T.parseISODate('2025-09-00'));
 r.ok('a JS Date string is not accepted by accident',
   T.parseISODate('2025-09-28T00:00:00Z') === null, T.parseISODate('2025-09-28T00:00:00Z'));
+
+// ── The Sheet's own display format ────────────────────────────────────────────
+// The Form Responses tab shows its Timestamp as `9/6/2023 15:56:49` — MONTH first,
+// proven by rows reading `9/13/2023`. It used to be handed to `new Date(string)`,
+// which is implementation-defined for a non-ISO string: Chrome parses it, Safari
+// answers Invalid Date. The result was a dashboard whose year and month dropdowns
+// were empty on one browser and full on another, with nothing on screen to explain
+// the difference.
+r.head('the Sheet\'s own date format is parsed by hand, not by the browser');
+r.ok('9/6/2023 15:56:49 → 2023-09-06', T.toISODate('9/6/2023 15:56:49') === '2023-09-06',
+  T.toISODate('9/6/2023 15:56:49'));
+r.ok('a two-digit day is read as a day', T.toISODate('9/13/2023 17:22:45') === '2023-09-13',
+  T.toISODate('9/13/2023 17:22:45'));
+r.ok('no time at all still reads', T.toISODate('12/31/2025') === '2025-12-31', T.toISODate('12/31/2025'));
+r.ok('an impossible month is refused, not rolled over', T.toISODate('13/1/2025') === '',
+  T.toISODate('13/1/2025'));
+r.ok('an already-ISO date is unchanged', T.toISODate('2025-09-28') === '2025-09-28');
 
 // ── The fiscal year ───────────────────────────────────────────────────────────
 r.head('the fiscal year runs 1 April – 31 March');
@@ -101,9 +120,70 @@ r.ok('models deduped and sorted, and a row without one adds no option',
   fx.models.join(',') === 'SIGMA 100,SIGMA 75', fx.models);
 r.ok('the undated count is surfaced, not swallowed', fx.undated === 2, fx.undated);
 r.ok('an empty list yields empty facets, not a crash',
-  JSON.stringify(T.insightsFacets([])) === '{"years":[],"months":[],"customers":[],"drones":[],"models":[],"undated":0}',
+  JSON.stringify(T.insightsFacets([])) === '{"years":[],"months":[],"customers":[],"drones":[],"models":[],"companies":[],"undated":0}',
   T.insightsFacets([]));
 r.ok('a non-list yields the same', T.insightsFacets(null).undated === 0);
+
+// ── The company axis ──────────────────────────────────────────────────────────
+// The dashboard and the Customers screen must agree on what a company IS. They agree by
+// both resolving a spelling through the register's name + aliases, so this block pins
+// that: one option per COMPANY, and a filter that matches every spelling of it.
+r.head('the company axis groups a company by its register record, aliases and all');
+{
+  const CO_IR = [
+    { irNumber: 'IR1', companyName: 'Acme Survey',          status: 'Open',      dateRaisedISO: '2025-09-01' },
+    { irNumber: 'IR2', companyName: 'ACME SURVEY PVT LTD',  status: 'Delivered',  dateRaisedISO: '2025-09-02' },
+    { irNumber: 'IR3', companyName: 'Beta Farms',           status: 'On Hold',    dateRaisedISO: '2025-09-03' },
+    { irNumber: 'IR4', companyName: '',                     status: 'Open',       dateRaisedISO: '2025-09-04' },
+  ];
+  // NO register: every spelling has to stand for itself, because the register may not be
+  // loaded at all (a non-admin never opens User access) and a dashboard that showed an
+  // empty dropdown in that case would look broken rather than unscoped.
+  T.accessCache = { users: [], departments: [], companies: [], apiVersion: 0 };
+  const raw = T.insightsFacets(CO_IR).companies;
+  r.ok('with no register, each spelling is its own option and the blank is not one',
+    raw.length === 3 && raw.every(c => c.n === 1) && !raw.some(c => !c.label),
+    raw.map(c => c.label + ':' + c.n));
+
+  // WITH the register: two companies, because two of those spellings are one customer.
+  T.accessCache = { users: [], departments: [], companies: [{
+    key: 'acme', name: 'Acme Survey Pvt Ltd', sheets: ['Acme Survey'], contacts: [],
+  }], apiVersion: 0 };
+  const grouped = T.insightsFacets(CO_IR).companies;
+  r.ok('with the register loaded, one company is ONE option however many spellings it has',
+    grouped.length === 2 && grouped[0].value === 'acme' && grouped[0].n === 2 &&
+    grouped[0].label === 'Acme Survey Pvt Ltd', JSON.stringify(grouped));
+  r.ok('...and the options are ranked by how much work the company raises',
+    grouped[1].value === 'Beta Farms' && grouped[1].n === 1, JSON.stringify(grouped));
+
+  // The predicate. A plain equality test would pass the first two assertions and fail
+  // this one the moment an alias existed — which is exactly the silent divergence the
+  // register was built to end.
+  r.ok('filtering by the company matches BOTH of its spellings, not just the canonical one',
+    T.insightsMatches(CO_IR[0], { company: 'acme' }) && T.insightsMatches(CO_IR[1], { company: 'acme' }),
+    JSON.stringify({ first: T.insightsMatches(CO_IR[0], { company: 'acme' }), second: T.insightsMatches(CO_IR[1], { company: 'acme' }) }));
+  r.ok('...and leaves another company out', !T.insightsMatches(CO_IR[2], { company: 'acme' }));
+  r.ok('...and leaves a row with no company out, rather than counting it as "all"',
+    !T.insightsMatches(CO_IR[3], { company: 'acme' }));
+  r.ok('"All companies" is no filter at all',
+    T.insightsMatches(CO_IR[2], { company: T.INSIGHTS_ALL }) && T.insightsMatches(CO_IR[3], {}),
+    T.INSIGHTS_ALL);
+  r.ok('a filter object built before this axis existed still matches everything',
+    T.insightsMatches(CO_IR[0], { fy: T.INSIGHTS_ALL, model: T.INSIGHTS_ALL }));
+
+  // The table. Its counts are taken with the COMPANY axis lifted, so it can show a
+  // distribution while one of its own values is the filter — and every other axis still
+  // applies, or the table would disagree with the page it sits on.
+  const ranked = T.insightsByCompany(CO_IR, { company: 'acme' }, Date.now());
+  r.ok('the by-company table lifts its own axis, so it still lists the OTHER companies',
+    ranked.length === 2 && ranked[0].value === 'acme' && ranked[0].total === 2,
+    JSON.stringify(ranked));
+  const openOnly = T.insightsByCompany(CO_IR, { company: 'acme', status: 'open' }, Date.now());
+  r.ok('...and keeps every other axis, so a status filter narrows the table as it narrows the page',
+    openOnly.length === 1 && openOnly[0].total === 1 && openOnly[0].open === 1,
+    JSON.stringify(openOnly));
+  T.accessCache = { users: [], departments: [], companies: [], apiVersion: 0 };
+}
 
 // ── Summary ───────────────────────────────────────────────────────────────────
 r.head('the summary counts every row, including the ones it cannot place');

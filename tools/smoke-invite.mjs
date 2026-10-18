@@ -69,6 +69,17 @@ const BINDINGS = `
   blankCompanyForm, companyFormFromRecord,
   set companyForm(v) { companyForm = v; },
   get companyForm() { return companyForm; },
+  // Which of the two screens the Customers tab is showing: '' for the register,
+  // COMPANY_NEW or a company key for that company's own screen. It is a live binding
+  // for the same reason companyForm is — a suite has to be able to put the reader on a
+  // screen, and a copy of the value would leave the app on the one it was already on.
+  set companyOpenKey(v) { companyOpenKey = v; },
+  get companyOpenKey() { return companyOpenKey; },
+  set companyView(v) { companyView = v; },
+  get companyView() { return companyView; },
+  set companyTab(v) { companyTab = v; },
+  get companyTab() { return companyTab; },
+  COMPANY_NEW,
   set accessCache(v) { accessCache = v; },
   get accessCache() { return accessCache; },
   set allIRs(v) { allIRs = v; },
@@ -203,8 +214,13 @@ const REG = [{
   ],
 }];
 {
+  // LIST VIEW, deliberately. v99 made the register a GRID of tiles by default and kept the
+  // card behind the List switch, so the card's own assertions are driven through the view
+  // that still draws it — otherwise this block would be asserting on markup no reader can
+  // reach. The grid has its own block below.
   const { A } = boot(STAFF.concat([CUSTOMER]), IRS, { companies: REG });
   const panel = A.T.document.getElementById('access-panels');
+  A.T.companyView = 'list';
   A.T.renderCustomersTab();
   const html = panel.innerHTML;
 
@@ -258,7 +274,67 @@ const REG = [{
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-r.head('saving a company posts the aliases, and a repaint never eats the typing');
+r.head('the register opens as a grid, and a tile answers the three questions the list could not');
+// ═══════════════════════════════════════════════════════════════════════════════
+// Seventy cards is a list nobody reads: the question an admin arrives with is "which of
+// these has open work", and a card that leads with an address does not answer it. The
+// tile leads with the counters, and the whole tile is the control that opens the company.
+{
+  const { A } = boot(STAFF.concat([CUSTOMER]), IRS, { companies: REG });
+  const panel = A.T.document.getElementById('access-panels');
+  A.T.renderCustomersTab();          // no view set: the DEFAULT has to be the grid
+  const html = panel.innerHTML;
+
+  r.ok('the default view is the grid, and it is tiles rather than cards',
+    /class="co-grid"/.test(html) && /class="co-tile acc-co-open"/.test(html) && !/acc-company"/.test(html));
+  r.ok('a tile carries the company name and its IR count',
+    /co-tile-name">Acme Survey Pvt Ltd</.test(html) && /<b>\d+<\/b> IRs?/.test(html));
+  r.ok('...and the open count, which is the reason the grid exists',
+    /<b>\d+<\/b> open/.test(html));
+  r.ok('the portal address is printed ONCE, not once per company',
+    (html.match(/class="co-portal"/g) || []).length === 1 && (html.match(/customer\.html/g) || []).length === 1,
+    (html.match(/customer\.html/g) || []).length);
+  r.ok('the unmatched spellings are folded away until asked for',
+    /acc-co-unreg-toggle/.test(html) && !/Make it a company/.test(html));
+
+  // The tile IS the control, so pressing it has to move the panel to that company. Driven
+  // rather than read: a data-key that is never wired is a grid of dead tiles.
+  // ⚠ The tile is wired through `panels.querySelectorAll`, which the stub DOM answers
+  // with `[]` — so a dispatch here would fire nothing and prove nothing. The screen is
+  // driven by putting the reader on it, which is exactly the state that handler sets.
+  A.T.companyOpenKey = 'acme-survey';
+  A.T.companyTab = 'overview';
+  A.T.renderCustomersTab();
+  r.ok('the reader on a company\'s screen gets that screen, not the register',
+    !/class="co-grid"/.test(panel.innerHTML), panel.innerHTML.slice(0, 120));
+  const detail = panel.innerHTML;
+  r.ok('...which names the company and offers the way back',
+    /co-detail-name">Acme Survey Pvt Ltd/.test(detail) && /id="acc-co-back"/.test(detail));
+  r.ok('...and its four views, with the IR count on the tab that lists them',
+    /data-tab="overview"/.test(detail) && /data-tab="irs"/.test(detail) &&
+    /data-tab="people"/.test(detail) && /data-tab="activity"/.test(detail));
+
+  // People carries what the card used to, so an invite is still one press from the
+  // company it belongs to.
+  A.T.companyTab = 'people';
+  A.T.renderCustomersTab();
+  r.ok('the People tab still offers Re-invite on an existing account and WhatsApp on a phone-only contact',
+    /ops@acme\.in[\s\S]{0,400}Re-invite/.test(panel.innerHTML) &&
+    /acc-co-wa[^>]*data-phone="\+91 90000 33333"/.test(panel.innerHTML) &&
+    !/acc-co-invite[^>]*data-name="Front desk"/.test(panel.innerHTML));
+
+  // Back returns to the register. It is wired by ID, so the harness CAN press it — and it
+  // has to clear the company as well, or the next repaint would put the reader straight
+  // back on the screen they just left.
+  A.T.companyTab = 'overview';
+  A.T.renderCustomersTab();
+  A.T.document.getElementById('acc-co-back').dispatch('click');
+  r.ok('the back button returns to the register and forgets the company',
+    A.T.companyOpenKey === '' && /class="co-grid"/.test(panel.innerHTML), A.T.companyOpenKey);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('a company is edited on its OWN screen, not at the top of the register');
 // ═══════════════════════════════════════════════════════════════════════════════
 {
   // THE POST ITSELF. The form is opened BEFORE the render, so the whole block is one
@@ -267,7 +343,10 @@ r.head('saving a company posts the aliases, and a repaint never eats the typing'
   // no form in it still collects a listener — a harness artifact, where a browser throws
   // the old node away with the markup it was in.
   const { A, posts } = boot(STAFF, IRS, { companies: REG });
+  // The form lives on the company's OWN screen now, so the reader has to be on the
+  // screen as well as holding a draft — the register no longer draws a form at all.
   A.T.companyForm = A.T.blankCompanyForm();
+  A.T.companyOpenKey = A.T.COMPANY_NEW;
   A.T.renderCustomersTab();
 
   r.ok('the form carries a name field, an alias box and a Save of its own',
@@ -304,7 +383,10 @@ r.head('saving a company posts the aliases, and a repaint never eats the typing'
   // time — where the name and the aliases vanish the moment the first contact is added.
   // Nothing is posted here on purpose; the POST is asserted above, on a single render.
   const { A } = boot(STAFF, IRS, { companies: REG });
+  // The form lives on the company's OWN screen now, so the reader has to be on the
+  // screen as well as holding a draft — the register no longer draws a form at all.
   A.T.companyForm = A.T.blankCompanyForm();
+  A.T.companyOpenKey = A.T.COMPANY_NEW;
   A.T.renderCustomersTab();
   fill(A, 'acc-co-name', '  Brand New Farms  ');
   fill(A, 'acc-co-sheets', 'Brand New Farms\nBRAND NEW FARM');
@@ -340,7 +422,10 @@ r.head('saving a company posts the aliases, and a repaint never eats the typing'
   // name; if the form closed on that reply, the message would be asking the admin to fix
   // text the panel had just thrown away.
   const { A } = boot(STAFF, IRS, { companies: REG, postReply: { status: 'error', message: 'A company with that name already exists' } });
+  // The form lives on the company's OWN screen now, so the reader has to be on the
+  // screen as well as holding a draft — the register no longer draws a form at all.
   A.T.companyForm = A.T.blankCompanyForm();
+  A.T.companyOpenKey = A.T.COMPANY_NEW;
   A.T.renderCustomersTab();
   fill(A, 'acc-co-name', 'Acme Survey Pvt Ltd');
   A.T.document.getElementById('acc-co-save').dispatch('click');
@@ -357,7 +442,10 @@ r.head('saving a company posts the aliases, and a repaint never eats the typing'
   // the name, so there is nothing to file it under. The refusal is local, and the proof is
   // that no POST is made at all.
   const { A, posts } = boot(STAFF, IRS, { companies: REG });
+  // The form lives on the company's OWN screen now, so the reader has to be on the
+  // screen as well as holding a draft — the register no longer draws a form at all.
   A.T.companyForm = A.T.blankCompanyForm();
+  A.T.companyOpenKey = A.T.COMPANY_NEW;
   A.T.renderCustomersTab();
   fill(A, 'acc-co-name', '   ');
   A.T.document.getElementById('acc-co-save').dispatch('click');

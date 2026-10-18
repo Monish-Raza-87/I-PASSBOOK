@@ -55,6 +55,8 @@ const { T, byId } = loadApp(`
   openAccessModal, renderCustomersTab, renderPeopleTab, renderDepartmentsTab,
   set accessTab(v){accessTab=v;},
   set accessCache(v){accessCache=v;},
+  set companyOpenKey(v){companyOpenKey=v;}, get companyOpenKey(){return companyOpenKey;},
+  set companyTab(v){companyTab=v;},
   get currentUser(){return currentUser;}, set currentUser(v){currentUser=v;},
 `, { capture: true });
 
@@ -298,6 +300,19 @@ const accessShellTemplate = (() => {
 T.accessTab = 'customers';
 T.renderCustomersTab();
 const accessCustomers = byId.get('access-panels').innerHTML;
+// ONE company's own screen, which is the other half of the Customers pane: the register's
+// tiles are only useful if the screen behind them reads well, and this is the screen an
+// admin lands on after pressing a tile. Rendered from the same fixture as the grid above,
+// so the two cannot photograph different registers.
+T.companyOpenKey = 'agrikart-pvt-ltd';
+T.companyTab = 'overview';
+T.renderCustomersTab();
+const accessCompany = byId.get('access-panels').innerHTML;
+T.companyTab = 'people';
+T.renderCustomersTab();
+const accessCompanyPeople = byId.get('access-panels').innerHTML;
+T.companyOpenKey = '';
+T.companyTab = 'overview';
 T.accessTab = 'people';
 T.renderPeopleTab();
 const accessPeople = byId.get('access-panels').innerHTML;
@@ -321,6 +336,36 @@ fs.writeFileSync(accessFile, `<!doctype html><html lang="en"><head><meta charset
 ${css}
 </head><body>
 ${withPanel(accessCustomers)}
+</body></html>`);
+
+const accessCompanyFile = path.join(outDir, 'access-company.html');
+fs.writeFileSync(accessCompanyFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>one company — overview</title>
+${css}
+</head><body>
+${withPanel(accessCompany)}
+</body></html>`);
+
+const accessCompanyPeopleFile = path.join(outDir, 'access-company-people.html');
+fs.writeFileSync(accessCompanyPeopleFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>one company — people</title>
+${css}
+</head><body>
+${withPanel(accessCompanyPeople)}
+</body></html>`);
+
+// THE SAME PANEL WITH THE MODAL MAXIMISED. "Maximise" is a class on the modal, so the
+// only way to see what the button actually does is to render the class already set —
+// reading the rule proves it exists, not that it lays out (views.css, definite-height trap).
+const accessMaxFile = path.join(outDir, 'access-max.html');
+fs.writeFileSync(accessMaxFile, `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>user access — maximised</title>
+${css}
+</head><body>
+${withPanel(accessCustomers).replace('class="inward-options-modal"', 'class="inward-options-modal access-max"')}
 </body></html>`);
 
 const accessPeopleFile = path.join(outDir, 'access-people.html');

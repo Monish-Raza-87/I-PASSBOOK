@@ -151,6 +151,39 @@ ok('...so the card carries the model once, not twice',
 ok('...while a column that only resembles it is still reported',
   T.lastSheetAudit.unmapped.includes('Mention the Drone Model Used'), T.lastSheetAudit.unmapped);
 
+head('the LIVE header row, copied from the Sheet, maps every field it is meant to');
+// Read off the Form Responses tab on 2026-10-18. This is the row the app actually
+// meets, so the needles are pinned against it rather than against a tidy fixture.
+// The Timestamp cell is the Sheet's own display format — `9/6/2023 15:56:49`, month
+// first, proven by other rows reading `9/13/2023`.
+const LIVE_H = ['Summary', 'IR Number', 'Timestamp', 'Issue Status', 'Resolved Via', 'SPOC',
+  'What Support Is Required?', 'Please Describe Your Problem/Purpose/Required Assistance In A Few Words',
+  'Date of Incident', 'Time of Incident', 'Mention the Drone Serial No (S250XX)',
+  "Who's Reporting? (Pilot/Respondent Name And Contact Info)", 'Incident Location and Weather',
+  'Evidence: Attach Files From The Incident',
+  "Do You Want Us To Track Your Courier? Share Your Courier Tracking ID or Courier Handling Person's Contact Info.",
+  'Email Address', 'Evidence: Attach Screenshot of UAV Forecast/Any Other Weather Forecast App',
+  'Where Do You Work?', 'Select the Drone Model',
+  'Reason and List of Particulars Sent Back To H.O.', 'Ops/Customer', 'Attach', 'UAS Model'];
+const LIVE_R = new Array(LIVE_H.length).fill('');
+LIVE_R[1] = 'IR500'; LIVE_R[2] = '9/6/2023 15:56:49';
+LIVE_R[10] = 'S25P014'; LIVE_R[11] = 'RAVI KUMAR 9999999999';
+LIVE_R[17] = 'ACME SURVEY PVT LTD'; LIVE_R[18] = 'SIGMA 25 PRO'; LIVE_R[22] = 'SIGMA 25 PRO';
+const live = T.mapSheetRows([LIVE_H, LIVE_R])[0];
+ok('model → column S', T.buildIntakeMap(LIVE_H).map.droneModel === 18,
+  T.buildIntakeMap(LIVE_H).map.droneModel);
+ok('...and the record carries it', live.droneModel === 'SIGMA 25 PRO', live.droneModel);
+ok('The Sheet\'s "9/6/2023 15:56:49" becomes an ISO date', live.dateRaisedISO === '2023-09-06', live.dateRaisedISO);
+ok('company is Col R, the person is Col L',
+  live.companyName === 'ACME SURVEY PVT LTD' && live.customerName === 'RAVI KUMAR' && live.contactPhone === '9999999999',
+  [live.companyName, live.customerName, live.contactPhone]);
+
+// A header typed in the Form editor with different casing is the same question.
+const LOWER_H = LIVE_H.map(h => h.toLowerCase());
+ok('a lower-cased header still maps',
+  T.buildIntakeMap(LOWER_H).map.droneModel === 18 && T.buildIntakeMap(LOWER_H).map.companyName === 17,
+  T.buildIntakeMap(LOWER_H).map);
+
 head('a blank unknown column adds no noise');
 const blankExtra = one(HEADERS, ROW.map((v, i) => (i === 14 ? '' : v)));
 ok('blank "Internal Notes" is omitted', blankExtra.extra.length === 2, blankExtra.extra);

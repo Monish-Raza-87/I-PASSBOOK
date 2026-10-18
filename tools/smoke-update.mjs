@@ -22,6 +22,14 @@ const SW = fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
 const HTML = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 const APP = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
+// THE VERSIONS THIS FILE TALKS ABOUT ARE DERIVED, NOT TYPED. They were the literals
+// 'v99' and 'v100' once, which meant a release turned "a newer build" into "the build
+// this device is already running" and the suite went red on the bump commit — or worse,
+// stayed green while asserting the opposite of its own name.
+const CURRENT = (APP.match(/const APP_VERSION = '([^']+)'/) || [])[1] || 'v0';
+const NEXT  = 'v' + (Number(String(CURRENT).replace(/\D/g, '')) + 1);
+const NEXT2 = 'v' + (Number(String(NEXT).replace(/\D/g, '')) + 1);
+
 // ══════════════════════════════════════════════════════════════════════════════
 r.head('the check can reach the network — the half that lives in sw.js');
 
@@ -186,13 +194,13 @@ reloads = 0;
 {
   const log = { calls: [] };
   const sw = makeSw({});
-  const { T, byId } = boot(sw, log, { body: SW_BODY('v99') });
+  const { T, byId } = boot(sw, log, { body: SW_BODY(NEXT) });
   const found = await T.checkForUpdate(true);
-  r.ok('a higher number in the served sw.js raises the notice', found === true && T._updateTarget === 'v99', T._updateTarget);
+  r.ok('a higher number in the served sw.js raises the notice', found === true && T._updateTarget === NEXT, T._updateTarget);
   const ws = byId.get('update-banner-ws');
   const auth = byId.get('update-banner-auth');
   r.ok('both slots are filled by ONE writer', ws.innerHTML.length > 0 && ws.innerHTML === auth.innerHTML);
-  r.ok('the notice names the version it is offering', ws.innerHTML.includes('v99'), ws.innerHTML.slice(0, 120));
+  r.ok('the notice names the version it is offering', ws.innerHTML.includes(NEXT), ws.innerHTML.slice(0, 120));
   r.ok('...and says the app will restart, because it will', /will restart/.test(ws.innerHTML));
   r.ok('the tap is the only thing offered — no automatic anything',
     /onclick="applyUpdate\(\)"/.test(ws.innerHTML) && /onclick="dismissUpdateBanner\(\)"/.test(ws.innerHTML));
@@ -210,7 +218,7 @@ reloads = 0;
   // never again. The exclusion in sw.js is the fix; this pins the app's half —
   // that an identical number is not treated as news.
   const log = { calls: [] };
-  const { T, byId } = boot(makeSw({}), log, { body: SW_BODY('v55') });
+  const { T, byId } = boot(makeSw({}), log, { body: SW_BODY(CURRENT) });
   const found = await T.checkForUpdate(true);
   r.ok('the version the device is ALREADY running is not an update',
     found === false && T._updateTarget === null, T._updateTarget);
@@ -239,7 +247,7 @@ reloads = 0;
 
 {
   const log = { calls: [] };
-  const { T } = boot(makeSw({}), log, { body: SW_BODY('v99') });
+  const { T } = boot(makeSw({}), log, { body: SW_BODY(NEXT) });
   await T.checkForUpdate(true);
   await T.checkForUpdate();
   await T.checkForUpdate();
@@ -253,7 +261,7 @@ r.head('applying it is a tap, and only a tap');
 reloads = 0;
 {
   const log = { calls: [] };
-  const { T } = boot(makeSw({}), log, { body: SW_BODY('v99') });
+  const { T } = boot(makeSw({}), log, { body: SW_BODY(NEXT) });
   await T.checkForUpdate(true);
   T.applyUpdate();
   await new Promise(res => setTimeout(res, 0));
@@ -267,7 +275,7 @@ reloads = 0;
   // before anyone has asked for anything. Reloading on that would reload a page
   // nobody clicked, and would break the intro timing smoke-boot.mjs pins.
   const sw = makeSw({ controller: null });
-  const { T } = boot(sw, { calls: [] }, { body: SW_BODY('v55') });
+  const { T } = boot(sw, { calls: [] }, { body: SW_BODY(CURRENT) });
   sw.container._fire('controllerchange');
   await new Promise(res => setTimeout(res, 0));
   r.ok('a worker taking over on its own does NOT reload the page',
@@ -279,7 +287,7 @@ reloads = 0;
   // ...but if the handover lands just after the settle deadline, the reload is
   // still owed, so the same event is a belt once the tap HAS happened.
   const sw = makeSw({});
-  const { T } = boot(sw, { calls: [] }, { body: SW_BODY('v99') });
+  const { T } = boot(sw, { calls: [] }, { body: SW_BODY(NEXT) });
   await T.checkForUpdate(true);
   T.applyUpdate();
   await new Promise(res => setTimeout(res, 0));
@@ -297,7 +305,7 @@ reloads = 0;
   const sw = makeSw({});
   const installing = sw.worker('installing');
   sw.reg.installing = installing;
-  const { T } = boot(sw, { calls: [] }, { body: SW_BODY('v99') });
+  const { T } = boot(sw, { calls: [] }, { body: SW_BODY(NEXT) });
   await T.checkForUpdate(true);
   T.applyUpdate();
   await new Promise(res => setTimeout(res, 0));
@@ -310,7 +318,7 @@ reloads = 0;
 
 reloads = 0;
 {
-  const { T } = boot(makeSw({}), { calls: [] }, { body: SW_BODY('v55') });
+  const { T } = boot(makeSw({}), { calls: [] }, { body: SW_BODY(CURRENT) });
   T.applyUpdate();
   await new Promise(res => setTimeout(res, 0));
   r.ok('with no registration at all the tap still reloads rather than doing nothing',
@@ -321,7 +329,7 @@ reloads = 0;
 {
   // The guards. `confirm` is the only thing that can say no, and saying no has to
   // mean the reload does not happen — otherwise the prompt is decoration.
-  const { T, byId } = boot(makeSw({}), { calls: [] }, { body: SW_BODY('v99'), confirm: () => false });
+  const { T, byId } = boot(makeSw({}), { calls: [] }, { body: SW_BODY(NEXT), confirm: () => false });
   await T.checkForUpdate(true);
   T.applyUpdate();
   await new Promise(res => setTimeout(res, 0));
@@ -334,7 +342,7 @@ reloads = 0;
 {
   // A save in flight is not something a restart prompt may take away, and there is
   // no "restore" for a POST that was cut off mid-flight.
-  const { T, byId } = boot(makeSw({}), { calls: [] }, { body: SW_BODY('v99') });
+  const { T, byId } = boot(makeSw({}), { calls: [] }, { body: SW_BODY(NEXT) });
   await T.checkForUpdate(true);
   T._savesInFlight.add('sec-a');
   T.applyUpdate();
@@ -351,24 +359,24 @@ r.head('dismissing lasts for the visit, and a NEWER version still speaks up');
 
 {
   const log = { calls: [] };
-  let served = 'v99';
+  let served = NEXT;
   const { T, byId } = boot(makeSw({}), log, { body: () => SW_BODY(served) });
   await T.checkForUpdate(true);
   T.dismissUpdateBanner();
   r.ok('the ✕ clears both slots', paint(byId, 'update-banner-ws') === '' &&
     paint(byId, 'update-banner-auth') === '' && !shown(byId, 'update-banner-auth'));
-  r.ok('...and remembers WHICH version was dismissed', T._updateDismissedFor === 'v99', T._updateDismissedFor);
+  r.ok('...and remembers WHICH version was dismissed', T._updateDismissedFor === NEXT, T._updateDismissedFor);
   // localStorage, not sessionStorage: a stored dismissal would keep suppressing a
   // real notice if the ✕ happened to be tapped during a CDN blip.
   r.ok('the dismissal is not written to storage', !/ipb_update|update_dismissed/i.test(APP),
     (APP.match(/[^\n]*dismissed[^\n]*/i) || [''])[0].slice(0, 100));
   // ...but it is a dismissal of THAT version only, and a deploy is exactly what
   // happens next — so the next probe must speak up again.
-  served = 'v100';
+  served = NEXT2;
   await T.checkForUpdate(true);
   r.ok('a version NEWER than the one dismissed raises the notice again',
-    T._updateTarget === 'v100' && shown(byId, 'update-banner-ws') &&
-    paint(byId, 'update-banner-ws').includes('v100'), paint(byId, 'update-banner-ws').slice(0, 120));
+    T._updateTarget === NEXT2 && shown(byId, 'update-banner-ws') &&
+    paint(byId, 'update-banner-ws').includes(NEXT2), paint(byId, 'update-banner-ws').slice(0, 120));
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -391,7 +399,7 @@ r.head('the watch starts on every boot path, and reads its own version right');
 }
 
 {
-  const { T } = boot(null, { calls: [] }, { body: SW_BODY('v55') });
+  const { T } = boot(null, { calls: [] }, { body: SW_BODY(CURRENT) });
   r.ok('the version parser reads the shipped shape', T.versionNumber('v55') === 55, T.versionNumber('v55'));
   r.ok('...and refuses anything that is not v<digits>, so junk is never "newer"',
     T.versionNumber('v9x') === null && T.versionNumber('') === null &&
@@ -421,7 +429,7 @@ const VNAV = NAV + `
   get accessCache() { return accessCache; },
 `;
 {
-  const { T, byId } = loadApp(VNAV, { capture: true, fetch: makeFetch(SW_BODY('v55'), { calls: [] }) });
+  const { T, byId } = loadApp(VNAV, { capture: true, fetch: makeFetch(SW_BODY(CURRENT), { calls: [] }) });
   T.accessCache.users = [
     { email: 'zoe@indrones.com', name: 'Zoe', appVersion: 'v55', lastLoginAt: '01-Oct-2026 09:00' },
     { email: 'abe@indrones.com', name: 'Abe', appVersion: 'v54', lastLoginAt: '30-Sep-2026 18:00' },

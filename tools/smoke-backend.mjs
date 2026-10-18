@@ -98,8 +98,18 @@ r.head('the owner\'s security decisions');
 // rather than assumed here: the register only ever narrows WHICH names an admin may
 // pick from, and the scope it writes is still the plain string the v11 backend already
 // understood — so an old backend keeps resolving every scope it is handed.
-r.ok('API_VERSION is 13 — no file ids in the source',
-  /API_VERSION:\s*13\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v14 = the INSPECTOR'S CORRECTION LEDGER (`_store/corrections.json`), `saveCorrection`
+// / `deleteCorrection`, and the ledger riding on `listIRs`. Independent in the quiet
+// direction: an older backend sends no `corrections` key, the frontend reads that as
+// "none", and the deterministic serial fix needs no store at all.
+r.ok('API_VERSION is 14 — the Inspector can record what CR decides',
+  /API_VERSION:\s*14\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('the correction ledger is seeded with the other store files',
+  /'corrections\.json', \{ items: \{\} \}/.test(code));
+r.ok('a correction is CR or admin, never a section grant',
+  /function canDecideCorrection[\s\S]{0,400}getUserDepartments\(authEmail\)\.indexOf\('cr'\)/.test(code));
+r.ok('a customer is never handed the correction ledger',
+  /company \? \{ items: \{\} \} : publicCorrections\(\)/.test(code));
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));

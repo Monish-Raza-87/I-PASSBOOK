@@ -973,6 +973,40 @@ spellings; the register is where that mess is resolved. The panel that edits it 
 `listCompanies`**, because a second answer to "which companies exist" is a second thing
 to keep true.
 
+### The Inspector's correction ledger — `saveCorrection`, `deleteCorrection` (v14)
+
+`_store/corrections.json` is where a **decided** value is remembered. I-INSPECTOR
+finds what is wrong, CR chooses the right value, and the app displays it — the intake
+Sheet is never edited. This is the owner's rule: "correction to wrong entry has to be
+made by our app only."
+
+| Action | Who | Does |
+|---|---|---|
+| `saveCorrection` | **admin or a member of the `cr` department** | Upserts one decision, keyed by the raw serial (`serial:S100-V3`) or by the reporter's email (`person:e:…`) — falling back to the normalised name for a reporter with no address. Returns the whole ledger so the panel can repaint. |
+| `deleteCorrection` | **admin or CR** | Removes one decision; the app goes back to exactly what the Sheet says. |
+
+`listIRs` carries the ledger under a `corrections` key — **staff only**, `{ items: {} }`
+for a customer account — so no extra round trip is paid and the mapper has the decisions
+in hand before it builds the records. An older backend sends no key at all; the frontend
+reads that as "none", and the deterministic serial fix (below) needs no store.
+
+**The record:**
+
+```json
+{ "items": {
+    "serial:S100-V3":  { "kind": "serial", "from": "S100-V3", "to": "S100-003",
+                         "email": "", "by": "…", "at": "…" },
+    "person:e:test@…": { "kind": "person", "from": "test reporter",
+                         "email": "test@…", "to": "Test Reporter", "by": "…", "at": "…" }
+} }
+```
+
+**Deterministic serial correction is NOT in this file.** A serial that merely does not
+match one of the four shapes but whose fix is certain (`S100-12` → `S100-012`,
+`S25P-014` → `S25P014`) is normalised by the frontend as the list is mapped — no store,
+no round trip, no decision. Only what the app cannot prove (`S100-V3`, `S75-MAHYCO`)
+reaches CR.
+
 **The record:**
 
 ```json
@@ -1210,7 +1244,7 @@ var CONFIG = {
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 13,           // 13 = no file ids in the source; see the version list in backend.gs
+  API_VERSION: 14,           // 14 = the Inspector's correction ledger; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 

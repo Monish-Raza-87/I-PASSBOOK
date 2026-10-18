@@ -106,7 +106,7 @@ function boot(users, irs, opts) {
     return Promise.resolve({ json: () => Promise.resolve({ status: 'ok' }) });
   };
   const A = loadApp(BINDINGS, { capture: true, fetch: fetchStub,
-    globals: { location: LOCATION, FormData: FormData } });
+    globals: Object.assign({ location: LOCATION, FormData: FormData }, (opts && opts.globals) || {}) });
   A.T.accessCache = { users: users, departments: [], companies: companies, apiVersion: 12 };
   A.T.allIRs = irs;
   return { A, posts };
@@ -232,12 +232,13 @@ const REG = [{
     /acc-company[\s\S]{0,400}1 account</.test(html));
 
   // THE THREE CONTACT STATES, none of which may look like the others. An invite on a
-  // contact who already has an account is a re-invite; a contact with only a phone cannot
-  // be invited at all, so it must not be offered a button that would refuse.
-  r.ok('a contact whose email already has an account is offered Re-invite, not Invite',
-    /ops@acme\.in[\s\S]{0,400}Re-invite/.test(html) && !/>Invite<\/button>[\s\S]{0,80}ops@acme\.in/.test(html));
-  r.ok('...and it says so on the face of the card',
-    /has an account/.test(html));
+  // contact who already has an account would be REFUSED by the backend — "An account
+  // already exists…" — so the card must not offer it at all. A contact with only a phone
+  // cannot be invited either. Neither may be offered a button that can only fail.
+  r.ok('a contact whose email already has an account is offered NO Invite button',
+    !/acc-co-invite[^>]*data-email="ops@acme\.in"/.test(html));
+  r.ok('...and it says why on the face of the card',
+    /has an account/.test(html) && /Copy sign-in message/.test(html));
   r.ok('a contact with a phone but no email is offered WhatsApp and no Invite',
     /acc-co-wa[^>]*data-phone="\+91 90000 33333"/.test(html) &&
     !/acc-co-invite[^>]*data-name="Front desk"/.test(html));
@@ -271,6 +272,56 @@ const REG = [{
   r.ok('...and the registered name is NOT also listed as a leftover',
     (html.match(/<optgroup label="Not in the register yet">([\s\S]*?)<\/optgroup>/) || ['', ''])[1]
       .indexOf('>Acme Survey Pvt Ltd<') < 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('an invitation is a one-way send, so it asks first — and a second invite is never offered');
+// ═══════════════════════════════════════════════════════════════════════════════
+// Two rules, both learned from the owner pressing the wrong button on a live screen:
+//   1. The email is gone the moment it is sent, so every path that sends one confirms
+//      first, in a dialog that names the address.
+//   2. The backend REFUSES a second invite for an address that already has an account,
+//      so the panel never draws a "Re-invite" button — it named an action that could
+//      only ever come back as an error.
+{
+  const REG2 = [{
+    key: 'acme-survey', name: 'Acme Survey Pvt Ltd', email: '', phone: '', city: '', state: '',
+    pincode: '', address: '', notes: '', updatedAt: '', sheets: ['Acme Survey'], scopeCount: 1,
+    contacts: [
+      { id: 'c1', name: 'Asha Rao',   email: 'ops@acme.in', phone: '', active: true },  // has an account
+      { id: 'c2', name: 'New Person', email: 'new@acme.in', phone: '', active: true },  // no account
+    ],
+  }];
+  const asked = [];
+  const { A, posts } = boot(STAFF.concat([CUSTOMER]), IRS, {
+    companies: REG2, globals: { confirm: msg => { asked.push(String(msg)); return true; } },
+  });
+  const panel = A.T.document.getElementById('access-panels');
+  A.T.companyView = 'list';
+  A.T.renderCustomersTab();
+  const html = panel.innerHTML;
+
+  r.ok('an address WITH an account gets no Invite button',
+    !/acc-co-invite[^>]*data-email="ops@acme\.in"/.test(html));
+  r.ok('an address WITHOUT one still gets one, and it is called Invite',
+    /acc-co-invite[^>]*data-email="new@acme\.in"[^>]*>Invite</.test(html),
+    (html.match(/acc-co-invite[^>]*>/) || [''])[0]);
+  r.ok('...and the other button says what it does, instead of "Copy what to send"',
+    /Copy sign-in message/.test(html) && !/Copy what to send/.test(html));
+
+  // The card's contact buttons are wired through panels.querySelectorAll, which the stub
+  // DOM answers with [] — so they cannot be dispatched here. The panel's own Invite button
+  // is wired by ID, and it is the other half of the SAME send, so that is the path driven.
+  A.T.document.getElementById('access-cust-company').value = 'Acme Survey Pvt Ltd';
+  A.T.document.getElementById('access-cust-email').value = 'new@acme.in';
+  A.T.document.getElementById('access-cust-invite').dispatch('click');
+  await new Promise(res => setTimeout(res, 20));
+
+  r.ok('the send asked before it went, and said the email cannot be unsent',
+    asked.length === 1 && /cannot be unsent/i.test(asked[0]), asked);
+  r.ok('...naming the address, so the dialog is where a wrong one is caught',
+    /new@acme\.in/.test(asked[0] || ''), asked[0]);
+  r.ok('...and only then did it make the one POST', posts.length === 1, posts.length);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -318,8 +369,8 @@ r.head('the register opens as a grid, and a tile answers the three questions the
   // company it belongs to.
   A.T.companyTab = 'people';
   A.T.renderCustomersTab();
-  r.ok('the People tab still offers Re-invite on an existing account and WhatsApp on a phone-only contact',
-    /ops@acme\.in[\s\S]{0,400}Re-invite/.test(panel.innerHTML) &&
+  r.ok('the People tab offers no Invite on an existing account, and WhatsApp on a phone-only contact',
+    !/acc-co-invite[^>]*data-email="ops@acme\.in"/.test(panel.innerHTML) &&
     /acc-co-wa[^>]*data-phone="\+91 90000 33333"/.test(panel.innerHTML) &&
     !/acc-co-invite[^>]*data-name="Front desk"/.test(panel.innerHTML));
 
@@ -640,7 +691,7 @@ r.head('an unsent invitation is a next step, never a failed onboarding');
   r.ok('it says the account WAS created, in the backend\'s own words',
     /Account created for ops@acme\.in/.test(html));
   r.ok('...and gives the manual next step rather than leaving the admin to guess',
-    /Copy what to send them/.test(html) && /Copy the portal link/.test(html));
+    /Copy sign-in message/.test(html) && /Copy the portal link/.test(html));
   r.ok('...and the wording is amber, not the green of a clean invite',
     /acc-invite-warn/.test(html) && !/acc-invite-ok/.test(html));
   r.ok('the notice remembers the address and company the copy button needs',

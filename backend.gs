@@ -244,7 +244,19 @@ var CONFIG = {
   // EVERY store-backed action fails with a named error. And `ping` CANNOT confirm the
   // deploy — it is pre-auth and touches no store, so it answers 13 happily with the
   // property unset. Confirm with `listIRs` instead. See docs/05.
-  API_VERSION: 13,
+  //
+  // v14 = THE INSPECTOR'S CORRECTION LEDGER. `_store/corrections.json` records the
+  // one thing the app could not decide by itself: how a serial or a reporter name
+  // should READ once CR has chosen. `listIRs` carries the ledger (staff only), and
+  // two actions write it: `saveCorrection` and `deleteCorrection`, both gated to an
+  // admin or a member of the `cr` department. Nothing is written to the intake
+  // Sheet; deleting an entry restores the raw value exactly.
+  //
+  // ⚠ NOT INDEPENDENT, and the degradation is quiet by design: an older backend
+  // sends no `corrections` key, the frontend reads that as "no corrections", and
+  // the DETERMINISTIC serial fix still runs because it needs no store at all. So a
+  // v14 frontend on a v13 backend shows corrected serials and no manual entries.
+  API_VERSION: 14,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -1901,6 +1913,7 @@ function initializeStore() {
    ['attempts.json', {}], ['access.json', { departments: {}, memberships: {} }],
    ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
    ['devices.json', { devices: {} }], ['companies.json', { companies: {} }],
+   ['corrections.json', { items: {} }],
    [STORE_IDS_FILE, {}],
    [STORE_INDEX, { irs: {} }]
   ].forEach(function (pair) {
@@ -4077,6 +4090,10 @@ function doPost(e) {
       // touches who may be scoped to what.
       saveCompany:       function () { return saveCompany(params, email); },
       deleteCompany:     function () { return deleteCompany(params, email); },
+      // The Inspector's ledger (v14). NOT admin-only: CR decides, and the owner is
+      // one CR member among the admins. Both functions re-check the rule inside.
+      saveCorrection:    function () { return saveCorrection(params, email); },
+      deleteCorrection:  function () { return deleteCorrection(params, email); },
       bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
       resetUserPassword: function () { return resetUserPassword(params, email); },
       setUserStatus:     function () { return setUserStatus(params, email); },
@@ -5057,6 +5074,123 @@ function deleteCompany(params, authEmail) {
   });
 }
 
+// ── THE INSPECTOR'S CORRECTION LEDGER (`_store/corrections.json`) ──────────────
+//
+// I-INSPECTOR FINDS, CR DECIDES, the app REMEMBERS. One entry is one decision:
+//
+//   { "items": {
+//       "serial:S100-V3":  { kind:'serial', from:'S100-V3', to:'S100-003', by, at },
+//       "person:e:test@…": { kind:'person', from:'test reporter', email:'…',
+//                            to:'Test Reporter', by, at } } }
+//
+// What this is NOT: a write to the intake Sheet. The client's own words stay in the
+// Sheet and on the ticket's intake view; the app shows the decided value instead,
+// and deleting an entry puts the raw value back. That is the owner's rule — "our app
+// has to be smart", corrections made in the app only.
+//
+// Who may decide: an admin, or a member of the `cr` department. He is both, and his
+// rule is that a reported-by name is rectified only after CR has chosen it — so the
+// write is gated the way Triage is, never by a section grant.
+function correctionsStore() {
+  var c = readJson('corrections.json');
+  if (!c || typeof c !== 'object') return { items: {} };
+  if (!c.items || typeof c.items !== 'object') c.items = {};
+  return c;
+}
+
+// The read that rides on listIRs. It carries no authority — it only says how two
+// strings should be DISPLAYED — but it is staff-only all the same: every entry
+// names the colleague who approved it, and a customer has no INSIGHTS pane.
+function publicCorrections() {
+  return { items: correctionsStore().items };
+}
+
+function canDecideCorrection(authEmail) {
+  if (isAdminEmail(authEmail)) return true;
+  return getUserDepartments(authEmail).indexOf('cr') > -1;
+}
+
+function requireCorrectionRights(authEmail) {
+  if (!canDecideCorrection(authEmail)) {
+    throw new Error('Forbidden: only CR or an admin may correct a record.');
+  }
+}
+
+// The SAME person key app.js's personKey() builds, so an entry written here is found
+// by the reader there. Kept deliberately small; two spellings that differ only by
+// case or punctuation are one person, initials are never guessed at.
+function correctionNameKey(v) {
+  return String(v == null ? '' : v).toLowerCase()
+    .replace(/[.,/\\|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// POST saveCorrection — record one decision. Admin or CR.
+function saveCorrection(params, authEmail) {
+  requireCorrectionRights(authEmail);
+  var kind  = String(params.kind || '').trim();
+  var to    = String(params.to == null ? '' : params.to).trim().slice(0, 120);
+  var from  = String(params.from == null ? '' : params.from).trim().slice(0, 120);
+  var email = String(params.email == null ? '' : params.email).toLowerCase().trim().slice(0, 160);
+  if (kind !== 'serial' && kind !== 'person') return { status: 'error', message: 'Unknown correction kind.' };
+  if (!to) return { status: 'error', message: 'There is nothing to save — the corrected value is blank.' };
+  if (kind === 'serial' && !from) return { status: 'error', message: 'Which serial is being corrected?' };
+  if (kind === 'person' && !from && !email) return { status: 'error', message: 'Which reporter is being corrected?' };
+
+  var key;
+  if (kind === 'serial') {
+    key = 'serial:' + from.toUpperCase();
+  } else {
+    var nk = correctionNameKey(from);
+    if (!email && !nk) return { status: 'error', message: 'Which reporter is being corrected?' };
+    key = email ? 'person:e:' + email : 'person:n:' + nk;
+  }
+
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('corrections.json');
+    if (!store || typeof store !== 'object') store = {};
+    if (!store.items || typeof store.items !== 'object') store.items = {};
+    store.items[key] = {
+      kind:  kind,
+      from:  from,
+      to:    to,
+      email: email,
+      by:    authEmail,
+      at:    new Date().toISOString()
+    };
+    writeJsonLocked('corrections.json', store);
+    return {
+      status: 'ok',
+      key: key,
+      corrections: { items: store.items },
+      message: 'Saved. Every screen now shows "' + to + '".'
+    };
+  });
+}
+
+// POST deleteCorrection — undo one decision, back to what the Sheet says.
+function deleteCorrection(params, authEmail) {
+  requireCorrectionRights(authEmail);
+  var key = String(params.key || '').trim();
+  if (!key) return { status: 'error', message: 'Which correction?' };
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('corrections.json');
+    var items = (store && store.items) || {};
+    if (!items[key]) return { status: 'ok', corrections: { items: items }, message: 'No such correction.' };
+    var was = items[key].to || '';
+    delete items[key];
+    if (!store || typeof store !== 'object') store = { items: items };
+    store.items = items;
+    writeJsonLocked('corrections.json', store);
+    return {
+      status: 'ok',
+      corrections: { items: items },
+      message: 'Removed' + (was ? ' "' + was + '"' : '') + '. The app is back to what the Sheet says.'
+    };
+  });
+}
+
 // POST createUser (admin) — one account + a one-time temporary password.
 function createUser(params, authEmail) {
   requireAdmin(authEmail);
@@ -5418,8 +5552,13 @@ function listIRs(authEmail) {
   // between an error and possibly handing an outsider every row in the repository,
   // and only one of those is recoverable.
   var company = customerCompany(authEmail);
-  if (!company) return { status: 'ok', grid: grid };
-  return { status: 'ok', grid: filterGridToCompany(grid, company) };
+  // The Inspector's ledger rides on this read so no extra round trip is paid — and
+  // BEFORE the grid is mapped on the other end, because the mapper applies it. It is
+  // staff-only: a customer has no INSIGHTS and no correction buttons, and every entry
+  // names the colleague who approved it.
+  var corrections = company ? { items: {} } : publicCorrections();
+  if (!company) return { status: 'ok', grid: grid, corrections: corrections };
+  return { status: 'ok', grid: filterGridToCompany(grid, company), corrections: corrections };
 }
 
 // The intake sheet as a grid, exactly as the sheet DISPLAYS it. One place, because

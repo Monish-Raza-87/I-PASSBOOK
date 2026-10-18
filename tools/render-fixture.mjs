@@ -245,9 +245,9 @@ const ACCESS_DEPTS = [
 // what the clean-up list is for, and a fixture with none of them would photograph a panel
 // that never shows its second section. `GreenField …` is deliberately long — it is what
 // decides whether a company card survives a narrow column — and the contacts cover the
-// three cases the card has to tell APART: an email that already has an account (the button
-// must read Re-invite, not Invite), a contact with a phone but no email (WhatsApp only),
-// and one with both.
+// three cases the card has to tell APART: an email that already has an account (NO Invite
+// button at all: the backend refuses a second invite), a contact with a phone but no email
+// (WhatsApp only), and one with both.
 const ACCESS_COMPANIES = [
   { key: 'agrikart-pvt-ltd', name: 'AgriKart Pvt Ltd', email: 'hello@agrikart.in', phone: '+91 98860 11223',
     city: 'Coimbatore', state: 'Tamil Nadu', pincode: '641004', address: '', notes: '',

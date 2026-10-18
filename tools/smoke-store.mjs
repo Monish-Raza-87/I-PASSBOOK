@@ -3143,4 +3143,44 @@ r.ok('...so the item is decided rather than deferred: there is no search left fo
 r.ok('the store files a sign-in and a ticket both touch are all covered by the id cache',
   ['users.json', 'irs.json', 'sections/index.json'].every(p => ctx.storeIdKey(p).indexOf(TEST_ROOT_ID) > -1));
 
+// ── The Inspector's correction ledger ─────────────────────────────────────────
+// I-INSPECTOR finds, CR decides, the app remembers. These are real calls into the
+// real backend — the whole point is that the write, the permission and the read-back
+// are behaviour, not source text.
+r.head('I-INSPECTOR: CR records a decision, and the next execution reads it back');
+const CR = 'adhik.nair@indrones.com';
+{
+  const saved = ctx.saveCorrection({ kind: 'serial', from: 'S100-V3', to: 'S100-003' }, ADMIN);
+  r.ok('an admin may record a serial correction',
+    saved.status === 'ok' && saved.key === 'serial:S100-V3', saved);
+  r.ok('...and the corrected value comes back with the ledger',
+    saved.corrections.items['serial:S100-V3'].to === 'S100-003', saved.corrections);
+
+  const p = ctx.saveCorrection(
+    { kind: 'person', from: 'test reporter', to: 'Test Reporter', email: 'TEST.REPORTER@example.com' }, CR);
+  r.ok('a CR member may record a reporter correction',
+    p.status === 'ok' && p.key === 'person:e:test.reporter@example.com', p);
+  r.ok('...and the email is the identity, lowercased',
+    p.corrections.items['person:e:test.reporter@example.com'].to === 'Test Reporter', p.corrections);
+
+  let refused = false;
+  try { ctx.saveCorrection({ kind: 'serial', from: 'S100-V4', to: 'S100-004' }, 'someone@indrones.com'); }
+  catch (e) { refused = /Forbidden/.test(e.message); }
+  r.ok('an ordinary staff account may NOT decide — the gate matches Triage', refused);
+
+  r.ok('a correction with no value to write is refused',
+    ctx.saveCorrection({ kind: 'serial', from: 'S100-V5', to: '  ' }, ADMIN).status === 'error');
+
+  reexec();   // a new execution: the ledger has to be on disk, not in memory
+  r.ok('the ledger survives into the next execution',
+    ctx.publicCorrections().items['serial:S100-V3'].to === 'S100-003', ctx.publicCorrections());
+
+  const del = ctx.deleteCorrection({ key: 'serial:S100-V3' }, CR);
+  r.ok('CR may remove one, putting the raw value back',
+    del.status === 'ok' && !del.corrections.items['serial:S100-V3'], del);
+  reexec();
+  r.ok('...and the removal is on disk too',
+    !ctx.publicCorrections().items['serial:S100-V3'], ctx.publicCorrections());
+}
+
 r.finish();

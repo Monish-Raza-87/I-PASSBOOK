@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v95';
+const APP_VERSION = 'v96';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -102,7 +102,8 @@ const CONFIG = {
   // primary to domain-only would have Google refuse the request before our code
   // runs — and that would kill the password door too, for exactly the people who
   // need it: a shared machine with no Google session, and the external address in
-  // the backend's CONFIG.EXTERNAL_EMAILS.
+  // the backend's `_store/ids.json` → externalEmails (it was CONFIG.EXTERNAL_EMAILS
+  // until v13, when the ids left the source — see docs/05).
   //
   // THIS URL IS OPENED, NEVER FETCHED. It is the one thing about this feature that
   // is easy to get wrong, and the first version of it did: fetching this URL from
@@ -5886,6 +5887,18 @@ function deleteDepartmentAction(key) {
 // written behind this panel's back.
 let custNotice = null;
 
+// The register's own two pieces of state, beside custNotice for the same reason it is
+// here: a repaint of the Customers tab must not lose what is being typed, and the panel
+// repaints on every save, every invite and every added contact row.
+//
+// `companyForm` is null when no company is being edited, and otherwise IS the form: the
+// fields are read back out of the DOM by readCompanyForm() before any repaint that the
+// form itself caused. Holding the draft here is what makes "add a contact" and "remove a
+// contact" possible at all — both are repaints, and a repaint that did not first capture
+// the typing would silently drop it.
+let companyForm = null;
+let companyFilter = '';
+
 // The portal sits beside this app, so the app's own directory is the answer — the same
 // derivation the backend's customerPortalUrl() makes from CONFIG.APP_URL. Not a
 // constant, because this page is served from GitHub Pages and from a local preview,
@@ -5894,28 +5907,135 @@ function customerPortalLink() {
   return location.origin + location.pathname.replace(/[^/]*$/, '') + 'customer.html';
 }
 
-// Every company an admin might be inviting into: the ones already on a ticket, plus the
-// ones a customer is already scoped to — a second contact at a company whose tickets
-// happen not to be in the loaded list is a normal thing to invite.
+// ─── THE COMPANY REGISTER (v96) ──────────────────────────────────────────────
+// Since v96 the source of truth for who a customer may be scoped to is the REGISTER —
+// `_store/companies.json`, carried to this pane on the same `listUsers` call as the
+// roster. The tickets still matter, but they matter as EVIDENCE of the mess rather than
+// as the list: three spellings of one company used to be three dropdown entries, which
+// is exactly the duplicate list this replaces.
 //
-// THE COLUMN IS `companyName`, AND IT HAS TO BE. This list feeds the company an admin
-// picks, and that string is what the backend matches rows against — customerIRS() reads
-// the intake grid through companyColumnIndex(), whose needles are 'where do you work' /
-// 'company name' / 'company' / … — i.e. Col R, the `companyName` mapping. This function
-// used to read `customerName` instead, which is Col L "Who's Reporting", the REPORTING
-// PERSON'S name with the phone split off it (splitNamePhone). The two columns hold
-// different things, so the dropdown was offering names that could never match a row: the
-// invitation mailed fine, the customer signed in, and the portal was empty — a working
-// account scoped to nothing, with nothing on screen saying why. `companyName` is the
-// only column here that agrees with what the backend decides access by.
+// The FRONTEND half of the backend's sameCompanyKey. Two copies of one normalisation
+// rule exist on purpose — the register's whole job is answering "are these the same
+// company", and the answer has to be identical on both sides of the wire — so the smoke
+// suite pins that these two agree, in the same spirit as the companyColumnIndex needle
+// cross-check below.
+function normCompany(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// Mirrors COMPANY_PLACEHOLDERS in backend.gs. A placeholder is not a company, and
+// offering "NA" as one to scope somebody to is the mess the register exists to clear.
+const COMPANY_PLACEHOLDERS = ['na', 'n/a', 'nil', 'none', 'no', '-', '--', 'test', 'testing', 'x'];
+function isCompanyPlaceholder(name) {
+  const k = normCompany(name);
+  return !k || COMPANY_PLACEHOLDERS.includes(k);
+}
+
+function registerCompanies() {
+  return (accessCache && accessCache.companies) || [];
+}
+
+// Does the register already speak for this spelling — as a company's name, or as one of
+// the extra spellings an admin has pinned to it? The dropdown uses this to show the
+// curated names as choices and the leftovers as work.
+//
+// It is the SAME match the backend scopes by (companySheetNames), deliberately: a
+// spelling this function called "registered" but the backend did not would show a
+// company as tidied while its tickets stayed unreachable.
+function companyIsRegistered(name) {
+  const k = normCompany(name);
+  if (!k) return false;
+  return registerCompanies().some(c =>
+    normCompany(c.name) === k || (c.sheets || []).some(s => normCompany(s) === k));
+}
+
+// Every company an admin might be inviting into: the register's names first, then every
+// spelling that is on a ticket or on an account and that no registered company speaks
+// for. Both halves matter. The register is the curated list the owner wants; the raw
+// spellings stay because dropping them would break the ONE case that already works
+// today — a company whose tickets say something the register has not been told about.
+// The dropdown shows the two groups apart, so a leftover reads as a leftover.
+//
+// THE TICKET COLUMN IS `companyName`, AND IT HAS TO BE. This list feeds the company an
+// admin picks, and that string is what the backend matches rows against — customerIRS()
+// reads the intake grid through companyColumnIndex(), whose needles are 'where do you
+// work' / 'company name' / 'company' / … — i.e. Col R, the `companyName` mapping. This
+// function used to read `customerName` instead, which is Col L "Who's Reporting", the
+// REPORTING PERSON'S name with the phone split off it (splitNamePhone). The two columns
+// hold different things, so the dropdown was offering names that could never match a
+// row: the invitation mailed fine, the customer signed in, and the portal was empty — a
+// working account scoped to nothing, with nothing on screen saying why. `companyName` is
+// the only column here that agrees with what the backend decides access by.
 //
 // A ticket with no company named is skipped rather than offered: an empty option invites
 // an admin to scope somebody to nothing.
 function knownCompanies() {
   const seen = new Set();
+  registerCompanies().forEach(c => { if (c && c.name) seen.add(String(c.name).trim()); });
   (accessCache.users || []).forEach(u => { if (u.customerOf) seen.add(String(u.customerOf).trim()); });
   (allIRs || []).forEach(ir => { if (ir && ir.companyName) seen.add(String(ir.companyName).trim()); });
   return [...seen].filter(Boolean).sort((a, b) => a.localeCompare(b));
+}
+
+// The spellings that are on a ticket or on an account and that NO registered company
+// speaks for — the list the register exists to empty. Shown as work, not as choices.
+//
+// The count is tickets PLUS accounts. A company a customer is already scoped to is one
+// somebody has already onboarded, so leaving those out would hide the entries that are
+// most certainly real.
+function unregisteredCompanyNames() {
+  const counts = new Map();
+  const add = (v) => {
+    const raw = String(v == null ? '' : v).trim();
+    if (isCompanyPlaceholder(raw) || companyIsRegistered(raw)) return;
+    counts.set(raw, (counts.get(raw) || 0) + 1);
+  };
+  (allIRs || []).forEach(ir => { if (ir && ir.companyName) add(ir.companyName); });
+  (accessCache.users || []).forEach(u => { if (u.customerOf) add(u.customerOf); });
+  return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+// A WhatsApp handover, built at CLICK time from the number on the record. It cannot be a
+// constant: the link has to carry the number AND the handover text, and the app has no
+// static equivalent. wa.me wants digits only, country code first — and a bare 10-digit
+// Indian mobile is the only shape the register is expected to hold, so that one gets 91
+// prefixed rather than silently dropping the message on an invalid number.
+function whatsappLink(phone, text) {
+  let d = String(phone || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length === 10) d = '91' + d;
+  return 'https://wa.me/' + d + '?text=' + encodeURIComponent(text);
+}
+
+// A register record, as the fields saveCompany reads. ONE builder, so a form save and a
+// one-click merge cannot post two different shapes of the same record — and `extraSheets`
+// is how the merge path adds a spelling without touching anything else.
+function companyToFields(c, extraSheets) {
+  return {
+    key: c.key || '',
+    name: c.name || '',
+    email: c.email || '', phone: c.phone || '',
+    address: c.address || '', city: c.city || '', state: c.state || '', pincode: c.pincode || '',
+    notes: c.notes || '',
+    sheets: (c.sheets || []).concat(extraSheets || []).join('\n'),
+    contacts: JSON.stringify(c.contacts || [])
+  };
+}
+// The FORM's own serialiser, and it is a separate function on purpose. A register record
+// carries `sheets` as an ARRAY and a draft carries `sheetsText` as a string, so posting a
+// draft through the record's serialiser would send an empty `sheets` — which the backend
+// reads as "no other spellings", silently un-registering every alias the company had and
+// taking its tickets away from the very customer the edit was meant to help.
+function companyFormToFields(f) {
+  return {
+    key: f.key || '',
+    name: f.name || '',
+    email: f.email || '', phone: f.phone || '',
+    address: f.address || '', city: f.city || '', state: f.state || '', pincode: f.pincode || '',
+    notes: f.notes || '',
+    sheets: String(f.sheetsText == null ? '' : f.sheetsText),
+    contacts: JSON.stringify(f.contacts || [])
+  };
 }
 
 // The handover text, in the same shape as credentialsTxt() — a customer has no
@@ -5955,18 +6075,236 @@ function customerHandoverTxt(email, company) {
   ].filter(l => l !== '').join('\n');
 }
 
+// Which spellings of this registered company actually appear on the loaded tickets. A
+// registered name that NO ticket uses is the one way left to onboard somebody into an
+// empty portal: the register would scope them to a string the intake column never
+// carries. It is not always a mistake — a first sale genuinely has no ticket yet — so
+// this only ever feeds a warning, and the warning names the fix.
+function companyIRSpellings(company) {
+  const names = [company.name].concat(company.sheets || []).map(normCompany);
+  const hits = new Set();
+  (allIRs || []).forEach(ir => {
+    if (ir && ir.companyName && names.includes(normCompany(ir.companyName))) hits.add(String(ir.companyName).trim());
+  });
+  return [...hits];
+}
+
+// ── one company in the register ──────────────────────────────────────────────
+// The card's job is to answer "who do I reach at this company, and does anything here
+// prove they can already get in". Both answers are on the face of it: the contact rows
+// carry their own Invite / WhatsApp / Copy buttons, and a contact whose email already has
+// an account says so, because "invite" on an existing account is a different act from
+// inviting a new one and the button should not pretend otherwise.
+function companyCardHtml(c) {
+  const users = accessCache.users || [];
+  const contactRows = (c.contacts || []).map(k => {
+    const email = String(k.email || '').trim();
+    const phone = String(k.phone || '').trim();
+    const hasAccount = !!email && users.some(u => String(u.email || '').toLowerCase() === email.toLowerCase());
+    const who = [k.name, email, phone].filter(Boolean).map(x => escHtml(x)).join(' · ') || '<em>no details yet</em>';
+    const buttons = [
+      email ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">${hasAccount ? 'Re-invite' : 'Invite'}</button>` : '',
+      phone ? `<button type="button" class="btn btn-sm btn-secondary acc-co-wa" data-phone="${escHtml(phone)}" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">WhatsApp</button>` : '',
+      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">Copy what to send</button>` : ''
+    ].filter(Boolean).join(' ');
+    return `<div class="acc-contact">
+      <div class="acc-contact-who">${who}${hasAccount ? ' <span class="acc-badge acc-badge-cust">has an account</span>' : ''}${k.active === false ? ' <span class="acc-badge acc-badge-off">left</span>' : ''}</div>
+      ${buttons ? `<div class="acc-contact-how">${buttons}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  const meta = [c.city, c.email, c.phone].filter(Boolean).map(x => escHtml(x)).join(' · ');
+  const n = c.scopeCount || 0;
+  return `
+    <div class="access-user-card acc-company">
+      <div class="access-user-top">
+        <div>
+          <div class="access-email-line">${escHtml(c.name)}
+            <span class="acc-badge acc-badge-cust">${n} account${n === 1 ? '' : 's'}</span></div>
+          ${meta ? `<div class="acc-matrix-sub">${meta}</div>` : ''}
+        </div>
+        <div class="access-user-controls">
+          <button type="button" class="btn btn-sm btn-secondary acc-co-edit" data-key="${escHtml(c.key)}">Edit</button>
+          <button type="button" class="btn btn-sm btn-secondary acc-co-link">Copy portal link</button>
+          <button type="button" class="btn btn-sm btn-danger acc-co-del" data-key="${escHtml(c.key)}" data-name="${escHtml(c.name)}">Remove</button>
+        </div>
+      </div>
+      ${(c.sheets || []).length ? `<div class="acc-matrix-sub">Also on IRs as: ${(c.sheets || []).map(s => `<code>${escHtml(s)}</code>`).join(' ')}</div>` : ''}
+      ${contactRows ? `<div class="acc-contacts">${contactRows}</div>` : '<div class="acc-matrix-sub">No contact people yet — press <strong>Edit</strong> to add one.</div>'}
+    </div>`;
+}
+
+// ── the register's form ──────────────────────────────────────────────────────
+function blankCompanyForm() {
+  return { key: '', originalName: '', name: '', email: '', phone: '', address: '', city: '',
+           state: '', pincode: '', notes: '', sheetsText: '', contacts: [] };
+}
+function companyFormFromRecord(c) {
+  return {
+    key: c.key, originalName: c.name,
+    name: c.name, email: c.email || '', phone: c.phone || '',
+    address: c.address || '', city: c.city || '', state: c.state || '', pincode: c.pincode || '',
+    notes: c.notes || '',
+    sheetsText: (c.sheets || []).join('\n'),
+    // A copy, never the record itself: the form is edited live and an abandoned edit must
+    // not have already changed the thing the list is rendering from.
+    contacts: (c.contacts || []).map(k => ({ id: k.id || '', name: k.name || '', email: k.email || '', phone: k.phone || '', active: k.active !== false }))
+  };
+}
+
+// The form's fields, read back out of the DOM. It has to exist because adding or
+// removing a contact row REPAINTS the panel, and a repaint that did not first capture
+// what is typed would silently discard it — the reason the state lives in `companyForm`
+// at all rather than being read once at save time.
+//
+// Every field is reached by ID, including the contact rows, rather than by a descendant
+// query. That is not style: the harness's stub DOM has no querySelector on an element, so
+// a form read through descendant queries is a form no driven test can fill in.
+function readCompanyForm() {
+  const val = (id) => { const e = document.getElementById(id); return e ? String(e.value == null ? '' : e.value) : ''; };
+  const contacts = [];
+  const n = companyForm ? companyForm.contacts.length : 0;
+  for (let i = 0; i < n; i++) {
+    contacts.push({ id: '', name: val('acc-c-' + i + '-name'), email: val('acc-c-' + i + '-email'),
+                    phone: val('acc-c-' + i + '-phone'), active: true });
+  }
+  return {
+    key: companyForm ? companyForm.key : '',
+    originalName: companyForm ? (companyForm.originalName || '') : '',
+    name: val('acc-co-name'),
+    email: val('acc-co-email'), phone: val('acc-co-phone'),
+    city: val('acc-co-city'), state: val('acc-co-state'), pincode: val('acc-co-pin'),
+    address: val('acc-co-address'), notes: val('acc-co-notes'),
+    sheetsText: val('acc-co-sheets'),
+    contacts: contacts
+  };
+}
+
+function companyFormHtml() {
+  const f = companyForm;
+  const isNew = !f.key;
+  const rows = f.contacts.map((k, i) => `
+    <div class="access-add-row acc-contact-row">
+      <input type="text"  id="acc-c-${i}-name"  class="form-input" value="${escHtml(k.name)}"  placeholder="Name" />
+      <input type="email" id="acc-c-${i}-email" class="form-input" value="${escHtml(k.email)}" placeholder="Email" />
+      <input type="text"  id="acc-c-${i}-phone" class="form-input" value="${escHtml(k.phone)}" placeholder="Phone" />
+      <button type="button" class="btn btn-sm btn-secondary acc-c-drop" id="acc-c-${i}-drop">Remove</button>
+    </div>`).join('');
+
+  return `
+    <div class="access-user-card acc-company-form">
+      <div class="access-email-line">${isNew ? 'Add a company' : 'Editing ' + escHtml(f.originalName || f.name)}</div>
+      <div class="access-add-row" style="margin-top:0.5rem;">
+        <input type="text" id="acc-co-name" class="form-input" value="${escHtml(f.name)}" placeholder="Company name, as you want it written" />
+      </div>
+      <div class="access-add-row">
+        <input type="email" id="acc-co-email" class="form-input" value="${escHtml(f.email)}" placeholder="Company email (optional)" />
+        <input type="text"  id="acc-co-phone" class="form-input" value="${escHtml(f.phone)}" placeholder="Company phone (optional)" />
+      </div>
+      <div class="access-add-row">
+        <input type="text" id="acc-co-city"  class="form-input" value="${escHtml(f.city)}"    placeholder="City" />
+        <input type="text" id="acc-co-state" class="form-input" value="${escHtml(f.state)}"   placeholder="State" />
+        <input type="text" id="acc-co-pin"   class="form-input" value="${escHtml(f.pincode)}" placeholder="PIN code" />
+      </div>
+      <div class="access-add-row">
+        <input type="text" id="acc-co-address" class="form-input" value="${escHtml(f.address)}" placeholder="Address (optional)" />
+      </div>
+      <p class="access-hint" style="margin-top:0.2rem;">Other spellings of this company,
+        <strong>one per line</strong>. These are matched against the company column of every IR, so
+        a spelling added here is what makes a messy IR reachable. Commas are not separators —
+        real company names contain them.</p>
+      <textarea id="acc-co-sheets" class="form-input" rows="3" placeholder="ACME SURVEY&#10;Acme Survey Pvt. Ltd.">${escHtml(f.sheetsText)}</textarea>
+      <p class="access-hint" style="margin-top:0.7rem;">Contact people. An invite needs the
+        <strong>email</strong>; WhatsApp needs the <strong>phone</strong>.</p>
+      ${rows || '<div class="acc-matrix-sub">No contact people yet.</div>'}
+      <div class="access-add-row" style="margin-top:0.4rem;">
+        <button type="button" class="btn btn-sm btn-secondary" id="acc-co-addcontact">Add a contact</button>
+      </div>
+      <textarea id="acc-co-notes" class="form-input" rows="2" placeholder="Notes (optional)">${escHtml(f.notes)}</textarea>
+      <div class="access-add-row" style="margin-top:0.6rem;">
+        <button type="button" class="btn" id="acc-co-save">${isNew ? 'Add company' : 'Save company'}</button>
+        <button type="button" class="btn btn-secondary" id="acc-co-cancel">Cancel</button>
+      </div>
+    </div>`;
+}
+
+// One invitation, wherever it is pressed from. The invite row above and a contact's own
+// Invite button are the same act, and two copies of it would be two places for the
+// "mailed:false is NOT a failed onboarding" rule to be got wrong — which is the mistake
+// this panel has already made once.
+function inviteCustomerAt(email, name, company) {
+  custNotice = null;
+  return adminPost('inviteCustomer', { email: email, name: name, company: company }).then(d => {
+    if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Could not invite the customer.'); return d; }
+    custNotice = { mailed: !!d.mailed, message: d.message || '', email: d.email, company: d.company };
+    renderCustomersTab();
+    loadAccessData();
+    return d;
+  });
+}
+
 function renderCustomersTab() {
   const panels = document.getElementById('access-panels');
   if (!panels) return;
   const companies = knownCompanies();
   const customers = (accessCache.users || []).filter(u => u.customerOf);
 
-  const options = companies.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('');
+  // The dropdown's two groups, and they are shown APART on purpose. Registered names are
+  // the choices; unregistered spellings are leftovers from the tickets, kept reachable so
+  // nothing that worked before the register shipped stops working, but visibly second.
+  const regNames   = companies.filter(companyIsRegistered);
+  const rawNames   = companies.filter(c => !companyIsRegistered(c));
+  const options = regNames.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('') +
+    (rawNames.length ? `<optgroup label="Not in the register yet">` +
+      rawNames.map(c => `<option value="${escHtml(c)}">${escHtml(c)}</option>`).join('') + `</optgroup>` : '');
   // "Other company" is ALWAYS offered, and is preselected when there is nothing to pick
   // from. A company with no ticket yet is the normal state on a first sale, and a
   // dropdown that cannot name it would make the first customer the one you cannot
   // onboard.
   const nothingToPick = companies.length === 0;
+
+  // ── the register, and the spellings it has not been told about yet ─────────
+  const reg = registerCompanies();
+  const needle = companyFilter.trim().toLowerCase();
+  const shown = !needle ? reg : reg.filter(c => [c.name, c.city, c.email, c.phone]
+    .concat(c.sheets || [], (c.contacts || []).map(k => (k.name || '') + ' ' + (k.email || '')))
+    .join(' ').toLowerCase().includes(needle));
+  const unregistered = unregisteredCompanyNames();
+
+  const registerHtml = `
+    <div class="access-section">
+      <h3>Companies <span class="acc-badge acc-badge-cust">${reg.length}</span></h3>
+      <p class="access-hint">The register. A company named here can be picked when a customer is
+        invited, and <strong>every spelling on its IRs</strong> counts as the same company — so
+        correcting a name here never takes a customer's IRs away.</p>
+      <div class="access-add-row">
+        <input type="text" id="acc-co-search" class="form-input" placeholder="Search companies, contacts…" value="${escHtml(companyFilter)}" />
+        <button type="button" class="btn" id="acc-co-new">Add a company</button>
+      </div>
+      ${companyForm ? companyFormHtml() : ''}
+      ${!reg.length ? '<div class="access-empty">The register is empty. Press <strong>Add a company</strong>, or run <code>seedCompanies()</code> from the Apps Script editor to build it from the names already on the IRs.</div>' : ''}
+      ${reg.length && !shown.length ? '<div class="access-empty">No company matches that search.</div>' : shown.map(companyCardHtml).join('')}
+    </div>
+    ${unregistered.length ? `
+    <div class="access-section">
+      <h3>Not in the register yet <span class="acc-badge acc-badge-temp">${unregistered.length}</span></h3>
+      <p class="access-hint">These spellings are on an IR or on an account, and no registered company
+        speaks for them. Several spellings of one company is how the customer list became a duplicate —
+        fold each one into a company, or make it a new one.</p>
+      ${unregistered.map(([name, n]) => `
+        <div class="access-user-card">
+          <div class="access-email-line">${escHtml(name)}</div>
+          <div class="acc-matrix-sub">${n} IR${n === 1 ? '' : 's'} or account${n === 1 ? '' : 's'} use this spelling</div>
+          <div class="access-add-row" style="margin:0.5rem 0 0;">
+            <button type="button" class="btn btn-sm acc-co-create" data-name="${escHtml(name)}">Make it a company</button>
+            ${reg.length ? `<select class="form-input acc-co-merge" data-name="${escHtml(name)}" aria-label="Fold ${escHtml(name)} into an existing company">
+              <option value="">…or fold it into an existing company</option>
+              ${reg.map(c => `<option value="${escHtml(c.key)}">${escHtml(c.name)}</option>`).join('')}
+            </select>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>` : ''}
+  `;
 
   const notice = custNotice ? `
     <div class="access-section acc-invite-${custNotice.mailed ? 'ok' : 'warn'}">
@@ -5979,7 +6317,7 @@ function renderCustomersTab() {
       <p class="access-hint" style="margin-top:0.5rem;"><code>${escHtml(customerPortalLink())}</code></p>
     </div>` : '';
 
-  panels.innerHTML = `
+  panels.innerHTML = registerHtml + `
     <div class="access-section">
       <h3>Invite a customer</h3>
       <p class="access-hint">Creates the account and emails the customer the portal address.
@@ -5999,8 +6337,9 @@ function renderCustomersTab() {
                value=""${nothingToPick ? '' : ' hidden'} />
         <button type="button" class="btn" id="access-cust-invite">Invite customer</button>
       </div>
-      <p class="access-hint" style="margin-top:0.5rem;">The list is every company already named on an
-        IR, plus every company a customer is already scoped to.</p>
+      <p class="access-hint" style="margin-top:0.5rem;">The list is the register, plus any spelling
+        already on an IR that the register has not been told about yet. Pick a registered name and
+        every spelling of it on the IRs comes with it.</p>
       ${notice}
     </div>
     <div class="access-section">
@@ -6037,20 +6376,18 @@ function renderCustomersTab() {
     const company = (sel && sel.value) ? sel.value : ((neu && neu.value || '').trim());
     if (!email)   { showToast('Enter the customer\'s email address'); return; }
     if (!company) { showToast('Choose or type the company this customer belongs to'); return; }
-    custNotice = null;
+    // A REGISTERED COMPANY NO TICKET SPELLS is the one way left to onboard somebody into
+    // an empty portal, and it is silent: the account is created, the mail goes out, and
+    // the customer sees nothing. It is not always a mistake — a first sale has no ticket
+    // yet — so it asks rather than refuses, and it says which field fixes it.
+    const rec = registerCompanies().filter(c => normCompany(c.name) === normCompany(company))[0];
+    if (rec && allIRs && allIRs.length && !companyIRSpellings(rec).length) {
+      if (!confirm('No IR in the list spells "' + rec.name + '" — not as the name, and not as any of its other spellings.\n\n' +
+                   'Unless this is a first sale, that customer will open an empty portal. Add the spelling the IRs use under "Other spellings" on the company, then invite.\n\nInvite anyway?')) return;
+    }
     invite.disabled = true; invite.textContent = 'Inviting…';
-    adminPost('inviteCustomer', { email: email, name: name, company: company }).then(d => {
+    inviteCustomerAt(email, name, company).then(() => {
       invite.disabled = false; invite.textContent = 'Invite customer';
-      if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Could not invite the customer.'); return; }
-      // THE ACCOUNT AND ITS SCOPE ARE REAL WHETHER OR NOT THE MAIL LEFT. A mail failure is
-      // reported as a next step — with the text to send by hand — and never as a failed
-      // onboarding, because the backend has already written both the scope and the
-      // account by the time it tries to send. Re-rendering twice here is deliberate:
-      // once now so the notice appears immediately, and once when the roster refresh
-      // lands, which is what puts the new customer in the list underneath it.
-      custNotice = { mailed: !!d.mailed, message: d.message || '', email: d.email, company: d.company };
-      renderCustomersTab();
-      loadAccessData();
     });
   });
 
@@ -6070,6 +6407,128 @@ function renderCustomersTab() {
       if (d && d.status === 'ok') loadAccessData();
     });
   }));
+
+  // ── the register's wiring ──────────────────────────────────────────────────
+  // The search box repaints the panel on every keystroke, so the caret has to be put
+  // back by hand: the box the browser was typing into is inside the markup the repaint
+  // just replaced, and without this the second character of every word lands nowhere.
+  const coSearch = document.getElementById('acc-co-search');
+  if (coSearch) coSearch.addEventListener('input', () => {
+    companyFilter = coSearch.value;
+    renderCustomersTab();
+    const again = document.getElementById('acc-co-search');
+    if (!again) return;
+    again.focus();
+    const n = String(again.value || '').length;
+    try { again.setSelectionRange(n, n); } catch (e) { /* not a text-like input here */ }
+  });
+
+  const coNew = document.getElementById('acc-co-new');
+  if (coNew) coNew.addEventListener('click', () => { companyForm = blankCompanyForm(); renderCustomersTab(); });
+
+  // "Make it a company" starts the SAME form, with the spelling already in it twice: as
+  // the name to edit, and as the ticket spelling it came from. Filling both is the point
+  // — the form opens ready to save, not ready to retype what the panel just showed.
+  panels.querySelectorAll('.acc-co-create').forEach(b => b.addEventListener('click', () => {
+    companyForm = blankCompanyForm();
+    companyForm.name = b.dataset.name || '';
+    companyForm.sheetsText = b.dataset.name || '';
+    renderCustomersTab();
+  }));
+
+  panels.querySelectorAll('.acc-co-edit').forEach(b => b.addEventListener('click', () => {
+    const c = registerCompanies().filter(x => x.key === b.dataset.key)[0];
+    if (c) { companyForm = companyFormFromRecord(c); renderCustomersTab(); }
+  }));
+
+  // Removing deletes a LABEL. It is the one destructive control here that cannot lose
+  // anybody's access, and the confirm says so plainly — an admin who believes Remove
+  // revokes access would go looking for a step that does not exist.
+  panels.querySelectorAll('.acc-co-del').forEach(b => b.addEventListener('click', () => {
+    const n = b.dataset.name || b.dataset.key;
+    if (!confirm('Remove "' + n + '" from the register?\n\nNo IR and no customer account is touched — the name simply stops being a registered one, and existing accounts keep working. You can add it back at any time.')) return;
+    b.disabled = true;
+    adminPost('deleteCompany', { key: b.dataset.key }).then(d => {
+      b.disabled = false;
+      showToast((d && d.message) || (d && d.status === 'ok' ? 'Removed' : 'Could not remove the company.'));
+      if (d && d.status === 'ok') { if (companyForm && companyForm.key === b.dataset.key) companyForm = null; loadAccessData(); }
+    });
+  }));
+
+  // Folding a stray spelling in is the whole clean-up tool, and it is one action: the
+  // spelling joins the company's `sheets`, which is what makes its tickets reachable.
+  panels.querySelectorAll('.acc-co-merge').forEach(sel2 => sel2.addEventListener('change', () => {
+    const c = registerCompanies().filter(x => x.key === sel2.value)[0];
+    if (!c) return;
+    const spelling = sel2.dataset.name || '';
+    if (!spelling) return;
+    sel2.disabled = true;
+    adminPost('saveCompany', companyToFields(c, [spelling])).then(d => {
+      sel2.disabled = false;
+      showToast((d && d.message) || (d && d.status === 'ok' ? 'Folded in' : 'Could not fold that spelling in.'));
+      if (d && d.status === 'ok') loadAccessData();
+    });
+  }));
+
+  panels.querySelectorAll('.acc-co-invite').forEach(b => b.addEventListener('click', () => {
+    b.disabled = true; b.textContent = 'Inviting…';
+    inviteCustomerAt(b.dataset.email, b.dataset.name || '', b.dataset.company).then(() => {
+      b.disabled = false; b.textContent = 'Invite';
+    });
+  }));
+  panels.querySelectorAll('.acc-co-txt').forEach(b => b.addEventListener('click', () => copyText(customerHandoverTxt(b.dataset.email, b.dataset.company))));
+  panels.querySelectorAll('.acc-co-wa').forEach(b => b.addEventListener('click', () => {
+    const url = whatsappLink(b.dataset.phone, customerHandoverTxt(b.dataset.email, b.dataset.company));
+    // No number is not a dead button: it is the one case where the other button is the
+    // answer, so it says which one.
+    if (!url) { showToast('No phone number on this contact — add one under Edit, or use "Copy what to send"'); return; }
+    window.open(url, '_blank', 'noopener');
+  }));
+  panels.querySelectorAll('.acc-co-link').forEach(b => b.addEventListener('click', () => copyText(customerPortalLink())));
+
+  // Adding or removing a contact row is a REPAINT of a form that is being typed into, so
+  // whatever is in the fields is captured first and the draft is what gets repainted.
+  const coAdd = document.getElementById('acc-co-addcontact');
+  if (coAdd) coAdd.addEventListener('click', () => {
+    companyForm = readCompanyForm();
+    companyForm.contacts.push({ id: '', name: '', email: '', phone: '', active: true });
+    renderCustomersTab();
+    const first = document.getElementById('acc-c-' + (companyForm.contacts.length - 1) + '-name');
+    if (first) first.focus();
+  });
+  if (companyForm) companyForm.contacts.forEach((k, i) => {
+    const drop = document.getElementById('acc-c-' + i + '-drop');
+    if (drop) drop.addEventListener('click', () => {
+      companyForm = readCompanyForm();
+      companyForm.contacts.splice(i, 1);
+      renderCustomersTab();
+    });
+  });
+
+  const coCancel = document.getElementById('acc-co-cancel');
+  if (coCancel) coCancel.addEventListener('click', () => { companyForm = null; renderCustomersTab(); });
+
+  const coSave = document.getElementById('acc-co-save');
+  if (coSave) coSave.addEventListener('click', () => {
+    const f = readCompanyForm();
+    // Put the draft back before anything can refuse it, so a refusal never costs the
+    // typing. readCompanyForm() already returned everything that was in the fields.
+    companyForm = f;
+    if (!String(f.name || '').trim()) { showToast('A company needs a name'); return; }
+    coSave.disabled = true; coSave.textContent = 'Saving…';
+    adminPost('saveCompany', companyFormToFields(f)).then(d => {
+      if (!d || d.status !== 'ok') {
+        coSave.disabled = false; coSave.textContent = f.key ? 'Save company' : 'Add company';
+        showToast((d && d.message) || 'Could not save the company.');
+        return;
+      }
+      // Only a SUCCESS closes the form. A refusal that closed it would discard exactly the
+      // text the message is asking the admin to fix.
+      companyForm = null;
+      showToast(d.message || 'Saved');
+      loadAccessData();
+    });
+  });
 }
 
 // ─── TAB 3: create people (single + bulk) ────────────────────────────────────

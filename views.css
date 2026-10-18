@@ -1807,6 +1807,45 @@
    pair shares the line, below it they stack. */
 .access-add-row .access-cust-field { min-width: 240px; }
 
+/* ── The company register ────────────────────────────────── */
+/* A company card is taller than every other card on this page, because it carries its
+   contacts as well as its own line. So its top row aligns to the TOP: centred, the
+   company name drifts to the middle of a card whose height the contacts decide. */
+.acc-company .access-user-top { align-items: flex-start; }
+
+/* One contact per row — who they are on the left, what can be done about them on the
+   right. The two halves are separate children so the buttons keep their own edge however
+   long a name or an address runs, and the row WRAPS to two lines on a phone rather than
+   squeezing either half; `overflow-wrap: anywhere` is what stops a long address widening
+   the card instead, since there is no space in an email to break at. */
+.acc-contacts { margin-top: 0.5rem; border-top: 1px solid var(--outline-gray-1); padding-top: 0.45rem; }
+.acc-contact {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.5rem; flex-wrap: wrap; padding: 0.25rem 0;
+}
+.acc-contact-who { font-size: var(--text-xs); color: var(--ink-gray-6); min-width: 0; overflow-wrap: anywhere; }
+.acc-contact-how { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; flex-shrink: 0; }
+/* A bare `.btn` is `width: 100%` (components.css:14), which is right for a form's submit
+   and wrong here. This group WRAPS, and inside a wrapping flex container each button
+   measures itself against the very box that is being measured from its children — so all
+   of them resolve to the container's width and every action lands on its own line, full
+   width, one above the other. Measured, not guessed: at 1280px the two buttons on one
+   contact came out 214px wide each in a 1034px row, i.e. stacked, with ~700px of empty
+   space beside them. The header's `.access-user-controls` escapes this only because it
+   does not wrap. `width: auto` is the app's own escape for exactly this (`.btn-inline`,
+   components.css:38 — note `.btn-sm` sizes height and padding, NOT width). The buttons
+   then sit on one line wherever they fit, and wrap only when they genuinely cannot. */
+.acc-contact-how .btn { width: auto; }
+
+/* The form. Indented and edge-marked so it reads as a card OPENED rather than as one
+   more card in the list — it is the company just pressed, not a new one. */
+.acc-company-form { border-left: 3px solid var(--accent); margin-left: 0.75rem; }
+/* The two long fields get the card's whole width; every other field keeps the shared
+   add-row sizing, which is what makes them wrap to one per line on a phone. */
+.acc-company-form textarea.form-input { width: 100%; }
+.acc-contact-row { margin-top: 0.35rem; }
+.acc-contact-row .form-input { min-width: 140px; }
+
 /* ── Department → section grant grid ─────────────────────── */
 .access-user-card {
   border: 1px solid var(--outline-gray-1);

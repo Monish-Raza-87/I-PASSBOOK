@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v99';
+const APP_VERSION = 'v100';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1077,6 +1077,15 @@ function canEditSection(secId)    { const a = myAccess(); if (a.role === 'admin'
 // Overview fields. A department can hold it without editing any section, which
 // is exactly what CR and Management do. Admin always has it.
 function canTriage()              { const a = myAccess(); if (a.role === 'admin') return true; return a.triage === true; }
+
+// May this person APPROVE an Inspector correction? The owner (admin) and the CR
+// department, and nobody else. The backend re-checks the same rule on the write
+// (backend.gs `saveCorrection`) — this is the button, not the gate.
+function canCorrect() {
+  const a = myAccess();
+  if (a.role === 'admin') return true;
+  return (a.departments || []).indexOf('cr') > -1;
+}
 
 // Does the DEPLOYED backend know this section at all? Admins are handed every
 // SECTION_KEYS entry by getEffectiveAccess (backend.gs), so a key that is MISSING is
@@ -6221,9 +6230,15 @@ function companyCardHtml(c) {
     const hasAccount = !!email && users.some(u => String(u.email || '').toLowerCase() === email.toLowerCase());
     const who = [k.name, email, phone].filter(Boolean).map(x => escHtml(x)).join(' · ') || '<em>no details yet</em>';
     const buttons = [
-      email ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">${hasAccount ? 'Re-invite' : 'Invite'}</button>` : '',
+      // NO Invite button once the address has an account. The backend refuses a second
+      // invite outright — "An account already exists…" — so the old "Re-invite" label
+      // named an action that could only fail. The badge beside the name says it once,
+      // and "Copy sign-in message" is the way to reach somebody who already has one.
+      email && !hasAccount ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">Invite</button>` : '',
       phone ? `<button type="button" class="btn btn-sm btn-secondary acc-co-wa" data-phone="${escHtml(phone)}" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">WhatsApp</button>` : '',
-      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">Copy what to send</button>` : ''
+      // Copies TEXT to the clipboard; it sends nothing. The label says so, because
+      // "Copy what to send" was a name only its author understood.
+      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}" title="Copies the sign-in steps to the clipboard — nothing is sent">Copy sign-in message</button>` : ''
     ].filter(Boolean).join(' ');
     return `<div class="acc-contact">
       <div class="acc-contact-who">${who}${hasAccount ? ' <span class="acc-badge acc-badge-cust">has an account</span>' : ''}${k.active === false ? ' <span class="acc-badge acc-badge-off">left</span>' : ''}</div>
@@ -6330,7 +6345,9 @@ function companyFormHtml() {
       <p class="access-hint" style="margin-top:0.2rem;">Other spellings on IRs — <strong>one per line</strong></p>
       <textarea id="acc-co-sheets" class="form-input" rows="3" placeholder="ACME SURVEY&#10;Acme Survey Pvt. Ltd.">${escHtml(f.sheetsText)}</textarea>
       <p class="access-hint" style="margin-top:0.7rem;">Contact people. An invite needs the
-        <strong>email</strong>; WhatsApp needs the <strong>phone</strong>.</p>
+        <strong>email</strong>; WhatsApp needs the <strong>phone</strong>. An address that
+        already has an account shows no Invite button — use
+        <strong>Copy sign-in message</strong> for that person.</p>
       ${rows || '<div class="acc-matrix-sub">No contact people yet.</div>'}
       <div class="access-add-row" style="margin-top:0.4rem;">
         <button type="button" class="btn btn-sm btn-secondary" id="acc-co-addcontact">Add a contact</button>
@@ -6427,9 +6444,15 @@ function companyPeopleHtml(c) {
     const hasAccount = !!email && users.some(u => String(u.email || '').toLowerCase() === email.toLowerCase());
     const who = [k.name, email, phone].filter(Boolean).map(escHtml).join(' · ') || '<em>no details yet</em>';
     const buttons = [
-      email ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">${hasAccount ? 'Re-invite' : 'Invite'}</button>` : '',
+      // NO Invite button once the address has an account. The backend refuses a second
+      // invite outright — "An account already exists…" — so the old "Re-invite" label
+      // named an action that could only fail. The badge beside the name says it once,
+      // and "Copy sign-in message" is the way to reach somebody who already has one.
+      email && !hasAccount ? `<button type="button" class="btn btn-sm acc-co-invite" data-email="${escHtml(email)}" data-name="${escHtml(k.name || '')}" data-company="${escHtml(c.name)}">Invite</button>` : '',
       phone ? `<button type="button" class="btn btn-sm btn-secondary acc-co-wa" data-phone="${escHtml(phone)}" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">WhatsApp</button>` : '',
-      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}">Copy what to send</button>` : '',
+      // Copies TEXT to the clipboard; it sends nothing. The label says so, because
+      // "Copy what to send" was a name only its author understood.
+      email ? `<button type="button" class="btn btn-sm btn-secondary acc-co-txt" data-email="${escHtml(email)}" data-company="${escHtml(c.name)}" title="Copies the sign-in steps to the clipboard — nothing is sent">Copy sign-in message</button>` : '',
     ].filter(Boolean).join(' ');
     return `<div class="acc-contact">
       <div class="acc-contact-who">${who}${hasAccount ? ' <span class="acc-badge acc-badge-cust">has an account</span>' : ''}${k.active === false ? ' <span class="acc-badge acc-badge-off">left</span>' : ''}</div>
@@ -6575,7 +6598,12 @@ function wireCompanyActions(panels) {
     });
   }));
 
+  // Sending an invitation is irreversible in the only way that matters: the email is
+  // gone the moment it is sent. It asks first, the same as every other button here that
+  // cannot be taken back.
   panels.querySelectorAll('.acc-co-invite').forEach(b => b.addEventListener('click', () => {
+    const to = b.dataset.email || 'this address';
+    if (!confirm('Send the invitation email to ' + to + ' now?\n\nThis creates their customer account and emails them the portal link. An email cannot be unsent — check the address first.')) return;
     b.disabled = true; b.textContent = 'Inviting…';
     inviteCustomerAt(b.dataset.email, b.dataset.name || '', b.dataset.company).then(() => {
       b.disabled = false; b.textContent = 'Invite';
@@ -6586,7 +6614,7 @@ function wireCompanyActions(panels) {
     const url = whatsappLink(b.dataset.phone, customerHandoverTxt(b.dataset.email, b.dataset.company));
     // No number is not a dead button: it is the one case where the other button is the
     // answer, so it says which one.
-    if (!url) { showToast('No phone number on this contact — add one under Edit, or use "Copy what to send"'); return; }
+    if (!url) { showToast('No phone number on this contact — add one under Edit, or use "Copy sign-in message"'); return; }
     window.open(url, '_blank', 'noopener');
   }));
 }
@@ -6744,7 +6772,7 @@ function renderCustomersTab() {
       <h3>${custNotice.mailed ? iconSvg('check-circle') + ' Invited' : iconSvg('alert') + ' Account created — the invitation email could NOT be sent'}</h3>
       <p class="access-hint">${escHtml(custNotice.message)}</p>
       <div class="access-add-row">
-        <button type="button" class="btn btn-sm" id="access-cust-copy">${iconSvg('copy')} Copy what to send them</button>
+        <button type="button" class="btn btn-sm" id="access-cust-copy">${iconSvg('copy')} Copy sign-in message</button>
         <button type="button" class="btn btn-sm btn-secondary" id="access-cust-copy-link">Copy the portal link</button>
       </div>
       <p class="access-hint" style="margin-top:0.5rem;"><code>${escHtml(customerPortalLink())}</code></p>
@@ -6813,11 +6841,17 @@ function renderCustomersTab() {
     // an empty portal, and it is silent: the account is created, the mail goes out, and
     // the customer sees nothing. It is not always a mistake — a first sale has no ticket
     // yet — so it asks rather than refuses, and it says which field fixes it.
+    //
+    // ONE dialog, not two: the empty-portal warning is folded into the send confirmation
+    // rather than stacked in front of it. Two confirms in a row is how people learn to
+    // press Enter without reading either.
     const rec = registerCompanies().filter(c => normCompany(c.name) === normCompany(company))[0];
-    if (rec && allIRs && allIRs.length && !companyIRSpellings(rec).length) {
-      if (!confirm('No IR in the list spells "' + rec.name + '" — not as the name, and not as any of its other spellings.\n\n' +
-                   'Unless this is a first sale, that customer will open an empty portal. Add the spelling the IRs use under "Other spellings" on the company, then invite.\n\nInvite anyway?')) return;
-    }
+    const emptyPortal = !!(rec && allIRs && allIRs.length && !companyIRSpellings(rec).length);
+    if (!confirm((emptyPortal
+          ? 'No IR in the list spells "' + rec.name + '" — not as the name, and not as any of its other spellings, so unless this is a first sale they will open an EMPTY portal.\n\n'
+          : '') +
+        'Send the invitation email to ' + email + ' now?\n\n' +
+        'This creates their customer account for ' + company + ' and emails them the portal link. An email cannot be unsent — check the address first.')) return;
     invite.disabled = true; invite.textContent = 'Inviting…';
     inviteCustomerAt(email, name, company).then(() => {
       invite.disabled = false; invite.textContent = 'Invite customer';
@@ -7324,6 +7358,20 @@ const ALL_FILTERS = { fy: INSIGHTS_ALL, month: INSIGHTS_ALL, status: INSIGHTS_AL
                       category: INSIGHTS_ALL, customer: INSIGHTS_ALL, drone: INSIGHTS_ALL,
                       model: INSIGHTS_ALL, company: INSIGHTS_ALL };
 let insightsFilters = { ...ALL_FILTERS };
+// The select id → filter axis, in ONE place: the renderer, the change handler and the
+// find box all need it, and three copies is three chances for a rename to leave one
+// control wired to a field that no longer exists.
+const INSIGHTS_KEY = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
+                       'ins-category': 'category', 'ins-customer': 'customer',
+                       'ins-company': 'company', 'ins-drone': 'drone', 'ins-model': 'model' };
+// The FIND text for each long facet, keyed by the select's id. It lives here rather
+// than in the input because every filter change rebuilds the pane; an input that
+// held its own value would empty itself the moment anything else was touched.
+let insightsFind = {};
+// The full option list per select, rebuilt on every render, so the find box can
+// narrow a select in place without re-rendering (and therefore without losing the
+// caret halfway through a word).
+let _insightsLists = {};
 
 // The dropdowns' option lists, computed over the WHOLE list and never over the
 // filtered rows: a select built from filtered rows would drop every other option the
@@ -7361,23 +7409,197 @@ function companyNamesFor(value) {
   return set;
 }
 
+// ─── OUT-OF-SCOPE EQUIPMENT ──────────────────────────────────────────────────
+// The intake's "Drone Model" column is free text and a handful of rows name things
+// Indrones does not service. The owner's ruling (2026-10-18) is that DJI and MAVIC
+// can be dropped from the app's own vocabulary, so the MODEL and UAS SN facets stand
+// aside for them and Data Quality counts them. AGISOFT is deliberately NOT in this
+// list: it is in their workflow and must stay visible.
+// The IRs themselves are untouched: dropping a ticket is not the same as tidying a
+// spelling, and a record that exists must stay findable in the list — only the
+// dashboard's own vocabulary is cleaned.
+const OUT_OF_SCOPE_MODEL = /\bDJI\b|\bMAVIC\b/i;
+function isOutOfScopeModel(v) { return OUT_OF_SCOPE_MODEL.test(String(v == null ? '' : v)); }
+function isOutOfScopeSerial(v) { return /\bMAVIC\b/i.test(String(v == null ? '' : v)); }
+
+// ─── THE FOUR SERIAL FORMATS (the Inspector's R-108) ─────────────────────────
+// The rule book has carried R-108 since it was written — "a drone serial that does
+// not match one of the four formats, or looks like one but is malformed → ask CR" —
+// and nothing ever ran it. This is that rule as code, keyed off the serial's OWN
+// prefix rather than the model column, because the model column is free text and is
+// the very thing nobody can be trusted to have spelled right.
+//
+// The formats are the owner's own, from the rule book:
+//   SIGMA 25  S25XXX · SIGMA 25 PRO S25PXXX · SIGMA 100 S100-XXX · SIGMA 75 S75XXX
+// Anything else is free writing and is never touched. S25P is tested before S25 or
+// every Pro serial would fail the plain Sigma 25 rule.
+//
+// AND THE APP FIXES WHAT IT CAN PROVE. The owner's rule (2026-10-18): "S100-XXX is
+// compulsory when the data is fed in our app, correction to wrong entry has to be
+// made by our app only." So the four formats are also a NORMALISER: a serial written
+// S100-12, S100 12 or s100_012 is the same serial as S100-012 and the app says so.
+// It only fixes a shape it can see — `S100-V3` or `S75-MAHYCO` is NOT guessed at,
+// because a wrong guess would invent an aircraft. Those go to CR, exactly as R-108
+// says. And nothing here edits the intake Sheet: the raw cell stays in `intake`.
+function canonicalSerial(v) {
+  const raw = String(v == null ? '' : v).trim();
+  if (!raw) return '';
+  const s = raw.toUpperCase();
+  // One prefix, then an optional separator, then up to three digits. A 4-digit body
+  // is left alone on purpose: it is not the owner's format, so guessing at it is the
+  // one thing R-108 forbids. Anything unrecognised is returned EXACTLY as written —
+  // not uppercased, because a free-written value is not a serial the app understands.
+  const m = /^(S100|S25P|S75|S25)[-_ .]?(\d{1,3})$/.exec(s);
+  if (!m) return raw;
+  const head = m[1] === 'S100' ? 'S100-' : m[1];
+  return head + ('00' + m[2]).slice(-3);
+}
+
+function serialFormatProblem(sn) {
+  const s = canonicalSerial(sn);
+  if (!s) return '';
+  if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX';
+  if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX';
+  if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX';
+  if (/^S25/.test(s)) return /^S25\d{3}$/.test(s) ? '' : 'SIGMA 25 serials read S25XXX';
+  return '';
+}
+
+// ─── APPROVED CORRECTIONS (`_store/corrections.json`) ────────────────────────
+// The Inspector FINDS, CR DECIDES, the app REMEMBERS. Nothing is ever rewritten in
+// the intake Sheet — the owner's rule is that a wrong value is corrected in the app,
+// and the client's own words stay on the record. One entry is one decision:
+//
+//   { kind: 'serial', from: 'S100-V3', to: 'S100-003', by, at }
+//   { kind: 'person', from: 'test reporter', email: 'test@…', to: 'Test Reporter', by, at }
+//
+// Delivered on the SAME `listIRs` call as the grid, so every device that can see a
+// ticket can also see the corrections and no extra round trip is paid for them.
+// A device running an older backend simply gets no `corrections` key and falls back
+// to the deterministic serial fix, which needs no store at all.
+let corrections = { items: {} };
+
+function normEmail(v) { return String(v == null ? '' : v).toLowerCase().trim(); }
+function serialCorrectionKey(v) { return 'serial:' + String(v == null ? '' : v).trim().toUpperCase(); }
+function personCorrectionKey(name, email) {
+  const e = normEmail(email);
+  return e ? 'person:e:' + e : 'person:n:' + personKey(name);
+}
+
+function setCorrections(v) {
+  const items = v && typeof v === 'object' && v.items && typeof v.items === 'object' ? v.items : {};
+  corrections = { items };
+}
+
+// The serial as the APP shows it: an approved correction first, then the
+// deterministic four-format fix, then the raw value untouched.
+function resolveSerial(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  const hit = corrections.items[serialCorrectionKey(s)];
+  if (hit && hit.to) return canonicalSerial(hit.to);
+  return canonicalSerial(s);
+}
+
+// The reporter's name as the APP shows it. An approved correction is the ONLY thing
+// that can change it, and a correction only exists after CR has chosen it.
+function reporterName(name, email) {
+  const n = String(name == null ? '' : name).trim();
+  if (!n) return '';
+  const hit = corrections.items[personCorrectionKey(n, email)];
+  if (hit && hit.to) return String(hit.to);
+  return n;
+}
+
+// ─── "Reported by" is a PERSON — Col L and Col P TOGETHER ────────────────────
+// Col L is a free-text "Who's Reporting", so one person arrives as "Monish Raza",
+// "monish raza" and "MONISH RAZA ". Col P is their email address and is a far
+// stronger identity than any spelling.
+//
+// The owner's rule (2026-10-18): mind L and P TOGETHER. So the identity is the
+// email when there is one, and a row with no email falls back to its name — and
+// attaches to an email group only when that name is used by exactly ONE address.
+// Two addresses that happen to share a name are NOT merged, because that is how two
+// different customers become one row and a dashboard starts lying quietly. Initials
+// are still never guessed at.
+function personKey(s) {
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/[.,/\\|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// The identity key for one row. `nameEmails` is the name → Set(email) map every
+// caller builds from the whole list first, so a row without an email can borrow the
+// unique address its name was seen with.
+function reporterKeyFor(name, email, nameEmails) {
+  const e = normEmail(email);
+  if (e) return 'e:' + e;
+  const n = personKey(name);
+  if (!n) return '';
+  const emails = nameEmails && nameEmails.get(n);
+  if (emails && emails.size === 1) return 'e:' + [...emails][0];
+  return n;
+}
+
+// Two passes over the same rows, so every caller resolves identities identically:
+// first collect each name's addresses, then key every row. PURE.
+function nameEmailIndex(irs) {
+  const index = new Map();
+  (Array.isArray(irs) ? irs : []).forEach(ir => {
+    const n = personKey(ir && ir.customerName);
+    const e = normEmail(ir && ir.contactEmail);
+    if (!n || !e) return;
+    const set = index.get(n) || new Set();
+    set.add(e);
+    index.set(n, set);
+  });
+  return index;
+}
+
 function insightsFacets(irs) {
   const rows = Array.isArray(irs) ? irs : [];
-  const years = new Set(), months = new Set(), customers = new Set(), drones = new Set(), models = new Set();
+  const years = new Set(), months = new Set(), drones = new Set(), models = new Set();
+  // Built once for the whole list: a row without an email borrows the unique address
+  // its name was seen with (see reporterKeyFor).
+  const nameEmails = nameEmailIndex(rows);
   // The company axis is keyed by the REGISTER's key where one speaks for the spelling,
   // so a company whose tickets carry three spellings is one option, not three. Where no
   // record speaks for it yet, the raw spelling is its own option — the dashboard has to
   // be able to count a mess the register has not tidied, or it would hide exactly the
   // companies that need tidying.
   const companies = new Map();
-  let undated = 0;
+  // Keyed by the reporter identity (email where there is one, name otherwise), value
+  // carries every spelling it has been seen under so the label can be the one most
+  // tickets actually use rather than whichever arrived first.
+  const persons = new Map();
+  let undated = 0, offFleet = 0;
   rows.forEach(ir => {
     const fy = irFiscalYear(ir.dateRaisedISO);
     if (fy === null) undated++;
     else { years.add(fy); months.add(irMonthNumber(ir.dateRaisedISO)); }
-    if (ir.customerName) customers.add(String(ir.customerName));
-    if (ir.droneId) drones.add(String(ir.droneId));
-    if (ir.droneModel) models.add(String(ir.droneModel));
+    const who = String(ir.customerName || '').trim();
+    if (who) {
+      // `reporterKey` is set at ingestion (mapSheetRows), so the facet and the row
+      // filter cannot disagree about who is who.
+      const k = ir.reporterKey || reporterKeyFor(who, ir.contactEmail, nameEmails);
+      if (k) {
+        const rec = persons.get(k) || { value: k, n: 0, spell: new Map() };
+        rec.n++;
+        rec.spell.set(who, (rec.spell.get(who) || 0) + 1);
+        persons.set(k, rec);
+      }
+    }
+    // Off-fleet equipment never reaches the MODEL or UAS SN facet — see the ruling
+    // above OUT_OF_SCOPE_MODEL. It is counted here so the panel can say how many
+    // rows it stood aside for, instead of the numbers quietly not adding up.
+    const model = String(ir.droneModel || '');
+    const sn = resolveSerial(ir.droneId);
+    if (isOutOfScopeModel(model) || isOutOfScopeSerial(sn)) { offFleet++; }
+    else {
+      if (sn) drones.add(sn);
+      if (model) models.add(model);
+    }
     const raw = String(ir.companyName || '').trim();
     if (raw) {
       const rec = companyRecordFor(raw);
@@ -7387,16 +7609,26 @@ function insightsFacets(irs) {
       else companies.set(value, { value, label: rec ? rec.name : raw, n: 1 });
     }
   });
+  // The most-used spelling wins the label; a tie goes to the longer one, which is the
+  // one carrying the surname. Both are read off the data, never rewritten.
+  const personList = [...persons.values()].map(r => {
+    let label = '', best = -1;
+    r.spell.forEach((n, s) => {
+      if (n > best || (n === best && s.length > label.length)) { label = s; best = n; }
+    });
+    return { value: r.value, label, n: r.n };
+  }).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
   return {
     years: [...years].sort((a, b) => b - a),
     months: [...months].sort((a, b) => a - b),
-    customers: [...customers].sort((a, b) => a.localeCompare(b)),
+    customers: personList,
     drones: [...drones].sort((a, b) => a.localeCompare(b)),
     models: [...models].sort((a, b) => a.localeCompare(b)),
     // Biggest first: this list is a ranking before it is an alphabetical index, and the
     // select's first screen should be the companies that actually raise work.
     companies: [...companies.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)),
     undated,
+    offFleet,
   };
 }
 
@@ -7477,8 +7709,17 @@ function insightsMatches(ir, filters) {
     if (f.category === UNCATEGORISED) { if (ir.category) return false; }
     else if (ir.category !== f.category) return false;
   }
-  if (!open(f.customer) && String(ir.customerName || '') !== f.customer) return false;
-  if (!open(f.drone) && String(ir.droneId || '') !== f.drone) return false;
+  // "Reported by" matches on the reporter IDENTITY, not the raw spelling: the facet
+  // lists one option per person, so the filter has to count every spelling that option
+  // stands for. Comparing raw strings would leave two thirds of a person's tickets
+  // outside their own row — the same failure the company axis was fixed for.
+  //
+  // `reporterKey` is written at ingestion from Col L and Col P together (mapSheetRows),
+  // so THIS comparison and the facet are the same answer. The fallback covers a record
+  // that never went through the mapper — the old `records` shape `listIRs` can still
+  // answer with until both deployments are pasted.
+  if (!open(f.customer) && String(ir.reporterKey || personKey(ir.customerName)) !== String(f.customer)) return false;
+  if (!open(f.drone) && resolveSerial(ir.droneId) !== f.drone) return false;
   if (!open(f.model) && String(ir.droneModel || '') !== f.model) return false;
   // The company axis matches through the REGISTER (name + every alias), which is the
   // same rule the Customers screen scopes by. A plain equality test would make the
@@ -7508,6 +7749,87 @@ function insightsByCompany(irs, filters, now) {
     if (irOverdue(ir, now)) e.late++;
   });
   return [...map.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+}
+
+// ─── THE INSPECTOR, ACTUALLY RUNNING ─────────────────────────────────────────
+// The rule book (inspector.html) has been a document since it was written: the owner
+// ticks rules, and nothing ever executed one. This is the first rule it RUNS, and it
+// is his own — R-108, "a serial that does not match one of the four formats, or looks
+// like one but is malformed → ask CR, never a block".
+//
+// The point of the split is that this is a REPORT. It reads rows and returns
+// complaints; it never edits a record, never hides a ticket and never stops work. A
+// finding that changed data by itself would be the one thing the rule book forbids.
+//
+// PURE: rows in, findings out. No DOM, no clock, no fetch — so a suite can drive it.
+//
+// FOUR lists, and the split between them is the point:
+//   autoFixed  the app already corrected it (S100-12 → S100-012) — nothing to ask
+//   serial     still malformed and NOT safely guessable — CR must choose a value
+//   reporters  one reporter spelled several ways — CR must choose the spelling
+//   offFleet   equipment this app does not service — named, never hidden
+function inspectorFindings(irs) {
+  const rows = Array.isArray(irs) ? irs : [];
+  const serial = [], offFleet = [], autoFixed = [];
+  rows.forEach(ir => {
+    const raw = String(ir.droneIdRaw != null ? ir.droneIdRaw : ir.droneId || '').trim();
+    const sn = resolveSerial(raw);
+    const model = String(ir.droneModel || '').trim();
+    if (isOutOfScopeModel(model) || isOutOfScopeSerial(sn)) {
+      offFleet.push({ irNumber: ir.irNumber, model, sn });
+      return;
+    }
+    // ONLY a deterministic fix counts as "automatic". An approved CR decision also
+    // changes the value, but listing it here would say the app guessed something it
+    // was actually told — those are reported under "corrections in force" instead.
+    const auto = canonicalSerial(raw);
+    if (raw && auto && raw !== auto) autoFixed.push({ irNumber: ir.irNumber, from: raw, to: auto });
+    const why = serialFormatProblem(sn);
+    if (why) serial.push({ irNumber: ir.irNumber, sn, raw: raw, model, why });
+  });
+
+  // Reporters. One identity, more than one spelling — the group is only a FINDING,
+  // never a rename. The owner's rule is explicit: a reported-by name is rectified in
+  // the app only after he (or CR) has been asked and has chosen.
+  const nameEmails = nameEmailIndex(rows);
+  const groups = new Map();
+  rows.forEach(ir => {
+    const name = String(ir.customerName || '').trim();
+    if (!name) return;
+    const key = ir.reporterKey || reporterKeyFor(name, ir.contactEmail, nameEmails);
+    if (!key) return;
+    const g = groups.get(key) || { key, email: normEmail(ir.contactEmail), n: 0, spell: new Map() };
+    g.n++;
+    g.spell.set(name, (g.spell.get(name) || 0) + 1);
+    groups.set(key, g);
+  });
+  const reporters = [];
+  groups.forEach(g => {
+    if (g.spell.size < 2) return;
+    reporters.push({
+      key: g.key,
+      email: g.email,
+      n: g.n,
+      spellings: [...g.spell.entries()]
+        .map(([name, n]) => ({ name, n }))
+        .sort((a, b) => b.n - a.n || a.name.length - b.name.length),
+    });
+  });
+  reporters.sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
+
+  return { serial, autoFixed, reporters, offFleet, total: rows.length };
+}
+
+// Record one decision, then re-read the list: mapSheetRows re-applies every
+// correction as it builds the records, so one write is enough to change the list
+// row, the detail header, the report and every facet at once.
+function applyCorrection(fields) {
+  adminPost('saveCorrection', fields).then(d => {
+    if (!d || d.status !== 'ok') { showToast((d && d.message) || 'Could not save the correction'); return; }
+    setCorrections(d.corrections);
+    showToast('Correction saved');
+    fetchIRs().catch(() => {});
+  });
 }
 
 // ─── WHAT THE CHARTS COUNT (Stage 3) ─────────────────────────────────────────
@@ -7768,7 +8090,7 @@ function renderInsights() {
   // "All", which is the one failure a reader cannot diagnose from the screen.
   if (f.fy !== INSIGHTS_ALL && !fx.years.some(y => String(y) === String(f.fy))) f.fy = INSIGHTS_ALL;
   if (f.month !== INSIGHTS_ALL && !fx.months.some(m => String(m) === String(f.month))) f.month = INSIGHTS_ALL;
-  if (f.customer !== INSIGHTS_ALL && !fx.customers.includes(f.customer)) f.customer = INSIGHTS_ALL;
+  if (f.customer !== INSIGHTS_ALL && !fx.customers.some(c => String(c.value) === String(f.customer))) f.customer = INSIGHTS_ALL;
   if (f.drone !== INSIGHTS_ALL && !fx.drones.includes(f.drone)) f.drone = INSIGHTS_ALL;
   if (f.model !== INSIGHTS_ALL && !fx.models.includes(f.model)) f.model = INSIGHTS_ALL;
   if (f.company !== INSIGHTS_ALL && !fx.companies.some(c => String(c.value) === String(f.company))) f.company = INSIGHTS_ALL;
@@ -7786,6 +8108,15 @@ function renderInsights() {
   const people   = assigneeCounts(allIRs, f, now);
   const byCo     = insightsByCompany(allIRs, f, now);
   const coShown  = byCo.slice(0, 12);
+  // Data quality is a property of the LIST, not of the current filter: the fix
+  // happens in the Sheet, and an issue that vanishes because somebody narrowed to
+  // one company would read as "fixed".
+  const flags    = inspectorFindings(allIRs);
+  // Who may APPROVE a finding. Everyone sees the findings — that is the Inspector
+  // doing its job — but only the owner and CR may record the answer, because a
+  // correction changes what every screen calls an aircraft or a reporter.
+  const canFix   = canCorrect();
+  const corrList = Object.keys(corrections.items || {}).map(k => Object.assign({ key: k }, corrections.items[k]));
   const openNow  = people.reduce((a, r) => a + r.open, 0);
   const lateNow  = people.reduce((a, r) => a + r.late, 0);
   const maxMonth = Math.max(1, ...mc.months, mc.undated);
@@ -7793,51 +8124,68 @@ function renderInsights() {
   const mixTotal = SEGMENT_LABELS.filter(([k]) => k !== 'all')
     .reduce((a, [k]) => a + (sum.statuses[k] || 0), 0) || 1;
 
-  const filterRow = (id, label, options) => `
+  // A facet with a hundred aircraft in it is a scroll bar, not a filter. Every list
+  // here is now {value,label} pairs, and one longer than a screenful grows a find box
+  // that narrows the SELECT's own options. The short ones (statuses, categories, model
+  // SKUs) keep a plain select rather than sprouting a control for eight rows.
+  //
+  // The typed text survives a re-render in `insightsFind`, not in the DOM: every
+  // filter change rebuilds this pane from scratch, so an input holding its own value
+  // would be wiped the moment the reader touched anything beside it.
+  const OPT = (value, label) => ({ value, label });
+  const filterRow = (id, label, allLabel, list) => {
+    const sel = f[INSIGHTS_KEY[id]];
+    const long = list.length > 12;
+    const opts = (allLabel == null ? '' : insightsOpt(INSIGHTS_ALL, sel, allLabel)) +
+      list.map(o => insightsOpt(o.value, sel, o.label)).join('');
+    // The find box goes UNDER the select, never above it. Above, it made that one
+    // column taller and the row is bottom-aligned, so its label floated above every
+    // other label — a misalignment that reads as a broken row. Under, the labels and
+    // the selects still line up across the row and only the narrowed facet grows.
+    return `
     <label class="insights-filter"><span>${escHtml(label)}</span>
-      <select class="form-input" id="${id}">${options}</select>
+      <select class="form-input" id="${id}">${opts}</select>
+      ${long ? `<input type="text" class="insights-find" id="${id}-find" autocomplete="off"
+                      placeholder="Find ${escHtml(label.toLowerCase())}…" value="${escHtml(insightsFind[id] || '')}">` : ''}
     </label>`;
+  };
 
-  const statusOpts = SEGMENT_LABELS
-    .map(([key, label]) => insightsOpt(key, f.status, key === 'all' ? 'All statuses' : label)).join('');
+  // The option lists are kept beside the markup so the find box can rebuild its own
+  // select without a full re-render (which would throw the caret away mid-word).
+  const lists = {
+    'ins-customer': fx.customers.map(c => OPT(c.value, c.label + ' (' + c.n + ')')),
+    'ins-company':  fx.companies.map(c => OPT(c.value, c.label + ' (' + c.n + ')')),
+    'ins-drone':    fx.drones.map(d => OPT(d, d)),
+    'ins-model':    fx.models.map(m => OPT(m, m)),
+  };
+  _insightsLists = lists;
 
   body.innerHTML = `
     <div class="insights-filters">
-      ${filterRow('ins-fy', 'Fiscal year',
-        insightsOpt(INSIGHTS_ALL, f.fy, 'All years') +
-        fx.years.map(y => insightsOpt(y, f.fy, 'FY ' + fyLabel(y))).join(''))}
-      ${filterRow('ins-month', 'Month',
-        insightsOpt(INSIGHTS_ALL, f.month, 'All months') +
-        fx.months.map(m => insightsOpt(m, f.month, MONTH_LABELS[m - 1])).join(''))}
-      ${filterRow('ins-status', 'Status', statusOpts)}
-      ${filterRow('ins-category', 'Category',
-        insightsOpt(INSIGHTS_ALL, f.category, 'All categories') +
-        IR_CATEGORIES.map(k => insightsOpt(k, f.category, categoryLabel(k))).join('') +
-        (sum.uncategorised || f.category === UNCATEGORISED
-          ? insightsOpt(UNCATEGORISED, f.category, 'No category') : ''))}
+      ${filterRow('ins-fy', 'Fiscal year', 'All years',
+        fx.years.map(y => OPT(y, 'FY ' + fyLabel(y))))}
+      ${filterRow('ins-month', 'Month', 'All months',
+        fx.months.map(m => OPT(m, MONTH_LABELS[m - 1])))}
+      ${filterRow('ins-status', 'Status', null,
+        SEGMENT_LABELS.map(([key, label]) => OPT(key, key === 'all' ? 'All statuses' : label)))}
+      ${filterRow('ins-category', 'Category', 'All categories',
+        IR_CATEGORIES.map(k => OPT(k, categoryLabel(k))).concat(
+          (sum.uncategorised || f.category === UNCATEGORISED) ? [OPT(UNCATEGORISED, 'No category')] : []))}
       <!-- "Reported by", not "Customer". This facet reads customerName — Col L,
            "Who's Reporting?" — which is the PERSON who raised the fault, while the
            company an account is scoped to is companyName (Col R). One word meaning
            two different things on two screens is how the invite panel shipped the
            wrong column; the label is the cheap honest fix and it changes no data.
            See docs/07 on the Customers tab and companyColumnIndex. -->
-      ${filterRow('ins-customer', 'Reported by',
-        insightsOpt(INSIGHTS_ALL, f.customer, 'All reporters') +
-        fx.customers.map(c => insightsOpt(c, f.customer)).join(''))}
+      ${filterRow('ins-customer', 'Reported by', 'All reporters', lists['ins-customer'])}
       <!-- The COMPANY axis reads companyName (Col R) and resolves it through the
            register, so it is the customer an ACCOUNT is scoped to — the other half of
            the pair the "Reported by" label above exists to keep apart. It is keyed by
            the register record where one speaks for the spelling, so three spellings of
            one company are one option here rather than three. -->
-      ${filterRow('ins-company', 'Company',
-        insightsOpt(INSIGHTS_ALL, f.company, 'All companies') +
-        fx.companies.map(c => insightsOpt(c.value, f.company, c.label + ' (' + c.n + ')')).join(''))}
-      ${filterRow('ins-drone', 'UAS SN',
-        insightsOpt(INSIGHTS_ALL, f.drone, 'All UAS SN') +
-        fx.drones.map(d => insightsOpt(d, f.drone)).join(''))}
-      ${filterRow('ins-model', 'UAS MODEL',
-        insightsOpt(INSIGHTS_ALL, f.model, 'All models') +
-        fx.models.map(m => insightsOpt(m, f.model)).join(''))}
+      ${filterRow('ins-company', 'Company', 'All companies', lists['ins-company'])}
+      ${filterRow('ins-drone', 'UAS SN', 'All UAS SN', lists['ins-drone'])}
+      ${filterRow('ins-model', 'UAS MODEL', 'All models', lists['ins-model'])}
       <button type="button" class="btn btn-sm btn-secondary" id="ins-clear"
               ${filtered ? '' : 'disabled'}>Clear filters</button>
     </div>
@@ -7848,6 +8196,72 @@ function renderInsights() {
       ${sum.undated ? `<span class="insights-note">${sum.undated} carry no readable date, so a year or month filter excludes them.</span>` : ''}
       ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
     </p>
+
+    ${(flags.serial.length || flags.autoFixed.length || flags.reporters.length || flags.offFleet.length || corrList.length) ? `
+    <div class="ins-flags">
+      <div class="ins-flags-head">
+        <strong>Data quality — I-INSPECTOR</strong>
+        <span>R-108 has run over all ${flags.total} IR${flags.total === 1 ? '' : 's'}. Nothing is blocked — the rule says ask CR. A correction is stored in this app only; the intake Sheet is never edited.</span>
+      </div>
+      ${flags.autoFixed.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically to the four formats</span>
+        <ul class="ins-flag-list">
+          ${flags.autoFixed.slice(0, 6).map(x => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`).join('')}
+        </ul>
+        ${flags.autoFixed.length > 6 ? `<span class="ins-flag-more">…and ${flags.autoFixed.length - 6} more.</span>` : ''}
+        <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
+      </div>` : ''}
+      ${flags.serial.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the four formats</span>
+        <ul class="ins-flag-list">
+          ${flags.serial.slice(0, 8).map((x, i) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.raw || x.sn || '—')}</code> — ${escHtml(x.why)}${canFix ? `
+            <span class="ins-fix">
+              <input type="text" class="form-input ins-fix-input" id="ins-fix-sn-${i}" autocomplete="off"
+                     placeholder="Correct serial" aria-label="Correct serial for ${escHtml(x.irNumber)}">
+              <button type="button" class="btn btn-sm ins-fix-apply" data-kind="serial"
+                      data-from="${escHtml(x.raw || x.sn || '')}" data-input="ins-fix-sn-${i}">Save correction</button>
+            </span>` : ''}</li>`).join('')}
+        </ul>
+        ${flags.serial.length > 8 ? `<span class="ins-flag-more">…and ${flags.serial.length - 8} more. Copy the list below to work through them.</span>` : ''}
+        <button type="button" class="btn btn-sm btn-secondary" id="ins-copy-serial"
+                data-list="${escHtml(flags.serial.map(x => x.irNumber + ' ' + (x.raw || x.sn || '(blank)') + ' ' + x.why).join('\n'))}">Copy these ${flags.serial.length}</button>
+      </div>` : ''}
+      ${flags.reporters.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.reporters.length} reporter group${flags.reporters.length === 1 ? ' is' : 's are'} spelled more than one way</span>
+        <ul class="ins-flag-list">
+          ${flags.reporters.slice(0, 6).map((g, i) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings${canFix ? `
+            <span class="ins-fix">
+              <select class="form-input ins-fix-input" id="ins-fix-rp-${i}" aria-label="Choose the spelling">
+                ${g.spellings.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)} (${s.n})</option>`).join('')}
+              </select>
+              <button type="button" class="btn btn-sm ins-fix-apply" data-kind="person"
+                      data-email="${escHtml(g.email || '')}" data-label="${escHtml(g.spellings[0].name)}"
+                      data-input="ins-fix-rp-${i}">Use this spelling</button>
+            </span>` : `<span class="ins-flag-more">${escHtml(g.spellings.map(s => s.name + ' (' + s.n + ')').join(' · '))}</span>`}</li>`).join('')}
+        </ul>
+        ${flags.reporters.length > 6 ? `<span class="ins-flag-more">…and ${flags.reporters.length - 6} more.</span>` : ''}
+        <span class="ins-flag-more">Col L and Col P are read together: the email is the identity, the name is the label. Nothing is renamed until someone with CR rights chooses a spelling.</span>
+      </div>` : ''}
+      ${corrList.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${corrList.length} correction${corrList.length === 1 ? '' : 's'} in force</span>
+        <ul class="ins-flag-list">
+          ${corrList.map(c => `<li><b>${c.kind === 'serial' ? 'Serial' : 'Reported by'}</b> · <code>${escHtml(c.from || c.key)}</code> → <code>${escHtml(c.to || '')}</code>${c.by ? ` · <span class="ins-flag-more">approved by ${escHtml(c.by)}</span>` : ''}${canFix ? ` <button type="button" class="btn btn-sm btn-secondary ins-fix-del" data-key="${escHtml(c.key)}">Remove</button>` : ''}</li>`).join('')}
+        </ul>
+      </div>` : ''}
+      ${flags.offFleet.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.offFleet.length} IR${flags.offFleet.length === 1 ? '' : 's'} on equipment outside the fleet</span>
+        <ul class="ins-flag-list">
+          ${flags.offFleet.slice(0, 8).map(x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`).join('')}
+        </ul>
+        ${flags.offFleet.length > 8 ? `<span class="ins-flag-more">…and ${flags.offFleet.length - 8} more.</span>` : ''}
+        <span class="ins-flag-more">DJI and MAVIC are left out of the MODEL and UAS SN lists above; the IRs themselves stay in the list. AGISOFT stays in scope.</span>
+      </div>` : ''}
+    </div>` : ''}
 
     <!-- The stat row. Four tiles of the same size, and the last one is a
          SPARKLINE rather than a number, which is the one shape on this page that
@@ -8033,11 +8447,32 @@ function showInsights() {
 }
 
 if (insightsView) {
+  // The find boxes narrow a select's OWN options, in place. Deliberately not a
+  // re-render: renderInsights() rebuilds the whole pane, and doing that on every
+  // keystroke would take the caret out of the box being typed into.
+  insightsView.addEventListener('input', e => {
+    const box = e.target;
+    if (!box || box.className !== 'insights-find') return;
+    const id = String(box.id || '').replace(/-find$/, '');
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    insightsFind[id] = box.value;
+    const q = box.value.trim().toLowerCase();
+    const all = _insightsLists[id] || [];
+    const shown = q ? all.filter(o => String(o.label).toLowerCase().indexOf(q) >= 0) : all;
+    // The option that is already chosen always stays, even when it stops matching:
+    // dropping it would silently reset the select to "All" while the dashboard still
+    // counted the old choice, and the two would disagree with nothing on screen to say so.
+    const keep = String(insightsFilters[INSIGHTS_KEY[id]] || INSIGHTS_ALL);
+    const keepOpt = (keep !== INSIGHTS_ALL && !shown.some(o => String(o.value) === keep))
+      ? all.filter(o => String(o.value) === keep) : [];
+    const allLabel = sel.options.length ? sel.options[0].textContent : 'All';
+    sel.innerHTML = insightsOpt(INSIGHTS_ALL, keep, allLabel) +
+      keepOpt.concat(shown).map(o => insightsOpt(o.value, keep, o.label)).join('');
+  });
   insightsView.addEventListener('change', e => {
     const id = e.target && e.target.id;
-    const map = { 'ins-fy': 'fy', 'ins-month': 'month', 'ins-status': 'status',
-                  'ins-category': 'category', 'ins-customer': 'customer',
-                  'ins-company': 'company', 'ins-drone': 'drone', 'ins-model': 'model' };
+    const map = INSIGHTS_KEY;
     if (!map[id]) return;
     insightsFilters[map[id]] = e.target.value;
     renderInsights();
@@ -8053,7 +8488,49 @@ if (insightsView) {
     }
     if (e.target && e.target.id === 'ins-clear') {
       insightsFilters = { ...ALL_FILTERS };
+      // The find boxes are part of "clear": leaving text in one would show an empty
+      // option list under a filter that reads "All", which looks like a broken select.
+      insightsFind = {};
       renderInsights();
+      return;
+    }
+    if (e.target && e.target.id === 'ins-copy-serial') {
+      copyText(e.target.dataset.list || '');
+      return;
+    }
+    // ── The Inspector's decisions. CR (or the owner) chooses the value; the app
+    //    records it in `_store/corrections.json` and re-reads the list, which is
+    //    what makes the correction appear on every screen at once. Nothing is
+    //    written to the intake Sheet, and removing the correction restores what
+    //    the Sheet says.
+    const fixBtn = e.target && e.target.closest ? e.target.closest('.ins-fix-apply') : null;
+    if (fixBtn) {
+      const input = document.getElementById(fixBtn.dataset.input);
+      const value = input ? String(input.value || '').trim() : '';
+      if (!value) { showToast('Type or choose the correct value first'); return; }
+      if (fixBtn.dataset.kind === 'serial') {
+        const problem = serialFormatProblem(value);
+        if (problem) { showToast('That still does not fit — ' + problem); return; }
+        const from = fixBtn.dataset.from || '';
+        if (!confirm('Use "' + value + '" for every IR that says "' + from + '"?\n\nThe app shows the corrected serial. The intake Sheet is not changed, and you can remove this correction at any time.')) return;
+        applyCorrection({ kind: 'serial', from: from, to: value });
+      } else {
+        const email = fixBtn.dataset.email || '';
+        if (!confirm('Show "' + value + '" for every IR reported by ' + (email || 'this name') + '?\n\nThis decides the reported-by label in this app only. The intake Sheet is not changed, and you can remove this correction at any time.')) return;
+        applyCorrection({ kind: 'person', from: fixBtn.dataset.label || '', to: value, email: email });
+      }
+      return;
+    }
+    const delBtn = e.target && e.target.closest ? e.target.closest('.ins-fix-del') : null;
+    if (delBtn) {
+      if (!confirm('Remove this correction?\n\nThe app goes back to exactly what the intake Sheet says. Nothing else changes.')) return;
+      delBtn.disabled = true;
+      adminPost('deleteCorrection', { key: delBtn.dataset.key }).then(d => {
+        if (!d || d.status !== 'ok') { delBtn.disabled = false; showToast((d && d.message) || 'Could not remove the correction'); return; }
+        setCorrections(d.corrections);
+        showToast('Correction removed');
+        fetchIRs().catch(() => {});
+      });
       return;
     }
     // A company row is a shortcut into its own slice of the page. Pressing the company
@@ -9077,6 +9554,15 @@ function mapSheetRows(rows) {
     const stat = cell(row, iStat) || 'Open';
     // Col L carries the name and the phone together ("SREENIVAS PAI 7828148298").
     const { name, phone } = splitNamePhone(cell(row, map.customerName));
+    // Col P, the reporter's own email. Col L and Col P are read TOGETHER to identify
+    // a person (see reporterKeyFor) — one name can belong to two people, and one
+    // person can be typed three ways.
+    const email = cell(row, map.contactEmail);
+    // Column K as the client wrote it; `droneId` below is what the APP shows. The
+    // app corrects a serial it can prove wrong (S100-12 → S100-012) and applies an
+    // approved CR correction; the raw cell is kept so the Inspector can say what it
+    // changed, and nothing writes back to the Sheet.
+    const rawSN = cell(row, map.droneId);
 
     // The raw cell text for every ingested column, so the intake view shows
     // exactly what the Sheet holds — the typed fields below are the parsed
@@ -9098,7 +9584,8 @@ function mapSheetRows(rows) {
 
     records.push({
       irNumber,
-      droneId:       cell(row, map.droneId),
+      droneId:       resolveSerial(rawSN),
+      droneIdRaw:    rawSN,
       droneModel:    cell(row, map.droneModel),
       dateRaised:    toDisplayDate(ts),
       dateRaisedISO: toISODate(ts),
@@ -9112,9 +9599,11 @@ function mapSheetRows(rows) {
       // without opening the Sheet; it is not one now.
       status:        '',
       summaryLink:   cell(row, map.summaryLink),
-      customerName:  name,
+      // The name the APP shows. It is the client's own words unless CR has approved
+      // a correction; `intake.customerName` above keeps the raw cell untouched.
+      customerName:  reporterName(name, email),
       contactPhone:  phone,
-      contactEmail:  cell(row, map.contactEmail),
+      contactEmail:  email,
       issueType:     cell(row, map.issueType),
       issueDesc:     cell(row, map.issueDesc),
       spoc:          cell(row, map.spoc),
@@ -9135,6 +9624,13 @@ function mapSheetRows(rows) {
     });
   }
   lastSheetAudit.badIRRows = badIRRows;
+  // Second pass: every row's reporter IDENTITY, now that the whole list is in hand —
+  // a row with no email can borrow the one address its name was seen with. Written
+  // onto the record so the list filter and the INSIGHTS facet cannot disagree.
+  const nameEmails = nameEmailIndex(records);
+  records.forEach(rec => {
+    rec.reporterKey = reporterKeyFor(rec.customerName, rec.contactEmail, nameEmails);
+  });
   return records.reverse();   // latest first
 }
 
@@ -9174,6 +9670,12 @@ async function fetchIRsFromBackend() {
   // Delete the `records` branch once both deployments report the grid. `data.grid`
   // is tested for ARRAY-ness, not truthiness: an empty repository is a real answer
   // and must not fall through to the old branch.
+  // The approved corrections arrive on THIS call, not behind an action of their own,
+  // and they must be in hand BEFORE the grid is mapped: mapSheetRows applies them to
+  // every serial and every reporter name as it builds the records. An older backend
+  // sends no key, and setCorrections({}) is the honest reading of that — no
+  // corrections, and the deterministic four-format fix still runs.
+  setCorrections(data.corrections);
   if (Array.isArray(data.grid))   return mapSheetRows(data.grid);
   if (Array.isArray(data.records)) return data.records;
   return [];

@@ -102,14 +102,29 @@ r.head('the owner\'s security decisions');
 // / `deleteCorrection`, and the ledger riding on `listIRs`. Independent in the quiet
 // direction: an older backend sends no `corrections` key, the frontend reads that as
 // "none", and the deterministic serial fix needs no store at all.
-r.ok('API_VERSION is 14 — the Inspector can record what CR decides',
-  /API_VERSION:\s*14\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v15 = I-POSTMAN SENDS: `sendPostmaster` posts one collected digest to CR. Its three
+// refusals — empty digest, a post inside two hours, the daily ceiling — are asserted
+// here because they are the anti-spam promise, not UI copy.
+r.ok('API_VERSION is 15 — I-POSTMAN can post one collected digest',
+  /API_VERSION:\s*15\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the correction ledger is seeded with the other store files',
   /'corrections\.json', \{ items: \{\} \}/.test(code));
 r.ok('a correction is CR or admin, never a section grant',
   /function canDecideCorrection[\s\S]{0,400}getUserDepartments\(authEmail\)\.indexOf\('cr'\)/.test(code));
 r.ok('a customer is never handed the correction ledger',
   /company \? \{ items: \{\} \} : publicCorrections\(\)/.test(code));
+r.ok('the Postmaster is CR or admin, and re-checks inside',
+  /function sendPostmaster\(params, authEmail\)\s*\{\s*[\s\S]{0,120}requireCorrectionRights\(authEmail\)/.test(code));
+r.ok('...it refuses a second post inside two hours',
+  /POSTMASTER_GAP_MS\s*=\s*2 \* 60 \* 60 \* 1000/.test(code) &&
+  /now - last < POSTMASTER_GAP_MS/.test(code));
+r.ok('...it refuses an empty digest',
+  /Nothing to post — the digest is empty/.test(code));
+r.ok('...its recipients come from CR memberships plus the admins, never a client value',
+  /function postmasterRecipients[\s\S]{0,700}memberships[\s\S]{0,300}ADMIN_EMAILS/.test(code) &&
+  !/params\.to/.test((code.match(/function sendPostmaster[\s\S]*?\n\}/) || [''])[0]));
+r.ok('...and it sends as the named bot, not the plain app',
+  /name: 'I-PASSBOOK POSTMASTER'/.test(code));
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));
@@ -688,13 +703,14 @@ r.ok('the reserve is non-zero and strictly below the cap',
 // send and require that it consulted the cap. A third sender added later cannot
 // slip through uncapped without failing here.
 //
-// THREE, and the count is the point of the assertion: 1 = sendAuthMail (sign-in
+// FOUR, and the count is the point of the assertion: 1 = sendAuthMail (sign-in
 // codes, resets), 2 = sendNudgeEmail (comment notifications), 3 = sendAdminNotice
-// (an old value was put back). A fourth appearing without this line changing means
-// a new outbound path was added and nobody looked at the daily ceiling — which is
-// how a busy day silently disables password recovery for the whole company.
+// (an old value was put back), 4 = sendPostmaster (the collected CR digest, v15).
+// A fifth appearing without this line changing means a new outbound path was
+// added and nobody looked at the daily ceiling — which is how a busy day
+// silently disables password recovery for the whole company.
 const sendSites = [...code.matchAll(/MailApp\.sendEmail/g)];
-r.ok('there are exactly three send sites', sendSites.length === 3, sendSites.length);
+r.ok('there are exactly four send sites', sendSites.length === 4, sendSites.length);
 sendSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   const body  = owner ? fnBody(owner.name) : '';

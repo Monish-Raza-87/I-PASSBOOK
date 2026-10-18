@@ -294,7 +294,10 @@ const accessShellTemplate = (() => {
   let card = src.slice(at, i);
   for (const expr of KNOWN) card = card.split(expr).join(T.iconSvg('users'));
   if (card.indexOf('${') >= 0) throw new Error('the User Access card grew an interpolation; it can no longer be lifted out verbatim');
-  return '<div class="inward-options-modal">' + card + '</div>';
+  // The real element carries BOTH the class and `id="access-modal"` (app.js sets it
+  // after appendChild), and industrial.css scopes the panel's typography to that id.
+  // A fixture with only the class photographed the right shape in the wrong face.
+  return '<div class="inward-options-modal" id="access-modal">' + card + '</div>';
 })();
 
 T.accessTab = 'customers';

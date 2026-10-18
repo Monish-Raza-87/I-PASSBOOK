@@ -912,12 +912,35 @@ the user's retry would then be refused by the `expectCurrent` guard.
 Relays a comment notification via `MailApp.sendEmail`. The sender is the `replyTo`.
 Requires redeploy and a one-time `script.send_mail` consent (see Development
 Guide). **`MailApp`, never `UrlFetchApp`** — the `UrlFetchApp` scope is what broke
-Google Sign-In in `8541019`, and there are exactly **three** `MailApp.sendEmail` call
-sites (this one, the auth mail, and `sendAdminNotice`); every one checks
-`mailQuotaOk()` first. This one checks it as `'nudge'`, from the reserve side of the
+Google Sign-In in `8541019`, and there are exactly **four** `MailApp.sendEmail` call
+sites (this one, the auth mail, `sendAdminNotice`, and `sendPostmaster`); every one
+checks `mailQuotaOk()` first. This one checks it as `'nudge'`, from the reserve side of the
 ceiling, and returns a visible `status: 'error'` when the day's mail is spent — the
 comment still posts, and the sender is told the notification did not go. Failing
 silently would leave people believing a colleague had been emailed.
+
+### `sendPostmaster`
+Sends **one collected digest** to the CR department, minted by I-POSTMAN in INSIGHTS.
+Requires CR (or an admin) inside the function, not only at the router. The body and
+the item count are the caller's; **the recipients never are** — `postmasterRecipients()`
+derives them from `accessStore()`'s `cr` memberships plus `CONFIG.ADMIN_EMAILS`, and
+filters every address through `isMailRecipientAllowed`. A customer address can never
+appear, because it is never read from the request.
+
+It refuses rather than degrades, and each refusal is a design choice:
+
+- **An empty digest is refused.** "Nothing to report" is the Postmaster staying
+  quiet, not an email that says so.
+- **A second post inside two hours is refused** (`POSTMASTER_GAP_MS`, kept in
+  Script Properties as `postmaster:lastSentAt`). The gap survives the browser, the
+  device and the account; a preview button cannot become a spam button by being
+  pressed twice.
+- **The daily mail ceiling applies** (`mailQuotaOk('nudge')`), so a busy digest day
+  cannot starve password resets.
+
+There is **no timer**. Nothing posts unless a person presses "Post to CR"; the
+automatic clock is deliberately absent. `API_VERSION` 15 exists because this is a
+new action.
 
 ### Customer accounts — `inviteCustomer`, `setCustomerCompany`, `getMyCustomer`
 
@@ -1244,7 +1267,7 @@ var CONFIG = {
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 14,           // 14 = the Inspector's correction ledger; see the version list in backend.gs
+  API_VERSION: 15,           // 15 = I-POSTMAN's collected digest; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 

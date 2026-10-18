@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v100';
+const APP_VERSION = 'v101';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7832,6 +7832,98 @@ function applyCorrection(fields) {
   });
 }
 
+// ─── I-POSTMAN — the collected digest ────────────────────────────────────────
+// The rule book's Q6 is the whole shape: ONE message, never one per finding;
+// nothing to report means no message at all; blocks and asks are never mailed.
+// This is the text half, and it is PURE — rows in, text out — so a suite can read
+// exactly what would be posted without sending anything.
+//
+// There is deliberately no clock here. The every-2-hours trigger is a server
+// decision and it is not installed; the Postmaster posts when CR or the owner taps
+// it, and the backend refuses a second post inside two hours even then.
+function postmanDigest(irs) {
+  const flags = inspectorFindings(irs);
+  const decisions = flags.serial.length + flags.reporters.length + flags.offFleet.length;
+  const lines = [];
+  lines.push('I-POSTMAN — collected digest');
+  lines.push('Generated from ' + flags.total + ' IR' + (flags.total === 1 ? '' : 's') +
+    ' at ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC.');
+  lines.push('');
+
+  if (!decisions) {
+    lines.push('Nothing to report. No action is needed.');
+  }
+
+  if (flags.serial.length) {
+    lines.push('SERIAL FORMATS (R-108) — ' + flags.serial.length + ' need a decision from CR:');
+    flags.serial.slice(0, 40).forEach(x =>
+      lines.push('  · ' + x.irNumber + ' — ' + (x.raw || x.sn || '(blank)') + ' — ' + x.why));
+    if (flags.serial.length > 40) lines.push('  …and ' + (flags.serial.length - 40) + ' more, in I-PASSBOOK → Insights.');
+    lines.push('');
+  }
+
+  if (flags.reporters.length) {
+    lines.push('REPORTED BY — ' + flags.reporters.length + ' group' +
+      (flags.reporters.length === 1 ? '' : 's') + ' spelled more than one way:');
+    flags.reporters.slice(0, 30).forEach(g => {
+      const who = g.email || g.spellings[0].name;
+      lines.push('  · ' + who + ' — ' + g.spellings.map(s => s.name + ' (' + s.n + ')').join(' / '));
+    });
+    if (flags.reporters.length > 30) lines.push('  …and ' + (flags.reporters.length - 30) + ' more.');
+    lines.push('');
+  }
+
+  if (flags.offFleet.length) {
+    lines.push('OUTSIDE THE FLEET — ' + flags.offFleet.length + ' IR' +
+      (flags.offFleet.length === 1 ? '' : 's') + ' name equipment this app does not service:');
+    flags.offFleet.slice(0, 20).forEach(x =>
+      lines.push('  · ' + x.irNumber + ' — ' + (x.model || x.sn || '—')));
+    if (flags.offFleet.length > 20) lines.push('  …and ' + (flags.offFleet.length - 20) + ' more.');
+    lines.push('');
+  }
+
+  if (flags.autoFixed.length) {
+    lines.push('Already corrected automatically: ' + flags.autoFixed.length +
+      ' serial' + (flags.autoFixed.length === 1 ? '' : 's') +
+      ' whose shape was certain. Nothing is asked of CR for these.');
+    lines.push('');
+  }
+
+  lines.push('The intake Sheet is never edited. A correction is recorded in I-PASSBOOK by CR.');
+  lines.push('— I-PASSBOOK POSTMASTER');
+  return { text: lines.join('\n'), count: decisions, total: flags.total };
+}
+
+// The preview is a PANE, not a send. A person reads exactly what would leave the
+// building before anything does; the button that posts is a second, deliberate tap.
+function openPostmanPreview() {
+  const d = postmanDigest(allIRs);
+  let modal = document.getElementById('postman-modal');
+  if (modal) modal.remove();
+  modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'postman-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <div class="inward-options-title">I-POSTMAN — digest preview</div>
+        <button type="button" class="inward-options-close" id="postman-close" title="Close">&times;</button>
+      </div>
+      <p class="access-hint">Nothing has been sent. This is exactly what the Postmaster would post, and only a tap on <b>Post to CR</b> sends it.</p>
+      <pre class="bot-digest" id="postman-text">${escHtml(d.text)}</pre>
+      <div class="inward-options-foot">
+        <button type="button" class="btn btn-sm btn-secondary" id="postman-copy">Copy</button>
+        <button type="button" class="btn btn-sm btn-secondary" id="postman-close2">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.getElementById('postman-close').addEventListener('click', close);
+  document.getElementById('postman-close2').addEventListener('click', close);
+  document.getElementById('postman-copy').addEventListener('click', () => copyText(d.text));
+}
+
 // ─── WHAT THE CHARTS COUNT (Stage 3) ─────────────────────────────────────────
 
 // PURE, and the same contract as insightsSummary(): rows in, counts out, no DOM,
@@ -8161,6 +8253,48 @@ function renderInsights() {
   _insightsLists = lists;
 
   body.innerHTML = `
+    <!-- THE TWO BOTS, RUNNING. The rule book named them on 2026-10-02 and the owner
+         asked for both to be launched on 2026-10-18. They are not a second screen:
+         they sit where the Inspector already reports, and every number here is the
+         live scan above, not a stored claim. The postman half is a PREVIEW by
+         design — nothing leaves the building without a second, deliberate tap. -->
+    <div class="bots-strip">
+      <section class="bot-card">
+        <div class="bot-head">
+          <span class="bot-led is-live" aria-hidden="true"></span>
+          <span class="bot-name">I-INSPECTOR</span>
+          <span class="bot-state">Running</span>
+        </div>
+        <p class="bot-say">R-108 is checking every serial, every reporter and every machine on all ${flags.total} IR${flags.total === 1 ? '' : 's'}.</p>
+        <div class="bot-metrics">
+          <span><b>${flags.serial.length}</b> serial</span>
+          <span><b>${flags.reporters.length}</b> reported-by</span>
+          <span><b>${flags.autoFixed.length}</b> auto-fixed</span>
+        </div>
+        <div class="bot-actions">
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-scan">Scan now</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-open">Open data quality</button>
+        </div>
+      </section>
+      <section class="bot-card">
+        <div class="bot-head">
+          <span class="bot-led${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? ' is-live' : ''}" aria-hidden="true"></span>
+          <span class="bot-name">I-POSTMAN</span>
+          <span class="bot-state">${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? 'Holding ' + (flags.serial.length + flags.reporters.length + flags.offFleet.length) : 'Quiet'}</span>
+        </div>
+        <p class="bot-say">Collects what the Inspector finds into one post. Nothing to report means nothing is sent, and two posts never land inside two hours.</p>
+        <div class="bot-metrics">
+          <span><b>${flags.serial.length + flags.reporters.length + flags.offFleet.length}</b> to collect</span>
+          <span><b>2 h</b> minimum gap</span>
+          <span>CR receives</span>
+        </div>
+        <div class="bot-actions">
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-preview">Preview the digest</button>
+          ${canFix ? `<button type="button" class="btn btn-sm" id="ins-bot-post">Post to CR</button>` : ''}
+        </div>
+      </section>
+    </div>
+
     <div class="insights-filters">
       ${filterRow('ins-fy', 'Fiscal year', 'All years',
         fx.years.map(y => OPT(y, 'FY ' + fyLabel(y))))}
@@ -8496,6 +8630,40 @@ if (insightsView) {
     }
     if (e.target && e.target.id === 'ins-copy-serial') {
       copyText(e.target.dataset.list || '');
+      return;
+    }
+    // ── The two bots. The Inspector's scan is the SAME pure function the pane
+    //    already ran, re-run over the current list; nothing is cached and nothing
+    //    is invented. The Postman never posts from here without a confirm, and the
+    //    backend refuses a second post inside two hours whatever this side says.
+    if (e.target && e.target.id === 'ins-bot-scan') {
+      renderInsights();
+      showToast('I-INSPECTOR scanned ' + allIRs.length + ' IR' + (allIRs.length === 1 ? '' : 's'));
+      return;
+    }
+    if (e.target && e.target.id === 'ins-bot-open') {
+      const panel = document.querySelector('#insights-body .ins-flags');
+      if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      else showToast('I-INSPECTOR has nothing to report');
+      return;
+    }
+    if (e.target && e.target.id === 'ins-bot-preview') {
+      openPostmanPreview();
+      return;
+    }
+    if (e.target && e.target.id === 'ins-bot-post') {
+      const d = postmanDigest(allIRs);
+      if (!d.count) { showToast('Nothing to report — the Postmaster stays quiet'); return; }
+      if (!confirm('Post this digest to CR?\n\n' + d.count + ' item' + (d.count === 1 ? '' : 's') + ' in ONE email. The Postmaster will not post again for two hours.')) return;
+      e.target.disabled = true;
+      adminPost('sendPostmaster', { body: d.text, items: d.count }).then(r => {
+        if (!r || r.status !== 'ok') {
+          e.target.disabled = false;
+          showToast((r && r.message) || 'The Postmaster could not post');
+          return;
+        }
+        showToast(r.message || 'Posted to CR');
+      });
       return;
     }
     // ── The Inspector's decisions. CR (or the owner) chooses the value; the app

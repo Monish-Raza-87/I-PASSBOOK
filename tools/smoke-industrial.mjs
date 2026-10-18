@@ -95,7 +95,7 @@ const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#ins
 // NOT scoped — a pill nobody can read is a defect on every screen, and fixing it on
 // three of eight would leave the app disagreeing with itself. It is a fixed list:
 // anything new here has to be argued for.
-const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$)/;
+const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$|\.badge(::before)?$)/;
 // The second sanctioned category, added 2026-10-09 with §9. These are the app's
 // FLOATING CHROME — the modal pane and its scrim, the two dropdown panels, the toast,
 // the customer door's own card. They are not a tenth root and must not become one: a
@@ -123,16 +123,18 @@ const GLOBALS = /^(:root|\[data-theme="dark"\]|\.prio-(low|medium|high|urgent)$)
 // reaching into it cannot touch a screen. Only its entry in §2's radius block is
 // actually written; the rest of it is styled from components.css, where the rest of
 // the floating chrome lives.
-const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#pattern-setup-overlay|#ir-dock|#user-menu|#nudge-panel|#toast)\b/;
+const CHROME = /^(\.inward-options-modal|\.inward-options-card|\.customer-door-card|#pattern-setup-overlay|#ir-dock|#access-modal|#user-menu|#nudge-panel|#toast)\b/;
 const escaped = selectors.filter(s => !SCOPES.test(s) && !GLOBALS.test(s) && !CHROME.test(s));
 r.ok('every rule is scoped, is one of the sanctioned globals, or is floating chrome',
   escaped.length === 0, escaped);
 // The list stays a LIST. A count is the only thing that fails when a category quietly
-// grows, so the ceiling is real and low: five chrome selectors on the day it was
-// written, and the colour steps and the chrome family are counted together because both
-// are ways of leaving the roots behind.
+// grows, so the ceiling is real and low. It was 22; on 2026-10-18 the owner ruled that
+// square is the app's language everywhere and that he must never have to say it again.
+// That added two deliberate families — the global radius scale plus the badge it cannot
+// reach (3 selectors), and the floating panels' typography, which is where the Customer
+// tab lives (5). The ceiling moves by exactly those eight, and by nothing else.
 r.ok('...and neither sanctioned list has quietly grown',
-  selectors.filter(s => !SCOPES.test(s)).length <= 22,
+  selectors.filter(s => !SCOPES.test(s)).length <= 30,
   selectors.filter(s => !SCOPES.test(s)));
 
 // A rule that reached `.ir-card-side` is the owner's known defect re-opened: a side
@@ -301,10 +303,17 @@ r.ok('...and the dot is a 5px square, not the base 5px circle',
   (css.match(/\.badge::before\s*\{[^}]*\}/) || [''])[0]);
 
 // ── 6. The corners, which are the whole design in one block ──────────────────
-r.head('the corners are squared by re-pointing the radius scale, inside the screens only');
-const cornerRule = (css.match(/#auth-container,\n#password-change,[\s\S]{0,400}?\{\s*--radius-1:\s*0px;[\s\S]{0,400}?\}/) || [''])[0];
-r.ok('the screen set zeroes the radius scale in one place', cornerRule.length > 0);
+r.head('the corners are squared by re-pointing the radius scale, once, for the whole app');
+// Until 2026-10-18 this was a list of nine roots. All three body-appended panels
+// (#pattern-setup-overlay, #ir-dock, the Access modal with its round Customers tab)
+// were missed by it, one at a time. The owner's ruling ended the list: square is the
+// app's language, and nothing may be added later that quietly keeps a radius. The
+// scale is zeroed at :root, so a new panel inherits it without being registered.
+const cornerRule = (css.match(/:root\s*\{\s*--radius-1:\s*0px;[\s\S]{0,400}?\}/) || [''])[0];
+r.ok('the radius scale is zeroed ONCE at the root, with no screen list to miss', cornerRule.length > 0);
 r.ok('...all eight steps from --radius-1 to --radius-8', /--radius-8:\s*0px/.test(cornerRule));
+r.ok('...and the old nine-root list is gone, so no panel has to be registered',
+  !/#auth-container,\s*\n#password-change,/.test(css) && !/#pattern-setup-overlay,\s*\n#ir-dock/.test(css));
 // --radius-9 is 999px, the ROUND family (the dot, the avatar). Leaving it alone is
 // what makes "the LED is squared by hand" a meaningful sentence rather than a
 // tautology, and it keeps circles circular.
@@ -317,8 +326,8 @@ r.ok('...and --radius-9 is deliberately NOT zeroed', !/--radius-9:\s*0px/.test(c
 // it is doing something.
 const handSquared = [...css.matchAll(/([^{}]+)\{\s*[^{}]*?border-radius:\s*0[;}]/g)]
   .map(m => m[1].trim().split(',')[0].trim().split(/\s+/).pop());
-r.ok('exactly four rules square a corner by hand, and each is one the scale cannot reach',
-  handSquared.length === 4, handSquared);
+r.ok('exactly six rules square a corner by hand, and each is one the scale cannot reach',
+  handSquared.length === 6, handSquared);
 r.ok('...and they are the LED, its dot, the avatar and the role chip',
   handSquared.every(s => /\.badge(::before)?$|#user-avatar$|\.door-role$/.test(s)), handSquared);
 // The claim in each of those comments is that base.css draws that corner from a

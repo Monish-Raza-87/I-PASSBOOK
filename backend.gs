@@ -256,7 +256,16 @@ var CONFIG = {
   // sends no `corrections` key, the frontend reads that as "no corrections", and
   // the DETERMINISTIC serial fix still runs because it needs no store at all. So a
   // v14 frontend on a v13 backend shows corrected serials and no manual entries.
-  API_VERSION: 14,
+  //
+  // v15 = I-POSTMAN SENDS. `sendPostmaster` posts ONE collected digest to CR (and
+  // the admins), never one message per finding. Three refusals live inside it: an
+  // empty digest is not sent, a second post inside two hours is refused, and the
+  // daily mail ceiling still applies. Recipients are the `cr` memberships plus
+  // ADMIN_EMAILS, filtered through isMailRecipientAllowed — a client cannot name a
+  // recipient. The frontend's `Post to CR` is the only caller, and it confirms
+  // first. There is NO automatic clock: the every-2-hours trigger is a separate
+  // install and is deliberately not in this file.
+  API_VERSION: 15,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4094,6 +4103,10 @@ function doPost(e) {
       // one CR member among the admins. Both functions re-check the rule inside.
       saveCorrection:    function () { return saveCorrection(params, email); },
       deleteCorrection:  function () { return deleteCorrection(params, email); },
+      // I-POSTMAN's one post (v15). CR or admin; the recipient set is decided HERE,
+      // never by the client, and the two-hour gap is a Script Property so it survives
+      // a redeploy. See sendPostmaster() for the three refusals.
+      sendPostmaster:    function () { return sendPostmaster(params, email); },
       bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
       resetUserPassword: function () { return resetUserPassword(params, email); },
       setUserStatus:     function () { return setUserStatus(params, email); },
@@ -5189,6 +5202,97 @@ function deleteCorrection(params, authEmail) {
       message: 'Removed' + (was ? ' "' + was + '"' : '') + '. The app is back to what the Sheet says.'
     };
   });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// ACTION: sendPostmaster (v15) — I-POSTMAN's ONE collected digest.
+// ──────────────────────────────────────────────────────────────────────────────
+// The rule book's Q6 is the contract, and it is a contract about restraint:
+//   · one message for everything collected, never one per finding
+//   · nothing to report means NO message at all
+//   · blocks and asks are never emailed
+//   · nobody is added to a recipient list silently
+// The text is built in the frontend from the Inspector's own scan, because the
+// findings live there (the rule engine reads the mapped IR list, not the Sheet).
+// What the server decides — and the client cannot — is WHO receives it, HOW OFTEN,
+// and whether the mail ceiling still allows it.
+var POSTMASTER_GAP_MS = 2 * 60 * 60 * 1000;   // the owner's cadence: one post / 2 h
+var POSTMASTER_LAST_KEY = 'postmaster:lastSentAt';
+
+// CR memberships + the admins, deduped, and every address put through the same
+// outbound guard every other mail path uses. A client-supplied recipient is never
+// read: there is no `to` parameter at all.
+function postmasterRecipients() {
+  var out = [], seen = {};
+  function add(addr) {
+    var a = String(addr || '').toLowerCase().trim();
+    if (!a || seen[a]) return;
+    if (!isMailRecipientAllowed(a)) return;
+    seen[a] = true;
+    out.push(a);
+  }
+  var memberships = accessStore().memberships || {};
+  Object.keys(memberships).forEach(function (email) {
+    var deps = memberships[email] instanceof Array ? memberships[email] : [];
+    var isCr = deps.some(function (d) { return String(d || '').toLowerCase() === 'cr'; });
+    if (isCr) add(email);
+  });
+  (CONFIG.ADMIN_EMAILS || []).forEach(add);
+  return out;
+}
+
+function sendPostmaster(params, authEmail) {
+  // The same gate as the correction ledger: CR decides, the owner is CR too.
+  requireCorrectionRights(authEmail);
+
+  var body = String(params.body == null ? '' : params.body);
+  var items = Math.max(0, Number(params.items || 0) || 0);
+  if (!body.trim()) {
+    return { status: 'error', message: 'Nothing to post — the digest is empty.' };
+  }
+  // A digest is text, not an upload. The cap is generous for a bad morning and
+  // small enough that this path can never become a way to send a large document.
+  if (body.length > 12000) body = body.slice(0, 12000) + '\n…';
+
+  var to = postmasterRecipients();
+  if (!to.length) {
+    return { status: 'error', message: 'No CR recipient is available to receive the digest.' };
+  }
+
+  var props = PropertiesService.getScriptProperties();
+  var now = Date.now();
+  var last = Number(props.getProperty(POSTMASTER_LAST_KEY) || 0);
+  if (last && now - last < POSTMASTER_GAP_MS) {
+    var mins = Math.ceil((POSTMASTER_GAP_MS - (now - last)) / 60000);
+    return {
+      status: 'error',
+      message: 'I-POSTMAN already posted inside the last two hours. The next one is allowed in ' +
+               mins + ' minute' + (mins === 1 ? '' : 's') + '.'
+    };
+  }
+
+  if (!mailQuotaOk('nudge')) {
+    return { status: 'error', message: 'The daily mail ceiling is reached. Nothing was sent.' };
+  }
+
+  var subject = '[I-PASSBOOK] I-POSTMAN — collected digest (' + items +
+                ' item' + (items === 1 ? '' : 's') + ')';
+  try {
+    MailApp.sendEmail(to.join(','), subject, body, { name: 'I-PASSBOOK POSTMASTER' });
+  } catch (e) {
+    // Same contract as every other mail path: a failure returns a sentence, never
+    // a 500. The timestamp is written only after a send that did not throw, so a
+    // failed attempt does not start the two-hour clock.
+    return { status: 'error', message: 'The mail could not be sent: ' +
+             (e && e.message ? e.message : 'unknown error') + '.' };
+  }
+  props.setProperty(POSTMASTER_LAST_KEY, String(now));
+  return {
+    status: 'ok',
+    to: to,
+    sentAt: new Date(now).toISOString(),
+    message: 'Posted to ' + to.length + ' CR recipient' + (to.length === 1 ? '' : 's') + '.'
+  };
 }
 
 // POST createUser (admin) — one account + a one-time temporary password.

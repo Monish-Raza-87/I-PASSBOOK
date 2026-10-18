@@ -95,53 +95,35 @@
   --ind-dim:    var(--ink-gray-5);
 }
 
-/* ── THE SCREEN SET, and the corners ──────────────────────────────────────────
-   This list is the whole blast radius of this file: nine roots, and nothing
-   outside them is touched by anything below. It is written ONCE, here, because the
-   corner rule genuinely applies to all nine and a second copy would be a list that
-   could silently disagree with the one the smoke suite pins.
-
-   #faq-view joined on 2026-10-08, when the Help & FAQ stopped being a separate page
-   in another tab and became a pane of this app — the owner's "it has to be in our
-   app, as per our UI and a part of our app". It is the same pane shape as Insights
-   and the Log Analyser, so it is the same entry, not a new kind of thing.
-
+/* ── THE CORNERS — one rule, every screen ─────────────────────────────────────
    Square is the language — an instrument panel has corners — and it is the single
-   biggest visual move in this file. It is done by re-pointing the radius scale
-   inside these subtrees rather than by a `border-radius: 0` on every rule, because
-   the app draws its corners from these nine tokens in ninety-odd places and
-   squaring the tokens squares all of them at once.
+   biggest visual move in this file. It is still done by re-pointing the radius
+   scale rather than by a `border-radius: 0` on every rule: the app draws its
+   corners from these tokens in ninety-odd places and squaring the tokens squares
+   all of them at once.
 
-   --radius-9 is deliberately NOT in the list. It is 999px — the ROUND family, the
-   status light and the dot and the avatar — and a circle is a circle. The LED in §4
-   is squared by its own rule, which is the one place it should be. */
-#auth-container,
-#password-change,
-#index-view,
-#detail-view,
-#insights-view,
-#log-view,
-#faq-view,
-#sidebar,
-#workspace header,
-/* ⚠ #pattern-setup-overlay IS HERE BECAUSE OF WHERE IT LIVES, NOT WHAT IT LOOKS LIKE.
-   The scale is zeroed on a list of ROOTS, and this overlay is appended to <body> — it
-   is opened from the avatar menu, so it can appear while SIGNED IN, outside every other
-   root on this list. Off the list it inherited the untouched --radius-6 (12px), and the
-   card rendered as the ONE rounded panel in an app of square ones, which is the state
-   the owner was looking at when he asked for the unlock pattern to be brought into line.
-   A `border-radius: 0` on the card would have fixed that one corner and left the button
-   inside it and the canvas beside it rounded; naming the root is what squares the lot.
-   (Read as: whatever the app grows that floats on <body> has to be added here, or it
-   silently keeps a radius the rest of the app does not have.) */
-/* #ir-dock joined on 2026-10-11, the day it was built. It is the second case of
-   the SAME mistake this block's note above describes: a piece of chrome that floats on
-   <body> rather than inside a screen. Without this entry its sheet, its buttons and its
-   tabs all keep the untouched --radius-3 and --radius-6, and it renders as the one
-   rounded family in an app of square ones. It is the whole corner block's own advice,
-   taken: whatever the app grows that floats on <body> has to be added here. */
-#pattern-setup-overlay,
-#ir-dock {
+   UNTIL 2026-10-18 THIS WAS A LIST OF NINE ROOTS, and the list failed three times
+   in the same way. #pattern-setup-overlay (2026-10-08), #ir-dock (2026-10-11) and
+   then the User Access modal with its Customers tab (2026-10-18) are all appended
+   to <body>, so all three sat OUTSIDE every root on the list and each rendered as
+   the one rounded panel in an app of square ones. The owner's ruling that day is
+   the fix, and it is about more than a corner:
+
+     "UI has to be same throughout… we have chosen to stay as it is in
+      indrones.com i.e., sharp corners… make sure all the pages of this app
+      follow this without me telling this."
+
+   A list of roots is an inventory, and an inventory is exactly what keeps missing
+   the next body-appended panel. So the scale is re-pointed ONCE, at the root, and
+   there is no list to keep in sync. Anything the app grows inherits it.
+
+   It is still removable: delete this file and its one <link> and tokens.css's own
+   radius scale is what the app renders.
+
+   --radius-9 is deliberately NOT zeroed. It is 999px — the ROUND family, the
+   status dot and the avatar — and a circle is a circle. The corners the scale
+   cannot reach are squared by hand below, and each one says why. */
+:root {
   --radius-1: 0px;
   --radius-2: 0px;
   --radius-3: 0px;
@@ -150,6 +132,58 @@
   --radius-6: 0px;
   --radius-7: 0px;
   --radius-8: 0px;
+}
+
+/* The status badge is a pill drawn from --radius-9, so the scale above cannot reach
+   it. The list already squared it; the DETAIL screen and the board kept the pill,
+   which is the owner's IR-grid-versus-Customers discontinuity one component over.
+   Squared once, everywhere, including its leading dot. */
+.badge { border-radius: 0; }
+.badge::before { border-radius: 0; }
+
+/* ── THE PANELS THAT FLOAT ─────────────────────────────────────────────────────
+   The User Access modal and every generic dialog are appended to <body>, so they
+   are not inside a screen. The global scale above now squares them automatically,
+   but a square card set in the app's sans face still read as a different
+   application beside the IR grid — and the Customers tab lives in this modal, which
+   is exactly where the owner saw round corners against square ones. These rules
+   give the floating panels the same language as every pane: the mono face, the
+   letterspacing, one accent rule across the head, and no soft elevation. His test is
+   the one to keep: the app has to "appear near in all angles". */
+.inward-options-card,
+#access-modal .access-card {
+  background: var(--ind-panel);
+  border: 1px solid var(--ind-line);
+  border-top: 2px solid var(--accent);
+  box-shadow: none;
+}
+.inward-options-card .inward-options-title,
+#access-modal .inward-options-title {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
+}
+#access-modal .access-status {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  color: var(--ind-muted);
+  background: transparent;
+}
+#access-modal .access-tab {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#access-modal .access-section h3 {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-gray-9);
 }
 
 [data-theme="dark"] {
@@ -167,9 +201,9 @@
    THESE ARE TEXT STEPS, AND INSIDE THE SCREENS THEY NOW COLOUR TEXT ONLY. The lamps
    the list and the board draw take their fill from the separate --ind-lamp-* set a few
    lines below, and the whole reason for the split is written there. What this block
-   governs everywhere is the WORD: the badges in the modals and the toast, which sit
-   outside the eight scopes, and the pill on every screen that is not one of the three
-   the look reaches. So this table stays exactly as measured and nothing here moves.
+   governs everywhere is the WORD: the badges in the modals and the toast, and the
+   pill on every screen. So this table stays exactly as measured and nothing here
+   moves.
 
    These restate six token names, so every pill and every priority word in the app
    moves at once. The steps are repeated here from the table below, and from the
@@ -309,7 +343,7 @@
   text-transform: uppercase;
   color: var(--ink-gray-9);
 }
-/* The avatar draws from --radius-9 (999px), which the screen set deliberately leaves
+/* The avatar draws from --radius-9 (999px), which this file deliberately leaves
    round, so it is the one control in the header that has to be squared by hand. It
    also takes the accent as its edge — the second and last place the accent is a mark
    rather than a word. (.nudge-bell draws from --radius-3 and is
@@ -351,9 +385,9 @@
   box-shadow: none;
 }
 /* The pane's corners are already square: .glass-card is rounded with --radius-6 and
-   .form-input with --radius-4, both on the scale the screen set zeroes. Exactly four
+   .form-input with --radius-4, both on the scale this file zeroes. Exactly six
    rules in this file DO write `border-radius: 0` by hand, and each one is a corner the
-   token scale cannot reach: the two LED rules draw from --radius-9, the avatar from
+   token scale cannot reach: the badge and its dot, the avatar, all drawn from
    --radius-9, and .door-role from a literal `999px` in base.css. Nothing else here
    names a radius at all, which is what keeps "square" a property of the scale rather
    than a property of this file's diligence. */
@@ -440,7 +474,7 @@
    identical on both doors so neither reads as the real one.
 
    Square by hand, and it is the one chip that has to be. base.css:461 rounds it with
-   a literal `999px` rather than with a radius token, so the screen set below cannot
+   a literal `999px` rather than with a radius token, so the scale below cannot
    reach it — the same reason the LED and the avatar need their own `border-radius: 0`.
    Left as a pill it would be the only curve on the doors. */
 #auth-container .door-role {

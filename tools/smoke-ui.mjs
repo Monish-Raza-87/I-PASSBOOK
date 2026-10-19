@@ -437,6 +437,31 @@ r.ok('the fold changes the layout with no IR open — the defect that read as a 
   return open && folded;
 })(), 'the index screen folds too, not just the tooltip');
 
+r.ok('the grid takes the workspace, and INSIGHTS takes it BACK', (() => {
+  // The owner, 2026-10-19: *"being on grid, I clicked on insights, the insight
+  // appeared on right tab, but its width is small and non controllable."* The drawing
+  // mode used to write `html.view-full` from setListView alone, so the IR list kept
+  // taking the row and squeezed the dashboard into a strip — and hid the one divider
+  // that could have widened it. The class is now a side of the ROUTE as well.
+  const { T: D } = loadApp(`
+    renderLayout, setListView, setFlag, LIST_KEY,
+    get view() { return currentView; },
+    set view(v) { currentView = v; },
+    get htmlEl() { return document.documentElement; },
+  `, { capture: true, desktop: true });
+  D.view = 'index';
+  D.setFlag(D.LIST_KEY, false);
+  D.setListView('grid');
+  const onGrid = D.htmlEl.classList.contains('view-full');
+  D.view = 'insights';
+  D.renderLayout();
+  const onInsights = D.htmlEl.classList.contains('view-full');
+  D.view = 'index';
+  D.renderLayout();
+  const backOnGrid = D.htmlEl.classList.contains('view-full');
+  return onGrid && !onInsights && backOnGrid;
+})(), 'grid full-width on the list only — never on an adjacent pane');
+
 r.ok('a phone never folds the list, because there the list IS the screen', (() => {
   T.view = 'index';
   T.setFlag(T.LIST_KEY, true);
@@ -489,8 +514,12 @@ r.ok('the rail is CSS-owned: one class on <html>, no second writer of a pane dis
     /html\.list-collapsed #list-rail \{/.test(css) &&
     /classList\.toggle\('list-collapsed', desktop && !viewFull && storedFlag\(LIST_KEY\)\)/.test(appCode) &&
     // The full-workspace exception is the whole reason the fold is not simply
-    // `storedFlag(LIST_KEY)`, so it is pinned rather than left to the comment.
-    /const viewFull\s*=\s*desktop && \(listMode === 'board' \|\| listMode === 'grid'\)/.test(appCode);
+    // `storedFlag(LIST_KEY)`, so it is pinned rather than left to the comment. The
+    // drawing mode alone is NOT enough: opening INSIGHTS from the grid must give the
+    // dashboard its half of the row, not leave the list owning it (the owner's bug).
+    /const viewFull\s*=\s*desktop && currentView === 'index' && \(listMode === 'board' \|\| listMode === 'grid'\)/.test(appCode) &&
+    // ...and renderLayout is the only writer of the class, so the mode cannot leak.
+    !/classList\.toggle\('view-full',\s*listMode === 'board' \|\| listMode === 'grid'\)/.test(appCode);
 })(), 'the rules live in base.css above lg and nowhere write display inline');
 r.ok('the detail pane is what governs the back button, not the fold',
   /backBtn\.style\.display\s*=/.test(appCode));

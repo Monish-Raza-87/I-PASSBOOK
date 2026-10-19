@@ -518,7 +518,7 @@ r.ok('...and writes them to the copy, so the next cold start paints the NEW list
   (() => { const got = D.T.readIRListCache(); return !!got && got.length === 1 && got[0].irNumber === 'IR900'; })(),
   D.T.readIRListCache());
 r.ok('the fresh record was mapped by the one mapper, phone split off the name',
-  D.T.allIRs[0].customerName === 'Fresh Customer' && D.T.allIRs[0].contactPhone === '9000000001',
+  D.T.allIRs[0].customerName === 'FRESH CUSTOMER' && D.T.allIRs[0].contactPhone === '9000000001',
   JSON.stringify({ n: D.T.allIRs[0].customerName, p: D.T.allIRs[0].contactPhone }));
 r.ok('and no demo flag is set', D.T.dataIsDemo === false, D.T.syncText);
 

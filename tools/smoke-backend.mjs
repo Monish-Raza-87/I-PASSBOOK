@@ -105,8 +105,10 @@ r.head('the owner\'s security decisions');
 // v15 = I-POSTMAN SENDS: `sendPostmaster` posts one collected digest to CR. Its three
 // refusals — empty digest, a post inside two hours, the daily ceiling — are asserted
 // here because they are the anti-spam promise, not UI copy.
-r.ok('API_VERSION is 15 — I-POSTMAN can post one collected digest',
-  /API_VERSION:\s*15\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v16 = a reporter correction is keyed by the NAME on the ticket, not the mailbox
+// that filed it (one manager files for a whole team).
+r.ok('API_VERSION is 16 — a reporter correction is keyed by name',
+  /API_VERSION:\s*16\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the correction ledger is seeded with the other store files',
   /'corrections\.json', \{ items: \{\} \}/.test(code));
 r.ok('a correction is CR or admin, never a section grant',

@@ -3157,11 +3157,22 @@ const CR = 'adhik.nair@indrones.com';
     saved.corrections.items['serial:S100-V3'].to === 'S100-003', saved.corrections);
 
   const p = ctx.saveCorrection(
-    { kind: 'person', from: 'test reporter', to: 'Test Reporter', email: 'TEST.REPORTER@example.com' }, CR);
+    { kind: 'person', from: 'test reporter', to: 'TEST REPORTER', email: 'TEST.REPORTER@example.com' }, CR);
   r.ok('a CR member may record a reporter correction',
-    p.status === 'ok' && p.key === 'person:e:test.reporter@example.com', p);
-  r.ok('...and the email is the identity, lowercased',
-    p.corrections.items['person:e:test.reporter@example.com'].to === 'Test Reporter', p.corrections);
+    p.status === 'ok' && p.key === 'person:n:test reporter', p);
+  r.ok('...keyed by the NAME, with the email kept only as provenance',
+    p.corrections.items['person:n:test reporter'].to === 'TEST REPORTER' &&
+    p.corrections.items['person:n:test reporter'].email === 'test.reporter@example.com', p.corrections);
+  // The bug the owner reported: one manager files for a whole team, and an
+  // email-keyed decision renamed every one of them at once.
+  const teammate = ctx.saveCorrection(
+    { kind: 'person', from: 'other person', to: 'OTHER PERSON', email: 'test.reporter@example.com' }, CR);
+  r.ok('a second name in the SAME mailbox gets its own entry, not the first one',
+    teammate.key === 'person:n:other person' && teammate.corrections.items['person:n:test reporter'], teammate);
+  r.ok('...and a name with no email is still keyable', ctx.saveCorrection(
+    { kind: 'person', from: 'Solo Person', to: 'SOLO PERSON' }, CR).key === 'person:n:solo person');
+  r.ok('...while a blank name is refused',
+    ctx.saveCorrection({ kind: 'person', from: '', to: 'X', email: 'a@b.in' }, CR).status === 'error');
 
   let refused = false;
   try { ctx.saveCorrection({ kind: 'serial', from: 'S100-V4', to: 'S100-004' }, 'someone@indrones.com'); }

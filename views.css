@@ -2351,6 +2351,16 @@
 .ins-flag-list li { margin-bottom: 1px; }
 .ins-flag-list code { font-size: var(--text-xs); background: var(--surface-gray-2); padding: 0 0.25rem; border-radius: var(--radius-2); }
 .ins-flag-more { display: block; font-size: var(--text-xs); color: var(--ink-gray-4); margin-top: 2px; }
+/* A tail that opens IN PLACE. The summary is the whole affordance, so it is sized
+   like the list rather than like a control, and it never reads as a dead end. */
+.ins-flag-details { margin: 0 0 0.3rem; }
+.ins-flag-details > summary { cursor: pointer; font-size: var(--text-xs); color: var(--ink-gray-6); padding: 2px 0; }
+.ins-flag-details > summary:hover { color: var(--ink-gray-9); }
+.ins-flag-details[open] > summary { margin-bottom: 0.2rem; }
+.ins-flag-details .ins-flag-list { margin-bottom: 0; }
+.ins-suggest { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-gray-4); border: 1px solid var(--outline-gray-2); padding: 0 0.25rem; }
+.ins-spell-list { margin: 2px 0 0.3rem; padding-left: 0.9rem; list-style: none; }
+.ins-spell-list > li { color: var(--ink-gray-6); }
 .ins-flag-group .btn { width: auto; margin-top: 0.15rem; }
 /* The Inspector's decision row. Inline under a finding, and never full-width: a bare
    .btn is width:100%, which on a list item turns the button into a bar. The input

@@ -265,7 +265,9 @@ var CONFIG = {
   // recipient. The frontend's `Post to CR` is the only caller, and it confirms
   // first. There is NO automatic clock: the every-2-hours trigger is a separate
   // install and is deliberately not in this file.
-  API_VERSION: 15,
+  // 16 = saveCorrection keys a person by the NAME on the ticket, not the mailbox
+  //      that filed it (one manager files for a whole team). Provenance only.
+  API_VERSION: 16,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -5093,8 +5095,10 @@ function deleteCompany(params, authEmail) {
 //
 //   { "items": {
 //       "serial:S100-V3":  { kind:'serial', from:'S100-V3', to:'S100-003', by, at },
-//       "person:e:test@…": { kind:'person', from:'test reporter', email:'…',
-//                            to:'Test Reporter', by, at } } }
+//       "person:n:a person": { kind:'person', from:'A Person', email:'…',
+//                            to:'A. PERSON FULL', by, at } } }
+//
+// A person key is the NAME, never the email (see correctionNameKey below).
 //
 // What this is NOT: a write to the intake Sheet. The client's own words stay in the
 // Sheet and on the ticket's intake view; the app shows the decided value instead,
@@ -5132,9 +5136,14 @@ function requireCorrectionRights(authEmail) {
 // The SAME person key app.js's personKey() builds, so an entry written here is found
 // by the reader there. Kept deliberately small; two spellings that differ only by
 // case or punctuation are one person, initials are never guessed at.
+//
+// ⚠ THE NAME IS THE IDENTITY, NOT THE MAILBOX. One manager files for a whole team:
+// one address can carry several genuinely different reporters.
+// An email-keyed entry renamed every one of them at once — the bug the owner
+// reported — so `email` is recorded as provenance only and never enters the key.
 function correctionNameKey(v) {
   return String(v == null ? '' : v).toLowerCase()
-    .replace(/[.,/\\|]+/g, ' ')
+    .replace(/[.,/\\|()_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -5149,15 +5158,15 @@ function saveCorrection(params, authEmail) {
   if (kind !== 'serial' && kind !== 'person') return { status: 'error', message: 'Unknown correction kind.' };
   if (!to) return { status: 'error', message: 'There is nothing to save — the corrected value is blank.' };
   if (kind === 'serial' && !from) return { status: 'error', message: 'Which serial is being corrected?' };
-  if (kind === 'person' && !from && !email) return { status: 'error', message: 'Which reporter is being corrected?' };
+  if (kind === 'person' && !from) return { status: 'error', message: 'Which reporter spelling is being corrected?' };
 
   var key;
   if (kind === 'serial') {
     key = 'serial:' + from.toUpperCase();
   } else {
     var nk = correctionNameKey(from);
-    if (!email && !nk) return { status: 'error', message: 'Which reporter is being corrected?' };
-    key = email ? 'person:e:' + email : 'person:n:' + nk;
+    if (!nk) return { status: 'error', message: 'Which reporter spelling is being corrected?' };
+    key = 'person:n:' + nk;
   }
 
   return withRowLockOrThrow(function () {

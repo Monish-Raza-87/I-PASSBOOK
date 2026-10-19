@@ -996,7 +996,7 @@ spellings; the register is where that mess is resolved. The panel that edits it 
 `listCompanies`**, because a second answer to "which companies exist" is a second thing
 to keep true.
 
-### The Inspector's correction ledger — `saveCorrection`, `deleteCorrection` (v14)
+### The Inspector's correction ledger — `saveCorrection`, `deleteCorrection` (v14, rekeyed v16)
 
 `_store/corrections.json` is where a **decided** value is remembered. I-INSPECTOR
 finds what is wrong, CR chooses the right value, and the app displays it — the intake
@@ -1005,7 +1005,7 @@ made by our app only."
 
 | Action | Who | Does |
 |---|---|---|
-| `saveCorrection` | **admin or a member of the `cr` department** | Upserts one decision, keyed by the raw serial (`serial:S100-V3`) or by the reporter's email (`person:e:…`) — falling back to the normalised name for a reporter with no address. Returns the whole ledger so the panel can repaint. |
+| `saveCorrection` | **admin or a member of the `cr` department** | Upserts one decision, keyed by the raw serial (`serial:S100-V3`) or by the **reporter's name** (`person:n:a person`). The email is stored as provenance only and never enters the key — one manager files for a whole team, so an email-keyed decision would rename every teammate at once (v16). Returns the whole ledger so the panel can repaint. |
 | `deleteCorrection` | **admin or CR** | Removes one decision; the app goes back to exactly what the Sheet says. |
 
 `listIRs` carries the ledger under a `corrections` key — **staff only**, `{ items: {} }`
@@ -1019,16 +1019,17 @@ reads that as "none", and the deterministic serial fix (below) needs no store.
 { "items": {
     "serial:S100-V3":  { "kind": "serial", "from": "S100-V3", "to": "S100-003",
                          "email": "", "by": "…", "at": "…" },
-    "person:e:test@…": { "kind": "person", "from": "test reporter",
-                         "email": "test@…", "to": "Test Reporter", "by": "…", "at": "…" }
+    "person:n:test reporter": { "kind": "person", "from": "test reporter",
+                         "email": "test@…", "to": "TEST REPORTER", "by": "…", "at": "…" }
 } }
 ```
 
 **Deterministic serial correction is NOT in this file.** A serial that merely does not
 match one of the four shapes but whose fix is certain (`S100-12` → `S100-012`,
-`S25P-014` → `S25P014`) is normalised by the frontend as the list is mapped — no store,
-no round trip, no decision. Only what the app cannot prove (`S100-V3`, `S75-MAHYCO`)
-reaches CR.
+`S25P-014` → `S25P014`, R&D `S25PV4 R&D` → `S25P-V4`) is normalised by the frontend as
+the list is mapped — no store, no round trip, no decision. a contracted `S75-<CODE>` and the R&D
+`PREFIX-Vn` forms are CORRECT as written (v101). Only what the app cannot prove reaches
+CR, and where it can read a proposal off the raw value it prefills the box.
 
 **The record:**
 
@@ -1267,7 +1268,7 @@ var CONFIG = {
   ALLOWED_DOMAIN: 'indrones.com',
   ADMIN_EMAILS: ['monish.raza@indrones.com'],          // exactly one
   APP_URL: 'https://monish-raza-87.github.io/I-PASSBOOK/',  // deep links in admin mail
-  API_VERSION: 15,           // 15 = I-POSTMAN's collected digest; see the version list in backend.gs
+  API_VERSION: 16,           // 16 = reporter corrections keyed by NAME; see the version list in backend.gs
   SESSION_HOURS: 8.5,        // one working day — ABSOLUTE, no slide on use
   TEMP_PW_TTL_DAYS: 14,
 

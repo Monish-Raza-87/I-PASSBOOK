@@ -33,10 +33,11 @@ const { T, byId } = loadApp(`
   insightsFacets, insightsSummary, insightsMatches, insightsByCompany,
   companyRecordFor, companyNamesFor, INSIGHTS_SKELETON, renderInsights,
   personKey, serialFormatProblem, canonicalSerial, resolveSerial, reporterKeyFor,
-  isOutOfScopeModel, isOutOfScopeSerial, inspectorFindings, nameEmailIndex,
-  reporterName, setCorrections,
+  isOutOfScopeModel, isOutOfScopeSerial, inspectorFindings, serialSuggestion,
+  reporterName, setCorrections, canonicalPersonName, personCorrectionKey,
   get corrections() { return corrections; },
   get accessCache() { return accessCache; }, set accessCache(v) { accessCache = v; },
+  get currentUser() { return currentUser; }, set currentUser(v) { currentUser = v; },
   categoryCounts, renderCategorySegments, applyListFilters, setCategoryFilter, setListView,
   IR_CATEGORIES, REPAIR_SUBCATEGORIES, REPAIR_OTHERS, UNCATEGORISED, CATEGORY_ALL,
   INSIGHTS_ALL, SEGMENT_LABELS, categoryLabel, subCategoryLabel, statusCategory,
@@ -119,7 +120,7 @@ r.ok('only months that actually occur', fx.months.join(',') === '1,5,9', fx.mont
 // the label is the spelling the tickets actually use, and the count rides along so
 // the list can put the busiest reporter first.
 r.ok('customers deduped by person, busiest first, with a count',
-  fx.customers.map(c => c.value + ':' + c.label + ':' + c.n).join(',') === 'acme:Acme:2,beta:Beta:1',
+  fx.customers.map(c => c.value + ':' + c.label + ':' + c.n).join(',') === 'n:acme:Acme:2,n:beta:Beta:1',
   fx.customers);
 r.ok('drones deduped and sorted', fx.drones.join(',') === 'D-1,D-2', fx.drones);
 // The model is the SECOND device axis and it is not the serial: one serial is one
@@ -307,7 +308,7 @@ r.ok('category filters to one', T.insightsSummary(FIXTURE, F({ category: 'REPAIR
 r.ok('the uncategorised sentinel filters to the rows with none',
   T.insightsSummary(FIXTURE, F({ category: T.UNCATEGORISED })).matched === 1,
   T.insightsSummary(FIXTURE, F({ category: T.UNCATEGORISED })).matched);
-r.ok('customer filters exactly', T.insightsSummary(FIXTURE, F({ customer: 'acme' })).matched === 2);
+r.ok('customer filters exactly', T.insightsSummary(FIXTURE, F({ customer: T.reporterKeyFor('Acme') })).matched === 2);
 r.ok('drone filters exactly', T.insightsSummary(FIXTURE, F({ drone: 'D-3' })).matched === 1);
 // The model axis, added 2026-10-13. The Sheet writes the model in column S and the
 // app read it nowhere, so the fleet could not be counted at all.
@@ -500,14 +501,56 @@ T.renderInsights();
 r.ok('and it is gone the moment the data is real',
   !/insights-demo/.test(byId.get('insights-body').innerHTML));
 
+r.head('a long findings list opens in place, and the box arrives prefilled');
+{
+  // The owner, 2026-10-19: *"I am not able to see rest of 30 more issues as there is no
+  // options to skip any entry for now and move on to next, or scroll down."* So the
+  // tail is a <details>, not a dead sentence; and the serial box carries the Inspector's
+  // own proposal so the decision is one press.
+  T.currentUser = { email: 'dev@indrones.com', access: { role: 'admin', departments: ['cr'], permissions: {}, triage: true, revokedBy: {} } };
+  const many = [];
+  for (let i = 1; i <= 11; i++) {
+    many.push({ irNumber: 'IR' + i, droneId: 'S100-V3 (R&D)', droneIdRaw: 'S100-V3 (R&D)', droneModel: 'SIGMA 100',
+                customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' });
+  }
+  T.allIRs = many;
+  T.insightsFilters = Object.assign({}, ALL_ON);
+  T.renderInsights();
+  const h = byId.get('insights-body').innerHTML;
+  r.ok('the serial tail is a <details> that can be opened',
+    /<details class="ins-flag-details">/.test(h) && /Show the other 3/.test(h), (h.match(/Show the other[^<]*/) || [''])[0]);
+  r.ok('...and every one of the 11 is reachable, not 8 of them',
+    (h.match(/<input[^>]*id="ins-fix-sn-\d+"/g) || []).length === 11,
+    (h.match(/<input[^>]*id="ins-fix-sn-\d+"/g) || []).length);
+  r.ok('a proposal the Inspector has is written into the box, and marked',
+    (h.match(/value="S100-V3"/g) || []).length === 11 && /ins-suggest/.test(h),
+    (h.match(/value="S100-V3"/g) || []).length);
+  // The reporter row is per SPELLING and prefilled with its canonical form. Two
+  // spellings in one manager's mailbox must produce TWO boxes that save separately.
+  T.allIRs = [
+    { irNumber: 'IRa', customerName: 'test person', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IRb', customerName: 'TEST PERSON', contactEmail: 'test.reporter@example.com' },
+  ];
+  T.renderInsights();
+  const hr = byId.get('insights-body').innerHTML;
+  r.ok('two spellings of one name are two rows, each with its own box',
+    (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 2,
+    (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []));
+  r.ok('...and the lowercase one arrives prefilled with its CAPS form',
+    /value="TEST PERSON"/.test(hr) && /data-from="test person"/.test(hr), hr.slice(0, 200));
+  T.currentUser = null;
+  T.allIRs = FIXTURE;
+  T.renderInsights();
+}
+
 r.head('a filter that has left the data is reset, not kept');
 // The select cannot show an option that no longer exists. Keeping the value would
 // leave the page reporting 0 matches with every dropdown reading "All" — the one
 // failure a reader cannot diagnose from the screen.
 T.allIRs = FIXTURE;
-T.insightsFilters = Object.assign({}, ALL_ON, { customer: 'gamma' });
+T.insightsFilters = Object.assign({}, ALL_ON, { customer: T.reporterKeyFor('Gamma') });
 T.renderInsights();
-r.ok('a customer still in the list is kept', T.insightsFilters.customer === 'gamma', T.insightsFilters.customer);
+r.ok('a customer still in the list is kept', T.insightsFilters.customer === T.reporterKeyFor('Gamma'), T.insightsFilters.customer);
 T.insightsFilters = Object.assign({}, ALL_ON, { customer: 'a-customer-that-left' });
 T.renderInsights();
 r.ok('one that has gone is dropped back to All',
@@ -541,16 +584,53 @@ r.ok('S75-4 is corrected and padded to S75004', T.canonicalSerial('S75-4') === '
 r.ok('a clean serial is returned unchanged', T.canonicalSerial('S25P033') === 'S25P033');
 // NOTHING IS GUESSED. A value the app cannot prove is left exactly as written and
 // stays a finding for CR — a wrong guess would invent an aircraft.
-r.ok('S75-MAHYCO is NOT guessed at and stays a finding',
-  T.canonicalSerial('S75-MAHYCO') === 'S75-MAHYCO' &&
-  T.serialFormatProblem('S75-MAHYCO') === 'SIGMA 75 serials read S75XXX',
-  T.serialFormatProblem('S75-MAHYCO'));
+//
+// THE OWNER'S TWO EXCEPTIONS, 2026-10-19. A contracted SIGMA 75 carries its customer's
+// own alpha suffix (`S75-ACME`) and is written that way and no other; and an R&D
+// machine is written as its version (`S100-V1`, `S100-V3`, `S25P-V4`), never as a unit
+// number, and never with the words "R&D" bolted on. Both are CORRECT, so neither
+// reaches CR.
+r.ok('S75-ACME is the accepted spelling and is NOT a finding',
+  T.canonicalSerial('S75-ACME') === 'S75-ACME' && T.serialFormatProblem('S75-ACME') === '',
+  T.serialFormatProblem('S75-ACME'));
+r.ok('...and it normalises the separators it was typed with',
+  ['s75 acme', 'S75_ACME', 'S75.ACME'].every(v => T.canonicalSerial(v) === 'S75-ACME'),
+  ['s75 acme', 'S75_ACME', 'S75.ACME'].map(v => T.canonicalSerial(v)));
+r.ok('an R&D version is a format, not a mistake',
+  ['S100-V1', 'S100-V3', 'S25P-V4', 'S25-V2', 'S75-V1'].every(v => T.serialFormatProblem(v) === ''),
+  ['S100-V1', 'S100-V3', 'S25P-V4', 'S25-V2', 'S75-V1'].map(v => T.serialFormatProblem(v)));
+r.ok('"S25PV4 R&D" is corrected to S25P-V4',
+  T.canonicalSerial('S25PV4 R&D') === 'S25P-V4', T.canonicalSerial('S25PV4 R&D'));
+r.ok('...and so are the other ways the version gets typed',
+  ['S100 V3', 's100-v3', 'S100V3', 'S100-V03', 'S100-V3 R&D'].every(v => T.canonicalSerial(v) === 'S100-V3'),
+  ['S100 V3', 's100-v3', 'S100V3', 'S100-V03', 'S100-V3 R&D'].map(v => T.canonicalSerial(v)));
 r.ok('a 4-digit body is outside the owner\'s format and is left alone',
   T.canonicalSerial('S100-1234') === 'S100-1234' && T.serialFormatProblem('S100-1234') !== '');
 r.ok('a free-written name is NOT a finding — it is not a malformed serial',
   T.serialFormatProblem('FIGHTER') === '' && T.serialFormatProblem('HECTOR-V1') === '');
 r.ok('a blank serial is not a finding', T.serialFormatProblem('') === '');
 r.ok('S25P030 is not mistaken for a malformed S25', T.serialFormatProblem('S25P030') === '');
+
+r.head('a finding can carry a proposal, and a proposal is never a guess');
+// The box is prefilled and CR presses once. The prefix comes from the MODEL, and the
+// number must ALREADY be written in the serial — nothing is invented.
+r.ok('a model word and a short number are proposed in that model\'s format',
+  T.serialSuggestion('SIGMA 25 018', 'SIGMA 25') === 'S25018' &&
+  T.serialSuggestion('SIGMA 100 12', 'SIGMA 100') === 'S100-012' &&
+  T.serialSuggestion('S75 7', 'SIGMA 75') === 'S75007',
+  ['SIGMA 25 018', 'SIGMA 100 12', 'S75 7'].map((v, i) => T.serialSuggestion(v, ['SIGMA 25', 'SIGMA 100', 'SIGMA 75'][i])));
+r.ok('an R&D version is proposed as a version',
+  T.serialSuggestion('S100 v33', 'SIGMA 100') === 'S100-V33' &&
+  T.serialSuggestion('SIGMA 25 PRO V4', 'SIGMA 25 PRO') === 'S25P-V4',
+  [T.serialSuggestion('S100 v33', 'SIGMA 100'), T.serialSuggestion('SIGMA 25 PRO V4', 'SIGMA 25 PRO')]);
+r.ok('a bare unit number is NOT proposed from — the model cannot be read off it',
+  T.serialSuggestion('25018', 'SIGMA 25 PRO') === '', T.serialSuggestion('25018', 'SIGMA 25 PRO'));
+r.ok('a 4-digit body gets NO proposal, because the app would be inventing one',
+  T.serialSuggestion('S100-1234', 'SIGMA 100') === '', T.serialSuggestion('S100-1234', 'SIGMA 100'));
+r.ok('an unknown model gets no proposal either',
+  T.serialSuggestion('123', 'DJI Mavic 2 Pro') === '' && T.serialSuggestion('FIGHTER', 'STRIVER') === '');
+r.ok('and every proposal really passes the format check',
+  ['S25P018', 'S100-012', 'S75007'].every(v => T.serialFormatProblem(v) === ''));
 
 r.head('equipment we do not make stays out of the fleet lists, and is named instead');
 r.ok('DJI is out of scope on the model axis', T.isOutOfScopeModel('DJI Mavic 2 Pro') === true);
@@ -576,35 +656,31 @@ r.ok('a real serial is in scope', T.isOutOfScopeSerial('S25P033') === false);
   r.ok('...and the label is the spelling most tickets use', ff.customers[0].n === 3, ff.customers[0]);
 }
 
-r.head('a reporter is identified by Col L together with Col P');
+r.head('a reporter is identified by the NAME on the ticket, not the mailbox');
 {
-  // One name, two addresses, is two people. One address, two spellings, is one
-  // person. That is the owner's rule: mind the name and the email TOGETHER.
+  // One manager files for a whole team, so a single address can carry several
+  // genuinely different reporters. The name is the identity and the address is
+  // provenance. Two spellings of one name ARE one person.
   const rows = [
     { irNumber: 'IR1', customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' },
-    { irNumber: 'IR2', customerName: 'test reporter', contactEmail: 'TEST.REPORTER@example.com' },
+    { irNumber: 'IR2', customerName: 'test  reporter', contactEmail: 'TEST.REPORTER@example.com' },
     { irNumber: 'IR3', customerName: 'Test Reporter', contactEmail: 'other@elsewhere.in' },
-    { irNumber: 'IR4', customerName: 'Test Reporter', contactEmail: '' },
-    { irNumber: 'IR5', customerName: 'Solo Person',  contactEmail: '' },
+    { irNumber: 'IR4', customerName: 'Solo Person',  contactEmail: '' },
+    { irNumber: 'IR5', customerName: '',             contactEmail: 'no.name@acme.in' },
   ];
-  const idx = T.nameEmailIndex(rows);
-  r.ok('the email is the identity when there is one',
-    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com', idx) === 'e:test.reporter@example.com');
-  r.ok('...and case in the address does not split a person',
-    T.reporterKeyFor('test reporter', 'TEST.REPORTER@example.com', idx) === 'e:test.reporter@example.com');
-  r.ok('two different addresses with the same name are NOT merged',
-    T.reporterKeyFor('Test Reporter', 'other@elsewhere.in', idx) === 'e:other@elsewhere.in');
-  // A row with no email borrows the unique address its name was seen with.
-  const soloIdx = T.nameEmailIndex([
-    { customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' },
-    { customerName: 'Test Reporter', contactEmail: '' },
-  ]);
-  r.ok('a blank email joins the one address its name is known by',
-    T.reporterKeyFor('Test Reporter', '', soloIdx) === 'e:test.reporter@example.com');
-  r.ok('a name with two addresses and no email stays its own group',
-    T.reporterKeyFor('Test Reporter', '', idx) === 'test reporter');
-  r.ok('an unknown name with no email is still its own reporter',
-    T.reporterKeyFor('Solo Person', '', idx) === 'solo person');
+  r.ok('the name is the identity',
+    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') === 'n:test reporter');
+  r.ok('...and punctuation or case does not split a person',
+    T.reporterKeyFor('test  reporter', 'TEST.REPORTER@example.com') === 'n:test reporter');
+  r.ok('one address holding two different names stays two reporters',
+    T.reporterKeyFor('Test Reporter', 'manager@example.com') !==
+    T.reporterKeyFor('Solo Person', 'manager@example.com'));
+  r.ok('two addresses with the same name are one person — the name wins',
+    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') ===
+    T.reporterKeyFor('Test Reporter', 'other@elsewhere.in'));
+  r.ok('a row that names nobody falls back to its address',
+    T.reporterKeyFor('', 'No.Name@Acme.in') === 'e:no.name@acme.in');
+  r.ok('...and a row with neither is no person at all', T.reporterKeyFor('', '') === '');
 }
 
 r.head('the Inspector finds the same things the panel lists');
@@ -614,22 +690,25 @@ r.head('the Inspector finds the same things the panel lists');
     { irNumber: 'IR2', droneId: 'S100-003', droneIdRaw: 'S100-003', droneModel: 'SIGMA 100' },
     { irNumber: 'IR3', droneId: 'Mavic 2 pro', droneIdRaw: 'Mavic 2 pro', droneModel: 'DJI Mavic 2 Pro' },
     { irNumber: 'IR4', droneId: 'FIGHTER', droneIdRaw: 'FIGHTER', droneModel: 'STRIVER' },
-    { irNumber: 'IR5', droneId: 'S100-V3', droneIdRaw: 'S100-V3', droneModel: 'SIGMA 100' },
+    { irNumber: 'IR5', droneId: 'S100-1234', droneIdRaw: 'S100-1234', droneModel: 'SIGMA 100' },
+    { irNumber: 'IR6', droneId: 'S25P-V4', droneIdRaw: 'S25P-V4', droneModel: 'SIGMA 25 PRO' },
   ]);
   r.ok('a serial the app can prove wrong is reported as auto-corrected',
     f.autoFixed.length === 1 && f.autoFixed[0].from === 'S100-12' && f.autoFixed[0].to === 'S100-012', f.autoFixed);
   r.ok('...and it is NOT also a CR finding',
     f.serial.every(x => x.irNumber !== 'IR1'), f.serial);
   r.ok('a serial the app cannot prove stays a serial finding',
-    f.serial.length === 1 && f.serial[0].irNumber === 'IR5' && f.serial[0].raw === 'S100-V3', f.serial);
+    f.serial.length === 1 && f.serial[0].irNumber === 'IR5' && f.serial[0].raw === 'S100-1234', f.serial);
   r.ok('the finding carries the IR, the serial and the reason',
-    f.serial[0].sn === 'S100-V3' && /S100-XXX/.test(f.serial[0].why), f.serial[0]);
+    f.serial[0].sn === 'S100-1234' && /S100-XXX/.test(f.serial[0].why), f.serial[0]);
+  r.ok('an R&D version is not a finding at all',
+    f.serial.every(x => x.irNumber !== 'IR6'), f.serial);
   r.ok('an off-fleet row is an off-fleet finding, never a serial finding',
     f.offFleet.length === 1 && f.offFleet[0].irNumber === 'IR3' && f.serial.every(x => x.irNumber !== 'IR3'),
     f.offFleet);
   r.ok('a free-written serial is neither finding',
     f.serial.every(x => x.irNumber !== 'IR4') && f.offFleet.every(x => x.irNumber !== 'IR4'), f);
-  r.ok('the total is every row the pass looked at', f.total === 5, f.total);
+  r.ok('the total is every row the pass looked at', f.total === 6, f.total);
 }
 
 r.head('the Inspector reports a reporter spelled two ways, and renames nothing by itself');
@@ -651,12 +730,17 @@ r.head('an approved correction is what changes the app, and only it');
 {
   T.setCorrections({ items: {
     'serial:S100-V3': { kind: 'serial', from: 'S100-V3', to: 'S100-003', by: 'cr@indrones.com' },
-    'person:e:test.reporter@example.com': { kind: 'person', from: 'test reporter', email: 'test.reporter@example.com', to: 'Test Reporter' },
+    'person:n:test reporter': { kind: 'person', from: 'test reporter', email: 'test.reporter@example.com', to: 'TEST REPORTER' },
   } });
   r.ok('the approved serial wins over the raw one', T.resolveSerial('S100-V3') === 'S100-003');
   r.ok('...and is shown in the standard format', T.resolveSerial('s100-v3') === 'S100-003');
-  r.ok('the approved reporter name is shown', T.reporterName('test reporter', 'test.reporter@example.com') === 'Test Reporter');
-  r.ok('another reporter is untouched', T.reporterName('Asha Rao', 'asha@acme.in') === 'Asha Rao');
+  r.ok('the approved reporter name is shown', T.reporterName('test reporter', 'test.reporter@example.com') === 'TEST REPORTER');
+  r.ok('...and the decision is keyed by the NAME, so another address saying it gets it too',
+    T.reporterName('Test Reporter', 'other@elsewhere.in') === 'TEST REPORTER');
+  r.ok('a different person in the same mailbox is untouched',
+    T.reporterName('Solo Person', 'test.reporter@example.com') === 'SOLO PERSON');
+  r.ok('an uncorrected name is shown in CAPS, which is the approved house form',
+    T.reporterName('Asha Rao', 'asha@acme.in') === 'ASHA RAO');
   r.ok('a serial with no entry still gets the deterministic fix',
     !T.corrections.items['serial:S100-12'] && T.resolveSerial('S100-12') === 'S100-012');
   // With a correction in force, the Inspector stops reporting it as a finding.
@@ -664,6 +748,23 @@ r.head('an approved correction is what changes the app, and only it');
     { irNumber: 'IR1', droneId: 'S100-V3', droneIdRaw: 'S100-V3', droneModel: 'SIGMA 100' },
   ]);
   r.ok('a corrected serial is no longer a finding', f.serial.length === 0, f.serial);
+  const fp = T.inspectorFindings([
+    { irNumber: 'IR1', customerName: 'test reporter', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IR2', customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' },
+  ]);
+  r.ok('a reporter spelling CR already decided is not asked again', fp.reporters.length === 0, fp.reporters);
+  T.setCorrections({});
+}
+
+r.head('a legacy email-keyed correction still lands, but never renames a teammate');
+{
+  T.setCorrections({ items: {
+    'person:e:manager@example.com': { kind: 'person', from: 'manager person', email: 'manager@example.com', to: 'MANAGER PERSON' },
+  } });
+  r.ok('the spelling it was written for is corrected',
+    T.reporterName('Manager Person', 'manager@example.com') === 'MANAGER PERSON');
+  r.ok('a teammate filed from the same mailbox is NOT',
+    T.reporterName('Solo Person', 'manager@example.com') === 'SOLO PERSON');
   T.setCorrections({});
 }
 

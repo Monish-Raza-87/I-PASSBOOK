@@ -3159,7 +3159,11 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      is set by BOTH the board (nine columns of cards do need the room) and the grid
      (a grid laid out inside the list's own 400px column would be ONE TILE WIDE).
      Two parallel classes would have been two places for the same fact to drift, so
-     there is one, and setListView() is its only writer.
+     there is one, and `renderLayout()` is its only writer — NOT `setListView()`. The
+     class depends on the ROUTE as well as the drawing: when the owner opened INSIGHTS
+     from the Grid, the list kept taking the row and squeezed the dashboard into a
+     strip, and this rule also hid the one divider that could have widened it. Only
+     `currentView === 'index'` may be full-width.
 
      Choosing either view: the "No IR selected" placeholder steps out and this pane
      stops being a fixed 400px column, so the drawing gets everything the list would

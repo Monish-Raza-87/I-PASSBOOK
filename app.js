@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v101';
+const APP_VERSION = 'v102';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -4466,7 +4466,14 @@ function renderLayout() {
   // replace the board or the grid and the detail pane behind it has no ticket in it.
   // So on those views the fold is suppressed (and its control is hidden); the
   // preference is untouched and comes straight back when List is chosen again.
-  const viewFull   = desktop && (listMode === 'board' || listMode === 'grid');
+  //
+  // ⚠ `currentView === 'index'` IS PART OF THE PREDICATE, and leaving it out was a
+  // real bug the owner hit: the board/grid took the row, he opened INSIGHTS, and the
+  // dashboard was squeezed into a strip beside a list pane that still believed it
+  // owned the workspace. The drawing mode does not travel — only the LIST screen can
+  // be full-width. This function is now the ONE writer of `html.view-full`.
+  const viewFull   = desktop && currentView === 'index' && (listMode === 'board' || listMode === 'grid');
+  document.documentElement.classList.toggle('view-full', viewFull);
   document.documentElement.classList.toggle('list-collapsed', desktop && !viewFull && storedFlag(LIST_KEY));
   indexView.style.display  = listHidden ? 'none' : 'flex';
   detailView.style.display = detail ? 'flex' : 'none';
@@ -7429,22 +7436,35 @@ function isOutOfScopeSerial(v) { return /\bMAVIC\b/i.test(String(v == null ? '' 
 // prefix rather than the model column, because the model column is free text and is
 // the very thing nobody can be trusted to have spelled right.
 //
-// The formats are the owner's own, from the rule book:
+// The formats are the owner's own, from the rule book, plus the two R&D exceptions he
+// gave on 2026-10-19:
 //   SIGMA 25  S25XXX · SIGMA 25 PRO S25PXXX · SIGMA 100 S100-XXX · SIGMA 75 S75XXX
+//   R&D machines carry their version: S100-V1, S100-V3, S25P-V4
+//   a contracted SIGMA 75 carries its own suffix: S75-<CODE>, and only like that
 // Anything else is free writing and is never touched. S25P is tested before S25 or
 // every Pro serial would fail the plain Sigma 25 rule.
 //
 // AND THE APP FIXES WHAT IT CAN PROVE. The owner's rule (2026-10-18): "S100-XXX is
 // compulsory when the data is fed in our app, correction to wrong entry has to be
-// made by our app only." So the four formats are also a NORMALISER: a serial written
+// made by our app only." So the formats are also a NORMALISER: a serial written
 // S100-12, S100 12 or s100_012 is the same serial as S100-012 and the app says so.
-// It only fixes a shape it can see — `S100-V3` or `S75-MAHYCO` is NOT guessed at,
-// because a wrong guess would invent an aircraft. Those go to CR, exactly as R-108
-// says. And nothing here edits the intake Sheet: the raw cell stays in `intake`.
+// Since 2026-10-19 the same is true of the R&D shape: "S25PV4 R&D" is S25P-V4 and
+// the app corrects it, because the version is written, not guessed. A value whose
+// shape the app cannot prove — "S100-1234" or a free-written name — is left EXACTLY
+// as written and goes to CR, exactly as R-108 says.
 function canonicalSerial(v) {
   const raw = String(v == null ? '' : v).trim();
   if (!raw) return '';
   const s = raw.toUpperCase();
+  // A contracted SIGMA 75 carries its customer's own alpha suffix (S75-ACME). Four
+  // letters or more keeps it apart from the R&D version shape (S75-V3) and from a
+  // short free-written code; the suffix is preserved exactly, in one upper case.
+  const c75 = /^S75[-_ .]?([A-Z]{4,})$/.exec(s);
+  if (c75 && !/^V\d+$/.test(c75[1])) return 'S75-' + c75[1];
+  // R&D: a version number after the prefix, optionally with the words "R&D" after it.
+  // The version is kept as an integer: S25PV4, S25P V 4 and S25P-V4 all read S25P-V4.
+  const rd = /^(S100|S25P|S75|S25)[-_ .]?V[-_ .]?(\d{1,2})(?:\s*R\s*&\s*D)?$/.exec(s);
+  if (rd) return rd[1] + '-V' + String(Number(rd[2]));
   // One prefix, then an optional separator, then up to three digits. A 4-digit body
   // is left alone on purpose: it is not the owner's format, so guessing at it is the
   // one thing R-108 forbids. Anything unrecognised is returned EXACTLY as written —
@@ -7458,11 +7478,48 @@ function canonicalSerial(v) {
 function serialFormatProblem(sn) {
   const s = canonicalSerial(sn);
   if (!s) return '';
-  if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX';
-  if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX';
-  if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX';
-  if (/^S25/.test(s)) return /^S25\d{3}$/.test(s) ? '' : 'SIGMA 25 serials read S25XXX';
+  if (/^S75-[A-Z]{4,}$/.test(s)) return '';
+  if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) || /^S100-V\d{1,2}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX (R&D: S100-Vn)';
+  if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) || /^S25P-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX (R&D: S25P-Vn)';
+  if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) || /^S75-V\d{1,2}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX (R&D: S75-Vn)';
+  if (/^S25/.test(s)) return /^S25\d{3}$/.test(s) || /^S25-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 serials read S25XXX (R&D: S25-Vn)';
   return '';
+}
+
+// The value the Inspector can PROPOSE for a serial it cannot fix by itself. A
+// proposal is never applied on its own: it prefills the box and CR presses once.
+// The prefix comes from the MODEL only when the model is one of ours, and the number
+// must already be written in the serial — nothing is invented.
+function serialSuggestion(raw, model) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return '';
+  const fixed = canonicalSerial(s);
+  if (fixed !== s && !serialFormatProblem(fixed)) return fixed;
+  const m = String(model || '').toUpperCase();
+  const prefix = /SIGMA\s*100/.test(m) ? 'S100-'
+    : /SIGMA\s*25\s*PRO/.test(m) ? 'S25P'
+    : /SIGMA\s*75/.test(m) ? 'S75'
+    : /SIGMA\s*25/.test(m) ? 'S25' : '';
+  if (!prefix) return '';
+  // Only the part AFTER the model word is proposed on. A 4-digit body ("S100-1234")
+  // has no proposal at all: it is outside the owner's format, and turning it into
+  // "S100-100" would be inventing an aircraft rather than reading one.
+  const tailMatch = /^(?:SIGMA\s*\d+(?:\s*PRO)?|S\d+P?)\s*[-_ .]?\s*(.*)$/i.exec(s);
+  const tail = tailMatch ? tailMatch[1].trim() : s;
+  // A version is a version wherever the words around it sit: "S100-V3 (R&D)" still
+  // says V3, so proposing S100-V3 reads what is written instead of guessing. The
+  // prefix has to be in the raw already (tailMatch), never inferred from a bare number.
+  const ver = /(?:^|[^A-Z0-9])V\s*[-_ .]?\s*(\d{1,2})(?![0-9])/i.exec(tail);
+  if (ver && tailMatch) {
+    // S100- already carries its dash; S25P/S75/S25 do not. Two dashes would be a
+    // candidate that fails its own format check and silently proposes nothing.
+    const candidate = prefix + (/-$/.test(prefix) ? '' : '-') + 'V' + String(Number(ver[1]));
+    return serialFormatProblem(candidate) ? '' : candidate;
+  }
+  const num = /^[-_ .]?\s*(\d{1,3})$/.exec(tail);
+  if (!num) return '';
+  const candidate = prefix + ('00' + num[1]).slice(-3);
+  return serialFormatProblem(candidate) ? '' : candidate;
 }
 
 // ─── APPROVED CORRECTIONS (`_store/corrections.json`) ────────────────────────
@@ -7481,10 +7538,32 @@ let corrections = { items: {} };
 
 function normEmail(v) { return String(v == null ? '' : v).toLowerCase().trim(); }
 function serialCorrectionKey(v) { return 'serial:' + String(v == null ? '' : v).trim().toUpperCase(); }
-function personCorrectionKey(name, email) {
-  const e = normEmail(email);
-  return e ? 'person:e:' + e : 'person:n:' + personKey(name);
+
+// A reported-by name is stored and SHOWN in CAPS. That is the owner's format, given
+// on 2026-10-19, when he asked for the reporter name to be shown as it is written.
+// It is a LABEL, not an identity: the row keeps its own
+// person, and a manager's email no longer drags every team member onto one name.
+//
+// Punctuation that is never part of a name is dropped — the underscore in
+// "ABHISHEK BHARTI_", the empty brackets in "VIPUL PALSHIKAR ()", the slashes in
+// "PILOT//A. PERSON/". Nothing else is guessed: "A. PERSON" does not
+// silently become "A. PERSON FULL" — that needs a CR decision, because a wrong
+// expansion would invent a person.
+function canonicalPersonName(v) {
+  return String(v == null ? '' : v)
+    .replace(/[.,/\\|()_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^-+|-+$/g, '')
+    .trim()
+    .toUpperCase();
 }
+
+// The correction key is the SPELLING, never the email. Keying by email is what made
+// one manager's decision rename every teammate who filed through his account. Two
+// people who genuinely share one spelling share one correction; that is the accepted
+// cost of the name being the identity, and it is the only key that can tell
+// "A. Person" and "B. Person" apart inside one mailbox.
+function personCorrectionKey(name) { return 'person:n:' + personKey(name); }
 
 function setCorrections(v) {
   const items = v && typeof v === 'object' && v.items && typeof v.items === 'object' ? v.items : {};
@@ -7502,76 +7581,103 @@ function resolveSerial(raw) {
 }
 
 // The reporter's name as the APP shows it. An approved correction is the ONLY thing
-// that can change it, and a correction only exists after CR has chosen it.
+// that can change a person's spelling; otherwise the name is normalised to CAPS.
+// Legacy entries (written before v16) were keyed by email; one is honoured only when
+// its own `from` is this same spelling, so an old decision cannot rename a whole
+// manager's mailbox again.
 function reporterName(name, email) {
   const n = String(name == null ? '' : name).trim();
   if (!n) return '';
-  const hit = corrections.items[personCorrectionKey(n, email)];
+  const nk = personKey(n);
+  const hit = corrections.items['person:n:' + nk];
   if (hit && hit.to) return String(hit.to);
-  return n;
+  const e = normEmail(email);
+  if (e) {
+    const old = corrections.items['person:e:' + e];
+    if (old && old.to && personKey(old.from) === nk) return String(old.to);
+  }
+  return canonicalPersonName(n);
 }
 
-// ─── "Reported by" is a PERSON — Col L and Col P TOGETHER ────────────────────
-// Col L is a free-text "Who's Reporting", so one person arrives as "Monish Raza",
-// "monish raza" and "MONISH RAZA ". Col P is their email address and is a far
-// stronger identity than any spelling.
+// ─── "Reported by" is a PERSON — the NAME is the identity ───────────────────
+// Col L is a free-text "Who's Reporting", so one person arrives as "A Person",
+// "a person" and "A PERSON ". Col P is the email address the report was FILED
+// from, and for a manager it is not the person at all: one manager files for a whole
+// team, so one address appears on tickets about several different reporters and
+// others.
 //
-// The owner's rule (2026-10-18): mind L and P TOGETHER. So the identity is the
-// email when there is one, and a row with no email falls back to its name — and
-// attaches to an email group only when that name is used by exactly ONE address.
-// Two addresses that happen to share a name are NOT merged, because that is how two
-// different customers become one row and a dashboard starts lying quietly. Initials
-// are still never guessed at.
+// The owner's rule (2026-10-19), replacing the email-as-identity rule: assign each IR
+// to the CAPS name written on it, never to the manager whose mailbox filed it. So the
+// identity is the (canonical, CAPS) NAME. The email is used only when a row has no
+// name at all. Two different people who happen to share one spelling are merged; that
+// is the accepted cost, and the alternative was the bug he reported.
 function personKey(s) {
   return String(s == null ? '' : s).toLowerCase()
-    .replace(/[.,/\\|]+/g, ' ')
+    .replace(/[.,/\\|()_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-// The identity key for one row. `nameEmails` is the name → Set(email) map every
-// caller builds from the whole list first, so a row without an email can borrow the
-// unique address its name was seen with.
-function reporterKeyFor(name, email, nameEmails) {
-  const e = normEmail(email);
-  if (e) return 'e:' + e;
-  const n = personKey(name);
-  if (!n) return '';
-  const emails = nameEmails && nameEmails.get(n);
-  if (emails && emails.size === 1) return 'e:' + [...emails][0];
-  return n;
+// One spelling is a VARIANT of another when the two could be the same person typed
+// differently: one contains the other ("A. PERSON" inside "PILOT A. PERSON"), the
+// surname matches and one first name is a prefix of the other ("A" / "AB" with the
+// same surname), or the whole key is one or two edits apart. This is
+// deliberately conservative: two genuinely different names under one manager's email
+// are NOT a finding, because that is a team, not a misspelling.
+function editDistance(a, b) {
+  const s = String(a), t = String(b);
+  if (s === t) return 0;
+  if (!s.length || !t.length) return Math.max(s.length, t.length);
+  let prev = Array.from({ length: t.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= s.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= t.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[t.length];
 }
 
-// Two passes over the same rows, so every caller resolves identities identically:
-// first collect each name's addresses, then key every row. PURE.
-function nameEmailIndex(irs) {
-  const index = new Map();
-  (Array.isArray(irs) ? irs : []).forEach(ir => {
-    const n = personKey(ir && ir.customerName);
-    const e = normEmail(ir && ir.contactEmail);
-    if (!n || !e) return;
-    const set = index.get(n) || new Set();
-    set.add(e);
-    index.set(n, set);
-  });
-  return index;
+function looksLikeSpellingVariant(a, b) {
+  const ka = personKey(a), kb = personKey(b);
+  if (!ka || !kb) return false;
+  if (ka === kb) return true;
+  if (ka.indexOf(kb) >= 0 || kb.indexOf(ka) >= 0) return true;
+  const ta = ka.split(' '), tb = kb.split(' ');
+  if (ta.length && tb.length) {
+    const lastSame = ta[ta.length - 1] === tb[tb.length - 1];
+    const firstA = ta[0], firstB = tb[0];
+    const prefix = firstA.indexOf(firstB) === 0 || firstB.indexOf(firstA) === 0;
+    if (lastSame && prefix && Math.min(firstA.length, firstB.length) >= 4) return true;
+  }
+  // Full-key distance only for names long enough that two edits cannot be two people.
+  return Math.min(ka.length, kb.length) >= 6 && editDistance(ka, kb) <= 2;
+}
+
+// The identity key for one row. The NAME wins; an email is only a fallback for a row
+// that names nobody. The third argument is accepted and ignored so older callers do
+// not break — it used to carry the name→email index this rule no longer needs.
+function reporterKeyFor(name, email) {
+  const n = personKey(name);
+  if (n) return 'n:' + n;
+  const e = normEmail(email);
+  return e ? 'e:' + e : '';
 }
 
 function insightsFacets(irs) {
   const rows = Array.isArray(irs) ? irs : [];
   const years = new Set(), months = new Set(), drones = new Set(), models = new Set();
-  // Built once for the whole list: a row without an email borrows the unique address
-  // its name was seen with (see reporterKeyFor).
-  const nameEmails = nameEmailIndex(rows);
   // The company axis is keyed by the REGISTER's key where one speaks for the spelling,
   // so a company whose tickets carry three spellings is one option, not three. Where no
   // record speaks for it yet, the raw spelling is its own option — the dashboard has to
   // be able to count a mess the register has not tidied, or it would hide exactly the
   // companies that need tidying.
   const companies = new Map();
-  // Keyed by the reporter identity (email where there is one, name otherwise), value
-  // carries every spelling it has been seen under so the label can be the one most
-  // tickets actually use rather than whichever arrived first.
+  // Keyed by the reporter identity — the NAME on the ticket, with the email only as a
+  // fallback for a row that names nobody (see reporterKeyFor). Value carries every
+  // spelling it has been seen under so the label can be the one most tickets actually
+  // use rather than whichever arrived first.
   const persons = new Map();
   let undated = 0, offFleet = 0;
   rows.forEach(ir => {
@@ -7582,7 +7688,7 @@ function insightsFacets(irs) {
     if (who) {
       // `reporterKey` is set at ingestion (mapSheetRows), so the facet and the row
       // filter cannot disagree about who is who.
-      const k = ir.reporterKey || reporterKeyFor(who, ir.contactEmail, nameEmails);
+      const k = ir.reporterKey || reporterKeyFor(who, ir.contactEmail);
       if (k) {
         const rec = persons.get(k) || { value: k, n: 0, spell: new Map() };
         rec.n++;
@@ -7718,7 +7824,7 @@ function insightsMatches(ir, filters) {
   // so THIS comparison and the facet are the same answer. The fallback covers a record
   // that never went through the mapper — the old `records` shape `listIRs` can still
   // answer with until both deployments are pasted.
-  if (!open(f.customer) && String(ir.reporterKey || personKey(ir.customerName)) !== String(f.customer)) return false;
+  if (!open(f.customer) && String(ir.reporterKey || reporterKeyFor(ir.customerName, ir.contactEmail)) !== String(f.customer)) return false;
   if (!open(f.drone) && resolveSerial(ir.droneId) !== f.drone) return false;
   if (!open(f.model) && String(ir.droneModel || '') !== f.model) return false;
   // The company axis matches through the REGISTER (name + every alias), which is the
@@ -7785,34 +7891,56 @@ function inspectorFindings(irs) {
     const auto = canonicalSerial(raw);
     if (raw && auto && raw !== auto) autoFixed.push({ irNumber: ir.irNumber, from: raw, to: auto });
     const why = serialFormatProblem(sn);
-    if (why) serial.push({ irNumber: ir.irNumber, sn, raw: raw, model, why });
+    if (why) serial.push({ irNumber: ir.irNumber, sn, raw: raw, model, why,
+                           suggest: serialSuggestion(raw, model) });
   });
 
-  // Reporters. One identity, more than one spelling — the group is only a FINDING,
-  // never a rename. The owner's rule is explicit: a reported-by name is rectified in
-  // the app only after he (or CR) has been asked and has chosen.
-  const nameEmails = nameEmailIndex(rows);
-  const groups = new Map();
+  // Reporters. The identity is the NAME (see reporterKeyFor), because a manager's
+  // mailbox files for a whole team. A group is a finding ONLY when at least two of
+  // its names look like the same person typed differently — "A. PERSON" beside
+  // "A. PERSON FULL", or "B. PERSON" beside "PILOT B. PERSON". Three
+  // genuinely different people under one email are a team, not misspellings, and the
+  // Inspector must not ask CR to merge them.
+  //
+  // The raw cell is read from `intake` when it is there, so a correction (or the
+  // CAPS normalisation) cannot hide the spelling that still needs a decision.
+  const nameGroups = new Map();
   rows.forEach(ir => {
-    const name = String(ir.customerName || '').trim();
-    if (!name) return;
-    const key = ir.reporterKey || reporterKeyFor(name, ir.contactEmail, nameEmails);
-    if (!key) return;
-    const g = groups.get(key) || { key, email: normEmail(ir.contactEmail), n: 0, spell: new Map() };
+    const raw = String((ir.intake && ir.intake.customerName) || ir.customerName || '').trim();
+    if (!raw) return;
+    // A spelling CR has already decided is NOT asked again. The correction is keyed by
+    // the name, so the decision survives the next ingest and the panel gets shorter
+    // instead of repeating the same question forever.
+    if (corrections.items[personCorrectionKey(raw)]) return;
+    const email = normEmail(ir.contactEmail);
+    const key = email ? 'e:' + email : 'n:' + personKey(raw);
+    const g = nameGroups.get(key) || { key, email, n: 0, names: new Map() };
     g.n++;
-    g.spell.set(name, (g.spell.get(name) || 0) + 1);
-    groups.set(key, g);
+    const seen = g.names.get(raw) || { name: raw, n: 0 };
+    seen.n++;
+    g.names.set(raw, seen);
+    nameGroups.set(key, g);
   });
   const reporters = [];
-  groups.forEach(g => {
-    if (g.spell.size < 2) return;
-    reporters.push({
-      key: g.key,
-      email: g.email,
-      n: g.n,
-      spellings: [...g.spell.entries()]
-        .map(([name, n]) => ({ name, n }))
-        .sort((a, b) => b.n - a.n || a.name.length - b.name.length),
+  nameGroups.forEach(g => {
+    const names = [...g.names.values()];
+    const clusters = [];
+    names.forEach(entry => {
+      const hit = clusters.find(c => c.some(other => looksLikeSpellingVariant(other.name, entry.name)));
+      if (hit) hit.push(entry);
+      else clusters.push([entry]);
+    });
+    clusters.forEach(c => {
+      if (c.length < 2) return;
+      const n = c.reduce((a, x) => a + x.n, 0);
+      reporters.push({
+        key: g.key,
+        email: g.email,
+        n,
+        spellings: c
+          .map(x => ({ name: x.name, n: x.n }))
+          .sort((a, b) => b.n - a.n || a.name.length - b.name.length),
+      });
     });
   });
   reporters.sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
@@ -8216,6 +8344,50 @@ function renderInsights() {
   const mixTotal = SEGMENT_LABELS.filter(([k]) => k !== 'all')
     .reduce((a, [k]) => a + (sum.statuses[k] || 0), 0) || 1;
 
+  // Every finding row is built by ONE function, used by both the visible head and the
+  // "show all" tail. A second copy of this markup is how the tail drifts from the head
+  // and a correction box in the tail stops saving the right value.
+  //
+  // The serial box is PREFILLED with the Inspector's own suggestion where it has one,
+  // so the decision is one press of Save. A suggestion is never applied by itself.
+  const serialItem = (x, i) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.raw || x.sn || '—')}</code> — ${escHtml(x.why)}${canFix ? `
+    <span class="ins-fix">
+      ${x.suggest ? '<span class="ins-suggest">suggested</span>' : ''}
+      <input type="text" class="form-input ins-fix-input" id="ins-fix-sn-${i}" autocomplete="off"
+             value="${escHtml(x.suggest || '')}" placeholder="Correct serial"
+             aria-label="Correct serial for ${escHtml(x.irNumber)}">
+      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="serial"
+              data-from="${escHtml(x.raw || x.sn || '')}" data-input="ins-fix-sn-${i}">Save correction</button>
+    </span>` : ''}</li>`;
+
+  // One row per SPELLING, not one decision per mailbox. The box is PREFILLED with
+  // the canonical CAPS form of that same spelling — the only change the app can
+  // prove — and stays editable, so "A. Person" can be typed to "A. PERSON FULL"
+  // without touching anyone else's IRs in the same mailbox. A suggestion
+  // is never applied by itself; the button is the decision.
+  const reporterItem = (g, s, i, j) => {
+    const suggest = canonicalPersonName(s.name);
+    const differs = suggest && suggest !== String(s.name);
+    return `<li><b>${escHtml(s.name)}</b> · ${s.n} IR${s.n === 1 ? '' : 's'}${canFix ? `
+    <span class="ins-fix">
+      ${differs ? '<span class="ins-suggest">suggested</span>' : ''}
+      <input type="text" class="form-input ins-fix-input" id="ins-fix-rp-${i}-${j}" autocomplete="off"
+             value="${escHtml(suggest || s.name)}" aria-label="Correct spelling of ${escHtml(s.name)}">
+      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="person"
+              data-email="${escHtml(g.email || '')}" data-from="${escHtml(s.name)}"
+              data-input="ins-fix-rp-${i}-${j}">Use this spelling</button>
+    </span>` : ''}</li>`;
+  };
+
+  // A list longer than its head opens in place, because "…and 30 more" with no way to
+  // reach them is the same as hiding them. It is a native <details>: no state to keep,
+  // no re-render, and it survives the pane being rebuilt.
+  const moreList = (rest, rowFn, offset) => rest.length ? `
+    <details class="ins-flag-details">
+      <summary>Show the other ${rest.length}</summary>
+      <ul class="ins-flag-list">${rest.map((x, i) => rowFn(x, offset + i)).join('')}</ul>
+    </details>` : '';
+
   // A facet with a hundred aircraft in it is a scroll bar, not a filter. Every list
   // here is now {value,label} pairs, and one longer than a screenful grows a find box
   // that narrows the SELECT's own options. The short ones (statuses, categories, model
@@ -8339,45 +8511,40 @@ function renderInsights() {
       </div>
       ${flags.autoFixed.length ? `
       <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically to the four formats</span>
+        <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically</span>
         <ul class="ins-flag-list">
           ${flags.autoFixed.slice(0, 6).map(x => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`).join('')}
         </ul>
-        ${flags.autoFixed.length > 6 ? `<span class="ins-flag-more">…and ${flags.autoFixed.length - 6} more.</span>` : ''}
+        ${moreList(flags.autoFixed.slice(6), (x) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`, 0)}
         <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
       </div>` : ''}
       ${flags.serial.length ? `
       <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the four formats</span>
+        <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the formats</span>
         <ul class="ins-flag-list">
-          ${flags.serial.slice(0, 8).map((x, i) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.raw || x.sn || '—')}</code> — ${escHtml(x.why)}${canFix ? `
-            <span class="ins-fix">
-              <input type="text" class="form-input ins-fix-input" id="ins-fix-sn-${i}" autocomplete="off"
-                     placeholder="Correct serial" aria-label="Correct serial for ${escHtml(x.irNumber)}">
-              <button type="button" class="btn btn-sm ins-fix-apply" data-kind="serial"
-                      data-from="${escHtml(x.raw || x.sn || '')}" data-input="ins-fix-sn-${i}">Save correction</button>
-            </span>` : ''}</li>`).join('')}
+          ${flags.serial.slice(0, 8).map((x, i) => serialItem(x, i)).join('')}
         </ul>
-        ${flags.serial.length > 8 ? `<span class="ins-flag-more">…and ${flags.serial.length - 8} more. Copy the list below to work through them.</span>` : ''}
+        ${moreList(flags.serial.slice(8), serialItem, 8)}
         <button type="button" class="btn btn-sm btn-secondary" id="ins-copy-serial"
                 data-list="${escHtml(flags.serial.map(x => x.irNumber + ' ' + (x.raw || x.sn || '(blank)') + ' ' + x.why).join('\n'))}">Copy these ${flags.serial.length}</button>
       </div>` : ''}
       ${flags.reporters.length ? `
       <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.reporters.length} reporter group${flags.reporters.length === 1 ? ' is' : 's are'} spelled more than one way</span>
+        <span class="ins-flag-title">${flags.reporters.length} reporter name${flags.reporters.length === 1 ? ' is' : 's are'} spelled more than one way</span>
         <ul class="ins-flag-list">
-          ${flags.reporters.slice(0, 6).map((g, i) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings${canFix ? `
-            <span class="ins-fix">
-              <select class="form-input ins-fix-input" id="ins-fix-rp-${i}" aria-label="Choose the spelling">
-                ${g.spellings.map(s => `<option value="${escHtml(s.name)}">${escHtml(s.name)} (${s.n})</option>`).join('')}
-              </select>
-              <button type="button" class="btn btn-sm ins-fix-apply" data-kind="person"
-                      data-email="${escHtml(g.email || '')}" data-label="${escHtml(g.spellings[0].name)}"
-                      data-input="ins-fix-rp-${i}">Use this spelling</button>
-            </span>` : `<span class="ins-flag-more">${escHtml(g.spellings.map(s => s.name + ' (' + s.n + ')').join(' · '))}</span>`}</li>`).join('')}
+          ${flags.reporters.slice(0, 6).map((g, i) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
+            ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, i, j)).join('')}</ul>`
+                     : `<ul class="ins-spell-list">${g.spellings.map(s => `<li>${escHtml(s.name)} (${s.n})</li>`).join('')}</ul>`}</li>`).join('')}
         </ul>
-        ${flags.reporters.length > 6 ? `<span class="ins-flag-more">…and ${flags.reporters.length - 6} more.</span>` : ''}
-        <span class="ins-flag-more">Col L and Col P are read together: the email is the identity, the name is the label. Nothing is renamed until someone with CR rights chooses a spelling.</span>
+        ${flags.reporters.length > 6 ? `
+        <details class="ins-flag-details">
+          <summary>Show the other ${flags.reporters.length - 6}</summary>
+          <ul class="ins-flag-list">
+            ${flags.reporters.slice(6).map((g, k) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
+              <ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 6 + k, j)).join('')}</ul></li>`).join('')}
+          </ul>
+        </details>` : ''}
+        <span class="ins-flag-more">The name on the IR is the reporter — one manager's mailbox can hold a whole team, so names are never merged. A correction applies to ONE spelling, and the intake Sheet is never edited.</span>
       </div>` : ''}
       ${corrList.length ? `
       <div class="ins-flag-group">
@@ -8392,7 +8559,7 @@ function renderInsights() {
         <ul class="ins-flag-list">
           ${flags.offFleet.slice(0, 8).map(x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`).join('')}
         </ul>
-        ${flags.offFleet.length > 8 ? `<span class="ins-flag-more">…and ${flags.offFleet.length - 8} more.</span>` : ''}
+        ${moreList(flags.offFleet.slice(8), x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`, 0)}
         <span class="ins-flag-more">DJI and MAVIC are left out of the MODEL and UAS SN lists above; the IRs themselves stay in the list. AGISOFT stays in scope.</span>
       </div>` : ''}
     </div>` : ''}
@@ -8683,9 +8850,14 @@ if (insightsView) {
         if (!confirm('Use "' + value + '" for every IR that says "' + from + '"?\n\nThe app shows the corrected serial. The intake Sheet is not changed, and you can remove this correction at any time.')) return;
         applyCorrection({ kind: 'serial', from: from, to: value });
       } else {
+        // The NAME is the identity, not the mailbox. One manager's address can carry
+        // a whole team's IRs (a manager filing for a teammate), so a
+        // correction is scoped to the one spelling being corrected and never to the
+        // address. `email` travels only so the ledger can say where it came from.
         const email = fixBtn.dataset.email || '';
-        if (!confirm('Show "' + value + '" for every IR reported by ' + (email || 'this name') + '?\n\nThis decides the reported-by label in this app only. The intake Sheet is not changed, and you can remove this correction at any time.')) return;
-        applyCorrection({ kind: 'person', from: fixBtn.dataset.label || '', to: value, email: email });
+        const from = fixBtn.dataset.from || '';
+        if (!confirm('Show "' + value + '" for every IR that says "' + from + '"?\n\nOnly that spelling changes' + (email ? ' — other names filed from ' + email + ' are left alone' : '') + '. This app only: the intake Sheet is never edited, and you can remove this at any time.')) return;
+        applyCorrection({ kind: 'person', from: from, to: value, email: email });
       }
       return;
     }
@@ -9792,12 +9964,10 @@ function mapSheetRows(rows) {
     });
   }
   lastSheetAudit.badIRRows = badIRRows;
-  // Second pass: every row's reporter IDENTITY, now that the whole list is in hand —
-  // a row with no email can borrow the one address its name was seen with. Written
+  // Second pass: every row's reporter IDENTITY, from the NAME it carries. Written
   // onto the record so the list filter and the INSIGHTS facet cannot disagree.
-  const nameEmails = nameEmailIndex(records);
   records.forEach(rec => {
-    rec.reporterKey = reporterKeyFor(rec.customerName, rec.contactEmail, nameEmails);
+    rec.reporterKey = reporterKeyFor(rec.customerName, rec.contactEmail);
   });
   return records.reverse();   // latest first
 }
@@ -10643,9 +10813,10 @@ function setListView(mode) {
   // The class is inert below lg — every rule behind it is desktop-scoped — because
   // on a phone both of these views are already a full screen.
   //
-  // ONE class and not one per view: "this drawing takes the workspace" is a single
-  // fact, and two parallel classes would be two places for it to drift.
-  document.documentElement.classList.toggle('view-full', listMode === 'board' || listMode === 'grid');
+  // ⚠ THIS FUNCTION DOES NOT WRITE THE CLASS. `renderLayout()` does, because the
+  // class also depends on WHICH VIEW is showing — the drawing mode must not carry
+  // into INSIGHTS/LOG/FAQ and squeeze their pane. Setting it here is what made the
+  // owner's dashboard arrive at a strip's width. `renderLayout()` is called below.
   if (listViewSwitch) {
     listViewSwitch.querySelectorAll('.view-switch-btn').forEach(b => {
       const on = b.dataset.view === listMode;

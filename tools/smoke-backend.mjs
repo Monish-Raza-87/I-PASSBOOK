@@ -102,13 +102,15 @@ r.head('the owner\'s security decisions');
 // / `deleteCorrection`, and the ledger riding on `listIRs`. Independent in the quiet
 // direction: an older backend sends no `corrections` key, the frontend reads that as
 // "none", and the deterministic serial fix needs no store at all.
-// v15 = I-POSTMAN SENDS: `sendPostmaster` posts one collected digest to CR. Its three
-// refusals — empty digest, a post inside two hours, the daily ceiling — are asserted
-// here because they are the anti-spam promise, not UI copy.
+// v15 = I-PASSBOOK POSTMAN SENDS: `sendPostmaster` posts one collected digest to CR.
+// Its three refusals — empty digest, a post inside two hours, the daily ceiling — are
+// asserted here because they are the anti-spam promise, not UI copy.
 // v16 = a reporter correction is keyed by the NAME on the ticket, not the mailbox
 // that filed it (one manager files for a whole team).
-r.ok('API_VERSION is 16 — a reporter correction is keyed by name',
-  /API_VERSION:\s*16\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v17 = every post carries a PERMANENT number, 001, 002, 003 … forever, in the
+// subject and as the body's first line.
+r.ok('API_VERSION is 17 — every post is numbered',
+  /API_VERSION:\s*17\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('the correction ledger is seeded with the other store files',
   /'corrections\.json', \{ items: \{\} \}/.test(code));
 r.ok('a correction is CR or admin, never a section grant',
@@ -126,7 +128,15 @@ r.ok('...its recipients come from CR memberships plus the admins, never a client
   /function postmasterRecipients[\s\S]{0,700}memberships[\s\S]{0,300}ADMIN_EMAILS/.test(code) &&
   !/params\.to/.test((code.match(/function sendPostmaster[\s\S]*?\n\}/) || [''])[0]));
 r.ok('...and it sends as the named bot, not the plain app',
-  /name: 'I-PASSBOOK POSTMASTER'/.test(code));
+  /name: 'I-PASSBOOK POSTMAN'/.test(code));
+r.ok('...the subject is the owner\'s exact, numbered form',
+  /I-PASSBOOK POSTMAN BRINGS POST NO\. #' \+ postmasterNo\(no\) \+ ' TO CR/.test(code) &&
+  /function postmasterNo\(no\)[\s\S]{0,120}slice\(-3\)/.test(code));
+r.ok('...the number is a permanent series, not a daily one',
+  /POSTMASTER_NO_KEY = 'postmaster:postNo'/.test(code) &&
+  /Number\(props\.getProperty\(POSTMASTER_NO_KEY\) \|\| 0\) \+ 1/.test(code));
+r.ok('...and read/send/write happen under the script lock',
+  /return withRowLock\(function \(\) \{[\s\S]{0,2000}POSTMASTER_NO_KEY/.test(code));
 r.ok('the session is one working day, 8h30m', /SESSION_HOURS:\s*8\.5\b/.test(code), (code.match(/SESSION_HOURS:[^\n]*/) || [''])[0]);
 r.ok('the session does NOT slide on use — an absolute expiry',
   !/SESSION_SLIDE_HOURS/.test(code) && !/lastSeenAt/.test(code));

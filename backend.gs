@@ -257,7 +257,7 @@ var CONFIG = {
   // the DETERMINISTIC serial fix still runs because it needs no store at all. So a
   // v14 frontend on a v13 backend shows corrected serials and no manual entries.
   //
-  // v15 = I-POSTMAN SENDS. `sendPostmaster` posts ONE collected digest to CR (and
+  // v15 = I-PASSBOOK POSTMAN SENDS. `sendPostmaster` posts ONE collected digest to CR (and
   // the admins), never one message per finding. Three refusals live inside it: an
   // empty digest is not sent, a second post inside two hours is refused, and the
   // daily mail ceiling still applies. Recipients are the `cr` memberships plus
@@ -267,7 +267,11 @@ var CONFIG = {
   // install and is deliberately not in this file.
   // 16 = saveCorrection keys a person by the NAME on the ticket, not the mailbox
   //      that filed it (one manager files for a whole team). Provenance only.
-  API_VERSION: 16,
+  // 17 = a post is NUMBERED. `sendPostmaster` keeps a permanent counter in Script
+  //      Properties and sends "I-PASSBOOK POSTMAN BRINGS POST NO. #NNN TO CR" as the
+  //      subject, so a pile of posts can always be referenced one by one. The sender
+  //      name is I-PASSBOOK POSTMAN, and the post number is also the body's first line.
+  API_VERSION: 17,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4105,7 +4109,7 @@ function doPost(e) {
       // one CR member among the admins. Both functions re-check the rule inside.
       saveCorrection:    function () { return saveCorrection(params, email); },
       deleteCorrection:  function () { return deleteCorrection(params, email); },
-      // I-POSTMAN's one post (v15). CR or admin; the recipient set is decided HERE,
+      // I-PASSBOOK POSTMAN's one post (v15). CR or admin; the recipient set is decided HERE,
       // never by the client, and the two-hour gap is a Script Property so it survives
       // a redeploy. See sendPostmaster() for the three refusals.
       sendPostmaster:    function () { return sendPostmaster(params, email); },
@@ -5214,7 +5218,7 @@ function deleteCorrection(params, authEmail) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// ACTION: sendPostmaster (v15) — I-POSTMAN's ONE collected digest.
+// ACTION: sendPostmaster (v15, numbered v17) — I-PASSBOOK POSTMAN's ONE post.
 // ──────────────────────────────────────────────────────────────────────────────
 // The rule book's Q6 is the contract, and it is a contract about restraint:
 //   · one message for everything collected, never one per finding
@@ -5224,9 +5228,26 @@ function deleteCorrection(params, authEmail) {
 // The text is built in the frontend from the Inspector's own scan, because the
 // findings live there (the rule engine reads the mapped IR list, not the Sheet).
 // What the server decides — and the client cannot — is WHO receives it, HOW OFTEN,
-// and whether the mail ceiling still allows it.
+// the POST NUMBER, and whether the mail ceiling still allows it.
 var POSTMASTER_GAP_MS = 2 * 60 * 60 * 1000;   // the owner's cadence: one post / 2 h
 var POSTMASTER_LAST_KEY = 'postmaster:lastSentAt';
+// THE PERMANENT SERIES. The owner's rule (2026-10-19): every post is numbered 001,
+// 002, 003 … forever — never reset by a day, a month or a year — so a future pile of
+// these mails can be referenced one by one without confusion. The number lives in
+// Script Properties (shared by both deployments of this project) and is written only
+// after a send that did not throw, so a refused or failed post does not burn a number.
+var POSTMASTER_NO_KEY = 'postmaster:postNo';
+
+function postmasterNo(no) {
+  var v = Math.max(1, Number(no) || 1);
+  // Three digits until the series reaches 1000, then the number stands as it is —
+  // a permanent reference must never wrap.
+  return v < 1000 ? ('00' + v).slice(-3) : String(v);
+}
+
+function postmasterSubject(no) {
+  return 'I-PASSBOOK POSTMAN BRINGS POST NO. #' + postmasterNo(no) + ' TO CR';
+}
 
 // CR memberships + the admins, deduped, and every address put through the same
 // outbound guard every other mail path uses. A client-supplied recipient is never
@@ -5268,40 +5289,54 @@ function sendPostmaster(params, authEmail) {
     return { status: 'error', message: 'No CR recipient is available to receive the digest.' };
   }
 
-  var props = PropertiesService.getScriptProperties();
-  var now = Date.now();
-  var last = Number(props.getProperty(POSTMASTER_LAST_KEY) || 0);
-  if (last && now - last < POSTMASTER_GAP_MS) {
-    var mins = Math.ceil((POSTMASTER_GAP_MS - (now - last)) / 60000);
+  // ONE lock around read-number → send → write-number. Without it two taps at the
+  // same moment could both pass the two-hour gap and both take the same number.
+  return withRowLock(function () {
+    var props = PropertiesService.getScriptProperties();
+    var now = Date.now();
+    var last = Number(props.getProperty(POSTMASTER_LAST_KEY) || 0);
+    if (last && now - last < POSTMASTER_GAP_MS) {
+      var mins = Math.ceil((POSTMASTER_GAP_MS - (now - last)) / 60000);
+      return {
+        status: 'error',
+        message: 'I-PASSBOOK POSTMAN already posted inside the last two hours. The next one is allowed in ' +
+                 mins + ' minute' + (mins === 1 ? '' : 's') + '.'
+      };
+    }
+
+    if (!mailQuotaOk('nudge')) {
+      return { status: 'error', message: 'The daily mail ceiling is reached. Nothing was sent.' };
+    }
+
+    var no = Number(props.getProperty(POSTMASTER_NO_KEY) || 0) + 1;
+    var subject = postmasterSubject(no);
+    // The number is the FIRST line of the body as well, so a printed copy or a
+    // forwarded mail still says which post it was.
+    var numbered = 'I-PASSBOOK POSTMAN — POST NO. #' + postmasterNo(no) +
+                   ' — sent ' + new Date(now).toISOString().replace('T', ' ').slice(0, 16) + ' UTC\n' +
+                   'This line is the post\'s permanent reference in the I-PASSBOOK postman series.\n\n' +
+                   body;
+    try {
+      MailApp.sendEmail(to.join(','), subject, numbered, { name: 'I-PASSBOOK POSTMAN' });
+    } catch (e) {
+      // Same contract as every other mail path: a failure returns a sentence, never
+      // a 500. The timestamp and the number are written only after a send that did
+      // not throw, so a failed attempt starts neither the two-hour clock nor the series.
+      return { status: 'error', message: 'The mail could not be sent: ' +
+               (e && e.message ? e.message : 'unknown error') + '.' };
+    }
+    props.setProperty(POSTMASTER_LAST_KEY, String(now));
+    props.setProperty(POSTMASTER_NO_KEY, String(no));
     return {
-      status: 'error',
-      message: 'I-POSTMAN already posted inside the last two hours. The next one is allowed in ' +
-               mins + ' minute' + (mins === 1 ? '' : 's') + '.'
+      status: 'ok',
+      postNo: no,
+      subject: subject,
+      to: to,
+      sentAt: new Date(now).toISOString(),
+      message: 'Post no. #' + postmasterNo(no) + ' was sent to ' + to.length +
+               ' CR recipient' + (to.length === 1 ? '' : 's') + '.'
     };
-  }
-
-  if (!mailQuotaOk('nudge')) {
-    return { status: 'error', message: 'The daily mail ceiling is reached. Nothing was sent.' };
-  }
-
-  var subject = '[I-PASSBOOK] I-POSTMAN — collected digest (' + items +
-                ' item' + (items === 1 ? '' : 's') + ')';
-  try {
-    MailApp.sendEmail(to.join(','), subject, body, { name: 'I-PASSBOOK POSTMASTER' });
-  } catch (e) {
-    // Same contract as every other mail path: a failure returns a sentence, never
-    // a 500. The timestamp is written only after a send that did not throw, so a
-    // failed attempt does not start the two-hour clock.
-    return { status: 'error', message: 'The mail could not be sent: ' +
-             (e && e.message ? e.message : 'unknown error') + '.' };
-  }
-  props.setProperty(POSTMASTER_LAST_KEY, String(now));
-  return {
-    status: 'ok',
-    to: to,
-    sentAt: new Date(now).toISOString(),
-    message: 'Posted to ' + to.length + ' CR recipient' + (to.length === 1 ? '' : 's') + '.'
-  };
+  });
 }
 
 // POST createUser (admin) — one account + a one-time temporary password.

@@ -34,6 +34,7 @@ const { T, byId } = loadApp(`
   companyRecordFor, companyNamesFor, INSIGHTS_SKELETON, renderInsights,
   personKey, serialFormatProblem, canonicalSerial, resolveSerial, reporterKeyFor,
   isOutOfScopeModel, isOutOfScopeSerial, inspectorFindings, serialSuggestion,
+  postmanNo, postmanSubject, postmanDigest,
   reporterName, setCorrections, canonicalPersonName, personCorrectionKey,
   get corrections() { return corrections; },
   get accessCache() { return accessCache; }, set accessCache(v) { accessCache = v; },
@@ -117,11 +118,28 @@ const fx = T.insightsFacets([
 r.ok('years newest first', fx.years.join(',') === '2026,2025,2024', fx.years);
 r.ok('only months that actually occur', fx.months.join(',') === '1,5,9', fx.months);
 // Reported by is keyed by PERSON, not by spelling. The two Acme rows are one person,
-// the label is the spelling the tickets actually use, and the count rides along so
-// the list can put the busiest reporter first.
-r.ok('customers deduped by person, busiest first, with a count',
+// the label is the spelling the tickets actually use, and the count rides along. The
+// owner asked for these ALPHABETICALLY (2026-10-19): a ranking makes him scan for a
+// name he already knows.
+r.ok('customers deduped by person, alphabetical, with a count',
   fx.customers.map(c => c.value + ':' + c.label + ':' + c.n).join(',') === 'n:acme:Acme:2,n:beta:Beta:1',
   fx.customers);
+{
+  const ab = T.insightsFacets([
+    { irNumber: 'IR1', customerName: 'Zed',  dateRaisedISO: '2025-09-01' },
+    { irNumber: 'IR2', customerName: 'Zed',  dateRaisedISO: '2025-09-02' },
+    { irNumber: 'IR3', customerName: 'Zed',  dateRaisedISO: '2025-09-03' },
+    { irNumber: 'IR4', customerName: 'Abel', dateRaisedISO: '2025-09-04' },
+    { irNumber: 'IR5', companyName: 'Zeta Works', dateRaisedISO: '2025-09-05' },
+    { irNumber: 'IR6', companyName: 'Alpha Works', dateRaisedISO: '2025-09-06' },
+    { irNumber: 'IR7', companyName: 'Alpha Works', dateRaisedISO: '2025-09-07' },
+  ]);
+  r.ok('...and a busier name does not jump the queue',
+    ab.customers.map(c => c.label).join(',') === 'Abel,Zed', ab.customers);
+  r.ok('companies are alphabetical too, count and all',
+    ab.companies.map(c => c.label + ' (' + c.n + ')').join(',') === 'Alpha Works (2),Zeta Works (1)',
+    ab.companies);
+}
 r.ok('drones deduped and sorted', fx.drones.join(',') === 'D-1,D-2', fx.drones);
 // The model is the SECOND device axis and it is not the serial: one serial is one
 // machine, one model is a fleet. Deduped and sorted the same way, and a row with no
@@ -525,15 +543,28 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
   r.ok('a proposal the Inspector has is written into the box, and marked',
     (h.match(/value="S100-V3"/g) || []).length === 11 && /ins-suggest/.test(h),
     (h.match(/value="S100-V3"/g) || []).length);
-  // The reporter row is per SPELLING and prefilled with its canonical form. Two
-  // spellings in one manager's mailbox must produce TWO boxes that save separately.
+  // ONE MAILBOX: the app merges a spelling and its fuller form, so there is nothing
+  // to ask. The owner's example: "if having same email ID then only one [fuller
+  // name] to be kept merging all IRs in his entry" (2026-10-19).
   T.allIRs = [
     { irNumber: 'IRa', customerName: 'test person', contactEmail: 'test.reporter@example.com' },
-    { irNumber: 'IRb', customerName: 'TEST PERSON', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'test.reporter@example.com' },
+  ];
+  T.renderInsights();
+  const hm = byId.get('insights-body').innerHTML;
+  r.ok('two spellings in ONE mailbox are merged — no box is asked for',
+    (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 0 &&
+    /merged automatically/.test(hm) && /TEST PERSON S/.test(hm), hm.slice(0, 300));
+
+  // TWO MAILBOXES: the app cannot prove one person, so each spelling keeps its own
+  // editable box, prefilled with its CAPS form.
+  T.allIRs = [
+    { irNumber: 'IRa', customerName: 'test person', contactEmail: 'one@example.com' },
+    { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'two@example.com' },
   ];
   T.renderInsights();
   const hr = byId.get('insights-body').innerHTML;
-  r.ok('two spellings of one name are two rows, each with its own box',
+  r.ok('two ADDRESSES are not merged — each spelling gets its own box',
     (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 2,
     (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []));
   r.ok('...and the lowercase one arrives prefilled with its CAPS form',
@@ -711,19 +742,35 @@ r.head('the Inspector finds the same things the panel lists');
   r.ok('the total is every row the pass looked at', f.total === 6, f.total);
 }
 
-r.head('the Inspector reports a reporter spelled two ways, and renames nothing by itself');
+r.head('one mailbox merges its own spellings; two mailboxes are a question for CR');
 {
-  const f = T.inspectorFindings([
-    { irNumber: 'IR1', customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com', droneId: 'S25018', droneModel: 'SIGMA 25' },
-    { irNumber: 'IR2', customerName: 'test  reporter', contactEmail: 'test.reporter@example.com', droneId: 'S25019', droneModel: 'SIGMA 25' },
-    { irNumber: 'IR3', customerName: 'Asha Rao', contactEmail: 'asha@acme.in', droneId: 'S25020', droneModel: 'SIGMA 25' },
+  // ONE email, two spellings: the app merges them itself (the owner's rule,
+  // 2026-10-19), so this is reported as automatic, never as a CR question.
+  const same = T.inspectorFindings([
+    { irNumber: 'IR1', customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IR2', customerName: 'test  reporter', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IR3', customerName: 'Asha Rao', contactEmail: 'asha@acme.in' },
   ]);
-  r.ok('one reporter spelled two ways is one finding', f.reporters.length === 1, f.reporters);
-  r.ok('...naming the email and both spellings',
-    f.reporters[0].email === 'test.reporter@example.com' && f.reporters[0].spellings.length === 2, f.reporters[0]);
+  r.ok('a spelling and its fuller form under ONE email are merged, not asked',
+    same.reporters.length === 0 && same.autoMerged.length === 1, same);
+  r.ok('...onto the most complete spelling, in the house CAPS form',
+    same.autoMerged[0].to === 'TEST REPORTER', same.autoMerged[0]);
+  r.ok('...and the merge names the address and both spellings',
+    same.autoMerged[0].email === 'test.reporter@example.com' &&
+    same.autoMerged[0].names.length === 2, same.autoMerged[0]);
+
+  // TWO emails: the app cannot prove it is one person, so CR decides.
+  const two = T.inspectorFindings([
+    { irNumber: 'IR1', customerName: 'Sample Name',   contactEmail: 'one@example.com' },
+    { irNumber: 'IR2', customerName: 'Sample Name S', contactEmail: 'two@example.com' },
+  ]);
+  r.ok('the same two spellings under TWO addresses stay a finding',
+    two.reporters.length === 1 && two.autoMerged.length === 0, two.reporters);
+  r.ok('...naming BOTH addresses and both spellings',
+    two.reporters[0].emails.length === 2 && two.reporters[0].spellings.length === 2, two.reporters[0]);
   r.ok('...and the raw name is untouched until CR chooses',
-    f.reporters[0].spellings.some(s => s.name === 'Test Reporter') &&
-    f.reporters[0].spellings.some(s => s.name === 'test  reporter'), f.reporters[0]);
+    two.reporters[0].spellings.some(s => s.name === 'Sample Name') &&
+    two.reporters[0].spellings.some(s => s.name === 'Sample Name S'), two.reporters[0]);
 }
 
 r.head('an approved correction is what changes the app, and only it');
@@ -859,6 +906,32 @@ r.head('the search box is rate-limited, and the last keystroke is the one that p
   r.ok('the source wires the listener through throttleTrailing, not straight to the render',
     /searchInput\.addEventListener\('input',\s*throttleTrailing\(applyListFilters/.test(code),
     (code.match(/searchInput\.addEventListener\([^\n]*/) || [''])[0]);
+}
+
+r.head('the postman post is numbered forever and explains itself');
+{
+  r.ok('the subject is the exact form the owner asked for, zero-padded',
+    T.postmanSubject(1) === 'I-PASSBOOK POSTMAN BRINGS POST NO. #001 TO CR' &&
+    T.postmanSubject(42) === 'I-PASSBOOK POSTMAN BRINGS POST NO. #042 TO CR',
+    [T.postmanSubject(1), T.postmanSubject(42)]);
+  r.ok('...and the series does not wrap at 999',
+    T.postmanSubject(1000) === 'I-PASSBOOK POSTMAN BRINGS POST NO. #1000 TO CR',
+    T.postmanSubject(1000));
+
+  const d = T.postmanDigest([
+    { irNumber: 'IR1', customerName: 'test person',   contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IR2', customerName: 'TEST PERSON S', contactEmail: 'test.reporter@example.com' },
+    { irNumber: 'IR3', droneId: 'S100-1234', droneIdRaw: 'S100-1234', droneModel: 'SIGMA 100' },
+  ]);
+  r.ok('every section says what it means and what to do',
+    /WHAT THIS EMAIL IS/.test(d.text) && /WHAT TO DO/.test(d.text) &&
+    /What it means:/.test(d.text) && /What to do:/.test(d.text), d.text.slice(0, 400));
+  r.ok('the digest is signed by I-PASSBOOK POSTMAN, and names no other bot',
+    /— I-PASSBOOK POSTMAN/.test(d.text) && !/POSTMASTER/.test(d.text));
+  r.ok('a merge the app did itself is reported, not asked',
+    /MERGED AUTOMATICALLY/.test(d.text) && /TEST PERSON S/.test(d.text) &&
+    /Nothing is asked of CR for these/.test(d.text), d.text);
+  r.ok('a merge is NOT counted as an item needing a decision', d.count === 1, d);
 }
 
 r.finish();

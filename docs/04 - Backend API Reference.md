@@ -920,7 +920,7 @@ comment still posts, and the sender is told the notification did not go. Failing
 silently would leave people believing a colleague had been emailed.
 
 ### `sendPostmaster`
-Sends **one collected digest** to the CR department, minted by I-POSTMAN in INSIGHTS.
+Sends **one collected digest** to the CR department, minted by I-PASSBOOK POSTMAN in INSIGHTS.
 Requires CR (or an admin) inside the function, not only at the router. The body and
 the item count are the caller's; **the recipients never are** — `postmasterRecipients()`
 derives them from `accessStore()`'s `cr` memberships plus `CONFIG.ADMIN_EMAILS`, and
@@ -929,7 +929,7 @@ appear, because it is never read from the request.
 
 It refuses rather than degrades, and each refusal is a design choice:
 
-- **An empty digest is refused.** "Nothing to report" is the Postmaster staying
+- **An empty digest is refused.** "Nothing to report" is the Postman staying
   quiet, not an email that says so.
 - **A second post inside two hours is refused** (`POSTMASTER_GAP_MS`, kept in
   Script Properties as `postmaster:lastSentAt`). The gap survives the browser, the
@@ -938,9 +938,19 @@ It refuses rather than degrades, and each refusal is a design choice:
 - **The daily mail ceiling applies** (`mailQuotaOk('nudge')`), so a busy digest day
   cannot starve password resets.
 
+**Every post is numbered** (v17). `POSTMASTER_NO_KEY` (`postmaster:postNo`) is a
+permanent counter in Script Properties: 001, 002, 003 … and it never resets on a
+day, month or year change, so any post can be referenced uniquely later. The number
+is fixed by the server — a client cannot choose it — and it appears twice: in the
+subject, `I-PASSBOOK POSTMAN BRINGS POST NO. #001 TO CR`, and as the body's first
+line. It is written only after a send that did not throw, and read/incremented/sent
+under the script lock, so two taps cannot take the same number. The sender's
+display name is `I-PASSBOOK POSTMAN` (the address is still the Google account the
+script runs as). The response carries `postNo`, `subject` and `sentAt`.
+
 There is **no timer**. Nothing posts unless a person presses "Post to CR"; the
 automatic clock is deliberately absent. `API_VERSION` 15 exists because this is a
-new action.
+new action; 17 because of the permanent post number.
 
 ### Customer accounts — `inviteCustomer`, `setCustomerCompany`, `getMyCustomer`
 

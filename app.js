@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v102';
+const APP_VERSION = 'v103';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7545,7 +7545,7 @@ function serialCorrectionKey(v) { return 'serial:' + String(v == null ? '' : v).
 // person, and a manager's email no longer drags every team member onto one name.
 //
 // Punctuation that is never part of a name is dropped — the underscore in
-// "ABHISHEK BHARTI_", the empty brackets in "VIPUL PALSHIKAR ()", the slashes in
+// "A. PERSON_", the empty brackets in "B. PERSON ()", the slashes in
 // "PILOT//A. PERSON/". Nothing else is guessed: "A. PERSON" does not
 // silently become "A. PERSON FULL" — that needs a CR decision, because a wrong
 // expansion would invent a person.
@@ -7715,24 +7715,27 @@ function insightsFacets(irs) {
       else companies.set(value, { value, label: rec ? rec.name : raw, n: 1 });
     }
   });
-  // The most-used spelling wins the label; a tie goes to the longer one, which is the
-  // one carrying the surname. Both are read off the data, never rewritten.
+  // A person's label is the spelling the app shows for them. The most complete spelling
+  // wins ("A. PERSON S" over "A. PERSON"), and a tie goes to the one most IRs carry. The
+  // owner asked for these lists ALPHABETICALLY with the IR count in brackets
+  // (2026-10-19) — a ranking by size makes him hunt for a name he already knows.
   const personList = [...persons.values()].map(r => {
     let label = '', best = -1;
     r.spell.forEach((n, s) => {
-      if (n > best || (n === best && s.length > label.length)) { label = s; best = n; }
+      if (s.length > label.length || (s.length === label.length && n > best)) { label = s; best = n; }
     });
     return { value: r.value, label, n: r.n };
-  }).sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+  }).sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.label.localeCompare(b.label));
   return {
     years: [...years].sort((a, b) => b - a),
     months: [...months].sort((a, b) => a - b),
     customers: personList,
     drones: [...drones].sort((a, b) => a.localeCompare(b)),
     models: [...models].sort((a, b) => a.localeCompare(b)),
-    // Biggest first: this list is a ranking before it is an alphabetical index, and the
-    // select's first screen should be the companies that actually raise work.
-    companies: [...companies.values()].sort((a, b) => b.n - a.n || a.label.localeCompare(b.label)),
+    // Alphabetical, and the count rides in the label ("ACME (12)"). The owner reads
+    // these lists to find a company he already has in mind; biggest-first turns a
+    // lookup into a scan. See personList above for the same ruling on reporters.
+    companies: [...companies.values()].sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }) || a.label.localeCompare(b.label)),
     undated,
     offFleet,
   };
@@ -7896,15 +7899,23 @@ function inspectorFindings(irs) {
   });
 
   // Reporters. The identity is the NAME (see reporterKeyFor), because a manager's
-  // mailbox files for a whole team. A group is a finding ONLY when at least two of
-  // its names look like the same person typed differently — "A. PERSON" beside
-  // "A. PERSON FULL", or "B. PERSON" beside "PILOT B. PERSON". Three
-  // genuinely different people under one email are a team, not misspellings, and the
-  // Inspector must not ask CR to merge them.
+  // mailbox files for a whole team. Spellings are clustered across the WHOLE list: two
+  // names are the same person typed differently ("A. PERSON" beside "A. PERSON S",
+  // or "B. PERSONK" beside "B. PERSONKAR") even when the addresses differ.
+  //
+  // What happens to a cluster is decided by the mailbox, and only by the mailbox:
+  //   · every row in it carries the SAME one address → the app has ALREADY merged
+  //     those IRs onto the most complete spelling (see mapSheetRows), so it is
+  //     reported as automatic and nothing is asked of CR.
+  //   · anything else (two addresses, or any row with no address) → a finding for CR,
+  //     because the app cannot prove the spellings are one person.
+  //
+  // Three genuinely different people under one email are a TEAM, not misspellings:
+  // looksLikeSpellingVariant is deliberately conservative, so they never cluster.
   //
   // The raw cell is read from `intake` when it is there, so a correction (or the
   // CAPS normalisation) cannot hide the spelling that still needs a decision.
-  const nameGroups = new Map();
+  const spellings = new Map();          // raw name → { name, n, emails:Set, noEmail }
   rows.forEach(ir => {
     const raw = String((ir.intake && ir.intake.customerName) || ir.customerName || '').trim();
     if (!raw) return;
@@ -7913,39 +7924,52 @@ function inspectorFindings(irs) {
     // instead of repeating the same question forever.
     if (corrections.items[personCorrectionKey(raw)]) return;
     const email = normEmail(ir.contactEmail);
-    const key = email ? 'e:' + email : 'n:' + personKey(raw);
-    const g = nameGroups.get(key) || { key, email, n: 0, names: new Map() };
-    g.n++;
-    const seen = g.names.get(raw) || { name: raw, n: 0 };
-    seen.n++;
-    g.names.set(raw, seen);
-    nameGroups.set(key, g);
+    const rec = spellings.get(raw) || { name: raw, n: 0, emails: new Set(), noEmail: false };
+    rec.n++;
+    if (email) rec.emails.add(email); else rec.noEmail = true;
+    spellings.set(raw, rec);
   });
-  const reporters = [];
-  nameGroups.forEach(g => {
-    const names = [...g.names.values()];
-    const clusters = [];
-    names.forEach(entry => {
-      const hit = clusters.find(c => c.some(other => looksLikeSpellingVariant(other.name, entry.name)));
-      if (hit) hit.push(entry);
-      else clusters.push([entry]);
-    });
-    clusters.forEach(c => {
-      if (c.length < 2) return;
-      const n = c.reduce((a, x) => a + x.n, 0);
-      reporters.push({
-        key: g.key,
-        email: g.email,
-        n,
-        spellings: c
-          .map(x => ({ name: x.name, n: x.n }))
-          .sort((a, b) => b.n - a.n || a.name.length - b.name.length),
+  const clusters = [];
+  [...spellings.values()].forEach(entry => {
+    const hit = clusters.find(c => c.some(other => looksLikeSpellingVariant(other.name, entry.name)));
+    if (hit) hit.push(entry);
+    else clusters.push([entry]);
+  });
+  const reporters = [], autoMerged = [];
+  clusters.forEach(c => {
+    if (c.length < 2) return;
+    const n = c.reduce((a, x) => a + x.n, 0);
+    const emails = [...new Set(c.reduce((a, x) => a.concat([...x.emails]), []))];
+    const everyRowHasTheSameMailbox = !c.some(x => x.noEmail) && emails.length === 1;
+    if (everyRowHasTheSameMailbox) {
+      // "Most complete" is measured on the NORMALISED key, so a double space or a
+      // stray dot cannot win, and the label is the house CAPS form.
+      let best = c[0].name, bestLen = personKey(best).length;
+      c.forEach(x => {
+        const len = personKey(x.name).length;
+        if (len > bestLen || (len === bestLen && x.n > best.n)) { best = x.name; bestLen = len; }
       });
+      autoMerged.push({ email: emails[0], n, to: canonicalPersonName(best), names: c.map(x => x.name).sort() });
+      return;
+    }
+    reporters.push({
+      key: 'n:' + personKey(c[0].name),
+      email: emails.join(', '),
+      emails,
+      n,
+      spellings: c
+        .map(x => ({ name: x.name, n: x.n }))
+        .sort((a, b) => b.n - a.n || a.name.length - b.name.length),
     });
   });
-  reporters.sort((a, b) => b.n - a.n || String(a.key).localeCompare(String(b.key)));
+  // Alphabetical by the name/address shown, not biggest-first: the owner reads this
+  // list to find a name he already has in mind (2026-10-19).
+  const sortName = x => String(x.email || (x.spellings[0] && x.spellings[0].name) || '');
+  reporters.sort((a, b) => sortName(a).localeCompare(sortName(b), undefined, { sensitivity: 'base' }) ||
+                           sortName(a).localeCompare(sortName(b)) || b.n - a.n);
+  autoMerged.sort((a, b) => a.to.localeCompare(b.to));
 
-  return { serial, autoFixed, reporters, offFleet, total: rows.length };
+  return { serial, autoFixed, reporters, autoMerged, offFleet, total: rows.length };
 }
 
 // Record one decision, then re-read the list: mapSheetRows re-applies every
@@ -7960,30 +7984,66 @@ function applyCorrection(fields) {
   });
 }
 
-// ─── I-POSTMAN — the collected digest ────────────────────────────────────────
+// ─── I-PASSBOOK POSTMAN — the collected digest ───────────────────────────────
 // The rule book's Q6 is the whole shape: ONE message, never one per finding;
 // nothing to report means no message at all; blocks and asks are never mailed.
 // This is the text half, and it is PURE — rows in, text out — so a suite can read
 // exactly what would be posted without sending anything.
 //
+// THE TEXT IS WRITTEN TO BE READ YEARS LATER (owner, 2026-10-19): someone opening
+// a pile of these must be able to tell what the mail is, why it arrived, and what
+// was supposed to happen — without the app in front of them. So every section says
+// what it means and what to do, in plain words.
+//
 // There is deliberately no clock here. The every-2-hours trigger is a server
-// decision and it is not installed; the Postmaster posts when CR or the owner taps
+// decision and it is not installed; the Postman posts when CR or the owner taps
 // it, and the backend refuses a second post inside two hours even then.
+function postmanNo(n) {
+  const v = Math.max(1, Number(n) || 1);
+  return v < 1000 ? ('00' + v).slice(-3) : String(v);
+}
+
+function postmanSubject(no) {
+  return 'I-PASSBOOK POSTMAN BRINGS POST NO. #' + postmanNo(no) + ' TO CR';
+}
+
 function postmanDigest(irs) {
   const flags = inspectorFindings(irs);
   const decisions = flags.serial.length + flags.reporters.length + flags.offFleet.length;
   const lines = [];
-  lines.push('I-POSTMAN — collected digest');
+  lines.push('I-PASSBOOK POSTMAN — collected digest');
+  lines.push('A collected digest of everything I-INSPECTOR found in the I-PASSBOOK IR list.');
+  lines.push('');
   lines.push('Generated from ' + flags.total + ' IR' + (flags.total === 1 ? '' : 's') +
     ' at ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC.');
+  lines.push('Items that need a decision from CR: ' + decisions + '.');
+  lines.push('');
+  lines.push('WHAT THIS EMAIL IS');
+  lines.push('  I-PASSBOOK POSTMAN reads the same IR list the app shows and puts every item');
+  lines.push('  that needs a person\'s decision into ONE email. It never sends one email per');
+  lines.push('  item, and it sends nothing at all when there is nothing to decide. It only');
+  lines.push('  reports: the intake Sheet is never edited. A correction is recorded in');
+  lines.push('  I-PASSBOOK by CR, and the app shows the corrected value from then on.');
+  lines.push('');
+  lines.push('WHAT TO DO');
+  lines.push('  Open I-PASSBOOK → INSIGHTS → Data quality. Every item below is there; where');
+  lines.push('  the app can prove the right value it is already written into the box. Press');
+  lines.push('  once to save a correction. It is remembered and never asked again.');
   lines.push('');
 
   if (!decisions) {
-    lines.push('Nothing to report. No action is needed.');
+    lines.push('NOTHING TO REPORT. No action is needed.');
+    lines.push('');
   }
 
   if (flags.serial.length) {
-    lines.push('SERIAL FORMATS (R-108) — ' + flags.serial.length + ' need a decision from CR:');
+    lines.push('SERIAL FORMATS (R-108) — ' + flags.serial.length + ' IR' +
+      (flags.serial.length === 1 ? '' : 's') + ' carry a serial the app cannot prove:');
+    lines.push('  What it means: the UAS serial is not one of our four formats (S25XXX,');
+    lines.push('  S25PXXX, S100-XXX, S75XXX) or an approved R&D/contracted shape (S100-V3,');
+    lines.push('  S25P-V4, S75-<CODE>), so the app will not guess at it.');
+    lines.push('  What to do: choose the right serial, or correct the Sheet cell if the');
+    lines.push('  client wrote down the wrong machine.');
     flags.serial.slice(0, 40).forEach(x =>
       lines.push('  · ' + x.irNumber + ' — ' + (x.raw || x.sn || '(blank)') + ' — ' + x.why));
     if (flags.serial.length > 40) lines.push('  …and ' + (flags.serial.length - 40) + ' more, in I-PASSBOOK → Insights.');
@@ -7991,8 +8051,14 @@ function postmanDigest(irs) {
   }
 
   if (flags.reporters.length) {
-    lines.push('REPORTED BY — ' + flags.reporters.length + ' group' +
-      (flags.reporters.length === 1 ? '' : 's') + ' spelled more than one way:');
+    lines.push('REPORTED BY — ' + flags.reporters.length + ' name group' +
+      (flags.reporters.length === 1 ? ' needs' : 's need') + ' CR to choose the spelling:');
+    lines.push('  What it means: the same person is written more than one way and these IRs');
+    lines.push('  do not share one email, so the app cannot decide which spelling is the');
+    lines.push('  person. Spellings that DO share one email are merged automatically — those');
+    lines.push('  are listed further down, and nothing is asked for them.');
+    lines.push('  What to do: type the correct name in the box beside each spelling. Lists are');
+    lines.push('  alphabetical, and the number in brackets is how many IRs use that spelling.');
     flags.reporters.slice(0, 30).forEach(g => {
       const who = g.email || g.spellings[0].name;
       lines.push('  · ' + who + ' — ' + g.spellings.map(s => s.name + ' (' + s.n + ')').join(' / '));
@@ -8004,9 +8070,26 @@ function postmanDigest(irs) {
   if (flags.offFleet.length) {
     lines.push('OUTSIDE THE FLEET — ' + flags.offFleet.length + ' IR' +
       (flags.offFleet.length === 1 ? '' : 's') + ' name equipment this app does not service:');
+    lines.push('  What it means: the model or serial on these IRs is outside our fleet, so the');
+    lines.push('  app neither repairs it nor counts it as one of ours.');
+    lines.push('  What to do: nothing, unless the machine was entered wrongly — in that case');
+    lines.push('  correct the serial on the IR.');
     flags.offFleet.slice(0, 20).forEach(x =>
       lines.push('  · ' + x.irNumber + ' — ' + (x.model || x.sn || '—')));
     if (flags.offFleet.length > 20) lines.push('  …and ' + (flags.offFleet.length - 20) + ' more.');
+    lines.push('');
+  }
+
+  if (flags.autoMerged.length) {
+    lines.push('MERGED AUTOMATICALLY — ' + flags.autoMerged.length + ' reporter name' +
+      (flags.autoMerged.length === 1 ? '' : 's') + ', one spelling each:');
+    lines.push('  What it means: these spellings share ONE email and one looks like the other');
+    lines.push('  typed differently, so the app shows the most complete spelling on every');
+    lines.push('  IR. The raw cells stay exactly as the client wrote them.');
+    lines.push('  What to do: nothing. Nothing is asked of CR for these.');
+    flags.autoMerged.slice(0, 20).forEach(g =>
+      lines.push('  · ' + (g.email || '—') + ' — ' + g.names.join(' + ') + ' → ' + g.to));
+    if (flags.autoMerged.length > 20) lines.push('  …and ' + (flags.autoMerged.length - 20) + ' more.');
     lines.push('');
   }
 
@@ -8018,8 +8101,8 @@ function postmanDigest(irs) {
   }
 
   lines.push('The intake Sheet is never edited. A correction is recorded in I-PASSBOOK by CR.');
-  lines.push('— I-PASSBOOK POSTMASTER');
-  return { text: lines.join('\n'), count: decisions, total: flags.total };
+  lines.push('— I-PASSBOOK POSTMAN');
+  return { text: lines.join('\n'), count: decisions, total: flags.total, autoMerged: flags.autoMerged.length };
 }
 
 // The preview is a PANE, not a send. A person reads exactly what would leave the
@@ -8034,10 +8117,10 @@ function openPostmanPreview() {
   modal.innerHTML = `
     <div class="inward-options-card">
       <div class="inward-options-head">
-        <div class="inward-options-title">I-POSTMAN — digest preview</div>
+        <div class="inward-options-title">I-PASSBOOK POSTMAN — digest preview</div>
         <button type="button" class="inward-options-close" id="postman-close" title="Close">&times;</button>
       </div>
-      <p class="access-hint">Nothing has been sent. This is exactly what the Postmaster would post, and only a tap on <b>Post to CR</b> sends it.</p>
+      <p class="access-hint">Nothing has been sent. This is exactly what the Postman would post, and only a tap on <b>Post to CR</b> sends it. The subject is fixed: <b>I-PASSBOOK POSTMAN BRINGS POST NO. #NNN TO CR</b>, where #NNN is the next number in the Postman's permanent series (001, 002, 003, …).</p>
       <pre class="bot-digest" id="postman-text">${escHtml(d.text)}</pre>
       <div class="inward-options-foot">
         <button type="button" class="btn btn-sm btn-secondary" id="postman-copy">Copy</button>
@@ -8451,10 +8534,10 @@ function renderInsights() {
       <section class="bot-card">
         <div class="bot-head">
           <span class="bot-led${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? ' is-live' : ''}" aria-hidden="true"></span>
-          <span class="bot-name">I-POSTMAN</span>
+          <span class="bot-name">I-PASSBOOK POSTMAN</span>
           <span class="bot-state">${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? 'Holding ' + (flags.serial.length + flags.reporters.length + flags.offFleet.length) : 'Quiet'}</span>
         </div>
-        <p class="bot-say">Collects what the Inspector finds into one post. Nothing to report means nothing is sent, and two posts never land inside two hours.</p>
+        <p class="bot-say">Collects what the Inspector finds into one numbered post. Nothing to report means nothing is sent, and two posts never land inside two hours.</p>
         <div class="bot-metrics">
           <span><b>${flags.serial.length + flags.reporters.length + flags.offFleet.length}</b> to collect</span>
           <span><b>2 h</b> minimum gap</span>
@@ -8503,7 +8586,7 @@ function renderInsights() {
       ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
     </p>
 
-    ${(flags.serial.length || flags.autoFixed.length || flags.reporters.length || flags.offFleet.length || corrList.length) ? `
+    ${(flags.serial.length || flags.autoFixed.length || flags.reporters.length || (flags.autoMerged && flags.autoMerged.length) || flags.offFleet.length || corrList.length) ? `
     <div class="ins-flags">
       <div class="ins-flags-head">
         <strong>Data quality — I-INSPECTOR</strong>
@@ -8517,6 +8600,15 @@ function renderInsights() {
         </ul>
         ${moreList(flags.autoFixed.slice(6), (x) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`, 0)}
         <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
+      </div>` : ''}
+      ${(flags.autoMerged && flags.autoMerged.length) ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.autoMerged.length} reporter name${flags.autoMerged.length === 1 ? ' was' : 's were'} merged automatically</span>
+        <ul class="ins-flag-list">
+          ${flags.autoMerged.slice(0, 6).map(g => `<li><b>${escHtml(g.email || '—')}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — ${escHtml(g.names.join(' + '))} → <code>${escHtml(g.to)}</code></li>`).join('')}
+        </ul>
+        ${moreList(flags.autoMerged.slice(6), g => `<li><b>${escHtml(g.email || '—')}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — ${escHtml(g.names.join(' + '))} → <code>${escHtml(g.to)}</code></li>`, 0)}
+        <span class="ins-flag-more">These spellings share ONE email and look like the same person typed differently, so the app shows the most complete spelling on every IR. The raw cells are untouched, and nothing is asked of CR.</span>
       </div>` : ''}
       ${flags.serial.length ? `
       <div class="ins-flag-group">
@@ -8544,7 +8636,7 @@ function renderInsights() {
               <ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 6 + k, j)).join('')}</ul></li>`).join('')}
           </ul>
         </details>` : ''}
-        <span class="ins-flag-more">The name on the IR is the reporter — one manager's mailbox can hold a whole team, so names are never merged. A correction applies to ONE spelling, and the intake Sheet is never edited.</span>
+        <span class="ins-flag-more">The name on the IR is the reporter. Spellings that share one email and differ only by a missing or mistyped part are merged already (above). What is left here is a name the app cannot attribute to one mailbox — a correction applies to ONE spelling, and the intake Sheet is never edited.</span>
       </div>` : ''}
       ${corrList.length ? `
       <div class="ins-flag-group">
@@ -8821,12 +8913,12 @@ if (insightsView) {
     if (e.target && e.target.id === 'ins-bot-post') {
       const d = postmanDigest(allIRs);
       if (!d.count) { showToast('Nothing to report — the Postmaster stays quiet'); return; }
-      if (!confirm('Post this digest to CR?\n\n' + d.count + ' item' + (d.count === 1 ? '' : 's') + ' in ONE email. The Postmaster will not post again for two hours.')) return;
+      if (!confirm('Post this digest to CR?\n\n' + d.count + ' item' + (d.count === 1 ? '' : 's') + ' in ONE email, as the next numbered post in the Postman series. The Postman will not post again for two hours.')) return;
       e.target.disabled = true;
       adminPost('sendPostmaster', { body: d.text, items: d.count }).then(r => {
         if (!r || r.status !== 'ok') {
           e.target.disabled = false;
-          showToast((r && r.message) || 'The Postmaster could not post');
+          showToast((r && r.message) || 'The Postman could not post');
           return;
         }
         showToast(r.message || 'Posted to CR');
@@ -9966,8 +10058,52 @@ function mapSheetRows(rows) {
   lastSheetAudit.badIRRows = badIRRows;
   // Second pass: every row's reporter IDENTITY, from the NAME it carries. Written
   // onto the record so the list filter and the INSIGHTS facet cannot disagree.
+  //
+  // ONE PERSON, ONE NAME (the owner's rule, 2026-10-19): when two spellings share the
+  // SAME email and one looks like the other typed differently ("A. PERSON" /
+  // "A. PERSON S", "B. PERSON" / "B. PERSON FULL", "C. PERSONK" / "C. PERSONKAR"),
+  // the app shows the MOST COMPLETE spelling on every one of those IRs. He asked for
+  // exactly that: "if having same email ID then only one [fuller name] to be kept
+  // merging all IRs in his entry".
+  //
+  // This is deliberately narrow. Only names that pass looksLikeSpellingVariant are
+  // merged, and only inside one non-empty mailbox: a manager's truly different
+  // teammates (or the same name filed from two different addresses) stay separate.
+  // A correction CR has approved has already been applied by reporterName above, so
+  // the corrected form is what the comparison and the label use.
+  const byEmail = new Map();
   records.forEach(rec => {
-    rec.reporterKey = reporterKeyFor(rec.customerName, rec.contactEmail);
+    const e = normEmail(rec.contactEmail);
+    if (!e) return;
+    const list = byEmail.get(e) || [];
+    list.push(rec);
+    byEmail.set(e, list);
+  });
+  byEmail.forEach(list => {
+    const clusters = [];
+    list.forEach(rec => {
+      const raw = String((rec.intake && rec.intake.customerName) || rec.customerName || '').trim();
+      if (!raw) return;
+      const hit = clusters.find(c => c.some(o => looksLikeSpellingVariant(o.raw, raw)));
+      if (hit) hit.push({ raw, rec });
+      else clusters.push([{ raw, rec }]);
+    });
+    clusters.forEach(cluster => {
+      if (cluster.length < 2) return;
+      let best = '';
+      cluster.forEach(o => {
+        const shown = String(o.rec.customerName || '').trim();
+        if (shown.length > best.length) best = shown;
+      });
+      if (!best) return;
+      cluster.forEach(o => {
+        o.rec.customerName = best;
+        o.rec.reporterKey = 'n:' + personKey(best);
+      });
+    });
+  });
+  records.forEach(rec => {
+    if (!rec.reporterKey) rec.reporterKey = reporterKeyFor(rec.customerName, rec.contactEmail);
   });
   return records.reverse();   // latest first
 }

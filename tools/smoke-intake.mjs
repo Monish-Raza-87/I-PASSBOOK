@@ -437,4 +437,47 @@ ok('angle brackets are still HTML-escaped for the attribute context',
 ok('escHtml leaves the quote it was never asked to handle',
   T.escHtml("x'y") === "x'y", T.escHtml("x'y"));
 
+// ── "Reported by" is one name per mailbox (owner, 2026-10-19, v103) ───────────
+// His ruling: "only one name to each email ID ... mention name and in bracket email
+// ID", and a company / site / form title in that cell is never a reporter.
+head('one mailbox speaks with one name, and an address can outlive a bad cell');
+{
+  const rowWith = (ir, name, email, company) => {
+    const r = ROW.slice();
+    r[1] = ir; r[11] = name; r[15] = email; r[17] = company;
+    return r;
+  };
+  const many = T.mapSheetRows([
+    HEADERS,
+    rowWith('IR501', 'Sample Person', 'sample.one@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR502', 'SAMPLE PERSON FULL PILOT', 'sample.one@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR503', 'Another Name', 'sample.two@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR504', 'Sample Company Pvt Ltd', 'sample.three@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR505', 'ANIL-STYLE NAME AND', 'sample.four@example.com', 'Sample Company Pvt Ltd'),
+  ]);
+  const by = no => many.find(x => x.irNumber === no);
+
+  ok('two spellings from ONE mailbox show the SAME, fuller name',
+    by('IR501').customerName === 'SAMPLE PERSON FULL' &&
+    by('IR502').customerName === 'SAMPLE PERSON FULL',
+    [by('IR501').customerName, by('IR502').customerName]);
+  ok('...and the identity is the MAILBOX, not the spelling',
+    by('IR501').reporterKey === 'e:sample.one@example.com' &&
+    by('IR501').reporterKey === by('IR502').reporterKey,
+    [by('IR501').reporterKey, by('IR502').reporterKey]);
+  ok('...and the list label is NAME (email)',
+    by('IR501').reporterLabel === 'SAMPLE PERSON FULL (sample.one@example.com)',
+    by('IR501').reporterLabel);
+  ok('two mailboxes with different names are two entries',
+    by('IR503').reporterKey !== by('IR502').reporterKey);
+  ok('a company name in the cell is NOT a reporter — the mailbox shows its email',
+    by('IR504').customerName === '' &&
+    by('IR504').reporterLabel === 'sample.three@example.com',
+    [by('IR504').customerName, by('IR504').reporterLabel]);
+  ok('a trailing joining word is not part of the name',
+    by('IR505').customerName === 'ANIL-STYLE NAME', by('IR505').customerName);
+  ok('the raw cell is untouched for the Inspector to show',
+    by('IR505').intake.customerName === 'ANIL-STYLE NAME AND', by('IR505').intake.customerName);
+}
+
 finish();

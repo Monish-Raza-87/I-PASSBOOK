@@ -543,32 +543,36 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
   r.ok('a proposal the Inspector has is written into the box, and marked',
     (h.match(/value="S100-V3"/g) || []).length === 11 && /ins-suggest/.test(h),
     (h.match(/value="S100-V3"/g) || []).length);
-  // ONE MAILBOX: the app merges a spelling and its fuller form, so there is nothing
-  // to ask. The owner's example: "if having same email ID then only one [fuller
-  // name] to be kept merging all IRs in his entry" (2026-10-19).
+  // ONE MAILBOX: one reporter entry, labelled "NAME (email)", with a box per spelling
+  // so CR can overrule the choice. The owner's rule: "only one name to each email ID"
+  // and "mention name and in bracket email ID" (2026-10-19).
   T.allIRs = [
     { irNumber: 'IRa', customerName: 'test person', contactEmail: 'test.reporter@example.com' },
     { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'test.reporter@example.com' },
   ];
   T.renderInsights();
   const hm = byId.get('insights-body').innerHTML;
-  r.ok('two spellings in ONE mailbox are merged — no box is asked for',
-    (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 0 &&
-    /merged automatically/.test(hm) && /TEST PERSON S/.test(hm), hm.slice(0, 300));
+  r.ok('one mailbox is ONE reporter entry, and it reads NAME (email)',
+    /TEST PERSON S \(test\.reporter@example\.com\)/.test(hm), hm.slice(0, 400));
+  r.ok('...the fuller spelling is the one it speaks with, not the first row',
+    (hm.match(/TEST PERSON S/g) || []).length >= 2 && !/<option[^>]*>test person</i.test(hm), hm.slice(0, 400));
+  r.ok('...and it is reported as merged, with one editable box per spelling',
+    /reduced to one name/.test(hm) &&
+    (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 2,
+    (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length);
 
-  // TWO MAILBOXES: the app cannot prove one person, so each spelling keeps its own
-  // editable box, prefilled with its CAPS form.
+  // TWO MAILBOXES, two entries — and NO question: each mailbox has a person's name.
   T.allIRs = [
     { irNumber: 'IRa', customerName: 'test person', contactEmail: 'one@example.com' },
     { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'two@example.com' },
   ];
   T.renderInsights();
   const hr = byId.get('insights-body').innerHTML;
-  r.ok('two ADDRESSES are not merged — each spelling gets its own box',
-    (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 2,
-    (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []));
-  r.ok('...and the lowercase one arrives prefilled with its CAPS form',
-    /value="TEST PERSON"/.test(hr) && /data-from="test person"/.test(hr), hr.slice(0, 200));
+  r.ok('two mailboxes are two entries, each with the address in brackets',
+    /test person \(one@example\.com\)/i.test(hr) && /TEST PERSON S \(two@example\.com\)/i.test(hr), hr.slice(0, 400));
+  r.ok('...and neither is a finding — the mailbox already has a name',
+    !/no person's name/.test(hr) && (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 0,
+    (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length);
   T.currentUser = null;
   T.allIRs = FIXTURE;
   T.renderInsights();
@@ -699,17 +703,17 @@ r.head('a reporter is identified by the NAME on the ticket, not the mailbox');
     { irNumber: 'IR4', customerName: 'Solo Person',  contactEmail: '' },
     { irNumber: 'IR5', customerName: '',             contactEmail: 'no.name@acme.in' },
   ];
-  r.ok('the name is the identity',
-    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') === 'n:test reporter');
-  r.ok('...and punctuation or case does not split a person',
-    T.reporterKeyFor('test  reporter', 'TEST.REPORTER@example.com') === 'n:test reporter');
-  r.ok('one address holding two different names stays two reporters',
-    T.reporterKeyFor('Test Reporter', 'manager@example.com') !==
+  r.ok('the mailbox is the identity',
+    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') === 'e:test.reporter@example.com');
+  r.ok('...and case or punctuation in the address does not split it',
+    T.reporterKeyFor('Test Reporter', 'TEST.REPORTER@example.com') === 'e:test.reporter@example.com');
+  r.ok('one mailbox holding two different names is still ONE entry',
+    T.reporterKeyFor('Test Reporter', 'manager@example.com') ===
     T.reporterKeyFor('Solo Person', 'manager@example.com'));
-  r.ok('two addresses with the same name are one person — the name wins',
-    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') ===
+  r.ok('two addresses with the same name are two entries — a mailbox is not a name',
+    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') !==
     T.reporterKeyFor('Test Reporter', 'other@elsewhere.in'));
-  r.ok('a row that names nobody falls back to its address',
+  r.ok('a row that names nobody still belongs to its mailbox',
     T.reporterKeyFor('', 'No.Name@Acme.in') === 'e:no.name@acme.in');
   r.ok('...and a row with neither is no person at all', T.reporterKeyFor('', '') === '');
 }
@@ -742,10 +746,10 @@ r.head('the Inspector finds the same things the panel lists');
   r.ok('the total is every row the pass looked at', f.total === 6, f.total);
 }
 
-r.head('one mailbox merges its own spellings; two mailboxes are a question for CR');
+r.head('one mailbox is one name; a mailbox with no name is the only question left');
 {
-  // ONE email, two spellings: the app merges them itself (the owner's rule,
-  // 2026-10-19), so this is reported as automatic, never as a CR question.
+  // ONE email, two spellings: the app reduces the mailbox to one name itself (the
+  // owner's rule, 2026-10-19), so this is reported as automatic, never as a question.
   const same = T.inspectorFindings([
     { irNumber: 'IR1', customerName: 'Test Reporter', contactEmail: 'test.reporter@example.com' },
     { irNumber: 'IR2', customerName: 'test  reporter', contactEmail: 'test.reporter@example.com' },
@@ -753,24 +757,34 @@ r.head('one mailbox merges its own spellings; two mailboxes are a question for C
   ]);
   r.ok('a spelling and its fuller form under ONE email are merged, not asked',
     same.reporters.length === 0 && same.autoMerged.length === 1, same);
-  r.ok('...onto the most complete spelling, in the house CAPS form',
-    same.autoMerged[0].to === 'TEST REPORTER', same.autoMerged[0]);
+  // Rows here are raw (no mapper), so the case is the row's own; the mapper hands
+  // the same pass a CAPS name.
+  r.ok('...onto the most complete spelling',
+    same.autoMerged[0].to.toLowerCase() === 'test reporter', same.autoMerged[0]);
   r.ok('...and the merge names the address and both spellings',
     same.autoMerged[0].email === 'test.reporter@example.com' &&
     same.autoMerged[0].names.length === 2, same.autoMerged[0]);
 
-  // TWO emails: the app cannot prove it is one person, so CR decides.
+  // TWO emails, same name: two mailboxes are two entries, and NEITHER is a question.
   const two = T.inspectorFindings([
     { irNumber: 'IR1', customerName: 'Sample Name',   contactEmail: 'one@example.com' },
     { irNumber: 'IR2', customerName: 'Sample Name S', contactEmail: 'two@example.com' },
   ]);
-  r.ok('the same two spellings under TWO addresses stay a finding',
-    two.reporters.length === 1 && two.autoMerged.length === 0, two.reporters);
-  r.ok('...naming BOTH addresses and both spellings',
-    two.reporters[0].emails.length === 2 && two.reporters[0].spellings.length === 2, two.reporters[0]);
-  r.ok('...and the raw name is untouched until CR chooses',
-    two.reporters[0].spellings.some(s => s.name === 'Sample Name') &&
-    two.reporters[0].spellings.some(s => s.name === 'Sample Name S'), two.reporters[0]);
+  r.ok('two addresses with a name each are two entries and no question',
+    two.reporters.length === 0 && two.autoMerged.length === 0, two);
+
+  // A mailbox that never names a person: the app shows the email and asks once.
+  const org = T.inspectorFindings([
+    { irNumber: 'IR1', customerName: 'Sample Company Pvt Ltd', contactEmail: 'ops@example.com' },
+    { irNumber: 'IR2', customerName: 'FORM RESPONSES',         contactEmail: 'form@example.com' },
+  ]);
+  r.ok('a company or a form title is NEVER a reporter — that mailbox is a question',
+    org.reporters.length === 2 && org.autoMerged.length === 0, org.reporters);
+  r.ok('...and the question is keyed by the ADDRESS, which is what the list shows',
+    org.reporters.every(g => /^e:/.test(g.key) && g.email) &&
+    org.reporters.map(g => g.email).join(',') === 'form@example.com,ops@example.com', org.reporters);
+  r.ok('...with the raw cell kept so CR can see what was written',
+    org.reporters.some(g => g.spellings.some(s => s.name === 'FORM RESPONSES')), org.reporters);
 }
 
 r.head('an approved correction is what changes the app, and only it');
@@ -930,7 +944,7 @@ r.head('the postman post is numbered forever and explains itself');
     /— I-PASSBOOK POSTMAN/.test(d.text) && !/POSTMASTER/.test(d.text));
   r.ok('a merge the app did itself is reported, not asked',
     /MERGED AUTOMATICALLY/.test(d.text) && /TEST PERSON S/.test(d.text) &&
-    /Nothing is asked of CR for these/.test(d.text), d.text);
+    /What to do: nothing/.test(d.text), d.text);
   r.ok('a merge is NOT counted as an item needing a decision', d.count === 1, d);
 }
 

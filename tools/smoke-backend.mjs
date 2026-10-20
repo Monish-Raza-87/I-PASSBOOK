@@ -109,8 +109,12 @@ r.head('the owner\'s security decisions');
 // that filed it (one manager files for a whole team).
 // v17 = every post carries a PERMANENT number, 001, 002, 003 … forever, in the
 // subject and as the body's first line.
-r.ok('API_VERSION is 17 — every post is numbered',
-  /API_VERSION:\s*17\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 18, a reporter is a name from an address',
+  /API_VERSION:\s*18\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v18 = the reporter is the NAME on the ticket PAIRED WITH the address it came from,
+// and CR can name a MAILBOX (`person:e:<address>`) for the tickets that name nobody.
+r.ok('a mailbox can be named without ever overriding a written name',
+  /kind === 'person-email'/.test(code) && /'person:e:'/.test(code));
 r.ok('the correction ledger is seeded with the other store files',
   /'corrections\.json', \{ items: \{\} \}/.test(code));
 r.ok('a correction is CR or admin, never a section grant',

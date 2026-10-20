@@ -557,7 +557,7 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
   r.ok('...the fuller spelling is the one it speaks with, not the first row',
     (hm.match(/TEST PERSON S/g) || []).length >= 2 && !/<option[^>]*>test person</i.test(hm), hm.slice(0, 400));
   r.ok('...and it is reported as merged, with one editable box per spelling',
-    /reduced to one name/.test(hm) &&
+    /merged inside one mailbox/.test(hm) &&
     (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length === 2,
     (hm.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length);
 
@@ -703,14 +703,14 @@ r.head('a reporter is identified by the NAME on the ticket, not the mailbox');
     { irNumber: 'IR4', customerName: 'Solo Person',  contactEmail: '' },
     { irNumber: 'IR5', customerName: '',             contactEmail: 'no.name@acme.in' },
   ];
-  r.ok('the mailbox is the identity',
-    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') === 'e:test.reporter@example.com');
+  r.ok('the identity is the NAME paired with the address it came from',
+    T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') === 'p:test reporter|test.reporter@example.com');
   r.ok('...and case or punctuation in the address does not split it',
-    T.reporterKeyFor('Test Reporter', 'TEST.REPORTER@example.com') === 'e:test.reporter@example.com');
-  r.ok('one mailbox holding two different names is still ONE entry',
-    T.reporterKeyFor('Test Reporter', 'manager@example.com') ===
+    T.reporterKeyFor('Test Reporter', 'TEST.REPORTER@example.com') === 'p:test reporter|test.reporter@example.com');
+  r.ok('one mailbox filing for two people is TWO entries — the name decides',
+    T.reporterKeyFor('Test Reporter', 'manager@example.com') !==
     T.reporterKeyFor('Solo Person', 'manager@example.com'));
-  r.ok('two addresses with the same name are two entries — a mailbox is not a name',
+  r.ok('one person from two addresses is two entries, one per mailbox',
     T.reporterKeyFor('Test Reporter', 'test.reporter@example.com') !==
     T.reporterKeyFor('Test Reporter', 'other@elsewhere.in'));
   r.ok('a row that names nobody still belongs to its mailbox',

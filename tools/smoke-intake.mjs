@@ -13,7 +13,7 @@
 import { loadApp, makeReporter } from './harness.mjs';
 
 const { T, byId } = loadApp(`
-  mapSheetRows, buildIntakeMap, INTAKE_FIELDS, intakeValueHtml, toDisplayDateTime,
+  mapSheetRows, buildIntakeMap, INTAKE_FIELDS, intakeValueHtml, toDisplayDateTime, setCorrections,
   toDisplayDate, toISODate, renderIntake, renderIRList, escHtml, escJsAttr, safeUrl,
   sheetGapNote,
   get lastSheetAudit() { return lastSheetAudit; },
@@ -437,10 +437,11 @@ ok('angle brackets are still HTML-escaped for the attribute context',
 ok('escHtml leaves the quote it was never asked to handle',
   T.escHtml("x'y") === "x'y", T.escHtml("x'y"));
 
-// ── "Reported by" is one name per mailbox (owner, 2026-10-19, v103) ───────────
-// His ruling: "only one name to each email ID ... mention name and in bracket email
-// ID", and a company / site / form title in that cell is never a reporter.
-head('one mailbox speaks with one name, and an address can outlive a bad cell');
+// ── "Reported by" is a NAME paired with its mailbox (owner, 2026-10-20, v105) ──
+// A shared address files for a whole team, so each IR counts under the name written
+// on it, per address: "NAME (email) (n)". Spellings that look like the same person
+// inside one mailbox still merge onto the most complete one.
+head('a mailbox files for people; one person from two addresses is two lines');
 {
   const rowWith = (ir, name, email, company) => {
     const r = ROW.slice();
@@ -449,11 +450,12 @@ head('one mailbox speaks with one name, and an address can outlive a bad cell');
   };
   const many = T.mapSheetRows([
     HEADERS,
-    rowWith('IR501', 'Sample Person', 'sample.one@example.com', 'Sample Company Pvt Ltd'),
-    rowWith('IR502', 'SAMPLE PERSON FULL PILOT', 'sample.one@example.com', 'Sample Company Pvt Ltd'),
-    rowWith('IR503', 'Another Name', 'sample.two@example.com', 'Sample Company Pvt Ltd'),
-    rowWith('IR504', 'Sample Company Pvt Ltd', 'sample.three@example.com', 'Sample Company Pvt Ltd'),
-    rowWith('IR505', 'ANIL-STYLE NAME AND', 'sample.four@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR501', 'Sample Person', 'shared@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR502', 'SAMPLE PERSON FULL PILOT', 'shared@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR503', 'Another Name', 'shared@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR504', 'Sample Company Pvt Ltd', 'quiet@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR505', 'TRAILING-WORD NAME AND', 'second@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR506', 'Another Name', 'third@example.com', 'Sample Company Pvt Ltd'),
   ]);
   const by = no => many.find(x => x.irNumber === no);
 
@@ -461,23 +463,42 @@ head('one mailbox speaks with one name, and an address can outlive a bad cell');
     by('IR501').customerName === 'SAMPLE PERSON FULL' &&
     by('IR502').customerName === 'SAMPLE PERSON FULL',
     [by('IR501').customerName, by('IR502').customerName]);
-  ok('...and the identity is the MAILBOX, not the spelling',
-    by('IR501').reporterKey === 'e:sample.one@example.com' &&
-    by('IR501').reporterKey === by('IR502').reporterKey,
-    [by('IR501').reporterKey, by('IR502').reporterKey]);
+  ok('...and the identity is that name from that address',
+    by('IR501').reporterKey === 'p:sample person full|shared@example.com' &&
+    by('IR501').reporterKey === by('IR502').reporterKey, by('IR501').reporterKey);
   ok('...and the list label is NAME (email)',
-    by('IR501').reporterLabel === 'SAMPLE PERSON FULL (sample.one@example.com)',
+    by('IR501').reporterLabel === 'SAMPLE PERSON FULL (shared@example.com)',
     by('IR501').reporterLabel);
-  ok('two mailboxes with different names are two entries',
-    by('IR503').reporterKey !== by('IR502').reporterKey);
+  ok('a DIFFERENT name from the same mailbox is a separate line, not a duplicate',
+    by('IR503').reporterKey !== by('IR502').reporterKey &&
+    by('IR503').customerName === 'ANOTHER NAME', by('IR503').reporterKey);
+  ok('one person from two addresses is two lines — the address is part of the count',
+    by('IR503').reporterKey !== by('IR506').reporterKey &&
+    by('IR503').reporterLabel !== by('IR506').reporterLabel,
+    [by('IR503').reporterLabel, by('IR506').reporterLabel]);
   ok('a company name in the cell is NOT a reporter — the mailbox shows its email',
     by('IR504').customerName === '' &&
-    by('IR504').reporterLabel === 'sample.three@example.com',
+    by('IR504').reporterLabel === 'quiet@example.com',
     [by('IR504').customerName, by('IR504').reporterLabel]);
   ok('a trailing joining word is not part of the name',
-    by('IR505').customerName === 'ANIL-STYLE NAME', by('IR505').customerName);
+    by('IR505').customerName === 'TRAILING-WORD NAME', by('IR505').customerName);
   ok('the raw cell is untouched for the Inspector to show',
-    by('IR505').intake.customerName === 'ANIL-STYLE NAME AND', by('IR505').intake.customerName);
+    by('IR505').intake.customerName === 'TRAILING-WORD NAME AND', by('IR505').intake.customerName);
+
+  // A mailbox CR has named fills the rows that name nobody — and only those.
+  T.setCorrections({ items: { 'person:e:quiet@example.com': { to: 'Sample Owner' } } });
+  const named = T.mapSheetRows([
+    HEADERS,
+    rowWith('IR511', '', 'quiet@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR512', 'Someone Else', 'quiet@example.com', 'Sample Company Pvt Ltd'),
+  ]);
+  ok('a mailbox named by CR gives its name to the IRs that name nobody',
+    named.find(x => x.irNumber === 'IR511').customerName === 'SAMPLE OWNER',
+    named.find(x => x.irNumber === 'IR511').customerName);
+  ok('...and NEVER overrides an IR that already names a person',
+    named.find(x => x.irNumber === 'IR512').customerName === 'SOMEONE ELSE',
+    named.find(x => x.irNumber === 'IR512').customerName);
+  T.setCorrections({ items: {} });
 }
 
 finish();

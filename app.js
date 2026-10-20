@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v104';
+const APP_VERSION = 'v105';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7575,17 +7575,43 @@ function canonicalPersonName(v) {
 // look like an organisation: the point of a correction is that a person decided.
 const REPORT_ROLE_WORDS = /(^|\s)(PILOT|CO-PILOT|ENGINEER|MANAGER|TECHNICIAN|OPERATOR|SUPERVISOR|INCHARGE|IN CHARGE)(?=\s|$)/gi;
 const REPORT_CONNECTOR_EDGE = /^(AND|WITH|&)\s+|\s+(AND|WITH|&)$/i;
+// A phone number is contact detail, not a name: 7+ digits with the usual separators.
+const REPORT_PHONE = /(?:^|\s)(?:\+?\d[\d\s-]{5,}\d)(?=\s|$)/g;
 const REPORT_ORG_WORDS = /(^|\s)(FORM RESPONSES?|GOOGLE FORM|RESPONSES?|OFFICE|DIVISION|DIVISIONAL|DEPARTMENT|MINISTRY|COUNCIL|AUTHORITY|GOVERNMENT|GOVT|LIMITED|LTD|PRIVATE|PVT|CORPORATION|CORP|COMPANY|INDUSTRIES?|ENTERPRISES?|TECHNOLOGIES|SOLUTIONS|SYSTEMS|SERVICES|GROUP|AGENCY|FOUNDATION|TRUST|SOCIETY|UNIVERSITY|COLLEGE|INSTITUTE|ACADEMY|BANK|HOSPITAL|DRONES?|ROBOTICS|AEROSPACE|AVIATION|LABS?|LABORATORIES|FARMS?|AGRO|MAIDEN|FLIGHT|ANALYSIS)(?=\s|$)/i;
 
 // Strip what a client adds around a name: a trailing "AND"/"&", a role such as PILOT.
 // Nothing inside the name is touched, so "A. PERSON" never becomes "A. PERSON FULL".
 function cleanReporterName(v) {
   let s = String(v == null ? '' : v).replace(/\s+/g, ' ').trim();
+  // The same cell carries the phone number ("A PERSON 9876543210") and sometimes the
+  // company after the name ("A PERSON, A COMPANY"). Neither is the reporter: his
+  // ruling is that the company is not required in the name, only the person.
+  s = s.replace(REPORT_PHONE, ' ').replace(/\s+/g, ' ').trim();
   for (let i = 0; i < 4; i++) {
     const before = s;
     s = s.replace(REPORT_ROLE_WORDS, ' ').replace(/\s+/g, ' ').trim();
     s = s.replace(REPORT_CONNECTOR_EDGE, '').trim();
     if (s === before) break;
+  }
+  return dropCompanyTail(s);
+}
+
+// A company glued to the end of the name is not part of the name. Only a REGISTERED
+// company or an organisation word counts, so a plain two-word surname is never
+// mistaken for one;
+// two and three word tails are tried, longest first, because the register holds
+// multi-word clients.
+function dropCompanyTail(s) {
+  const words = String(s || '').split(' ').filter(Boolean);
+  if (words.length < 2) return s;
+  // A legal form means the WHOLE cell is the company ("A COMPANY PVT LTD"), not a name
+  if (/\b(LTD|LIMITED|PVT|PRIVATE|CORP|CORPORATION|INC|LLP|COMPANY)\b/i.test(s)) return s;
+  if (/(LTD|LIMITED|PVT|PRIVATE|CORP|CORPORATION|INC|LLP|COMPANY)/i.test(s)) return s;
+  for (let take = Math.min(3, words.length - 1); take >= 1; take--) {
+    const head = words.slice(0, words.length - take).join(' ');
+    const tail = words.slice(words.length - take).join(' ');
+    const org = REPORT_ORG_WORDS.test(' ' + personKey(tail) + ' ') || !!companyRecordFor(tail);
+    if (org) return head.trim();
   }
   return s;
 }
@@ -7729,15 +7755,22 @@ function looksLikeSpellingVariant(a, b) {
   return Math.min(ka.length, kb.length) >= 6 && editDistance(ka, kb) <= 2;
 }
 
-// The identity key for one row. THE MAILBOX IS THE IDENTITY (owner, 2026-10-19,
-// v103): "only one name to each email ID". A row with an address is keyed by it, so
-// every spelling ever typed from that address is one entry; the name is only the
-// identity when the row carries no address at all.
+// The identity key for one row: the NAME PAIRED WITH THE ADDRESS IT WAS FILED FROM
+// (owner, 2026-10-20, v105). One mailbox can legitimately file for several people —
+// a manager reports on behalf of a team, or a shared address is used by whoever is on
+// shift — so the name on the IR decides who the IR belongs to, and that name is
+// counted PER EMAIL: "NAME (email) (n)". The same person filing from two addresses is
+// two lines, one per address, which is exactly what he asked for.
+//
+// The address is still part of the key, because the same name typed from two mailboxes
+// is two different counts and he reads the list per mailbox. A row with no usable name
+// falls back to the mailbox itself.
 function reporterKeyFor(name, email) {
-  const e = normEmail(email);
-  if (e) return 'e:' + e;
   const n = personKey(name);
-  return n ? 'n:' + n : '';
+  const e = normEmail(email);
+  if (n && e) return 'p:' + n + '|' + e;
+  if (n) return 'n:' + n;
+  return e ? 'e:' + e : '';
 }
 
 function insightsFacets(irs) {
@@ -7978,63 +8011,77 @@ function inspectorFindings(irs) {
                            suggest: serialSuggestion(raw, model) });
   });
 
-  // Reporters. ONE NAME PER MAILBOX (owner, 2026-10-19, v103): the identity is the
-  // email, and every IR filed from it shows the same name (see mapSheetRows). So the
-  // list can no longer be "one name spelled several ways" — a mailbox is ONE entry.
+  // Reporters. The identity is the NAME PAIRED WITH THE ADDRESS it was filed from
+  // (owner, 2026-10-20, v105). One mailbox can file for a whole team, so the name on
+  // the IR decides whose IR it is, and the count is per (name, address) pair:
+  // "NAME (email) (n)".
   //
-  // What is left for CR is only what the app could NOT resolve by itself: a mailbox
-  // whose every spelling is not a person at all (a company, a site, "FORM RESPONSES")
-  // and which no correction names yet. For those the app shows the email and asks CR
-  // for the person — his instruction: "write the email here itself".
-  //
-  // A mailbox with two person-like spellings is merged by the app and reported as
-  // automatic (autoMerged), never asked. The raw cell is read from `intake`, so a
-  // correction cannot hide the spelling that needs a decision.
-  const mailboxes = new Map();
+  // Inside one mailbox, spellings that look like the same person typed differently are
+  // merged by the app onto the most complete form and reported as automatic. What is
+  // left for CR is only a mailbox where NO IR named a person at all (a company, a site
+  // or a form title) and no correction names its owner yet — for those the list shows
+  // the address, exactly as he asked.
+  const byKey = new Map();
   rows.forEach(ir => {
     const raw = String((ir.intake && ir.intake.customerName) || ir.customerName || '').trim();
     const email = normEmail(ir.contactEmail);
     const shown = String(ir.customerName || '').trim();
-    const key = email || ('n:' + personKey(shown || raw));
-    if (!key || key === 'n:') return;
-    const rec = mailboxes.get(key) || { email, raws: new Map(), names: new Map(), n: 0 };
-    rec.n++;
-    if (raw) rec.raws.set(raw, (rec.raws.get(raw) || 0) + 1);
-    // A correction is CR's word, so a corrected spelling is a person even when the
-    // words read like a company. Everything else must survive looksLikePersonName.
-    const hit = raw && corrections.items[personCorrectionKey(raw)];
+    const hit = raw ? corrections.items[personCorrectionKey(raw)] : null;
     const trusted = !!(hit && hit.to);
-    if (shown && (trusted || looksLikePersonName(shown, ir.companyName))) {
-      rec.names.set(shown, (rec.names.get(shown) || 0) + 1);
-    }
-    mailboxes.set(key, rec);
+    const usable = shown && (trusted || looksLikePersonName(shown, ir.companyName));
+    const key = email || ('n:' + personKey(usable ? shown : raw));
+    if (!key || key === 'n:') return;
+    const rec = byKey.get(key) || { email, rows: [] };
+    rec.rows.push({ raw, name: usable ? shown : '' });
+    byKey.set(key, rec);
   });
-  const spellingsOf = rec => [...rec.raws.entries()]
-    .map(([name, n]) => ({ name, n }))
+  const spellingsOf = list => list
+    .map(e => ({ name: e.raw || e.name || '(blank)', n: e.n }))
     .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
   const reporters = [], autoMerged = [];
-  mailboxes.forEach(rec => {
-    const names = [...rec.names.keys()];
-    const raws = [...rec.raws.keys()];
-    if (!names.length) {
-      if (!rec.email) return;
-      reporters.push({
-        key: 'e:' + rec.email, email: rec.email, emails: [rec.email], n: rec.n,
-        spellings: spellingsOf(rec).map(x => ({ name: x.name, n: x.n, suggest: '' })),
-      });
-      return;
-    }
-    if (raws.length < 2) return;
-    autoMerged.push({
-      email: rec.email, n: rec.n, to: names[0],
-      names: raws.slice().sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b)),
-      spellings: spellingsOf(rec),
+  byKey.forEach(rec => {
+    // One entry per distinct (raw cell, shown name) with its IR count.
+    const entries = [], idx = new Map();
+    rec.rows.forEach(r => {
+      const k = r.raw + '\u0000' + r.name;
+      const hit = idx.get(k);
+      if (hit) hit.n++;
+      else { const o = { raw: r.raw, name: r.name, n: 1 }; idx.set(k, o); entries.push(o); }
     });
+    const named = entries.filter(e => e.name);
+    const unnamed = entries.filter(e => !e.name);
+    const clusters = [];
+    named.forEach(e => {
+      const hit = clusters.find(c => c.some(o => looksLikeSpellingVariant(o.name, e.name)));
+      if (hit) hit.push(e);
+      else clusters.push([e]);
+    });
+    clusters.forEach(cluster => {
+      const chosen = pickMailboxName(cluster.map(e => e.name));
+      const n = cluster.reduce((a, e) => a + e.n, 0);
+      const raws = cluster.map(e => e.raw || e.name).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b));
+      if (raws.length < 2) return;
+      autoMerged.push({
+        key: reporterKeyFor(chosen, rec.email), email: rec.email, n, to: chosen,
+        names: raws, spellings: spellingsOf(cluster),
+      });
+    });
+    if (unnamed.length && rec.email) {
+      reporters.push({
+        key: 'e:' + rec.email, email: rec.email, emails: [rec.email],
+        n: unnamed.reduce((a, e) => a + e.n, 0), kind: 'email',
+        spellings: spellingsOf(unnamed).map(x => ({ name: x.name, n: x.n, suggest: '' })),
+      });
+    }
   });
-  // Alphabetical by the address shown, not biggest-first: the owner reads this list
-  // to find a name he already has in mind (2026-10-19).
-  reporters.sort((a, b) => a.email.localeCompare(b.email, undefined, { sensitivity: 'base' }) || a.email.localeCompare(b.email) || b.n - a.n);
-  autoMerged.sort((a, b) => String(a.to).localeCompare(String(b.to), undefined, { sensitivity: 'base' }) || String(a.to).localeCompare(String(b.to)));
+  // Alphabetical by the line shown (name, then address), not biggest-first: the owner
+  // reads these lists to find a name he already has in mind (2026-10-19/20).
+  const lineOf = x => String(x.email || '');
+  reporters.sort((a, b) => lineOf(a).localeCompare(lineOf(b), undefined, { sensitivity: 'base' }) || b.n - a.n);
+  const sortAuto = x => String(x.to) + '\u0000' + String(x.email);
+  autoMerged.sort((a, b) => sortAuto(a).localeCompare(sortAuto(b), undefined, { sensitivity: 'base' }) ||
+                                 sortAuto(a).localeCompare(sortAuto(b)));
 
   return { serial, autoFixed, reporters, autoMerged, offFleet, total: rows.length };
 }
@@ -8149,16 +8196,17 @@ function postmanDigest(irs) {
   }
 
   if (flags.autoMerged.length) {
-    lines.push('MERGED AUTOMATICALLY — ' + flags.autoMerged.length + ' mailbox' +
-      (flags.autoMerged.length === 1 ? ' was' : 'es were') + ' reduced to one name:');
-    lines.push('  What it means: each of these addresses wrote its reporter more than one');
-    lines.push('  way, and the rule is ONE NAME PER EMAIL ID. The app shows the most');
-    lines.push('  complete name that mailbox ever wrote on every one of its IRs, so the');
-    lines.push('  same person is never listed twice. The raw cells stay exactly as the');
-    lines.push('  client wrote them.');
-    lines.push('  What to do: nothing, if the name chosen is the right one. If it is not,');
-    lines.push('  type the right name beside the spelling in I-PASSBOOK → INSIGHTS and');
-    lines.push('  press once; the whole mailbox follows it.');
+    lines.push('MERGED AUTOMATICALLY — ' + flags.autoMerged.length + ' spelling' +
+      (flags.autoMerged.length === 1 ? ' was' : 's were') + ' merged inside one mailbox:');
+    lines.push('  What it means: within ONE address, the same person typed their name more');
+    lines.push('  than one way. The app shows the most complete spelling for that address,');
+    lines.push('  so the same person is not listed twice. The raw cells stay exactly as the');
+    lines.push('  client wrote them. Only spelling variants are merged — two genuinely');
+    lines.push('  different names from one mailbox stay two lines, because a mailbox can');
+    lines.push('  file for a whole team.');
+    lines.push('  What to do: nothing, if the spelling chosen is the right one. If it is not,');
+    lines.push('  type the right one beside the spelling in I-PASSBOOK → INSIGHTS and press');
+    lines.push('  once.');
     flags.autoMerged.slice(0, 20).forEach(g =>
       lines.push('  · ' + g.to + ' (' + (g.email || '—') + ') — ' + g.n + ' IR' +
         (g.n === 1 ? '' : 's') + ' — written: ' + g.names.join(' / ')));
@@ -8531,9 +8579,9 @@ function renderInsights() {
       ${differs ? '<span class="ins-suggest">suggested</span>' : ''}
       <input type="text" class="form-input ins-fix-input" id="ins-fix-rp-${i}-${j}" autocomplete="off"
              placeholder="person for this mailbox" value="${escHtml(suggest || '')}" aria-label="Correct spelling of ${escHtml(s.name)}">
-      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="person"
+      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="${g.kind === 'email' ? 'person-email' : 'person'}"
               data-email="${escHtml(g.email || '')}" data-from="${escHtml(s.name)}"
-              data-input="ins-fix-rp-${i}-${j}">Use this spelling</button>
+              data-input="ins-fix-rp-${i}-${j}">${g.kind === 'email' ? 'Use this name' : 'Use this spelling'}</button>
     </span>` : ''}</li>`;
   };
 
@@ -8678,7 +8726,7 @@ function renderInsights() {
       </div>` : ''}
       ${(flags.autoMerged && flags.autoMerged.length) ? `
       <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.autoMerged.length} mailbox${flags.autoMerged.length === 1 ? ' was' : 'es were'} reduced to one name</span>
+        <span class="ins-flag-title">${flags.autoMerged.length} spelling${flags.autoMerged.length === 1 ? ' was' : 's were'} merged inside one mailbox</span>
         <ul class="ins-flag-list">
           ${flags.autoMerged.slice(0, 20).map((g, i) => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — written ${g.names.length} ways
             ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 20 + i, j)).join('')}</ul>`
@@ -8691,7 +8739,7 @@ function renderInsights() {
             ${flags.autoMerged.slice(20).map(g => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — ${escHtml(g.names.join(' + '))}</li>`).join('')}
           </ul>
         </details>` : ''}
-        <span class="ins-flag-more">One name per email ID: every IR filed from a mailbox shows the most complete name that mailbox ever wrote, and the list shows it as NAME (email). The raw cells are untouched. If the chosen name is wrong, type the right one beside the spelling and press once.</span>
+        <span class="ins-flag-more">Inside one mailbox, the same person typed more than one way is shown under the most complete spelling. The list reads NAME (email) (n), where n is how many IRs carry that name from that address. The raw cells are untouched; if the chosen spelling is wrong, type the right one beside it and press once.</span>
       </div>` : ''}
       ${flags.serial.length ? `
       <div class="ins-flag-group">
@@ -9024,11 +9072,16 @@ if (insightsView) {
         const from = fixBtn.dataset.from || '';
         if (!confirm('Use "' + value + '" for every IR that says "' + from + '"?\n\nThe app shows the corrected serial. The intake Sheet is not changed, and you can remove this correction at any time.')) return;
         applyCorrection({ kind: 'serial', from: from, to: value });
+      } else if (fixBtn.dataset.kind === 'person-email') {
+        // A mailbox that never named a person: the correction belongs to the ADDRESS.
+        // It only ever fills a blank — an IR that names someone keeps that name.
+        const email = fixBtn.dataset.email || '';
+        if (!email) { showToast('That row has no email address'); return; }
+        if (!confirm('Show "' + value + '" for every IR filed from ' + email + ' that names nobody?\n\nAn IR from this address that already names a person keeps that name. This app only: the intake Sheet is never edited, and you can remove this at any time.')) return;
+        applyCorrection({ kind: 'person-email', from: '', to: value, email: email });
       } else {
-        // The NAME is the identity, not the mailbox. One manager's address can carry
-        // a whole team's IRs (a manager filing for a teammate), so a
-        // correction is scoped to the one spelling being corrected and never to the
-        // address. `email` travels only so the ledger can say where it came from.
+        // The NAME on the IR is the identity. A correction is scoped to the one
+        // spelling being corrected, never to the address it came from.
         const email = fixBtn.dataset.email || '';
         const from = fixBtn.dataset.from || '';
         if (!confirm('Show "' + value + '" for every IR that says "' + from + '"?\n\nOnly that spelling changes' + (email ? ' — other names filed from ' + email + ' are left alone' : '') + '. This app only: the intake Sheet is never edited, and you can remove this at any time.')) return;
@@ -10142,21 +10195,19 @@ function mapSheetRows(rows) {
     });
   }
   lastSheetAudit.badIRRows = badIRRows;
-  // Second pass: every row's reporter IDENTITY and the ONE name its mailbox speaks
-  // with. Written onto the record so the list filter and the INSIGHTS facet cannot
-  // disagree.
+  // Second pass: every row's reporter IDENTITY — the NAME it carries, paired with
+  // the mailbox it was filed from (owner, 2026-10-20, v105).
   //
-  // THE OWNER'S RULE (2026-10-19, v103): "only one name to each email ID ... mention
-  // name and in bracket email ID". So a mailbox is the identity, every IR filed from
-  // it shows the SAME name, and that name is the most complete one the mailbox ever
-  // wrote — "A. PERSON S" over "A. PERSON", "B. PERSON FULL" over "B. PERSONK". The
-  // cell is free text, so a value that is not a person at all (a company, a site, a
-  // form title, a role or a joining word) is never chosen: see looksLikePersonName.
-  // When a mailbox has no usable name, its IRs show the EMAIL alone — his instruction,
-  // "write the email here itself", rather than invent a person.
+  // A shared address is NOT one person. The same mailbox files for a whole team, so
+  // each IR counts under the name written on it, and an "NAME (email) (n)" line means
+  // "n IRs carry this name and were filed from this address". The same person using
+  // two addresses is two lines, one per address.
   //
-  // An approved correction is trusted over every heuristic: if CR has said a spelling
-  // names a person, it is a person even when the words look like an organisation.
+  // Inside ONE mailbox, spellings that look like the same person typed differently
+  // are still merged onto the most complete one — that is the earlier ruling and it
+  // still holds. A value that is not a person (a company, a site, a form title, a role
+  // or a joining word) is never a reporter: the mailbox's owner stands in when CR has
+  // named one, otherwise the list shows the address alone.
   const byEmail = new Map();
   records.forEach(rec => {
     const e = normEmail(rec.contactEmail);
@@ -10166,20 +10217,38 @@ function mapSheetRows(rows) {
     byEmail.set(e, list);
   });
   byEmail.forEach((list, email) => {
-    const raws = [], usable = [];
-    list.forEach(rec => {
+    const rows = list.map(rec => {
       const raw = String((rec.intake && rec.intake.customerName) || '').trim();
-      if (raw) raws.push(raw);
       const shown = String(rec.customerName || '').trim();
-      if (!shown) return;
-      const trusted = !!(corrections.items[personCorrectionKey(raw)] && corrections.items[personCorrectionKey(raw)].to);
-      if (trusted || looksLikePersonName(shown, rec.companyName)) usable.push(shown);
+      const hit = raw ? corrections.items[personCorrectionKey(raw)] : null;
+      const trusted = !!(hit && hit.to);
+      const usable = shown && (trusted || looksLikePersonName(shown, rec.companyName));
+      return { rec, name: usable ? shown : '' };
     });
-    const chosen = pickMailboxName(usable);
-    list.forEach(rec => {
-      rec.reporterKey = 'e:' + email;
-      rec.customerName = chosen;            // '' when the mailbox never named a person
-      rec.reporterLabel = chosen ? chosen + ' (' + email + ')' : email;
+    // Merge variant spellings inside this mailbox onto its most complete form.
+    const clusters = [];
+    rows.forEach(r => {
+      if (!r.name) return;
+      const hit = clusters.find(c => c.some(o => looksLikeSpellingVariant(o.name, r.name)));
+      if (hit) hit.push(r);
+      else clusters.push([r]);
+    });
+    clusters.forEach(cluster => {
+      if (cluster.length < 2) return;
+      const chosen = pickMailboxName(cluster.map(r => r.name));
+      cluster.forEach(r => { r.name = chosen; });
+    });
+    // A row that names nobody takes the mailbox's owner when CR has said who that is.
+    // This is the ONLY place an address-keyed correction acts: a row that names a
+    // person is never overridden by the address it came from.
+    const owner = corrections.items['person:e:' + email];
+    rows.forEach(r => {
+      let name = r.name;
+      if (!name && owner && owner.to) name = canonicalPersonName(cleanReporterName(owner.to));
+      const rec = r.rec;
+      rec.customerName = name;
+      rec.reporterKey = reporterKeyFor(name, email);
+      rec.reporterLabel = name ? name + ' (' + email + ')' : email;
     });
   });
   records.forEach(rec => {

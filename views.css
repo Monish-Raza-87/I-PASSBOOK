@@ -2347,6 +2347,11 @@
 .ins-flags-head span { font-size: var(--text-xs); color: var(--ink-gray-5); }
 .ins-flag-group + .ins-flag-group { margin-top: 0.6rem; border-top: 1px solid var(--outline-gray-1); padding-top: 0.6rem; }
 .ins-flag-title { font-size: var(--text-xs); font-weight: var(--weight-medium); color: var(--ink-gray-7); display: block; margin-bottom: 0.25rem; }
+/* A summary is a <summary>, so it gets the pointer and the disclosure arrow for free.
+   The note says the work is DONE, so a reader who came to fix something does not
+   mistake a finished merge for a question. */
+details.ins-flag-group > summary.ins-flag-title { cursor: pointer; }
+.ins-flag-sum-note { color: var(--ink-gray-5); margin-left: 0.4rem; font-weight: var(--weight-regular); }
 .ins-flag-list { margin: 0 0 0.3rem; padding-left: 1.1rem; font-size: var(--text-xs); color: var(--ink-gray-7); }
 .ins-flag-list li { margin-bottom: 1px; }
 .ins-flag-list code { font-size: var(--text-xs); background: var(--surface-gray-2); padding: 0 0.25rem; border-radius: var(--radius-2); }

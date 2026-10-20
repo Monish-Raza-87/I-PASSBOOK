@@ -681,6 +681,11 @@ r.ok('the drag uses pointer capture, so it survives leaving the 7px strip', (() 
     // goes — this view has no narrow list column to fold.
     /html\.view-full #list-toggle \{ display: none; \}/.test(baseSrc) &&
     !/html\.view-full #sidebar-toggle/.test(baseSrc.replace(/\/\*[\s\S]*?\*\//g, '')));
+  // Help & FAQ is the fourth pane in that row. It was the one view the placeholder
+  // was never told about, so "No IR selected" sat under the FAQ and stole half its
+  // width (owner, 2026-10-20).
+  r.ok('Help & FAQ hides the empty state instead of sharing the row with it',
+    /body\.view-faq #detail-placeholder \{ display: none; \}/.test(baseSrc));
   r.ok('...and the fold stands down, because a rail over the board is a stranding',
     unfolded);
   r.ok('...and going back to List restores both the fold and the sidebar',

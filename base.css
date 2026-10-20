@@ -3275,6 +3275,10 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      #/insights. The Log Analyser is the same case for the same reason. */
   body.view-insights #detail-placeholder { display: none; }
   body.view-log #detail-placeholder { display: none; }
+  /* Help & FAQ is a pane in the same row. Without this it shares the row with the
+     empty state, so "No IR selected" sits under the FAQ and the FAQ gets half the
+     width. It was the one view the placeholder was never told about. */
+  body.view-faq #detail-placeholder { display: none; }
   /* The big faded mark. It replaced a 2.75rem inline glyph on 2026-10-11, on the
      owner's instruction: "when landing on dashboard and no any service desk is open,
      in blank space big faded logo to appear." See index.html for why it is an <img>.

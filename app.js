@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v105';
+const APP_VERSION = 'v106';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7593,7 +7593,9 @@ function cleanReporterName(v) {
     s = s.replace(REPORT_CONNECTOR_EDGE, '').trim();
     if (s === before) break;
   }
-  return dropCompanyTail(s);
+  // Canonical last, so edge punctuation is gone and the house style is CAPS: a
+  // suggestion offered in the Inspector is a name the list can actually show.
+  return canonicalPersonName(dropCompanyTail(s));
 }
 
 // A company glued to the end of the name is not part of the name. Only a REGISTERED
@@ -8725,8 +8727,9 @@ function renderInsights() {
         <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
       </div>` : ''}
       ${(flags.autoMerged && flags.autoMerged.length) ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.autoMerged.length} spelling${flags.autoMerged.length === 1 ? ' was' : 's were'} merged inside one mailbox</span>
+      <details class="ins-flag-group ins-flag-details">
+        <summary class="ins-flag-title">${flags.autoMerged.length} spelling${flags.autoMerged.length === 1 ? ' was' : 's were'} merged inside one mailbox
+          <span class="ins-flag-sum-note">done — open only to override a choice</span></summary>
         <ul class="ins-flag-list">
           ${flags.autoMerged.slice(0, 20).map((g, i) => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — written ${g.names.length} ways
             ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 20 + i, j)).join('')}</ul>`
@@ -8740,7 +8743,7 @@ function renderInsights() {
           </ul>
         </details>` : ''}
         <span class="ins-flag-more">Inside one mailbox, the same person typed more than one way is shown under the most complete spelling. The list reads NAME (email) (n), where n is how many IRs carry that name from that address. The raw cells are untouched; if the chosen spelling is wrong, type the right one beside it and press once.</span>
-      </div>` : ''}
+      </details>` : ''}
       ${flags.serial.length ? `
       <div class="ins-flag-group">
         <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the formats</span>
@@ -10235,7 +10238,8 @@ function mapSheetRows(rows) {
     });
     clusters.forEach(cluster => {
       if (cluster.length < 2) return;
-      const chosen = pickMailboxName(cluster.map(r => r.name));
+      // Canonicalised, so a trailing underscore or dot never becomes the shown name.
+      const chosen = canonicalPersonName(pickMailboxName(cluster.map(r => r.name)));
       cluster.forEach(r => { r.name = chosen; });
     });
     // A row that names nobody takes the mailbox's owner when CR has said who that is.

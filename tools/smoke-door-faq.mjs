@@ -518,7 +518,7 @@ ok('the route exists, and resolves to the pane rather than the list fallthrough'
 
 ok('renderLayout gives it the screen and the list fold, like the other two panes',
   /const faq\s+= currentView === 'faq';/.test(appCode) &&
-  /const full\s+= detail \|\| insights \|\| log \|\| faq;/.test(appCode) &&
+  /const full\s+= detail \|\| insights \|\| log \|\| faq \|\| setup;/.test(appCode) &&
   /faqView\.style\.display = faq \? 'flex' : 'none';/.test(appCode) &&
   /classList\.toggle\('view-faq', faq\)/.test(appCode));
 

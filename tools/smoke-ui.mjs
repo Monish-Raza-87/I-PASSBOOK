@@ -839,7 +839,7 @@ r.ok('the back button answers to the pane that OWNS the screen, and to the fold 
   // in the stylesheet below, because the rule coming back would silently undo this.
   /backBtn\.style\.display\s*=\s*listHidden \? 'block' : 'none';/.test(appCode) &&
   /const listHidden\s*=\s*detail \? true : \(full && !desktop\);/.test(appCode) &&
-  /const full\s*=\s*detail \|\| insights \|\| log \|\| faq;/.test(appCode) &&
+  /const full\s*=\s*detail \|\| insights \|\| log \|\| faq \|\| setup;/.test(appCode) &&
   !/#back-btn\s*\{[^}]*!important/.test(baseCode),
   (appCode.match(/backBtn\.style\.display[^\n]*/) || [''])[0]);
 // …and the list-hidden rule itself: a ticket takes the whole row on desktop, and the

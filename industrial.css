@@ -895,15 +895,18 @@
    them.
    ══════════════════════════════════════════════════════════════ */
 #insights-view,
-#log-view { background: var(--ind-ground); }
+#log-view,
+#setup-view { background: var(--ind-ground); }
 
 #insights-view .list-toolbar,
-#log-view .list-toolbar {
+#log-view .list-toolbar,
+#setup-view .list-toolbar {
   background: var(--ind-panel);
   border-bottom: 1px solid var(--ind-line);
 }
 #insights-view .list-title,
-#log-view .list-title {
+#log-view .list-title,
+#setup-view .list-title {
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   letter-spacing: 0.18em;

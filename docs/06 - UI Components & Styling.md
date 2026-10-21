@@ -727,6 +727,28 @@ sequence token. With `allIRs` empty it re-emits `INSIGHTS_SKELETON` — the pane
 static markup, because the first frame happens before `fetchIRs()` is even called —
 rather than a dashboard of zeroes, which is not "loading" but the wrong answer.
 
+**It counts, and nothing else.** The Inspector, the corrections ledger and I-PASSBOOK
+POSTMAN used to sit under the stat row; they were moved to Setup (below) on the
+owner's ruling, 2026-10-21: *"Insights is simply for someone to take info from stats,
+not for all this. This is a setup and configurational work."* The 12-month graph opens
+into a month-by-month `<details>` table that reads the same `monthCounts()` output, so
+the picture and the numbers cannot drift.
+
+### Setup (`#setup-view`)
+The configuration pane, routed at `#/setup`, a fourth read-only sibling. `renderSetup()`
+carries what `renderInsights()` gave up: I-INSPECTOR's findings (bad serials, unnamed
+mailboxes, off-fleet equipment, spellings auto-merged, serials auto-corrected), the
+per-IR "give one IR its reporter" box, the collapsed correction ledger
+(`<details>`, closed by default — *"why can't it be made a tab to be opened when
+needed"*), and the POSTMAN strip with the Send and preview controls.
+
+The two panes share ONE click listener (`onPaneClick`) rather than two copies, and the
+same visibility gate: `renderSetup()` returns at once unless `currentView === 'setup'`,
+so the Inspector's freshness is maintained by calling it beside every
+`renderInsights()` refresh site (`setAllIRs`, the overlay-apply path, the legacy-stub
+path) without ever painting a hidden pane. `renderLayout()` owns `#setup-view`'s
+`display` and the `view-setup` body class like every other pane.
+
 ### Status pills (`.badge`) and priority (`.prio`)
 | Class | Category | Statuses mapped to it |
 |---|---|---|

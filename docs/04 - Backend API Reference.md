@@ -920,7 +920,7 @@ comment still posts, and the sender is told the notification did not go. Failing
 silently would leave people believing a colleague had been emailed.
 
 ### `sendPostmaster`
-Sends **one collected digest** to the CR department, minted by I-PASSBOOK POSTMAN in INSIGHTS.
+Sends **one collected digest** to the CR department, minted by I-PASSBOOK POSTMAN in SETUP (`#/setup`).
 Requires CR (or an admin) inside the function, not only at the router. The body and
 the item count are the caller's; **the recipients never are** — `postmasterRecipients()`
 derives them from `accessStore()`'s `cr` memberships plus `CONFIG.ADMIN_EMAILS`, and

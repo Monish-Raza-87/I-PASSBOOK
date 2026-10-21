@@ -307,7 +307,16 @@ window.FAQ_CONTENT = {
           "blocks": [
             {
               "t": "p",
-              "html": "Three headline figures — raised, open now, and late now — then how many were\nraised in each of the last twelve months, the spread of statuses, how REPAIR\ntickets break down by sub-category, and a card per person with how many they have\nopen and how many are late."
+              "html": "Three headline figures — raised, open now, and late now — then how many were\nraised in each of the last twelve months, the spread of statuses, how REPAIR\ntickets break down by sub-category, and a card per person with how many they have\nopen and how many are late. The month graph opens — click it — to show the exact\nnumber of tickets behind each bar and each bar's share of the total."
+            }
+          ]
+        },
+        {
+          "q": "Where did the Inspector and the POSTMAN go?",
+          "blocks": [
+            {
+              "t": "p",
+              "html": "They live in <b>Setup</b> now, not on Insights. Insights is for taking numbers\nout of the list; deciding that a serial is wrong or that a mailbox belongs to\nsomebody is configuration work, so it sits on its own screen. Nothing was\nremoved — every box and every correction is in Setup, untouched."
             }
           ]
         },

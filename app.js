@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v107';
+const APP_VERSION = 'v108';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1304,6 +1304,9 @@ async function loadIRState() {
   // AFTER the list — so the dashboard has to be repainted here too or it would
   // count a list whose categories have not arrived yet.
   renderInsights();
+  // The Inspector scans the same list, so it is offered the same repaint. It too
+  // returns untouched while its pane is not the one on screen.
+  renderSetup();
 }
 
 // The single writer of `allIRs`. Every fetchIRs() path goes through it so
@@ -1319,6 +1322,7 @@ function setAllIRs(records) {
   // list is empty it re-emits the skeleton rather than leaving yesterday's numbers
   // standing. See its header for why an early return cannot leave the pane stale.
   renderInsights();
+  renderSetup();
   return allIRs;
 }
 
@@ -1598,6 +1602,7 @@ const detailView  = document.getElementById('detail-view');
 const insightsView = document.getElementById('insights-view');
 const logView     = document.getElementById('log-view');
 const faqView     = document.getElementById('faq-view');
+const setupView   = document.getElementById('setup-view');
 const irList      = document.getElementById('ir-list');
 const searchInput = document.getElementById('search-input');
 const backBtn     = document.getElementById('back-btn');
@@ -4424,6 +4429,7 @@ function renderLayout() {
   const insights = currentView === 'insights';
   const log      = currentView === 'log';
   const faq      = currentView === 'faq';
+  const setup    = currentView === 'setup';
   // A pane that OWNS the screen on a phone. Below lg, #panes is a COLUMN, so the
   // list and the open pane are separate full screens and the open one hides the
   // list. On desktop they sit side by side, so the list hides only when the user
@@ -4439,7 +4445,7 @@ function renderLayout() {
   // Folding it is only safe because the SAME change gives Insights the back
   // button below: that is what stops the fold stranding anyone, which is the
   // worry the old comment here was trying to answer.
-  const full       = detail || insights || log || faq;
+  const full       = detail || insights || log || faq || setup;
   // The fold, and the two different things it means.
   //
   // DESKTOP: the list is a COLUMN beside the other panes, so folding it NARROWS
@@ -4485,6 +4491,10 @@ function renderLayout() {
   // The Help & FAQ is the same pane shape a third time, and it is folded rather
   // than opened in a tab from 2026-10-08 — see the markup comment in index.html.
   if (faqView) faqView.style.display = faq ? 'flex' : 'none';
+  // SETUP is the same pane shape a fifth time: the Inspector, the Postman and the
+  // corrections ledger. It is configuration, not statistics, so it is NOT inside
+  // Insights — see renderSetup()'s header for the owner's words.
+  if (setupView) setupView.style.display = setup ? 'flex' : 'none';
   // The detail's back button goes to the list; the dashboard's does the same. It is
   // shown exactly when the list is NOT on screen — the same predicate as `listHidden`
   // above, and the same sentence: the back button is what stops the fold stranding
@@ -4502,6 +4512,7 @@ function renderLayout() {
   document.body.classList.toggle('view-insights', insights);
   document.body.classList.toggle('view-log', log);
   document.body.classList.toggle('view-faq', faq);
+  document.body.classList.toggle('view-setup', setup);
 
   // On desktop these views stay on screen, so mark which ticket is open. The board
   // deliberately does NOT do this — it is a wall of work, not a column of rows — but
@@ -4519,7 +4530,7 @@ function renderLayout() {
 
   // Which section the user is in. A ticket belongs to the IRs item — it is a row
   // of that list, not a section of its own.
-  markActiveNav(insights ? 'insights' : (log ? 'log' : (faq ? 'faq' : 'tickets')));
+  markActiveNav(setup ? 'setup' : (insights ? 'insights' : (log ? 'log' : (faq ? 'faq' : 'tickets'))));
 }
 
 // The nav never showed which section you were in: `.nav-item.active` has a rule
@@ -4532,7 +4543,7 @@ function renderLayout() {
 // `aria-current` rides along with the class: the highlight is colour, and colour
 // alone is not an announcement.
 function markActiveNav(name) {
-  [['nav-tickets', 'tickets'], ['nav-insights', 'insights'], ['nav-log', 'log'], ['nav-faq', 'faq']].forEach(([id, route]) => {
+  [['nav-tickets', 'tickets'], ['nav-insights', 'insights'], ['nav-log', 'log'], ['nav-faq', 'faq'], ['nav-setup', 'setup']].forEach(([id, route]) => {
     const el = document.getElementById(id);
     if (!el) return;
     const on = route === name;
@@ -4563,6 +4574,7 @@ function currentRoute() {
   if (parts[0] === 'insights') return { name: 'insights' };
   if (parts[0] === 'log') return { name: 'log' };
   if (parts[0] === 'faq') return { name: 'faq' };
+  if (parts[0] === 'setup') return { name: 'setup' };
   // The fallthrough. An unknown hash (a stale bookmark, a typo) lands on the list
   // rather than on a blank pane, which is why `insights` had to be matched above.
   return { name: 'tickets' };
@@ -4966,6 +4978,11 @@ function goLog() {
   location.hash = '#/log';
 }
 
+function goSetup() {
+  if (location.hash === '#/setup') { showSetup(); return; }
+  location.hash = '#/setup';
+}
+
 function goFaq() {
   if (location.hash === '#/faq') { showFaq(); return; }
   location.hash = '#/faq';
@@ -5022,6 +5039,17 @@ async function handleRoute() {
     if (!currentUser) return;                   // signed out
     if (currentRoute().name !== 'faq') return;  // navigated away
     showFaq();
+    return;
+  }
+
+  if (r.name === 'setup') {
+    if (currentView === 'setup') return;
+    // The Inspector scans allIRs, so a cold #/setup deep link waits for the list the
+    // same way the dashboard's branch does.
+    if (!allIRs.length && _irsReady) { try { await _irsReady; } catch { /* paint anyway */ } }
+    if (!currentUser) return;                   // signed out while waiting
+    if (currentRoute().name !== 'setup') return; // navigated away meanwhile
+    showSetup();
     return;
   }
 
@@ -8131,108 +8159,172 @@ function postmanSubject(no) {
 }
 
 function postmanDigest(irs) {
+  // ── THE LETTER, NOT A DATA DUMP ────────────────────────────────────────────
+  // The owner, 2026-10-21: *"you can work on structurising the email better way, it is
+  // scattered as of now. Listing items in points, making tables and putting things
+  // neatly will help. An email is a conversation that should make sense because
+  // recipient is a human and not a computer. It should also start with salutation
+  // addressed properly."*
+  //
+  // So this is written as a letter. It opens by addressing CR, says in one line what
+  // arrived and what it wants, lists the work in the order it is worth doing, and
+  // explains each kind of finding in the same three beats every time: why it is worth
+  // knowing, what to do about it, then the IRs it is about. No section invents a
+  // finding and no section is printed when it has nothing to say — an empty heading is
+  // louder than silence.
+  //
+  // It is PLAIN TEXT on purpose. The backend sends it with MailApp's plain body, and a
+  // mail client renders proportional type, so column alignment is a promise this text
+  // cannot keep. One item per line, separated by an em dash, reads the same in every
+  // client and in a printed copy.
   const flags = inspectorFindings(irs);
   const decisions = flags.serial.length + flags.reporters.length + flags.offFleet.length;
-  const lines = [];
-  lines.push('I-PASSBOOK POSTMAN — collected digest');
-  lines.push('A collected digest of everything I-INSPECTOR found in the I-PASSBOOK IR list.');
-  lines.push('');
-  lines.push('Generated from ' + flags.total + ' IR' + (flags.total === 1 ? '' : 's') +
-    ' at ' + new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC.');
-  lines.push('Items that need a decision from CR: ' + decisions + '.');
-  lines.push('');
-  lines.push('WHAT THIS EMAIL IS');
-  lines.push('  I-PASSBOOK POSTMAN reads the same IR list the app shows and puts every item');
-  lines.push('  that needs a person\'s decision into ONE email. It never sends one email per');
-  lines.push('  item, and it sends nothing at all when there is nothing to decide. It only');
-  lines.push('  reports: the intake Sheet is never edited. A correction is recorded in');
-  lines.push('  I-PASSBOOK by CR, and the app shows the corrected value from then on.');
-  lines.push('');
-  lines.push('WHAT TO DO');
-  lines.push('  Open I-PASSBOOK → INSIGHTS → Data quality. Every item below is there; where');
-  lines.push('  the app can prove the right value it is already written into the box. Press');
-  lines.push('  once to save a correction. It is remembered and never asked again.');
-  lines.push('');
+  const L = [];
+  const push = (...xs) => xs.forEach(x => L.push(x));
+  const blank = () => L.push('');
+  const nIR = n => n + ' IR' + (n === 1 ? '' : 's');
 
-  if (!decisions) {
-    lines.push('NOTHING TO REPORT. No action is needed.');
-    lines.push('');
+  push('Dear CR,');
+  blank();
+  push('Here is my check of the I-PASSBOOK IR list — ' + nIR(flags.total) + ' read at ' +
+    new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC.');
+  if (decisions) {
+    push('There ' + (decisions === 1 ? 'is 1 thing that needs' : 'are ' + decisions + ' things that need') +
+      ' a decision from you. Everything below is also on screen in I-PASSBOOK → Setup, under');
+    push('I-INSPECTOR, with a box to answer in; this mail is the summary so that nothing has');
+    push('to wait on somebody opening the app.');
+  } else {
+    push('Nothing needs a decision from you today. I am sending this because there were');
+    push('corrections to report, and a quiet day is worth being able to confirm.');
+  }
+  blank();
+
+  // ONE LINE PER KIND OF WORK. It is the "what am I being asked for" answer, before
+  // any detail — the thing a reader wants in the first ten seconds.
+  if (decisions) {
+    push('WHAT I NEED FROM YOU');
+    let step = 1;
+    if (flags.serial.length) push('  ' + (step++) + '. ' + nIR(flags.serial.length) +
+      ' whose UAS serial fits no format we make — please say which machine it is.');
+    if (flags.reporters.length) push('  ' + (step++) + '. ' + flags.reporters.length + ' mailbox' +
+      (flags.reporters.length === 1 ? ' that carries' : 'es that carry') +
+      ' no person\'s name — please say who they belong to.');
+    if (flags.offFleet.length) push('  ' + (step++) + '. ' + nIR(flags.offFleet.length) +
+      ' on equipment this app does not service — please confirm it is not a typo.');
+    blank();
+    push('It takes about five minutes in Setup. Each answer is remembered, so nothing here');
+    push('comes back next time.');
+    blank();
   }
 
+  // ── 1. SERIALS ──────────────────────────────────────────────────────────────
   if (flags.serial.length) {
-    lines.push('SERIAL FORMATS (R-108) — ' + flags.serial.length + ' IR' +
-      (flags.serial.length === 1 ? '' : 's') + ' carry a serial the app cannot prove:');
-    lines.push('  What it means: the UAS serial is not one of our four formats (S25XXX,');
-    lines.push('  S25PXXX, S100-XXX, S75XXX) or an approved R&D/contracted shape (S100-V3,');
-    lines.push('  S25P-V4, S75-<CODE>), so the app will not guess at it.');
-    lines.push('  What to do: choose the right serial, or correct the Sheet cell if the');
-    lines.push('  client wrote down the wrong machine.');
+    push('1. SERIALS THAT FIT NO FORMAT (' + nIR(flags.serial.length) + ')');
+    blank();
+    push('   Why I am asking: the UAS serial in the intake Sheet is not one of our four');
+    push('   formats — S25XXX, S25PXXX, S100-XXX or S75XXX — and it is not one of the');
+    push('   approved R&D or contracted shapes either (S100-V3, S25P-V4, S75-<CODE>).');
+    push('   A wrong serial points the whole IR at the wrong aircraft, so I will not');
+    push('   guess at one.');
+    blank();
+    push('   What to do: in Setup, the box beside each IR already holds the serial I');
+    push('   believe is right wherever I can prove it. Press Save, or type the right one');
+    push('   first. If the customer simply wrote down the wrong machine, the intake');
+    push('   Sheet may need that cell corrected — I never edit it myself.');
+    blank();
+    push('   The IRs:');
     flags.serial.slice(0, 40).forEach(x =>
-      lines.push('  · ' + x.irNumber + ' — ' + (x.raw || x.sn || '(blank)') + ' — ' + x.why));
-    if (flags.serial.length > 40) lines.push('  …and ' + (flags.serial.length - 40) + ' more, in I-PASSBOOK → Insights.');
-    lines.push('');
+      push('     · ' + x.irNumber + ' — ' + (x.raw || x.sn || '(blank)') + ' — ' + x.why));
+    if (flags.serial.length > 40) {
+      push('     …and ' + (flags.serial.length - 40) + ' more, listed in I-PASSBOOK → Setup.');
+    }
+    blank();
   }
 
+  // ── 2. REPORTED BY ───────────────────────────────────────────────────────────
   if (flags.reporters.length) {
-    lines.push('REPORTED BY — ' + flags.reporters.length + ' mailbox' +
-      (flags.reporters.length === 1 ? ' has' : 'es have') + ' no person\'s name:');
-    lines.push('  What it means: the name cell on these IRs holds a company, a site or a form');
-    lines.push('  title instead of a person, and no other IR from the same address carries a');
-    lines.push('  person\'s name either. A company is not a reporter, so the list shows the');
-    lines.push('  EMAIL for that mailbox rather than the value that was typed.');
-    lines.push('  What to do: say who that address belongs to. It is remembered per spelling,');
-    lines.push('  and the list shows "NAME (email)" from then on. The intake Sheet is never');
-    lines.push('  edited, and nothing is guessed.');
+    push('2. MAILBOXES WITH NO PERSON\'S NAME (' + flags.reporters.length + ')');
+    blank();
+    push('   Why I am asking: the name cell on these IRs holds a company, a site or a');
+    push('   form title instead of a person, and no other IR from the same address names');
+    push('   anyone either. A company is not a reporter, so the list shows the address');
+    push('   for that mailbox rather than the value that was typed.');
+    blank();
+    push('   What to do: tell me who each address belongs to. I remember it per');
+    push('   spelling and show "NAME (email)" from then on. Nothing is guessed, and an');
+    push('   IR that already names a person keeps that name.');
+    blank();
+    push('   The mailboxes:');
     flags.reporters.slice(0, 30).forEach(g => {
-      lines.push('  · ' + g.email + ' — ' + g.n + ' IR' + (g.n === 1 ? '' : 's') +
-        ' — written: ' + g.spellings.map(s => s.name + ' (' + s.n + ')').join(' / '));
+      push('     · ' + (g.email || '(no address)') + ' — ' + nIR(g.n) + ', written ' +
+        g.spellings.map(s => s.name + ' (' + s.n + ')').join(' / '));
     });
-    if (flags.reporters.length > 30) lines.push('  …and ' + (flags.reporters.length - 30) + ' more.');
-    lines.push('');
+    if (flags.reporters.length > 30) {
+      push('     …and ' + (flags.reporters.length - 30) + ' more, listed in I-PASSBOOK → Setup.');
+    }
+    blank();
   }
 
+  // ── 3. OUTSIDE THE FLEET ─────────────────────────────────────────────────────
   if (flags.offFleet.length) {
-    lines.push('OUTSIDE THE FLEET — ' + flags.offFleet.length + ' IR' +
-      (flags.offFleet.length === 1 ? '' : 's') + ' name equipment this app does not service:');
-    lines.push('  What it means: the model or serial on these IRs is outside our fleet, so the');
-    lines.push('  app neither repairs it nor counts it as one of ours.');
-    lines.push('  What to do: nothing, unless the machine was entered wrongly — in that case');
-    lines.push('  correct the serial on the IR.');
+    push('3. EQUIPMENT THIS APP DOES NOT SERVICE (' + nIR(flags.offFleet.length) + ')');
+    blank();
+    push('   Why I am telling you: the model or serial on these IRs is outside our fleet,');
+    push('   so the app neither repairs it nor counts it as one of ours. DJI, MAVIC and');
+    push('   the like stay out of the MODEL and UAS SN lists on purpose.');
+    blank();
+    push('   What to do: usually nothing. If one of them was written down wrongly,');
+    push('   correct the serial on that IR and it will come back into the fleet.');
+    blank();
+    push('   The IRs:');
     flags.offFleet.slice(0, 20).forEach(x =>
-      lines.push('  · ' + x.irNumber + ' — ' + (x.model || x.sn || '—')));
-    if (flags.offFleet.length > 20) lines.push('  …and ' + (flags.offFleet.length - 20) + ' more.');
-    lines.push('');
+      push('     · ' + x.irNumber + ' — ' + (x.model || x.sn || '—')));
+    if (flags.offFleet.length > 20) {
+      push('     …and ' + (flags.offFleet.length - 20) + ' more, listed in I-PASSBOOK → Setup.');
+    }
+    blank();
   }
 
+  // ── 4. MERGES I ALREADY MADE ────────────────────────────────────────────────
   if (flags.autoMerged.length) {
-    lines.push('MERGED AUTOMATICALLY — ' + flags.autoMerged.length + ' spelling' +
-      (flags.autoMerged.length === 1 ? ' was' : 's were') + ' merged inside one mailbox:');
-    lines.push('  What it means: within ONE address, the same person typed their name more');
-    lines.push('  than one way. The app shows the most complete spelling for that address,');
-    lines.push('  so the same person is not listed twice. The raw cells stay exactly as the');
-    lines.push('  client wrote them. Only spelling variants are merged — two genuinely');
-    lines.push('  different names from one mailbox stay two lines, because a mailbox can');
-    lines.push('  file for a whole team.');
-    lines.push('  What to do: nothing, if the spelling chosen is the right one. If it is not,');
-    lines.push('  type the right one beside the spelling in I-PASSBOOK → INSIGHTS and press');
-    lines.push('  once.');
+    push('FOR YOUR INFORMATION — SPELLINGS I MERGED (' + flags.autoMerged.length + ')');
+    blank();
+    push('   Why: inside ONE address, the same person wrote their name more than one way.');
+    push('   I show the most complete spelling for that address so one person is not');
+    push('   listed twice. The raw cells in the intake Sheet stay exactly as written.');
+    push('   Only spelling variants are merged — two genuinely different names from one');
+    push('   mailbox stay two lines, because a shared address can file for a whole team.');
+    blank();
+    push('   What to do: nothing, if the spelling I chose is the right one. If it is not,');
+    push('   type the right one beside it in Setup and press once.');
+    blank();
     flags.autoMerged.slice(0, 20).forEach(g =>
-      lines.push('  · ' + g.to + ' (' + (g.email || '—') + ') — ' + g.n + ' IR' +
-        (g.n === 1 ? '' : 's') + ' — written: ' + g.names.join(' / ')));
-    if (flags.autoMerged.length > 20) lines.push('  …and ' + (flags.autoMerged.length - 20) + ' more.');
-    lines.push('');
+      push('     · ' + g.to + ' (' + (g.email || 'no address') + ') — ' + nIR(g.n) +
+        ', written ' + g.names.join(' / ')));
+    if (flags.autoMerged.length > 20) {
+      push('     …and ' + (flags.autoMerged.length - 20) + ' more.');
+    }
+    blank();
   }
 
+  // ── 5. WHAT I FIXED MYSELF ───────────────────────────────────────────────────
   if (flags.autoFixed.length) {
-    lines.push('Already corrected automatically: ' + flags.autoFixed.length +
-      ' serial' + (flags.autoFixed.length === 1 ? '' : 's') +
-      ' whose shape was certain. Nothing is asked of CR for these.');
-    lines.push('');
+    push('ALREADY CORRECTED, NOTHING NEEDED FROM YOU (' + nIR(flags.autoFixed.length) + ')');
+    blank();
+    push('   ' + flags.autoFixed.length + ' serial' + (flags.autoFixed.length === 1 ? '' : 's') +
+      ' were written in a shape I can prove — the same serial with a space, a slash');
+    push('   or a lowercase letter — so I corrected them on the way in. The intake Sheet');
+    push('   still holds the original text.');
+    blank();
   }
 
-  lines.push('The intake Sheet is never edited. A correction is recorded in I-PASSBOOK by CR.');
-  lines.push('— I-PASSBOOK POSTMAN');
-  return { text: lines.join('\n'), count: decisions, total: flags.total, autoMerged: flags.autoMerged.length };
+  push('Nothing above edits the intake Sheet. Every answer you give is recorded in');
+  push('I-PASSBOOK, applied to every screen at once, and can be removed in one press.');
+  blank();
+  push('Regards,');
+  push('I-PASSBOOK POSTMAN');
+
+  return { text: L.join('\n'), count: decisions, total: flags.total, autoMerged: flags.autoMerged.length };
 }
 
 // The preview is a PANE, not a send. A person reads exactly what would leave the
@@ -8541,67 +8633,12 @@ function renderInsights() {
   const people   = assigneeCounts(allIRs, f, now);
   const byCo     = insightsByCompany(allIRs, f, now);
   const coShown  = byCo.slice(0, 12);
-  // Data quality is a property of the LIST, not of the current filter: the fix
-  // happens in the Sheet, and an issue that vanishes because somebody narrowed to
-  // one company would read as "fixed".
-  const flags    = inspectorFindings(allIRs);
-  // Who may APPROVE a finding. Everyone sees the findings — that is the Inspector
-  // doing its job — but only the owner and CR may record the answer, because a
-  // correction changes what every screen calls an aircraft or a reporter.
-  const canFix   = canCorrect();
-  const corrList = Object.keys(corrections.items || {}).map(k => Object.assign({ key: k }, corrections.items[k]));
   const openNow  = people.reduce((a, r) => a + r.open, 0);
   const lateNow  = people.reduce((a, r) => a + r.late, 0);
   const maxMonth = Math.max(1, ...mc.months, mc.undated);
   const maxCat   = Math.max(1, ...IR_CATEGORIES.map(k => sum.categories[k]), sum.uncategorised);
   const mixTotal = SEGMENT_LABELS.filter(([k]) => k !== 'all')
     .reduce((a, [k]) => a + (sum.statuses[k] || 0), 0) || 1;
-
-  // Every finding row is built by ONE function, used by both the visible head and the
-  // "show all" tail. A second copy of this markup is how the tail drifts from the head
-  // and a correction box in the tail stops saving the right value.
-  //
-  // The serial box is PREFILLED with the Inspector's own suggestion where it has one,
-  // so the decision is one press of Save. A suggestion is never applied by itself.
-  const serialItem = (x, i) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.raw || x.sn || '—')}</code> — ${escHtml(x.why)}${canFix ? `
-    <span class="ins-fix">
-      ${x.suggest ? '<span class="ins-suggest">suggested</span>' : ''}
-      <input type="text" class="form-input ins-fix-input" id="ins-fix-sn-${i}" autocomplete="off"
-             value="${escHtml(x.suggest || '')}" placeholder="Correct serial"
-             aria-label="Correct serial for ${escHtml(x.irNumber)}">
-      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="serial"
-              data-from="${escHtml(x.raw || x.sn || '')}" data-input="ins-fix-sn-${i}">Save correction</button>
-    </span>` : ''}</li>`;
-
-  // One row per SPELLING, not one decision per mailbox. The box is PREFILLED with
-  // the canonical CAPS form of that same spelling — the only change the app can
-  // prove — and stays editable, so "A. Person" can be typed to "A. PERSON FULL"
-  // without touching anyone else's IRs in the same mailbox. A suggestion
-  // is never applied by itself; the button is the decision.
-  const reporterItem = (g, s, i, j) => {
-    // A mailbox the app could not name offers an EMPTY box on purpose: there is no
-    // suggestion to make, and pre-filling the company name would invite saving it.
-    const suggest = s.suggest != null ? s.suggest : cleanReporterName(s.name);
-    const differs = suggest && suggest !== String(s.name);
-    return `<li><b>${escHtml(s.name)}</b> · ${s.n} IR${s.n === 1 ? '' : 's'}${canFix ? `
-    <span class="ins-fix">
-      ${differs ? '<span class="ins-suggest">suggested</span>' : ''}
-      <input type="text" class="form-input ins-fix-input" id="ins-fix-rp-${i}-${j}" autocomplete="off"
-             placeholder="person for this mailbox" value="${escHtml(suggest || '')}" aria-label="Correct spelling of ${escHtml(s.name)}">
-      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="${g.kind === 'email' ? 'person-email' : 'person'}"
-              data-email="${escHtml(g.email || '')}" data-from="${escHtml(s.name)}"
-              data-input="ins-fix-rp-${i}-${j}">${g.kind === 'email' ? 'Use this name' : 'Use this spelling'}</button>
-    </span>` : ''}</li>`;
-  };
-
-  // A list longer than its head opens in place, because "…and 30 more" with no way to
-  // reach them is the same as hiding them. It is a native <details>: no state to keep,
-  // no re-render, and it survives the pane being rebuilt.
-  const moreList = (rest, rowFn, offset) => rest.length ? `
-    <details class="ins-flag-details">
-      <summary>Show the other ${rest.length}</summary>
-      <ul class="ins-flag-list">${rest.map((x, i) => rowFn(x, offset + i)).join('')}</ul>
-    </details>` : '';
 
   // A facet with a hundred aircraft in it is a scroll bar, not a filter. Every list
   // here is now {value,label} pairs, and one longer than a screenful grows a find box
@@ -8640,48 +8677,6 @@ function renderInsights() {
   _insightsLists = lists;
 
   body.innerHTML = `
-    <!-- THE TWO BOTS, RUNNING. The rule book named them on 2026-10-02 and the owner
-         asked for both to be launched on 2026-10-18. They are not a second screen:
-         they sit where the Inspector already reports, and every number here is the
-         live scan above, not a stored claim. The postman half is a PREVIEW by
-         design — nothing leaves the building without a second, deliberate tap. -->
-    <div class="bots-strip">
-      <section class="bot-card">
-        <div class="bot-head">
-          <span class="bot-led is-live" aria-hidden="true"></span>
-          <span class="bot-name">I-INSPECTOR</span>
-          <span class="bot-state">Running</span>
-        </div>
-        <p class="bot-say">R-108 is checking every serial, every reporter and every machine on all ${flags.total} IR${flags.total === 1 ? '' : 's'}.</p>
-        <div class="bot-metrics">
-          <span><b>${flags.serial.length}</b> serial</span>
-          <span><b>${flags.reporters.length}</b> reported-by</span>
-          <span><b>${flags.autoFixed.length}</b> auto-fixed</span>
-        </div>
-        <div class="bot-actions">
-          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-scan">Scan now</button>
-          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-open">Open data quality</button>
-        </div>
-      </section>
-      <section class="bot-card">
-        <div class="bot-head">
-          <span class="bot-led${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? ' is-live' : ''}" aria-hidden="true"></span>
-          <span class="bot-name">I-PASSBOOK POSTMAN</span>
-          <span class="bot-state">${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? 'Holding ' + (flags.serial.length + flags.reporters.length + flags.offFleet.length) : 'Quiet'}</span>
-        </div>
-        <p class="bot-say">Collects what the Inspector finds into one numbered post. Nothing to report means nothing is sent, and two posts never land inside two hours.</p>
-        <div class="bot-metrics">
-          <span><b>${flags.serial.length + flags.reporters.length + flags.offFleet.length}</b> to collect</span>
-          <span><b>2 h</b> minimum gap</span>
-          <span>CR receives</span>
-        </div>
-        <div class="bot-actions">
-          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-preview">Preview the digest</button>
-          ${canFix ? `<button type="button" class="btn btn-sm" id="ins-bot-post">Post to CR</button>` : ''}
-        </div>
-      </section>
-    </div>
-
     <div class="insights-filters">
       ${filterRow('ins-fy', 'Fiscal year', 'All years',
         fx.years.map(y => OPT(y, 'FY ' + fyLabel(y))))}
@@ -8718,93 +8713,6 @@ function renderInsights() {
       ${_dataIsDemo ? `<span class="insights-note insights-demo">These numbers count the <strong>demo sample</strong>, not real IRs — the Sheet and the backend both refused to sync. Check the sync bar on the IR list before quoting any of this.</span>` : ''}
     </p>
 
-    ${(flags.serial.length || flags.autoFixed.length || flags.reporters.length || (flags.autoMerged && flags.autoMerged.length) || flags.offFleet.length || corrList.length) ? `
-    <div class="ins-flags">
-      <div class="ins-flags-head">
-        <strong>Data quality — I-INSPECTOR</strong>
-        <span>R-108 has run over all ${flags.total} IR${flags.total === 1 ? '' : 's'}. Nothing is blocked — the rule says ask CR. A correction is stored in this app only; the intake Sheet is never edited.</span>
-      </div>
-      ${canFix ? `
-      <div class="ins-assign">
-        <label class="ins-assign-label" for="ins-assign-ir">Give one IR its reporter</label>
-        <input id="ins-assign-ir" class="ins-assign-in" type="text" placeholder="IR342" autocomplete="off">
-        <input id="ins-assign-name" class="ins-assign-in" type="text" placeholder="Name" autocomplete="off">
-        <button type="button" class="ins-assign-save btn btn-sm btn-secondary" id="ins-assign-save">Save</button>
-        <span class="ins-assign-note">This IR only. It beats the name in the cell and the mailbox rule, and the Sheet is never edited.</span>
-      </div>` : ''}
-      ${flags.autoFixed.length ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically</span>
-        <ul class="ins-flag-list">
-          ${flags.autoFixed.slice(0, 6).map(x => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`).join('')}
-        </ul>
-        ${moreList(flags.autoFixed.slice(6), (x) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`, 0)}
-        <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
-      </div>` : ''}
-      ${(flags.autoMerged && flags.autoMerged.length) ? `
-      <details class="ins-flag-group ins-flag-details">
-        <summary class="ins-flag-title">${flags.autoMerged.length} spelling${flags.autoMerged.length === 1 ? ' was' : 's were'} merged inside one mailbox
-          <span class="ins-flag-sum-note">done — open only to override a choice</span></summary>
-        <ul class="ins-flag-list">
-          ${flags.autoMerged.slice(0, 20).map((g, i) => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — written ${g.names.length} ways
-            ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 20 + i, j)).join('')}</ul>`
-                     : `<ul class="ins-spell-list">${g.spellings.map(s => `<li>${escHtml(s.name)} (${s.n})</li>`).join('')}</ul>`}</li>`).join('')}
-        </ul>
-        ${flags.autoMerged.length > 20 ? `
-        <details class="ins-flag-details">
-          <summary>Show the other ${flags.autoMerged.length - 20}</summary>
-          <ul class="ins-flag-list">
-            ${flags.autoMerged.slice(20).map(g => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — ${escHtml(g.names.join(' + '))}</li>`).join('')}
-          </ul>
-        </details>` : ''}
-        <span class="ins-flag-more">Inside one mailbox, the same person typed more than one way is shown under the most complete spelling. The list reads NAME (email) (n), where n is how many IRs carry that name from that address. The raw cells are untouched; if the chosen spelling is wrong, type the right one beside it and press once.</span>
-      </details>` : ''}
-      ${flags.serial.length ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the formats</span>
-        <ul class="ins-flag-list">
-          ${flags.serial.slice(0, 8).map((x, i) => serialItem(x, i)).join('')}
-        </ul>
-        ${moreList(flags.serial.slice(8), serialItem, 8)}
-        <button type="button" class="btn btn-sm btn-secondary" id="ins-copy-serial"
-                data-list="${escHtml(flags.serial.map(x => x.irNumber + ' ' + (x.raw || x.sn || '(blank)') + ' ' + x.why).join('\n'))}">Copy these ${flags.serial.length}</button>
-      </div>` : ''}
-      ${flags.reporters.length ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.reporters.length} mailbox${flags.reporters.length === 1 ? ' has' : 'es have'} no person's name</span>
-        <ul class="ins-flag-list">
-          ${flags.reporters.slice(0, 6).map((g, i) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
-            ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, i, j)).join('')}</ul>`
-                     : `<ul class="ins-spell-list">${g.spellings.map(s => `<li>${escHtml(s.name)} (${s.n})</li>`).join('')}</ul>`}</li>`).join('')}
-        </ul>
-        ${flags.reporters.length > 6 ? `
-        <details class="ins-flag-details">
-          <summary>Show the other ${flags.reporters.length - 6}</summary>
-          <ul class="ins-flag-list">
-            ${flags.reporters.slice(6).map((g, k) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
-              <ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 6 + k, j)).join('')}</ul></li>`).join('')}
-          </ul>
-        </details>` : ''}
-        <span class="ins-flag-more">These IRs were filed with a company, a site or a form title in the name cell, and the mailbox has no person's name on any other IR either. The list shows the EMAIL for them rather than that value. Type the person or team the address belongs to and press once — the intake Sheet is never edited.</span>
-      </div>` : ''}
-      ${corrList.length ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${corrList.length} correction${corrList.length === 1 ? '' : 's'} in force</span>
-        <ul class="ins-flag-list">
-          ${corrList.map(c => `<li><b>${c.kind === 'serial' ? 'Serial' : 'Reported by'}</b> · <code>${escHtml(c.from || c.key)}</code> → <code>${escHtml(c.to || '')}</code>${c.by ? ` · <span class="ins-flag-more">approved by ${escHtml(c.by)}</span>` : ''}${canFix ? ` <button type="button" class="btn btn-sm btn-secondary ins-fix-del" data-key="${escHtml(c.key)}">Remove</button>` : ''}</li>`).join('')}
-        </ul>
-      </div>` : ''}
-      ${flags.offFleet.length ? `
-      <div class="ins-flag-group">
-        <span class="ins-flag-title">${flags.offFleet.length} IR${flags.offFleet.length === 1 ? '' : 's'} on equipment outside the fleet</span>
-        <ul class="ins-flag-list">
-          ${flags.offFleet.slice(0, 8).map(x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`).join('')}
-        </ul>
-        ${moreList(flags.offFleet.slice(8), x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`, 0)}
-        <span class="ins-flag-more">DJI and MAVIC are left out of the MODEL and UAS SN lists above; the IRs themselves stay in the list. AGISOFT stays in scope.</span>
-      </div>` : ''}
-    </div>` : ''}
-
     <!-- The stat row. Four tiles of the same size, and the last one is a
          SPARKLINE rather than a number, which is the one shape on this page that
          answers "which way is this going" instead of "how many".
@@ -8836,6 +8744,41 @@ function renderInsights() {
         <span class="insights-stat-label">${escHtml(t('insights.perMonth'))}</span>
       </div>
     </div>
+
+    <!-- THE SPARKLINE, OPENED. The owner, 2026-10-21: *"Last 12 months has a graph which
+         is looking ok but not sufficient info, had I been able to open it and see the
+         graph with data/numbers, it would have been making better sense."* The tile is
+         one gesture away from the same twelve values as a table — the chart says which
+         way the year is going, this says exactly how many, and neither is a second
+         source: both read mc.months, computed once above. -->
+    <details class="insights-12m" id="insights-12m">
+      <summary class="insights-12m-sum">
+        Month by month — open for the numbers
+        <span class="insights-12m-hint">${mc.total} IR${mc.total === 1 ? '' : 's'} in all</span>
+      </summary>
+      <table class="insights-12m-table">
+        <thead>
+          <tr><th scope="col">Month</th><th scope="col">IRs</th><th scope="col">Share</th></tr>
+        </thead>
+        <tbody>
+          ${mc.months.map((n, i) => `
+            <tr${n ? '' : ' class="is-zero"'}>
+              <th scope="row">${escHtml(MONTH_LABELS[i])}</th>
+              <td>${n}</td>
+              <td>${mc.total ? Math.round((n / mc.total) * 100) : 0}%</td>
+            </tr>`).join('')}
+          ${mc.undated ? `
+            <tr class="is-undated">
+              <th scope="row">${escHtml(t('insights.undatedBucket'))}</th>
+              <td>${mc.undated}</td>
+              <td>${Math.round((mc.undated / mc.total) * 100)}%</td>
+            </tr>` : ''}
+        </tbody>
+        <tfoot>
+          <tr><th scope="row">Total</th><td>${mc.total}</td><td>100%</td></tr>
+        </tfoot>
+      </table>
+    </details>
 
     <div class="insights-cards">
       ${IR_CATEGORIES.map(k => `
@@ -8979,6 +8922,226 @@ function renderInsights() {
     </div>`;
 }
 
+// ─── SETUP (#/setup) — THE CONFIGURATION PANE ────────────────────────────────
+// The Inspector and the Postman are not statistics. They are the two things CR runs
+// to keep the LIST true, and the owner said so plainly on 2026-10-21: *"whole insights
+// page is cluttered, whole inspector and postman thing should be kept separately and
+// not in insights. Insights is simply for someone to take info from stats, not for all
+// this. This is a setup and configurational work."*
+//
+// So they moved here, whole, with the corrections ledger — which had grown to seventy
+// rows and turned the bottom of a dashboard into paperwork. Nothing was rewritten in
+// the move: every finding, box and button is the same markup this pane rendered when
+// it lived at the bottom of INSIGHTS. What changed is WHO PAYS FOR IT ON SCREEN: a
+// reader taking a number out of Insights no longer scrolls past a repair queue, and a
+// person repairing the list opens a pane that is only about repairing the list.
+//
+// The scan itself is unchanged and still runs over the WHOLE list, never the current
+// filter: a finding that vanished because somebody narrowed to one company would read
+// as "fixed". Only the owner and CR may record a decision, same rule as before.
+function renderSetup() {
+  if (currentView !== 'setup') return;
+  const body = document.getElementById('setup-body');
+  if (!body) return;
+  if (!allIRs.length) {
+    body.innerHTML = '<div class="insights-skeleton"></div><div class="insights-skeleton"></div>';
+    return;
+  }
+
+  const flags    = inspectorFindings(allIRs);
+  const canFix   = canCorrect();
+  const corrList = Object.keys(corrections.items || {}).map(k => Object.assign({ key: k }, corrections.items[k]));
+
+  // Every finding row is built by ONE function, used by both the visible head and the
+  // "show all" tail. A second copy of this markup is how the tail drifts from the head
+  // and a correction box in the tail stops saving the right value.
+  //
+  // The serial box is PREFILLED with the Inspector's own suggestion where it has one,
+  // so the decision is one press of Save. A suggestion is never applied by itself.
+  const serialItem = (x, i) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.raw || x.sn || '—')}</code> — ${escHtml(x.why)}${canFix ? `
+    <span class="ins-fix">
+      ${x.suggest ? '<span class="ins-suggest">suggested</span>' : ''}
+      <input type="text" class="form-input ins-fix-input" id="ins-fix-sn-${i}" autocomplete="off"
+             value="${escHtml(x.suggest || '')}" placeholder="Correct serial"
+             aria-label="Correct serial for ${escHtml(x.irNumber)}">
+      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="serial"
+              data-from="${escHtml(x.raw || x.sn || '')}" data-input="ins-fix-sn-${i}">Save correction</button>
+    </span>` : ''}</li>`;
+
+  // One row per SPELLING, not one decision per mailbox. The box is PREFILLED with
+  // the canonical CAPS form of that same spelling — the only change the app can
+  // prove — and stays editable, so "A. Person" can be typed to "A. PERSON FULL"
+  // without touching anyone else's IRs in the same mailbox. A suggestion
+  // is never applied by itself; the button is the decision.
+  const reporterItem = (g, s, i, j) => {
+    // A mailbox the app could not name offers an EMPTY box on purpose: there is no
+    // suggestion to make, and pre-filling the company name would invite saving it.
+    const suggest = s.suggest != null ? s.suggest : cleanReporterName(s.name);
+    const differs = suggest && suggest !== String(s.name);
+    return `<li><b>${escHtml(s.name)}</b> · ${s.n} IR${s.n === 1 ? '' : 's'}${canFix ? `
+    <span class="ins-fix">
+      ${differs ? '<span class="ins-suggest">suggested</span>' : ''}
+      <input type="text" class="form-input ins-fix-input" id="ins-fix-rp-${i}-${j}" autocomplete="off"
+             placeholder="person for this mailbox" value="${escHtml(suggest || '')}" aria-label="Correct spelling of ${escHtml(s.name)}">
+      <button type="button" class="btn btn-sm ins-fix-apply" data-kind="${g.kind === 'email' ? 'person-email' : 'person'}"
+              data-email="${escHtml(g.email || '')}" data-from="${escHtml(s.name)}"
+              data-input="ins-fix-rp-${i}-${j}">${g.kind === 'email' ? 'Use this name' : 'Use this spelling'}</button>
+    </span>` : ''}</li>`;
+  };
+
+  // A list longer than its head opens in place, because "…and 30 more" with no way to
+  // reach them is the same as hiding them. It is a native <details>: no state to keep,
+  // no re-render, and it survives the pane being rebuilt.
+  const moreList = (rest, rowFn, offset) => rest.length ? `
+    <details class="ins-flag-details">
+      <summary>Show the other ${rest.length}</summary>
+      <ul class="ins-flag-list">${rest.map((x, i) => rowFn(x, offset + i)).join('')}</ul>
+    </details>` : '';
+
+  const quiet = !(flags.serial.length || flags.autoFixed.length || flags.reporters.length ||
+                  (flags.autoMerged && flags.autoMerged.length) || flags.offFleet.length || corrList.length);
+
+  body.innerHTML = `
+    <!-- THE TWO BOTS, RUNNING. The rule book named them on 2026-10-02 and the owner
+         asked for both to be launched on 2026-10-18. They are not a second screen:
+         they sit where the Inspector already reports, and every number here is the
+         live scan above, not a stored claim. The postman half is a PREVIEW by
+         design — nothing leaves the building without a second, deliberate tap. -->
+    <div class="bots-strip">
+      <section class="bot-card">
+        <div class="bot-head">
+          <span class="bot-led is-live" aria-hidden="true"></span>
+          <span class="bot-name">I-INSPECTOR</span>
+          <span class="bot-state">Running</span>
+        </div>
+        <p class="bot-say">R-108 is checking every serial, every reporter and every machine on all ${flags.total} IR${flags.total === 1 ? '' : 's'}.</p>
+        <div class="bot-metrics">
+          <span><b>${flags.serial.length}</b> serial</span>
+          <span><b>${flags.reporters.length}</b> reported-by</span>
+          <span><b>${flags.autoFixed.length}</b> auto-fixed</span>
+        </div>
+        <div class="bot-actions">
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-scan">Scan now</button>
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-open">Open data quality</button>
+        </div>
+      </section>
+      <section class="bot-card">
+        <div class="bot-head">
+          <span class="bot-led${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? ' is-live' : ''}" aria-hidden="true"></span>
+          <span class="bot-name">I-PASSBOOK POSTMAN</span>
+          <span class="bot-state">${(flags.serial.length + flags.reporters.length + flags.offFleet.length) ? 'Holding ' + (flags.serial.length + flags.reporters.length + flags.offFleet.length) : 'Quiet'}</span>
+        </div>
+        <p class="bot-say">Collects what the Inspector finds into one numbered post. Nothing to report means nothing is sent, and two posts never land inside two hours.</p>
+        <div class="bot-metrics">
+          <span><b>${flags.serial.length + flags.reporters.length + flags.offFleet.length}</b> to collect</span>
+          <span><b>2 h</b> minimum gap</span>
+          <span>CR receives</span>
+        </div>
+        <div class="bot-actions">
+          <button type="button" class="btn btn-sm btn-secondary" id="ins-bot-preview">Preview the digest</button>
+          ${canFix ? `<button type="button" class="btn btn-sm" id="ins-bot-post">Post to CR</button>` : ''}
+        </div>
+      </section>
+    </div>
+
+    <div class="ins-flags">
+      <div class="ins-flags-head">
+        <strong>Data quality — I-INSPECTOR</strong>
+        <span>R-108 has run over all ${flags.total} IR${flags.total === 1 ? '' : 's'}. Nothing is blocked — the rule says ask CR. A correction is stored in this app only; the intake Sheet is never edited.</span>
+      </div>
+      ${quiet ? '<p class="ins-flag-more ins-quiet">Nothing to repair. Every serial and every reported-by name on the list fits the rules.</p>' : ''}
+      ${canFix ? `
+      <div class="ins-assign">
+        <label class="ins-assign-label" for="ins-assign-ir">Give one IR its reporter</label>
+        <input id="ins-assign-ir" class="ins-assign-in" type="text" placeholder="IR342" autocomplete="off">
+        <input id="ins-assign-name" class="ins-assign-in" type="text" placeholder="Name" autocomplete="off">
+        <button type="button" class="ins-assign-save btn btn-sm btn-secondary" id="ins-assign-save">Save</button>
+        <span class="ins-assign-note">This IR only. It beats the name in the cell and the mailbox rule, and the Sheet is never edited.</span>
+      </div>` : ''}
+      ${flags.autoFixed.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically</span>
+        <ul class="ins-flag-list">
+          ${flags.autoFixed.slice(0, 6).map(x => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`).join('')}
+        </ul>
+        ${moreList(flags.autoFixed.slice(6), (x) => `<li><b>${escHtml(x.irNumber)}</b> · <code>${escHtml(x.from)}</code> → <code>${escHtml(x.to)}</code></li>`, 0)}
+        <span class="ins-flag-more">The shape was certain, so the app fixed it. Anything it cannot prove is never guessed — it goes to CR below.</span>
+      </div>` : ''}
+      ${(flags.autoMerged && flags.autoMerged.length) ? `
+      <details class="ins-flag-group ins-flag-details">
+        <summary class="ins-flag-title">${flags.autoMerged.length} spelling${flags.autoMerged.length === 1 ? ' was' : 's were'} merged inside one mailbox
+          <span class="ins-flag-sum-note">done — open only to override a choice</span></summary>
+        <ul class="ins-flag-list">
+          ${flags.autoMerged.slice(0, 20).map((g, i) => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — written ${g.names.length} ways
+            ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 20 + i, j)).join('')}</ul>`
+                     : `<ul class="ins-spell-list">${g.spellings.map(s => `<li>${escHtml(s.name)} (${s.n})</li>`).join('')}</ul>`}</li>`).join('')}
+        </ul>
+        ${flags.autoMerged.length > 20 ? `
+        <details class="ins-flag-details">
+          <summary>Show the other ${flags.autoMerged.length - 20}</summary>
+          <ul class="ins-flag-list">
+            ${flags.autoMerged.slice(20).map(g => `<li><b>${escHtml(g.to)} (${escHtml(g.email || '—')})</b> · ${g.n} IR${g.n === 1 ? '' : 's'} — ${escHtml(g.names.join(' + '))}</li>`).join('')}
+          </ul>
+        </details>` : ''}
+        <span class="ins-flag-more">Inside one mailbox, the same person typed more than one way is shown under the most complete spelling. The list reads NAME (email) (n), where n is how many IRs carry that name from that address. The raw cells are untouched; if the chosen spelling is wrong, type the right one beside it and press once.</span>
+      </details>` : ''}
+      ${flags.serial.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.serial.length} serial${flags.serial.length === 1 ? ' does' : 's do'} not match the formats</span>
+        <ul class="ins-flag-list">
+          ${flags.serial.slice(0, 8).map((x, i) => serialItem(x, i)).join('')}
+        </ul>
+        ${moreList(flags.serial.slice(8), serialItem, 8)}
+        <button type="button" class="btn btn-sm btn-secondary" id="ins-copy-serial"
+                data-list="${escHtml(flags.serial.map(x => x.irNumber + ' ' + (x.raw || x.sn || '(blank)') + ' ' + x.why).join('\n'))}">Copy these ${flags.serial.length}</button>
+      </div>` : ''}
+      ${flags.reporters.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.reporters.length} mailbox${flags.reporters.length === 1 ? ' has' : 'es have'} no person's name</span>
+        <ul class="ins-flag-list">
+          ${flags.reporters.slice(0, 6).map((g, i) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
+            ${canFix ? `<ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, i, j)).join('')}</ul>`
+                     : `<ul class="ins-spell-list">${g.spellings.map(s => `<li>${escHtml(s.name)} (${s.n})</li>`).join('')}</ul>`}</li>`).join('')}
+        </ul>
+        ${flags.reporters.length > 6 ? `
+        <details class="ins-flag-details">
+          <summary>Show the other ${flags.reporters.length - 6}</summary>
+          <ul class="ins-flag-list">
+            ${flags.reporters.slice(6).map((g, k) => `<li><b>${escHtml(g.email || g.spellings[0].name)}</b> · ${g.n} IR${g.n === 1 ? '' : 's'} under ${g.spellings.length} spellings
+              <ul class="ins-spell-list">${g.spellings.map((s, j) => reporterItem(g, s, 6 + k, j)).join('')}</ul></li>`).join('')}
+          </ul>
+        </details>` : ''}
+        <span class="ins-flag-more">These IRs were filed with a company, a site or a form title in the name cell, and the mailbox has no person's name on any other IR either. The list shows the EMAIL for them rather than that value. Type the person or team the address belongs to and press once — the intake Sheet is never edited.</span>
+      </div>` : ''}
+      ${corrList.length ? `
+      <details class="ins-flag-group ins-flag-details">
+        <summary class="ins-flag-title">${corrList.length} correction${corrList.length === 1 ? '' : 's'} in force
+          <span class="ins-flag-sum-note">closed — open to review or remove one</span></summary>
+        <ul class="ins-flag-list">
+          ${corrList.map(c => `<li><b>${c.kind === 'serial' ? 'Serial' : 'Reported by'}</b> · <code>${escHtml(c.from || c.key)}</code> → <code>${escHtml(c.to || '')}</code>${c.by ? ` · <span class="ins-flag-more">approved by ${escHtml(c.by)}</span>` : ''}${canFix ? ` <button type="button" class="btn btn-sm btn-secondary ins-fix-del" data-key="${escHtml(c.key)}">Remove</button>` : ''}</li>`).join('')}
+        </ul>
+      </details>` : ''}
+      ${flags.offFleet.length ? `
+      <div class="ins-flag-group">
+        <span class="ins-flag-title">${flags.offFleet.length} IR${flags.offFleet.length === 1 ? '' : 's'} on equipment outside the fleet</span>
+        <ul class="ins-flag-list">
+          ${flags.offFleet.slice(0, 8).map(x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`).join('')}
+        </ul>
+        ${moreList(flags.offFleet.slice(8), x => `<li><b>${escHtml(x.irNumber)}</b> · ${escHtml(x.model || x.sn || '—')}</li>`, 0)}
+        <span class="ins-flag-more">DJI and MAVIC are left out of the MODEL and UAS SN lists above; the IRs themselves stay in the list. AGISOFT stays in scope.</span>
+      </div>` : ''}
+    </div>
+  `;
+
+}
+
+function showSetup() {
+  currentView = 'setup';
+  renderLayout();
+  headerTitle.textContent = tFloor('nav.setup', 'Setup');
+  renderSetup();
+}
+
 function showInsights() {
   currentView = 'insights';
   renderLayout();
@@ -9019,7 +9182,14 @@ if (insightsView) {
     insightsFilters[map[id]] = e.target.value;
     renderInsights();
   });
-  insightsView.addEventListener('click', e => {
+}
+
+// ONE click handler for BOTH panes. The branch that matches a card or a filter can
+// only ever fire from #insights-view, and the Inspector's boxes can only ever fire
+// from #setup-body, so the same function is bound to each and neither needs to know
+// which pane a click came from. A second copy of this switch is how the two panes
+// would drift — and it is ninety lines.
+function onPaneClick(e) {
     const el = e.target && e.target.closest ? e.target.closest('.insights-card') : null;
     if (el) {
       // A card deep-links into the IR LIST, filtered to that category — the counts
@@ -9045,12 +9215,12 @@ if (insightsView) {
     //    is invented. The Postman never posts from here without a confirm, and the
     //    backend refuses a second post inside two hours whatever this side says.
     if (e.target && e.target.id === 'ins-bot-scan') {
-      renderInsights();
+      renderSetup();
       showToast('I-INSPECTOR scanned ' + allIRs.length + ' IR' + (allIRs.length === 1 ? '' : 's'));
       return;
     }
     if (e.target && e.target.id === 'ins-bot-open') {
-      const panel = document.querySelector('#insights-body .ins-flags');
+      const panel = document.querySelector('#setup-body .ins-flags');
       if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
       else showToast('I-INSPECTOR has nothing to report');
       return;
@@ -9146,8 +9316,10 @@ if (insightsView) {
       insightsFilters.company = String(insightsFilters.company) === String(v) ? INSIGHTS_ALL : v;
       renderInsights();
     }
-  });
 }
+
+if (insightsView) insightsView.addEventListener('click', onPaneClick);
+if (setupView) setupView.addEventListener('click', onPaneClick);
 
 // ─── LOG ANALYSER ─────────────────────────────────────────────────────────────
 //
@@ -10620,6 +10792,7 @@ function mergeLegacyOnlyIRs() {
   // too — the list is not the only screen that shows a number. It early-returns
   // while another pane owns the screen, so on the boot path this costs nothing.
   renderInsights();
+  renderSetup();
 }
 
 function renderIRList(records) {
@@ -17315,6 +17488,7 @@ function initIcons() {
     ['#nav-insights .nav-icon',              'chart'],
     ['#nav-log .nav-icon',                   'pulse'],
     ['#nav-faq .nav-icon',                   'help'],
+    ['#nav-setup .nav-icon',                 'settings'],
     // The signed-in home of "Report a problem", moved here from the sign-in screen on
     // the owner's instruction of 2026-10-10 (see index.html's note on it). The glyph is
     // the same one the intake tab wears, because it is the same act: telling the desk

@@ -31,7 +31,7 @@ const r = makeReporter();
 const { T, byId } = loadApp(`
   parseISODate, toISODate, irFiscalYear, irMonthNumber, fyLabel, MONTH_LABELS,
   insightsFacets, insightsSummary, insightsMatches, insightsByCompany,
-  companyRecordFor, companyNamesFor, INSIGHTS_SKELETON, renderInsights,
+  companyRecordFor, companyNamesFor, INSIGHTS_SKELETON, renderInsights, renderSetup,
   personKey, serialFormatProblem, canonicalSerial, resolveSerial, reporterKeyFor,
   isOutOfScopeModel, isOutOfScopeSerial, inspectorFindings, serialSuggestion,
   postmanNo, postmanSubject, postmanDigest,
@@ -533,8 +533,12 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
   }
   T.allIRs = many;
   T.insightsFilters = Object.assign({}, ALL_ON);
-  T.renderInsights();
-  const h = byId.get('insights-body').innerHTML;
+  // THE FINDINGS ARE NOT ON THE DASHBOARD ANY MORE. The Inspector, the Postman and
+  // every repair box moved to their own pane on 2026-10-21 — Insights is counts only —
+  // so the pane that has to be showing for these to paint is #/setup.
+  T.currentView = 'setup';
+  T.renderSetup();
+  const h = byId.get('setup-body').innerHTML;
   r.ok('the serial tail is a <details> that can be opened',
     /<details class="ins-flag-details">/.test(h) && /Show the other 3/.test(h), (h.match(/Show the other[^<]*/) || [''])[0]);
   r.ok('...and every one of the 11 is reachable, not 8 of them',
@@ -550,8 +554,8 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
     { irNumber: 'IRa', customerName: 'test person', contactEmail: 'test.reporter@example.com' },
     { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'test.reporter@example.com' },
   ];
-  T.renderInsights();
-  const hm = byId.get('insights-body').innerHTML;
+  T.renderSetup();
+  const hm = byId.get('setup-body').innerHTML;
   r.ok('one mailbox is ONE reporter entry, and it reads NAME (email)',
     /TEST PERSON S \(test\.reporter@example\.com\)/.test(hm), hm.slice(0, 400));
   r.ok('...the fuller spelling is the one it speaks with, not the first row',
@@ -566,6 +570,9 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
     { irNumber: 'IRa', customerName: 'test person', contactEmail: 'one@example.com' },
     { irNumber: 'IRb', customerName: 'TEST PERSON S', contactEmail: 'two@example.com' },
   ];
+  // These two names are read off the REPORTER facet — one option per name+address
+  // pair — so this one looks at the dashboard, not at Setup.
+  T.currentView = 'insights';
   T.renderInsights();
   const hr = byId.get('insights-body').innerHTML;
   r.ok('two mailboxes are two entries, each with the address in brackets',
@@ -575,6 +582,7 @@ r.head('a long findings list opens in place, and the box arrives prefilled');
     (hr.match(/<input[^>]*id="ins-fix-rp-\d+-\d+"/g) || []).length);
   T.currentUser = null;
   T.allIRs = FIXTURE;
+  T.currentView = 'insights';
   T.renderInsights();
 }
 
@@ -937,15 +945,73 @@ r.head('the postman post is numbered forever and explains itself');
     { irNumber: 'IR2', customerName: 'TEST PERSON S', contactEmail: 'test.reporter@example.com' },
     { irNumber: 'IR3', droneId: 'S100-1234', droneIdRaw: 'S100-1234', droneModel: 'SIGMA 100' },
   ]);
-  r.ok('every section says what it means and what to do',
-    /WHAT THIS EMAIL IS/.test(d.text) && /WHAT TO DO/.test(d.text) &&
-    /What it means:/.test(d.text) && /What to do:/.test(d.text), d.text.slice(0, 400));
+  // An email is a conversation with a person (owner, 2026-10-21): it opens by
+  // addressing CR, says what is wanted before saying anything else, and explains every
+  // finding in the same three beats — why, what to do, then the IRs.
+  r.ok('the mail is a letter, and it addresses CR first',
+    /^Dear CR,/.test(d.text) &&
+    /Regards,[\r\n]+I-PASSBOOK POSTMAN$/.test(d.text.trim()),
+    d.text.slice(0, 200));
+  r.ok('...it says what it needs before it lists anything',
+    d.text.indexOf('WHAT I NEED FROM YOU') > 0 &&
+    d.text.indexOf('WHAT I NEED FROM YOU') < d.text.indexOf('SERIALS THAT FIT NO FORMAT'),
+    d.text.slice(0, 600));
+  r.ok('...and every finding is explained the same way: why, then what to do',
+    /Why I am asking:/.test(d.text) && /What to do:/.test(d.text));
   r.ok('the digest is signed by I-PASSBOOK POSTMAN, and names no other bot',
-    /— I-PASSBOOK POSTMAN/.test(d.text) && !/POSTMASTER/.test(d.text));
+    /I-PASSBOOK POSTMAN/.test(d.text) && !/POSTMASTER/.test(d.text));
   r.ok('a merge the app did itself is reported, not asked',
-    /MERGED AUTOMATICALLY/.test(d.text) && /TEST PERSON S/.test(d.text) &&
+    /SPELLINGS I MERGED/.test(d.text) && /TEST PERSON S/.test(d.text) &&
     /What to do: nothing/.test(d.text), d.text);
   r.ok('a merge is NOT counted as an item needing a decision', d.count === 1, d);
+}
+
+// ── SETUP is not the dashboard ────────────────────────────────────────────────
+// The owner, 2026-10-21: *"whole insights page is cluttered, whole inspector and
+// postman thing should be kept separately and not in insights. Insights is simply for
+// someone to take info from stats."* So the two panes are asserted as a PAIR: the
+// dashboard still counts, and the Inspector does not appear on it.
+r.head('Insights counts, Setup repairs');
+{
+  T.currentView = 'insights';
+  T.allIRs = FIXTURE;
+  T.insightsFilters = Object.assign({}, ALL_ON);
+  T.renderInsights();
+  const dash = byId.get('insights-body').innerHTML;
+  r.ok('the dashboard carries no Inspector panel and no correction box',
+    !/banner|I-INSPECTOR/.test(dash) && !/ins-assign/.test(dash) && !/ins-flags/.test(dash),
+    (dash.match(/I-INSPECTOR/) || [''])[0]);
+  r.ok('...and no ledger of corrections', !/corrections? in force/.test(dash));
+
+  T.currentUser = { email: 'dev@indrones.com', access: { role: 'admin', departments: ['cr'], permissions: {}, triage: true, revokedBy: {} } };
+  T.currentView = 'setup';
+  T.renderSetup();
+  const setup = byId.get('setup-body').innerHTML;
+  r.ok('Setup carries the Inspector, the Postman and the one-IR box',
+    /I-INSPECTOR/.test(setup) && /I-PASSBOOK POSTMAN/.test(setup) && /ins-assign-ir/.test(setup));
+  r.ok('...and it is gated exactly like the dashboard: another pane owns the screen, nothing is painted',
+    (() => {
+      T.currentView = 'index';
+      byId.get('setup-body').innerHTML = 'CANARY';
+      T.renderSetup();
+      return byId.get('setup-body').innerHTML === 'CANARY';
+    })());
+  T.currentUser = null;
+  T.currentView = 'insights';
+}
+
+// ── The sparkline, opened ──────────────────────────────────────────────────────
+r.head('the month chart can be opened into its own numbers');
+{
+  T.currentView = 'insights';
+  T.allIRs = FIXTURE;
+  T.insightsFilters = Object.assign({}, ALL_ON);
+  T.renderInsights();
+  const h = byId.get('insights-body').innerHTML;
+  r.ok('a month-by-month table sits behind a summary', /<details class="insights-12m"/.test(h) &&
+    /Month by month/.test(h));
+  r.ok('...with one row per month and a total', (h.match(/<th scope="row">/g) || []).length >= 13 &&
+    /<tfoot>/.test(h));
 }
 
 r.finish();

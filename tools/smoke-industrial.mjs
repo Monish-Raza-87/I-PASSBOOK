@@ -90,7 +90,10 @@ r.head('no rule escapes the nine roots it is allowed to change');
 // #faq-view joined on 2026-10-08, when the Help & FAQ stopped being a page in another
 // tab and became a pane of the app. It is the same pane shape as the two beside it,
 // which is the test for membership: a NEW KIND of screen is an argument, not an entry.
-const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view|#faq-view|#sidebar|#workspace header)\b/;
+// #setup-view joined on 2026-10-21 for the same reason and by the same test: the
+// Inspector and the Postman moved out of INSIGHTS into a pane of their own, and a pane
+// is a pane wherever its content came from.
+const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view|#faq-view|#setup-view|#sidebar|#workspace header)\b/;
 // The one sanctioned global block: the status and priority colour steps. Deliberately
 // NOT scoped — a pill nobody can read is a defect on every screen, and fixing it on
 // three of eight would leave the app disagreeing with itself. It is a fixed list:
@@ -499,11 +502,11 @@ r.ok('...and the active nav item is marked with a 2px accent rail',
   (css.match(/#sidebar \.nav-item\.active\s*\{[^}]*\}/) || [''])[0]);
 r.ok('the header band is ruled off from the panes',
   /#workspace header\s*\{\s*border-bottom:\s*1px solid var\(--ind-line\)/.test(css));
-r.ok('the three read-only panes\' toolbars sit on the panel',
+r.ok('the four read-only panes\' toolbars sit on the panel',
   css.includes('#insights-view .list-toolbar') && css.includes('#log-view .list-toolbar') &&
-  css.includes('#faq-view .list-toolbar'));
-r.ok('all three read-only panes get the page ground',
-  /#insights-view,\s*\n#log-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css) &&
+  css.includes('#faq-view .list-toolbar') && css.includes('#setup-view .list-toolbar'));
+r.ok('all four read-only panes get the page ground',
+  /#insights-view,\s*\n#log-view,\s*\n#setup-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css) &&
   /#faq-view\s*\{\s*background:\s*var\(--ind-ground\)/.test(css));
 r.ok('the detail pane gets the page ground',
   css.includes('#detail-view { background: var(--ind-ground)'));

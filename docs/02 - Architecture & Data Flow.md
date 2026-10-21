@@ -124,8 +124,12 @@ store layout.
   drone serial, **and drone model**), a read-only third pane rather than a panel inside the detail one, so
   `#detail-view`'s display keeps meaning "an IR is open". No new endpoint: the whole
   list is already in memory.
-- Routing is hash-based (`#/tickets`, `#/tickets/IR409`, `#/insights`, `#/legacy`) so
-  deep links and the browser back button work on a static host
+- **Setup** — the configuration half: I-INSPECTOR's repairs and the correction
+  ledger, and I-PASSBOOK POSTMAN. A fourth read-only pane, split out of Insights on
+  the owner's ruling (2026-10-21) that a dashboard is for taking numbers *out* and
+  fixes belong on their own screen.
+- Routing is hash-based (`#/tickets`, `#/tickets/IR409`, `#/insights`, `#/setup`,
+  `#/legacy`) so deep links and the browser back button work on a static host
 
 ## Who owns what (the load-bearing split)
 

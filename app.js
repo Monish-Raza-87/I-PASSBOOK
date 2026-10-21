@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v109';
+const APP_VERSION = 'v110';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -8660,7 +8660,7 @@ function renderInsights() {
     // the selects still line up across the row and only the narrowed facet grows.
     return `
     <label class="insights-filter"><span>${escHtml(label)}</span>
-      <select class="form-input" id="${id}">${opts}</select>
+      <select class="form-input${sel !== INSIGHTS_ALL ? ' is-set' : ''}" id="${id}">${opts}</select>
       ${long ? `<input type="text" class="insights-find" id="${id}-find" autocomplete="off"
                       placeholder="Find ${escHtml(label.toLowerCase())}…" value="${escHtml(insightsFind[id] || '')}">` : ''}
     </label>`;

@@ -976,6 +976,55 @@
 #insights-view .insights-mix-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--accent); }
 #insights-view .insights-note { color: var(--ind-muted); }
 
+/* ── A CHOSEN FILTER WEARS THE ONE FILL ────────────────────────────────────────
+   Owner, 2026-10-21: *"I like how the button ALL and ALL CATEGORIES are in the
+   filters of IRs. It is yellow. We should place it as and where applicable in
+   insights page also."* The IR list's rule (§ below, `#index-view .segment.active`)
+   is that the lit tile wears the sign-in screen's single button fill, so the same
+   rule answers the same question here: WHICH AXES ARE NARROWING THIS PAGE. It is
+   painted only on a select that is OFF "All" — eight filled boxes at rest would be a
+   wall of yellow with nothing in it to read, and "you are here" is meaningless when
+   everywhere is. The count under them (`insights-total`) still says how many matched.
+   ⚠ The fill is a TOKEN, never `--ind-yellow`: palette.css owns what the one button
+   fill is, and its `--btn-solid-fg` is the ink with 11.2:1 on it in both modes. */
+#insights-view .insights-filters .form-input.is-set {
+  background: var(--btn-solid-bg);
+  border-color: var(--btn-solid-bg);
+  color: var(--btn-solid-fg);
+  font-weight: var(--weight-medium);
+}
+
+/* ── A HEADING IS NOT A ROW ────────────────────────────────────────────────────
+   The month table's summary and the two column heads over the People and company
+   lists read as the FIRST ENTRIES OF THEIR OWN LISTS — same type, same weight, same
+   ground — so the eye counts them as data. Owner, 2026-10-21: *"table header rows
+   like 'Month by month / 461 IRs in all', 'People / Open / Late', 'Company / IRs /
+   Open / Late' can have some distinctions, as they are same as further rows of
+   entries and not differentiated."*
+   So a head now takes a tinted strip, the mono face and a rule UNDER it; the rows
+   below keep the plain ground. No new colour: `--ind-inset` is the same recess the
+   filter selects sit in, `--ind-line` the same hairline. */
+#insights-view .people-head,
+#insights-view .insights-12m-sum {
+  background: var(--ind-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-gray-7);
+}
+#insights-view .people-head {
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--ind-line);
+}
+#insights-view .people-head-n { color: var(--ink-gray-6); }
+/* The summary is a <summary> inside a bordered <details>, so its strip must stop at
+   the frame's own edge — `border-bottom` draws the rule the first table row would
+   otherwise sit flush against. */
+#insights-view .insights-12m-sum { border-bottom: 1px solid var(--ind-line); }
+/* The hint is already mono caps in views.css; it only stops being a whisper. */
+#insights-view .insights-12m-hint { color: var(--ink-gray-6); }
+
 /* ══════════════════════════════════════════════════════════════
    8 · HELP & FAQ — the answers, inside the app
 

@@ -1006,7 +1006,7 @@ spellings; the register is where that mess is resolved. The panel that edits it 
 `listCompanies`**, because a second answer to "which companies exist" is a second thing
 to keep true.
 
-### The Inspector's correction ledger — `saveCorrection`, `deleteCorrection` (v14, rekeyed v16, mailbox kind v18)
+### The Inspector's correction ledger — `saveCorrection`, `deleteCorrection` (v14, rekeyed v16, mailbox kind v18, per-IR kind v19)
 
 `_store/corrections.json` is where a **decided** value is remembered. I-INSPECTOR
 finds what is wrong, CR chooses the right value, and the app displays it — the intake
@@ -1015,7 +1015,7 @@ made by our app only."
 
 | Action | Who | Does |
 |---|---|---|
-| `saveCorrection` | **admin or a member of the `cr` department** | Upserts one decision. `kind: "serial"` is keyed by the raw serial (`serial:S100-V3`). `kind: "person"` is keyed by the **reporter's spelling** (`person:n:a person`) — the name on the IR is the identity, so one manager's address can carry a whole team's IRs (v16). `kind: "person-email"` is keyed by the **mailbox** (`person:e:ops@example.com`) and is used only where an IR names nobody: it can never override a name that is written (v18). Returns the whole ledger so the panel can repaint. |
+| `saveCorrection` | **admin or a member of the `cr` department** | Upserts one decision. `kind: "serial"` is keyed by the raw serial (`serial:S100-V3`). `kind: "person"` is keyed by the **reporter's spelling** (`person:n:a person`) — the name on the IR is the identity, so one manager's address can carry a whole team's IRs (v16). `kind: "person-email"` is keyed by the **mailbox** (`person:e:ops@example.com`) and is used only where an IR names nobody: it can never override a name that is written (v18). `kind: "person-ir"` is keyed by the **ticket** (`person:ir:IR342`) and is applied last, so it beats both the cell and the mailbox rule — it is the only kind that can separate tickets filed from one shared mailbox (v19). Returns the whole ledger so the panel can repaint. |
 | `deleteCorrection` | **admin or CR** | Removes one decision; the app goes back to exactly what the Sheet says. |
 
 `listIRs` carries the ledger under a `corrections` key — **staff only**, `{ items: {} }`

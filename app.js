@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v106';
+const APP_VERSION = 'v107';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7767,6 +7767,13 @@ function looksLikeSpellingVariant(a, b) {
 // The address is still part of the key, because the same name typed from two mailboxes
 // is two different counts and he reads the list per mailbox. A row with no usable name
 // falls back to the mailbox itself.
+// One ticket's name, decided by CR. The ONLY rule that can tell three tickets filed
+// from one shared mailbox apart, so it is applied last and beats everything else.
+function irCorrectionKey(ir) {
+  const v = String(ir == null ? '' : ir).trim().toUpperCase();
+  return v ? 'person:ir:' + v : '';
+}
+
 function reporterKeyFor(name, email) {
   const n = personKey(name);
   const e = normEmail(email);
@@ -8717,6 +8724,14 @@ function renderInsights() {
         <strong>Data quality — I-INSPECTOR</strong>
         <span>R-108 has run over all ${flags.total} IR${flags.total === 1 ? '' : 's'}. Nothing is blocked — the rule says ask CR. A correction is stored in this app only; the intake Sheet is never edited.</span>
       </div>
+      ${canFix ? `
+      <div class="ins-assign">
+        <label class="ins-assign-label" for="ins-assign-ir">Give one IR its reporter</label>
+        <input id="ins-assign-ir" class="ins-assign-in" type="text" placeholder="IR342" autocomplete="off">
+        <input id="ins-assign-name" class="ins-assign-in" type="text" placeholder="Name" autocomplete="off">
+        <button type="button" class="ins-assign-save btn btn-sm btn-secondary" id="ins-assign-save">Save</button>
+        <span class="ins-assign-note">This IR only. It beats the name in the cell and the mailbox rule, and the Sheet is never edited.</span>
+      </div>` : ''}
       ${flags.autoFixed.length ? `
       <div class="ins-flag-group">
         <span class="ins-flag-title">${flags.autoFixed.length} serial${flags.autoFixed.length === 1 ? ' was' : 's were'} corrected automatically</span>
@@ -9090,6 +9105,24 @@ if (insightsView) {
         if (!confirm('Show "' + value + '" for every IR that says "' + from + '"?\n\nOnly that spelling changes' + (email ? ' — other names filed from ' + email + ' are left alone' : '') + '. This app only: the intake Sheet is never edited, and you can remove this at any time.')) return;
         applyCorrection({ kind: 'person', from: from, to: value, email: email });
       }
+      return;
+    }
+    // ── One IR, one name. The only control that can separate three tickets filed
+    //    from the same shared mailbox.
+    const assignBtn = e.target && e.target.closest ? e.target.closest('#ins-assign-save') : null;
+    if (assignBtn) {
+      const irEl = document.getElementById('ins-assign-ir');
+      const nameEl = document.getElementById('ins-assign-name');
+      const ir = irEl ? String(irEl.value || '').trim().toUpperCase() : '';
+      const name = nameEl ? String(nameEl.value || '').trim() : '';
+      if (!ir) { showToast('Type the IR number, like IR342'); return; }
+      if (!/^IR[0-9]+$/.test(ir)) { showToast('An IR number looks like IR342'); return; }
+      if (!name) { showToast('Type the name that should be shown'); return; }
+      if (!confirm('Show "' + name + '" as the reporter of ' + ir + '?\n\nThis one IR only. It beats the name in the cell and the mailbox rule. The intake Sheet is not changed, and you can remove this at any time.')) return;
+
+      applyCorrection({ kind: 'person-ir', ir: ir, to: name });
+      if (irEl) irEl.value = '';
+      if (nameEl) nameEl.value = '';
       return;
     }
     const delBtn = e.target && e.target.closest ? e.target.closest('.ins-fix-del') : null;
@@ -10254,6 +10287,19 @@ function mapSheetRows(rows) {
       rec.reporterKey = reporterKeyFor(name, email);
       rec.reporterLabel = name ? name + ' (' + email + ')' : email;
     });
+  });
+  // A per-IR decision is the last word: CR named THIS ticket, so it overrides the
+  // name in the cell and the mailbox rule alike (owner, 2026-10-21).
+  records.forEach(rec => {
+    const key = irCorrectionKey(rec.irNumber);
+    const hit = key ? corrections.items[key] : null;
+    if (!hit || !hit.to) return;
+    const name = canonicalPersonName(cleanReporterName(hit.to));
+    if (!name) return;
+    const email = normEmail(rec.contactEmail);
+    rec.customerName = name;
+    rec.reporterKey = reporterKeyFor(name, email);
+    rec.reporterLabel = email ? name + ' (' + email + ')' : name;
   });
   records.forEach(rec => {
     if (rec.reporterKey) return;

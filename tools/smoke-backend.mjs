@@ -109,8 +109,10 @@ r.head('the owner\'s security decisions');
 // that filed it (one manager files for a whole team).
 // v17 = every post carries a PERMANENT number, 001, 002, 003 … forever, in the
 // subject and as the body's first line.
-r.ok('API_VERSION is 18, a reporter is a name from an address',
-  /API_VERSION:\s*18\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('API_VERSION is 19, one IR can be named on its own',
+  /API_VERSION:\s*19\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+r.ok('a per-IR reporter correction exists and is keyed by the ticket',
+  /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));
 // v18 = the reporter is the NAME on the ticket PAIRED WITH the address it came from,
 // and CR can name a MAILBOX (`person:e:<address>`) for the tickets that name nobody.
 r.ok('a mailbox can be named without ever overriding a written name',

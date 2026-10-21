@@ -274,7 +274,9 @@ var CONFIG = {
   // 18 = a reporter is the NAME on the IR paired with the address it came from, and
   //      CR can name a MAILBOX (`person:e:<address>`) for the rows that name nobody.
   //      That correction only ever fills a blank: an IR that names a person keeps it.
-  API_VERSION: 18,
+  // 19 = CR can name ONE ticket (`person:ir:IR342`). It is the only rule that can
+  // tell three tickets filed from one shared mailbox apart, so it is applied last.
+  API_VERSION: 19,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -5162,17 +5164,23 @@ function saveCorrection(params, authEmail) {
   var to    = String(params.to == null ? '' : params.to).trim().slice(0, 120);
   var from  = String(params.from == null ? '' : params.from).trim().slice(0, 120);
   var email = String(params.email == null ? '' : params.email).toLowerCase().trim().slice(0, 160);
-  if (kind !== 'serial' && kind !== 'person' && kind !== 'person-email') {
+  var ir    = String(params.ir == null ? '' : params.ir).trim().toUpperCase().slice(0, 24);
+  if (kind !== 'serial' && kind !== 'person' && kind !== 'person-email' && kind !== 'person-ir') {
     return { status: 'error', message: 'Unknown correction kind.' };
   }
   if (!to) return { status: 'error', message: 'There is nothing to save — the corrected value is blank.' };
   if (kind === 'serial' && !from) return { status: 'error', message: 'Which serial is being corrected?' };
   if (kind === 'person' && !from) return { status: 'error', message: 'Which reporter spelling is being corrected?' };
   if (kind === 'person-email' && !email) return { status: 'error', message: 'Which mailbox is being named?' };
+  if (kind === 'person-ir' && !ir) return { status: 'error', message: 'Which IR is being assigned?' };
 
   var key;
   if (kind === 'serial') {
     key = 'serial:' + from.toUpperCase();
+  } else if (kind === 'person-ir') {
+    // ONE ticket, one name. This is the only kind that can tell three IRs filed from
+    // the same shared mailbox apart, so it outranks every other reporter rule.
+    key = 'person:ir:' + ir;
   } else if (kind === 'person-email') {
     // The mailbox's owner, used ONLY where no IR from that address names a person.
     key = 'person:e:' + email;
@@ -5191,6 +5199,7 @@ function saveCorrection(params, authEmail) {
       from:  from,
       to:    to,
       email: email,
+      ir:    ir,
       by:    authEmail,
       at:    new Date().toISOString()
     };

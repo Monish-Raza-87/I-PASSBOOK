@@ -498,6 +498,21 @@ head('a mailbox files for people; one person from two addresses is two lines');
   ok('...and NEVER overrides an IR that already names a person',
     named.find(x => x.irNumber === 'IR512').customerName === 'SOMEONE ELSE',
     named.find(x => x.irNumber === 'IR512').customerName);
+  // A per-IR decision is the only rule that can tell two tickets from one shared
+  // mailbox apart, so it is applied last and beats every other reporter rule.
+  T.setCorrections({ items: { 'person:ir:IR521': { to: 'Chosen Person' } } });
+  const per = T.mapSheetRows([
+    HEADERS,
+    rowWith('IR520', 'First Name', 'shared@example.com', 'Sample Company Pvt Ltd'),
+    rowWith('IR521', 'First Name', 'shared@example.com', 'Sample Company Pvt Ltd'),
+  ]);
+  ok('one IR can be named by CR without touching its neighbour',
+    per.find(x => x.irNumber === 'IR521').customerName === 'CHOSEN PERSON' &&
+    per.find(x => x.irNumber === 'IR520').customerName === 'FIRST NAME',
+    per.map(x => x.irNumber + '=' + x.customerName));
+  ok('...and that IR keys under the chosen name and its own mailbox',
+    per.find(x => x.irNumber === 'IR521').reporterKey === 'p:chosen person|shared@example.com',
+    per.find(x => x.irNumber === 'IR521').reporterKey);
   T.setCorrections({ items: {} });
 }
 

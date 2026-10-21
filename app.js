@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v108';
+const APP_VERSION = 'v109';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -8750,10 +8750,16 @@ function renderInsights() {
          graph with data/numbers, it would have been making better sense."* The tile is
          one gesture away from the same twelve values as a table — the chart says which
          way the year is going, this says exactly how many, and neither is a second
-         source: both read mc.months, computed once above. -->
-    <details class="insights-12m" id="insights-12m">
+         source: both read mc.months, computed once above.
+
+         OPEN BY DEFAULT, and that is the second half of the same request (owner,
+         2026-10-21, after the first attempt): *"Last 12 months functionality is still
+         not expandable and clearly data not being visible."* A control that has to be
+         found before the numbers exist is one more thing that can fail; the numbers
+         are now simply THERE, and the summary is how you fold them away. -->
+    <details class="insights-12m" id="insights-12m" open>
       <summary class="insights-12m-sum">
-        Month by month — open for the numbers
+        Month by month
         <span class="insights-12m-hint">${mc.total} IR${mc.total === 1 ? '' : 's'} in all</span>
       </summary>
       <table class="insights-12m-table">

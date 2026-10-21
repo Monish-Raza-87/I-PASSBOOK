@@ -849,6 +849,18 @@
           <span class="nav-label" data-i18n="nav.help">Help &amp; FAQ</span>
         </a>
 
+        <!-- ── SETUP ──
+             The Inspector, the Postman and the corrections ledger. They lived at the
+             bottom of INSIGHTS until 2026-10-21, and the owner named the cost: *"whole
+             insights page is cluttered, whole inspector and postman thing should be
+             kept separately and not in insights. Insights is simply for someone to take
+             info from stats."* A plain hash link with no JS binding, exactly like the
+             five above it: the hashchange listener is the whole mechanism. -->
+        <a class="nav-item" id="nav-setup" href="#/setup" title="Setup" data-i18n-title="nav.setup">
+          <span class="nav-icon" aria-hidden="true"></span>
+          <span class="nav-label" data-i18n="nav.setup">Setup</span>
+        </a>
+
         <!-- ── REPORT A PROBLEM, FOR SOMEONE ALREADY SIGNED IN ──
              It stood on the SIGN-IN screen until 2026-10-10, and the owner moved it:
              *"We need to remove report a problem button from login page, this element is
@@ -1404,6 +1416,24 @@
             </div>
           </div>
           <div id="faq-body" class="faq-body"></div>
+        </div>
+
+        <!-- ====== SETUP VIEW ====== -->
+        <!-- The Inspector, the Postman and the corrections ledger. The same sibling
+             pane a sixth time, on the same principle as #insights-view above: it owns
+             the screen on a phone, and on desktop the IR list keeps its place beside
+             it. Deliberately carries no class="section-content".
+
+             EMPTY here rather than carrying a skeleton: renderSetup() writes its own
+             two skeleton blocks, and the pane's first frame is either a scan of the
+             list or a skeleton while the list is still arriving. -->
+        <div id="setup-view">
+          <div class="list-toolbar">
+            <div class="list-toolbar-top">
+              <span class="list-title" data-i18n="nav.setup">Setup</span>
+            </div>
+          </div>
+          <div id="setup-body" class="setup-body"></div>
         </div>
 
       </div><!-- end panes -->

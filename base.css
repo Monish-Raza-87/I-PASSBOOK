@@ -2954,6 +2954,17 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   flex-direction: column;
 }
 
+/* SETUP. The same arrangement a sixth time. The Inspector, the Postman and the
+   corrections ledger were pulled out of INSIGHTS on 2026-10-21 because they are
+   configuration, not counts — see renderSetup() in app.js. */
+#setup-view {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
 /* Desktop-only; the media block below turns it back on. */
 #detail-placeholder { display: none; }
 
@@ -3098,6 +3109,7 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   #index-view { display: flex; }
   #detail-view { display: none; }
   #insights-view { display: none; }
+  #setup-view { display: none; }
 
   #toast { bottom: calc(var(--bottombar-h) + var(--safe-b) + 0.75rem); }
 }
@@ -3279,6 +3291,9 @@ html[data-sso="wait"] #sso-wait { display: flex; }
      empty state, so "No IR selected" sits under the FAQ and the FAQ gets half the
      width. It was the one view the placeholder was never told about. */
   body.view-faq #detail-placeholder { display: none; }
+  /* Setup is the same case: a pane in the row, not a detail panel. Leaving this out
+     is how the FAQ shipped with "No IR selected" underneath it. */
+  body.view-setup #detail-placeholder { display: none; }
   /* The big faded mark. It replaced a 2.75rem inline glyph on 2026-10-11, on the
      owner's instruction: "when landing on dashboard and no any service desk is open,
      in blank space big faded logo to appear." See index.html for why it is an <img>.

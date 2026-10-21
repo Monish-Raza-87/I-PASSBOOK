@@ -93,6 +93,7 @@
     // to shorten the link on the sign-in card with it, and a shared key would make
     // that impossible — which is the whole reason this table exists.
     'nav.help':            'Help & FAQ',
+    'nav.setup':           'Setup',
 
     // ── The IR list, and the board and grid it draws the same rows as ────────
     'list.title':          'IRs',
@@ -567,6 +568,7 @@
     'nav.logAnalyser':     'लॉग विश्लेषक',
     'nav.userAccess':      'उपयोगकर्ता पहुँच',
     'nav.help':            'सहायता और FAQ',
+    'nav.setup':           'सेटअप',
 
     // ── The IR list, and the board and grid it draws the same rows as ────────
     'list.title':          'IR',

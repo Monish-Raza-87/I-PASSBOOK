@@ -1,4 +1,9 @@
-// Smoke test for the customer portal — customer.html's signed-in half.
+// Smoke test for the customer portal — the signed-in half, in portal.js and portal.css.
+//
+// v112 moved the portal OUT of customer.html: the markup and the code live in portal.js,
+// the styles in portal.css, and customer.html is a two-line loader over both. The suite
+// reads portal.js and portal.css now, because that is where the portal is. customer.html
+// and index.html are still read, but only to prove the two of them load the same files.
 //
 //   node tools/smoke-portal.mjs
 //
@@ -34,7 +39,11 @@ import { loadApp, makeReporter } from './harness.mjs';
 const r = makeReporter();
 const read = p => fs.readFileSync(new URL(p, import.meta.url), 'utf8');
 
-const portal = read('../customer.html');
+// The portal itself.
+const portal    = read('../portal.js');
+const portalCss = read('../portal.css');
+// The two documents that MOUNT it: the standalone loader, and the app in customer mode.
+const portalPage = read('../customer.html');
 const appJs  = read('../app.js');
 const swJs   = read('../sw.js');
 const deploy = read('./deploy-ghpages.mjs');
@@ -45,9 +54,8 @@ const backend = read('../backend.gs');
 // of the check: it proves app.js still runs top to bottom.
 const T = loadApp('CONFIG, STATUS_LEGACY, IR_NUMBER_RE, SESSION_KEY, USER_KEY, IR_LIST_CACHE_KEY, ACCESS_CACHE_KEY, UNLOCK_KEY');
 
-// The portal's copies, pulled out of customer.html's own text. Not `loadApp`: that file is
-// a plain end-of-body script with no exports and a different global, and it is the file
-// under test — reading its literal is the point.
+// The portal's copies, pulled out of portal.js's own text. Not `loadApp`: that file is an
+// IIFE with no exports, and it is the file under test — reading its literal is the point.
 const foldBody = portal.match(/const STATUS_LEGACY = \{([\s\S]*?)\n  \};/);
 const irReBody = portal.match(/const IR_NUMBER_RE = (\/.*\/[a-z]*);/);
 const gasUrlBody = portal.match(/GAS_URL: '([^']+)'/);
@@ -78,14 +86,33 @@ r.ok('the stripper leaves the portal\'s own ipbc_ keys in the code it scans, so 
 
 // Quoted-string form only: a bare mention in a comment is a warning, not a leak.
 const namedInPortal = appKeys.filter(k => new RegExp(`['"\`]${k}['"\`]`).test(portalCode));
-r.ok('customer.html names none of them', namedInPortal.length === 0, namedInPortal);
+r.ok('portal.js names none of them', namedInPortal.length === 0, namedInPortal);
 
 r.ok('...and it does use its own ipbc_ pair',
   /SESSION_KEY:\s*'ipbc_session'/.test(portal) && /USER_KEY:\s*'ipbc_user'/.test(portal));
 
 // The one key it deliberately SHARES, because a display preference is not identity.
 r.ok('...but the theme key is shared on purpose, so a customer gets the mode they chose',
-  /localStorage\.getItem\('theme'\)/.test(portal), 'the pre-paint script');
+  /localStorage\.getItem\('theme'\)/.test(portalPage), 'the pre-paint script');
+
+// ── ONE PORTAL, TWO DOCUMENTS, ZERO COPIES (v112) ─────────────────────────────
+// The owner, 2026-10-22: a customer signs in at the app's OWN address and lands in the
+// portal there. The way that stays true is that neither document owns the portal: both
+// point at these two files. A copy of the markup in either one is the drift this shape
+// exists to prevent, so the loader is checked to be a loader and the app is checked to
+// fetch the same two names.
+r.ok('customer.html is a LOADER — no inline styles, no inline portal script',
+  !/<style[\s>]/.test(portalPage) &&
+  /<link rel="stylesheet" href="portal\.css">/.test(portalPage) &&
+  /<script src="portal\.js"><\/script>/.test(portalPage) &&
+  /CustomerPortal\.mount\(/.test(portalPage),
+  'style tags: ' + (/<style[\s>]/.test(portalPage) ? 'present' : 'none'));
+r.ok('...and it keeps the pre-paint theme script, because a loader still paints first',
+  /dataset\.theme = 'dark'/.test(portalPage));
+r.ok('...and the app customer mode fetches the same two files, not a page',
+  /css\.href = 'portal\.css\?v=' \+ v/.test(appJs) &&
+  /js\.src = 'portal\.js\?v=' \+ v/.test(appJs) &&
+  /CustomerPortal\.mount\(root\)/.test(appJs));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 r.head('one backend, two copies of its address');
@@ -153,8 +180,8 @@ r.ok('the row is keyed the way the backend\'s irKey() keys it — upper case, sp
 r.head('`hidden` hides, or a signed-out visitor sees the signed-in panel');
 // ═══════════════════════════════════════════════════════════════════════════════
 r.ok('the rule is `!important`, because .btn and .ticket both outrank the UA\'s own',
-  /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/.test(portal),
-  (portal.match(/\[hidden\][^\n]*/) || [])[0]);
+  /\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/.test(portalCss),
+  (portalCss.match(/\[hidden\][^\n]*/) || [])[0]);
 r.ok('...and the blocks it protects really do start hidden',
   /<section id="reports"[^>]*\shidden>/.test(portal)
   && /<div class="sheet" id="signin" hidden>/.test(portal)
@@ -166,6 +193,8 @@ r.ok('...and the blocks it protects really do start hidden',
 r.head('the page is published, and never precached');
 // ═══════════════════════════════════════════════════════════════════════════════
 r.ok('deploy-ghpages.mjs serves it', /'customer\.html'/.test(deploy));
+r.ok('...and the two files it now needs are served with it',
+  /'portal\.css'/.test(deploy) && /'portal\.js'/.test(deploy));
 // A cached copy of somebody's tickets is the one thing the shell must never hand out.
 r.ok('...and sw.js does NOT put it in the shell',
   !/customer\.html/.test(swJs), (swJs.match(/'[^']*customer[^']*'/) || [])[0]);

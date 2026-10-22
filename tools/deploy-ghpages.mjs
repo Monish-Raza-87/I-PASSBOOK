@@ -75,6 +75,11 @@ const SERVED = [
   'manifest.json',
   'palette.css',
   'plan.html',
+  // The customer portal's two halves. They are NOT in sw.js's shell (a cached copy of
+  // somebody's tickets is the one thing the shell must never hand out); they are fetched
+  // at runtime by customer.html and by the app's customer mode.
+  'portal.css',
+  'portal.js',
   'privacy.html',
   'sw.js',
   'terms.html',

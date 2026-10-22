@@ -388,7 +388,11 @@ const wrongGuard = guardFiles.filter(f => /:root:not\(\[data-theme="light"\]\)/.
 ok('every OS guard tests for the absence of the attribute',
   wrongGuard.length === 0, wrongGuard.map(f => f.replace('../', '')));
 ok('the standalone pages carry the corrected guard',
-  ['../backup.html', '../customer.html', '../faq.html', '../inspector.html', '../plan.html', '../docs/I-PASSBOOK Demo Run-Sheet.html']
+  // v112: the portal's styles moved out of customer.html into portal.css (that page is
+  // now a loader). The rule is unchanged; the file carrying it moved, so this list
+  // follows the file — a list still naming customer.html would pass on a page that no
+  // longer contains a single style rule.
+  ['../backup.html', '../portal.css', '../faq.html', '../inspector.html', '../plan.html', '../docs/I-PASSBOOK Demo Run-Sheet.html']
     .every(f => /:root:not\(\[data-theme\]\)/.test(read(f))));
 
 // ── 9. it is actually shipped ───────────────────────────────────────────────────

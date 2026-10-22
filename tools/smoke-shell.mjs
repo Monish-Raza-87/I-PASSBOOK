@@ -1332,10 +1332,31 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   // CUSTOMER's key, never the staff one, so a staff session on this machine cannot open this
   // door and the customer's cannot open the app's.
   ok('...and a customer already holding a session gets the way in instead of the form',
-    /<div id="cust-session" style="display:none">[\s\S]*?<a class="btn" id="customer-space-open" href="customer\.html" data-i18n="door\.openSpace">/.test(custCard) &&
+    /<div id="cust-session" style="display:none">[\s\S]*?<a class="btn" id="customer-space-open" href="\.\/" data-i18n="door\.openSpace">/.test(custCard) &&
     /localStorage\.getItem\('ipbc_session'\)/.test(appCode) &&
     /localStorage\.setItem\('ipbc_session'/.test(appCode) &&
     /localStorage\.setItem\('ipbc_user'/.test(appCode));
+
+  // ── v112: THE CUSTOMER STAYS AT THE APP'S OWN ADDRESS ─────────────────────────
+  // The owner, 2026-10-22: a customer should arrive at the app root, sign in there,
+  // and land in the portal WITHOUT the URL changing. Three separate things have to
+  // hold for that, and each one fails silently on its own:
+  //   · the boot must fork into customer mode on a customer session (and only when
+  //     there is no staff session — a staff member who once opened the portal must
+  //     still reach their own app);
+  //   · finishing a customer sign-in must enter that mode rather than navigate;
+  //   · customer mode must take the STAFF STYLESHEETS DOWN, because industrial.css
+  //     claims `.btn`/`.card` by ID and would otherwise reach into the portal.
+  ok('a load with a customer session forks into the portal, before the staff shell is built',
+    /if \(!hasStoredSession\(\) && hasCustomerSession\(\)\) \{ enterCustomerMode\(\); return; \}/.test(appCode) &&
+    /function hasCustomerSession\(\) \{[\s\S]*?localStorage\.getItem\('ipbc_session'\)/.test(appCode));
+  ok('...and a finished customer sign-in enters the portal instead of navigating away',
+    /function finishCustomerAuth\(email, d\) \{[\s\S]*?enterCustomerMode\(\);\s*\}/.test(appCode) &&
+    !/location\.href = 'customer\.html'/.test(appCode));
+  ok('...and customer mode drops the staff stylesheets before mounting',
+    /function enterCustomerMode\(\) \{[\s\S]*?link\[rel="stylesheet"\][\s\S]*?portal\.css[\s\S]*?l\.remove\(\)/.test(appCode));
+  ok('...and it is never entered twice on one load',
+    /function enterCustomerMode\(\) \{\s*if \(document\.documentElement\.dataset\.mode === 'customer'\) return;/.test(appCode));
 
   // ── THE CODE STEP: ONE SCREEN FOR BOTH DOORS ──────────────────────────────────
   // The owner, 2026-10-08: *"it lands in next screen totally blank and in center it says

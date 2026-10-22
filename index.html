@@ -615,7 +615,11 @@
           <!-- A customer already signed in on this device does not need a form: the
                Customer Space is one tap away. JS swaps this for the form below. -->
           <div id="cust-session" style="display:none">
-            <a class="btn" id="customer-space-open" href="customer.html" data-i18n="door.openSpace">Open the Customer Space</a>
+            <!-- The app's own address, not customer.html: a customer signs in HERE and the
+                 portal opens in place of this screen (app.js's enterCustomerMode). The
+                 href is the root as a fallback, so the link still works if the click
+                 handler has not been wired yet — a reload lands on the same place. -->
+            <a class="btn" id="customer-space-open" href="./" data-i18n="door.openSpace">Open the Customer Space</a>
           </div>
 
           <form id="cust-form" autocomplete="on">

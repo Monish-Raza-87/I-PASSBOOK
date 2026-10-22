@@ -533,8 +533,14 @@ r.ok('...and it names the door it does open — the ordinary reset, asked for on
   inv.mails[0].body);
 r.ok('...and NO password ever travels by email',
   !/temporary password is|your password is [^.]/i.test(inv.mails[0].body), inv.mails[0].body);
-r.ok('...and the link it offers is the CUSTOMER page, not the staff app',
-  /customer\.html/.test(inv.mails[0].body) && !/index\.html/.test(inv.mails[0].body),
+// v112: the link is the app's ROOT. The property the assertion is protecting is
+// unchanged — the invitation must not send a customer to the staff app's sign-in — but
+// "the customer page" and "the staff app" are now the same address. What still has to be
+// true is that the URL carries no page name and no query: the root is the only spelling
+// that opens the customer door for them.
+r.ok('...and the link it offers is the app root, with no page name to land on the wrong door',
+  /https:\/\/[^\s/]+\/I-PASSBOOK\/(?:\s|$)/.test(inv.mails[0].body) &&
+  !/customer\.html/.test(inv.mails[0].body) && !/index\.html/.test(inv.mails[0].body),
   (inv.mails[0].body.match(/https?:\/\/\S+/) || ['(no link)'])[0]);
 
 // ── THE TRAP ────────────────────────────────────────────────────────────────────

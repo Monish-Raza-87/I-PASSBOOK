@@ -342,9 +342,13 @@ r.head('the register opens as a grid, and a tile answers the three questions the
     /co-tile-name">Acme Survey Pvt Ltd</.test(html) && /<b>\d+<\/b> IRs?/.test(html));
   r.ok('...and the open count, which is the reason the grid exists',
     /<b>\d+<\/b> open/.test(html));
+  // v112: the printed address is the app ROOT, so the thing to count is the link
+  // itself. Counting `customer.html` would now be counting a page the desk no longer
+  // hands out, and it would pass on a screen that printed nothing at all.
   r.ok('the portal address is printed ONCE, not once per company',
-    (html.match(/class="co-portal"/g) || []).length === 1 && (html.match(/customer\.html/g) || []).length === 1,
-    (html.match(/customer\.html/g) || []).length);
+    (html.match(/class="co-portal"/g) || []).length === 1 &&
+    (html.match(/example\.github\.io\/I-PASSBOOK\//g) || []).length === 1,
+    (html.match(/example\.github\.io\/I-PASSBOOK\//g) || []).length);
   r.ok('the unmatched spellings are folded away until asked for',
     /acc-co-unreg-toggle/.test(html) && !/Make it a company/.test(html));
 
@@ -780,12 +784,15 @@ r.head('the portal link is built from where this app is served, not from a const
 // ═══════════════════════════════════════════════════════════════════════════════
 {
   const { A } = boot(STAFF, IRS);
-  r.ok('the link sits beside the app, so a Pages subdirectory is kept',
-    A.T.customerPortalLink() === 'https://example.github.io/I-PASSBOOK/customer.html',
+  // v112: the portal IS the app's address. The link is the ROOT, so a Pages
+  // subdirectory is still kept and customer.html is no longer a destination the
+  // desk hands out — it survives only as a loader for links already emailed.
+  r.ok('the link is the app root, so a Pages subdirectory is kept',
+    A.T.customerPortalLink() === 'https://example.github.io/I-PASSBOOK/',
     A.T.customerPortalLink());
   const txt = A.T.customerHandoverTxt('ops@acme.in', 'Acme Survey');
   r.ok('the handover text names the link, the address and the one button to press',
-    txt.indexOf('https://example.github.io/I-PASSBOOK/customer.html') > 0 &&
+    txt.indexOf('https://example.github.io/I-PASSBOOK/') > 0 &&
     txt.indexOf('ops@acme.in') > 0 && /First time here\?/.test(txt));
   r.ok('...and carries no password of any kind', !/[Pp]assword:/.test(txt), txt.split('\n').filter(l => /assword/.test(l)));
   r.ok('...and matches the door the invitation email names',

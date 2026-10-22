@@ -202,7 +202,11 @@ const STUB = `
           { sku: 'SIGMA25G', label: 'SIGMA25G user manual', url: 'https://example.com/manual.pdf', kind: 'doc' },
           { sku: 'SIGMA25G', label: 'Pre-flight checklist', url: 'https://example.com/checklist.pdf', kind: 'doc' },
           { sku: 'SIGMA100', label: 'SIGMA100 LiDAR setup', url: 'https://example.com/lidar.pdf', kind: 'doc' },
-          { sku: '', label: 'Fleet training video', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', kind: 'video' }
+          // Two videos, one filed WITHOUT a SKU and one filed against SIGMA100. The second
+          // is the point: the owner's rule (2026-10-22) is that training videos are ONE
+          // folder regardless of SKU, so a sku on a video must not open a second shelf.
+          { sku: '', label: 'Fleet training video', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', kind: 'video' },
+          { sku: 'SIGMA100', label: 'LiDAR flight walkthrough', url: 'https://www.youtube.com/watch?v=oHg5SJYRHA0', kind: 'video' }
         ],
         cr: { name: 'Customer Relations', email: 'cr@indrones.com', whatsapp: '919000000000' },
         certified: ['SIGMA25G', 'SIGMA100']
@@ -335,6 +339,13 @@ const goto = async (state, width) => {
   await call('Page.navigate', { url: BASE + (state ? '?state=' + state : '') });
   await SLEEP(500);
 };
+// The SAME probe against the app's own address. Since v112 index.html is the customer's
+// page too, and that path exists only if the app forks into customer mode on boot.
+const gotoApp = async (state, width) => {
+  await call('Emulation.setDeviceMetricsOverride', { width, height: 1000, deviceScaleFactor: 1, mobile: width < 640 });
+  await call('Page.navigate', { url: 'http://127.0.0.1:' + PORT + '/index.html' + (state ? '?state=' + state : '') });
+  await SLEEP(600);
+};
 
 // Everything this page can legitimately be measured on, in one place.
 const text = () => evaluate('document.body.innerText');
@@ -365,6 +376,15 @@ try {
   ws.addEventListener('message', e => {
     const m = JSON.parse(e.data);
     if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    // An uncaught error in the page is otherwise INVISIBLE until some later assertion
+    // fails for a reason that looks like a design bug. (v112: the portal moved into
+    // portal.js, and a single bad line there left the whole page blank while the run
+    // only reported "the header offers Sign in ... FAIL".)
+    if (m.method === 'Runtime.exceptionThrown') {
+      const d = m.params.exceptionDetails || {};
+      console.log('          PAGE ERROR: ' + (d.text || '') + ' ' +
+        ((d.exception && (d.exception.description || d.exception.value)) || ''));
+    }
   });
 
   await call('Page.enable');
@@ -388,6 +408,14 @@ try {
   console.log('\n— signed out: nothing about anybody\'s tickets is on the page —');
   // ════════════════════════════════════════════════════════════════════════════
   await goto('signedout', 414);
+  // The mount is the ONE thing that can leave every other line below failing for the
+  // same uninteresting reason, so it is measured first and on its own.
+  const mounted = await evaluate(`(function () {
+    var r = document.getElementById('portal-root');
+    return { kids: r ? r.children.length : -1, html: r ? r.innerHTML.length : -1,
+             hasSheet: !!document.getElementById('signin') };
+  })()`);
+  ok('the portal really mounted into #portal-root', mounted.kids > 0 && mounted.hasSheet, JSON.stringify(mounted));
   ok('the signed-in block stays hidden', !(await visible('#reports')));
   ok('the header offers Sign in, not Sign out', (await visible('#header-signin')) && !(await visible('#signout')));
   ok('...and names nobody', !(await visible('#header-who')));
@@ -539,12 +567,18 @@ try {
     JSON.stringify(await evaluate(openPanels)) === JSON.stringify(['panel-library']),
     await evaluate(openPanels));
 
-  // The library groups by SKU, in the product order, with General last — a flat list
-  // would hide which airframe a manual belongs to, which is the only reason it is filed.
+  // Documents group by SKU, in the product order. VIDEOS do not: the owner's rule
+  // (2026-10-22) is ONE training folder regardless of airframe, so the two videos in
+  // the stub — one filed with no SKU, one filed against SIGMA100 — must sit on ONE
+  // shelf at the end. A third group is the failure this measures.
   const groups = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-group h3')).map(h => h.textContent)`);
-  ok('the library groups by airframe, in the order the products are sold',
-    groups.length === 3 && /^SIGMA25G/.test(groups[0]) && /^SIGMA100/.test(groups[1]) && /^General/.test(groups[2]),
+  ok('documents group by airframe, and every training video sits on one shelf after them',
+    groups.length === 3 && /^SIGMA25G/.test(groups[0]) && /^SIGMA100/.test(groups[1]) &&
+    /^Training videos/.test(groups[2]),
     JSON.stringify(groups));
+  ok('...and that shelf holds both videos, whatever SKU each was filed under',
+    await evaluate(`document.querySelector('#lib-body .lib-group:last-child').querySelectorAll('.lib-item').length`) === 2,
+    await evaluate(`document.querySelector('#lib-body .lib-group:last-child').querySelectorAll('.lib-item').length`));
   ok('a video shows a thumbnail rather than a bare row of text',
     await evaluate(`!!document.querySelector('#lib-body .lib-item.video img[src*="img.youtube.com/vi/"]')`));
   ok('every library item opens in its own tab', await evaluate(
@@ -715,6 +749,29 @@ try {
   ok('...and puts every invitation back where a visitor expects it',
     /sign in to your reports/i.test(await evaluate(`document.getElementById('hero-cta').textContent`))
     && await visible('#access-visitor') && !(await visible('#access-member')));
+
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n— the app\'s own address: a customer signs in there and STAYS there —');
+  // ════════════════════════════════════════════════════════════════════════════
+  // The owner, 2026-10-22: not customer.html — index.html carries the customer door and
+  // opens the portal in place. Every part of that fails silently on its own: a forgotten
+  // stylesheet leaves the staff look on the portal, a missed removal leaves the sign-in
+  // screen standing behind it, and a redirect would look perfect from inside the page.
+  await gotoApp('customer', 414);
+  const appMode = await waitFor(
+    "!!document.getElementById('portal-root') && document.querySelectorAll('#portal-tiles .tile').length === 5", 6000);
+  ok('a customer session at the app address opens the portal, not the staff shell', appMode);
+  ok('...and the portal is the only thing on the page',
+    await evaluate("document.body.children.length === 1 && document.body.firstElementChild.id === 'portal-root'"),
+    await evaluate("Array.from(document.body.children).map(e => e.id || e.tagName)"));
+  ok('...served from the address they typed, with nothing navigated to',
+    /\/index\.html$/.test(await evaluate('location.pathname')), await evaluate('location.pathname'));
+  ok('...under the portal\'s stylesheet only, never the app\'s',
+    await evaluate("Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).every(l => /portal[.]css/.test(l.href))"),
+    await evaluate("Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).map(l => l.getAttribute('href'))"));
+  ok('...and the portal really read the customer\'s own record',
+    /Acme Survey/.test(await evaluate("document.getElementById('portal-title').textContent")),
+    await evaluate("document.getElementById('portal-title').textContent"));
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exitCode = fail ? 1 : 0;

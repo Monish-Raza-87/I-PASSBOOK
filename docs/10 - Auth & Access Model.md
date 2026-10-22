@@ -44,15 +44,21 @@ and the credit.
 | | Employee (`#door-employee`) | Customer (`#door-customer`) |
 |---|---|---|
 | Holds | the one staff `#auth-form` — email → emailed code — plus the `.quick-row` (Google handoff, passkey, pattern) | its own `#cust-form`: welcome, the helper line, the address, **Continue**, `or`, and the desk's address for anyone not onboarded |
-| Already signed in | the app shell | `#cust-session` replaces the form with **Open the Customer Space** → `customer.html` |
+| Already signed in | the app shell | `#cust-session` replaces the form with **Open the Customer Space** → the portal, in this same page |
 | Update banner | yes — it reports the *app's* build | no — a customer never runs the app |
 
-**The customer door is a real sign-in form, and `customer.html` is still what is behind
-it.** The old rule here was *"the customer card opens the door; it does not copy it"* —
+**The customer door is a real sign-in form, and the portal opens behind it without the
+URL moving.** Since v112 a customer arrives at the app's own address, signs in there, and
+`enterCustomerMode()` replaces the staff document with the portal in place — the owner,
+2026-10-22: *"it should be ideal that customers also go via …/I-PASSBOOK/ where there is a
+login portal for customers. Post that login screen, they directly land into the page we
+have just designed."* The portal itself lives in `portal.css` and `portal.js`; the old
+`customer.html` survives only as a thin loader over those two files, because every
+invitation already emailed points at it. The old rule here was *"the customer card opens the door; it does not copy it"* —
 a link-out with a description and no form at all. That is no longer true and should not
 be restored: the owner asked for the customer's own form, in the shape app.notion.com
 uses, and the two doors now share only the one code step (`#code-view`) below them. What
-the old rule was protecting is still protected: `customer.html` keeps its own `ipbc_`
+the old rule was protecting is still protected: the portal keeps its own `ipbc_`
 storage keys, so a customer session can never be inherited by, or inherit, a staff one
 on a shared machine, and the signed-in customer gets a link rather than a second form.
 

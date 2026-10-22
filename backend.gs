@@ -4802,10 +4802,14 @@ function listUsers(authEmail) {
 // Where the portal lives. Built from CONFIG.APP_URL and nothing else — the same rule
 // irDeepLink follows, and for the same reason: a URL that arrives in a request body is
 // a URL an attacker chose, and this one goes into an email signed by Indrones.
+//
+// It is the app's ROOT, not customer.html. Since v112 a customer signs in at the app's
+// own address and the portal opens there; customer.html still resolves (it is a thin
+// loader), but an invitation should carry the address the owner actually wants shared.
 function customerPortalUrl() {
   var base = String(CONFIG.APP_URL || '');
   if (!base) return '';
-  return base.replace(/[^/]*$/, '') + 'customer.html';
+  return base.replace(/[^/]*$/, '');
 }
 
 // The portal's boot call: "who am I, and what am I scoped to". Available to any

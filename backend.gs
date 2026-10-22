@@ -276,7 +276,7 @@ var CONFIG = {
   //      That correction only ever fills a blank: an IR that names a person keeps it.
   // 19 = CR can name ONE ticket (`person:ir:IR342`). It is the only rule that can
   // tell three tickets filed from one shared mailbox apart, so it is applied last.
-  API_VERSION: 19,
+  API_VERSION: 20,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -1934,6 +1934,9 @@ function initializeStore() {
    ['irs.json', {}], ['config.json', {}], ['kb.json', {}], ['comments.json', {}],
    ['devices.json', { devices: {} }], ['companies.json', { companies: {} }],
    ['corrections.json', { items: {} }],
+   // The customer portal's own file. Seeded so a fresh install has somewhere to write,
+   // and so the backup's file count includes it from the first night.
+   [PORTAL_STORE_FILE, { cr: {}, library: [], companies: {} }],
    [STORE_IDS_FILE, {}],
    [STORE_INDEX, { irs: {} }]
   ].forEach(function (pair) {
@@ -4019,6 +4022,9 @@ function doGet(e) {
       // display name; for anyone else it is an empty scope, so the page can tell it is
       // talking to a staff account and send them to the staff app.
       getMyCustomer: function () { return getMyCustomer(email); },
+      // Everything the portal's landing page paints, in the same round trip: profile,
+      // library and the CR contact. Adding a call here is how a customer waits twice.
+      getCustomerPortal: function () { return getCustomerPortal(email, e.parameter.company); },
       listIRs:       function () { return listIRs(email); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
       getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId, email); },
@@ -4106,6 +4112,12 @@ function doPost(e) {
       // invitation. Admin-only, and it re-checks inside (see inviteCustomer).
       inviteCustomer:    function () { return inviteCustomer(params, email); },
       setCustomerCompany:function () { return setCustomerCompany(params, email); },
+      // The portal's own writes. A customer may edit their company's addresses and
+      // contacts, and rate a closed ticket; both derive the company from the SESSION.
+      // The library, the CR contact and every aircraft/UIN are admin-only.
+      saveCustomerProfile: function () { return saveCustomerProfile(params, email); },
+      rateIR:              function () { return rateIR(params, email); },
+      savePortalConfig:    function () { return savePortalConfig(params, email); },
       // The Company & Contact register (v96). Admin-only, like everything else that
       // touches who may be scoped to what.
       saveCompany:       function () { return saveCompany(params, email); },
@@ -4812,6 +4824,270 @@ function getMyCustomer(authEmail) {
     portalUrl:  customerPortalUrl(),
     apiVersion: CONFIG.API_VERSION
   };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE CUSTOMER PORTAL (v20) — the store, the profile, the library, the rating.
+//
+// `backend.gs` IS IN A PUBLIC REPOSITORY, so nothing about a real person may live in
+// this file: the CR representative's name, address and number are DATA, held in
+// `_store/portal.json` and editable from the Setup pane. The only names written here
+// are product names, which are on the public site anyway.
+//
+// ONE STORE FILE, because every read here is paid for by a customer on a phone: the
+// Drive store costs ~0.37 s per operation, and a portal that takes six reads to paint
+// a tile row is a portal that feels broken. `portal.json`:
+//
+//   { "cr": { name, email, whatsapp },            // the CR person, for every customer
+//     "library": [ { sku, label, url, kind } ],   // shared documents and videos
+//     "companies": { "<sameCompanyKey(name)>": {
+//         addresses: [ { label, text } ],
+//         contacts:  [ { name, role, phone, email } ],
+//         fleet:     [ { sn, model, uin, cert } ] } } }
+//
+// `companies` is keyed by the NORMALISED company name, exactly as the register is, so
+// "Acme Survey" and "ACME SURVEY " are one profile — the same rule that decides which
+// tickets a customer may see.
+// ══════════════════════════════════════════════════════════════════════════════
+var PORTAL_STORE_FILE = 'portal.json';
+
+// The two SKUs that carry a DGCA type certificate today (owner, 2026-10-22). A UIN is
+// per AIRCRAFT, not per model, so the certificate itself is entered against the serial
+// — this list only decides which models are even offered the row.
+var PORTAL_CERTIFIED_SKUS = ['SIGMA25G', 'SIGMA100'];
+
+// One shape for all three lists. Every value is a string, trimmed, capped, and every
+// row with nothing in it is DROPPED rather than stored as a blank — an empty row in a
+// store is indistinguishable from a row the customer deleted.
+function portalCleanList(raw, fields, maxRows, maxLen) {
+  var out = [];
+  if (!(raw instanceof Array)) return out;
+  raw.slice(0, maxRows).forEach(function (r) {
+    if (!r || typeof r !== 'object') return;
+    var one = {}, any = false;
+    fields.forEach(function (f) {
+      var v = String(r[f] == null ? '' : r[f]).trim().slice(0, maxLen);
+      one[f] = v;
+      if (v) any = true;
+    });
+    if (any) out.push(one);
+  });
+  return out;
+}
+
+function portalRead() {
+  var st = readJson(PORTAL_STORE_FILE);
+  return (st && typeof st === 'object') ? st : {};
+}
+
+function portalProfileFor(company) {
+  var k = sameCompanyKey(company);
+  var all = portalRead().companies;
+  var p = (k && all && all[k]) ? all[k] : {};
+  return {
+    addresses: portalCleanList(p.addresses, ['label', 'text'], 8, 200),
+    contacts:  portalCleanList(p.contacts, ['name', 'role', 'phone', 'email'], 8, 140),
+    // Forty is a fleet, not a customer's whole history; an aircraft that has gone is
+    // removed from this list, and its tickets stay readable regardless.
+    fleet:     portalCleanList(p.fleet, ['sn', 'model', 'uin', 'cert'], 40, 400)
+  };
+}
+
+function portalLibraryArray() {
+  var st = portalRead();
+  var out = [];
+  (st.library instanceof Array ? st.library : []).slice(0, 120).forEach(function (r) {
+    if (!r || typeof r !== 'object') return;
+    var label = String(r.label || '').trim().slice(0, 160);
+    var url   = String(r.url || '').trim().slice(0, 400);
+    if (!label && !url) return;
+    // A stored link is only ever rendered as an href when it is http(s). Anything else
+    // — a bare id, a `javascript:` string — is shown as text and never made clickable.
+    if (url && !/^https?:\/\//i.test(url)) url = '';
+    out.push({
+      sku:   String(r.sku || '').trim().slice(0, 40),
+      label: label,
+      url:   url,
+      kind:  String(r.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
+    });
+  });
+  return out;
+}
+
+// GET getCustomerPortal — everything a signed-in customer's landing page needs, in ONE
+// round trip: their profile, the library, and the CR contact. A staff account gets an
+// empty answer rather than a refusal, exactly as getMyCustomer does.
+function getCustomerPortal(authEmail, wantedCompany) {
+  var email = usersKey(authEmail);
+  // An ADMIN may name a company, and only an admin: the Setup pane edits one company's
+  // fleet at a time and has to see what is already there before it replaces it. For
+  // everyone else the company is the session's, whatever the request says.
+  var company = (wantedCompany && isAdminEmail(email))
+    ? String(wantedCompany).trim()
+    : customerCompany(email);
+  var cr = portalRead().cr;
+  return {
+    status:     'ok',
+    company:    company,
+    profile:    company ? portalProfileFor(company) : null,
+    library:    portalLibraryArray(),
+    cr: {
+      name:     String((cr && cr.name) || '').trim(),
+      email:    String((cr && cr.email) || '').trim(),
+      whatsapp: String((cr && cr.whatsapp) || '').replace(/[^\d+]/g, '')
+    },
+    certified:  PORTAL_CERTIFIED_SKUS,
+    apiVersion: CONFIG.API_VERSION
+  };
+}
+
+// POST saveCustomerProfile — a customer writing THEIR OWN company's details.
+//
+// The company is derived from the session, never from the body: a customer cannot name
+// another company's profile even by sending one. This is the one write a customer has
+// besides a rating, and it touches only two lists — addresses and contacts. The fleet
+// and the UIN certificates come from the desk, because a certificate is a document WE
+// hold, not a claim to be self-attested.
+function saveCustomerProfile(params, authEmail) {
+  var email   = usersKey(authEmail);
+  var company = customerCompany(email);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+  var key = sameCompanyKey(company);
+  if (!key) throw new Error('Forbidden: this account has no customer scope.');
+
+  var addresses, contacts;
+  try { addresses = JSON.parse(params.addresses || '[]'); } catch (e) { addresses = []; }
+  try { contacts  = JSON.parse(params.contacts  || '[]'); } catch (e) { contacts  = []; }
+
+  var cleanAddr = portalCleanList(addresses, ['label', 'text'], 8, 200);
+  var cleanCont = portalCleanList(contacts, ['name', 'role', 'phone', 'email'], 8, 140);
+
+  return withRowLockOrThrow(function () {
+    var st = readJsonLocked(PORTAL_STORE_FILE);
+    if (!st || typeof st !== 'object') st = {};
+    if (!st.companies || typeof st.companies !== 'object') st.companies = {};
+    var prev = (st.companies[key] && typeof st.companies[key] === 'object') ? st.companies[key] : {};
+    // The fleet is the desk's, so it is carried across untouched.
+    st.companies[key] = {
+      addresses: cleanAddr,
+      contacts:  cleanCont,
+      fleet:     prev.fleet instanceof Array ? prev.fleet : [],
+      updatedAt: new Date().toISOString(),
+      updatedBy: usersKey(authEmail)
+    };
+    writeJson(PORTAL_STORE_FILE, st);
+    return { status: 'ok', profile: portalProfileFor(company), apiVersion: CONFIG.API_VERSION };
+  });
+}
+
+// POST rateIR — one rating, on one ticket, once.
+//
+// Two refusals carry the whole value of the number: it is only taken on a ticket that
+// is DELIVERED (a rating of work still in hand is an opinion about the delay), and only
+// from the company that owns the ticket. Re-rating overwrites the customer's own earlier
+// answer rather than stacking, so the average can never be inflated by pressing a star
+// twice.
+//
+// `updatedAt`/`updatedBy` are deliberately NOT touched. Those two fields mean "somebody
+// worked on this ticket", and companyActivity() reads them as work done — this is not.
+function rateIR(params, authEmail) {
+  var email   = usersKey(authEmail);
+  var company = customerCompany(email);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+
+  var ir = String(params.irNumber || '').trim();
+  var stars = Math.round(Number(params.stars));
+  if (!ir) return { status: 'error', message: 'Which IR is this rating for?' };
+  if (!(stars >= 1 && stars <= 5)) return { status: 'error', message: 'A rating is 1 to 5.' };
+  if (!customerOwnsIR(company, ir)) throw new Error('Forbidden: ' + ir + ' is not one of your tickets.');
+
+  var key = irKey(ir);
+  return withRowLockOrThrow(function () {
+    var store = readJsonLocked('irs.json') || {};
+    var rec = store[key];
+    if (!rec || typeof rec !== 'object') rec = {};
+    var stage = String(rec.status || '').trim();
+    if (stage !== 'Delivered') {
+      return { status: 'error',
+               message: 'This ticket is not closed yet, so there is nothing to rate.' };
+    }
+    rec.rating   = stars;
+    rec.ratedAt  = new Date().toISOString();
+    rec.ratedBy  = email;
+    store[key] = rec;
+    writeJson('irs.json', store);
+    return { status: 'ok', irNumber: key, rating: stars, apiVersion: CONFIG.API_VERSION };
+  });
+}
+
+// POST savePortalConfig (admin) — the Setup pane's editor for the CR contact, the
+// library and one company's fleet.
+//
+// `company` present means "this is a fleet edit"; absent means "these are the shared
+// lists". They are separate calls because they are separate panes, and a save that can
+// silently rewrite the other half is the kind of thing that is only noticed later.
+function savePortalConfig(params, authEmail) {
+  requireAdmin(authEmail);
+
+  var company = String(params.company || '').trim();
+
+  if (company) {
+    var fleet;
+    try { fleet = JSON.parse(params.fleet || '[]'); } catch (e) { fleet = []; }
+    var cleanFleet = portalCleanList(fleet, ['sn', 'model', 'uin', 'cert'], 40, 400);
+    // Only http(s) links are kept for a certificate, for the same reason library links
+    // are: the value ends up in an href on a public page.
+    cleanFleet.forEach(function (f) {
+      if (f.cert && !/^https?:\/\//i.test(f.cert)) f.cert = '';
+    });
+    var key = sameCompanyKey(company);
+    return withRowLockOrThrow(function () {
+      var st = readJsonLocked(PORTAL_STORE_FILE);
+      if (!st || typeof st !== 'object') st = {};
+      if (!st.companies || typeof st.companies !== 'object') st.companies = {};
+      var prev = (st.companies[key] && typeof st.companies[key] === 'object') ? st.companies[key] : {};
+      st.companies[key] = {
+        addresses: prev.addresses instanceof Array ? prev.addresses : [],
+        contacts:  prev.contacts  instanceof Array ? prev.contacts  : [],
+        fleet:     cleanFleet,
+        updatedAt: new Date().toISOString(),
+        updatedBy: usersKey(authEmail)
+      };
+      writeJson(PORTAL_STORE_FILE, st);
+      return { status: 'ok', fleet: portalProfileFor(company).fleet, apiVersion: CONFIG.API_VERSION };
+    });
+  }
+
+  var cr, library;
+  try { cr = JSON.parse(params.cr || '{}'); } catch (e) { cr = {}; }
+  try { library = JSON.parse(params.library || '[]'); } catch (e) { library = []; }
+  cr = (cr && typeof cr === 'object') ? cr : {};
+  if (!(library instanceof Array)) library = [];
+
+  return withRowLockOrThrow(function () {
+    var st = readJsonLocked(PORTAL_STORE_FILE);
+    if (!st || typeof st !== 'object') st = {};
+    st.cr = {
+      name:     String(cr.name  || '').trim().slice(0, 120),
+      email:    String(cr.email || '').trim().slice(0, 160),
+      whatsapp: String(cr.whatsapp || '').replace(/[^\d+]/g, '').slice(0, 20)
+    };
+    st.library = library.slice(0, 120).map(function (r) {
+      r = (r && typeof r === 'object') ? r : {};
+      var url = String(r.url || '').trim().slice(0, 400);
+      if (url && !/^https?:\/\//i.test(url)) url = '';
+      return {
+        sku:   String(r.sku   || '').trim().slice(0, 40),
+        label: String(r.label || '').trim().slice(0, 160),
+        url:   url,
+        kind:  String(r.kind  || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
+      };
+    }).filter(function (r) { return r.label && r.url; });
+    st.updatedAt = new Date().toISOString();
+    st.updatedBy = usersKey(authEmail);
+    writeJson(PORTAL_STORE_FILE, st);
+    return { status: 'ok', cr: st.cr, library: portalLibraryArray(), apiVersion: CONFIG.API_VERSION };
+  });
 }
 
 // POST inviteCustomer (admin) — onboard one customer: account, scope, invitation.
@@ -6175,7 +6451,8 @@ function getPassbook(irNumber, authEmail) {
 function narrowSentinelForCustomer(irNumber, stored, ownIRs) {
   var src = (stored && typeof stored === 'object') ? stored : {};
 
-  // Their own tickets' workflow state, and only the three facts the portal shows.
+  // Their own tickets' workflow state, and only the four facts the portal shows
+  // (the fourth is the customer's own rating — added in v20).
   if (String(irNumber) === '__IRS__') {
     var out = {};
     Object.keys(src).forEach(function (key) {
@@ -6187,6 +6464,9 @@ function narrowSentinelForCustomer(irNumber, stored, ownIRs) {
       if (rec.status   != null) one.status   = rec.status;
       if (rec.assignee != null) one.assignee = rec.assignee;
       if (rec.updatedAt!= null) one.updatedAt= rec.updatedAt;
+      // The customer's OWN rating, so the portal can show what they said and not offer
+      // them the stars again. Nothing else about the row leaves — no notes, no fields.
+      if (rec.rating   != null) one.rating   = rec.rating;
       out[key] = one;
     });
     return out;

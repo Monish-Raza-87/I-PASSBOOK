@@ -109,8 +109,14 @@ r.head('the owner\'s security decisions');
 // that filed it (one manager files for a whole team).
 // v17 = every post carries a PERMANENT number, 001, 002, 003 … forever, in the
 // subject and as the body's first line.
-r.ok('API_VERSION is 19, one IR can be named on its own',
-  /API_VERSION:\s*19\b/.test(code), (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
+// v19 = one IR can be given its reporter on its own (`person:ir:`).
+// v20 = THE CUSTOMER PORTAL: `getCustomerPortal`, `saveCustomerProfile`, `rateIR` and
+// the admin's `savePortalConfig`. Its data is a FOURTH store file, so the assertions
+// below are about the two things that are invisible until they are wrong — that a
+// customer's company is always the session's and never the body's, and that a rating is
+// only taken on a ticket that is actually closed.
+r.ok('API_VERSION is 20, the customer portal is served', /API_VERSION:\s*20\b/.test(code),
+  (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('a per-IR reporter correction exists and is keyed by the ticket',
   /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));
 // v18 = the reporter is the NAME on the ticket PAIRED WITH the address it came from,
@@ -123,6 +129,26 @@ r.ok('a correction is CR or admin, never a section grant',
   /function canDecideCorrection[\s\S]{0,400}getUserDepartments\(authEmail\)\.indexOf\('cr'\)/.test(code));
 r.ok('a customer is never handed the correction ledger',
   /company \? \{ items: \{\} \} : publicCorrections\(\)/.test(code));
+
+// ── v20, the customer portal. The two properties that nothing on screen would show:
+// a customer must not be able to name a company, and a rating is only an answer about
+// finished work.
+r.ok('a customer\'s own profile write takes the company from the session, never the body',
+  /function saveCustomerProfile\(params, authEmail\) \{[\s\S]{0,400}customerCompany\(email\)/.test(code) &&
+  !/function saveCustomerProfile[\s\S]{0,900}params\.company/.test(code));
+r.ok('...and it carries the desk\'s fleet across rather than replacing it',
+  /fleet:\s+prev\.fleet instanceof Array \? prev\.fleet : \[\]/.test(code));
+r.ok('a rating is refused on a ticket that is not Delivered',
+  /function rateIR[\s\S]{0,1200}!== 'Delivered'/.test(code));
+r.ok('...and it is scoped to the customer\'s own ticket',
+  /function rateIR[\s\S]{0,700}customerOwnsIR\(company, ir\)/.test(code));
+r.ok('...and a rating is not work on the ticket, so updatedAt is not touched',
+  !/rec\.updatedAt\s*=/.test((code.match(/function rateIR[\s\S]*?\n\}/) || [''])[0]));
+r.ok('only an admin may read another company\'s fleet',
+  /getCustomerPortal: function \(\) \{ return getCustomerPortal\(email, e\.parameter\.company\); \}/.test(code) &&
+  /function getCustomerPortal\(authEmail, wantedCompany\)[\s\S]{0,500}isAdminEmail\(email\)/.test(code));
+r.ok('the portal keeps its own store file',
+  /PORTAL_STORE_FILE = 'portal\.json'/.test(code));
 r.ok('the Postmaster is CR or admin, and re-checks inside',
   /function sendPostmaster\(params, authEmail\)\s*\{\s*[\s\S]{0,120}requireCorrectionRights\(authEmail\)/.test(code));
 r.ok('...it refuses a second post inside two hours',

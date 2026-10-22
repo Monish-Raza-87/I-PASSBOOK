@@ -177,8 +177,12 @@ const urls = [...portal.matchAll(/(SUPPORT_FORM_URL|FEEDBACK_FORM_URL)\s*=\s*'([
   .map(m => [m[1], m[2]]);
 r.ok('both form URLs are set, not left as placeholders',
   urls.length === 2 && urls.every(([, u]) => /^https:\/\/docs\.google\.com\/forms\//.test(u)), urls);
+// Four now, not three: the portal's Report tile opens its own panel with its own button,
+// and the hero, the support aside and the empty state each keep theirs. The property is
+// still "every report button on the page is wired to the ONE support form" — a fifth
+// button with no URL, or a second form URL, is what this catches.
 r.ok('the support form is wired to every report button on the page',
-  (portal.match(/wire\('raise[^']*',\s*SUPPORT_FORM_URL\)/g) || []).length === 3,
+  (portal.match(/wire\('raise[^']*',\s*SUPPORT_FORM_URL\)/g) || []).length === 4,
   (portal.match(/wire\('raise[^']*',[^)]*\)/g) || []));
 r.ok('...and the feedback form to the feedback button',
   /wire\('feedback',\s*FEEDBACK_FORM_URL\)/.test(portal));
@@ -202,5 +206,37 @@ r.ok('...and it names the door it does open, by the words on the page',
   !!invite && /First time here\?/i.test(invite[0]) && /choose your password/i.test(invite[0]));
 r.ok('...and that wording is on the page it names',
   /First time here\?/.test(portal));
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the owner can configure the portal, and only on a real read');
+// ═══════════════════════════════════════════════════════════════════════════════
+// The two silent faults here are both about a FORM, not a view:
+//   • The backend writes the CR and the library in ONE file write, so both saves carry
+//     both halves. A form painted on a read that never arrived would therefore post
+//     blanks over a real configuration, and the store would take them.
+//   • The fleet box is filled from the store, so choosing a company is a READ. An edit
+//     left in one company's box must not follow the select into the next one.
+const indexHtml = read('../index.html');
+r.ok('Setup gives the button somewhere to live', /id="setup-tools"/.test(indexHtml));
+r.ok('the button is painted only for an admin', /isAdmin\(\)\s*\?\s*'<button[^']*id="setup-portal"/.test(appJs));
+const setupAt = appJs.indexOf('function renderSetup()');
+r.ok('...and it is painted BEFORE renderSetup\'s own empty-list guard, so an empty list cannot hide it',
+  setupAt > 0 &&
+  appJs.indexOf('id="setup-portal"', setupAt) < appJs.indexOf('if (!allIRs.length) {', setupAt),
+  { setup: setupAt, button: appJs.indexOf('id="setup-portal"', setupAt),
+    guard: appJs.indexOf('if (!allIRs.length) {', setupAt) });
+r.ok('the form is gated on a successful read, with a way to try again',
+  /if \(!portalAdmin\.loaded\)[\s\S]{0,400}portal-retry/.test(appJs));
+r.ok('a save is refused while the read is missing or in flight',
+  /if \(!portalAdmin\.loaded \|\| portalAdmin\.busy\) return;/.test(appJs));
+r.ok('both shared saves carry the CR and the library, because one write covers both',
+  (appJs.match(/adminPost\('savePortalConfig', \{ cr: JSON\.stringify\(cr\), library: JSON\.stringify\(library\) \}\)/g) || []).length === 1);
+r.ok('the fleet save names its company, and needs one to be chosen',
+  /adminPost\('savePortalConfig', \{ company: company, fleet: JSON\.stringify\(fleetRows\) \}\)/.test(appJs) &&
+  /if \(!company\) \{ portalAdmin\.busy = false/.test(appJs));
+r.ok('the typed values are read BEFORE the panel repaints — a repaint takes them with it',
+  appJs.indexOf("const libBox  = document.getElementById('portal-library');") <
+  appJs.indexOf('portalAdmin.busy = true;', appJs.indexOf('function portalSave(')),
+  'the capture lines must sit above the busy/repaint');
 
 r.finish();

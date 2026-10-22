@@ -177,7 +177,52 @@ const STUB = `
       if (state === 'staff') return env({ status: 'ok', email: 'cradmin@indrones.com', customerOf: '', name: 'CR Admin', apiVersion: 8 });
       return env({ status: 'ok', email: 'reports@acmesurvey.example', customerOf: 'Acme Survey', name: 'Priya Nair', portalUrl: '', apiVersion: 8 });
     }
+    // The portal's landing read. The stub carries every shape the panels paint: two
+    // addresses, two contacts, one platform group and a video, and one aircraft with a
+    // UIN certificate — so the panels are measured with content in them rather than
+    // measured empty, which is the state that never breaks.
+    if (action === 'getCustomerPortal') {
+      if (state === 'staff') return env({ status: 'ok', company: '', profile: null, library: [], cr: {}, certified: [], apiVersion: 20 });
+      return env({
+        status: 'ok', company: 'Acme Survey', apiVersion: 20,
+        profile: {
+          addresses: [
+            { label: 'Head office', text: 'Plot 4, Survey Estate, Pune 411045' },
+            { label: 'Warehouse', text: 'Unit 9, Logistics Park, Pune 412114' }
+          ],
+          contacts: [
+            { name: 'Asha Rao', role: 'Operations head', phone: '+91 90000 00000', email: 'asha@acmesurvey.example' },
+            { name: 'Vikram Shah', role: 'Pilot', phone: '+91 90000 00001', email: 'vikram@acmesurvey.example' }
+          ],
+          fleet: [
+            { sn: 'S25G0001', model: 'SIGMA25G', uin: 'UIN-EXAMPLE-1', cert: 'https://example.com/cert.pdf' }
+          ]
+        },
+        library: [
+          { sku: 'SIGMA25G', label: 'SIGMA25G user manual', url: 'https://example.com/manual.pdf', kind: 'doc' },
+          { sku: 'SIGMA25G', label: 'Pre-flight checklist', url: 'https://example.com/checklist.pdf', kind: 'doc' },
+          { sku: 'SIGMA100', label: 'SIGMA100 LiDAR setup', url: 'https://example.com/lidar.pdf', kind: 'doc' },
+          { sku: '', label: 'Fleet training video', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', kind: 'video' }
+        ],
+        cr: { name: 'Customer Relations', email: 'cr@indrones.com', whatsapp: '919000000000' },
+        certified: ['SIGMA25G', 'SIGMA100']
+      });
+    }
     if (action === 'listIRs') return env({ status: 'ok', grid: [HEADERS].concat(ROWS) });
+    // The two customer writes. They echo what was posted, so the page is measured against
+    // a reply rather than against its own optimism — a save that never reached the server
+    // and a save that did look identical from inside the page.
+    var bp = (opts && opts.body && opts.body.get) ? opts.body : new URLSearchParams();
+    if (action === 'rateIR') {
+      return env({ status: 'ok', irNumber: bp.get('irNumber'), rating: Number(bp.get('stars')), apiVersion: 20 });
+    }
+    if (action === 'saveCustomerProfile') {
+      var parse = s => { try { return JSON.parse(s || '[]'); } catch (e) { return []; } };
+      return env({ status: 'ok', apiVersion: 20, profile: {
+        addresses: parse(bp.get('addresses')), contacts: parse(bp.get('contacts')),
+        fleet: [{ sn: 'S25G0001', model: 'SIGMA25G', uin: 'UIN-EXAMPLE-1', cert: 'https://example.com/cert.pdf' }]
+      } });
+    }
     if (action === 'getPassbook') {
       if (p.get('irNumber') === '__IRS__') {
         if (state === 'nostore') return env({ status: 'error', message: 'Could not read the app store just now.' });
@@ -474,14 +519,78 @@ try {
 
   await overflow('the list', WIDTHS);
 
+  // ════════════════════════════════════════════════════════════════════════════
+  console.log('\n— the portal landing: five doors, one panel at a time —');
+  // ════════════════════════════════════════════════════════════════════════════
+  // Measured rather than read, because the failure this catches is a panel that only
+  // LOOKS closed: a second panel visible under the first still reads fine in source.
+  const openPanels = `Array.from(document.querySelectorAll('#portal > .panel')).filter(p => !p.hidden).map(p => p.id)`;
+  ok('the customer lands on the space, with the tile row shown', await visible('#portal-tiles'));
+  ok('there are five doors', await evaluate(`document.querySelectorAll('#portal-tiles .tile').length`) === 5);
+  ok('IR History is the one open on arrival', JSON.stringify(await evaluate(openPanels)) === JSON.stringify(['reports']),
+    await evaluate(openPanels));
+  ok('the open door says so, rather than leaving a screen reader to guess',
+    await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="history"]').getAttribute('aria-pressed')`) === 'true');
+
+  // Opening a door CLOSES the other one — the same assertion, after a real press.
+  await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="library"]').click()`);
+  await SLEEP(120);
+  ok('pressing a door opens its panel and closes the one before it',
+    JSON.stringify(await evaluate(openPanels)) === JSON.stringify(['panel-library']),
+    await evaluate(openPanels));
+
+  // The library groups by SKU, in the product order, with General last — a flat list
+  // would hide which airframe a manual belongs to, which is the only reason it is filed.
+  const groups = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-group h3')).map(h => h.textContent)`);
+  ok('the library groups by airframe, in the order the products are sold',
+    groups.length === 3 && /^SIGMA25G/.test(groups[0]) && /^SIGMA100/.test(groups[1]) && /^General/.test(groups[2]),
+    JSON.stringify(groups));
+  ok('a video shows a thumbnail rather than a bare row of text',
+    await evaluate(`!!document.querySelector('#lib-body .lib-item.video img[src*="img.youtube.com/vi/"]')`));
+  ok('every library item opens in its own tab', await evaluate(
+    `Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.target === '_blank' && /noopener/.test(a.rel))`));
+
+  // Your details: the addresses we ship to, and the people we call.
+  await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="details"]').click()`);
+  await SLEEP(120);
+  ok('your details carries the addresses already on file, not an empty form',
+    await evaluate(`document.querySelectorAll('#addr-rows .detail-row').length`) === 2);
+  ok('...and the contacts too', await evaluate(`document.querySelectorAll('#cont-rows .detail-row').length`) === 2);
+  ok('...and Save is live, because the profile really loaded',
+    !(await evaluate(`document.getElementById('profile-save').disabled`)));
+  const fleetText = await evaluate(`document.getElementById('fleet-list').innerText`);
+  ok('an aircraft shows its own UIN, which is the compliance number the customer needs',
+    /UIN-EXAMPLE-1/.test(fleetText), fleetText);
+  ok('...and a certified airframe offers the certificate as a download',
+    await evaluate(`!!document.querySelector('#fleet-list a.cert[href$="cert.pdf"]')`), fleetText);
+
+  // Discuss your requirement: the desk's own line, and the named CR from the store.
+  await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="contact"]').click()`);
+  await SLEEP(120);
+  ok('the desk WhatsApp is on the page', await evaluate(`document.getElementById('contact-wa').href`).then(h => /^https:\/\/wa\.me\/91/.test(h)));
+  ok('the CR card names the person configured in the store, not a name in this file',
+    await visible('#cr-card') && /Customer Relations/.test(await evaluate(`document.getElementById('cr-card').innerText`)));
+  ok('...and the desk WhatsApp follows the store\'s number rather than the one hard-coded above it',
+    await evaluate(`document.getElementById('contact-wa').href === 'https://wa.me/919000000000'`),
+    await evaluate(`document.getElementById('contact-wa').href`));
+
+  await overflow('the portal panels', WIDTHS);
+
+  await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="history"]').click()`);
+  await SLEEP(100);
+
   // ── nothing on the page offers a way IN to somebody already in ──────────────
   // Found by looking at a screenshot, not by measuring: every width passed while the hero
   // still said "Sign in to your reports" to a customer who was signed in. The header had
   // been swapped and these two had not.
-  ok('the hero stops offering a way in, and points at the reports instead',
-    /your reports/i.test(await evaluate(`document.getElementById('hero-cta').textContent`))
+  // The destination moved with the portal shell: the customer's landing is now a set of
+  // four doors, so the hero points at the space rather than straight at the list. The
+  // property is unchanged — a signed-in customer is never offered a way IN, and the
+  // button goes somewhere they can actually reach.
+  ok('the hero stops offering a way in, and points at the customer\'s own space',
+    /your space/i.test(await evaluate(`document.getElementById('hero-cta').textContent`))
     && !/sign in/i.test(await evaluate(`document.getElementById('hero-cta').textContent`))
-    && await evaluate(`document.getElementById('hero-cta').getAttribute('href') === '#reports'`),
+    && await evaluate(`document.getElementById('hero-cta').getAttribute('href') === '#portal'`),
     await evaluate(`document.getElementById('hero-cta').outerHTML`));
   ok('the aside shows the account rather than an invitation to sign in',
     (await visible('#access-member')) && !(await visible('#access-visitor'))
@@ -527,10 +636,32 @@ try {
   ok('...and the caveat about Drive is stated rather than assumed',
     /Google Drive, which decides for itself/i.test(one), one);
 
+  // A rating is an answer about FINISHED work. On a ticket still in hand it would be an
+  // opinion about the delay, so the control must not be there at all.
+  ok('work still in hand offers no rating control',
+    !(await evaluate(`!!document.querySelector('#one-body .rate')`)), one);
+
   const back = await evaluate(`(() => { document.getElementById('back-to-list').click(); return true; })()`);
   await SLEEP(200);
   ok('and there is a way back to the list',
     back && (await visible('#reports-list')) && !(await visible('#report-one')));
+
+  // ── a closed ticket can be rated, once, and the server is what is told ──────
+  await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).find(b => b.querySelector('.ticket-ir').textContent === 'IR 204').click()`);
+  await waitFor(`document.querySelector('#one-body .record')`);
+  await SLEEP(200);
+  ok('a Delivered ticket offers five stars', await evaluate(`document.querySelectorAll('#one-body .rate .rate-star').length`) === 5);
+  ok('...as real buttons with a name, not five spans with a click handler',
+    await evaluate(`Array.from(document.querySelectorAll('#one-body .rate .rate-star')).every(b => b.tagName === 'BUTTON' && b.getAttribute('aria-label'))`));
+  await evaluate(`document.querySelector('#one-body .rate .rate-star[data-stars="4"]').click()`);
+  await SLEEP(250);
+  ok('pressing one sends the rating to the server, naming the ticket',
+    await evaluate(`window.__calls.indexOf('rateIR') >= 0`) && await evaluate(`document.querySelectorAll('#one-body .rate .rate-star[aria-pressed="true"]').length`) === 4);
+  ok('...and says so, rather than leaving the stars as the only answer',
+    /thank you/i.test(await evaluate(`document.getElementById('rate-msg') ? document.getElementById('rate-msg').textContent : ''`)));
+
+  await evaluate(`document.getElementById('back-to-list').click()`);
+  await SLEEP(200);
 
   await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).find(b => b.querySelector('.ticket-ir').textContent === 'IR 107').click()`);
   await waitFor(`document.querySelector('#one-body .record')`);

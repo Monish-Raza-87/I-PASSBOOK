@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v110';
+const APP_VERSION = 'v111';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -8945,10 +8945,279 @@ function renderInsights() {
 // The scan itself is unchanged and still runs over the WHOLE list, never the current
 // filter: a finding that vanished because somebody narrowed to one company would read
 // as "fixed". Only the owner and CR may record a decision, same rule as before.
+
+// ─── THE CUSTOMER PORTAL'S CONFIGURATION ─────────────────────────────────────
+// Three things live here and nowhere else: the CR person every customer may reach, the
+// shared Access Library, and ONE company's aircraft with their UIN certificates. It is
+// configuration, so it belongs in Setup.
+//
+// It is stored in `_store/portal.json` and NOT in this file, and that is not tidiness:
+// this repository is published, and the CR person's name and number are operating data.
+// The same reason the Inspector never writes a customer name into a comment.
+//
+// Held while its modal is open, and cleared when it closes; every save re-renders from
+// the backend's reply rather than from what was typed, so the screen can never show a
+// value the store did not take.
+let portalAdmin = {
+  loaded: false, busy: false, error: '',
+  cr: { name: '', email: '', whatsapp: '' },
+  library: [], company: '', fleet: []
+};
+
+// One line per record. `|` is the separator; a record is trimmed field by field and
+// padded to `width` so a short line does not shift the caller's indexes.
+function portalLines(text, width) {
+  return String(text || '').split('\n').map(line => {
+    if (!line.trim()) return null;
+    const parts = line.split('|').map(s => s.trim());
+    while (parts.length < width) parts.push('');
+    return parts.slice(0, width);
+  }).filter(Boolean);
+}
+
+// THE FORM IS ONLY EVER PAINTED FROM A SUCCESSFUL READ.
+//
+// That is the whole safety of this panel. Both saves write the WHOLE of what they cover
+// — the CR and the library in one file write, the fleet in another — so a form built on
+// a failed read would post blanks over a real configuration and the store would take it.
+// So `loaded` gates every control: a read that did not arrive disables the lot and says
+// so, and the owner presses Retry rather than pressing Save on an empty page.
+function portalAdminHTML() {
+  if (!portalAdmin.loaded) {
+    const failed = !!portalAdmin.error;
+    return `<div class="portal-gate">
+      <p>${failed
+        ? escHtml(portalAdmin.error)
+        : 'Reading the portal configuration…'}</p>
+      ${failed ? '<button type="button" class="btn btn-sm btn-secondary" id="portal-retry">Try again</button>' : ''}
+    </div>`;
+  }
+
+  const cr = portalAdmin.cr || {};
+  const companies = registerCompanies()
+    .slice()
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
+  const co = portalAdmin.company || '';
+  const libLines = (portalAdmin.library || [])
+    .map(l => [l.sku || '', l.label || '', l.url || '', l.kind || 'doc'].join(' | ')).join('\n');
+  const fleetLines = (portalAdmin.fleet || [])
+    .map(f => [f.sn || '', f.model || '', f.uin || '', f.cert || ''].join(' | ')).join('\n');
+
+  return `
+    <fieldset class="portal-group">
+      <legend>The CR contact every customer may reach</legend>
+      <p class="inward-options-hint">Shown in "Discuss Your Requirement", only when it is filled.
+      Leave every box blank and the card is hidden — a half-filled card is worse than none.</p>
+      <div class="portal-fields">
+        <label for="portal-cr-name">Name</label>
+        <input id="portal-cr-name" class="form-input" type="text" autocomplete="off"
+               value="${escHtml(cr.name || '')}">
+        <label for="portal-cr-email">Email</label>
+        <input id="portal-cr-email" class="form-input" type="email" autocomplete="off"
+               value="${escHtml(cr.email || '')}">
+        <label for="portal-cr-wa">WhatsApp</label>
+        <input id="portal-cr-wa" class="form-input" type="tel" autocomplete="off"
+               value="${escHtml(cr.whatsapp || '')}" placeholder="91…">
+      </div>
+    </fieldset>
+
+    <fieldset class="portal-group">
+      <legend>Access Library</legend>
+      <p class="inward-options-hint">One per line — <code>SKU | Label | URL | doc or video</code>.
+      SKU is <b>SIGMA25G</b>, <b>SIGMA 25 PRO</b>, <b>SIGMA100</b>, or blank for General.
+      A <b>video</b> shows its YouTube thumbnail. Only http(s) addresses are kept.</p>
+      <textarea id="portal-library" class="form-input portal-lines" rows="6" spellcheck="false"
+                autocomplete="off" placeholder="SIGMA25G | User manual | https://… | doc">${escHtml(libLines)}</textarea>
+    </fieldset>
+
+    <fieldset class="portal-group">
+      <legend>Aircraft and UIN certificates</legend>
+      <p class="inward-options-hint">One per line — <code>UAS SN | Model | UIN | Certificate URL</code>.
+      Saving replaces this company's whole list. The customer sees their own UIN and can open the
+      certificate; a certificate is a document we hold, so it is entered here and never by them.</p>
+      <label for="portal-co" class="portal-co-label">Company</label>
+      <select id="portal-co" class="form-input">
+        <option value="">— choose a company —</option>
+        ${companies.map(c => `<option value="${escHtml(c.name)}"${String(c.name) === co ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('')}
+      </select>
+      <textarea id="portal-fleet" class="form-input portal-lines" rows="4" spellcheck="false"
+                autocomplete="off" placeholder="S25G0001 | SIGMA25G | UIN… | https://…"
+                ${co ? '' : 'disabled'}>${escHtml(fleetLines)}</textarea>
+    </fieldset>`;
+}
+
+function paintPortalAdmin() {
+  const body = document.getElementById('portal-admin-body');
+  if (body) body.innerHTML = portalAdminHTML();
+  const libSave = document.getElementById('portal-lib-save');
+  if (libSave) libSave.disabled = !portalAdmin.loaded || portalAdmin.busy;
+  const fleetSave = document.getElementById('portal-fleet-save');
+  if (fleetSave) fleetSave.disabled = !portalAdmin.loaded || portalAdmin.busy || !portalAdmin.company;
+}
+
+// One read. `company` blank means "the shared half" (CR + library) and is also what the
+// fleet list is keyed by, so choosing a company is a second call, not a different screen.
+function loadPortalAdmin(company) {
+  portalAdmin.loaded = false;
+  portalAdmin.error  = '';
+  portalAdmin.busy   = true;
+  paintPortalAdmin();
+  const q = '?action=getCustomerPortal' + (company ? '&company=' + encodeURIComponent(company) : '');
+  return fetch(CONFIG.GAS_URL + q, { cache: 'no-store' })
+    .then(r => r.json())
+    .then(res => {
+      portalAdmin.busy = false;
+      if (!res || res.status !== 'ok') {
+        portalAdmin.error = (res && res.message) || 'The portal configuration could not be read.';
+        paintPortalAdmin();
+        return;
+      }
+      portalAdmin.cr      = res.cr || { name: '', email: '', whatsapp: '' };
+      portalAdmin.library = res.library || [];
+      portalAdmin.company = company || '';
+      portalAdmin.fleet   = (company && res.profile && res.profile.fleet) ? res.profile.fleet : [];
+      portalAdmin.loaded  = true;
+      paintPortalAdmin();
+    })
+    .catch(() => {
+      portalAdmin.busy  = false;
+      portalAdmin.error = 'Could not reach the backend.';
+      paintPortalAdmin();
+    });
+}
+
+function openPortalModal() {
+  if (!isAdmin()) { showToast('Only an admin can change the customer portal'); return; }
+  if (document.getElementById('portal-admin-modal')) return;
+
+  const modal = document.createElement('div');
+  modal.className = 'inward-options-modal';
+  modal.id = 'portal-admin-modal';
+  modal.innerHTML = `
+    <div class="inward-options-card">
+      <div class="inward-options-head">
+        <h3>Customer portal</h3>
+        <button type="button" class="inward-options-close" id="portal-close">&times;</button>
+      </div>
+      <p class="inward-options-hint">What the customer sees on their landing page: the contact they
+      may reach, the Access Library, and one company's aircraft with their UIN certificates. It is
+      stored privately — never in the app's published files.</p>
+      <div class="inward-options-body" id="portal-admin-body"></div>
+      <div class="inward-options-foot">
+        <button type="button" class="btn" id="portal-cancel">Close</button>
+        <button type="button" class="btn btn-secondary" id="portal-cr-save" disabled>Save contact</button>
+        <button type="button" class="btn btn-secondary" id="portal-lib-save" disabled>Save library</button>
+        <button type="button" class="btn btn-primary" id="portal-fleet-save" disabled>Save aircraft</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.addEventListener('click', e => {
+    if (e.target === modal) closePortalModal();
+  });
+  modal.addEventListener('click', e => {
+    const t = e.target;
+    if (!t || !t.id) return;
+    if (t.id === 'portal-close' || t.id === 'portal-cancel') { closePortalModal(); return; }
+    if (t.id === 'portal-retry') { loadPortalAdmin(portalAdmin.company); return; }
+    if (t.id === 'portal-cr-save') { portalSave('cr'); return; }
+    if (t.id === 'portal-lib-save') { portalSave('library'); return; }
+    if (t.id === 'portal-fleet-save') { portalSave('fleet'); return; }
+  });
+  // Choosing a company is a READ, so it re-locks the form until the fleet arrives. The
+  // fleet box is then filled from the store, never from what was typed — an edit in one
+  // company that was never saved must not follow the select into the next one.
+  modal.addEventListener('change', e => {
+    if (e.target && e.target.id === 'portal-co') loadPortalAdmin(String(e.target.value || ''));
+  });
+
+  loadPortalAdmin('');
+}
+
+function closePortalModal() {
+  document.getElementById('portal-admin-modal')?.remove();
+  portalAdmin = { loaded: false, busy: false, error: '',
+                  cr: { name: '', email: '', whatsapp: '' },
+                  library: [], company: '', fleet: [] };
+}
+
+// POST one half. Both shared saves carry the CR AND the library, because the backend
+// writes them in one file write — so the caller's other box is always sent as it stands,
+// and the form is only ever on screen when that stands on a real read (see the gate).
+function portalSave(kind) {
+  if (!portalAdmin.loaded || portalAdmin.busy) return;
+
+  // READ THE BOXES BEFORE THE PANEL REPAINTS. paintPortalAdmin() replaces the body's
+  // innerHTML to lock the buttons, and that takes every typed value with it — reading
+  // afterwards would post the store's own values back and look like a save that did
+  // nothing.
+  const nameEl  = document.getElementById('portal-cr-name');
+  const emailEl = document.getElementById('portal-cr-email');
+  const waEl    = document.getElementById('portal-cr-wa');
+  const libBox  = document.getElementById('portal-library');
+  const fleetBox = document.getElementById('portal-fleet');
+
+  const cr = {
+    name:     nameEl  ? String(nameEl.value  || '').trim() : (portalAdmin.cr.name || ''),
+    email:    emailEl ? String(emailEl.value || '').trim() : (portalAdmin.cr.email || ''),
+    whatsapp: waEl    ? String(waEl.value    || '').trim() : (portalAdmin.cr.whatsapp || '')
+  };
+  const library = portalLines(libBox ? libBox.value : '', 4).map(r => ({
+    sku: r[0] || '', label: r[1] || '', url: r[2] || '', kind: r[3] || 'doc'
+  }));
+  const fleetRows = portalLines(fleetBox ? fleetBox.value : '', 4).map(r => ({
+    sn: r[0] || '', model: r[1] || '', uin: r[2] || '', cert: r[3] || ''
+  }));
+
+  portalAdmin.busy = true;
+  paintPortalAdmin();
+  const done = (res, what) => {
+    portalAdmin.busy = false;
+    paintPortalAdmin();
+    if (!res || res.status !== 'ok') {
+      showToast((res && res.message) || 'Could not save the ' + what);
+      return;
+    }
+    if (kind === 'fleet') {
+      portalAdmin.fleet = res.fleet || [];
+    } else {
+      portalAdmin.cr = res.cr || portalAdmin.cr;
+      portalAdmin.library = res.library || [];
+    }
+    portalAdmin.loaded = true;
+    paintPortalAdmin();
+    showToast('Saved — the portal shows it now');
+  };
+
+  if (kind === 'fleet') {
+    const company = portalAdmin.company;
+    if (!company) { portalAdmin.busy = false; paintPortalAdmin(); showToast('Choose a company first'); return; }
+    adminPost('savePortalConfig', { company: company, fleet: JSON.stringify(fleetRows) })
+      .then(r => done(r, 'aircraft list'));
+    return;
+  }
+
+  // Both halves. The boxes are read TOGETHER, so pressing either button saves what both
+  // say — which is exactly what the screen shows, and why a failed read locks both.
+  adminPost('savePortalConfig', { cr: JSON.stringify(cr), library: JSON.stringify(library) })
+    .then(r => done(r, kind === 'cr' ? 'contact' : 'library'));
+}
+
 function renderSetup() {
   if (currentView !== 'setup') return;
   const body = document.getElementById('setup-body');
   if (!body) return;
+
+  // The portal's configuration is the one thing on this pane that does not depend on the
+  // IR list, so its button is painted BEFORE the list guard below — an empty list is a
+  // reason to show a skeleton, not a reason to lock an admin out of the CR contact.
+  const tools = document.getElementById('setup-tools');
+  if (tools) {
+    tools.innerHTML = isAdmin()
+      ? '<button type="button" class="btn btn-sm btn-secondary" id="setup-portal">&#9881; Customer portal</button>'
+      : '';
+  }
+
   if (!allIRs.length) {
     body.innerHTML = '<div class="insights-skeleton"></div><div class="insights-skeleton"></div>';
     return;
@@ -9214,6 +9483,12 @@ function onPaneClick(e) {
     }
     if (e.target && e.target.id === 'ins-copy-serial') {
       copyText(e.target.dataset.list || '');
+      return;
+    }
+    // Configuration, not a scan — and it is the one Setup control that works with no
+    // IR list loaded at all (the button is painted before renderSetup's guard).
+    if (e.target && e.target.id === 'setup-portal') {
+      openPortalModal();
       return;
     }
     // ── The two bots. The Inspector's scan is the SAME pure function the pane

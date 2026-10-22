@@ -1431,6 +1431,10 @@
           <div class="list-toolbar">
             <div class="list-toolbar-top">
               <span class="list-title" data-i18n="nav.setup">Setup</span>
+              <!-- Filled by renderSetup(), and only for an admin. The customer portal's
+                   settings are configuration, so they sit beside the pane's own title
+                   rather than taking a block of the scan. -->
+              <span id="setup-tools" class="setup-tools"></span>
             </div>
           </div>
           <div id="setup-body" class="setup-body"></div>

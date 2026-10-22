@@ -672,11 +672,11 @@ user could loop it and take out password recovery for the whole company.
 
 **Five tabs**, all powered by one `?action=listUsers` call:
 
-- **People & departments** — a people × departments tick matrix. One "Save all" posts
-  the grid, and unchanged rows are skipped, so a 19-person grid with one edit is one
-  write. Per-row actions: reset password, enable/disable. A customer's row carries a
-  green `customer · <Company>` badge, holds **no ticks**, and says in a full-width row
-  that department access does not apply to them and where to manage them instead.
+- **Employees & departments** — an employee × departments tick matrix. Customers are
+  filtered out of this list entirely; they are a different kind of account, scoped by
+  company and with no password or departments. One "Save all" posts the grid, and
+  unchanged rows are skipped, so a 19-person grid with one edit is one write. Per-row
+  actions: reset password, enable/disable.
 - **Departments** — the department → section grant grid (seven checkboxes, **A–G**,
   with the labels taken from `sectionLetter()`) plus a **Triage** checkbox rendered after them and labelled `TR`, so it reads as a
   different kind of thing, plus a member count. *"Need one person to edit one
@@ -733,13 +733,14 @@ so inviting one **asks first**, in words, and names the field that fixes it (the
 yet, and refusing would make the one customer you cannot onboard the one you just created a
 record for.
 
-### A customer's row cannot be emptied by the grid
+### Customers are not in the employee grid at all
 
-`savePeopleMatrix()` **skips customer rows outright**, and that is not an optimisation.
-A customer holds no department ticks, so their row is an empty set — and an empty set
-in that grid means "remove everything". Writing it would be a silent change to an
-account the grid cannot manage in the first place. The row exists there only so an
-admin can find them; the Customers tab is where they are changed.
+`renderPeopleTab()` **filters customer rows out**, and `savePeopleMatrix()` skips them
+defensively as well. A customer holds no department ticks, so their row would be an
+empty set — and an empty set in that grid means "remove everything". Writing it would be
+a silent change to an account the grid cannot manage in the first place. The separation
+is also the point: employees are managed in **Employees & departments**, customers in
+**Customers**.
 
 ### The page paints from the last saved copy, then refreshes
 

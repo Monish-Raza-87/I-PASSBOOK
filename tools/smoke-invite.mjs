@@ -751,7 +751,7 @@ r.head('changing an existing customer\'s company is a scope change, and posts as
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-r.head('the People tab cannot manage a customer, and says so instead of pretending');
+r.head('customers and employees are separate lists in User access');
 // ═══════════════════════════════════════════════════════════════════════════════
 {
   const { A, posts } = boot(STAFF.concat([CUSTOMER]), IRS);
@@ -760,14 +760,13 @@ r.head('the People tab cannot manage a customer, and says so instead of pretendi
   A.T.renderPeopleTab();
   const html = panel.innerHTML;
 
-  r.ok('a customer is badged with their scope rather than looking like a colleague',
-    /acc-badge-cust/.test(html) && /customer · Acme Survey/.test(html));
-  // Two staff × one department = two ticks. The customer contributes none, which is the
-  // assertion: a tick in that row would be an offer the app cannot honour.
-  r.ok('...and their row has NO department ticks to click',
+  r.ok('the employees grid does NOT contain the customer at all',
+    !/ops@acme\.in/.test(html) && !/Asha Rao/.test(html) && !/customer · Acme Survey/.test(html));
+  // Two staff × one department = two ticks. The customer contributes none, and is not
+  // even rendered — a tick in that row would be an offer the app cannot honour.
+  r.ok('...so only the two employees have department ticks',
     (html.match(/acc-dept-tick/g) || []).length === 2, (html.match(/acc-dept-tick/g) || []).length);
-  r.ok('...and it says where to manage them instead',
-    /Manage it in the <em>Customers<\/em> tab/.test(html) ||
+  r.ok('...and the tab says where customers are managed',
     /Customers<\/em> tab/.test(html));
 
   // The dangerous half: an empty tick set for a customer must never be written as
@@ -804,7 +803,8 @@ r.head('the tab is reachable, and the panel renderer knows it');
 // ═══════════════════════════════════════════════════════════════════════════════
 {
   const appCode = read('../app.js');
-  r.ok('the strip offers a Customers tab',
+  r.ok('the strip names the employee list and the customer list separately',
+    /data-tab="people">Employees &amp; departments<\//.test(appCode) &&
     /data-tab="customers">Customers<\//.test(appCode));
   r.ok('...and renderAccessPanel has a branch for it, so tapping it paints something',
     /else if \(accessTab === 'customers'\) renderCustomersTab\(\);/.test(appCode));

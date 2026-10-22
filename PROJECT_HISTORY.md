@@ -1189,7 +1189,33 @@ digits, three resends are allowed, and the fourth is capped with the CR contact.
 
 ---
 
-## 15. Future Roadmap (Planned)
+## 15. v114 — customers leave the employee grid (2026-10-22)
+
+### What he asked for
+
+The User access desk must keep **customers and employees separate**. A customer is not a
+colleague with an empty department set, and the People & departments matrix must not show
+them at all.
+
+### What shipped
+
+- The first tab is now **Employees & departments**, and `renderPeopleTab()` filters out
+  every account with a `customerOf` scope before painting. Customers are managed only in
+  the **Customers** tab.
+- The customer-specific badge and full-width “manage it in Customers” row are gone from
+  the employee matrix, because the row itself is gone. `savePeopleMatrix()` still skips
+  customers defensively.
+- The customer invite copy no longer says the customer “sets their own password”; it says
+  the code is emailed on demand.
+- Docs and the invite suite now assert the separation instead of asserting the old badge.
+
+### Verification
+
+`node tools/smoke-invite.mjs` and `node tools/smoke-all.mjs` green.
+
+---
+
+## 16. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

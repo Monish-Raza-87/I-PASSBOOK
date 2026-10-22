@@ -139,7 +139,7 @@ window.FAQ_CONTENT = {
           "blocks": [
             {
               "t": "p",
-              "html": "Eight and a half hours from the moment it is emailed — a working day. The clock\nstarts when the mail is sent, so a code requested at 2pm is good until 10:30pm.\nWithin that window the <strong>same</strong> code works for every sign-in; you do\nnot need a fresh one each time."
+              "html": "Eight hours from the moment it is emailed — a working day. The clock\nstarts when the mail is sent, so a code requested at 2pm is good until 10pm.\nWithin that window the <strong>same</strong> code works for every sign-in; you do\nnot need a fresh one each time."
             }
           ]
         },

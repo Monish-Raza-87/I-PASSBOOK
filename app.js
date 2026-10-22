@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v111';
+const APP_VERSION = 'v112';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1772,6 +1772,13 @@ window.addEventListener('load', () => {
   if (window.location.protocol === 'file:') {
     alert('⚠️ You are running this app directly from a local file. Login and the backend will NOT work unless you serve the app via a local server (http://localhost) or deploy it to GitHub Pages.');
   }
+
+  // A CUSTOMER'S LOAD ENDS IN THEIR OWN SPACE, and it ends BEFORE the update watch,
+  // the session restore and the intro, because all three of those are the staff
+  // screen's business. The check is "a customer session and no staff one": a member
+  // of staff who once opened the portal on this device must still reach their own
+  // app, so the staff session wins when both are present.
+  if (!hasStoredSession() && hasCustomerSession()) { enterCustomerMode(); return; }
 
   // Start the update watch FIRST, above every early return below. Two of the three
   // paths out of this handler — an already-signed-in device and a Google return — are
@@ -3673,9 +3680,11 @@ function wireCustomerForm() {
   });
 }
 
-// The session lands in localStorage and the customer is handed to the portal, which
-// finds the token already there and boots straight into their own tickets instead of
-// asking them to sign in a second time.
+// The session lands in localStorage and the screen becomes the portal, HERE — the
+// URL does not move. It used to be `location.href = 'customer.html'`, and the owner
+// rejected that on 2026-10-22: a customer should arrive at the app's own address,
+// sign in there, and stay there. The two files that draw the portal are fetched at
+// this moment (and only at this moment), so an employee never loads them.
 function finishCustomerAuth(email, d) {
   try {
     localStorage.setItem('ipbc_session', d.sessionToken);
@@ -3683,8 +3692,83 @@ function finishCustomerAuth(email, d) {
       email: email,
       customerOf: (d && d.access && d.access.customerOf) || '',
     }));
-  } catch (e) { /* private mode — the redirect will ask again, which is honest */ }
-  location.href = 'customer.html';
+  } catch (e) { /* private mode — the portal will ask for a code again, which is honest */ }
+  enterCustomerMode();
+}
+
+// True when this device holds a CUSTOMER's session. Deliberately a different key
+// pair from the staff one: the two identities share an origin and nothing else.
+function hasCustomerSession() {
+  try { return !!localStorage.getItem('ipbc_session'); } catch (e) { return false; }
+}
+
+// ─── CUSTOMER MODE ───────────────────────────────────────────────────────────
+// index.html becomes the customer's space. Everything the staff shell put on the
+// page is removed — the container, the sign-in screen, the modals, the code view —
+// and the portal is mounted into a fresh root in its place.
+//
+// THE APP'S STYLESHEETS GO TOO, and that is not tidiness. industrial.css claims
+// `.btn`, `.card` and `.link-btn` BY ID (see that file's header), and base.css owns
+// `body`, so leaving them linked would let the staff look reach into the portal's
+// markup through class names they happen to share. The portal carries its own token
+// set (portal.css) and expects to be the only stylesheet in the document.
+function enterCustomerMode() {
+  if (document.documentElement.dataset.mode === 'customer') return;
+  document.documentElement.dataset.mode = 'customer';
+
+  // The portal has ONE light palette and one dark one. This app's prepaint script can
+  // also have written 'cream', which the portal cannot honour — the loader maps it to
+  // light for exactly this reason, and the same mapping is made here so the two entry
+  // points cannot disagree about what a stored preference means.
+  const chosen = document.documentElement.dataset.theme;
+  if (chosen === 'cream') document.documentElement.dataset.theme = 'light';
+  document.title = 'Indrones Customer Space';
+
+  document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+    if ((link.getAttribute('href') || '').indexOf('portal.css') === -1) link.remove();
+  });
+  // The whole staff document, in one statement. #app-container is display:none until
+  // showApp() and the sign-in screen is a sibling of it, so removing the container
+  // alone would leave the door the customer just came through standing behind them.
+  document.body.innerHTML = '';
+  document.body.className = '';
+  document.body.removeAttribute('style');
+
+  const root = document.createElement('div');
+  root.id = 'portal-root';
+  document.body.appendChild(root);
+
+  // Versioned, so a stale-while-revalidate cache cannot pair this build's app.js
+  // with an older portal.js.
+  const v = encodeURIComponent(APP_VERSION);
+  if (!document.querySelector('link[data-portal-css]')) {
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'portal.css?v=' + v;
+    css.setAttribute('data-portal-css', '1');
+    document.head.appendChild(css);
+  }
+
+  const mount = () => {
+    if (window.CustomerPortal) window.CustomerPortal.mount(root);
+  };
+  if (window.CustomerPortal) { mount(); return; }
+
+  const js = document.createElement('script');
+  js.src = 'portal.js?v=' + v;
+  js.onload = mount;
+  // An empty page with no explanation is the one outcome worth a sentence. There is
+  // no retry button, because the thing that failed is the fetch and a reload is the
+  // retry — the customer's session is still in storage and survives it.
+  js.onerror = () => {
+    root.innerHTML = '<p style="padding:2rem;font:15px/1.5 system-ui,sans-serif">' +
+      'Could not load your space. Check your connection, then reload this page.</p>';
+  };
+  // Into the HEAD, not the body: the body is the portal's, and it is asserted to hold
+  // nothing but #portal-root. A stray <script> element there is not merely untidy — it is
+  // the difference between "the staff shell is gone" and "something else is still on the
+  // page", which is exactly the check that has to stay readable.
+  (document.head || document.body).appendChild(js);
 }
 
 // Which of the customer card's two faces is up: the form, or the way in for someone
@@ -3700,6 +3784,16 @@ function paintCustomerDoor() {
   form.style.display = has ? 'none' : '';
   session.style.display = has ? '' : 'none';
   if (!has) wireCustomerForm();
+  // "Open the Customer Space" is a door OUT of the sign-in screen and INTO the portal
+  // in the same document — not a navigation. Wired here, on every paint, because the
+  // card that carries it is shown and hidden as the customer's session comes and goes.
+  // (Its href is the app root, so even an unwired click lands in the same place after
+  // one reload.)
+  const openBtn = document.getElementById('customer-space-open');
+  if (openBtn && !openBtn.dataset.wired) {
+    openBtn.dataset.wired = '1';
+    openBtn.addEventListener('click', ev => { ev.preventDefault(); enterCustomerMode(); });
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
@@ -3999,7 +4093,9 @@ function wireCodeView() {
 // Verify. WHICH REQUEST IS MADE IS THE ONLY THING THE DOOR CHANGES: a customer's code is
 // checked by the same backend action the staff door uses (`login` with no password IS
 // the OTP door), but a customer's session must be written under the CUSTOMER's keys and
-// hand off to customer.html — which is finishCustomerAuth's job and not finishAuth's.
+// hand off to the portal in place — which is finishCustomerAuth's job and not
+// finishAuth's. Since v112 that hand-off is a mode change, not a navigation: the URL
+// stays the one the customer typed.
 function submitCode() {
   const code = codeValue();
   if (!/^\d{6}$/.test(code)) { setCodeError('Enter the 6-digit code from your email.'); return; }
@@ -6005,10 +6101,13 @@ let companyOpenKey = '';        // '' = the register; a key = that company's scr
 let companyTab = 'overview';    // overview | irs | people | activity
 let unregOpen = false;          // "Not in the register yet" starts folded away
 
-// The portal sits beside this app, so the app's own directory is the answer — the same
-// derivation the backend's customerPortalUrl() makes from CONFIG.APP_URL. Not a
-// constant, because this page is served from GitHub Pages and from a local preview,
-// and the link has to be the one that works from wherever it was copied.
+// The portal IS this app's address now (v112): index.html carries the customer door and
+// the portal opens in place of the staff shell, so the link a customer is handed is the
+// app root, not a separate page. The backend builds the same URL from CONFIG.APP_URL in
+// customerPortalUrl(), and the two must agree — an invite that pointed somewhere else
+// would be a second address for one room. Not a constant, because this page is served
+// from GitHub Pages and from a local preview, and the link has to be the one that works
+// from wherever it was copied.
 function customerPortalLink() {
   // `pathname` and `origin` are defaulted rather than trusted: a browser always has
   // both, but a fixture that lifts this panel out of the source (tools/render-fixture.mjs)
@@ -6017,7 +6116,7 @@ function customerPortalLink() {
   // and keeps a lifted screen photographable.
   const here = String(location.pathname || '/');
   const origin = location.origin || (String(location.protocol || 'https:') + '//' + String(location.hostname || 'localhost'));
-  return origin + here.replace(/[^/]*$/, '') + 'customer.html';
+  return origin + here.replace(/[^/]*$/, '');
 }
 
 // ─── THE COMPANY REGISTER (v96) ──────────────────────────────────────────────
@@ -9025,7 +9124,9 @@ function portalAdminHTML() {
       <legend>Access Library</legend>
       <p class="inward-options-hint">One per line — <code>SKU | Label | URL | doc or video</code>.
       SKU is <b>SIGMA25G</b>, <b>SIGMA 25 PRO</b>, <b>SIGMA100</b>, or blank for General.
-      A <b>video</b> shows its YouTube thumbnail. Only http(s) addresses are kept.</p>
+      <b>For a video the SKU is ignored</b>: every video, whatever it was filed against, is
+      shown on one <b>Training videos</b> shelf after the aircraft. A video shows its YouTube
+      thumbnail. Only http(s) addresses are kept.</p>
       <textarea id="portal-library" class="form-input portal-lines" rows="6" spellcheck="false"
                 autocomplete="off" placeholder="SIGMA25G | User manual | https://… | doc">${escHtml(libLines)}</textarea>
     </fieldset>

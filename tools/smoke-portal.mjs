@@ -228,13 +228,14 @@ r.head('the invitation names a door that exists, and mails no credential');
 // ═══════════════════════════════════════════════════════════════════════════════
 const invite = backend.match(/function inviteCustomer\(params, authEmail\)[\s\S]*?\n\}/);
 r.ok('inviteCustomer is in the backend', !!invite);
-r.ok('...and it sends no code of any kind — a fresh account cannot redeem a login code',
+r.ok('...and it sends no code of any kind — the customer asks for one when they sign in',
   !!invite && !/issueAuthCode/.test(invite[0]) && !/\b\d{6}\b/.test(invite[0]),
   (invite && (invite[0].match(/\b\d{6}\b/) || [])[0]));
-r.ok('...and it names the door it does open, by the words on the page',
-  !!invite && /First time here\?/i.test(invite[0]) && /choose your password/i.test(invite[0]));
-r.ok('...and that wording is on the page it names',
-  /First time here\?/.test(portal));
+r.ok('...and it names the code door, not a password to choose',
+  !!invite && /press Continue/i.test(invite[0]) && /sign-in code we email you/i.test(invite[0]) &&
+  !/first time here|choose your (own )?password/i.test(invite[0]));
+r.ok('...and the page it names has no set-password door either',
+  !/First time here\?/.test(portal) && !/signin-firsttime/.test(portal) && !/newpass-field/.test(portal));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 r.head('the owner can configure the portal, and only on a real read');
@@ -267,5 +268,45 @@ r.ok('the typed values are read BEFORE the panel repaints — a repaint takes th
   appJs.indexOf("const libBox  = document.getElementById('portal-library');") <
   appJs.indexOf('portalAdmin.busy = true;', appJs.indexOf('function portalSave(')),
   'the capture lines must sit above the busy/repaint');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the code can be asked for again — three times, then a human');
+// ═══════════════════════════════════════════════════════════════════════════════
+// The owner, 2026-10-22: "Resend is available but not to spam, it can only be sent 3
+// times. If more than that then needs to reach out Indrones CR."
+//
+// The number is checked AGAINST THE BACKEND'S OWN, because the two are the same rule
+// seen from two sides: the backend refuses a fourth issue per email per hour, and this
+// link stops offering a fourth. If they ever drift, the link promises a mail the server
+// will not send — which looks exactly like a broken account.
+const resent = portal.match(/const RESEND_MAX\s*=\s*(\d+)/);
+const codeCap = backend.match(/var CODE_MAX_PER_HOUR\s*=\s*(\d+)/);
+r.ok('the portal names its resend cap', !!resent, resent && resent[0]);
+r.ok('...and it is the backend\'s own per-email budget, not a second opinion',
+  !!resent && !!codeCap && Number(resent[1]) === Number(codeCap[1]),
+  { portal: resent && resent[1], backend: codeCap && codeCap[1] });
+
+r.ok('the link exists in the sheet and starts hidden',
+  /id="resend-line" hidden/.test(portal) && /id="signin-resend"/.test(portal));
+r.ok('it is wired in wirePortal, where a mounted sheet can actually reach it',
+  /\$\('signin-resend'\)\.addEventListener\('click'/.test(portal));
+// Step 1 already sends from the button in the middle of the sheet; a second send link
+// there would be two controls for one action, one of which silently does nothing.
+r.ok('...and it only appears once a code is outstanding',
+  /const show = flow\.step === 2;/.test(portal) && /\$\('resend-line'\)\.hidden = !show;/.test(portal));
+r.ok('...and it stops offering itself at the cap, in a sentence that says who to ask',
+  /if \(flow\.resent >= RESEND_MAX\) \{[\s\S]{0,120}crLine\(\)/.test(portal) &&
+  /This code has been sent three times/.test(portal));
+
+// The CR person's address is Indrones operating data and this repository is published;
+// it lives in the portal's configuration (_store/portal.json), never in a source file.
+// The check is on crLine's OWN body, because the page legitimately prints the company's
+// public contact details elsewhere — what must never be typed here is who to write to
+// when the three codes are gone, since that is a named person.
+const crBody = (portal.match(/function crLine\(\) \{([\s\S]*?)\n  \}/) || [])[1] || '';
+r.ok('crLine reads the Customer Relations contact from the configuration',
+  /PORTAL_DATA && PORTAL_DATA\.cr/.test(crBody), crBody.slice(0, 80));
+r.ok('...and types no address or number of its own',
+  crBody.length > 0 && !/@/.test(crBody) && !/\+?\d[\d ]{6,}/.test(crBody));
 
 r.finish();

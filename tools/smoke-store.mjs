@@ -355,6 +355,12 @@ const ctx = {
       const ymd = p.day + '-' + MONTHS[Number(p.month) - 1] + '-' + p.year;
       if (fmt === 'dd-MMM-yyyy') return ymd;
       if (fmt === 'dd-MMM-yyyy HH:mm') return ymd + ' ' + p.hour + ':' + p.minute;
+      // The clock time a sign-in code dies, printed in the mail. 12-hour with no
+      // leading zero, which is what Apps Script's 'h:mm a' produces.
+      if (fmt === 'h:mm a') {
+        const h24 = Number(p.hour);
+        return (h24 % 12 === 0 ? 12 : h24 % 12) + ':' + p.minute + ' ' + (h24 < 12 ? 'AM' : 'PM');
+      }
       throw new Error('unmocked date format: ' + fmt);
     },
   },
@@ -1230,7 +1236,7 @@ r.ok('an app store carrying a file upload is refused', !!sentinelUpload && /cann
 
 // ── The emailed sign-in code ──────────────────────────────────────────────────
 // Sign-in is TWO steps now: the password, then a 6-digit code mailed to the
-// address. The code is deliberately REUSABLE for a whole working day (8h30m), so
+// address. The code is deliberately REUSABLE for the whole 8-hour window, so
 // someone signing in on a phone and then a desktop types it once. These run the
 // real doLoginPassword against the real Drive-fake, because "one code covers the
 // day" is a claim about stored state, not about source text.
@@ -1270,14 +1276,15 @@ r.ok('it reports that a code WAS sent, since there was none to reuse',
 const first = liveLoginCode(OTPUSER);
 r.ok('a login-purpose code is now in the store', !!first, codeEntries().length + ' entries');
 r.ok('it is six digits', /^\d{6}$/.test(first.code), first.code);
-r.ok('and it lives 8h30m — one working day, not the reset window',
-  first.expiresAt - first.createdAt === 510 * 60 * 1000,
+r.ok('and it lives 8 hours — the sign-in window, not the reset window',
+  first.expiresAt - first.createdAt === 480 * 60 * 1000,
   (first.expiresAt - first.createdAt) / 60000 + ' min vs reset ' + 15);
 r.ok('the code was EMAILED, and the mail carries it',
   mails.length === 1 && mails[0].to === OTPUSER && mails[0].body.indexOf(first.code) > -1,
   mails.map(m => m.to + ' / ' + m.subject));
-r.ok('the mail gives a DURATION from the send, not "end of the working day"',
-  /valid for 8:30 hours from now/.test(mails[0].body) &&
+r.ok('the mail gives a DURATION and the clock time it dies, not "end of the working day"',
+  /8:00 from now/.test(mails[0].body) &&
+  /until \d{1,2}:\d{2} [AP]M/.test(mails[0].body) &&
   !/end of the working day|every sign-in today/.test(mails[0].body), mails[0].body);
 
 // A wrong code is refused, and says how much rope is left.
@@ -2470,7 +2477,7 @@ mkUser(DEV);
 const DEVCODE = '135790';
 setCodes(codeEntries().concat([{
   email: DEV, code: DEVCODE, purpose: 'login',
-  createdAt: Date.now(), expiresAt: Date.now() + 510 * 60 * 1000, attempts: 0, used: false,
+  createdAt: Date.now(), expiresAt: Date.now() + 480 * 60 * 1000, attempts: 0, used: false,
 }]));
 reexec();
 

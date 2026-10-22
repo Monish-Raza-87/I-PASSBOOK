@@ -1,5 +1,5 @@
 # I-PASSBOOK Project Milestone Log
-*Last Updated: 2026-10-17*
+*Last Updated: 2026-10-22*
 
 This document serves as the authoritative record of architectural changes, bug fixes, and feature blueprints implemented during the recent development cycle.
 
@@ -43,7 +43,7 @@ A specialized forensic tool for ArduPilot `.bin` files, integrated as a Global H
 
 ### The Passwordless Daily Door (now with a working backend)
 - **The 2026-09-27 passwordless commits were frontend-only**: the backend still demanded a password on both steps, the code step could never submit, and first-login temp-password accounts had lost their only door. Sign-in was broken as deployed; this cycle rebuilt both ends.
-- **Stage 1**: email only → the reusable 8h30m emailed code (issued or reused, uniform response that is no account-existence oracle).
+- **Stage 1**: email only → the reusable 8-hour emailed code (issued or reused, uniform response that is no account-existence oracle).
 - **Stage 2**: email + 6-digit code → the same gates → the same audit line → the session. No password anywhere.
 - The password door survives as an opt-in mode ("Use password instead") for legacy shells and the temp-password first login.
 
@@ -1141,7 +1141,55 @@ two deployments.
 
 ---
 
-## 14. Future Roadmap (Planned)
+## 14. v113 — the customer has no password, and a code can be asked for again (2026-10-22)
+
+### What he asked for
+
+A customer never uses a password: sign-in is email + a 6-digit code, and only that. The
+"First time here?" / set-password door goes. The code lives **8 hours**, not 8h30m. Pressing
+Resend mails the **same** code; three resends are allowed per code, and the fourth points at
+**Indrones Customer Relations** with its official email and WhatsApp number — never a
+person's name. The invitation opens with **Welcome** and says I-PASSBOOK, the portal link,
+the login email, and "Password: a sign-in code we email you — nothing to remember."
+
+### The silent bug underneath it
+
+`createUserRow` marks every new account `mustChange: 'yes'`, and `passwordlessLogin`
+refused a login code for such an account. That rule is correct for **staff** — an admin
+issues a one-use temporary password — but `inviteCustomer` creates a customer the same way,
+so a freshly invited customer pressed Continue and **no code was sent**, with nothing on
+screen saying why. The exemption is keyed on the **company scope in `access.json`**, not a
+new users.json flag: the scope is already what makes an account a customer, and a flag
+would have to be written by every future account-creating path.
+
+### What shipped
+
+- **Backend.** Customer scopes bypass the temp-password gate. `sendLoginCodeMail` is the
+  one body for a first send and a resend. `resendLoginCode` mails the live digits again,
+  holds a per-code cap of **3**, and reads the CR email/WhatsApp from `portal.json` for the
+  refusal. `LOGIN_OTP_TTL_MIN` is **480** (8 hours); the session remains 8h30m, so a code
+  can never outlive the sign-in it bought.
+- **Portal.** The sign-in sheet is one door, two steps. The set-password field and
+  "First time here?" link are gone. "Send the code again" appears only at step 2, waits out
+  the backend's 60-second gap, shows the same-code confirmation, and replaces itself with
+  the Customer Relations sentence after the third ask. No CR name is printed.
+- **Invitation & handover.** "Welcome" greeting, the owner's wording, and the code door in
+  the admin's copyable handover text — no first-time password steps anywhere.
+- **FAQ.** The code lifetime is quoted as 8 hours, matching the constant.
+
+### Verification
+
+`node tools/smoke-customer.mjs` and `node tools/smoke-all.mjs` green. The customer suite
+now proves the invited account is not treated as a temp-password account, the code is
+mailed directly, a wrong code is answered as a wrong code, resend carries the identical
+digits, three resends are allowed, and the fourth is capped with the CR contact.
+
+⚠ `API_VERSION` does not change for v113, but **`backend.gs` does**: paste it into both
+`/exec` deployments as a **New version**, then hard-reload the app.
+
+---
+
+## 15. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

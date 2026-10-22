@@ -64,10 +64,10 @@ makes the door structurally incapable of an open redirect.
 remains a first-class door and the only one for a machine with no Google session
 or an address outside the domain (`EXTERNAL_EMAILS`). Sign-in is **two steps** in
 password mode: the password, then a 6-digit code emailed to the same address. The
-code is issued once and reused for **8h30m from the send**, so a second sign-in
+code is issued once and reused for **8 hours from the send**, so a second sign-in
 inside that window (another device) needs no second mail. The window is a duration
 from issue, **not** "until the end of the working day" — a first sign-in at 2pm
-leaves the code live until 10:30pm. The session is **8h30m and absolute** — one
+leaves the code live until 10pm. The session is **8h30m and absolute** — one
 working day, not slid forward on use — so everyone starts the day with a sign-in.
 A temporary password is refused on the Google door and pointed back at the
 password door, so the forced first-login change still happens. There is no

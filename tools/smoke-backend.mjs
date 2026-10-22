@@ -280,8 +280,14 @@ r.ok('no PENDING_SIGNUPS tab is created', !/PENDING_SIGNUPS['"]?\s*\)?\s*\.?(ins
 r.ok('no captcha image is generated', !/createCaptcha|svgChallenge|captchaAnswer/i.test(code));
 // The reset code is single-use, TTL'd and attempt-capped, and is never returned
 // to the caller — the response is the same whether or not the account exists.
+// resendLoginCode is an INTERNAL helper: it hands the live digits back to its caller,
+// which mails them. What must never happen is a CLIENT-facing response carrying them.
+const authReplies = ['forgotPassword', 'resetPassword', 'passwordlessLogin', 'doLoginPassword'];
+const leakingReply = authReplies
+  .map(name => fnBody(name))
+  .find(body => /return\s*\{[^}]*\bcode\b\s*:/.test(body)) || '';
 r.ok('the reset code is never returned to the client',
-  !/return\s*\{[^}]*\bcode\b\s*:/.test(code), (code.match(/return \{[^}]*code\s*:[^\n]*/) || [''])[0]);
+  !leakingReply, (leakingReply.match(/return \{[^}]*code\s*:[^\n]*/) || [''])[0]);
 
 r.head('every sheet-shaped machine is gone, not adapted');
 // Each of these only made sense against a spreadsheet. The dangerous outcome is

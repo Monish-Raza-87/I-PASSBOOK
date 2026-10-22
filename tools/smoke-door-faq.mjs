@@ -401,8 +401,8 @@ head('faq.html answers are true');
 
 // The answers quote numbers the code owns. If a constant moves and the page does
 // not, this page starts lying to the people least able to check it.
-ok('the code lifetime it quotes (8h30m / 510 min) matches the backend',
-  /eight and a half hours/i.test(faqCode) && /LOGIN_OTP_TTL_MIN\s*=\s*510/.test(read('../backend.gs')),
+ok('the code lifetime it quotes (8 hours / 480 min) matches the backend',
+  /eight hours/i.test(faqCode) && /LOGIN_OTP_TTL_MIN\s*=\s*480/.test(read('../backend.gs')),
   'backend LOGIN_OTP_TTL_MIN');
 ok('the five-attempt burn it quotes matches the backend',
   /five wrong attempts/i.test(faqCode) && /CODE_MAX_ATTEMPTS\s*=\s*5/.test(read('../backend.gs')),

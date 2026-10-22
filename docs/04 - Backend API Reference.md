@@ -970,11 +970,12 @@ this is the wire.
 1. **The scope goes into `access.json` first.** If it were written last, there would
    be a window in which the account exists, the invitation email is already sent, and
    the account is unscoped — which in this model means *every* IR.
-2. **Then `createUserRow`**, which always sets `mustChange: 'yes'`, so the first
-   sign-in is forced through the password change like any other new account.
-3. **Then the mail.** No code rides in it: a fresh temp-password account **cannot**
-   redeem a login code, because `passwordlessLogin` refuses one by design, so the mail
-   names the ordinary *"First time here?"* reset door instead.
+2. **Then `createUserRow`**. A customer is never held to the staff temp-password rule:
+   `passwordlessLogin` reads the company scope and exempts a scoped account, so the
+   first sign-in is the ordinary email + code door.
+3. **Then the mail.** No code rides in it: the customer asks for one when they sign in,
+   so the mail names the code door — enter the address, press Continue, and use the
+   6-digit code that arrives. There is no password to set.
 
 The reply carries **`mailed`** separately from `status`. A send failure comes back as
 `{ status: 'ok', mailed: false }` and the panel reports it in words as a next step —
@@ -1311,7 +1312,7 @@ config, because changing one is a security decision, not a setting:
 | `CODE_MAX_ATTEMPTS` | 5 | wrong guesses before a code is burned — shared across the day for a sign-in code |
 | `CODE_RESEND_GAP_MS` | 60000 | the minimum gap between code issues for one email |
 | `CODE_TTL_MIN` | 15 | how long a **reset** code lives, and it is consumed on use |
-| `LOGIN_OTP_TTL_MIN` | 510 (8h30m) | how long a **sign-in** code lives, and it is **reusable** inside that window |
+| `LOGIN_OTP_TTL_MIN` | 480 (8h) | how long a **sign-in** code lives, and it is **reusable** inside that window |
 | `LOGIN_MAX_FAILS` | 5 in a 10-min window → 15-min lockout | `login` **and** `changePassword`, one shared `attempts.json` |
 
 `globalCodeCap(purpose)` is the ONE reader of the two global ceilings — 120 for

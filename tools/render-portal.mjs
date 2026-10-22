@@ -19,8 +19,8 @@
 // So this serves the REAL customer.html over a local origin (file:// would make
 // `localStorage` unreliable, which is exactly what the portal signs in with), installs a
 // stub backend before any page script runs, and then drives the page the way a customer
-// does: open the sheet, step through both doors, read the list, open a ticket, and
-// measure the result at five device widths.
+// does: open the sheet, step through the one code door and its resend, read the list,
+// open a ticket, and measure the result at five device widths.
 //
 // ── What it asserts ───────────────────────────────────────────────────────────
 //
@@ -429,14 +429,17 @@ try {
   await SLEEP(150);
   ok('the sheet opens on the page, not on the staff app', await visible('#signin'));
   const s1 = await evaluate(`document.getElementById('signin').innerText`);
-  ok('...titled as the customer\'s own reports', /your reports/i.test(s1), s1);
-  ok('...asking only for an email address', await visible('#signin-email') && !(await visible('#code-field')) && !(await visible('#newpass-field')));
-  ok('...and its button asks to email a code, not to sign in',
-    /email me a code/i.test(await evaluate(`document.getElementById('signin-go').textContent`)));
-  // The invitation mail tells a brand-new customer to take this route, so it has to be
-  // reachable in one press from the screen they land on.
-  ok('...with the door the invitation names one press away',
-    /first time here/i.test(await evaluate(`document.getElementById('signin-firsttime').textContent`)));
+  ok('...titled as the customer\'s own account', /i-passbook account/i.test(s1), s1);
+  ok('...asking only for an email address',
+    await visible('#signin-email') && !(await visible('#code-field')));
+  ok('...and its button continues, rather than promising a mail it has not sent',
+    /^continue$/i.test((await evaluate(`document.getElementById('signin-go').textContent`)).trim()));
+  // The owner removed the "first time here" door on 2026-10-22: a customer has no
+  // password at all, so a set-password route was a door the backend no longer opens.
+  ok('...with no set-password door anywhere on the sheet',
+    !/first time here/i.test(s1) &&
+    !(await evaluate(`!!document.getElementById('newpass-field')`)) &&
+    !(await evaluate(`!!document.getElementById('signin-firsttime')`)), s1);
 
   // An empty address must not spend a code, and must say what is wanted.
   await evaluate(`document.getElementById('signin-go').click()`);
@@ -464,52 +467,39 @@ try {
     await evaluate(`document.getElementById('signin-msg').textContent`));
   ok('...and the sheet gets out of the way', !(await visible('#signin')));
 
-  // ── the first-time door, end to end ─────────────────────────────────────────
-  // What the invitation email sends a brand-new customer to. It has to reach a screen
-  // that takes the code AND the new password in one go, or the mail is promising a step
-  // that does not exist — which is exactly the fault the old invitation had.
+  // ── asking for the same code again ──────────────────────────────────────────
+  // The owner, 2026-10-22: "When a code is sent and resend button is clicked, the same
+  // code is to be sent again." Three sends, then a human.
   await goto('signedout', 414);
   await evaluate(`document.querySelector('.js-signin').click()`);
   await evaluate(`document.getElementById('signin-email').value = 'reports@acmesurvey.example'`);
-  await evaluate(`document.getElementById('signin-firsttime').click()`);
-  await SLEEP(180);
-  const s3 = await evaluate(`document.getElementById('signin').innerText`);
-  ok('the door the invitation names is titled for what it does', /set your password/i.test(s3), s3);
-  ok('...and says nobody at Indrones chooses or can read that password',
-    /nobody at indrones chooses it/i.test(s3), s3);
-  ok('...and it takes only the address at this step', !(await visible('#newpass-field')), s3);
-
+  ok('the resend link is hidden before any code is outstanding',
+    !(await visible('#resend-line')));
   await evaluate(`document.getElementById('signin-go').click()`);
   await SLEEP(250);
-  const s4 = await evaluate(`document.getElementById('signin').innerText`);
-  ok('asking for it brings ONE screen with the code and the new password together',
-    await visible('#code-field') && await visible('#newpass-field'), s4);
-  ok('...stating the rule the backend enforces, rather than letting them discover it',
-    /at least 8 characters/i.test(s4), s4);
-  ok('...and its button now sets the password',
-    /set my password/i.test(await evaluate(`document.getElementById('signin-go').textContent`)));
-
-  await evaluate(`document.getElementById('signin-code').value = '654321'`);
-  await evaluate(`document.getElementById('signin-newpass').value = 'a-password-of-my-own'`);
-  await evaluate(`document.getElementById('signin-go').click()`);
+  ok('...and appears once one is', await visible('#resend-line'));
+  await evaluate(`document.getElementById('signin-resend').click()`);
   await SLEEP(300);
-  const s5 = await evaluate(`document.getElementById('signin').innerText`);
-  ok('setting it hands them back to the sign-in door, because the reset mints no session',
-    /your password is set/i.test(s5) && /email me a code/i.test(await evaluate(`document.getElementById('signin-go').textContent`)), s5);
-  ok('...and does NOT claim they are signed in', !(await visible('#reports')), s5);
+  const r1 = await evaluate(`document.getElementById('signin-msg').textContent`);
+  ok('pressing it sends the SAME code again, and says so', /same code again/i.test(r1), r1);
+  ok('...after which the link waits out the server\'s own 60-second gap',
+    await evaluate(`document.getElementById('signin-resend').getAttribute('aria-disabled')`) === 'true',
+    await evaluate(`document.getElementById('resend-note').textContent`));
 
-  // ── the account that cannot use the code door yet ────────────────────────────
-  // A freshly invited account sits on an admin-issued temporary password, and
-  // passwordlessLogin refuses to redeem a login code for it. Saying "we emailed you a
-  // code" here would leave them waiting for a mail that was never sent.
+  // ── an address with no usable account ───────────────────────────────────────
+  // The backend answers codeSent:false for two different reasons — a code from earlier
+  // today that is still live, or an address with no account — and this screen cannot
+  // tell them apart, so it names both rather than guessing one.
   await goto('newaccount', 414);
   await evaluate(`document.querySelector('.js-signin').click()`);
   await evaluate(`document.getElementById('signin-email').value = 'brand.new@acmesurvey.example'`);
   await evaluate(`document.getElementById('signin-go').click()`);
   await SLEEP(250);
   const s6 = await evaluate(`document.getElementById('signin-msg').textContent`);
-  ok('a brand-new account is NOT told a code is on its way', !/emailed you|code is on its way/i.test(s6), s6);
-  ok('...and is pointed at the door that does work for it', /first time here/i.test(s6), s6);
+  ok('an address with no code behind it is not told one is on its way',
+    !/emailed a 6-digit|code is on its way/i.test(s6), s6);
+  ok('...and names both possibilities instead of guessing at one',
+    /spam folder/i.test(s6) && /not registered/i.test(s6), s6);
 
   await evaluate(`document.getElementById('signin').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
   await SLEEP(150);

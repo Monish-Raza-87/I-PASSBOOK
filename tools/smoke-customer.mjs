@@ -528,8 +528,15 @@ r.ok('an invitation email was actually sent',
   JSON.stringify(inv.mails.map(m => m.to)));
 r.ok('...and it carries NO code, because this account could not redeem one',
   !/\b\d{6}\b/.test(inv.mails[0].body), inv.mails[0].body.split('\n').slice(-10).join(' | '));
-r.ok('...and it names the door it does open — the ordinary reset, asked for on demand',
-  /first time here/i.test(inv.mails[0].body) && /choose your password/i.test(inv.mails[0].body),
+r.ok('...and it opens with Welcome, as the owner asked',
+  /^Welcome(?: [^,\n]+)?,/m.test(inv.mails[0].body), inv.mails[0].body);
+r.ok('...and says what I-PASSBOOK is in the owner\'s own words',
+  /I-PASSBOOK, i\.e\., Indrones Product After Sales Service Book portal is for you to/.test(inv.mails[0].body) &&
+  /manage your Indrones' fleet's after sales activities/.test(inv.mails[0].body),
+  inv.mails[0].body);
+r.ok('...and names the code door, not a password to choose',
+  /press Continue/i.test(inv.mails[0].body) && /sign-in code we email you/i.test(inv.mails[0].body) &&
+  !/first time here/i.test(inv.mails[0].body) && !/choose your (own )?password/i.test(inv.mails[0].body),
   inv.mails[0].body);
 r.ok('...and NO password ever travels by email',
   !/temporary password is|your password is [^.]/i.test(inv.mails[0].body), inv.mails[0].body);
@@ -539,39 +546,63 @@ r.ok('...and NO password ever travels by email',
 // true is that the URL carries no page name and no query: the root is the only spelling
 // that opens the customer door for them.
 r.ok('...and the link it offers is the app root, with no page name to land on the wrong door',
-  /https:\/\/[^\s/]+\/I-PASSBOOK\/(?:\s|$)/.test(inv.mails[0].body) &&
+  /https:\/\/[^\s/]+\/I-PASSBOOK\/(?:\s|,|$)/.test(inv.mails[0].body) &&
   !/customer\.html/.test(inv.mails[0].body) && !/index\.html/.test(inv.mails[0].body),
   (inv.mails[0].body.match(/https?:\/\/\S+/) || ['(no link)'])[0]);
 
-// ── THE TRAP ────────────────────────────────────────────────────────────────────
-// The invitation's FIRST version mailed a 'login' code and told the customer to sign in
-// with it. It could never have worked, and nothing in this repo would have said so: the
-// account createUserRow makes sits on an admin-issued temporary password, and
-// passwordlessLogin refuses to redeem a login code for such an account. Both halves are
-// asserted here — the refusal that made the old email dead on arrival, and the door the
-// email now names actually opening — so the mistake cannot be re-made silently.
+// ── THE ONE DOOR, AND THE THREE RESENDS ────────────────────────────────────────
+// The owner's rule, 2026-10-22: a customer never has a password. A freshly invited
+// account must therefore be able to ask for a sign-in code immediately — it must NOT be
+// mistaken for a staff account sitting on an admin-issued temporary password — and the
+// resend must mail the SAME six digits, three times, then point at a human.
 const trap = fresh({ files: store(), sections: SECTIONS });
 trap.call("inviteCustomer({email:'new@acme.example', company:'Acme Survey', name:'New Person'}, '" + ADMIN + "')");
 
-r.ok('a freshly invited account is refused by the code door — which is why no code is emailed',
-  JSON.parse(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '', '', '').codeSent)")) === false,
-  trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '', '', ''))"));
-r.ok('...and refused outright when a code IS offered, naming the temp password as the reason',
-  /admin-issued password/.test(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '123456', '', '').message)")),
-  trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '123456', '', ''))"));
+const invited = JSON.parse(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '', '', ''))"));
+r.ok('a freshly invited account is NOT treated as a temp-password account',
+  invited.status === 'ok' && invited.otpRequired === true && invited.codeSent === true,
+  JSON.stringify(invited));
+r.ok('...and the code door mails the sign-in code directly',
+  trap.mails.length === 2 && trap.mails[1].to === 'new@acme.example' &&
+  /\b\d{6}\b/.test(trap.mails[1].body),
+  trap.mails.map(m => m.to + ' / ' + m.subject));
+r.ok('...with no word of a temporary password',
+  !/admin-issued|temporary password/i.test(JSON.stringify(invited)), JSON.stringify(invited));
 
-const invCode = JSON.parse(trap.call("JSON.stringify(issueAuthCode('new@acme.example', 'reset', CODE_TTL_MIN))"));
-const invSet  = JSON.parse(trap.call("JSON.stringify(resetPassword({email:'new@acme.example', code:" + JSON.stringify(invCode) + ", newPassword:'chosen-by-the-customer'}))"));
-r.ok('the reset door the invitation names DOES open, and sets their own password',
-  invSet.status === 'ok', JSON.stringify(invSet));
-r.ok('...and it retires the admin-issued password in the same act',
-  trap.call("JSON.stringify(String(findUser('new@acme.example').mustChange))") === '""');
-r.ok('...and afterwards the temp-password refusal is gone, so the code door is theirs from then on',
-  !/admin-issued password/.test(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '123456', '', '').message)")),
-  trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '123456', '', ''))"));
-r.ok('...and asking for a fresh code in the same breath is throttled, not silently dropped',
-  /wait a minute/i.test(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '', '', '').message)")),
-  trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '', '', ''))"));
+const firstCode = (trap.mails[1].body.match(/\b\d{6}\b/) || [])[0];
+const wrongInviteCode = JSON.parse(trap.call("JSON.stringify(passwordlessLogin('new@acme.example', '000000', '', ''))"));
+r.ok('...and a wrong code is answered as a wrong code, not as a password problem',
+  wrongInviteCode.status === 'error' && /Wrong code/.test(wrongInviteCode.message),
+  JSON.stringify(wrongInviteCode));
+
+// Resend — the same digits, not a new code. The backend's 60-second gap is real, so
+// each ask below clears only that timestamp: this measures the CAP, not the clock.
+const resend = () => JSON.parse(trap.call(
+  "JSON.stringify(passwordlessLogin('new@acme.example', '', '', '', true))"));
+const clearGap = () => trap.call(
+  "(function(){var c=readJson('codes.json'); c.entries.forEach(function(e){" +
+  " if(e.purpose==='login' && e.email==='new@acme.example') e.lastResendAt=0;" +
+  "}); writeJson('codes.json', c); return true;})()");
+
+const rs1 = resend(); clearGap();
+const rs2 = resend(); clearGap();
+const rs3 = resend(); clearGap();
+const rs4 = resend();
+r.ok('Resend mails the SAME six digits again, not a new code',
+  rs1.status === 'ok' && rs1.codeSent === true && rs1.resent === true &&
+  trap.mails[trap.mails.length - 1].body.indexOf(firstCode) > -1,
+  JSON.stringify(rs1));
+r.ok('...three resends are allowed, each carrying that same code',
+  rs1.resendsLeft === 2 && rs2.resendsLeft === 1 && rs3.resendsLeft === 0 &&
+  [rs1, rs2, rs3].every(x => x.status === 'ok' && x.resent === true),
+  JSON.stringify([rs1, rs2, rs3]));
+r.ok('...and the FOURTH is refused, naming Indrones Customer Relations',
+  rs4.status === 'error' && rs4.tooMany === true &&
+  /Indrones Customer Relations/.test(rs4.message) &&
+  /customer\.relations@indrones\.com/.test(rs4.message),
+  JSON.stringify(rs4));
+r.ok('...and no fourth mail went out',
+  trap.mails.length === 5, trap.mails.length + ' mails');
 
 r.ok('inviting an existing account is refused rather than silently re-scoping it',
   JSON.parse(inv.call("JSON.stringify(inviteCustomer({email:'" + ACCT + "', company:'Bharat Geo'}, '" + ADMIN + "').status)")) === 'error',

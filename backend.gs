@@ -2610,9 +2610,11 @@ function createUserRow(email, name, createdBy) {
 // code dies after CODE_MAX_ATTEMPTS wrong tries regardless of its TTL.
 var CODE_TTL_MIN        = 15;
 // Sign-in codes last a working day, and are REUSABLE inside it: one email at the
-// first sign-in covers every sign-in that day. Deliberately the same window as
-// CONFIG.SESSION_HOURS — when the session dies, so does the code.
-var LOGIN_OTP_TTL_MIN   = 510;         // 8h30m
+// first sign-in covers every sign-in that day. The owner fixed this at 8 HOURS on
+// 2026-10-22 — it was 8h30m, matching CONFIG.SESSION_HOURS, and he wanted the code to
+// never outlive the session it was issued for. Keep them equal: a code that outlives
+// its session would let one mail buy a second working day.
+var LOGIN_OTP_TTL_MIN   = 480;         // 8 hours
 var CODE_RESEND_GAP_MS  = 60 * 1000;   // min gap between code (re)issues per email
 var CODE_MAX_PER_HOUR   = 3;           // throttle: codes issued per email per hour
 var CODE_MAX_PER_HOUR_GLOBAL = 12;     // throttle: RESET codes across ALL emails per hour
@@ -2644,7 +2646,7 @@ function globalCodeCap(purpose) {
 //
 // THREE PURPOSES live here and they are not interchangeable:
 //   'reset'  — 6 digits, emailed, 15 min, single use.
-//   'login'  — 6 digits, emailed, 8h30m, REUSABLE inside the day.
+//   'login'  — 6 digits, emailed, 8h, REUSABLE inside the window.
 //   'google' — 32 hex chars, NEVER emailed: it is the one-time handoff the Google
 //              door hands back to the browser in a URL fragment. It is looked up BY
 //              CODE, not by email (the app knows the code and not yet the address),
@@ -2733,6 +2735,97 @@ function issueAuthCode(email, purpose, ttlMin) {
   });
 }
 
+// How many times ONE code may be mailed. The owner's rule, 2026-10-22: three, then
+// the person must reach a human. Note this is the per-CODE cap and is deliberately
+// separate from CODE_MAX_PER_HOUR, which counts ISSUES — a re-send spends no new code
+// and must not be able to exhaust the budget that a genuinely fresh code needs.
+var LOGIN_CODE_RESEND_MAX = 3;
+
+// The one place the sign-in code mail is written. Two copies of this body is how a
+// re-sent mail quietly loses a sentence the first one carried.
+function sendLoginCodeMail(email, code) {
+  var ttlLabel = Math.floor(LOGIN_OTP_TTL_MIN / 60) + ':' +
+                 ('0' + (LOGIN_OTP_TTL_MIN % 60)).slice(-2);
+  // The clock time it dies, not only a duration: "valid for 8:00" makes the reader do
+  // arithmetic, and at 2pm that arithmetic decides whether they try again tonight.
+  var expiresLabel = Utilities.formatDate(
+    new Date(Date.now() + LOGIN_OTP_TTL_MIN * 60000), 'Asia/Kolkata', 'h:mm a');
+  sendAuthMail(email, 'Your I-PASSBOOK sign-in code: ' + code,
+    'Welcome to I-PASSBOOK.\n\n' +
+    'Your sign-in code is\n\n' +
+    '    ' + code + '\n\n' +
+    'It works until ' + expiresLabel + ' (' + ttlLabel + ' from now), and you can use\n' +
+    'this same code for every sign-in until then. There is no need to ask for\n' +
+    'another one.\n\n' +
+    'Signing in on a new device signs the older device out — one device per account.\n\n' +
+    'If you did not try to sign in, tell us and we will look at the account.\n\n' +
+    'Indrones Service Desk');
+}
+
+// Who to write to when the resend cap is spent. The email and WhatsApp number are the
+// owner's operating data in `portal.json`, not source literals — this repository is
+// public — and the wording names the ROLE, never a person.
+function customerRelationsContact() {
+  var cr = {};
+  try { cr = portalRead().cr || {}; } catch (e) { cr = {}; }
+  var email = String(cr.email || '').trim() || 'customer.relations@indrones.com';
+  var wa = String(cr.whatsapp || '').replace(/[^\d+]/g, '');
+  return 'Indrones Customer Relations — ' + email + (wa ? ' · WhatsApp ' + wa : '');
+}
+
+// Mail the LIVE code again — the same six digits, not a new one.
+//
+// Returns null when there is nothing live to re-send, and the caller then issues a
+// fresh code the ordinary way. Otherwise it returns a ready-to-send response: the
+// success envelope, or a refusal that is already worded for the person reading it.
+//
+// The mail goes out OUTSIDE the lock, exactly as issueAuthCode's does: MailApp is slow
+// and must never hold the store.
+function resendLoginCode(email) {
+  var out = withRowLockOrThrow(function () {
+    var raw = readJsonLocked('codes.json');
+    var entries = pruneCodesIn((raw && raw.entries instanceof Array) ? raw.entries : []);
+    var e = findCodeEntry(entries, email, 'login');
+    if (!e) return null;                      // nothing live → caller issues one
+
+    var exp = asDate(e.expiresAt);
+    if (!exp || exp.getTime() <= Date.now()) {
+      e.used = true;
+      writeJsonLocked('codes.json', { entries: entries });
+      return null;                            // expired → caller issues a fresh one
+    }
+
+    var now  = Date.now();
+    var last = asDate(e.lastResendAt);
+    if (last && (now - last.getTime()) < CODE_RESEND_GAP_MS) {
+      // Deliberately NOT an error: nothing is wrong, the mail simply needs a minute.
+      return { status: 'ok', otpRequired: true, codeSent: false,
+               retryInSec: Math.ceil((CODE_RESEND_GAP_MS - (now - last.getTime())) / 1000),
+               message: 'That code went out a moment ago — give it a minute to arrive.' };
+    }
+
+    var n = Number(e.resends) || 0;
+    if (n >= LOGIN_CODE_RESEND_MAX) {
+      return { status: 'error', tooMany: true,
+               message: 'This code has already been sent ' + LOGIN_CODE_RESEND_MAX +
+                        ' times. Write to ' + customerRelationsContact() +
+                        ' and they will get you in.' };
+    }
+
+    e.resends = n + 1;
+    e.lastResendAt = now;
+    writeJsonLocked('codes.json', { entries: entries });
+    return { code: String(e.code), left: LOGIN_CODE_RESEND_MAX - e.resends };
+  });
+
+  if (!out) return null;
+  if (out.status) return out;                 // a refusal, already worded
+
+  sendLoginCodeMail(email, out.code);
+  return { status: 'ok', otpRequired: true, codeSent: true, resent: true, resendsLeft: out.left,
+           message: 'We sent you the same code again.' };
+}
+
 // The REDEEM itself, lock-free: the caller holds the lock and owns the write.
 //
 // It is split out because resetPassword redeems inside a bigger lock that covers
@@ -2747,7 +2840,7 @@ function issueAuthCode(email, purpose, ttlMin) {
 // `consume` is the whole difference between the two callers. A RESET code is
 // burned on use — one reset, one code. A SIGN-IN code is deliberately NOT: it
 // stays valid for its full working day so the same code covers every sign-in that
-// day, which is the entire point of the 8h30m window. What still bounds abuse is
+// day, which is the entire point of the 8h window. What still bounds abuse is
 // the attempt counter, which is shared across the day for the same reason.
 function redeemCodeIn(entries, email, purpose, code, consume) {
   var isLogin = (purpose === 'login');
@@ -3197,16 +3290,44 @@ var PWLESS_GENERIC_STAGE1 =
   'Otherwise no code will arrive — if you were given a temporary password, use ' +
   '"Use password instead" below.';
 
-function passwordlessLogin(email, suppliedCode, device, version) {
+function passwordlessLogin(email, suppliedCode, device, version, wantResend) {
   var locked = lockoutRemaining(email);
   if (locked) return locked;
 
   var u = findUser(email);
 
+  // ── A CUSTOMER IS NEVER "ON A TEMPORARY PASSWORD" ────────────────────────────
+  // The temp-password gate below exists for STAFF: an account an admin creates has a
+  // one-use password the person must replace. A customer has no password at all by
+  // design — "there is no password based login for customers and only one standard
+  // OTP based login method" — and their account is created by inviteCustomer, which
+  // left them flagged exactly like a new hire. The result was the bug the owner hit
+  // on 2026-10-22: a freshly invited customer pressed Continue, no code was sent, and
+  // nothing on the screen could tell them why.
+  //
+  // The test is the COMPANY SCOPE, read from access.json, and not a new column in
+  // users.json. A flag would have to be written by the invite AND by every path that
+  // ever creates an account, and the one path that forgot it would recreate the same
+  // silent failure. The scope is already the thing that makes an account a customer.
+  var scope = '';
+  try { scope = customerCompany(email); } catch (e) { /* unreadable store → no exemption */ }
+  var isCustomer = !!scope;
+
   // STAGE 1 — email only, no code. Reuse the live reusable code if there is one;
   // otherwise issue + mail, all of it loginOtpStep's existing behaviour.
   if (!suppliedCode) {
-    if (!u || userField(u, 'status').toLowerCase() === 'disabled' || isTempPasswordAccount(u)) {
+    // A RESEND asks for the code that is already out to be sent AGAIN, and it is the
+    // only thing that can put the same six digits in an inbox twice. The owner,
+    // 2026-10-22: "When a code is sent and resend button is clicked, the same code is
+    // to be sent again." Without this the stage below answers "one is already live"
+    // and mails nothing — correct for an accidental double-press, useless for a
+    // person whose mail genuinely did not arrive.
+    if (wantResend) {
+      var again = resendLoginCode(email);
+      if (again) return again;
+    }
+    if (!u || userField(u, 'status').toLowerCase() === 'disabled' ||
+        (!isCustomer && isTempPasswordAccount(u))) {
       return { status: 'ok', otpRequired: true, codeSent: false, message: PWLESS_GENERIC_STAGE1 };
     }
     return loginOtpStep(email, '', userField(u, 'Name'), {});
@@ -3221,7 +3342,7 @@ function passwordlessLogin(email, suppliedCode, device, version) {
     recordFailedLogin(email);
     return { status: 'error', message: 'This account has been disabled. Ask an admin to re-enable it.' };
   }
-  if (isTempPasswordAccount(u)) {
+  if (!isCustomer && isTempPasswordAccount(u)) {
     var stale = tempPasswordExpired(u);
     if (stale) return stale;
     return { status: 'error', message: 'This account starts with its admin-issued password once — use "Use password instead" to set your real one.' };
@@ -3268,14 +3389,14 @@ function doLoginPassword(params) {
 
   // ── THE PASSWORDLESS DOOR (2026-09-30) ──────────────────────────────────────
   // The daily sign-in carries NO password: step one is an email that earns the
-  // 8h30m reusable code, step two is that code. The password path below is left
+  // 8h reusable code, step two is that code. The password path below is left
   // byte-for-byte as it was, for legacy shells and for the "Use password instead"
   // link — which is also the only door a temp-password (first-login) account has,
   // so it is not dead code.
   //
   // Everything about which account state is which lives in passwordlessLogin; this
   // split is only "did the caller bring a password".
-  if (!password) return passwordlessLogin(email, supplied, params.device, params.version);
+  if (!password) return passwordlessLogin(email, supplied, params.device, params.version, params.resend);
 
   // Lockout check (applies whether or not the account exists — avoids leaking
   // which emails have accounts, and stops password guessing on a shared device).
@@ -3852,7 +3973,7 @@ function doGoogleExchange(params) {
 // to send back instead.
 //
 // Shape: the SAME code is reused for the whole working day (LOGIN_OTP_TTL_MIN,
-// 8h30m). A user signing in on their phone at 9am and their desktop at 2pm types
+// 8h). A user signing in on their phone at 9am and their desktop at 2pm types
 // it once and never sees a second mail. So this deliberately does NOT mint a fresh
 // code per attempt: it reuses the live one, and only ISSUES when there is no live
 // code to reuse — otherwise the "reusable code" would be silently replaced by a
@@ -3917,17 +4038,10 @@ function loginOtpStep(email, supplied, name, info) {
     }
     // The lifetime is stated as a DURATION from this mail, never as "end of the
     // working day": the code expires LOGIN_OTP_TTL_MIN after it is ISSUED, so a
-    // first sign-in at 2pm leaves it live until 10:30pm, not until 5:30pm. Saying
+    // first sign-in at 2pm leaves it live until 10pm, not until 5:30pm. Saying
     // "end of the day" would be a promise the clock does not keep for anyone who
     // starts their day late. Derived from the constant so it cannot drift.
-    var ttlLabel = Math.floor(LOGIN_OTP_TTL_MIN / 60) + ':' +
-                   ('0' + (LOGIN_OTP_TTL_MIN % 60)).slice(-2);
-    sendAuthMail(email, 'Your I-PASSBOOK sign-in code',
-      'Your I-PASSBOOK sign-in code is ' + issued + '.\n\n' +
-      'It is valid for ' + ttlLabel + ' hours from now, and you can reuse this same ' +
-      'code for every sign-in until it expires. Note: signing in on a new device ' +
-      'signs the previous device out — one device stays signed in per account.\n\n' +
-      'If you did not try to sign in, someone may be using your email — tell an admin.');
+    sendLoginCodeMail(email, issued);
     return {
       status: 'ok', otpRequired: true, email: email, name: name, codeSent: true,
       message: 'We emailed you a 6-digit sign-in code.'
@@ -5135,50 +5249,35 @@ function inviteCustomer(params, authEmail) {
     return { status: 'error', message: 'Could not create the account: ' + ((err && err.message) || 'unknown error') };
   }
 
-  // 3. The invitation. NO CODE RIDES IN THIS EMAIL, and that is a correction, not an
-  //    omission.
+  // 3. The invitation. NO CODE RIDES IN THIS EMAIL, and that is deliberate.
   //
-  //    The obvious thing to put here is a one-time code, and that is what the first
-  //    version of this function did: it issued a 'login' code and told the customer to
-  //    sign in with it. That invitation could not work. createUserRow leaves the new
-  //    account on an admin-issued temporary password, and passwordlessLogin REFUSES to
-  //    redeem a login code for such an account — "This account starts with its
-  //    admin-issued password once" — so the code in that email was dead on arrival. The
-  //    same mail also promised a "choose your own password" step that nothing offered,
-  //    because the temporary password it would have been typed against was never in the
-  //    email either. Two wrong sentences and a dead credential.
+  //    A customer has no password at all: they sign in with their email and a 6-digit
+  //    code mailed on demand. The invitation therefore only says where to go and what
+  //    to press. Issuing a code here would put a credential in an inbox days before it
+  //    is used, and a first-time-password step would send them to a door the portal no
+  //    longer has.
   //
-  //    What actually works needs no new machinery at all: the account is already
-  //    eligible for the ORDINARY reset door. forgotPassword issues a 'reset' code for
-  //    any active account, and resetPassword redeems it, sets the customer's own
-  //    password, and clears the temp-password flag in the same act. That is precisely
-  //    "they generate their own credentials" — and it retires the admin-issued password
-  //    by using it for nothing. The customer asks for that code ON DEMAND from the
-  //    portal, sitting in front of the screen, so it keeps its fifteen-minute life
-  //    instead of ageing in an inbox.
-  //
-  //    So the email's job is only to say where to go and what to press. `mailed:false` is
-  //    reported in words, never as a failed onboarding — the account and its scope are
-  //    real and usable either way, and the admin can walk the customer through it.
+  //    `mailed:false` is reported in words, never as a failed onboarding — the account
+  //    and its scope are real and usable either way, and the admin can walk the
+  //    customer through it.
   var link = customerPortalUrl();
+  // The owner's own wording, 2026-10-22: "Welcome" rather than "Hello", I-PASSBOOK
+  // named for what it is, and the three things a person needs on one line — link,
+  // login email, and the fact that the password is a code we mail them.
   var body = [
-    'Hello' + (name ? ' ' + name : '') + ',',
+    'Welcome' + (name ? ' ' + name : '') + ',',
     '',
-    'Your ' + company + ' fleet has been set up on the Indrones Customer Space.',
-    'From here you can raise a request against any of your aircraft, follow what we are',
-    'doing about it, and read the record of every service we have carried out for you.',
+    'I-PASSBOOK, i.e., Indrones Product After Sales Service Book portal is for you to',
+    'manage your Indrones\' fleet\'s after sales activities. To access the portal, using',
+    'link: ' + (link || 'https://monish-raza-87.github.io/I-PASSBOOK/') + ', login email: ' + email + ',',
+    'Password: a sign-in code we email you — nothing to remember.',
     '',
-    link ? 'Open your customer space: ' + link : 'Open the Indrones Customer Space.',
-    'Your email address is ' + email + ' — that is the one to sign in with.',
+    'Open the portal, enter the email address above and press Continue. We email you',
+    'a 6-digit code; enter it and you are in. It stays valid for 8 hours.',
     '',
-    'To choose your password, press "First time here?" on that page and enter this email',
-    'address. We will send you a code; enter it together with the password you want.',
-    'Nobody at Indrones sets that password, and nobody here can read it.',
+    'Signing in on a new device signs the older one out — one device per account.',
     '',
-    'After that you can sign in either way — with that password, or by asking for a code',
-    'each morning and never having to remember one.',
-    '',
-    'If you did not expect this, tell us and we will remove the account.',
+    'Not expecting this? Reply and we will remove the account.',
     '',
     'Indrones Service Desk'
   ];
@@ -5187,7 +5286,7 @@ function inviteCustomer(params, authEmail) {
   return {
     status: 'ok', email: email, company: company, mailed: !!mailed,
     message: 'Account created for ' + email + ', scoped to ' + company + '. ' +
-             (mailed ? 'The invitation has been emailed.' : 'The invitation email could NOT be sent — give the customer the portal link and this email address, and have them press "First time here?".')
+             (mailed ? 'The invitation has been emailed.' : 'The invitation email could NOT be sent — give the customer the portal link and this email address; they sign in with a code, and there is no password to set.')
   };
 }
 

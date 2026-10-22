@@ -674,7 +674,7 @@ r.head('an unsent invitation is a next step, never a failed onboarding');
 {
   const { A, posts } = boot(STAFF, IRS, { postReply: {
     status: 'ok', email: 'ops@acme.in', company: 'Acme Survey', mailed: false,
-    message: 'Account created for ops@acme.in, scoped to Acme Survey. The invitation email could NOT be sent — give the customer the portal link and this email address, and have them press "First time here?".',
+    message: 'Account created for ops@acme.in, scoped to Acme Survey. The invitation email could NOT be sent — give the customer the portal link and this email address; they sign in with a code, and there is no password to set.',
   } });
   const panel = A.T.document.getElementById('access-panels');
   // The admin is ON this tab — which matters, because the roster refresh that follows the
@@ -793,10 +793,10 @@ r.head('the portal link is built from where this app is served, not from a const
   const txt = A.T.customerHandoverTxt('ops@acme.in', 'Acme Survey');
   r.ok('the handover text names the link, the address and the one button to press',
     txt.indexOf('https://example.github.io/I-PASSBOOK/') > 0 &&
-    txt.indexOf('ops@acme.in') > 0 && /First time here\?/.test(txt));
+    txt.indexOf('ops@acme.in') > 0 && /press Continue/.test(txt));
   r.ok('...and carries no password of any kind', !/[Pp]assword:/.test(txt), txt.split('\n').filter(l => /assword/.test(l)));
   r.ok('...and matches the door the invitation email names',
-    /First time here\?/.test(backendGs));
+    /press Continue/i.test(backendGs) && /sign-in code we email you/i.test(backendGs));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

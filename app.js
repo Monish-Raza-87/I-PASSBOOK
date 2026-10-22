@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v112';
+const APP_VERSION = 'v113';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -6264,15 +6264,15 @@ function customerHandoverTxt(email, company) {
     (company ? 'Company: ' + company : ''),
     'Sign in with: ' + email,
     '',
-    'How to get in (first time only)',
-    '-------------------------------',
+    'How to get in',
+    '-----------',
     '1. Open: ' + link,
-    '2. Press "First time here?" and enter the email address above.',
-    '3. A code arrives by email. Enter it together with the password you want.',
-    '   Nobody at Indrones sets that password, and nobody here can read it.',
+    '2. Enter the email address above and press Continue.',
+    '3. We email you a 6-digit code. Enter it and you are in.',
+    '   The same code works for 8 hours; there is no password to remember.',
     '',
-    'After that you can sign in either way — with that password, or by asking',
-    'for a code each morning and never having to remember one.',
+    'If the mail does not arrive, press "Send the code again" — it mails the',
+    'same code. After three resends, write to Indrones Customer Relations.',
     '',
     'What you can do',
     '---------------',

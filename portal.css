@@ -341,6 +341,14 @@
   .msg { margin: 0; font-size: 14px; min-height: 1.4em; }
   .msg.err { color: var(--warn); }
   .msg.ok  { color: var(--ok); }
+  /* The resend line. It sits directly under the code field, so the two things a person
+     does at this step — type the code, or ask for it again — are next to each other.
+     #resend-note carries the countdown and the "talk to Customer Relations" sentence in
+     the same slot, so the sheet never changes height when the third ask is spent. */
+  #resend-line { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+  #resend-note { font-variant-numeric: tabular-nums; }
+  #resend-note.resend-stop { flex-basis: 100%; color: var(--fg); line-height: 1.5; }
+  #signin-resend[aria-disabled="true"] { color: var(--fg-muted); pointer-events: none; }
   .sheet-note { margin: 0; font-size: 13px; color: var(--fg-muted); }
   .error-box {
     background: var(--warn-soft); border: 1px solid var(--warn-line);

@@ -214,7 +214,7 @@
         record you see is only ever your own.</p>
         <ol class="steps">
           <li><b>We onboard you</b><span>When your order is delivered, we set you up in the portal and send an invitation to your official email address.</span></li>
-          <li><b>You set your credentials</b><span>On your own space, press &ldquo;First time here?&rdquo; and we email you a code. Enter it with the password you want — nobody at Indrones chooses it for you, and nobody here can read it.</span></li>
+          <li><b>You sign in with a code</b><span>On your own space, enter your email address and press Continue. We email you a 6-digit code; enter it and you are in. There is no password to remember.</span></li>
           <li><b>You use it from then on</b><span>Every request, every report, every dispatch note for your fleet — under one sign-in, for the life of the aircraft.</span></li>
         </ol>
       </div>
@@ -225,8 +225,8 @@
              dropped the account name for room. -->
         <div class="aside-block" id="access-visitor">
           <h3>Already have an account?</h3>
-          <p>Sign in with your email address. We will send you a code that stays good for the
-          rest of the working day, so you do not have to remember a password every morning.</p>
+          <p>Sign in with your email address. We will send you a code that stays good for 8
+          hours, so you do not have to remember a password every morning.</p>
           <a class="btn btn-primary js-signin" href="#signin">Sign in</a>
           <p>Not onboarded yet? Raise a request below and the service desk will set you up.</p>
         </div>
@@ -368,15 +368,17 @@
 </footer>
 
 <!-- ── THE SIGN-IN SHEET ───────────────────────────────────────────────────────
-     One card, two doors, two steps each:
-       · the daily door — email, then the 6-digit code that arrives. This is the
-         default and it is what the page has always promised the customer.
-       · the first-time door — email, then a code plus the password they choose. It
-         exists because an account we create is issued a temporary password nobody
-         hands over, and the app refuses to sign such an account in by code until
-         that password has been replaced. This is where it gets replaced.
-     Both are the app's OWN backend actions ('login', 'forgotPassword', 'resetPassword').
-     This page adds no auth machinery, and stores nothing but the session it is given. -->
+     ONE door, two steps: an email address, then the 6-digit code we mail to it.
+
+     There used to be a second door here — a first-time / forgotten-password path
+     that asked the visitor to choose a password. It is gone, and its removal is
+     the fix rather than a simplification: a customer account has no password at
+     all, so the app no longer issues one, and a screen offering to set one sent a
+     newly invited customer down a road the backend had already closed.
+
+     What is here is the app OWN actions — the same login call the customer door on
+     index.html uses — so this page adds no auth machinery and stores nothing but
+     the session it is given. -->
 <div class="sheet" id="signin" hidden>
   <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="signin-title">
     <button type="button" class="sheet-x" id="signin-close" aria-label="Close">&#10005;</button>
@@ -396,16 +398,16 @@
              maxlength="6" placeholder="000000">
     </div>
 
-    <div class="field" id="newpass-field" hidden>
-      <label for="signin-newpass">Choose your password</label>
-      <input id="signin-newpass" type="password" autocomplete="new-password" minlength="8"
-             placeholder="At least 8 characters">
-    </div>
+    <button type="button" class="btn btn-primary" id="signin-go">Continue</button>
 
-    <button type="button" class="btn btn-primary" id="signin-go">Email me a code</button>
+    <!-- Only while a code is outstanding. The link is the WHOLE resend feature: the
+         backend re-mails the SAME code, so this adds a second chance, not a second code. -->
+    <p class="sheet-note" id="resend-line" hidden>
+      <a href="#" id="signin-resend">Send the code again</a>
+      <span id="resend-note"></span>
+    </p>
 
     <p class="sheet-note" id="signin-note"></p>
-    <p class="sheet-note"><a href="#" id="signin-firsttime">First time here?</a></p>
     <p class="sheet-note">Looking for the service desk app? It is on the <a href="./index.html">same page as this one</a>, behind the Employee door.</p>
   </div>
 </div>
@@ -1186,15 +1188,24 @@
   }
 
   // ── The sign-in sheet ──────────────────────────────────────────────────────────
-  // Two doors, two steps each. Nothing here is invented: `login` is the app's own daily
-  // door, `forgotPassword` + `resetPassword` are its own password path.
-  let flow = { mode: 'code', step: 1, busy: false };
+  // ONE door, two steps: an email address, then the code we mail to it. There is no
+  // password door and no "first time here" here any more, by the owner's instruction of
+  // 2026-10-22 — a customer has no password at all, so a set-password path was a second
+  // way in that nobody needed and that told a first-time visitor to do something the
+  // backend no longer expects.
+  //
+  // `resent` counts the times this screen has asked for the code again. Three asks,
+  // then the person talks to Customer Relations. The backend holds the real cap; this
+  // one exists so the LINK stops before a fourth press is spent on nothing.
+  const RESEND_MAX    = 3;
+  const RESEND_GAP_MS = 60 * 1000;      // the backend's own gap — never fire into it
+
+  let flow = { step: 1, busy: false, resent: 0, resentAt: 0 };
 
   function showSignin(message) {
-    flow = { mode: 'code', step: 1, busy: false };
+    flow = { step: 1, busy: false, resent: 0, resentAt: 0 };
     $('signin').hidden = false;
     $('signin-code').value = '';
-    $('signin-newpass').value = '';
     paintFlow();
     setMsg(message || '', 'err');
     setTimeout(() => { if (!$('signin-email').value) $('signin-email').focus(); }, 30);
@@ -1207,31 +1218,122 @@
     el.className = 'msg' + (kind ? ' ' + kind : '');
   }
 
-  const goLabel = () => flow.step === 1
-    ? 'Email me a code'
-    : (flow.mode === 'setpass' ? 'Set my password' : 'Sign in');
+  const goLabel = () => flow.step === 1 ? 'Continue' : 'Sign in';
 
   function paintFlow() {
-    const setpass = flow.mode === 'setpass';
-    const second  = flow.step === 2;
+    const second = flow.step === 2;
 
-    $('signin-title').textContent = setpass ? 'Set your password' : 'Sign in to your reports';
-    $('code-field').hidden    = !second;
-    $('newpass-field').hidden = !(setpass && second);
+    $('signin-title').textContent = second ? 'Enter your code' : 'Log in to your I-PASSBOOK account';
+    $('code-field').hidden = !second;
     $('signin-email').readOnly = second;
     $('signin-go').textContent = goLabel();
     $('signin-go').disabled = false;
-    $('signin-firsttime').textContent = setpass
-      ? '← Sign in with a code instead'
-      : 'First time here? Choose your password';
 
-    $('signin-note').textContent = setpass
-      ? (second
-          ? 'Enter the code we just emailed you, and the password you want. At least 8 characters.'
-          : 'Enter the email address we onboarded, and we will send you a code to set your own password with. Nobody at Indrones chooses it, and nobody here can read it.')
-      : (second
-          ? 'Enter the 6-digit code we emailed you. You can reuse it for the rest of the working day.'
-          : 'We email you a 6-digit code. One every morning is enough — you never have to remember a password.');
+    // The words are the app's own customer door, word for word — the two screens are
+    // the same door reached from two places, and a person who sees both should not have
+    // to wonder whether they are the same account.
+    $('signin-note').textContent = second
+      ? 'Enter the 6-digit code we emailed you. It stays valid for 8 hours, so one email a day is enough.'
+      : 'Use your official email registered with us while onboarding as a customer. We email you a 6-digit code — there is no password to remember.';
+
+    paintResend();
+  }
+
+  // ── "Send the code again" ─────────────────────────────────────────────────────
+  // Shown only while a code is outstanding, because at step 1 the button in the middle
+  // of the sheet already sends one.
+  //
+  // Three things can be true of the link, and each says so plainly:
+  //   • it is waiting out the backend's 60-second gap;
+  //   • it is live;
+  //   • it is gone, and the person now needs a human — with the address to write to
+  //     filled in from the portal's own configuration, never typed into this file.
+  function crLine() {
+    const cr = (PORTAL_DATA && PORTAL_DATA.cr) || {};
+    const bits = [];
+    if (cr.email)    bits.push(cr.email);
+    if (cr.whatsapp) bits.push('WhatsApp ' + cr.whatsapp);
+    // NOBODY'S NAME. The owner on 2026-10-22: "do not mention CR name but just
+    // Indrones Customer Relations and its email, whatsapp number." A named person
+    // leaves when they leave, and the page would then point at someone who has gone.
+    return 'This code has been sent three times. Write to Indrones Customer Relations' +
+           (bits.length ? ' — ' + bits.join(' · ') : '') + ' and they will get you in.';
+  }
+
+  // The one address the page may print when someone needs a human. Read from the
+  // portal configuration, never typed here: this repository is public.
+  function crEmail() {
+    const cr = (PORTAL_DATA && PORTAL_DATA.cr) || {};
+    return cr.email || 'Indrones Customer Relations';
+  }
+
+  function paintResend() {
+    // Step 1 sends from the main button, so the link has nothing to add there.
+    const show = flow.step === 2;
+    $('resend-line').hidden = !show;
+    if (!show) return;
+
+    const link = $('signin-resend');
+    const note = $('resend-note');
+
+    if (flow.resent >= RESEND_MAX) {
+      link.hidden = true;
+      note.textContent = crLine();
+      note.className = 'resend-stop';
+      return;
+    }
+
+    link.hidden = false;
+    note.className = '';
+    const waitMs = flow.resentAt ? (flow.resentAt + RESEND_GAP_MS) - Date.now() : 0;
+    if (waitMs > 0) {
+      link.setAttribute('aria-disabled', 'true');
+      note.textContent = 'in ' + Math.ceil(waitMs / 1000) + 's …';
+    } else {
+      link.removeAttribute('aria-disabled');
+      note.textContent = flow.resent ? 'sent ' + flow.resent + ' of ' + RESEND_MAX : '';
+    }
+  }
+
+  // A one-shot ticker, not an interval: it only has to wake the link up once, and an
+  // interval left running behind a closed sheet is a timer nobody owns.
+  function tickResend() {
+    if (flow.step !== 2 || flow.resent >= RESEND_MAX) return;
+    const waitMs = flow.resentAt ? (flow.resentAt + RESEND_GAP_MS) - Date.now() : 0;
+    if (waitMs > 0) { paintResend(); setTimeout(tickResend, Math.min(waitMs + 50, 1000)); }
+    else paintResend();
+  }
+
+  async function resendCode() {
+    if (flow.busy || flow.step !== 2 || flow.resent >= RESEND_MAX) return;
+    const email = $('signin-email').value.trim().toLowerCase();
+    if (!email) { setMsg('Enter your email address first.', 'err'); return; }
+
+    flow.resent += 1;
+    flow.resentAt = Date.now();
+    paintResend();
+    setTimeout(tickResend, 1000);
+
+    setBusy(true);
+    try {
+      // THE SAME CODE, MAILED AGAIN — which is what the owner asked for, 2026-10-22:
+      // "When a code is sent and resend button is clicked, the same code is to be sent
+      // again." So this call carries `resend`, and the backend re-mails the digits that
+      // are already out instead of issuing a second code that would retire the first.
+      const res = await apiPost('login', { email: email, device: deviceLabel(), resend: true });
+      if (res && res.status === 'ok' && res.otpRequired) {
+        setMsg(res.codeSent === false
+          ? 'That code went out a moment ago — give it a minute to arrive.'
+          : 'We sent you the same code again. The earlier mail works too.', 'ok');
+      } else {
+        setMsg(msgOf(res) || 'Could not send just now — wait a minute and press it again.', 'err');
+      }
+    } catch (e) {
+      setMsg('Could not reach us just now. Check your connection and try again.', 'err');
+    } finally {
+      setBusy(false);
+      paintResend();
+    }
   }
 
   function setBusy(on) {
@@ -1245,45 +1347,12 @@
 
     const email = $('signin-email').value.trim().toLowerCase();
     const code  = $('signin-code').value.trim();
-    const pass  = $('signin-newpass').value;
 
     if (!email) { setMsg('Enter your email address.', 'err'); return; }
     if (flow.step === 2 && !code) { setMsg('Enter the 6-digit code we emailed you.', 'err'); return; }
-    if (flow.mode === 'setpass' && flow.step === 2 && pass.length < 8) {
-      setMsg('Choose a password of at least 8 characters.', 'err');
-      return;
-    }
 
     setBusy(true);
     try {
-      // ── The first-time / forgotten-password door ──
-      if (flow.mode === 'setpass') {
-        if (flow.step === 1) {
-          // The answer is the same whether or not we hold that address. That is the
-          // backend's design — it does not enumerate — and the wording here must not
-          // promise more than the backend would.
-          await apiPost('forgotPassword', { email: email });
-          flow.step = 2;
-          paintFlow();
-          setMsg('If we hold that address, a code is on its way. Enter it below with the password you want.', '');
-          $('signin-code').focus();
-          return;
-        }
-        const set = await apiPost('resetPassword', { email: email, code: code, newPassword: pass });
-        if (set && set.status === 'ok') {
-          // The reset door returns NO session token, on purpose: the password proves itself
-          // by being used. So the customer goes back to the code door rather than being left
-          // to believe they are already signed in.
-          flow = { mode: 'code', step: 1, busy: false };
-          $('signin-code').value = '';
-          $('signin-newpass').value = '';
-          paintFlow();
-          setMsg('Your password is set. Now press the button and we will email you a sign-in code.', 'ok');
-        } else {
-          setMsg(msgOf(set), 'err');
-        }
-        return;
-      }
 
       // ── The daily door ──
       // No `password` key at all: the backend reads that absence as the passwordless door.
@@ -1303,18 +1372,25 @@
         flow.step = 2;
         paintFlow();
         if (res.codeSent === false) {
-          // Stage one was answered without a code going out. For an account we have just
-          // onboarded that is the temporary-password rule, and "a code is on its way" would
-          // be a plain lie that leaves them waiting forever.
-          setMsg('No code was sent. If you have just been onboarded, use "First time here?" below to choose your password first.', 'err');
+          // TWO different situations answer with codeSent:false, and this screen cannot
+          // tell them apart — so it names both rather than guessing. One: a code sent
+          // earlier today is still live (it is reused, never reissued). Two: the address
+          // has no usable account, which is also what an account still on its
+          // first-time password looks like. The old wording assumed the second and sent
+          // a person with a perfectly good code in their inbox off to reset a password
+          // they did not need.
+          setMsg('No new code was sent to ' + email + '. Either one from earlier today is ' +
+                 'still valid — check your inbox and spam folder — or this address is not ' +
+                 'registered with us. If you were never set up, write to ' + crEmail() + '.', 'err');
         } else {
-          setMsg('We emailed you a 6-digit code.', 'ok');
+          setMsg('We emailed a 6-digit code to ' + email + '.', 'ok');
         }
         $('signin-code').focus();
         return;
       }
       if (res && res.status === 'ok' && res.mustChangePassword) {
-        setMsg('This account is still on the temporary password we issued. Use "First time here?" below to choose your own.', 'err');
+        setMsg('This account is not ready for code sign-in yet. Write to ' + crEmail() +
+               ' and they will finish setting it up.', 'err');
         return;
       }
       setMsg(msgOf(res), 'err');
@@ -1338,6 +1414,7 @@
     $('signin-close').addEventListener('click', hideSignin);
     $('signin').addEventListener('click', e => { if (e.target === $('signin')) hideSignin(); });
     $('signin-go').addEventListener('click', submitSignin);
+    $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
     $('back-to-list').addEventListener('click', () => {
       $('report-one').hidden = true;
@@ -1345,17 +1422,6 @@
       $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    $('signin-firsttime').addEventListener('click', e => {
-      e.preventDefault();
-      flow = { mode: flow.mode === 'setpass' ? 'code' : 'setpass', step: 1, busy: false };
-      $('signin-code').value = '';
-      $('signin-newpass').value = '';
-      paintFlow();
-      setMsg(flow.mode === 'setpass'
-        ? 'Enter your email address and we will send you a code to set your own password with.'
-        : 'Enter your email address and we will send you a sign-in code.');
-      $('signin-email').focus();
-    });
 
     // Enter submits from anywhere in the card, which is how a form behaves — and this is a
     // card of one or two fields and a button, so a customer reaching for Enter is certain.

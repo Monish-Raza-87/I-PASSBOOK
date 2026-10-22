@@ -490,9 +490,9 @@ native mobile apps never expire. That is where the **30-day sliding session** ca
 from — and it has since been **reversed**. The session is 8h30m and absolute,
 because a session that slides forward on every request never expires for exactly the
 people who use the app most: the daily sign-in that the emailed code protects never
-happened for them, and the code was decoration on the busiest accounts. One working
-day is also the window the sign-in code lives in, so the code and the session it
-mints now end together.
+happened for them, and the code was decoration on the busiest accounts. The code
+lives for 8 hours, an hour inside the session it mints, so a code can never outlive
+the sign-in it bought.
 
 The 15-minute idle timeout and the `sessionStorage` home are still **deliberate
 removals**, and they stay removed. Do not reintroduce them as a hardening measure
@@ -557,7 +557,7 @@ a disabled account is still refused, and a first-login user is still answered
   5 wrong guesses (`CODE_MAX_ATTEMPTS`) burn it and force a fresh one. It is
   deliberately counted per code, not per IP — GAS web apps expose no reliable client
   address, and the entry is the only thing that can be counted honestly.
-- **A code still expires.** `LOGIN_OTP_TTL_MIN` is 510 minutes, and an expired entry
+- **A code still expires.** `LOGIN_OTP_TTL_MIN` is 480 minutes, and an expired entry
   is marked used rather than left usable.
 - **The password is re-sent with every attempt.** The frontend holds it in memory
   only (`_otpPassword`, never persisted), so a reload between the two steps restarts
@@ -569,7 +569,7 @@ a disabled account is still refused, and a first-login user is still answered
 | | Reset code | Sign-in code |
 |---|---|---|
 | Issued by | `forgotPassword`, for any address, unauthenticated | `doLoginPassword`, **only after a correct password** |
-| Lives | `CODE_TTL_MIN` — **15 minutes** | `LOGIN_OTP_TTL_MIN` — **8h30m**, the same window as the session |
+| Lives | `CODE_TTL_MIN` — **15 minutes** | `LOGIN_OTP_TTL_MIN` — **8h**, an hour inside the session |
 | On success | **consumed** — one reset, one code (`consume=true`) | **reused** — `consume=false` |
 | Retry | 5 wrong guesses burn it | 5 wrong guesses burn it, and the count runs all day |
 | Global ceiling | `CODE_MAX_PER_HOUR_GLOBAL` — **12/hour** | `CODE_MAX_PER_HOUR_GLOBAL_LOGIN` — **120/hour** |
@@ -609,7 +609,7 @@ admin-facing detail, not something a person signing in can act on.
 
 The reuse is the feature and it has a cost worth stating plainly. A sign-in code
 read over someone's shoulder, or out of an inbox left open, stays usable for
-**8h30m** — the same window as the session it mints — and the same code will sign in
+**8h** — an hour inside the session it mints — and the same code will sign in
 on more than one device. A 15-minute reset code, consumed by its one use, has
 neither property.
 

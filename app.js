@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v113';
+const APP_VERSION = 'v114';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -5509,7 +5509,7 @@ function openAccessModal() {
       </div>
       <div class="access-status" id="access-status"></div>
       <div class="access-tabs">
-        <button type="button" class="access-tab" data-tab="people">People &amp; departments</button>
+        <button type="button" class="access-tab" data-tab="people">Employees &amp; departments</button>
         <button type="button" class="access-tab" data-tab="depts">Departments</button>
         <button type="button" class="access-tab" data-tab="create">Create people</button>
         <button type="button" class="access-tab" data-tab="customers">Customers</button>
@@ -5854,10 +5854,14 @@ function renderVersionsTab() {
 function renderPeopleTab() {
   const panels = document.getElementById('access-panels');
   if (!panels) return;
-  const users = accessCache.users || [];
+  // EMPLOYEES ONLY. A customer is a different kind of account — scoped by company, with
+  // no departments and no password — so they belong in the Customers tab, never in this
+  // matrix. Keeping them here made the grid offer ticks that do nothing and made the
+  // roster look like one list of colleagues.
+  const users = (accessCache.users || []).filter(u => !u.customerOf);
   const depts = accessCache.departments || [];
   if (!users.length) {
-    panels.innerHTML = '<div class="access-empty">No accounts yet — create one in the <strong>Create people</strong> tab.</div>';
+    panels.innerHTML = '<div class="access-empty">No employees yet — create one in the <strong>Create people</strong> tab.</div>';
     return;
   }
   const head = depts.map(d => `<th title="${escHtml(d.name)}">${escHtml(d.name || d.key)}</th>`).join('');
@@ -5868,31 +5872,24 @@ function renderPeopleTab() {
     const badge = u.isAdmin
       ? '<span class="acc-badge acc-badge-admin">admin</span>'
       : (u.status === 'disabled' ? '<span class="acc-badge acc-badge-off">disabled</span>' : '');
-    // A scoped account, said out loud. Without it a customer looks like a colleague whose
-    // departments happen to be empty, and the natural next move — tick them some — is the
-    // one thing that does nothing for them.
-    const scope = u.customerOf
-      ? '<span class="acc-badge acc-badge-cust">customer · ' + escHtml(u.customerOf) + '</span>' : '';
     const pending = u.mustChangePassword ? '<span class="acc-badge acc-badge-temp">temp password</span>' : '';
     return `<tr data-email="${escHtml(u.email)}">
       <td class="acc-matrix-name">
         <div class="access-email-line">${escHtml(u.email)}</div>
-        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${scope}${pending}</div>
+        <div class="acc-matrix-sub">${escHtml(u.name || '')}${u.name ? ' · ' : ''}${escHtml(u.lastLoginAt || 'never signed in')} ${badge}${pending}</div>
         <div class="acc-matrix-actions">
           <button type="button" class="btn btn-sm btn-secondary acc-reset" data-email="${escHtml(u.email)}">Reset password</button>
           ${u.isAdmin ? '' : `<button type="button" class="btn btn-sm btn-secondary acc-toggle" data-email="${escHtml(u.email)}" data-status="${u.status === 'disabled' ? 'active' : 'disabled'}">${u.status === 'disabled' ? 'Enable' : 'Disable'}</button>`}
         </div>
       </td>
-      ${u.customerOf
-        ? `<td class="acc-matrix-sub" colspan="${depts.length}">Scoped to <strong>${escHtml(u.customerOf)}</strong> — a customer sees that company's IRs and nothing else, so department access does not apply. Manage it in the <em>Customers</em> tab.</td>`
-        : (depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>')}
+      ${depts.length ? cells : '<td class="acc-matrix-sub">Create a department first →</td>'}
     </tr>`;
   }).join('');
 
   panels.innerHTML = `
     <div class="access-section">
-      <h3>Who is in which department</h3>
-      <p class="access-hint">Tick the departments a person belongs to. <strong>Everyone</strong> signed in can edit every section by default, and a department takes edit <em>away</em> on the sections its box is unticked in the <em>Departments</em> tab — so a tick here can remove rights as well as add them.</p>
+      <h3>Which employee is in which department</h3>
+      <p class="access-hint">Tick the departments an employee belongs to. <strong>Everyone</strong> signed in can edit every section by default, and a department takes edit <em>away</em> on the sections its box is unticked in the <em>Departments</em> tab — so a tick here can remove rights as well as add them. Customers are managed separately in the <em>Customers</em> tab.</p>
       <div class="acc-matrix-wrap">
         <table class="acc-matrix">
           <thead><tr><th>Person</th>${head}</tr></thead>
@@ -6917,8 +6914,8 @@ function renderCustomersTab() {
       <h3>Invite a customer</h3>
       <p class="access-hint">Creates the account and emails the customer the portal address.
         Their <strong>company</strong> is the whole setting — it decides which IRs they
-        can see, and nothing else. There is no temporary password to hand over: the customer
-        sets their own, and nobody at Indrones ever sees it.</p>
+        can see, and nothing else. There is no password to hand over: the customer signs in
+        with a 6-digit code we email on demand.</p>
       <div class="access-add-row">
         <input type="email" id="access-cust-email" class="form-input access-cust-field" placeholder="contact@customer.com" />
         <input type="text" id="access-cust-name" class="form-input access-cust-field" placeholder="Contact name (optional)" />

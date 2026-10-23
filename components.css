@@ -1572,3 +1572,39 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
   .dock-btn { width: 2.5rem; height: 2.5rem; }
   .dock-sheet-body { padding: 0.625rem; }
 }
+
+/* -- The legacy tab, drawn as the sheet it is --------------------------------
+   Not a label/value list: the owner reads the workbook's geometry, not a
+   translation of it. The table scrolls in both directions and never widens the
+   modal. */
+.legacy-sheet-wrap {
+  overflow: auto;
+  max-height: 68vh;
+  border: 1px solid var(--outline-gray-2);
+  background: var(--surface-base);
+}
+.legacy-sheet {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.legacy-sheet th,
+.legacy-sheet td {
+  border: 1px solid var(--outline-gray-1);
+  padding: 4px 8px;
+  vertical-align: top;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.legacy-sheet th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-gray-2);
+  font-weight: var(--weight-semibold);
+}
+.legacy-sheet td.is-empty,
+.legacy-sheet th.is-empty { background: var(--surface-gray-1); }

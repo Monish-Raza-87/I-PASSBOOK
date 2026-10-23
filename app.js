@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v119';
+const APP_VERSION = 'v120';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -13471,24 +13471,29 @@ async function applyTriage(irNumber, p = '') {
 // a row with none is a spacer and is dropped.
 let _legacyReq = 0;   // a sequence number, so a superseded fetch cannot paint last
 
+// The legacy tab, CELL FOR CELL. This used to be a label/value list, which hid the
+// sheet's real shape: a column of notes beside a column of dates reads as one run-on
+// sentence, and two facts in adjacent cells looked like one fact. A table keeps the
+// row and column geometry the writer used, so the record can be checked against the
+// original without translating it first.
 function legacyGridHtml(grid) {
   const rows = Array.isArray(grid) ? grid : [];
-  let out = '';
-  (rows || []).forEach(row => {
-    const filled = (row || []).map(c => String(c == null ? '' : c).trim()).filter(Boolean);
-    if (!filled.length) return;                     // blank spacer row — say nothing
-    if (filled.length === 1) {
-      out += `<div class="legacy-row legacy-row-head"><span class="legacy-value">${escHtml(filled[0])}</span></div>`;
-      return;
-    }
-    out += `<div class="legacy-row">` +
-             `<span class="legacy-label">${escHtml(filled[0])}</span>` +
-             `<span class="legacy-value">${escHtml(filled.slice(1).join(' · ')).replace(/\n/g, '<br/>')}</span>` +
-           `</div>`;
-  });
-  // A tab that is genuinely empty (or all spacers) says so — an empty card would
-  // read as a failed load rather than an empty record.
-  return out || '<p class="legacy-empty">This record has no content in the workbook.</p>';
+  if (!rows.length) {
+    return '<p class="legacy-empty">This record has no content in the workbook.</p>';
+  }
+  const width = rows.reduce((n, row) => Math.max(n, Array.isArray(row) ? row.length : 0), 0);
+  const body = rows.map((row, ri) => {
+    const cells = Array.from({ length: width }, (_, ci) => {
+      const raw = Array.isArray(row) ? row[ci] : '';
+      const v = String(raw == null ? '' : raw).trim();
+      const tag = ri === 0 ? 'th' : 'td';
+      return v
+        ? `<${tag}>${escHtml(v).replace(/\n/g, '<br/>')}</${tag}>`
+        : `<${tag} class="is-empty"></${tag}>`;
+    }).join('');
+    return `<tr>${cells}</tr>`;
+  }).join('');
+  return `<div class="legacy-sheet-wrap"><table class="legacy-sheet"><tbody>${body}</tbody></table></div>`;
 }
 
 // Open one legacy record, read-only. The fetch is the same token-gated shape as
@@ -13537,7 +13542,7 @@ function openLegacyRecord(irNumber) {
       if (req !== _legacyReq) return;               // a newer record is on screen
       if (!data || data.status !== 'ok') throw new Error((data && data.message) || 'getLegacyIR failed');
       body.innerHTML = legacyGridHtml(data.grid) +
-        `<p class="legacy-link-note">The original is in a restricted workbook; this copy is read-only. ` +
+        `<p class="legacy-link-note">The original tab, cell for cell — read-only here. The workbook itself stays restricted. ` +
         openLink(data.openUrl || openUrl) + `</p>`;
     })
     .catch(err => {
@@ -13707,9 +13712,9 @@ function showSection(sectionId) {
   }
   const pane = document.getElementById(sectionId);
   if (pane) pane.classList.add('active');
-  // Activity lives inside Section G now; opening G should show the log rather than
-  // making the reader hunt for a second disclosure.
-  if (sectionId === 'sec-g') applyActivityState(true);
+  // Activity is its own pane beside Section G; opening it shows the log rather
+  // than making the reader hunt for a second disclosure.
+  if (sectionId === 'ir-activity-pane') applyActivityState(true);
   refreshInspectorSoon();
 }
 

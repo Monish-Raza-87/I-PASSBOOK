@@ -1393,7 +1393,40 @@ sections is a separate import job, not done yet.
 
 ---
 
-## 21. Future Roadmap (Planned)
+## 21. v120 — Activity is its own tab, the legacy tab looks like the sheet, and the blank panes (2026-10-23)
+
+### What he corrected
+
+- Activity was inside Section G; he asked for a **separate section adjacent to G**.
+- The legacy record was a label/value list; he wants the **same sheet**, cell for cell.
+- Insights, Log analyser, Help & FAQ and Setup were still blank.
+
+### The blank panes were a real DOM bug
+
+Moving Activity into Section G left `#detail-view` **one `</div>` short**. The four sibling
+panes were therefore nested INSIDE `#detail-view`, so `renderLayout()` set them to
+`display:flex` while their hidden parent kept them invisible. The vm suites did not see it
+because they test element display, not ancestry. `smoke-ui` now asserts all four panes are
+siblings of `#detail-view`, and the browser route probe still paints each one.
+
+### What shipped
+
+- **Activity** is a tab of its own after `G: PDI/Dispatch`, with its own
+  `#ir-activity-pane`. It is not inside Section G, not a footer, and does not count as a
+  workflow section (`SECTION_IDS` stays seven).
+- **Legacy record** is now a real `<table>`: every row and every cell from the workbook,
+  including empty cells, scrolls in both directions. It is still read-only and the
+  workbook itself stays restricted.
+- The IR head is the two-line layout from v119.
+- `renderPaneSafely()` remains: a thrown pane render shows the reason instead of a blank.
+
+### Verification
+
+`node tools/smoke-all.mjs` green.
+
+---
+
+## 22. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

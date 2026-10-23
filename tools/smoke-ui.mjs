@@ -183,15 +183,19 @@ r.ok('saving a section no longer stamps anything', (() => {
 })());
 
 // ── 2 + 3. The activity panel ─────────────────────────────────────────────────
-r.head('the activity log sits in Section G, with PDI/Dispatch');
+r.head('the activity log is a section of its own, adjacent to G');
 r.ok('#ir-activity is inside #detail-view, so #detail-view stays a truthful "is an IR open" flag',
   insideOf('ir-activity', 'detail-view') && !insideOf('ir-activity', 'index-view'),
   ancestorPath(indexCode, 'ir-activity'));
-r.ok('it is inside Section G, not a footer panel',
-  insideOf('ir-activity', 'sec-g') && !insideOf('ir-activity', 'ir-overview'),
+r.ok('it is inside its own Activity pane, not inside Section G',
+  insideOf('ir-activity', 'ir-activity-pane') && !insideOf('ir-activity', 'sec-g'),
   ancestorPath(indexCode, 'ir-activity'));
-r.ok('and it comes after the Section G form in reading order',
-  indexCode.indexOf('id="ir-activity"') > indexCode.indexOf('id="sec-g-form"'));
+r.ok('and the Activity pane comes after Section G in reading order',
+  indexCode.indexOf('id="ir-activity-pane"') > indexCode.indexOf('id="sec-g"'));
+r.ok('the sibling panes are NOT nested inside #detail-view — a missing close would hide them all',
+  ['insights-view', 'log-view', 'faq-view', 'setup-view']
+    .every(id => !insideOf(id, 'detail-view')),
+  ['insights-view', 'log-view', 'faq-view', 'setup-view'].map(id => ancestorPath(indexCode, id)));
 r.ok('#ir-timeline is mounted inside the activity panel, not in the Overview',
   insideOf('ir-timeline', 'ir-activity') && !insideOf('ir-timeline', 'ir-overview'),
   ancestorPath(indexCode, 'ir-timeline'));
@@ -1100,20 +1104,22 @@ r.ok('...and the dead embed helpers went with it',
   !/openLegacyModal|legacyTick|_legacyLoaded|LEGACY_SLOW_MS/.test(appCode));
 r.ok('the record read is the token-gated getLegacyIR action',
   /action=getLegacyIR&irNumber=/.test(appCode) && /function openLegacyRecord\(/.test(appCode));
-r.ok('a single filled cell reads as a heading, not a label with an empty value', (() => {
-  const html = L.legacyGridHtml([['Overview'], ['', ''], ['IR Number', 'IR310']]);
-  return /legacy-row-head/.test(html) && /Overview/.test(html) &&
-         /legacy-label[^>]*>IR Number</.test(html) && /legacy-value[^>]*>IR310</.test(html);
+r.ok('the record is drawn as the sheet it is — a table, not a label/value list', (() => {
+  const html = L.legacyGridHtml([['Overview'], ['IR Number', 'IR310']]);
+  return /<table class="legacy-sheet">/.test(html) && /Overview/.test(html) &&
+         /IR Number/.test(html) && /IR310/.test(html) && !/legacy-row/.test(html);
 })(), L.legacyGridHtml([['Overview'], ['IR Number', 'IR310']]));
-r.ok('a two-column row becomes a stacked label/value — NOT a <table>',
+r.ok('a two-column row keeps its two columns',
   (() => { const h = L.legacyGridHtml([['IR Number', 'IR310']]);
-           return !/<table/i.test(h) && /legacy-row/.test(h); })(),
+           return /<table/i.test(h) && /<t[hd]>IR Number<\/t[hd]><t[hd]>IR310<\/t[hd]>/.test(h); })(),
   L.legacyGridHtml([['IR Number', 'IR310']]));
-r.ok('blank spacer rows are dropped, and an empty record says so plainly', (() => {
-  const blank = L.legacyGridHtml([[''], ['  ', '']]);
-  const empty = L.legacyGridHtml([]);
-  return !/legacy-row/.test(blank) && /legacy-empty/.test(empty);
-})(), L.legacyGridHtml([]));
+r.ok('empty cells and blank rows keep the workbook geometry, and an empty record says so',
+  (() => {
+    const blank = L.legacyGridHtml([['', ''], ['  ', '']]);
+    const empty = L.legacyGridHtml([]);
+    return /<tr><td class="is-empty"><\/td><td class="is-empty"><\/td><\/tr>/.test(blank) &&
+           /legacy-empty/.test(empty);
+  })(), L.legacyGridHtml([['', ''], ['', '']]));
 r.ok('opening a record paints a loading state before the fetch resolves',
   /class="legacy-loading"/.test(appCode) && /getLegacyIR&irNumber=/.test(appCode));
 r.ok('a slow record read is abandoned rather than left spinning forever',

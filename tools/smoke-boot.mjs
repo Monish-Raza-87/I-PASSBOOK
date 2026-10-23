@@ -578,10 +578,10 @@ const tabStrip = (dom.match(/id="section-tabs">([\s\S]*?)<div id="sections-wrapp
 // carries a hyphen, which is why every list of ids here is written out rather than
 // generated from a letter range.
 const SIX = ['sec-b','sec-c','sec-d','sec-cost','sec-e','sec-f','sec-g'];
-ok('eight tabs in the strip (seven sections + Report)',
+ok('nine tabs in the strip (seven sections + Report + Activity)',
   // `class="tab( |")` and not `class="tab` — the loose form also counts a tab's
   // own inner glyph span (`class="tab-icon"`), which is not a tab.
-  (tabStrip.match(/class="tab(?=[ "])/g) || []).length === 8,
+  (tabStrip.match(/class="tab(?=[ "])/g) || []).length === 9,
   (tabStrip.match(/class="tab(?=[ "])/g) || []).length);
 ok('every section tab is present',
   SIX.every(s => tabStrip.includes(`data-section="${s}"`)));

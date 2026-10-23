@@ -53,7 +53,7 @@ const tabSection = attr => (attr.match(/data-section="([^"]+)"/) || [])[1];
 const tabIds = tabs.map(tabSection).filter(Boolean);
 const sectionTabs = tabIds.filter(id => id !== 'sec-intake');
 
-ok('exactly 7 section tabs', sectionTabs.length === 7, sectionTabs);
+ok('7 workflow section tabs plus the Activity pane beside G', sectionTabs.length === 8, sectionTabs);
 ok('the 📋 Report tab is present and marked data-intake',
   /data-section="sec-intake"[^>]*data-intake="1"/.test(html), tabs);
 ok('the intake tab is first, so the report reads as the cover page',
@@ -64,8 +64,8 @@ ok('the intake tab carries no section pane in SECTIONS\' shape (it is not savabl
 // written against them, so a letter drifting here silently mis-grants access. The
 // IDS do not move with the letters — they are the permission keys — which is why
 // `sec-cost` sits between `sec-d` and `sec-e` while showing the letter D.
-ok('the tabs are the seven ids in order, with no A/H/I',
-  sectionTabs.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g', sectionTabs);
+ok('the tabs are the seven ids in order, then Activity, with no A/H/I',
+  sectionTabs.join(',') === 'sec-b,sec-c,sec-d,sec-cost,sec-e,sec-f,sec-g,ir-activity-pane', sectionTabs);
 
 // The gating fallback must skip the intake tab or it would always win it: the
 // intake pane is never hidden, so it is always "the first visible tab".

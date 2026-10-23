@@ -1202,6 +1202,7 @@
             <div class="tab" data-section="sec-e">E: Production</div>
             <div class="tab" data-section="sec-f">F: Quality Tests</div>
             <div class="tab" data-section="sec-g">G: PDI/Dispatch</div>
+            <div class="tab" data-section="ir-activity-pane" data-activity="1">Activity</div>
           </div>
 
           <!-- Section contents -->
@@ -1311,12 +1312,15 @@
                 <button type="button" class="btn btn-secondary" id="share-sec-g">⬇ Download and share</button>
               </div>
 
-              <!-- ── ACTIVITY, INSIDE SECTION G ─────────────────────────────────
-                   The owner, 2026-10-23: the footer panel was taking screen space
-                   away from the work, and the activity belongs next to PDI/Dispatch.
-                   It is opened by default when Section G is shown; the toggle still
-                   collapses it for a long list. `#ir-timeline` is the shared renderer's
-                   mount point — do NOT put the header inside it. -->
+            </div>
+
+            <!-- ── ACTIVITY — a section of its own, adjacent to Section G ──────
+                 The owner, 2026-10-23: not inside PDI/Dispatch and not a footer
+                 panel — a separate tab beside G. `#ir-timeline` is the shared
+                 renderer's mount point; do NOT put the header inside it. -->
+            <div id="ir-activity-pane" class="section-content">
+              <h2 class="section-title">Activity</h2>
+              <p class="sub">Every change recorded for this IR, in one place.</p>
               <div id="ir-activity" class="activity-panel">
                 <h2 class="activity-title">
                   <button type="button" class="activity-toggle" id="ir-activity-toggle"
@@ -1333,6 +1337,7 @@
             </div>
 
           </div>
+        </div><!-- end detail-view -->
 
 
         <!-- Desktop-only empty state, shown until an IR is selected.

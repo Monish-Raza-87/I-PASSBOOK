@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v115';
+const APP_VERSION = 'v116';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -569,16 +569,18 @@ function deviceLabel() {
   return os + ' · ' + br + installed;
 }
 
-function loginBackend(email, password, code) {
+function loginBackend(email, password, code, resend) {
   // The password may legitimately be EMPTY — that is the passwordless door, where
   // stage 1 (no code) asks for a code and stage 2 (code) redeems it. Only the
-  // email is mandatory everywhere.
+  // email is mandatory everywhere. `resend` asks for the LIVE code to be mailed
+  // again; it is the one flag that does not issue a second code.
   if (!email) return Promise.resolve({ status: 'error', message: 'Enter your email.' });
   const fd = new FormData();
   fd.append('action', 'login');
   fd.append('email', email);
   fd.append('password', password);
   if (code) fd.append('code', String(code).trim());
+  if (resend) fd.append('resend', 'true');
   // Sent on both steps; the backend only records it on the one that mints the
   // session. An older cached app.js sends nothing, and the audit line says
   // "device not reported" rather than failing.
@@ -1955,6 +1957,16 @@ let _authMode = 'email';     // 'email' | 'login' | 'unlock' | 'pattern'
 let _codeDoor = '';          // 'employee' | 'customer'
 let _codeEmail = '';
 let _codePassword = '';
+// The resend control on the shared code screen. `_codeResendAt` is the start of the
+// server's 60-second gap, and `_codeResendCount` is how many times THIS code has been
+// re-mailed. The backend holds the real 3-per-code cap; this mirror is what stops the
+// button offering a fourth press that would only be refused.
+const CODE_RESEND_GAP_MS = 60 * 1000;
+const CODE_RESEND_MAX = 3;
+let _codeResendAt = 0;
+let _codeResendCount = 0;
+let _codeResendTimer = null;
+let _codeResendStopMsg = '';
 
 // Establish a signed-in session from a backend payload. Shared by the login form
 // and the forced password change, so both land in exactly the same state.
@@ -3983,12 +3995,20 @@ function openCodeView(door, email, password) {
   _codeDoor = (door === 'customer') ? 'customer' : 'employee';
   _codeEmail = (email || '').trim().toLowerCase();
   _codePassword = password || '';
+  // Every arrival starts the server's 60-second gap. Even a code reused from earlier
+  // in the day is subject to it, so the button must never fire into a throttle.
+  _codeResendAt = Date.now();
+  _codeResendCount = 0;
+  _codeResendStopMsg = '';
+  if (_codeResendTimer) { clearTimeout(_codeResendTimer); _codeResendTimer = null; }
   const em = document.getElementById('code-email');
   if (em) em.textContent = _codeEmail;
   setCodeError('');
   codeBoxes().forEach(b => { b.value = ''; b.disabled = false; });
   const cv = document.getElementById('code-view');
   if (cv) { cv.dataset.open = '1'; cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); }
+  paintCodeResend();
+  tickCodeResend();
   // The landing page goes away ENTIRELY — head, both doors, the terms line, the
   // language picker — which is what makes this read as the blank centred page he asked
   // for. `stopBrandTyping()` is part of that and not an optimisation: the head's chain
@@ -4010,6 +4030,7 @@ function openCodeView(door, email, password) {
 // employee's door by default: a customer who mistyped their address and is put back on
 // the wrong panel has lost their place.
 function closeCodeView(restore) {
+  if (_codeResendTimer) { clearTimeout(_codeResendTimer); _codeResendTimer = null; }
   const cv = document.getElementById('code-view');
   if (cv) { cv.dataset.open = '0'; cv.dataset.busy = '0'; cv.removeAttribute('aria-busy'); }
   if (restore === false) return;
@@ -4017,6 +4038,78 @@ function closeCodeView(restore) {
   setDoor(_codeDoor === 'customer' ? 'customer' : 'employee', true);
   const field = document.getElementById(_codeDoor === 'customer' ? 'cust-email' : 'auth-email');
   if (field && _codeEmail) field.value = _codeEmail;
+}
+
+// The resend button on the shared code screen. It mirrors the customer portal's own
+// control: one button under the boxes, disabled for the server's 60-second gap, its
+// label counting down, then the same six digits are mailed again — never a new code.
+function paintCodeResend() {
+  const wrap = document.getElementById('code-resend-wrap');
+  const btn  = document.getElementById('code-resend');
+  const note = document.getElementById('code-resend-note');
+  if (!wrap || !btn || !note) return;
+  if (!_codeDoor) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+
+  if (_codeResendCount >= CODE_RESEND_MAX) {
+    btn.hidden = true;
+    note.className = 'code-resend-note resend-stop';
+    note.textContent = _codeResendStopMsg ||
+      'This code has been sent three times. Contact Indrones Customer Relations.';
+    return;
+  }
+
+  btn.hidden = false;
+  note.className = 'code-resend-note';
+  const waitMs = _codeResendAt ? (_codeResendAt + CODE_RESEND_GAP_MS) - Date.now() : 0;
+  if (waitMs > 0) {
+    btn.disabled = true;
+    btn.textContent = 'Resend in ' + Math.ceil(waitMs / 1000) + 's';
+    note.textContent = '';
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Resend code';
+    note.textContent = _codeResendCount
+      ? 'Sent again · ' + _codeResendCount + ' of ' + CODE_RESEND_MAX : '';
+  }
+}
+
+function tickCodeResend() {
+  if (_codeResendTimer) { clearTimeout(_codeResendTimer); _codeResendTimer = null; }
+  if (!_codeDoor || _codeResendCount >= CODE_RESEND_MAX) return;
+  const waitMs = _codeResendAt ? (_codeResendAt + CODE_RESEND_GAP_MS) - Date.now() : 0;
+  if (waitMs > 0) {
+    paintCodeResend();
+    _codeResendTimer = setTimeout(tickCodeResend, Math.min(waitMs + 50, 1000));
+  } else {
+    paintCodeResend();
+  }
+}
+
+function resendCodeFromScreen() {
+  const btn = document.getElementById('code-resend');
+  if (!btn || btn.disabled || !_codeDoor || _codeResendCount >= CODE_RESEND_MAX) return;
+  btn.disabled = true;
+  setCodeError('');
+  const req = (_codeDoor === 'customer')
+    ? customerAuth('login', { email: _codeEmail, password: '', resend: true })
+    : loginBackend(_codeEmail, _codePassword, '', true);
+  req.then(d => {
+    if (d && d.status === 'ok' && d.otpRequired) {
+      _codeResendAt = Date.now();
+      if (d.codeSent !== false) _codeResendCount = Math.min(CODE_RESEND_MAX, _codeResendCount + 1);
+    } else if (d && d.tooMany) {
+      _codeResendCount = CODE_RESEND_MAX;
+      _codeResendStopMsg = d.message || '';
+    } else {
+      setCodeError((d && d.message) || 'Could not resend the code just now.');
+    }
+    paintCodeResend();
+    if (_codeResendCount < CODE_RESEND_MAX) tickCodeResend();
+  }).catch(() => {
+    setCodeError('Could not reach us just now. Check your connection and try again.');
+    paintCodeResend();
+  });
 }
 
 // Spread a run of digits across the boxes, starting at `from` — except a FULL code,
@@ -4087,6 +4180,8 @@ function wireCodeView() {
   form.addEventListener('submit', ev => { ev.preventDefault(); submitCode(); });
   const diff = document.getElementById('code-different');
   if (diff) diff.addEventListener('click', () => closeCodeView(true));
+  const resend = document.getElementById('code-resend');
+  if (resend) resend.addEventListener('click', resendCodeFromScreen);
   if (boxes[0]) setTimeout(() => boxes[0].focus(), 60);
 }
 

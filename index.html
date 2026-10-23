@@ -763,6 +763,14 @@
           <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="5" aria-label="Digit 5 of the code" />
           <input class="code-box" type="text" inputmode="numeric" maxlength="1" data-i18n-aria="code.digit" data-i18n-var-n="6" aria-label="Digit 6 of the code" />
         </div>
+
+        <!-- The resend control. It sits under the six boxes and starts disabled for the
+             server's own 60-second gap; the label counts down, then becomes the action.
+             Same code, mailed again — never a new code that would retire the first. -->
+        <div class="code-resend" id="code-resend-wrap">
+          <button type="button" class="btn" id="code-resend" disabled>Resend in 60s</button>
+          <span class="code-resend-note" id="code-resend-note" aria-live="polite"></span>
+        </div>
       </form>
       <p id="code-error" class="auth-error" style="display:none"></p>
       <button type="button" class="link-btn" id="code-different" data-i18n="code.different">Use a different account</button>

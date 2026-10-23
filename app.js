@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v118';
+const APP_VERSION = 'v119';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9624,11 +9624,23 @@ function renderSetup() {
 
 }
 
+// A pane that throws must still say something. A blank screen is the one failure a
+// reader cannot report precisely, so the error is written where the pane would be.
+function renderPaneSafely(name, bodyId, fn) {
+  try { fn(); return true; } catch (e) {
+    const body = document.getElementById(bodyId);
+    if (body) body.innerHTML = '<div class="access-error">' + escHtml(name) +
+      ' could not render: ' + escHtml((e && e.message) || String(e)) + '</div>';
+    console.error(name, e);
+    return false;
+  }
+}
+
 function showSetup() {
   currentView = 'setup';
   renderLayout();
   headerTitle.textContent = tFloor('nav.setup', 'Setup');
-  renderSetup();
+  renderPaneSafely('Setup', 'setup-body', renderSetup);
 }
 
 function showInsights() {
@@ -9637,7 +9649,7 @@ function showInsights() {
   headerTitle.textContent = tFloor('nav.insights', 'Insights');
   // The pane renders from whatever is in memory; handleRoute() is what waits for
   // the list. Re-rendering here keeps a re-entry from showing a stale dashboard.
-  renderInsights();
+  renderPaneSafely('Insights', 'insights-body', renderInsights);
 }
 
 if (insightsView) {
@@ -10448,7 +10460,7 @@ function showLog() {
   headerTitle.textContent = tFloor('nav.logAnalyser', 'Log analyser');
   // Renders from whatever is in memory; handleRoute() is what waits for the IR
   // list. Re-rendering on every entry keeps a re-entry from showing a stale pane.
-  renderLog();
+  renderPaneSafely('Log analyser', 'log-body', renderLog);
 }
 
 // ─── HELP & FAQ (#/faq) ───────────────────────────────────────────────────────
@@ -10479,7 +10491,7 @@ function showFaq() {
   // here reads a store, an IR or the network, so there is no stale pane to refresh
   // and no reason to rebuild a document the user may have scrolled down — which
   // would also throw away which questions they had opened.
-  if (!faqBuilt) renderFaq();
+  if (!faqBuilt) renderPaneSafely('Help & FAQ', 'faq-body', renderFaq);
 }
 
 function renderFaq() {
@@ -12458,9 +12470,11 @@ async function openPassbook(irNumber) {
   dispatchChecklistState = {}; // clear Section H dispatch checklist from previous IR
 
   document.getElementById('ir-banner-title').textContent = irNumber;
-  // Drone + customer only — status moved into the pill strip beside it.
+  // One line: IR · serial · company · the person who raised it. The assignee and the
+  // workflow facts stay in the pill strip on the second line.
   document.getElementById('ir-banner-sub').textContent =
-    [currentIR.droneId, currentIR.customerName || currentIR.contactEmail].filter(Boolean).join(' · ') || '—';
+    [currentIR.droneId, currentIR.companyName, currentIR.customerName || currentIR.contactEmail]
+      .filter(Boolean).join(' · ') || '—';
   if (bannerPills) {
     // This IR may not be in allIRs yet (deep link into a list that has not
     // loaded), so apply its app-owned state directly instead of relying on the
@@ -12520,22 +12534,13 @@ async function openPassbook(irNumber) {
   // legacy activity log), so it renders only after loadSectionData has landed.
   renderOverview();
 
-  // Legacy record: show the "Legacy Record" button if this IR exists in the
-  // legacy workbook, and auto-open that read-only view when there's no new-app
-  // data yet (so old IRs immediately show their original record, not empty tabs).
+  // Legacy record: the button is available when this IR exists in the legacy
+  // workbook, but the record NO LONGER opens by itself. The owner, 2026-10-23: the
+  // floating read-only sheet over the ticket was unwanted — the legacy facts are
+  // already carried into this screen, and the original is one deliberate press away.
   const legacy = legacyMap[irNumber];
   const legacyBtn = document.getElementById('ir-legacy-btn');
-  if (legacy && legacyBtn) {
-    legacyBtn.style.display = '';
-    // A pre-app IR that has no data in the new app yet: show its original record
-    // straight away rather than six empty tabs. The record is read from the backend
-    // (getLegacyIR) — see openLegacyRecord — because the workbook itself is
-    // restricted and the browser cannot open it.
-    const hasNewData = currentSectionData && Object.keys(currentSectionData).length > 0;
-    if (!hasNewData) openLegacyRecord(irNumber);
-  } else if (legacyBtn) {
-    legacyBtn.style.display = 'none';
-  }
+  if (legacyBtn) legacyBtn.style.display = legacy ? '' : 'none';
 }
 
 // ─── CLIENT INTAKE VIEW (the 📋 Report tab) ──────────────────────────────────
@@ -13702,6 +13707,9 @@ function showSection(sectionId) {
   }
   const pane = document.getElementById(sectionId);
   if (pane) pane.classList.add('active');
+  // Activity lives inside Section G now; opening G should show the log rather than
+  // making the reader hunt for a second disclosure.
+  if (sectionId === 'sec-g') applyActivityState(true);
   refreshInspectorSoon();
 }
 

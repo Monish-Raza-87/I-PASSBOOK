@@ -276,24 +276,31 @@ r.head('the code can be asked for again — three times, then a human');
 // times. If more than that then needs to reach out Indrones CR."
 //
 // The number is checked AGAINST THE BACKEND'S OWN, because the two are the same rule
-// seen from two sides: the backend refuses a fourth issue per email per hour, and this
-// link stops offering a fourth. If they ever drift, the link promises a mail the server
+// seen from two sides: the backend refuses a fourth resend of one code, and this button
+// stops offering a fourth. If they ever drift, the button promises a mail the server
 // will not send — which looks exactly like a broken account.
 const resent = portal.match(/const RESEND_MAX\s*=\s*(\d+)/);
-const codeCap = backend.match(/var CODE_MAX_PER_HOUR\s*=\s*(\d+)/);
+const codeCap = backend.match(/var LOGIN_CODE_RESEND_MAX\s*=\s*(\d+)/);
 r.ok('the portal names its resend cap', !!resent, resent && resent[0]);
-r.ok('...and it is the backend\'s own per-email budget, not a second opinion',
+r.ok('...and it is the backend\'s own per-code cap, not a second opinion',
   !!resent && !!codeCap && Number(resent[1]) === Number(codeCap[1]),
   { portal: resent && resent[1], backend: codeCap && codeCap[1] });
 
-r.ok('the link exists in the sheet and starts hidden',
-  /id="resend-line" hidden/.test(portal) && /id="signin-resend"/.test(portal));
+r.ok('the resend button exists in the sheet and starts hidden + disabled',
+  /id="resend-line" hidden/.test(portal) &&
+  /id="signin-resend" disabled/.test(portal));
 r.ok('it is wired in wirePortal, where a mounted sheet can actually reach it',
   /\$\('signin-resend'\)\.addEventListener\('click'/.test(portal));
-// Step 1 already sends from the button in the middle of the sheet; a second send link
+// Step 1 already sends from the button in the middle of the sheet; a second send control
 // there would be two controls for one action, one of which silently does nothing.
 r.ok('...and it only appears once a code is outstanding',
   /const show = flow\.step === 2;/.test(portal) && /\$\('resend-line'\)\.hidden = !show;/.test(portal));
+r.ok('...and it starts disabled with the 60-second countdown in its own label',
+  /btn\.disabled = true;/.test(portal) &&
+  /btn\.textContent = 'Resend in ' \+ Math\.ceil\(waitMs \/ 1000\) \+ 's'/.test(portal) &&
+  /const RESEND_GAP_MS = 60 \* 1000;/.test(portal));
+r.ok('...and it activates only when the countdown reaches zero',
+  /if \(waitMs > 0\) \{[\s\S]{0,180}btn\.disabled = true;[\s\S]{0,180}else \{[\s\S]{0,120}btn\.disabled = false;/.test(portal));
 r.ok('...and it stops offering itself at the cap, in a sentence that says who to ask',
   /if \(flow\.resent >= RESEND_MAX\) \{[\s\S]{0,120}crLine\(\)/.test(portal) &&
   /This code has been sent three times/.test(portal));

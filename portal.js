@@ -398,14 +398,16 @@
              maxlength="6" placeholder="000000">
     </div>
 
-    <button type="button" class="btn btn-primary" id="signin-go">Continue</button>
+    <!-- Only while a code is outstanding. The button is the WHOLE resend feature: the
+         backend re-mails the SAME code, so this adds a second chance, not a second code.
+         It sits under the code field and starts disabled for 60 seconds, because that is
+         the server's own gap; a button that fires into it would only produce a refusal. -->
+    <div class="resend-row" id="resend-line" hidden>
+      <button type="button" class="btn btn-resend" id="signin-resend" disabled>Resend code</button>
+      <span class="resend-note" id="resend-note" aria-live="polite"></span>
+    </div>
 
-    <!-- Only while a code is outstanding. The link is the WHOLE resend feature: the
-         backend re-mails the SAME code, so this adds a second chance, not a second code. -->
-    <p class="sheet-note" id="resend-line" hidden>
-      <a href="#" id="signin-resend">Send the code again</a>
-      <span id="resend-note"></span>
-    </p>
+    <button type="button" class="btn btn-primary" id="signin-go">Continue</button>
 
     <p class="sheet-note" id="signin-note"></p>
     <p class="sheet-note">Looking for the service desk app? It is on the <a href="./index.html">same page as this one</a>, behind the Employee door.</p>
@@ -1243,8 +1245,8 @@
   // Shown only while a code is outstanding, because at step 1 the button in the middle
   // of the sheet already sends one.
   //
-  // Three things can be true of the link, and each says so plainly:
-  //   • it is waiting out the backend's 60-second gap;
+  // Three things can be true of the button, and each says so plainly:
+  //   • it is waiting out the backend's 60-second gap, with the seconds counting down;
   //   • it is live;
   //   • it is gone, and the person now needs a human — with the address to write to
   //     filled in from the portal's own configuration, never typed into this file.
@@ -1268,34 +1270,36 @@
   }
 
   function paintResend() {
-    // Step 1 sends from the main button, so the link has nothing to add there.
+    // Step 1 sends from the main button, so the resend row has nothing to add there.
     const show = flow.step === 2;
     $('resend-line').hidden = !show;
     if (!show) return;
 
-    const link = $('signin-resend');
+    const btn = $('signin-resend');
     const note = $('resend-note');
 
     if (flow.resent >= RESEND_MAX) {
-      link.hidden = true;
+      btn.hidden = true;
       note.textContent = crLine();
-      note.className = 'resend-stop';
+      note.className = 'resend-note resend-stop';
       return;
     }
 
-    link.hidden = false;
-    note.className = '';
+    btn.hidden = false;
+    note.className = 'resend-note';
     const waitMs = flow.resentAt ? (flow.resentAt + RESEND_GAP_MS) - Date.now() : 0;
     if (waitMs > 0) {
-      link.setAttribute('aria-disabled', 'true');
-      note.textContent = 'in ' + Math.ceil(waitMs / 1000) + 's …';
+      btn.disabled = true;
+      btn.textContent = 'Resend in ' + Math.ceil(waitMs / 1000) + 's';
+      note.textContent = '';
     } else {
-      link.removeAttribute('aria-disabled');
-      note.textContent = flow.resent ? 'sent ' + flow.resent + ' of ' + RESEND_MAX : '';
+      btn.disabled = false;
+      btn.textContent = 'Resend code';
+      note.textContent = flow.resent ? 'Sent again · ' + flow.resent + ' of ' + RESEND_MAX : '';
     }
   }
 
-  // A one-shot ticker, not an interval: it only has to wake the link up once, and an
+  // A one-shot ticker, not an interval: it only has to wake the button up once, and an
   // interval left running behind a closed sheet is a timer nobody owns.
   function tickResend() {
     if (flow.step !== 2 || flow.resent >= RESEND_MAX) return;
@@ -1306,13 +1310,9 @@
 
   async function resendCode() {
     if (flow.busy || flow.step !== 2 || flow.resent >= RESEND_MAX) return;
+    if ($('signin-resend').disabled) return;
     const email = $('signin-email').value.trim().toLowerCase();
     if (!email) { setMsg('Enter your email address first.', 'err'); return; }
-
-    flow.resent += 1;
-    flow.resentAt = Date.now();
-    paintResend();
-    setTimeout(tickResend, 1000);
 
     setBusy(true);
     try {
@@ -1322,9 +1322,19 @@
       // are already out instead of issuing a second code that would retire the first.
       const res = await apiPost('login', { email: email, device: deviceLabel(), resend: true });
       if (res && res.status === 'ok' && res.otpRequired) {
-        setMsg(res.codeSent === false
-          ? 'That code went out a moment ago — give it a minute to arrive.'
-          : 'We sent you the same code again. The earlier mail works too.', 'ok');
+        if (res.codeSent === false) {
+          // The server's 60-second gap is still running. Restart the visible countdown
+          // rather than pretending a mail went out.
+          flow.resentAt = Date.now();
+          setMsg('That code went out a moment ago — give it a minute to arrive.', 'ok');
+        } else {
+          flow.resent = Math.min(RESEND_MAX, flow.resent + 1);
+          flow.resentAt = Date.now();
+          setMsg('We sent you the same code again. The earlier mail works too.', 'ok');
+        }
+      } else if (res && res.tooMany) {
+        flow.resent = RESEND_MAX;
+        setMsg(msgOf(res) || crLine(), 'err');
       } else {
         setMsg(msgOf(res) || 'Could not send just now — wait a minute and press it again.', 'err');
       }
@@ -1333,6 +1343,7 @@
     } finally {
       setBusy(false);
       paintResend();
+      if (flow.resent < RESEND_MAX) setTimeout(tickResend, 1000);
     }
   }
 
@@ -1370,7 +1381,13 @@
       }
       if (res && res.status === 'ok' && res.otpRequired) {
         flow.step = 2;
+        flow.resent = 0;
+        // Every arrival at the code step starts the server's own 60-second gap. Even
+        // when codeSent is false (a live code was reused), the resend must not fire
+        // immediately into a throttle that would only answer "give it a minute".
+        flow.resentAt = Date.now();
         paintFlow();
+        setTimeout(tickResend, 1000);
         if (res.codeSent === false) {
           // TWO different situations answer with codeSent:false, and this screen cannot
           // tell them apart — so it names both rather than guessing. One: a code sent

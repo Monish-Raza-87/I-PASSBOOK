@@ -1215,7 +1215,39 @@ them at all.
 
 ---
 
-## 16. Future Roadmap (Planned)
+## 16. v115 — the portal looks like Indrones, and the resend button counts down (2026-10-23)
+
+### What he asked for
+
+The customer sign-in sheet must show a **disabled resend button under the OTP field, with a
+60-second countdown that reaches zero and then enables it**. And the customer portal must
+stop looking like a different product: it has to match `indrones.com/#programs` — clean,
+professional, and interactive.
+
+### What shipped
+
+- **Resend.** The old text link is gone. The button sits directly under the OTP field,
+  starts disabled, and its own label counts down (`Resend in 60s`). At zero it becomes
+  `Resend code`. A successful resend restarts the 60-second wait and reports
+  `Sent again · n of 3`. The fourth ask is replaced by the Customer Relations sentence.
+- **The portal's look.** The palette is now paper/ink/yellow from indrones.com, with sharp
+  corners, mono micro-labels, editorial uppercase headings, hairline rules, numbered
+  activity tiles, hover lift and a yellow active state. The sign-in sheet is square with a
+  yellow top rule; buttons are square mono labels; product cards and ticket rows follow the
+  same language. Dark mode keeps the same structure on the app's dark ground.
+- **No new framework, font or image.** The portal still loads only `portal.css` and
+  `portal.js`, so the two pages that mount it cannot drift and a customer pays nothing new.
+
+### Verification
+
+`node tools/render-portal.mjs` — 106 passed, 0 failed, including the real 60-second
+countdown and the same-code resend. `node tools/smoke-all.mjs` green. The intro acceptance
+test was also made reliable by waiting for the previous headless Chrome to exit before the
+next load reuses its profile; that hand-off was the one flaky step.
+
+---
+
+## 17. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

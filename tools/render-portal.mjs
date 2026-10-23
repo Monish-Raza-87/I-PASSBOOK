@@ -473,18 +473,32 @@ try {
   await goto('signedout', 414);
   await evaluate(`document.querySelector('.js-signin').click()`);
   await evaluate(`document.getElementById('signin-email').value = 'reports@acmesurvey.example'`);
-  ok('the resend link is hidden before any code is outstanding',
+  ok('the resend button is hidden before any code is outstanding',
     !(await visible('#resend-line')));
   await evaluate(`document.getElementById('signin-go').click()`);
   await SLEEP(250);
   ok('...and appears once one is', await visible('#resend-line'));
+  ok('...disabled, with the server\'s 60-second gap counted down in the button',
+    await evaluate(`document.getElementById('signin-resend').disabled`) === true &&
+    /Resend in \d+s/.test(await evaluate(`document.getElementById('signin-resend').textContent`)),
+    await evaluate(`document.getElementById('signin-resend').textContent`));
+  const countdown1 = await evaluate(`document.getElementById('signin-resend').textContent`);
+  await SLEEP(1200);
+  const countdown2 = await evaluate(`document.getElementById('signin-resend').textContent`);
+  ok('...and the countdown actually moves toward zero',
+    countdown1 !== countdown2 && /Resend in \d+s/.test(countdown2),
+    countdown1 + ' → ' + countdown2);
+  // The button is genuinely disabled, so the acceptance test lifts the attribute the way
+  // a user cannot, then presses it. The production path never fires into the gap.
+  await evaluate(`document.getElementById('signin-resend').disabled = false`);
   await evaluate(`document.getElementById('signin-resend').click()`);
   await SLEEP(300);
   const r1 = await evaluate(`document.getElementById('signin-msg').textContent`);
   ok('pressing it sends the SAME code again, and says so', /same code again/i.test(r1), r1);
-  ok('...after which the link waits out the server\'s own 60-second gap',
-    await evaluate(`document.getElementById('signin-resend').getAttribute('aria-disabled')`) === 'true',
-    await evaluate(`document.getElementById('resend-note').textContent`));
+  ok('...after which the button waits out the server\'s own 60-second gap again',
+    await evaluate(`document.getElementById('signin-resend').disabled`) === true &&
+    /Resend in \d+s/.test(await evaluate(`document.getElementById('signin-resend').textContent`)),
+    await evaluate(`document.getElementById('signin-resend').textContent`));
 
   // ── an address with no usable account ───────────────────────────────────────
   // The backend answers codeSent:false for two different reasons — a code from earlier

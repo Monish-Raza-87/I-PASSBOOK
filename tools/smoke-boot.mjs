@@ -906,6 +906,17 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH) {
   // failed there and passed alone, which is the worst way for a test to be wrong.
   if (got) await new Promise(r => setTimeout(r, 4000));
   try { proc.kill(); } catch { /* already gone */ }
+  // The NEXT load reuses this profile. On Windows `kill()` is a hard terminate and
+  // does not promise the profile's lock has been released before the next Chrome
+  // starts — the second load then silently fails to report and the suite blames the
+  // product. Wait for the exit event (with a ceiling) so the hand-off is real.
+  await new Promise(r => {
+    if (proc.exitCode !== null) return r();
+    let done = false;
+    const finish = () => { if (!done) { done = true; r(); } };
+    proc.once('exit', finish);
+    setTimeout(finish, 3000);
+  });
   return got;
 }
 

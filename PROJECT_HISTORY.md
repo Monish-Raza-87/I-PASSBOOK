@@ -1357,7 +1357,43 @@ typing — no panel, no button taking a corner of the screen.
 
 ---
 
-## 20. Future Roadmap (Planned)
+## 20. v119 — a two-line IR head, Activity in Section G, and no auto-opened legacy (2026-10-23)
+
+### What he asked for
+
+- The IR head should be two lines: `IR · serial · company · reporter` with the actions on
+  the right, then the workflow pills beneath.
+- The legacy record must stop opening over the ticket by itself.
+- Activity belongs next to PDI/Dispatch, not in an expandable footer.
+- Insights, Log analyser, Help & FAQ and Setup were reported blank.
+
+### What shipped
+
+- The banner is a two-row grid. Row one is the identity line plus the four actions; row
+  two is the status/age/progress/assignee pills. The workspace header no longer repeats
+  the IR number. The line is `IR496 · S25P033 · COMPANY · REPORTER`.
+- `#ir-activity` moved inside Section G, after the form/export row. Opening G opens the
+  activity log; the toggle still collapses a long list.
+- The legacy sheet no longer auto-opens on an IR with no new-app data. The **Legacy
+  record** button remains for a deliberate press.
+- The four sibling panes now render through `renderPaneSafely()`, so a thrown render shows
+  the error in the pane instead of a blank screen. A real-browser route probe was added to
+  `smoke-boot` for all four panes.
+
+### Honest answer on legacy import
+
+The legacy workbook is **not** imported into the section records. `mergeLegacyOnlyIRs()`
+only adds a list stub for an IR the Sheet does not have, and `getLegacyIR` fetches the
+original tab as a read-only grid when pressed. Bringing the legacy text into the app's six
+sections is a separate import job, not done yet.
+
+### Verification
+
+`node tools/smoke-all.mjs` green.
+
+---
+
+## 21. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

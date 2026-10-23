@@ -183,14 +183,15 @@ r.ok('saving a section no longer stamps anything', (() => {
 })());
 
 // ── 2 + 3. The activity panel ─────────────────────────────────────────────────
-r.head('the activity log sits under the sections, inside the detail pane');
+r.head('the activity log sits in Section G, with PDI/Dispatch');
 r.ok('#ir-activity is inside #detail-view, so #detail-view stays a truthful "is an IR open" flag',
   insideOf('ir-activity', 'detail-view') && !insideOf('ir-activity', 'index-view'),
   ancestorPath(indexCode, 'ir-activity'));
-r.ok('it is inside #detail-view but OUTSIDE #sections-wrapper',
-  !insideOf('ir-activity', 'sections-wrapper'), ancestorPath(indexCode, 'ir-activity'));
-r.ok('and it comes after every section in reading order',
-  indexCode.indexOf('id="ir-activity"') > indexCode.indexOf('id="sections-wrapper"'));
+r.ok('it is inside Section G, not a footer panel',
+  insideOf('ir-activity', 'sec-g') && !insideOf('ir-activity', 'ir-overview'),
+  ancestorPath(indexCode, 'ir-activity'));
+r.ok('and it comes after the Section G form in reading order',
+  indexCode.indexOf('id="ir-activity"') > indexCode.indexOf('id="sec-g-form"'));
 r.ok('#ir-timeline is mounted inside the activity panel, not in the Overview',
   insideOf('ir-timeline', 'ir-activity') && !insideOf('ir-timeline', 'ir-overview'),
   ancestorPath(indexCode, 'ir-timeline'));

@@ -1433,3 +1433,31 @@
 }
 #detail-view #ir-overview.is-collapsed .overview-title { font-size: var(--text-2xs); }
 #detail-view #ir-overview.is-collapsed .overview-head .btn { display: none; }
+
+/* The IR head is TWO lines: identity � company � reporter on the left with the
+   actions on the right, then the workflow pills beneath. The owner's layout, 2026-10-23. */
+#detail-view #ir-banner {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "id actions" "pills pills";
+  align-items: center;
+}
+#detail-view .banner-main {
+  grid-area: id;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+}
+#detail-view #ir-banner-sub::before {
+  content: "\00b7";
+  margin-right: 0.45rem;
+  color: var(--ind-muted);
+}
+#detail-view .banner-pills { grid-area: pills; }
+#detail-view .banner-actions { grid-area: actions; justify-content: flex-end; }
+@media (max-width: 639px) {
+  #detail-view #ir-banner { grid-template-columns: minmax(0, 1fr); grid-template-areas: "id" "actions" "pills"; }
+  #detail-view .banner-actions { justify-content: flex-start; }
+}

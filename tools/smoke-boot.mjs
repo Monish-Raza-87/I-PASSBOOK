@@ -353,6 +353,21 @@ const AUTH_DRIVER = `<script>
     log('token', localStorage.getItem('ipb_session'));
     log('authGone', !shown('auth-container'));
     log('codeViewGoneAfterSignIn', !shown('code-view'));
+    // Route through the four sibling panes after sign-in. A blank pane here is a
+    // real-browser failure the vm suites cannot see.
+    var routes = [
+      ['nav-insights', 'insights-view', 'insights-body', 'routeInsights'],
+      ['nav-log', 'log-view', 'log-body', 'routeLog'],
+      ['nav-faq', 'faq-view', 'faq-body', 'routeFaq'],
+      ['nav-setup', 'setup-view', 'setup-body', 'routeSetup']
+    ];
+    for (var ri = 0; ri < routes.length; ri++) {
+      var rt = routes[ri];
+      if (el(rt[0])) el(rt[0]).click();
+      await waitFor(function () { return shown(rt[1]); }, 5000);
+      log(rt[3] + 'Shown', shown(rt[1]));
+      log(rt[3] + 'Len', el(rt[2]) ? el(rt[2]).textContent.trim().length : 0);
+    }
   } catch (e) {
     log('failedAt', out.steps[out.steps.length - 1] || 'start');
     log('error', String((e && e.message) || e));
@@ -864,6 +879,12 @@ if (probe && !probe.error) {
   ok('the right code signs in', probe.signedIn === true, probe.steps);
   ok('the token is now in localStorage', probe.token === 'tok-from-probe', probe.token);
   ok('and the auth card is gone', probe.authGone === true);
+  [['Insights', 'routeInsights'], ['Log analyser', 'routeLog'], ['Help & FAQ', 'routeFaq'], ['Setup', 'routeSetup']]
+    .forEach(([label, key]) => {
+      ok(label + ' opens and paints content, not a blank pane',
+        probe[key + 'Shown'] === true && probe[key + 'Len'] > 20,
+        { shown: probe[key + 'Shown'], len: probe[key + 'Len'] });
+    });
 }
 
 // ── Phase 4: the intro plays once per device ──────────────────────────────────

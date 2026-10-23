@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v117';
+const APP_VERSION = 'v118';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1785,9 +1785,6 @@ window.addEventListener('load', () => {
   // because they are properties of the screen rather than of any one sign-in — and
   // because a signed-in device that signs out must find them already alive.
   wireLanding();
-  // The Inspector's floating checklist. It is a property of the IR screen, and the
-  // button/panel are static markup, so wiring once at boot is enough.
-  wireInspector();
   setInterval(paintAllSavedAges, 15000);
 
   // The customer door's REPORT modal — a different thing from the door, and it needs
@@ -12490,7 +12487,9 @@ async function openPassbook(irNumber) {
 
   currentView = 'detail';
   renderLayout();
-  headerTitle.textContent = irNumber;
+  // The banner carries the IR number. Repeating it in the workspace header was the
+  // duplicate the owner saw at the top of every ticket, and it cost a line for nothing.
+  headerTitle.textContent = tFloor('nav.irs', 'IRs');
 
   // Build all section forms
   buildSectionForms(irNumber);
@@ -14411,11 +14410,11 @@ function buildField(field, irNumber, sectionId) {
     : '';
   const fieldBtns = fieldNudgeBtn + fieldHistBtn;
   const labelHtml = field.label
-    ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldBtns}</label>`
-    : (fieldBtns ? `<div class="form-label">${fieldBtns}</div>` : '');
+    ? `<label class="form-label${locked ? ' field-locked-label' : ''}" for="${id}">${field.label}${lockIcon}${fieldBtns}<span class="field-inspector-badge" data-inspector-badge="${escJsAttr(id)}" hidden></span></label>`
+    : (fieldBtns ? `<div class="form-label">${fieldBtns}<span class="field-inspector-badge" data-inspector-badge="${escJsAttr(id)}" hidden></span></div>` : '');
 
   return `
-    <div class="form-group${locked ? ' field-locked' : ''}">
+    <div class="form-group${locked ? ' field-locked' : ''}" data-field-id="${escJsAttr(id)}">
       ${labelHtml}
       ${control}
     </div>
@@ -15723,7 +15722,7 @@ function inspectorPresent(v) { return !inspectorEmpty(v); }
 // The writing helper. Every finding here is a Note: it offers a better sentence, it
 // never stops a save or a close. The checks are deliberately conservative — a false
 // correction in a compliance record is worse than a missed comma.
-function inspectorWritingFindings(text, label) {
+function inspectorWritingFindings(text, fieldId, label) {
   const s = String(text == null ? '' : text).trim();
   if (!s) return [];
   const out = [];
@@ -15755,7 +15754,7 @@ function inspectorWritingFindings(text, label) {
   const wrong = Object.keys(spells).find(k => new RegExp('\\b' + k + '\\b', 'i').test(s));
   if (wrong) add('Spelling: “' + wrong + '” → “' + spells[wrong] + '”.');
 
-  return out.map(msg => ({ id: 'LANG', severity: 'note', fieldId: label, message: msg }));
+  return out.map(msg => ({ id: 'LANG', severity: 'note', fieldId: fieldId, message: msg }));
 }
 
 // The repair table is the one table the user builds row by row, so its incomplete rows
@@ -15803,7 +15802,8 @@ function inspectorMaturityFindings(sectionId, ir, fieldValues) {
     .slice(0, 3);
   if (!scored.length) return [];
   return [{
-    id: 'MATURITY', severity: 'note', fieldId: 'd_investigation',
+    id: 'MATURITY', severity: 'note',
+    fieldId: sectionId === 'sec-d' ? 'd_investigation' : 'c_remarks',
     message: 'Similar past records: ' + scored.map(x => x.ir.irNumber).join(', ') +
              '. Read them before writing a fresh conclusion.',
   }];
@@ -15921,7 +15921,7 @@ function inspectorSectionFindings(sectionId, ir) {
   // ── Writing helper (Notes only) ────────────────────────────────────────────
   section.fields.forEach(f => {
     if (f.type !== 'text' && f.type !== 'textarea') return;
-    inspectorWritingFindings(fieldValues[f.id], inspectorFieldLabel(sectionId, f.id))
+    inspectorWritingFindings(fieldValues[f.id], f.id, inspectorFieldLabel(sectionId, f.id))
       .forEach(x => add(x.id, x.severity, x.message, x.fieldId));
   });
 
@@ -15931,110 +15931,52 @@ function inspectorSectionFindings(sectionId, ir) {
   return findings.sort((a, b) => (INSPECTOR_RANK[a.severity] ?? 9) - (INSPECTOR_RANK[b.severity] ?? 9));
 }
 
-// ── The floating live checklist ──────────────────────────────────────────────
-let _inspectorWired = false;
+// ── The invisible Inspector ─────────────────────────────────────────────────
 let _inspectorRefreshTimer = null;
-let _inspectorDrag = null;
 
 function inspectorActiveSectionId() {
   const active = document.querySelector('.section-content.active');
   return active ? active.id : '';
 }
-function inspectorOpen(open) {
-  const panel = document.getElementById('inspector-panel');
-  const fab = document.getElementById('inspector-fab');
-  if (!panel || !fab) return;
-  panel.hidden = !open;
-  fab.setAttribute('aria-expanded', String(!!open));
-  if (open) renderInspectorChecklist();
-}
-const INSPECTOR_SEV_CLASS = { block: 'is-block', fir: 'is-fir', ask: 'is-ask', note: 'is-note' };
-function renderInspectorChecklist() {
-  const panel = document.getElementById('inspector-panel');
-  const box = document.getElementById('inspector-findings');
-  const dot = document.getElementById('inspector-dot');
-  const ctx = document.getElementById('inspector-context');
-  if (!box) return;
+// The invisible Inspector. Every finding that names a field becomes a tiny badge in the
+// field's label — no panel, no floating button, no layout shift. The badge itself is the
+// whole UI: hover reads the message, a tap repeats it as a toast. Block findings also
+// draw a red edge on the control so the reason is visible while typing.
+function applyInspectorInline() {
   const sectionId = inspectorActiveSectionId();
-  const findings = currentIR && sectionId ? inspectorSectionFindings(sectionId, currentIR) : [];
-  if (dot) dot.hidden = !findings.length;
-  if (ctx) ctx.textContent = sectionId && SECTIONS[sectionId] ? SECTIONS[sectionId].title : 'No section open';
-  if (!panel || panel.hidden) return;
+  const badges = new Map([...document.querySelectorAll('[data-inspector-badge]')]
+    .map(el => [el.dataset.inspectorBadge, el]));
+  badges.forEach(el => {
+    el.hidden = true;
+    el.textContent = '';
+    el.className = 'field-inspector-badge';
+    el.removeAttribute('title');
+    delete el.dataset.tip;
+    el.onclick = null;
+  });
+  document.querySelectorAll('#detail-view .form-group.has-inspector-block')
+    .forEach(el => el.classList.remove('has-inspector-block'));
+  if (!sectionId || !currentIR) return;
 
-  if (!findings.length) {
-    box.innerHTML = '<p class="inspector-clear">Nothing to report. Saving is free; Close will run the gate.</p>';
-    return;
-  }
-  box.innerHTML = findings.map(f => `
-    <div class="inspector-finding ${INSPECTOR_SEV_CLASS[f.severity] || 'is-note'}">
-      <span class="inspector-sev">${escHtml(f.severity)}</span>
-      <span class="inspector-msg">${f.id ? '<b>' + escHtml(f.id) + '</b> ' : ''}${escHtml(f.message)}</span>
-    </div>`).join('');
+  inspectorSectionFindings(sectionId, currentIR).forEach(f => {
+    if (!f.fieldId) return;
+    const badge = badges.get(f.fieldId);
+    if (!badge) return;
+    badge.hidden = false;
+    badge.classList.add(f.severity === 'block' ? 'is-block' : 'is-note');
+    badge.textContent = f.severity === 'block' ? '!' : '•';
+    badge.dataset.tip = (badge.dataset.tip ? badge.dataset.tip + ' · ' : '') + f.message;
+    badge.title = badge.dataset.tip;
+    badge.onclick = (e) => { e.preventDefault(); e.stopPropagation(); showToast(badge.dataset.tip); };
+    if (f.severity === 'block') {
+      const group = badge.closest('.form-group');
+      if (group) group.classList.add('has-inspector-block');
+    }
+  });
 }
 function refreshInspectorSoon() {
   clearTimeout(_inspectorRefreshTimer);
-  _inspectorRefreshTimer = setTimeout(renderInspectorChecklist, 450);
-}
-function wireInspector() {
-  if (_inspectorWired) return;
-  const fab = document.getElementById('inspector-fab');
-  const panel = document.getElementById('inspector-panel');
-  if (!fab || !panel) return;
-  _inspectorWired = true;
-  const fabIcon = document.getElementById('inspector-fab-icon');
-  if (fabIcon && !fabIcon.querySelector('svg')) fabIcon.innerHTML = iconSvg('cap');
-  const capIcon = document.getElementById('inspector-cap-icon');
-  if (capIcon && !capIcon.querySelector('svg')) capIcon.innerHTML = iconSvg('cap');
-
-  const hide = document.getElementById('inspector-hide');
-  const close = document.getElementById('inspector-close');
-  const restore = document.getElementById('inspector-restore');
-  const setHidden = (hidden) => {
-    fab.hidden = hidden;
-    panel.hidden = true;
-    if (restore) restore.style.display = hidden ? '' : 'none';
-    try { localStorage.setItem('ipb_inspector_hidden', hidden ? '1' : '0'); } catch (e) {}
-  };
-  if (hide) hide.addEventListener('click', () => setHidden(true));
-  if (close) close.addEventListener('click', () => inspectorOpen(false));
-  if (restore) restore.addEventListener('click', () => setHidden(false));
-
-  fab.addEventListener('click', () => {
-    if (_inspectorDrag && _inspectorDrag.moved) { _inspectorDrag = null; return; }
-    inspectorOpen(panel.hidden);
-  });
-  fab.addEventListener('pointerdown', e => {
-    if (e.button !== 0) return;
-    const r = fab.getBoundingClientRect();
-    _inspectorDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false, id: e.pointerId };
-    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
-  });
-  fab.addEventListener('pointermove', e => {
-    if (!_inspectorDrag || _inspectorDrag.id !== e.pointerId) return;
-    const x = Math.max(8, Math.min(window.innerWidth - fab.offsetWidth - 8, e.clientX - _inspectorDrag.dx));
-    const y = Math.max(8, Math.min(window.innerHeight - fab.offsetHeight - 8, e.clientY - _inspectorDrag.dy));
-    fab.style.left = x + 'px'; fab.style.top = y + 'px';
-    fab.style.right = 'auto'; fab.style.bottom = 'auto';
-    _inspectorDrag.moved = true;
-  });
-  fab.addEventListener('pointerup', () => {
-    if (!_inspectorDrag) return;
-    if (_inspectorDrag.moved) {
-      try { localStorage.setItem('ipb_inspector_pos', JSON.stringify({ left: fab.style.left, top: fab.style.top })); } catch (e) {}
-    }
-    setTimeout(() => { _inspectorDrag = null; }, 0);
-  });
-
-  try {
-    if (localStorage.getItem('ipb_inspector_hidden') === '1') setHidden(true);
-    const pos = JSON.parse(localStorage.getItem('ipb_inspector_pos') || 'null');
-    if (pos && pos.left && pos.top) {
-      fab.style.left = pos.left; fab.style.top = pos.top;
-      fab.style.right = 'auto'; fab.style.bottom = 'auto';
-    }
-  } catch (e) {}
-
-  renderInspectorChecklist();
+  _inspectorRefreshTimer = setTimeout(applyInspectorInline, 450);
 }
 
 // ── Not Applicable — a statement about the section, recorded on the IR ───────
@@ -16081,8 +16023,7 @@ function paintNASections(irNumber) {
   });
 }
 function showInspectorBlocks(blocks) {
-  inspectorOpen(true);
-  renderInspectorChecklist();
+  applyInspectorInline();
   showToast(blocks.length + ' block' + (blocks.length === 1 ? '' : 's') + ': ' + blocks[0].message);
 }
 

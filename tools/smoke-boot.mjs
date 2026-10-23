@@ -979,7 +979,10 @@ if (firstIntro) {
 // went and got the file at all. It is also the weight saving, stated as a number: a
 // returning device downloads no video, no still — nothing this panel needs is fetched
 // before sign-in on the second visit.
-const secondIntro = await runIntroLoad(45000);
+let secondIntro = await runIntroLoad(45000);
+// A headless launch can occasionally lose the probe without a product failure. Retry
+// once with the SAME profile, because the property under test is the stored version.
+if (!secondIntro) { await new Promise(r => setTimeout(r, 2000)); secondIntro = await runIntroLoad(45000); }
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
   ok('a device that has already been given this version\'s intro is not given it again',

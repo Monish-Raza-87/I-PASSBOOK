@@ -267,7 +267,7 @@ ok('the sign-in buttons\' four labels are asked for through the table, not writt
   !/setBusy\(signBtn, 'Sending…'\)/.test(appJs),
   handWritten.filter(k => !appJs.includes(`'${k}'`)));
 ok('...and the four view titles too, so no header reads English under a Hindi sidebar',
-  ['app.name', 'nav.insights', 'nav.logAnalyser', 'nav.help']
+  ['app.name', 'nav.irs', 'nav.insights', 'nav.logAnalyser', 'nav.help']
     .every(k => new RegExp(`headerTitle\\.textContent = tFloor\\('${k.replace('.', '\\.')}'`).test(appJs)));
 // The claim is not "within N characters of the handler's first line" — that was a
 // stand-in for the real one, and it broke the moment the handler grew an honest

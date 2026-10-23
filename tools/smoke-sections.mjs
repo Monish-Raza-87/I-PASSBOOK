@@ -363,9 +363,13 @@ r.ok('the rule engine carries the block rules that can be checked deterministica
 r.ok('the writing helper is Notes only, and the maturity note cites past IRs',
   /inspectorWritingFindings/.test(appJs) && /severity: 'note'/.test(appJs) &&
   /inspectorMaturityFindings/.test(appJs) && /Similar past records/.test(appJs));
-r.ok('the live panel is a movable cap button with a findings sheet',
-  /id="inspector-fab"/.test(html) && /id="inspector-panel"/.test(html) &&
-  /wireInspector/.test(appJs) && /inspectorOpen/.test(appJs));
+r.ok('the Inspector is inline: a badge in the field label, no panel or floating button',
+  /field-inspector-badge/.test(appJs) && /applyInspectorInline/.test(appJs) &&
+  !/id="inspector-fab"/.test(html) && !/id="inspector-panel"/.test(html) &&
+  !/id="inspector-restore"/.test(html));
+r.ok('...and the IR header is compact, with no duplicate IR number in the workspace title',
+  /#detail-view #ir-banner \{ padding: 0\.45rem/.test(fs.readFileSync(new URL('../industrial.css', import.meta.url), 'utf8')) &&
+  /headerTitle\.textContent = tFloor\('nav\.irs', 'IRs'\)/.test(appJs));
 r.ok('the save note ages from just-now to minutes to hours',
   /paintSavedAge/.test(appJs) && /common\.savedJustNow/.test(appJs) &&
   /common\.savedMinsAgo/.test(appJs) && /common\.savedHoursAgo/.test(appJs));

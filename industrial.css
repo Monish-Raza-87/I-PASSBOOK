@@ -1355,10 +1355,11 @@
   color: var(--ink-gray-9);
 }
 
-/* -- I-INSPECTOR � the live checklist, and the NA control (v117) -------------
-   The panel is a Grammarly-shaped affordance: a movable cap button, a compact
-   findings sheet, and no modal. It is inside #detail-view, so it is scoped with
-   every other screen and cannot leak into the landing page. */
+/* -- I-INSPECTOR -- invisible by default, inline where you are typing (v118) --
+   The owner's correction, 2026-10-23: the floating checklist was taking screen
+   space from the work. The engine still runs; the output is now a small badge in
+   the field label, with the message in its tooltip and a tap on the badge. Nothing
+   in the layout shifts, and there is no panel to open or close. */
 #detail-view .btn-na-section {
   min-height: 40px;
   margin-left: 0.5rem;
@@ -1376,136 +1377,59 @@
   border-color: var(--accent);
   color: var(--btn-solid-fg);
 }
-#detail-view #inspector-fab {
-  position: fixed;
-  right: 24px;
-  bottom: 86px;
-  z-index: 48;
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  display: grid;
+#detail-view .field-inspector-badge {
+  display: inline-grid;
   place-items: center;
-  border: 1px solid var(--ind-line);
-  background: var(--ind-panel);
-  color: var(--ink-gray-9);
-  cursor: grab;
-  touch-action: none;
-}
-#detail-view #inspector-fab:hover { border-color: var(--accent); color: var(--accent); }
-#detail-view #inspector-fab:active { cursor: grabbing; }
-#detail-view .inspector-dot {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 8px;
-  height: 8px;
-  background: var(--accent);
-  border: 2px solid var(--ind-panel);
-  border-radius: 50%;
-}
-#detail-view .inspector-panel {
-  position: fixed;
-  right: 24px;
-  bottom: 146px;
-  z-index: 49;
-  width: min(380px, calc(100vw - 32px));
-  max-height: min(62vh, 560px);
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--ind-line);
-  border-top: 2px solid var(--accent);
-  background: var(--ind-panel);
-}
-#detail-view .inspector-head {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.75rem 0.85rem;
-  border-bottom: 1px solid var(--ind-line);
-}
-#detail-view .inspector-cap { display: grid; place-items: center; color: var(--accent); }
-#detail-view .inspector-title { display: grid; gap: 0.1rem; min-width: 0; }
-#detail-view .inspector-title b {
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-#detail-view .inspector-title span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--ind-muted);
-  font-size: var(--text-2xs);
-}
-#detail-view .inspector-x {
-  margin-left: auto;
-  min-height: 28px;
-  padding: 0 0.4rem;
-  border: 0;
-  background: transparent;
-  color: var(--ind-muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-}
-#detail-view .inspector-x:hover { color: var(--ink-gray-9); }
-#detail-view .inspector-x + .inspector-x { margin-left: 0; }
-#detail-view .inspector-findings {
-  display: grid;
-  gap: 0.55rem;
-  padding: 0.8rem;
-  overflow-y: auto;
-}
-#detail-view .inspector-finding {
-  display: grid;
-  grid-template-columns: 54px 1fr;
-  gap: 0.55rem;
-  align-items: start;
-  padding: 0.6rem;
+  width: 15px;
+  height: 15px;
+  margin-left: 0.35rem;
   border: 1px solid var(--ind-line);
   background: var(--ind-inset);
-}
-#detail-view .inspector-sev {
+  color: var(--ind-muted);
   font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  padding-top: 0.15rem;
+  font-size: 10px;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
 }
-#detail-view .inspector-msg { font-size: var(--text-sm); line-height: 1.45; }
-#detail-view .inspector-msg b { font-family: var(--font-mono); font-weight: 600; }
-#detail-view .inspector-finding.is-block { border-left: 3px solid var(--ink-red-6); }
-#detail-view .inspector-finding.is-block .inspector-sev { color: var(--ink-red-6); }
-#detail-view .inspector-finding.is-fir { border-left: 3px solid var(--ink-amber-7); }
-#detail-view .inspector-finding.is-fir .inspector-sev { color: var(--ink-amber-7); }
-#detail-view .inspector-finding.is-ask { border-left: 3px solid var(--accent); }
-#detail-view .inspector-finding.is-ask .inspector-sev { color: var(--accent); }
-#detail-view .inspector-finding.is-note { border-left: 3px solid var(--ind-line); }
-#detail-view .inspector-finding.is-note .inspector-sev { color: var(--ind-muted); }
-#detail-view .inspector-clear {
+#detail-view .field-inspector-badge.is-block {
+  border-color: var(--ink-red-6);
+  color: var(--ink-red-6);
+  background: var(--surface-red-1);
+}
+#detail-view .field-inspector-badge.is-note {
+  border-color: var(--ink-amber-7);
+  color: var(--ink-amber-7);
+  background: var(--surface-amber-1);
+}
+#detail-view .form-group.has-inspector-block > .form-input,
+#detail-view .form-group.has-inspector-block textarea,
+#detail-view .form-group.has-inspector-block select {
+  border-left: 3px solid var(--ink-red-6);
+}
+
+/* The IR header is a working strip, not a poster. Tighten it so the section you
+   came for keeps the screen. */
+#detail-view #ir-banner { padding: 0.45rem 0.75rem; gap: 0.35rem 0.6rem; }
+#detail-view #ir-banner-title { font-size: var(--text-lg); }
+#detail-view #ir-banner-sub { margin-top: 0; }
+#detail-view .banner-pills { margin-top: 3px; gap: 0.3rem; }
+#detail-view .banner-actions { gap: 0.3rem; }
+#detail-view .banner-actions .btn-ghost {
+  min-height: 30px;
+  padding: 0 0.5rem;
+  font-size: var(--text-2xs);
+}
+#detail-view #ir-overview.is-collapsed {
+  margin: 0 0 0.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+#detail-view #ir-overview.is-collapsed .overview-head {
   margin: 0;
-  padding: 0.5rem 0.2rem;
-  color: var(--ind-muted);
-  font-size: var(--text-sm);
+  padding: 0.2rem 0.85rem;
+  border-bottom: 1px solid var(--ind-line);
 }
-#detail-view .inspector-foot {
-  padding: 0.6rem 0.85rem;
-  border-top: 1px solid var(--ind-line);
-  color: var(--ind-muted);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.04em;
-  line-height: 1.5;
-  text-transform: uppercase;
-}
-@media (max-width: 639px) {
-  #detail-view #inspector-fab { right: 14px; bottom: 76px; }
-  #detail-view .inspector-panel { right: 14px; bottom: 136px; }
-}
-#detail-view .inspector-fab-icon,
-#detail-view .inspector-cap { display: grid; place-items: center; }
-#detail-view .inspector-fab-icon svg { width: 20px; height: 20px; }
-#detail-view .inspector-cap svg { width: 16px; height: 16px; }
+#detail-view #ir-overview.is-collapsed .overview-title { font-size: var(--text-2xs); }
+#detail-view #ir-overview.is-collapsed .overview-head .btn { display: none; }

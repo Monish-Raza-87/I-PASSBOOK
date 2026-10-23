@@ -1328,7 +1328,36 @@ version**.
 
 ---
 
-## 19. Future Roadmap (Planned)
+## 19. v118 — I-INSPECTOR goes invisible, and the IR header gives the screen back (2026-10-23)
+
+### What he said
+
+The floating Inspector and the IR header were eating the space the section form needs.
+I-INSPECTOR should work in the background and suggest changes the way Grammarly does while
+typing — no panel, no button taking a corner of the screen.
+
+### What shipped
+
+- Removed the floating cap button, the findings panel, and the banner's **Inspector**
+  restore button. Nothing about the Inspector is on screen as chrome any more.
+- The same rule engine now writes a **tiny badge in the field's own label**: `!` for a
+  Block, `•` for a FIR/Ask/Note. Hover reads the message; tapping repeats it as a toast.
+  A Block also draws a red edge on the control. It costs no layout height.
+- The section form gets the screen back:
+  - the workspace header no longer repeats the IR number (the banner already carries it),
+  - the banner is tighter and its action buttons are smaller,
+  - the collapsed Overview is a thin one-line strip, with its Save button hidden while
+    collapsed.
+- The NA control stays beside Close; the rule engine, save-age wording and failed-save
+  admin notice are unchanged.
+
+### Verification
+
+`node tools/smoke-all.mjs` green.
+
+---
+
+## 20. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

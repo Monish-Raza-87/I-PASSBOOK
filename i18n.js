@@ -295,7 +295,10 @@
     'overview.sectionsSaved':   '{n} of {m} sections saved',
 
     // ── Words the app uses everywhere ────────────────────────────────────────
-    'common.saved':        'Saved',
+    'common.savedJustNow': 'Saved just now',
+    'common.savedSecsAgo': 'Saved {n}s ago',
+    'common.savedMinsAgo': 'Saved {n} min ago',
+    'common.savedHoursAgo':'Saved {n}h ago',
     'common.saving':       'Saving…',
     'common.notSaved':     'Not saved — press again',
     'common.retrying':     'Not saved — retrying',
@@ -700,7 +703,10 @@
     'overview.sectionsSaved':   '{m} में से {n} सेक्शन सहेजे गए',
 
     // ── Words the app uses everywhere ────────────────────────────────────────
-    'common.saved':        'सहेजा गया',
+    'common.savedJustNow': 'अभी सहेजा गया',
+    'common.savedSecsAgo': '{n} सेकंड पहले सहेजा गया',
+    'common.savedMinsAgo': '{n} मिनट पहले सहेजा गया',
+    'common.savedHoursAgo':'{n} घंटे पहले सहेजा गया',
     'common.saving':       'सहेजा जा रहा है…',
     'common.notSaved':     'सहेजा नहीं गया — फिर दबाएँ',
     'common.retrying':     'सहेजा नहीं गया — फिर कोशिश हो रही है',

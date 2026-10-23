@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v116';
+const APP_VERSION = 'v117';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1360,6 +1360,7 @@ function applyIRStateToAllIRs() {
     // completion marker for a section that no longer exists would render as a
     // progress row nobody can name.
     ir.done = Array.isArray(s.done) ? s.done.filter(id => SECTION_IDS.includes(id)) : [];
+    ir.na   = Array.isArray(s.na)   ? s.na.filter(id => SECTION_IDS.includes(id))   : [];
   });
 }
 
@@ -1402,6 +1403,25 @@ function markSectionDone(irNumber, sectionId) {
   // retired id must never be able to re-enter the list.
   if (SECTION_IDS.includes(sectionId) && !done.includes(sectionId)) done.push(sectionId);
   return done;
+}
+
+// The section-level Not Applicable state. It lives beside `done` in the IR row, so it
+// travels with the ticket rather than with a device. A section that is NA is complete
+// (it must not hold the progress chip open) and cannot be closed or edited as if it
+// were a normal section until CR undoes it.
+function markSectionNA(irNumber, sectionId) {
+  const row = irState[irNumber] || {};
+  const na = (Array.isArray(row.na) ? row.na : []).filter(id => SECTION_IDS.includes(id));
+  if (SECTION_IDS.includes(sectionId) && !na.includes(sectionId)) na.push(sectionId);
+  return na;
+}
+function markSectionNotNA(irNumber, sectionId) {
+  const row = irState[irNumber] || {};
+  return (Array.isArray(row.na) ? row.na : []).filter(id => id !== sectionId);
+}
+function isSectionNA(irNumber, sectionId) {
+  const row = irState[irNumber] || {};
+  return (Array.isArray(row.na) ? row.na : []).includes(sectionId);
 }
 
 // The 11 particulars from the IDS master Inward Checklist.
@@ -1765,6 +1785,10 @@ window.addEventListener('load', () => {
   // because they are properties of the screen rather than of any one sign-in — and
   // because a signed-in device that signs out must find them already alive.
   wireLanding();
+  // The Inspector's floating checklist. It is a property of the IR screen, and the
+  // button/panel are static markup, so wiring once at boot is enough.
+  wireInspector();
+  setInterval(paintAllSavedAges, 15000);
 
   // The customer door's REPORT modal — a different thing from the door, and it needs
   // CUSTOMER_FORM_URL before it exists at all.
@@ -13320,6 +13344,21 @@ async function applyTriage(irNumber, p = '') {
   const prev     = String(ir.assignee || '').toLowerCase();
   const member   = teamPeople().find(d => String(d.email).toLowerCase() === email.toLowerCase());
 
+  // R-115 — the whole IR cannot be delivered while a section is still open.
+  // `done` and `na` are both "finished" for this question: NA is a deliberate answer,
+  // not a gap. This is the gate the rule book calls the one-level-up close.
+  if (status === 'Delivered') {
+    const row = irState[irNumber] || {};
+    const done = Array.isArray(row.done) ? row.done : [];
+    const na   = Array.isArray(row.na)   ? row.na   : [];
+    const open = SECTION_IDS.filter(id => !done.includes(id) && !na.includes(id));
+    if (open.length) {
+      showToast('Deliver is blocked: complete or mark Not Applicable first — ' +
+        open.map(id => sectionLetter(id)).join(', ') + '.');
+      return;
+    }
+  }
+
   // Category is MANDATORY. It is the one triage field the list filter and the
   // Insights page count by, so a triaged IR without one would be invisible to both
   // — an "uncategorised" hole no report could explain. The sub-category is required
@@ -13587,10 +13626,11 @@ document.getElementById('sections-wrapper').addEventListener('input', e => {
     clearTimeout(dispatchRefreshTimer);
     dispatchRefreshTimer = setTimeout(() => renderDispatchChecklist('h_dispatchChecklist'), 350);
   }
+  refreshInspectorSoon();
 });
 document.getElementById('sections-wrapper').addEventListener('change', e => {
   const sec = e.target.closest('.section-content');
-  if (sec) { markSectionDirty(sec.id); saveDraft(sec.id); }
+  if (sec) { markSectionDirty(sec.id); saveDraft(sec.id); refreshInspectorSoon(); }
 });
 
 // ─── FLUSH POINTS ─────────────────────────────────────────────────────────────
@@ -13663,6 +13703,7 @@ function showSection(sectionId) {
   }
   const pane = document.getElementById(sectionId);
   if (pane) pane.classList.add('active');
+  refreshInspectorSoon();
 }
 
 document.querySelectorAll('.tab').forEach(tab => {
@@ -13862,6 +13903,20 @@ function buildSectionForms(irNumber) {
   Object.keys(SECTIONS).forEach(secId => {
     const btn = document.getElementById('close-' + secId);
     if (btn) btn.onclick = () => closeSection(secId, irNumber);
+    // The NA control lives beside Close, not in a settings menu: it is a statement
+    // about THIS section, and the person making it is standing in the section.
+    const holder = document.querySelector('#' + secId + ' .sec-close-row');
+    if (holder) {
+      let naBtn = holder.querySelector('.btn-na-section');
+      if (!naBtn) {
+        naBtn = document.createElement('button');
+        naBtn.type = 'button';
+        naBtn.className = 'btn btn-na-section';
+        naBtn.textContent = 'Not applicable';
+        holder.insertBefore(naBtn, btn || null);
+      }
+      naBtn.onclick = () => toggleSectionNA(secId, irNumber);
+    }
     // A freshly built form holds exactly what is stored, so the honest starting
     // state of the indicator is "Saved" — and if this IR has already closed the
     // section, the button says so before any click in this session.
@@ -15446,6 +15501,8 @@ const AUTOSAVE_RETRY_MS = 10000;   // after a failure, and it keeps retrying
 const _autosaveTimers    = Object.create(null);
 const _autosaveSnapshots = Object.create(null);   // sectionId → JSON of last saved fields
 const _autosaveFailed    = Object.create(null);   // sectionId → true while unsaved
+const _autosaveSavedAt   = Object.create(null);   // sectionId → ms of the last real save
+const _saveFailureSent   = Object.create(null);   // irNumber+section → true once reported
 
 function scheduleAutoSave(unitId) {
   if (!isTrackedUnit(unitId) || !unitAutoSaves(unitId)) return;
@@ -15537,6 +15594,7 @@ async function autoSaveUnit(unitId) {
     // is still marked dirty, so the retry below has something to send.
     _autosaveFailed[unitId] = true;
     setAutosaveNote(unitId, 'error');
+    alertUnsavedChange(unitId, err);
     clearTimeout(_autosaveTimers[unitId]);
     _autosaveTimers[unitId] = setTimeout(() => {
       delete _autosaveTimers[unitId];
@@ -15560,7 +15618,8 @@ function setAutosaveNote(unitId, state) {
   if (!el) return;
   el.dataset.state = state;
   if (state === 'saved') {
-    el.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(t('common.saved')) + '</span>';
+    _autosaveSavedAt[unitId] = Date.now();
+    paintSavedAge(unitId);
   } else if (state === 'saving') {
     el.textContent = t('common.saving');
   } else if (state === 'failed') {
@@ -15569,6 +15628,55 @@ function setAutosaveNote(unitId, state) {
     el.textContent = t('common.retrying');
   }
 }
+
+// The owner's words, 2026-10-23: “Saved just now” or “Saved x mins ago” for a save
+// inside the hour. After that the age is still honest but no longer useful minute by
+// minute, so it rounds to hours. The timestamp is per unit, so two sections saved at
+// different times do not share a clock.
+function paintSavedAge(unitId) {
+  const el = document.getElementById('autosave-' + unitId);
+  if (!el) return;
+  const at = _autosaveSavedAt[unitId];
+  if (!at) return;
+  const secs = Math.max(0, Math.floor((Date.now() - at) / 1000));
+  let label;
+  if (secs < 10) label = t('common.savedJustNow');
+  else if (secs < 60) label = t('common.savedSecsAgo', { n: secs });
+  else if (secs < 3600) label = t('common.savedMinsAgo', { n: Math.floor(secs / 60) });
+  else label = t('common.savedHoursAgo', { n: Math.floor(secs / 3600) });
+  el.dataset.state = 'saved';
+  el.innerHTML = iconSvg('check-circle') + '<span>' + escHtml(label) + '</span>';
+}
+function paintAllSavedAges() {
+  Object.keys(_autosaveSavedAt).forEach(unitId => {
+    const el = document.getElementById('autosave-' + unitId);
+    if (el && el.dataset.state === 'saved') paintSavedAge(unitId);
+  });
+}
+
+// A failed auto-save is the one state that must never be quiet. The person typing is
+// told in words that the change is NOT saved and to contact the admin; the admin is
+// told by I-INSPECTOR through the one backend notice path. The alert is sent once per
+// IR+section per session, because a retry loop must not become a mail loop.
+function alertUnsavedChange(unitId, err) {
+  const irNumber = currentIR?.irNumber || '';
+  const key = irNumber + '::' + unitId;
+  showToast('Changes are NOT saved — contact the admin immediately.');
+  if (_saveFailureSent[key]) return;
+  _saveFailureSent[key] = true;
+  if (!irNumber) return;
+  try {
+    const fd = new FormData();
+    fd.append('action', 'reportInspectorAlert');
+    fd.append('kind', 'save-failure');
+    fd.append('irNumber', irNumber);
+    fd.append('sectionId', unitId);
+    fd.append('message', String((err && err.message) || err || 'unknown error').slice(0, 400));
+    fd.append('version', APP_VERSION);
+    postJson(_origFetch, fd).catch(() => {});
+  } catch (e) { /* the toast is the local guarantee; the notice is best-effort */ }
+}
+
 
 // ─── CLOSING A SECTION ────────────────────────────────────────────────────────
 // Is Costing empty? Answered from the COLLECTED values, never the DOM, so the question
@@ -15587,6 +15695,397 @@ function isBlankCosting() {
     return Array.isArray(value) ? value.length === 0 : !String(value || '').trim();
   });
 }
+// ═══ I-INSPECTOR — THE RULE ENGINE (chunk 2) ═════════════════════════════════
+// The rule book has been a document since it was written. This is the part that
+// actually runs: deterministic checks over the values the Close button is about to
+// send, with the four severities the owner chose.
+//
+//   block  cannot close until fixed
+//   fir    reported, nobody interrupted
+//   ask    asks once, closes anyway, files an FIR
+//   note   observation only
+//
+// Saving is always free. Only Close consults `block`; the live panel shows everything.
+const INSPECTOR_RANK = { block: 0, fir: 1, ask: 2, note: 3 };
+
+function inspectorFieldLabel(sectionId, fieldId) {
+  const section = SECTIONS[sectionId];
+  const field = section && section.fields.find(f => f.id === fieldId);
+  return field ? field.label : fieldId;
+}
+function inspectorEmpty(v) {
+  if (Array.isArray(v)) return v.length === 0;
+  if (v && typeof v === 'object') return Object.keys(v).length === 0;
+  return !String(v == null ? '' : v).trim();
+}
+function inspectorPresent(v) { return !inspectorEmpty(v); }
+
+// The writing helper. Every finding here is a Note: it offers a better sentence, it
+// never stops a save or a close. The checks are deliberately conservative — a false
+// correction in a compliance record is worse than a missed comma.
+function inspectorWritingFindings(text, label) {
+  const s = String(text == null ? '' : text).trim();
+  if (!s) return [];
+  const out = [];
+  const add = msg => { if (out.length < 3) out.push(msg); };
+
+  if (/\b(\w+)\s+\1\b/i.test(s)) add('A word is written twice.');
+  if (/[.,;:!?][A-Za-z]/.test(s)) add('Add a space after the punctuation.');
+  if (/\bi\b/.test(s)) add('Use a capital “I”.');
+  if (s.length >= 18 && (s.match(/[A-Za-z]/g) || []).length >= 12 && s === s.toUpperCase())
+    add('A whole paragraph in capitals — sentence case reads better.');
+  if (/[!?.,]{2,}/.test(s)) add('Repeated punctuation (“!!!” or “…”).');
+  if (/\b(plz|thx|asap|rgds|u|ur)\b/i.test(s)) add('Chat abbreviation — write the word out.');
+  if (/\(\s|\s\)/.test(s)) add('Spacing around brackets.');
+  if (/\b(its a|its the|your welcome|your right|more then|less then|there is no|their is)\b/i.test(s))
+    add('Check its/it’s, your/you’re, then/than, there/their.');
+  if (/^(some problem|not working properly|issue is there|problem is there)\.?$/i.test(s))
+    add('This says nothing specific — which part, and what did it do?');
+  if (/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(s)) add('Write dates as 05 Oct 2026.');
+  if (s.replace(/[\s\p{P}]/gu, '').length === 0) add('This field is only punctuation.');
+  if (/[\u0900-\u097F]/.test(s)) add('Devanagari in an English field — use English for the record.');
+  if (/\b(theek|thik|nahi|hai|kya|jaldi|kal|acha|accha|bas|kuch|kaam|ho gaya|kar diya)\b/i.test(s))
+    add('Hinglish is welcome; if this is customer-facing, a plain English sentence may read better.');
+
+  const spells = {
+    recieved: 'received', seperate: 'separate', occured: 'occurred', maintainance: 'maintenance',
+    enviroment: 'environment', sucess: 'success', definately: 'definitely', teh: 'the',
+    adress: 'address', batterry: 'battery', batter: 'battery', intial: 'initial', inspite: 'in spite',
+  };
+  const wrong = Object.keys(spells).find(k => new RegExp('\\b' + k + '\\b', 'i').test(s));
+  if (wrong) add('Spelling: “' + wrong + '” → “' + spells[wrong] + '”.');
+
+  return out.map(msg => ({ id: 'LANG', severity: 'note', fieldId: label, message: msg }));
+}
+
+// The repair table is the one table the user builds row by row, so its incomplete rows
+// are read from the DOM rather than from the collected payload (which drops a row that
+// only has a remark).
+function collectCostRowsRaw() {
+  const body = document.getElementById('d_repairTable-body');
+  if (!body) return [];
+  const rows = [];
+  body.querySelectorAll('.cost-table-row').forEach(row => {
+    const r = {
+      particular: row.querySelector('.cost-particular')?.value || '',
+      qty:        row.querySelector('.cost-qty')?.value || '',
+      rate:       row.querySelector('.cost-rate')?.value || '',
+      cost:       row.querySelector('.cost-cost')?.value || '',
+      remark:     row.querySelector('.cost-remark')?.value || '',
+    };
+    if (r.particular || r.qty || r.rate || r.cost || r.remark) rows.push(r);
+  });
+  return rows;
+}
+
+// Retrieval, not a model: the past IRs that share this machine and/or the words in
+// this investigation. It is a Note with source IR numbers, which is the only kind of
+// suggestion worth having in a compliance record.
+function inspectorMaturityFindings(sectionId, ir, fieldValues) {
+  if (!ir || (sectionId !== 'sec-d' && sectionId !== 'sec-c')) return [];
+  const text = [fieldValues.d_investigation, fieldValues.d_rootCause, fieldValues.c_remarks]
+    .filter(Boolean).join(' ').toLowerCase();
+  const words = new Set((text.match(/[a-z0-9]{4,}/g) || []).filter(w =>
+    !['this', 'that', 'with', 'from', 'have', 'been', 'were', 'there', 'which', 'what', 'when', 'then'].includes(w)));
+  if (!words.size) return [];
+  const model = String(ir.droneModel || '').toLowerCase();
+  const scored = (allIRs || [])
+    .filter(x => x && x.irNumber && x.irNumber !== ir.irNumber)
+    .map(x => {
+      const hay = String(x.issueDesc || '').toLowerCase();
+      let score = 0;
+      words.forEach(w => { if (hay.includes(w)) score += 1; });
+      if (model && String(x.droneModel || '').toLowerCase() === model) score += 2;
+      return { ir: x, score };
+    })
+    .filter(x => x.score >= 2)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
+  if (!scored.length) return [];
+  return [{
+    id: 'MATURITY', severity: 'note', fieldId: 'd_investigation',
+    message: 'Similar past records: ' + scored.map(x => x.ir.irNumber).join(', ') +
+             '. Read them before writing a fresh conclusion.',
+  }];
+}
+
+function inspectorSectionFindings(sectionId, ir) {
+  const section = SECTIONS[sectionId];
+  if (!section || !ir) return [];
+  const { fieldValues } = collectSectionValues(sectionId);
+  const findings = [];
+  const add = (id, severity, message, fieldId) =>
+    findings.push({ id, severity, message, fieldId: fieldId || null });
+
+  // ── Block rules ────────────────────────────────────────────────────────────
+  if (sectionId === 'sec-b') {
+    const table = fieldValues.b_inwardTable || {};
+    const missing = INWARD_PARTICULARS.filter(p => !table[p.name] || !String(table[p.name].model || '').trim());
+    if (missing.length) {
+      add('R-05a', 'block',
+        'Inward rows still have no answer: ' + missing.map(p => p.name).join(', ') + '.',
+        'b_inwardTable');
+    }
+    const noQty = INWARD_PARTICULARS.filter(p => {
+      const r = table[p.name];
+      const model = String(r && r.model || '').trim();
+      return model && !/^did\s+not\s+come$/i.test(model) &&
+             (!String(r.qty || '').trim() || Number(r.qty) <= 0);
+    });
+    if (noQty.length) {
+      add('R-05a', 'block',
+        'Inward rows need a quantity (or DID NOT COME): ' + noQty.map(p => p.name).join(', ') + '.',
+        'b_inwardTable');
+    }
+    const photos = Array.isArray(fieldValues.b_inwardPhotos) ? fieldValues.b_inwardPhotos : [];
+    const applies = Object.keys(table).length > 0 ||
+      String(fieldValues.b_inwardDate || '').trim() || String(fieldValues.b_inwardBy || '').trim();
+    if (applies && photos.length === 0) {
+      add('R-137', 'block', 'Inward photos are required when Section A applies.', 'b_inwardPhotos');
+    }
+  }
+
+  if (sectionId === 'sec-c') {
+    const table = fieldValues.c_iqcTable || {};
+    const required = iqcZones.filter(z => !z.header && !z.editable);
+    const missing = required.filter(z => !table[z.id] || !String(table[z.id].result || '').trim());
+    if (missing.length) {
+      add('R-05b', 'block',
+        'Every IQC zone needs PASS, FAIL or NA. Still missing: ' +
+        missing.map(z => z.code || z.id).join(', ') + '.', 'c_iqcTable');
+    }
+  }
+
+  if (sectionId === 'sec-cost') {
+    const rows = collectCostRowsRaw();
+    const half = rows.filter(r => !String(r.particular || '').trim() ||
+                                  !String(r.qty || '').trim() || !String(r.rate || '').trim());
+    if (half.length) {
+      add('R-05c', 'block',
+        'Every repair row needs a part, a quantity and a rate. ' + half.length +
+        ' row(s) are incomplete.', 'd_repairTable');
+    }
+    const zero = rows.filter(r => String(r.particular || '').trim() &&
+      (Number(r.qty) <= 0 || Number(r.rate) <= 0));
+    if (zero.length) add('R-104', 'fir', 'A repair row has a zero quantity or rate.', 'd_repairTable');
+  }
+
+  if (sectionId === 'sec-d') {
+    const inv = String(fieldValues.d_investigation || '').trim();
+    const rc  = String(fieldValues.d_rootCause || '').trim();
+    const ca  = String(fieldValues.d_correctiveAction || '').trim();
+    const pa  = String(fieldValues.d_preventiveAction || '').trim();
+    if (!inv && !rc) {
+      add('R-125', 'block',
+        'Investigation and Root Cause are both empty. Describe the investigation, or write “Not required” / “Not applicable” in Root Cause.',
+        'd_investigation');
+    } else if (!inv && !/^(not required|not applicable|n\/?a)\.?$/i.test(rc)) {
+      add('R-125', 'block',
+        'Investigation is blank, so Root Cause must say “Not required” or “Not applicable”.',
+        'd_rootCause');
+    }
+    if (rc && !ca && !pa) {
+      add('R-126', 'fir', 'Root Cause is written, but neither Corrective nor Preventive Action is there.', 'd_correctiveAction');
+    }
+    if (rc && (ca || pa) && !(ca && pa)) {
+      add('R-127', 'fir', 'Only one of Corrective / Preventive Action is filled. The other should be filled or selected Not applicable.', 'd_preventiveAction');
+    }
+  }
+
+  if (sectionId === 'sec-g') {
+    if (String(fieldValues.i_dispatchDate || '').trim() &&
+        !(Array.isArray(fieldValues.h_pdiDocs) && fieldValues.h_pdiDocs.length)) {
+      add('R-134', 'fir', 'Dispatch is recorded with no PDI report on the IR.', 'h_pdiDocs');
+    }
+  }
+
+  // ── Cross-cutting FIRs ─────────────────────────────────────────────────────
+  section.fields.forEach(f => {
+    if (f.type !== 'date') return;
+    const v = String(fieldValues[f.id] || '').trim();
+    if (!v) return;
+    const t = Date.parse(v);
+    if (Number.isFinite(t) && t > Date.now() + 24 * 60 * 60 * 1000) {
+      add('R-105', 'fir', 'A future date is recorded for something that has already happened: ' + f.label + '.', f.id);
+    }
+  });
+  if (String(ir.droneIdRaw || ir.droneId || '').trim()) {
+    const sn = resolveSerial(ir.droneIdRaw || ir.droneId);
+    const why = serialFormatProblem(sn);
+    if (why) add('R-108', 'ask', 'UAS serial “' + sn + '”: ' + why + ' Ask CR to confirm the machine.', null);
+  }
+  if (inspectorEmpty(fieldValues)) {
+    add('R-131', 'fir', 'This section is empty. Close it only if that is intentional; CR and the owning department will see it.', null);
+  }
+
+  // ── Writing helper (Notes only) ────────────────────────────────────────────
+  section.fields.forEach(f => {
+    if (f.type !== 'text' && f.type !== 'textarea') return;
+    inspectorWritingFindings(fieldValues[f.id], inspectorFieldLabel(sectionId, f.id))
+      .forEach(x => add(x.id, x.severity, x.message, x.fieldId));
+  });
+
+  // ── Maturity retrieval ─────────────────────────────────────────────────────
+  inspectorMaturityFindings(sectionId, ir, fieldValues).forEach(x => add(x.id, x.severity, x.message, x.fieldId));
+
+  return findings.sort((a, b) => (INSPECTOR_RANK[a.severity] ?? 9) - (INSPECTOR_RANK[b.severity] ?? 9));
+}
+
+// ── The floating live checklist ──────────────────────────────────────────────
+let _inspectorWired = false;
+let _inspectorRefreshTimer = null;
+let _inspectorDrag = null;
+
+function inspectorActiveSectionId() {
+  const active = document.querySelector('.section-content.active');
+  return active ? active.id : '';
+}
+function inspectorOpen(open) {
+  const panel = document.getElementById('inspector-panel');
+  const fab = document.getElementById('inspector-fab');
+  if (!panel || !fab) return;
+  panel.hidden = !open;
+  fab.setAttribute('aria-expanded', String(!!open));
+  if (open) renderInspectorChecklist();
+}
+const INSPECTOR_SEV_CLASS = { block: 'is-block', fir: 'is-fir', ask: 'is-ask', note: 'is-note' };
+function renderInspectorChecklist() {
+  const panel = document.getElementById('inspector-panel');
+  const box = document.getElementById('inspector-findings');
+  const dot = document.getElementById('inspector-dot');
+  const ctx = document.getElementById('inspector-context');
+  if (!box) return;
+  const sectionId = inspectorActiveSectionId();
+  const findings = currentIR && sectionId ? inspectorSectionFindings(sectionId, currentIR) : [];
+  if (dot) dot.hidden = !findings.length;
+  if (ctx) ctx.textContent = sectionId && SECTIONS[sectionId] ? SECTIONS[sectionId].title : 'No section open';
+  if (!panel || panel.hidden) return;
+
+  if (!findings.length) {
+    box.innerHTML = '<p class="inspector-clear">Nothing to report. Saving is free; Close will run the gate.</p>';
+    return;
+  }
+  box.innerHTML = findings.map(f => `
+    <div class="inspector-finding ${INSPECTOR_SEV_CLASS[f.severity] || 'is-note'}">
+      <span class="inspector-sev">${escHtml(f.severity)}</span>
+      <span class="inspector-msg">${f.id ? '<b>' + escHtml(f.id) + '</b> ' : ''}${escHtml(f.message)}</span>
+    </div>`).join('');
+}
+function refreshInspectorSoon() {
+  clearTimeout(_inspectorRefreshTimer);
+  _inspectorRefreshTimer = setTimeout(renderInspectorChecklist, 450);
+}
+function wireInspector() {
+  if (_inspectorWired) return;
+  const fab = document.getElementById('inspector-fab');
+  const panel = document.getElementById('inspector-panel');
+  if (!fab || !panel) return;
+  _inspectorWired = true;
+  const fabIcon = document.getElementById('inspector-fab-icon');
+  if (fabIcon && !fabIcon.querySelector('svg')) fabIcon.innerHTML = iconSvg('cap');
+  const capIcon = document.getElementById('inspector-cap-icon');
+  if (capIcon && !capIcon.querySelector('svg')) capIcon.innerHTML = iconSvg('cap');
+
+  const hide = document.getElementById('inspector-hide');
+  const close = document.getElementById('inspector-close');
+  const restore = document.getElementById('inspector-restore');
+  const setHidden = (hidden) => {
+    fab.hidden = hidden;
+    panel.hidden = true;
+    if (restore) restore.style.display = hidden ? '' : 'none';
+    try { localStorage.setItem('ipb_inspector_hidden', hidden ? '1' : '0'); } catch (e) {}
+  };
+  if (hide) hide.addEventListener('click', () => setHidden(true));
+  if (close) close.addEventListener('click', () => inspectorOpen(false));
+  if (restore) restore.addEventListener('click', () => setHidden(false));
+
+  fab.addEventListener('click', () => {
+    if (_inspectorDrag && _inspectorDrag.moved) { _inspectorDrag = null; return; }
+    inspectorOpen(panel.hidden);
+  });
+  fab.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    const r = fab.getBoundingClientRect();
+    _inspectorDrag = { dx: e.clientX - r.left, dy: e.clientY - r.top, moved: false, id: e.pointerId };
+    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  fab.addEventListener('pointermove', e => {
+    if (!_inspectorDrag || _inspectorDrag.id !== e.pointerId) return;
+    const x = Math.max(8, Math.min(window.innerWidth - fab.offsetWidth - 8, e.clientX - _inspectorDrag.dx));
+    const y = Math.max(8, Math.min(window.innerHeight - fab.offsetHeight - 8, e.clientY - _inspectorDrag.dy));
+    fab.style.left = x + 'px'; fab.style.top = y + 'px';
+    fab.style.right = 'auto'; fab.style.bottom = 'auto';
+    _inspectorDrag.moved = true;
+  });
+  fab.addEventListener('pointerup', () => {
+    if (!_inspectorDrag) return;
+    if (_inspectorDrag.moved) {
+      try { localStorage.setItem('ipb_inspector_pos', JSON.stringify({ left: fab.style.left, top: fab.style.top })); } catch (e) {}
+    }
+    setTimeout(() => { _inspectorDrag = null; }, 0);
+  });
+
+  try {
+    if (localStorage.getItem('ipb_inspector_hidden') === '1') setHidden(true);
+    const pos = JSON.parse(localStorage.getItem('ipb_inspector_pos') || 'null');
+    if (pos && pos.left && pos.top) {
+      fab.style.left = pos.left; fab.style.top = pos.top;
+      fab.style.right = 'auto'; fab.style.bottom = 'auto';
+    }
+  } catch (e) {}
+
+  renderInspectorChecklist();
+}
+
+// ── Not Applicable — a statement about the section, recorded on the IR ───────
+// The person working in the section may set it (an FIR to CR is the record); CR or an
+// admin may undo it. It counts as complete for the progress chip, and Close refuses
+// while it is set.
+async function toggleSectionNA(sectionId, irNumber) {
+  if (!SECTION_IDS.includes(sectionId) || !irNumber) return;
+  const already = isSectionNA(irNumber, sectionId);
+  if (already) {
+    if (!canCorrect()) { showToast('Only CR or an admin can undo Not Applicable.'); return; }
+    if (!confirm('Undo Not Applicable for this section? The section will be open again.')) return;
+    const na = markSectionNotNA(irNumber, sectionId);
+    const done = (irState[irNumber]?.done || []).filter(id => id !== sectionId);
+    await patchIRState(irNumber, { na, done });
+    markSectionReopened(sectionId);
+    paintNASections(irNumber);
+    showToast('Section reopened. CR can now work on it.');
+    return;
+  }
+  if (!confirm('Mark this section Not Applicable?\n\nThe section will count as complete, and CR will be asked to review the decision.')) return;
+  const na = markSectionNA(irNumber, sectionId);
+  const done = markSectionDone(irNumber, sectionId);
+  await patchIRState(irNumber, { na, done });
+  markSectionClosed(sectionId);
+  paintNASections(irNumber);
+  showToast('Marked Not Applicable — CR will review it.');
+}
+function paintNASections(irNumber) {
+  const na = (irState[irNumber] && Array.isArray(irState[irNumber].na)) ? irState[irNumber].na : [];
+  SECTION_IDS.forEach(secId => {
+    const btn = document.querySelector('#' + secId + ' .btn-na-section');
+    if (!btn) return;
+    const isNA = na.includes(secId);
+    btn.classList.toggle('is-na', isNA);
+    btn.textContent = isNA ? 'Not applicable ✓' : 'Not applicable';
+    const closeBtn = document.getElementById('close-' + secId);
+    if (closeBtn) {
+      closeBtn.disabled = isNA;
+      closeBtn.style.opacity = isNA ? '0.5' : '';
+      closeBtn.style.cursor = isNA ? 'not-allowed' : '';
+      closeBtn.title = isNA ? 'This section is marked Not Applicable' : '';
+    }
+  });
+}
+function showInspectorBlocks(blocks) {
+  inspectorOpen(true);
+  renderInspectorChecklist();
+  showToast(blocks.length + ' block' + (blocks.length === 1 ? '' : 's') + ': ' + blocks[0].message);
+}
+
 // The one remaining button, and the only thing in the app that appends to
 // `done[]`. Closing is the gate the Inspector speaks at: it is the moment a
 // section is declared finished, which is why it is the only moment worth
@@ -15594,6 +16093,13 @@ function isBlankCosting() {
 async function closeSection(sectionId, irNumber) {
   const section = SECTIONS[sectionId];
   if (!section || !irNumber) return;
+  if (isSectionNA(irNumber, sectionId)) {
+    showToast('This section is marked Not Applicable. Only CR can undo it.');
+    return;
+  }
+  const findings = inspectorSectionFindings(sectionId, currentIR);
+  const blocks = findings.filter(f => f.severity === 'block');
+  if (blocks.length) { showInspectorBlocks(blocks); return; }
   // Costing can be closed EMPTY, and that is a real answer rather than an oversight:
   // a repair covered under warranty, or anything else not charged for, has no figures
   // to enter. So the Close button is never disabled for being blank — but a section
@@ -15677,6 +16183,8 @@ function paintClosedSections(irNumber) {
   const row = irState[irNumber] || {};
   const done = Array.isArray(row.done) ? row.done : [];
   SECTION_IDS.forEach(secId => { done.includes(secId) ? markSectionClosed(secId) : markSectionReopened(secId); });
+  paintNASections(irNumber);
+  refreshInspectorSoon();
   // The two answers are painted together because they read the same row and disagree
   // if they are ever painted apart: "this section is closed" and "the IR is standing
   // on this section's stage" are exactly the two facts the move offer is built from.
@@ -17825,6 +18333,8 @@ function sectionDisplayName(sectionId) {
 const ICON_PATHS = {
   // timeline kinds
   'check-circle': '<circle cx="12" cy="12" r="9"/><path d="M8.5 12.6l2.5 2.4 4.5-5"/>',
+  // I-INSPECTOR's cap — the owner's pick (Q2). One glyph, one source.
+  cap:            '<path d="M4 16.5h16"/><path d="M6 16.5l1.2-5.2A3 3 0 0 1 10.1 9h3.8a3 3 0 0 1 2.9 2.3l1.2 5.2"/><path d="M9 9V7.2A2.2 2.2 0 0 1 11.2 5h1.6A2.2 2.2 0 0 1 15 7.2V9"/><path d="M10.5 12.2h3"/>',
   plus:           '<path d="M12 5v14"/><path d="M5 12h14"/>',
   pencil:         '<path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14.5 5.5l4 4"/>',
   minus:          '<path d="M5 12h14"/>',

@@ -1141,6 +1141,7 @@
               <button type="button" id="ir-nudge-btn" class="btn-ghost" title="All comments on this IR / tag a teammate"><span class="btn-icon" aria-hidden="true"></span>Comments<span class="comment-count" style="display:none">0</span></button>
               <button type="button" id="ir-history-btn" class="btn-ghost" title="Audit trail / edit history for this IR"><span class="btn-icon" aria-hidden="true"></span>History</button>
               <button type="button" id="ir-legacy-btn" class="btn-ghost" style="display:none" title="View this IR's original record in the legacy I-PASSBOOK"><span class="btn-icon" aria-hidden="true"></span>Legacy record</button>
+              <button type="button" id="inspector-restore" class="btn-ghost" style="display:none" title="Show the live I-INSPECTOR checklist">Inspector</button>
             </div>
           </div>
 
@@ -1340,6 +1341,32 @@
               <div id="ir-timeline"></div>
             </div>
           </div>
+
+          <!-- ══ I-INSPECTOR — the live checklist (v117) ══════════════════════════
+               A Grammarly-shaped affordance: a movable cap button that opens the
+               findings for the section you are standing in. It never blocks typing;
+               only the Close button consults the Block rules. The panel is inside
+               #detail-view so its look is scoped like every other screen. -->
+          <button type="button" id="inspector-fab" aria-expanded="false" aria-controls="inspector-panel"
+                  title="I-INSPECTOR — live checklist" aria-label="Open the I-INSPECTOR checklist">
+            <span id="inspector-fab-icon" class="inspector-fab-icon" aria-hidden="true"></span>
+            <span id="inspector-dot" class="inspector-dot" hidden></span>
+          </button>
+          <section id="inspector-panel" class="inspector-panel" hidden aria-label="I-INSPECTOR live checklist">
+            <div class="inspector-head">
+              <span class="inspector-cap" id="inspector-cap-icon" aria-hidden="true"></span>
+              <div class="inspector-title">
+                <b>I-INSPECTOR</b>
+                <span id="inspector-context">This section</span>
+              </div>
+              <button type="button" id="inspector-hide" class="inspector-x" title="Hide the Inspector">Hide</button>
+              <button type="button" id="inspector-close" class="inspector-x" title="Close">&times;</button>
+            </div>
+            <div id="inspector-findings" class="inspector-findings"></div>
+            <div class="inspector-foot">
+              <span>Blocks only stop <b>Close</b>. Saving is always free.</span>
+            </div>
+          </section>
         </div><!-- end detail-view -->
 
         <!-- Desktop-only empty state, shown until an IR is selected.

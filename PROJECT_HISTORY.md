@@ -1275,7 +1275,60 @@ disabled and counting at the code step. `node tools/smoke-all.mjs` green.
 
 ---
 
-## 18. Future Roadmap (Planned)
+## 18. v117 — I-INSPECTOR chunk 2, NA, save age, and the writing helper (2026-10-23)
+
+### What he asked for
+
+Build all four: the NA control and section-completion gate; the rule engine and live
+checklist; the save-age indicator and failed-save alert; and the English/Hinglish writing
+helper with maturity retrieval.
+
+### What shipped
+
+- **NA control.** Every section now has **Not applicable** beside Close. It is stored on
+  the IR row (`na[]`), counts as complete for the progress chip, refuses Close while set,
+  and only CR/admin can undo it. A normal user setting it gets a toast that CR will review.
+- **Section completion gate.** `closeSection` runs `inspectorSectionFindings` and refuses
+  only on **Block** findings. The first deterministic Block rules are R-05a (inward rows),
+  R-05b (IQC zones), R-05c/R-130 (repair rows), R-125 (Investigation/Root Cause), and
+  R-137 (inward photos). FIR/Ask/Note findings are shown but do not block.
+- **Live checklist.** A movable cap button bottom-right opens the findings for the
+  section you are in. It can be hidden and restored from the IR banner, remembers its
+  position per device, and shows each finding's severity and rule number. Saving stays
+  free; only Close consults Blocks.
+- **Save age.** The indicator now reads `Saved just now`, then `Saved 12s ago`,
+  `Saved 5 min ago`, and `Saved 1h ago`. It is per section and updates on a timer.
+- **Failed save.** A failed auto-save tells the user in a toast that the change is **NOT
+  saved** and to contact the admin immediately, and calls the new backend
+  `reportInspectorAlert` once per IR+section. That uses `sendAdminNotice`, so only
+  `CONFIG.ADMIN_EMAILS` receive it; it cannot be pointed at a client-supplied address.
+- **Writing helper.** English/Hinglish checks (doubled words, punctuation spacing,
+  capitals, chat abbreviations, its/it’s, loose dates, spelling, empty filler, Devanagari,
+  Hinglish detection) are Notes on the live checklist. They never block.
+- **Maturity retrieval.** When Section C has investigation text, the Inspector lists up
+  to three past IRs whose issue text/model overlaps, with their IR numbers. It is
+  retrieval, not a model; nothing leaves Indrones.
+- **IR Close gate.** A ticket cannot be set to **Delivered** while any section is neither
+  completed nor NA (R-115).
+
+### Honest limits
+
+The rule engine now runs the deterministic checks above; the remaining Block/FIR/Ask
+rules in the book (cross-section timings, reopening, table-derived dispatch, some
+advisory rules) need the section-open timestamps and the FIR ledger, so they are the next
+pass. The writing helper is a conservative first dictionary, not a full grammar engine.
+
+### Verification
+
+`node tools/smoke-all.mjs` green. `smoke-sections.mjs` pins the NA storage, the Close gate,
+the live panel, the save-age wording, and the failed-save report. The browser boot suite
+also drives the real code screen. `API_VERSION` moves to **21** for
+`reportInspectorAlert`; paste `backend.gs` into both `/exec` deployments as a **New
+version**.
+
+---
+
+## 19. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

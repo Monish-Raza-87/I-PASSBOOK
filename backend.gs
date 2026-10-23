@@ -275,8 +275,11 @@ var CONFIG = {
   //      CR can name a MAILBOX (`person:e:<address>`) for the rows that name nobody.
   //      That correction only ever fills a blank: an IR that names a person keeps it.
   // 19 = CR can name ONE ticket (`person:ir:IR342`). It is the only rule that can
-  // tell three tickets filed from one shared mailbox apart, so it is applied last.
-  API_VERSION: 20,
+  //      tell three tickets filed from one shared mailbox apart, so it is applied last.
+  // 20 = the customer portal's own store and corrections.
+  // 21 = I-INSPECTOR's save-failure notice (`reportInspectorAlert`): a failed auto-save
+  //      tells the person on screen AND the admin by mail, through the one notice path.
+  API_VERSION: 21,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -2977,6 +2980,43 @@ function sendAdminNotice(subject, body, replyTo) {
   } catch (e) { return false; }
 }
 
+// POST reportInspectorAlert — I-INSPECTOR's one loud path.
+//
+// The frontend calls this when an auto-save FAILS: the person is told on screen that
+// their change is not saved, and the admin is told here, immediately, because a silent
+// failure is the one kind that loses work. It is deliberately narrow: the caller is a
+// verified session, the text is capped, and the recipient set is CONFIG.ADMIN_EMAILS
+// through sendAdminNotice — a client can never name a recipient.
+function reportInspectorAlert(params, authEmail) {
+  var email = usersKey(authEmail);
+  if (!email || !findUser(email)) throw new Error('Forbidden: sign in again.');
+  var kind     = String(params.kind || 'alert').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40) || 'alert';
+  var irNumber = String(params.irNumber || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+  var sectionId= String(params.sectionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+  var message  = String(params.message || '').replace(/[\r\n]+/g, ' ').slice(0, 400);
+  var version  = String(params.version || '').replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 24);
+  var subject  = 'I-PASSBOOK INSPECTOR — ' +
+    (kind === 'save-failure' ? 'changes NOT saved' : 'alert');
+  var body = [
+    'I-INSPECTOR alert',
+    '',
+    'Person  : ' + email,
+    'Kind    : ' + kind,
+    'IR      : ' + (irNumber || '(none)'),
+    'Section : ' + (sectionId || '(none)'),
+    'Version : ' + (version || '(unknown)'),
+    'Time    : ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm'),
+    '',
+    'Detail  : ' + (message || '(none)'),
+    '',
+    kind === 'save-failure'
+      ? 'The change exists only as a local draft until the save succeeds. Contact the person.'
+      : 'Open the app and review the Inspector findings.'
+  ].join('\n');
+  var sent = sendAdminNotice(subject, body, email);
+  return { status: 'ok', mailed: !!sent };
+}
+
 // A ticket's own address in the deployed app, built from CONFIG.APP_URL and
 // nothing else — see the note there on why a client-supplied URL is refused. The
 // app is hash-routed, so this lands on the ticket's own screen. Returns '' when
@@ -4208,6 +4248,8 @@ function doPost(e) {
         return saveSection(params.irNumber, params.sectionId, fields, files, email, mode);
       },
       sendNudgeEmail:    function () { return sendNudgeEmail(params, email); },
+      // I-INSPECTOR's save-failure notice. Authed, capped, admin-recipient only.
+      reportInspectorAlert: function () { return reportInspectorAlert(params, email); },
 
       // Put ONE field back to an earlier audited value. `by` is the VERIFIED email,
       // never a client value — the audit line and the admin notice both name the

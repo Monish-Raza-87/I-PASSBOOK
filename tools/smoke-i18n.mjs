@@ -338,9 +338,10 @@ ok('the board\'s own empty sentence is its own — the list\'s says "create one 
   STRINGS['board.emptyNone'] === 'No IRs found.' &&
   !/customer form/.test(STRINGS['board.emptyNone']) &&
   /customer form/.test(STRINGS['list.emptyNone']));
-ok('the autosave indicator asks the table for all four of its states',
-  ['common.saved', 'common.saving', 'common.notSaved', 'common.retrying']
-    .every(k => appJs.includes(`t('${k}')`)));
+ok('the autosave indicator asks the table for its four states and its age wording',
+  ['common.savedJustNow', 'common.savedSecsAgo', 'common.savedMinsAgo', 'common.savedHoursAgo',
+   'common.saving', 'common.notSaved', 'common.retrying']
+    .every(k => appJs.includes(`t('${k}'`)));
 // The letter comes from sectionLetter(), NOT from the id: the ids are permission
 // keys and never moved when the displayed letters did, so `sec-cost` would otherwise
 // have rendered "Section COST completed" on its own Close button.

@@ -344,4 +344,36 @@ r.ok('the collector still reads dataset.sec, so it picks Triage up unchanged',
   /dataset\.sec/.test(appJs) && /acc-grant/.test(appJs),
   (appJs.match(/[^\n]*dataset\.sec[^\n]*/) || [''])[0]);
 
+// ── I-INSPECTOR chunk 2: NA, the rule engine, the live panel, save age ───────
+r.head('the Inspector speaks at Close, and the NA control is a section action');
+r.ok('a Not Applicable control is created beside every Close button',
+  /btn-na-section/.test(appJs) && /toggleSectionNA/.test(appJs) &&
+  /paintNASections/.test(appJs));
+r.ok('NA is stored on the IR row, not on the device',
+  /markSectionNA/.test(appJs) && /patchIRState\(irNumber, \{ na, done \}\)/.test(appJs) &&
+  /Array\.isArray\(s\.na\)/.test(appJs));
+r.ok('a section marked NA cannot be closed, and only CR can undo it',
+  /isSectionNA\(irNumber, sectionId\)/.test(appJs) &&
+  /canCorrect\(\)/.test(appJs) && /Only CR or an admin can undo Not Applicable/.test(appJs));
+r.ok('the Close button consults the rule engine and refuses a Block',
+  /inspectorSectionFindings\(sectionId, currentIR\)/.test(appJs) &&
+  /f\.severity === 'block'/.test(appJs) && /showInspectorBlocks/.test(appJs));
+r.ok('the rule engine carries the block rules that can be checked deterministically',
+  ['R-05a','R-05b','R-05c','R-125','R-131','R-137'].every(id => appJs.includes(id)));
+r.ok('the writing helper is Notes only, and the maturity note cites past IRs',
+  /inspectorWritingFindings/.test(appJs) && /severity: 'note'/.test(appJs) &&
+  /inspectorMaturityFindings/.test(appJs) && /Similar past records/.test(appJs));
+r.ok('the live panel is a movable cap button with a findings sheet',
+  /id="inspector-fab"/.test(html) && /id="inspector-panel"/.test(html) &&
+  /wireInspector/.test(appJs) && /inspectorOpen/.test(appJs));
+r.ok('the save note ages from just-now to minutes to hours',
+  /paintSavedAge/.test(appJs) && /common\.savedJustNow/.test(appJs) &&
+  /common\.savedMinsAgo/.test(appJs) && /common\.savedHoursAgo/.test(appJs));
+r.ok('a failed auto-save tells the user AND reports to the admin',
+  /alertUnsavedChange/.test(appJs) && /reportInspectorAlert/.test(appJs) &&
+  /contact the admin immediately/.test(appJs));
+r.ok('the backend has one capped admin notice endpoint for that report',
+  fs.readFileSync(new URL('../backend.gs', import.meta.url), 'utf8')
+    .match(/function reportInspectorAlert[\s\S]{0,1600}sendAdminNotice/));
+
 r.finish();

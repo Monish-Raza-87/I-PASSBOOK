@@ -883,7 +883,7 @@ function waitForProbe(before, ms) {
 // A real, persistent Chrome profile, shared by all three loads.
 const introProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'ipb-intro-'));
 
-async function runIntroLoad(ms, pagePath = INTRO_PATH) {
+async function runIntroLoad(ms, pagePath = INTRO_PATH, profile = introProfile) {
   const before = probePosts;
   const proc = spawn(chromePath, [
     '--headless=new', '--disable-gpu', '--no-sandbox', '--no-first-run',
@@ -898,7 +898,7 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH) {
     // played", which is a confusing way to fail.
     '--autoplay-policy=no-user-gesture-required',
     '--enable-logging=stderr', '--log-level=0',
-    '--user-data-dir=' + introProfile,
+    '--user-data-dir=' + profile,
     `${base}${pagePath}`,
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const got = await waitForProbe(before, ms);
@@ -998,7 +998,11 @@ if (secondIntro) {
 
 // The one thing that skips it entirely. A seeded sign-in is put in localStorage before
 // app.js's boot handler runs, which is what a resuming device looks like from there.
-const signedInIntro = await runIntroLoad(30000, INTRO_SIGNED_IN_PATH);
+// A separate profile: the signed-in load has its sign-in seeded, so it does not need
+// the intro history — and sharing the second load's profile makes this one flaky on
+// Windows when the previous Chrome has not released the lock yet.
+const signedInProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'ipb-intro-signedin-'));
+const signedInIntro = await runIntroLoad(30000, INTRO_SIGNED_IN_PATH, signedInProfile);
 ok('the signed-in device reports', !!signedInIntro);
 if (signedInIntro) {
   // The panel is inside #auth-container, and showAuth() is the only route that ever
@@ -1022,6 +1026,7 @@ if (signedInIntro) {
 }
 
 try { fs.rmSync(introProfile, { recursive: true, force: true }); } catch {}
+try { fs.rmSync(signedInProfile, { recursive: true, force: true }); } catch {}
 
 server.close();
 

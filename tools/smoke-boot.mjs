@@ -298,6 +298,11 @@ const AUTH_DRIVER = `<script>
     await waitFor(function () { return shown('code-view'); }, 15000);
     log('codeStepShown', true);
     log('codeEmail', el('code-email').textContent);
+    // The resend control belongs to THIS screen, not only to the portal's sheet. A
+    // customer who signs in through the app's own door lands here.
+    log('resendVisible', shown('code-resend-wrap'));
+    log('resendDisabledAtStart', el('code-resend') ? el('code-resend').disabled : null);
+    log('resendLabelAtStart', el('code-resend') ? el('code-resend').textContent : '');
     // The landing page goes away WHOLE — head, both doors, the terms line, the language
     // picker. That is what makes this read as the blank centred page the owner asked for,
     // and it is a property of the markup (#code-view is a SIBLING of #auth-container).
@@ -779,6 +784,7 @@ head('the new sign-in path is present');
 ['auth-form', 'auth-email', 'auth-password', 'auth-signin-btn', 'auth-pwd-link',
  'cust-form', 'cust-email', 'cust-signin-btn', 'auth-or', 'auth-quick',
  'code-view', 'code-form', 'code-boxes', 'code-email', 'code-different',
+ 'code-resend-wrap', 'code-resend', 'code-resend-note',
  'lang-select', 'door-employee-toggle', 'door-customer-toggle',
  'pc-form', 'pc-new', 'pc-confirm']
   .forEach(id => ok('#' + id + ' exists', adom.includes('id="' + id + '"')));
@@ -838,6 +844,10 @@ if (probe && !probe.error) {
   head('step 1 buys no session, only a code');
   ok('the code screen appeared, and the landing page went with it',
     probe.codeStepShown === true && probe.landingGoneAtStep2 === true, JSON.stringify(probe));
+  ok('...and a resend button is under the boxes, disabled with the 60s countdown',
+    probe.resendVisible === true && probe.resendDisabledAtStart === true &&
+    /Resend in \d+s/.test(probe.resendLabelAtStart || ''),
+    { visible: probe.resendVisible, disabled: probe.resendDisabledAtStart, label: probe.resendLabelAtStart });
   ok('and it names the address the code was sent to',
     /asha@indrones\.com/.test(probe.codeEmail || ''), probe.codeEmail);
   // The whole point of the two-step split: an address alone must not produce a session

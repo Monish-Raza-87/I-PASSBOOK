@@ -77,9 +77,11 @@ r.ok('the Desk prototype it replaced was deleted, not left behind',
   !/desk\.css/.test(html) && !/desk\.css/.test(swJs) && !/desk\.css/.test(deployJs));
 
 // ── 2. It cannot leak ─────────────────────────────────────────────────────────
-r.head('no rule escapes the nine roots it is allowed to change');
-// The nine roots are the app's own view containers plus the two shell bands, not a
-// list of screens that happened to be reviewed. #index-view carries the IR list AND
+r.head('no rule escapes the roots it is allowed to change');
+// The roots are the app's own view containers plus the two shell bands, not a list of
+// screens that happened to be reviewed. #code-view joined on 2026-10-23: it is a
+// screen of the landing page, not a floating panel, and the resend control belongs to
+// its own look. #index-view carries the IR list AND
 // the board switch; #detail-view is one IR; #insights-view, #log-view and #faq-view
 // are the read-only panes. #sidebar and #workspace header are the chrome — the first
 // is ALSO the phone bottom bar, because it is the same element re-laid out, so
@@ -93,7 +95,7 @@ r.head('no rule escapes the nine roots it is allowed to change');
 // #setup-view joined on 2026-10-21 for the same reason and by the same test: the
 // Inspector and the Postman moved out of INSIGHTS into a pane of their own, and a pane
 // is a pane wherever its content came from.
-const SCOPES = /^(#auth-container|#password-change|#index-view|#detail-view|#insights-view|#log-view|#faq-view|#setup-view|#sidebar|#workspace header)\b/;
+const SCOPES = /^(#auth-container|#password-change|#code-view|#index-view|#detail-view|#insights-view|#log-view|#faq-view|#setup-view|#sidebar|#workspace header)\b/;
 // The one sanctioned global block: the status and priority colour steps. Deliberately
 // NOT scoped — a pill nobody can read is a defect on every screen, and fixing it on
 // three of eight would leave the app disagreeing with itself. It is a fixed list:

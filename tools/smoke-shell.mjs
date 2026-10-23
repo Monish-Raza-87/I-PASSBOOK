@@ -1399,14 +1399,28 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   ok('...and "Use a different account" is the one way out, under them',
     /<button type="button" class="link-btn" id="code-different" data-i18n="code\.different">Use a different account<\/button>/.test(codeBlock) &&
     codeBlock.indexOf('id="code-boxes"') < codeBlock.indexOf('id="code-different"'));
-  // NO RESEND ANYWHERE, and that is a decision rather than an omission: the owner's list for
-  // this screen is the heading, the sub-line, the boxes and that one button, and a "send it
-  // again" would be the one control here whose only possible behaviour is to send mail.
-  ok('...inside a form, with one place to say it went wrong and no resend beside it',
+  // The owner asked for a resend control on THIS screen too (2026-10-23): the customer
+  // door lands here, not on the portal's own sheet, so a resend that exists only in
+  // portal.js is a resend the customer cannot see. It sits under the boxes, starts
+  // disabled for the server's 60-second gap, and its label carries the countdown.
+  ok('...inside a form, with one place to say it went wrong',
     /<form id="code-form" autocomplete="off">/.test(codeBlock) &&
-    /<p id="code-error" class="auth-error" style="display:none"><\/p>/.test(codeBlock) &&
-    !/resend/i.test(codeBlock) && !/Send the code again/i.test(codeBlock) &&
-    !/code\.resent|code\.resend|code\.verifying/.test(i18nCode));
+    /<p id="code-error" class="auth-error" style="display:none"><\/p>/.test(codeBlock));
+  ok('...and a resend button directly under the boxes, disabled until the gap expires',
+    /<div class="code-resend" id="code-resend-wrap">/.test(codeBlock) &&
+    /<button type="button" class="btn" id="code-resend" disabled>Resend in 60s<\/button>/.test(codeBlock) &&
+    /<span class="code-resend-note" id="code-resend-note" aria-live="polite"><\/span>/.test(codeBlock) &&
+    codeBlock.indexOf('id="code-boxes"') < codeBlock.indexOf('id="code-resend-wrap"') &&
+    codeBlock.indexOf('id="code-resend-wrap"') < codeBlock.indexOf('id="code-different"'));
+  ok('...and app.js owns the countdown, the cap and the same-code request',
+    /const CODE_RESEND_GAP_MS = 60 \* 1000;/.test(appCode) &&
+    /const CODE_RESEND_MAX = 3;/.test(appCode) &&
+    /function paintCodeResend\(\)/.test(appCode) &&
+    /function tickCodeResend\(\)/.test(appCode) &&
+    /function resendCodeFromScreen\(\)/.test(appCode) &&
+    /customerAuth\('login', \{ email: _codeEmail, password: '', resend: true \}\)/.test(appCode) &&
+    /loginBackend\(_codeEmail, _codePassword, '', true\)/.test(appCode) &&
+    /if \(resend\) fd\.append\('resend', 'true'\);/.test(appCode));
   // ── …and the machinery app.js owns, since six boxes means owning the caret ────
   ok('opening the step takes the WHOLE landing page down, and stops the wordmark typing',
     /function openCodeView\(door, email, password\) \{[\s\S]{0,1800}?authCont\.style\.display = 'none';/.test(appCode) &&

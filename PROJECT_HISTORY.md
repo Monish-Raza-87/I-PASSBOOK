@@ -1247,7 +1247,35 @@ next load reuses its profile; that hand-off was the one flaky step.
 
 ---
 
-## 17. Future Roadmap (Planned)
+## 17. v116 — the app's own code screen gets the resend button too (2026-10-23)
+
+### What he reported
+
+The countdown was missing where he was signing in. The screen he was on was **not** the
+portal's sheet: the customer door on `index.html` hands off to the app's shared
+`#code-view` ("Check your email"), and the v115 resend control existed only in
+`portal.js`. A customer signing in through the app's own door therefore saw no resend.
+
+### What shipped
+
+- `#code-view` now carries a square resend bar directly under the six boxes:
+  **disabled**, label counting `Resend in 60s` → `Resend code`.
+- It mails the **same six digits** through the existing `login … resend: true` action,
+  restarts the 60-second gap, and stops at the third resend with the Customer Relations
+  sentence returned by the backend.
+- `loginBackend()` gained the `resend` flag; a customer's request goes through
+  `customerAuth`, an employee's through `loginBackend`, so both doors use one backend rule.
+- The code screen's own close/back path clears the timer; a returning arrival resets it.
+
+### Verification
+
+`node tools/smoke-shell.mjs` pins the markup, order, countdown and same-code request.
+`node tools/smoke-boot.mjs` drives the real browser and asserts the button is present,
+disabled and counting at the code step. `node tools/smoke-all.mjs` green.
+
+---
+
+## 18. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -1304,3 +1304,53 @@
   #workspace header #back-btn:active,
   #workspace header .icon-btn:active { background: var(--accent-tint-strong); color: var(--ink-gray-9); }
 }
+
+/* -- THE SHARED CODE SCREEN'S RESEND CONTROL ----------------------------------
+   The screen the customer door lands on after the address is submitted is
+   #code-view, not the portal's own sheet. It therefore needs the same resend
+   affordance, in the app's industrial language: a square bar under the six boxes,
+   disabled for the server's 60-second gap, with the countdown in its own label. */
+#code-view .code-resend {
+  display: grid;
+  gap: 0.45rem;
+  margin: -0.35rem 0 1rem;
+}
+#code-view .code-resend .btn {
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  border: 1px solid var(--ind-line);
+  background: var(--ind-panel);
+  color: var(--ink-gray-9);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+#code-view .code-resend .btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--btn-solid-fg);
+}
+#code-view .code-resend .btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+#code-view .code-resend-note {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ind-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+#code-view .code-resend-note.resend-stop {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.5;
+  color: var(--ink-gray-9);
+}

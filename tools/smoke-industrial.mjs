@@ -138,8 +138,10 @@ r.ok('every rule is scoped, is one of the sanctioned globals, or is floating chr
 // That added two deliberate families — the global radius scale plus the badge it cannot
 // reach (3 selectors), and the floating panels' typography, which is where the Customer
 // tab lives (5). The ceiling moves by exactly those eight, and by nothing else.
+// 2026-10-23: User Access took the brand yellow — its active tab and its add-row
+// buttons — which is three more selectors and the owner's own colour rule.
 r.ok('...and neither sanctioned list has quietly grown',
-  selectors.filter(s => !SCOPES.test(s)).length <= 30,
+  selectors.filter(s => !SCOPES.test(s)).length <= 33,
   selectors.filter(s => !SCOPES.test(s)));
 
 // A rule that reached `.ir-card-side` is the owner's known defect re-opened: a side
@@ -200,12 +202,11 @@ r.ok('...and the primary text step it uses instead is --ink-gray-9',
 // checked by smoke-palette; this is the half that belongs to this file.
 r.ok('the brand yellow is named nowhere — every mark is the accent role',
   !/--ind-yellow/.test(css), (css.match(/[^\n]*--ind-yellow[^\n]*/g) || []));
-r.ok('...and no --ind-* colour token is named at all, so the four other palettes still work',
-  !/var\(--ind-(?!ground|panel|inset|line|rule|muted|dim|lamp-)/.test(css),
+r.ok('...and the only --ind-* colour token is the on-yellow ink, which is black on the brand fill',
+  !/var\(--ind-(?!ground|panel|inset|line|rule|muted|dim|lamp-|on-yellow)/.test(css),
   (css.match(/var\(--ind-[a-z-]+\)/g) || []));
 r.ok('...and the lamp set is this file\'s own name, not base.css\'s palette-specific one',
-  /--ind-lamp-open:\s*var\(--accent-bar\)/.test(css) && !/--ind-accent/.test(css) &&
-  !/--ind-on-yellow/.test(css));
+  /--ind-lamp-open:\s*var\(--accent-bar\)/.test(css) && !/--ind-accent/.test(css));
 r.ok('...and the accent is a real role, defined in palette.css for every preset',
   /--accent:/.test(palette) && (palette.match(/--accent:/g) || []).length >= 5);
 

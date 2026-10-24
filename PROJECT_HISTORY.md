@@ -1426,7 +1426,32 @@ siblings of `#detail-view`, and the browser route probe still paints each one.
 
 ---
 
-## 22. Future Roadmap (Planned)
+## 22. v121 — the legacy button is always there, and the two section actions match (2026-10-23)
+
+### What he corrected
+
+- The manual **Legacy record** button had disappeared.
+- **Not applicable** and **Mark Section completed** were different heights and colours.
+- User Access had no brand yellow.
+
+### What shipped
+
+- The Legacy button is always visible on an IR. It no longer depends on `legacyMap`
+  having an index entry; the press asks `getLegacyIR` directly, so a stale index can no
+  longer hide the only way to check.
+- The two section actions are both 40px high. **Mark Section completed** stays black with
+  white text; **Not applicable** is the brand yellow with black text, and its active state
+  flips to black.
+- User Access carries the same yellow: the card's top rule, the active tab underline, and
+  the add-row actions (Invite customer, Create account, Save all changes).
+
+### Verification
+
+`node tools/smoke-all.mjs` green.
+
+---
+
+## 23. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

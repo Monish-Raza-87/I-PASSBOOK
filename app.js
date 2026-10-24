@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v120';
+const APP_VERSION = 'v121';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -12538,9 +12538,10 @@ async function openPassbook(irNumber) {
   // workbook, but the record NO LONGER opens by itself. The owner, 2026-10-23: the
   // floating read-only sheet over the ticket was unwanted — the legacy facts are
   // already carried into this screen, and the original is one deliberate press away.
-  const legacy = legacyMap[irNumber];
   const legacyBtn = document.getElementById('ir-legacy-btn');
-  if (legacyBtn) legacyBtn.style.display = legacy ? '' : 'none';
+  // The manual button is always available. A missing index entry no longer hides the
+  // only way to ask: getLegacyIR is the authority and will say 'no record' honestly.
+  if (legacyBtn) legacyBtn.style.display = '';
 }
 
 // ─── CLIENT INTAKE VIEW (the 📋 Report tab) ──────────────────────────────────
@@ -13607,7 +13608,7 @@ if (irHistoryBtn) irHistoryBtn.addEventListener('click', () => openHistoryModal(
 // IR banner legacy-record button
 const irLegacyBtn = document.getElementById('ir-legacy-btn');
 if (irLegacyBtn) irLegacyBtn.addEventListener('click', () => {
-  if (legacyMap[currentIR?.irNumber]) openLegacyRecord(currentIR?.irNumber);
+  if (currentIR?.irNumber) openLegacyRecord(currentIR.irNumber);
 });
 // The pre-app workbook index is GONE from the service desk (the owner, 2026-10-08:
 // *"Remove the Legacy Records button from the service desk (since legacy is being

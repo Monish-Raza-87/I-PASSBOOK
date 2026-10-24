@@ -1126,9 +1126,9 @@ r.ok('a slow record read is abandoned rather than left spinning forever',
   /setTimeout\(\(\) => controller\.abort\(\), 12000\)/.test(appCode));
 r.ok('closing bumps the sequence, so an in-flight fetch cannot paint into a closed card',
   /_legacyReq\+\+/.test(appCode) && /if \(req !== _legacyReq\)/.test(appCode));
-r.ok('the per-ticket fallback still opens its own record off legacyMap',
-  /const legacy = legacyMap\[irNumber\]/.test(appCode) &&
-  /openLegacyRecord\(currentIR\?\.irNumber\)/.test(appCode));
+r.ok('the per-ticket Legacy button is always available and asks getLegacyIR directly',
+  /if \(legacyBtn\) legacyBtn\.style\.display = '';/.test(appCode) &&
+  /openLegacyRecord\(currentIR\.irNumber\)/.test(appCode));
 r.ok('the spinner is the app\'s own spin animation, so reduced-motion already covers it',
   /\.legacy-spinner \{[\s\S]{0,220}?animation: spin /.test(componentsCode) &&
   /@keyframes spin/.test(fs.readFileSync(new URL('../base.css', import.meta.url), 'utf8')));

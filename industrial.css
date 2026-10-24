@@ -154,7 +154,7 @@
 #access-modal .access-card {
   background: var(--ind-panel);
   border: 1px solid var(--ind-line);
-  border-top: 2px solid var(--accent);
+  border-top: 2px solid var(--accent-bar);
   box-shadow: none;
 }
 .inward-options-card .inward-options-title,
@@ -1460,4 +1460,41 @@
 @media (max-width: 639px) {
   #detail-view #ir-banner { grid-template-columns: minmax(0, 1fr); grid-template-areas: "id" "actions" "pills"; }
   #detail-view .banner-actions { justify-content: flex-start; }
+}
+
+/* -- One height for the two section actions; NA is the brand yellow --------- */
+#detail-view .sec-close-row .btn-close-section,
+#detail-view .sec-close-row .btn-na-section {
+  min-height: 40px;
+  height: 40px;
+  padding-block: 0;
+}
+#detail-view .btn-na-section {
+  background: var(--accent-bar);
+  border-color: var(--accent-bar);
+  color: var(--ind-on-yellow);
+}
+#detail-view .btn-na-section:hover {
+  background: var(--accent-bar);
+  border-color: var(--accent-bar);
+  color: var(--ind-on-yellow);
+  filter: brightness(1.04);
+}
+#detail-view .btn-na-section.is-na {
+  background: var(--ink-gray-9);
+  border-color: var(--ink-gray-9);
+  color: var(--surface-base);
+}
+
+/* -- User access follows the same brand yellow ------------------------------ */
+#access-modal .access-tab.is-active { border-bottom: 2px solid var(--accent-bar); }
+#access-modal .access-add-row .btn {
+  background: var(--accent-bar);
+  border-color: transparent;
+  color: var(--ind-on-yellow);
+}
+#access-modal .access-add-row .btn:hover {
+  background: var(--accent-bar);
+  color: var(--ind-on-yellow);
+  filter: brightness(1.04);
 }

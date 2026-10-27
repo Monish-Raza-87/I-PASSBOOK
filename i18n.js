@@ -279,6 +279,8 @@
     // job — that one names a field in the edit history and must not be re-worded
     // when a screen's copy changes.
     'overview.crmOwner':        'Customer relations manager',
+    'overview.crRepresentative':'CR representative',
+    'overview.crDerived':       'from the IR date',
     'overview.contactPhone':    'Customer phone',
     'overview.siteLocation':    'Site location',
     'overview.readOnlyNote':    'Only Customer Relations and Management can edit these. Everyone can read them.',
@@ -698,6 +700,8 @@
 
     // ── The Overview panel's own fields ──────────────────────────────────────
     'overview.crmOwner':        'ग्राहक संबंध प्रबंधक',
+    'overview.crRepresentative':'सीआर प्रतिनिधि',
+    'overview.crDerived':       'आईआर तिथि से',
     'overview.contactPhone':   'ग्राहक का फ़ोन',
     'overview.siteLocation':    'साइट का स्थान',
     'overview.readOnlyNote':    'इन्हें केवल कस्टमर रिलेशंस और प्रबंधन बदल सकते हैं। बाकी सब पढ़ सकते हैं।',

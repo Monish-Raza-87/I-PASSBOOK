@@ -1131,6 +1131,16 @@
 /* A failed CLOSE, which is a different promise from a failed save: nothing retries
    it, so it must not borrow the word "retrying". */
 .autosave-note[data-state="failed"] { color: var(--ink-red-7); font-weight: var(--weight-semibold); }
+/* The read behind these forms has not landed yet. Quiet, not red: nothing is wrong,
+   the sections are simply not the record yet. */
+.autosave-note[data-state="loading"] { color: var(--ink-gray-6); font-style: italic; }
+/* A draft is ON TOP of the saved record. It is neither saved nor a failure, and the
+   old "Saved just now" over restored text was both. */
+.autosave-note[data-state="draft"] { color: var(--ink-amber-7); }
+/* A read that failed is not a save that failed, but it does mean the screen is showing
+   less than the record holds, so it wears the failure colour rather than grey. */
+.autosave-note[data-state="load-error"],
+.autosave-note[data-state="save-failed"] { color: var(--ink-red-7); font-weight: var(--weight-semibold); }
 
 /* ── Three notes that explain a control the app is withholding ────────────
    .section-server-note   — the deployed backend does not carry this section yet
@@ -1235,6 +1245,30 @@
 .evidence-pdf-icon { font-size: var(--text-xl); line-height: 1; }
 .evidence-pdf-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .evidence-pdf-open { font-size: var(--text-xs); color: var(--accent); font-weight: var(--weight-medium); white-space: nowrap; }
+/* A PDF now has a preview, not just a paperclip. It is a <details> so the frame is
+   created only when somebody asks for it; several documents in one section would
+   otherwise mount several viewers on load. */
+.evidence-pdf-block { display: flex; flex-direction: column; gap: 6px; }
+.evidence-pdf-preview > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--text-xs);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+  padding: 2px 0;
+}
+.evidence-pdf-preview > summary::-webkit-details-marker { display: none; }
+.evidence-pdf-preview > summary::before { content: '+ '; }
+.evidence-pdf-preview[open] > summary::before { content: '− '; }
+.evidence-pdf-frame {
+  display: block;
+  width: 100%;
+  height: 420px;
+  max-height: 70vh;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-3);
+  background: var(--surface-gray-2);
+}
 
 /* ── Section H, retired — dispatch checklist + cross-check, now in G ── */
 .dispatch-checklist { display: flex; flex-direction: column; gap: 0.45rem; }

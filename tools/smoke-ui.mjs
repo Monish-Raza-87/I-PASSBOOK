@@ -1110,9 +1110,10 @@ r.ok('the Legacy Records button is gone from the desk, markup and binding alike'
 r.ok('...and its label went with the key that named it',
   !/nav\.legacyRecords/.test(indexSrc) &&
   !/nav\.legacyRecords/.test(fs.readFileSync(new URL('../i18n.js', import.meta.url), 'utf8')));
-r.ok('there is no iframe and no embed URL left anywhere in the app',
-  !/<iframe/.test(appCode) && !/embedUrl/.test(appCode) && !/rm=minimal/.test(appCode),
-  (appCode.match(/[^\n]*iframe[^\n]*/g) || ['none'])[0]);
+r.ok('there is no embedded legacy frame and no embed URL left anywhere in the app',
+  !/<iframe[^>]*(legacy|spreadsheet|docs\.google\.com)/i.test(appCode) &&
+  !/embedUrl/.test(appCode) && !/rm=minimal/.test(appCode),
+  (appCode.match(/[^\n]*iframe[^\n]*/g) || ['none']));
 r.ok('...and the dead embed helpers went with it',
   !/openLegacyModal|legacyTick|_legacyLoaded|LEGACY_SLOW_MS/.test(appCode));
 r.ok('the record read is the token-gated getLegacyIR action',
@@ -1152,6 +1153,21 @@ r.ok('the record card scrolls inside itself rather than off the phone screen',
 // keep theirs — they really do scroll into view, which is what lazy is for.
 r.ok('evidence thumbnails keep their lazy loading, which is what lazy is for',
   /class="evidence-thumb" alt="evidence" loading="lazy"/.test(appCode));
+
+r.head('a PDF has a preview, not only a paperclip');
+// `/view` is Drive's download page and refuses to render in a frame; `/preview` is the
+// one that embeds. A local file is still a blob URL and needs no Drive at all.
+r.ok('a saved PDF frames Drive\'s preview endpoint, not the download page',
+  /drive\.google\.com\/file\/d\/\$\{id\}\/preview/.test(appSrc) &&
+  !/drive\.google\.com\/file\/d\/\$\{id\}\/view/.test(appSrc));
+r.ok('the frame is a fold, so it is created only when somebody asks for it',
+  /<details class="evidence-pdf-preview">/.test(appSrc) &&
+  /class="evidence-pdf-frame"/.test(appSrc) &&
+  /class="evidence-pdf-frame"[\s\S]{0,220}?loading="lazy"/.test(appSrc));
+r.ok('a not-yet-uploaded PDF uses its own blob URL instead of a Drive id',
+  /function evidencePdfPreviewUrl\(e\) \{[\s\S]{0,220}?if \(e\.url\) return e\.url;/.test(appSrc));
+r.ok('the frame has a bounded height, so one PDF cannot take the whole phone',
+  /\.evidence-pdf-frame \{[^}]*height: 420px[^}]*max-height: 70vh/.test(viewsCode));
 
 r.ok('the deep link still works — the route name was NOT renamed',
   /parts\[0\] === 'tickets'/.test(appCode) && T.IR_CATEGORIES.length === 4);
@@ -1927,6 +1943,43 @@ r.ok('the outside-click guard treats a click inside the avatar as a click on it'
   /!userAvatar\.contains\(e\.target\)/.test(appSrc) &&
   !/e\.target !== userAvatar/.test(appSrc),
   'the guard must use contains(), because the avatar\'s own <svg> is the click target');
+
+// ── The dock's worklist survives a reload ─────────────────────────────────────
+// The strip is memory in the old build, so a refresh emptied it. Restoring it is
+// allowed to be convenient, not careless: a dead ticket number must not come back,
+// and an empty first paint (no cache, network still in flight) must not consume the
+// saved list before the rows exist.
+r.head('the dock worklist survives a reload, and forgets what is gone');
+const DK = loadApp(`
+  restoreDockWorklist, persistDockWorklist, setAllIRs,
+  get dockIRs() { return dockIRs; },
+  set dockIRs(v) { dockIRs = v; },
+  get stored() { return localStorage.getItem(DOCK_KEY); },
+  DOCK_KEY,
+`, { preload: `localStorage.setItem('ipb_dock_irs',
+     JSON.stringify(['IR2', 'GONE', 'IR2', 'IR1']));` });
+DK.setAllIRs([{ irNumber: 'IR1' }, { irNumber: 'IR2' }]);
+r.ok('saved tabs come back in their own order, with dead ids and duplicates dropped',
+  DK.dockIRs.join(',') === 'IR2,IR1', DK.dockIRs);
+r.ok('and the cleaned list is written back, so the dead id is not retried forever',
+  DK.stored === '["IR2","IR1"]', DK.stored);
+DK.dockIRs.push('IR3');
+DK.persistDockWorklist();
+r.ok('a tab opened after the restore is persisted', DK.stored === '["IR2","IR1","IR3"]', DK.stored);
+
+const DK2 = loadApp(`
+  restoreDockWorklist, setAllIRs,
+  get dockIRs() { return dockIRs; },
+`, { preload: `localStorage.setItem('ipb_dock_irs', JSON.stringify(['IR9']));` });
+DK2.setAllIRs([]);
+r.ok('an empty first paint does NOT consume the saved list', DK2.dockIRs.length === 0, DK2.dockIRs);
+DK2.setAllIRs([{ irNumber: 'IR9' }]);
+r.ok('...the saved tab appears as soon as the rows do', DK2.dockIRs.join(',') === 'IR9', DK2.dockIRs);
+r.ok('setAllIRs is what asks for the restore, so no boot path can forget it',
+  /restoreDockWorklist\(\);/.test(appCode.slice(appCode.indexOf('function setAllIRs('),
+                                       appCode.indexOf('function setAllIRs(') + 900)));
+r.ok('sign-out clears the key AND the memory, so the next account starts clean',
+  /localStorage\.removeItem\(DOCK_KEY\)/.test(appCode) && /dockIRs\.length = 0/.test(appCode));
 
 // ── The harness itself ────────────────────────────────────────────────────────
 r.head('the stub DOM is faithful enough for these assertions to be able to fail');

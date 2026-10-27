@@ -1513,7 +1513,56 @@ publish the frontend first as always.
 
 ---
 
-## 24. Future Roadmap (Planned)
+## 24. v123 — the small waits and the small lies (2026-10-27)
+
+### What this pass is
+
+The first UX-debt batch from the closure list. None of it changes a workflow; all
+of it removes a moment where the screen said less than the app knew.
+
+### A section says it is loading
+
+`openPassbook` builds seven empty forms and only then reads the ticket. For the
+length of that read the screen was indistinguishable from a ticket nobody had
+filled in. It now clears the PREVIOUS ticket's record first (a failed read used to
+leave the old record in `currentSectionData`), paints **Loading saved data…** on
+each section's own indicator, and finishes with **Saved**, **Draft restored**, or
+**Couldn't load saved data — your draft is safe**. `loadSectionData` returns
+success/failure instead of swallowing both. The failure also gets one toast,
+because "this ticket is empty" and "this ticket could not be read" are different
+states that look identical.
+
+### A failed save retries with backoff, then stops
+
+Auto-save already retried every 10 seconds forever. It now doubles the wait to a
+60-second ceiling, gives up after six attempts with **Not saved — contact the
+admin**, and starts a fresh budget on the next keystroke. The draft is untouched
+throughout; only the useless repetition is gone.
+
+### A PDF has a preview
+
+The evidence card showed a paperclip and an Open link. A saved PDF now frames
+Drive's `/preview` endpoint (the `/view` page refuses to frame), and a file still
+on this device frames its own blob URL. It is a `<details>` fold, so several PDFs
+in one section mount no viewer until asked.
+
+### The dock worklist survives a reload
+
+`dockIRs` is persisted under `ipb_dock_irs` and restored once per page, after the
+IR rows exist. Dead ticket numbers and duplicates are dropped; the open sheet is
+deliberately not restored. Sign-out removes both the key and the in-memory strip,
+so the next account starts clean.
+
+### Verification
+
+`node tools/smoke-all.mjs` — **4676 cases across 37 suites**, all passing. The
+new cases cover the four loading states in both languages, the retry budget and
+its reset, the PDF endpoint/fold, and a driven dock restore including the
+empty-first-paint case. No backend change, no `API_VERSION` move.
+
+---
+
+## 25. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

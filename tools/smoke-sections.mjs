@@ -37,6 +37,7 @@ i18nCtx.window = i18nCtx;
 vm.createContext(i18nCtx);
 vm.runInContext(i18nJs, i18nCtx, { filename: 'i18n.js' });
 const STRINGS = i18nCtx.I18N.STRINGS;
+const HI = i18nCtx.I18N.TABLES.hi;
 
 const T = loadApp(`
   SECTION_IDS, SECTION_LABELS, SECTION_SHORT, SECTIONS, FIELD_SECTION_INDEX,
@@ -298,6 +299,41 @@ r.ok('a failed close has its own wording, not the save-retry wording',
   /retrying/i.test(STRINGS['common.retrying']) &&
   /\.autosave-note\[data-state="failed"\]/.test(css),
   (appJs.match(/[^\n]*'failed'[^\n]*/) || [''])[0]);
+
+// Retrying is bounded in BOTH directions: the wait grows so a short outage does not
+// become a fixed-rate hammer, and the loop stops so a long one does not toast forever.
+// A new keystroke resets the budget, which is what keeps the cap from stranding edits.
+r.ok('a failed save backs off, caps its wait, and stops after a fixed number of tries',
+  /AUTOSAVE_RETRY_LIMIT\s*=\s*6/.test(appJs) &&
+  /AUTOSAVE_RETRY_MAX_MS\s*=\s*60000/.test(appJs) &&
+  /Math\.pow\(2, attempt - 1\)/.test(appJs) &&
+  /attempt >= AUTOSAVE_RETRY_LIMIT/.test(appJs),
+  (appJs.match(/[^\n]*AUTOSAVE_RETRY_[A-Z_]+[^\n]*/g) || []));
+r.ok('the last failure says to contact the admin, rather than promising a retry',
+  /setAutosaveNote\(unitId, 'save-failed'\)/.test(appJs) &&
+  /common\.notSavedFinal/.test(appJs) &&
+  STRINGS['common.notSavedFinal'] !== STRINGS['common.retrying']);
+r.ok('a new keystroke resets the retry budget, so a capped loop is not a dead end',
+  /_autosaveAttempts\[unitId\] = 0/.test(appJs));
+
+// The gap between "the form exists" and "the record arrived" used to look exactly like
+// an empty ticket. It now wears its own word on the indicator the section already has,
+// and a restored draft is neither "saved" nor a failure.
+r.head('the form says it is loading, and a draft is not called saved');
+r.ok('openPassbook clears the previous record and marks the sections loading',
+  /currentSectionData = \{\};[\s\S]{0,240}paintSectionsLoading\(\);/.test(appJs));
+r.ok('the read answers with success or failure, and the indicator follows it',
+  /paintSectionsLoaded\(loadedOk\)/.test(appJs) &&
+  /setAutosaveNote\(secId, ok \? 'saved' : 'load-error'\)/.test(appJs) &&
+  /return true;/.test(appJs.slice(appJs.indexOf('async function loadSectionData('),
+                                  appJs.indexOf('async function loadSectionData(') + 5000)));
+r.ok('a restored draft gets its own state, not "Saved just now"',
+  /setAutosaveNote\(secId, 'draft'\)/.test(appJs) &&
+  /data-state="draft"/.test(css));
+r.ok('the three new states have words in both languages',
+  ['common.loadingSaved', 'common.loadFailed', 'common.draftRestored']
+    .every(k => STRINGS[k] && HI[k] && /[\u0900-\u097F]/.test(HI[k])),
+  ['common.loadingSaved', 'common.loadFailed', 'common.draftRestored'].map(k => HI[k]));
 
 // The guard is only worth anything if something SETS it. It was checked in both new
 // paths before anything added to it, so two quick taps on Close both posted.

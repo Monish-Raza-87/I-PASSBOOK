@@ -8735,6 +8735,129 @@ function maintenancePruneAuditLog() {
   }));
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// COSTING FIELD MIGRATION — editor-run, dry-run by default, NO route.
+// ──────────────────────────────────────────────────────────────────────────────
+// When Costing split out of Investigation on 2026-10-13, the three fields kept
+// their ids (`d_repairTable`, `d_leadTime`, `d_goAhead`) so every comment anchor
+// and every audit row still resolves. The price is that a ticket saved before the
+// split holds them under `sec-d`, while the registry says their home is `sec-cost`.
+// The app READS them through FIELD_SECTION_INDEX on open and carries them forward
+// on an Investigation save, so nothing is lost today. This is the tidy-up: move the
+// three values to their declared home, once, deliberately.
+//
+// WHY DRY RUN IS THE DEFAULT. This writes across live tickets. A function whose
+// first run mutates 450 files is not something an operator should discover by
+// accidentally selecting it. `migrateCostingFields(true)` is the one-word edit
+// that applies it, and the plan it prints first is the thing to read.
+//
+// CONFLICTS ARE LEFT ALONE. If both sections hold a non-empty, DIFFERENT value for
+// one field, this refuses that field and reports it. The newer value cannot be
+// guessed from the file alone, and a migration that picks one silently is a data
+// loss in the one place the operator was trying to make the data better.
+//
+// It takes the lock PER TICKET, not for the whole run: a few hundred Drive reads
+// and writes under one lock would hold every writer out for minutes and risk the
+// script timeout. Each ticket is atomic on its own; a concurrent save either lands
+// before this read or after this write, never in between. Re-running is safe
+// because a moved field is no longer under `sec-d`.
+function costingMigrationEmpty(v) {
+  if (v == null) return true;
+  if (Array.isArray(v)) return v.length === 0;
+  if (typeof v === 'object') return Object.keys(v).length === 0;
+  return String(v).trim() === '';
+}
+function costingMigrationKey(v) {
+  return (typeof v === 'object') ? JSON.stringify(v) : String(v);
+}
+function planCostingMigration(data) {
+  var next = JSON.parse(JSON.stringify(data || {}));
+  var from = (next['sec-d'] && typeof next['sec-d'] === 'object') ? next['sec-d'] : null;
+  if (!from) return { data: next, moves: [], conflicts: [] };
+  var to = (next['sec-cost'] && typeof next['sec-cost'] === 'object') ? next['sec-cost'] : {};
+  var fields = ['d_repairTable', 'd_leadTime', 'd_goAhead'];
+  var moves = [], conflicts = [];
+  fields.forEach(function (fid) {
+    if (!Object.prototype.hasOwnProperty.call(from, fid)) return;
+    var source = from[fid];
+    if (costingMigrationEmpty(source)) return;         // nothing worth carrying
+    var already = Object.prototype.hasOwnProperty.call(to, fid) ? to[fid] : null;
+    if (!costingMigrationEmpty(already)) {
+      if (costingMigrationKey(already) === costingMigrationKey(source)) {
+        // The same value already landed at the new home. Removing the duplicate is
+        // the whole move; writing it again would be a no-op audit row.
+        moves.push({ field: fid, value: source, already: true });
+      } else {
+        conflicts.push({ field: fid });
+      }
+      return;
+    }
+    to[fid] = source;
+    moves.push({ field: fid, value: source, already: false });
+  });
+  moves.forEach(function (m) { delete from[m.field]; });
+  if (!Object.keys(from).length) delete next['sec-d'];
+  if (moves.length) next['sec-cost'] = to;
+  return { data: next, moves: moves, conflicts: conflicts };
+}
+function migrateCostingFields(apply) {
+  var dry = apply !== true;
+  var idx = readSectionsIndex(false);
+  var irs = Object.keys(idx.irs || {}).filter(function (k) { return /^IR\d+$/.test(k); }).sort();
+  var changed = [], conflicts = [], failed = [];
+  irs.forEach(function (irNumber) {
+    try {
+      var plan;
+      if (dry) {
+        plan = planCostingMigration(readIR(irNumber, false, false).data);
+      } else {
+        plan = withRowLockOrThrow(function () {
+          var ir = readIR(irNumber, false, true);
+          var p = planCostingMigration(ir.data);
+          if (!p.moves.length) return p;
+          var ts = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+          var by = 'system (costing migration)';
+          var lines = [];
+          p.moves.forEach(function (m) {
+            if (!m.already) {
+              lines.push({ t: ts, ir: irNumber, sec: 'sec-cost', by: by,
+                           ev: 'added', fid: m.field, old: '', nw: snapValue(m.value) });
+            }
+            lines.push({ t: ts, ir: irNumber, sec: 'sec-d', by: by,
+                         ev: 'removed', fid: m.field, old: snapValue(m.value), nw: '' });
+          });
+          writeIR(irNumber, p.data, ir.fileId);
+          appendAuditLinesLocked(irNumber, lines);
+          journalLocked({ by: by, action: 'migrateCostingFields', ir: irNumber,
+                          sec: 'sec-d', keys: p.moves.map(function (m) { return m.field; }) });
+          return p;
+        });
+      }
+      if (plan.moves.length) changed.push({ ir: irNumber, fields: plan.moves.map(function (m) { return m.field; }) });
+      if (plan.conflicts.length) conflicts.push({ ir: irNumber, fields: plan.conflicts.map(function (c) { return c.field; }) });
+    } catch (e) {
+      failed.push(irNumber + ': ' + e.message);
+      // A dry run has written nothing, so continuing is safe. An APPLY run has
+      // already committed this ticket or refused it; either way the next ticket is
+      // independent, and stopping would only hide the rest of the plan.
+    }
+  });
+  // Returned as ONE text block AND logged line by line. The editor shows only the
+  // log, but a suite (and a person pasting the result) gets the whole plan back.
+  var out = [];
+  var say = function (s) { out.push(String(s)); report(s); };
+  say(dry ? 'COSTING MIGRATION - DRY RUN (nothing written)' : 'COSTING MIGRATION - APPLIED');
+  say('Tickets scanned: ' + irs.length);
+  changed.forEach(function (c) { say('  ' + c.ir + '  <- ' + c.fields.join(', ')); });
+  conflicts.forEach(function (c) {
+    say('  CONFLICT ' + c.ir + '  both sections hold a value for: ' + c.fields.join(', ') + ' (left untouched)');
+  });
+  failed.forEach(function (f) { say('  FAILED ' + f); });
+  say((dry ? 'Would move' : 'Moved') + ' costing field(s) on ' + changed.length +
+      ' ticket(s); ' + conflicts.length + ' conflict(s); ' + failed.length + ' failure(s).');
+  return out.join('\n');
+}
+
 // Read the sign-in audit — `audit/signins.jsonl`, written on every successful
 // sign-in by doLoginPassword. An operator lever run from the editor, in the same
 // spirit as maintenancePruneAuditLog: the value of the record is that it EXISTS and

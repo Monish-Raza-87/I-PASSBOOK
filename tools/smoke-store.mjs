@@ -3261,4 +3261,63 @@ const CR = 'adhik.nair@indrones.com';
     !ctx.publicCorrections().items['serial:S100-V3'], ctx.publicCorrections());
 }
 
+// ── The Costing fields: a dry-run-first move out of sec-d ────────────────────
+// Costing split out of Investigation on 2026-10-13 and kept the d_* ids, so an
+// older ticket still stores those three values under sec-d. The app reads them by
+// their declared home, so nothing is lost - but the record is tidy only after a
+// deliberate move. The function is editor-run and DRY by default; this block proves
+// the default really writes nothing, that a conflict is left alone, and that the
+// resulting history says who moved what.
+r.head('the Costing fields can be moved out of sec-d, dry-run first');
+ctx.saveSection('IR950', 'sec-d',
+  { d_repairTable: 'repair rows', d_leadTime: '10 days', d_goAhead: 'yes' }, [], ADMIN);
+ctx.saveSection('IR951', 'sec-cost', { d_leadTime: 'same' }, [], ADMIN);
+ctx.saveSection('IR951', 'sec-d', { d_leadTime: 'same', d_repairTable: 'repair rows 2' }, [], ADMIN);
+ctx.saveSection('IR952', 'sec-cost', { d_leadTime: 'new value' }, [], ADMIN);
+ctx.saveSection('IR952', 'sec-d', { d_leadTime: 'old value' }, [], ADMIN);
+reexec();
+
+const before950 = sectionFile('IR950').content;
+const audit950Before = auditFile('IR950').content;
+const dry = ctx.migrateCostingFields();
+r.ok('the dry run names the tickets and says it is a dry run',
+  /DRY RUN/.test(dry) && /IR950/.test(dry) && /IR951/.test(dry) && /IR952/.test(dry), dry);
+r.ok('...and it writes NOTHING - the ticket and its audit are byte-for-byte unchanged',
+  sectionFile('IR950').content === before950 && auditFile('IR950').content === audit950Before);
+r.ok('...and no sec-cost is invented by a plan',
+  !fresh('sections/IR950.json')['sec-cost'], fresh('sections/IR950.json'));
+r.ok('a value that exists at BOTH homes and differs is a CONFLICT, not a guess',
+  /CONFLICT IR952/.test(dry) &&
+  fresh('sections/IR952.json')['sec-cost'].d_leadTime === 'new value' &&
+  fresh('sections/IR952.json')['sec-d'].d_leadTime === 'old value', fresh('sections/IR952.json'));
+
+const applied = ctx.migrateCostingFields(true);
+const after950 = fresh('sections/IR950.json');
+r.ok('apply puts all three values at their declared home',
+  after950['sec-cost'].d_repairTable === 'repair rows' &&
+  after950['sec-cost'].d_leadTime === '10 days' &&
+  after950['sec-cost'].d_goAhead === 'yes', after950);
+r.ok('...and the old section is gone once it held nothing else',
+  !after950['sec-d'], after950);
+const after951 = fresh('sections/IR951.json');
+r.ok('a duplicate already at the new home is removed from the old one, not duplicated',
+  after951['sec-cost'].d_leadTime === 'same' && after951['sec-cost'].d_repairTable === 'repair rows 2' &&
+  !after951['sec-d'], after951);
+r.ok('the conflict ticket is untouched by apply too',
+  fresh('sections/IR952.json')['sec-cost'].d_leadTime === 'new value' &&
+  fresh('sections/IR952.json')['sec-d'].d_leadTime === 'old value' &&
+  /CONFLICT IR952/.test(applied), applied);
+const moveLines = auditFile('IR951').content.trim().split('\n').map(l => JSON.parse(l))
+  .filter(l => l.by === 'system (costing migration)');
+r.ok('the move is on the ticket history, attributed to the migration',
+  moveLines.some(l => l.sec === 'sec-cost' && l.fid === 'd_repairTable' && l.ev === 'added') &&
+  moveLines.some(l => l.sec === 'sec-d' && l.fid === 'd_repairTable' && l.ev === 'removed'),
+  moveLines);
+r.ok('...and the duplicate move did not write a second sec-cost line',
+  moveLines.filter(l => l.fid === 'd_leadTime' && l.sec === 'sec-cost' && l.ev === 'added').length === 0,
+  moveLines.filter(l => l.fid === 'd_leadTime'));
+const again = ctx.migrateCostingFields(true);
+r.ok('re-running is safe: no ticket is changed twice',
+  /on 0 ticket\(s\)/.test(again), again);
+
 r.finish();

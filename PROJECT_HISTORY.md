@@ -1562,7 +1562,52 @@ empty-first-paint case. No backend change, no `API_VERSION` move.
 
 ---
 
-## 25. Future Roadmap (Planned)
+## 25. v123 backend — the Costing fields can move, and the default is a dry run (2026-10-27)
+
+### What this is
+
+Costing split out of Investigation on 2026-10-13 and the three fields kept their
+`d_*` ids, so every ticket saved before the split still stores them under `sec-d`.
+The app reads them through `FIELD_SECTION_INDEX` and carries them forward on a save,
+so nothing is lost — but the record is not tidy, and an operator had no safe way to
+tidy it.
+
+`migrateCostingFields()` is that way. It is editor-run and **not routed**: no app
+button, no API surface, no trigger. With no argument it is a **dry run** — it reads
+every indexed ticket, prints what it would move and on which ticket, and writes
+nothing. The one-word edit `migrateCostingFields(true)` applies it.
+
+### What apply does
+
+Per ticket, under the normal script lock:
+
+- moves `d_repairTable`, `d_leadTime` and `d_goAhead` to `sec-cost`;
+- removes an emptied `sec-d`;
+- leaves a field held at **both** homes with **different** values as a reported
+  conflict — the newer value cannot be guessed from the file, and guessing is how a
+  tidy-up becomes a data loss;
+- writes `added`/`removed` audit lines attributed to `system (costing migration)`,
+  plus a journal entry, in the same lock as the data write;
+- reports failures per ticket and continues, because each ticket is independent.
+
+The lock is taken **per ticket**, not for the whole run: a few hundred Drive
+reads and writes under one lock would hold every writer out for minutes and risk
+the script timeout. Re-running is safe; a moved field is no longer under `sec-d`.
+
+### Verification
+
+`node tools/smoke-all.mjs` — **4693 cases across 37 suites**, all passing.
+`smoke-store.mjs` drives the real backend through the dry run, apply, duplicate,
+conflict and idempotence cases; `smoke-backend.mjs` pins that it is not a route or a
+trigger and that only the literal `true` applies it.
+
+⚠ `backend.gs` changes but **`API_VERSION` stays 21** — this adds no action and no
+field. The next paste carries it. The old carry-forward remains, so every ticket is
+still read correctly until an operator applies the plan.
+
+---
+
+## 26. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

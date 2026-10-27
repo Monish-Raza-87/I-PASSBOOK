@@ -1886,6 +1886,30 @@ r.ok('parseAuditTimestamp parses dd-MMM-yyyy explicitly, not via Date.parse',
       /match\(/.test(p) && /'jan'/.test(p);
   })(), fnBody('parseAuditTimestamp').slice(0, 400));
 
+r.head('the Costing migration is editor-run, dry-run by default, and refuses to guess');
+// A live-data change is the one class of function that must never be reachable from
+// the app, and must never apply itself because somebody selected the wrong menu item.
+const cst = fnBody('migrateCostingFields');
+r.ok('it exists and is NOT routed - no API surface and no button',
+  /function migrateCostingFields\s*\(/.test(code) &&
+  !/migrateCostingFields\s*:/.test(code) &&
+  !/\bmigrateCostingFields\b/.test(fnBody('doGet')) &&
+  !/\bmigrateCostingFields\b/.test(fnBody('doPost')),
+  (code.match(/[^\n]*migrateCostingFields[^\n]*/g) || []).slice(0, 3));
+r.ok('the default is a DRY RUN - only the literal true applies it',
+  /var dry = apply !== true;/.test(cst), (cst.match(/[^\n]*apply !== true[^\n]*/) || [''])[0]);
+r.ok('a dry run reads and writes nothing, and apply takes the lock per ticket',
+  /planCostingMigration\(readIR\(/.test(cst) && /withRowLockOrThrow/.test(cst),
+  (cst.match(/[^\n]*(planCostingMigration|withRowLockOrThrow)[^\n]*/g) || []));
+r.ok('it writes through writeIR and the locked audit, never a raw setContent',
+  /writeIR\(irNumber, p\.data, ir\.fileId\)/.test(cst) &&
+  /appendAuditLinesLocked\(/.test(cst) && !/setContent/.test(cst));
+r.ok('a field held at BOTH homes with DIFFERENT values is refused, not overwritten',
+  /conflicts\.push/.test(cst) && /left untouched/.test(fnBody('migrateCostingFields')),
+  (cst.match(/[^\n]*conflict[^\n]*/gi) || []));
+r.ok('it is not a trigger, so nothing applies it on a schedule',
+  !/newTrigger\([^)]*migrateCostingFields/.test(code));
+
 // ── Putting an old value back ─────────────────────────────────────────────────
 r.head('restoreField writes ONE KEY, and nothing else about the IR moves');
 // The tempting shortcut is to reuse saveSection: it already has the gate, the lock

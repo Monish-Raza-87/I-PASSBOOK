@@ -256,21 +256,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 - 🔧 **`maintenancePruneAuditLog` reads and rewrites every audit file** it finds, under one lock. Each file is small (~40 KB for a busy ticket), so the whole sweep is bounded, but it is the one editor-run function whose cost grows with the number of tickets. Run it deliberately, not on a schedule nobody watches.
 - 🔧 **Drive folder names no longer match the section letters.** A merged section keeps the folder of its **first-listed source**, so `sec-f` writes to `'Section F - Quality Control'` (which therefore also holds Flight Test uploads) and `sec-g` to `'Section H - PDI'` (also Dispatch). `'Section G - Flight Test'` and `'Section I - Logistics Dispatch'` are historical — browsable, never written again. Renaming them is a Drive-wide mutation needing its own editor function; deliberately left as an optional later step rather than bundled into a cutover.
 - 🔧 **Merged sections hold two field-id prefixes** — `sec-f` declares `f_*` **and** `g_*`, `sec-g` declares `h_*` **and** `i_*`. This is not laziness: field ids are comment anchors (`n.fieldId` inside every comments item) *and* the `Field ID` of every historical audit row, so renaming `g_basicReport` → `f_basicReport` would orphan every anchored comment on it and split its audit history across two names. It is survivable only because field ids resolve through `FIELD_SECTION_INDEX`, built from `SECTIONS` itself — resolving by prefix, as the code used to, sends `g_basicReport` to a section that no longer exists.
-- 🔧 **Costing's legacy values still live under `sec-d`, and nothing moves them.** When
-  Costing split out of Investigation on 2026-10-13 the three fields kept their ids
-  (`d_repairTable`, `d_leadTime`, `d_goAhead`), so every ticket saved before the split
-  still holds them under `sec-d`. That is read through on open (the field's home is
-  resolved through `FIELD_SECTION_INDEX`, never assumed from the stored section) and
-  **carried forward** on an Investigation save — a section save *replaces* the section
-  object, so a declared field missing from the payload counts as **deleted**, and
-  without the carry-forward the first ordinary Investigation save would have destroyed
-  every stored estimate. The carry-forward is gated on the **stored** record, never on
-  anything the load path invented, so it goes inert by itself the moment the values stop
-  living in `sec-d`. Consequences to state rather than discover: the old keys sit in a
-  record whose registry no longer declares them (invisible, but there); and **Costing
-  reads not-done on every existing ticket** until someone opens it and closes it. A
-  one-shot backend move would tidy both; it is a write across every IR's stored data on
-  live tickets and is deliberately **not** in this change.
+- ✅ **A dry-run-first move for Costing's legacy `sec-d` values — built 2026-10-27.** `migrateCostingFields()` is editor-run (not routed), and with no argument it only **plans**: it reads every indexed ticket, lists what would move, and writes nothing. `migrateCostingFields(true)` applies it per ticket under the normal lock, moves the three `d_*` values to `sec-cost`, writes `added`/`removed` audit lines and a journal entry, and removes an emptied `sec-d`. A field held at BOTH homes with **different** values is reported as a conflict and left untouched. Re-running is safe. `smoke-store.mjs` drives the dry run, apply, conflict and idempotence; `smoke-backend.mjs` pins that it is not a route or a trigger. **This still needs the next backend paste.** The old carry-forward remains in place, so an un-migrated ticket is still read correctly until an operator applies the plan.
 - 🔧 **"Costing first" is a gate on the app's own offer, not a rule the server enforces.**
   A ticket may not reach E · Production until D · Costing is closed — but the Board still
   shows **no Costing column**, because no workflow status means "Costing" and a D column
@@ -336,7 +322,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **4676 cases across 37 suites**, all passing.
+`node tools/smoke-all.mjs` — **4693 cases across 37 suites**, all passing.
 (The figure in the heading is MEASURED by summing the run, never carried forward: it
 said "2273 across 16 suites" long after both numbers had stopped being true, which is
 the same drift the emoji ledger below had to be corrected for. It also said 4273

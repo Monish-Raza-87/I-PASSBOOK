@@ -22,7 +22,7 @@ const T = loadApp(`
   buildTimeline, parseAuditTimestamp, SUPPRESSED_AUDIT_FIELDS, TIMELINE_KINDS,
   renderTimelineInto, sectionDisplayName, iconSvg, ICON_PATHS,
   restoreOfferFor, fieldCurrentFrom, RESTORABLE_KINDS, VALUE_BEARING_KINDS,
-  SECTION_SHORT, sectionLetter, shortMailbox,
+  SECTION_SHORT, sectionLetter, shortMailbox, irReportedEvent,
   renderInto: (el, tl, opts) => renderTimelineInto(el, tl, opts),
 `);
 
@@ -373,7 +373,7 @@ const missing = Object.keys(T.TIMELINE_KINDS).filter(k => !T.TIMELINE_KINDS[k].i
 // the list exists: a reader has to be able to tell a mail from a comment at a glance.
 const KINDS = ['save','add','edit','remove','status','assign','priority',
                'category','subcategory','subcatnote','upload','comment',
-               'archived','restored','revert','email'];
+               'archived','restored','revert','email','reported'];
 const actual = Object.keys(T.TIMELINE_KINDS).slice().sort();
 r.ok('every kind the reader can see is complete, and none appeared unannounced',
   missing.length === 0 && actual.join(',') === KINDS.slice().sort().join(','),
@@ -722,5 +722,50 @@ r.ok('a subject or preview cannot inject markup',
     const h = render(builtMail([], [], [mailFrom({ subject: '<img src=x onerror=alert(1)>', preview: '<script>bad()</script>' })]), {});
     return !/<img src=x/.test(h) && !/<script>/.test(h) && /&lt;img src=x/.test(h);
   })());
+
+// ── The first event: the client's own report ──────────────────────────────────
+// A ticket's timeline that starts with the first staff edit reads as if the client
+// never raised it. `reported` is APPENDED as a sixth parameter, so every existing
+// fixture above still calls the five-argument form.
+r.head('the report itself is the first row');
+const reported = T.irReportedEvent({
+  irNumber: 'IR409', dateRaisedISO: '2026-05-11',
+  companyName: 'Acme', droneId: 'S25P033', customerName: 'Sreenivas Pai',
+});
+r.ok('the report is built from the record, with the reporter as the actor',
+  !!reported && reported.by === 'Sreenivas Pai' && /Acme/.test(reported.message) &&
+  reported.at === new Date(2026, 4, 11).getTime(), reported);
+r.ok('a record with no readable date still gets a row, saying so',
+  (() => {
+    const r2 = T.irReportedEvent({ irNumber: 'IR409', customerName: 'Someone' });
+    return !!r2 && r2.at === 0 && r2.timestamp === 'Date not recorded';
+  })());
+
+const withReport = T.buildTimeline('IR409', [sectionRow({})], [], 0, [], {
+  at: new Date(2026, 7, 21, 8, 0, 0).getTime(),
+  timestamp: '21 August 2026',
+  by: 'Sreenivas Pai',
+  message: 'Acme · S25P033',
+});
+r.ok('the report sorts before the first save, by instant',
+  withReport.map(x => x.kind).join(',') === 'reported,save', withReport.map(x => x.kind));
+r.ok('the report is a first-class kind with its own label',
+  T.TIMELINE_KINDS.reported.label === 'IR reported' && T.TIMELINE_KINDS.reported.icon === 'report');
+
+r.head('the Activity tab is one table: date-time, activity, performed-by');
+const tableHtml = render(withReport, { table: true });
+r.ok('the table carries the three headings',
+  /hist-table-head/.test(tableHtml) &&
+  /Date &amp; time/.test(tableHtml) && /Activity/.test(tableHtml) && /Performed by/.test(tableHtml),
+  tableHtml.slice(0, 240));
+r.ok('the report is the first row and the save is below it',
+  tableHtml.indexOf('IR reported') > -1 && tableHtml.indexOf('Section saved') > -1 &&
+  tableHtml.indexOf('IR reported') < tableHtml.indexOf('Section saved'));
+r.ok('the performed-by column names the reporter and the saver',
+  /hist-table-by[^>]*>Sreenivas Pai/.test(tableHtml) &&
+  /hist-table-by[^>]*>ganesh@indrones.com/.test(tableHtml),
+  (tableHtml.match(/hist-table-by[^>]*>[^<]*/g) || []));
+r.ok('the card layout is still what the history modal gets',
+  /hist-item/.test(render(withReport, {})) && !/hist-table/.test(render(withReport, {})));
 
 r.finish();

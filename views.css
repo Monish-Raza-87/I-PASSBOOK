@@ -1375,6 +1375,54 @@
 .hist-old { color: var(--ink-red-7); }
 .hist-new { color: var(--ink-green-7); }
 
+/* ── ACTIVITY AS A TABLE ─────────────────────────────────────────────────────
+   The owner's shape for the Activity tab: one chronological list with three
+   columns - date-time, activity, performed-by. It is NOT the history modal's card
+   layout: a card cannot carry a column, and the Activity tab is read as a record
+   of the ticket's life rather than as a set of things to act on. */
+.hist-table {
+  display: flex;
+  flex-direction: column;
+  max-height: 48vh;
+  overflow: auto;
+  border: 1px solid var(--outline-gray-1);
+  border-radius: var(--radius-4);
+  background: var(--surface-base);
+}
+.hist-table-head,
+.hist-table-row {
+  display: grid;
+  grid-template-columns: 135px minmax(0, 1fr) 150px;
+  gap: 0.55rem;
+  padding: 0.45rem 0.6rem;
+}
+.hist-table-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-gray-2);
+  color: var(--ink-gray-5);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.hist-table-row { border-top: 1px solid var(--outline-gray-1); align-items: start; }
+.hist-table-date { color: var(--ink-gray-5); font-size: var(--text-xs); }
+.hist-table-act { min-width: 0; }
+.hist-table-act-head { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin-bottom: 2px; }
+.hist-table-by { color: var(--ink-gray-6); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.hist-table-where { display: block; color: var(--ink-gray-5); margin-top: 2px; }
+.hist-table .hist-diff,
+.hist-table .nudge-msg { font-size: var(--text-xs); }
+@media (max-width: 700px) {
+  .hist-table-head { display: none; }
+  .hist-table-row { grid-template-columns: 1fr; gap: 0.15rem; }
+  .hist-table-date { order: 1; }
+  .hist-table-act { order: 2; }
+  .hist-table-by { order: 3; }
+}
+
 /* Which half of the timeline an entry came from — a section save or a workflow
    change. Reuses the .hist-field chip shape so the two read as one family. */
 .hist-src {
@@ -1628,6 +1676,11 @@
 }
 .overview-edit-label { font-size: var(--text-sm); color: var(--ink-gray-7); }
 .overview-edit-row .form-input:disabled { background: var(--surface-gray-2); cursor: not-allowed; }
+/* The derived CR name is a READOUT, not a field: no border, no focus ring, and no
+   history button, because nobody typed it. The note names where it came from so it
+   cannot be mistaken for something a person set. */
+.overview-derived-value { font-size: var(--text-sm); color: var(--ink-gray-9); font-weight: var(--weight-medium); }
+.overview-derived-note { font-size: var(--text-2xs); color: var(--ink-gray-5); font-weight: var(--weight-regular); text-transform: uppercase; letter-spacing: 0.06em; }
 .overview-note,
 .overview-sub-note { font-size: var(--text-xs); color: var(--ink-gray-5); margin: 0.35rem 0 0; }
 
@@ -3473,6 +3526,28 @@ details.ins-flag-group > summary.ins-flag-title { cursor: pointer; }
    cap. The cap is gone (see renderIRGrid), so there is nothing to be past, and this is
    no longer a control at all: no border to invite a click, no `cursor`, no hover. It is
    a paragraph. */
+/* The owner asked for the brand mark in the blank space under a short grid. It is a
+   watermark, not a tile: it spans the row, takes no clicks, and is hidden from the
+   accessibility tree. The mark is the SAME asset the app already ships, so a theme
+   change moves one file rather than two drawings. */
+.grid-watermark {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0 0;
+  pointer-events: none;
+}
+.grid-watermark img {
+  width: min(300px, 44vw);
+  height: auto;
+  opacity: 0.07;
+  filter: grayscale(1);
+}
+:root[data-theme="dark"] .grid-watermark img {
+  opacity: 0.10;
+  filter: brightness(0) invert(1);
+}
+
 .grid-foot {
   grid-column: 1 / -1;
   margin: 0.25rem 0 0;

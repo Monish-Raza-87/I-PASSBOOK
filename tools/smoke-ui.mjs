@@ -140,7 +140,7 @@ const { T, byId } = loadApp(`
   SECTIONS,
   renderActivityCount, applyActivityState, toggleActivity,
   applyChromeState, toggleRail, toggleList, renderLayout, iconSvg, ICON_PATHS,
-  TIMELINE_KINDS, IR_CATEGORIES,
+  TIMELINE_KINDS, IR_CATEGORIES, crRepresentativeFor,
   storedFlag, setFlag, RAIL_KEY, LIST_KEY, ACTIVITY_KEY, ACTIVITY_LIMIT,
   get view() { return currentView; },
   set view(v) { currentView = v; },
@@ -1943,6 +1943,48 @@ r.ok('the outside-click guard treats a click inside the avatar as a click on it'
   /!userAvatar\.contains\(e\.target\)/.test(appSrc) &&
   !/e\.target !== userAvatar/.test(appSrc),
   'the guard must use contains(), because the avatar\'s own <svg> is the click target');
+
+// ── The CR representative is derived from the IR date ─────────────────────────
+// Not an import and not a second editable field: the owner's date rule, applied to
+// the ticket's own raise date. The boundaries are the test, because an off-by-one
+// day silently assigns the wrong person for a whole ticket.
+r.head('the CR representative follows the owner\'s date rule');
+r.ok('11 May 2026 switches to Adhik Nair',
+  T.crRepresentativeFor({ dateRaisedISO: '2026-05-11' }) === 'Adhik Nair' &&
+  T.crRepresentativeFor({ dateRaisedISO: '2026-05-10' }) === 'Monish Raza');
+r.ok('17 Jun 2025 switches from Ravi Singh to Monish Raza',
+  T.crRepresentativeFor({ dateRaisedISO: '2025-06-17' }) === 'Monish Raza' &&
+  T.crRepresentativeFor({ dateRaisedISO: '2025-06-16' }) === 'Ravi Singh');
+r.ok('1 Apr 2024 switches to Ravi Singh',
+  T.crRepresentativeFor({ dateRaisedISO: '2024-04-01' }) === 'Ravi Singh' &&
+  T.crRepresentativeFor({ dateRaisedISO: '2024-03-31' }) === 'Monish Raza');
+r.ok('27 Aug 2023 switches from Ravi Singh to Monish Raza',
+  T.crRepresentativeFor({ dateRaisedISO: '2023-08-27' }) === 'Monish Raza' &&
+  T.crRepresentativeFor({ dateRaisedISO: '2023-08-26' }) === 'Ravi Singh');
+r.ok('a record with no readable date answers nothing rather than guessing',
+  T.crRepresentativeFor({ dateRaisedISO: 'not a date' }) === '' &&
+  T.crRepresentativeFor({}) === '');
+r.ok('the Overview shows it read-only and uses it as the blank-field default',
+  /overview-derived/.test(appCode) &&
+  /crRepresentativeFor\(currentIR\)/.test(appCode) &&
+  /const ownerValue =/.test(appCode) &&
+  /crName \|\| currentIR\?\.spoc/.test(appCode),
+  (appCode.match(/[^\n]*ownerValue[^\n]*/g) || []));
+
+// ── The evidence folder link and the grid watermark ──────────────────────────
+r.head('the Report tab can open the IR evidence folder');
+r.ok('the frontend keeps the staff-only URL from getPassbook',
+  /currentIR\.folderUrl = data\.folderUrl/.test(appCode));
+r.ok('the Report head renders it as a link, not as a bare URL',
+  /const folderLink = folder/.test(appCode) &&
+  /Open IR folder/.test(appCode) && /href="\$\{escHtml\(folder\)\}"/.test(appCode));
+r.ok('the grid blank area carries the faded brand mark',
+  /grid-watermark/.test(appCode) &&
+  /\.grid-watermark img/.test(viewsCode) &&
+  /opacity: 0\.07/.test(viewsCode));
+r.ok('...and the mark is hidden from assistive tech and takes no clicks',
+  /class="grid-watermark" aria-hidden="true"/.test(appCode) &&
+  /\.grid-watermark \{[^}]*pointer-events: none/.test(viewsCode));
 
 // ── The dock's worklist survives a reload ─────────────────────────────────────
 // The strip is memory in the old build, so a refresh emptied it. Restoring it is

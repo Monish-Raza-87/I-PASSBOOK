@@ -115,8 +115,8 @@ r.head('the owner\'s security decisions');
 // below are about the two things that are invisible until they are wrong — that a
 // customer's company is always the session's and never the body's, and that a rating is
 // only taken on a ticket that is actually closed.
-r.ok('API_VERSION is 21, the Inspector can report a failed save',
-/API_VERSION:\s*21\b/.test(code),
+r.ok('API_VERSION is 22, the evidence folder is in getPassbook',
+  /API_VERSION:\s*22\b/.test(code),
   (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('a per-IR reporter correction exists and is keyed by the ticket',
   /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));
@@ -1280,6 +1280,36 @@ r.ok('it prints its own lines rather than one dump, so a long inventory cannot b
 // before it is an answer about naming.
 r.ok('it prints the account it ran as — a zero-result search is about identity first',
   /Session\.getActiveUser\(\)\.getEmail\(\)/.test(fnBody('inventoryEmailIndex')));
+
+r.head('the evidence folder, its link and its audits are editor-run and read-only');
+// The By ID evidence root is a deployment fact. Its id must never be in this public
+// repository, and the link must never be handed to a customer.
+r.ok('setByIdFolder exists and is NOT routed',
+  /function setByIdFolder\s*\(/.test(code) &&
+  !/setByIdFolder\s*:/.test(code) &&
+  !/\bsetByIdFolder\b/.test(fnBody('doGet')) &&
+  !/\bsetByIdFolder\b/.test(fnBody('doPost')),
+  (code.match(/[^\n]*setByIdFolder[^\n]*/g) || []).slice(0, 3));
+r.ok('it stores the folder id in a Script Property, never in the source',
+  /setProperty\(BY_ID_FOLDER_PROPERTY/.test(fnBody('setByIdFolder')) &&
+  !/1yN_2TIv2mRozgbvzLh2ziRK7KsElOBTC/.test(code),
+  (code.match(/[^\n]*BY_ID_FOLDER_PROPERTY[^\n]*/g) || []).slice(0, 3));
+r.ok('getPassbook carries folderUrl for staff and strips it for a customer',
+  /folderUrl/.test(fnBody('getPassbook')) &&
+  /access\.role !== 'customer'/.test(fnBody('getPassbook')),
+  (fnBody('getPassbook').match(/[^\n]*folderUrl[^\n]*/g) || []));
+r.ok('auditFormEvidence exists, is not routed, and writes NOTHING',
+  /function auditFormEvidence\s*\(/.test(code) &&
+  !/auditFormEvidence\s*:/.test(code) &&
+  !/setContent|createFile|setSharing|moveTo|trash/.test(fnBody('auditFormEvidence')),
+  (fnBody('auditFormEvidence').match(/[^\n]*(setContent|createFile|setSharing|moveTo|trash)[^\n]*/g) || ['none - correct']));
+r.ok('auditIRFolders exists, is not routed, and writes NOTHING',
+  /function auditIRFolders\s*\(/.test(code) &&
+  !/auditIRFolders\s*:/.test(code) &&
+  !/setContent|createFile|setSharing|moveTo|trash/.test(fnBody('auditIRFolders')),
+  (fnBody('auditIRFolders').match(/[^\n]*(setContent|createFile|setSharing|moveTo|trash)[^\n]*/g) || ['none - correct']));
+r.ok('the manifest filename is one named constant',
+  /IR_FOLDER_MANIFEST_NAME\s*=\s*'manifest\.json'/.test(code));
 
 r.head('the legacy record read is one tab at a time, as the sheet displays it');
 r.ok('getLegacyIR exists and is routed behind the token gate',

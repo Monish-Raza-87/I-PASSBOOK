@@ -1607,7 +1607,55 @@ still read correctly until an operator applies the plan.
 
 ---
 
-## 26. Future Roadmap (Planned)
+## 26. v124 — the evidence folder, the CR rule, and one timeline (2026-10-27)
+
+### What shipped
+
+- **The By ID evidence root.** `setByIdFolder('<id>')` stores the owner's folder id
+  in a Script Property (never in the public source). `getPassbook` now returns
+  `folderUrl` — **staff only**, never for a customer — and the Report tab renders it
+  as **Open IR folder**. A missing folder or an unset property simply means no link.
+- **Two read-only audits, run from the editor.** `auditFormEvidence()` checks every
+  N/Q file link in the intake sheet against the file's real parent under
+  `By ID/IRxxx` and counts in-place / misplaced / missing / text-only. `auditIRFolders()`
+  lists each IR folder, its file count, subfolders, summary doc and manifest. Neither
+  moves, copies or re-shares anything, and neither is routed.
+- **The manifest schema.** `manifest.json` per IR folder — source, kind, name, file
+  id, message/thread id, time, from/to/subject, sha256 — documented in the backend.
+  The crawler/app will write it; the app can read it. No writer yet.
+- **The CR representative rule.** A pure function of `dateRaisedISO`:
+  before 27 Aug 2023 Ravi Singh; 27 Aug 2023–31 Mar 2024 Monish Raza; 1 Apr
+  2024–16 Jun 2025 Ravi Singh; 17 Jun 2025–10 May 2026 Monish Raza; 11 May 2026
+  onward Adhik Nair. The Overview shows it read-only, and an empty CRM-owner box
+  defaults to it; a stored manual value wins.
+- **The ACTIVITY table.** One chronological list with `Date & time | Activity |
+  Performed by`, oldest first, starting with the synthesized **IR reported** row.
+  It merges audit, comments, email and the report; the field-history modal keeps its
+  card layout and its restore buttons.
+- **The Grid watermark.** The brand mark at 7% opacity in the blank area under a
+  short grid, hidden from assistive technology and taking no clicks.
+
+### Verification
+
+`node tools/smoke-all.mjs` — **4717 cases across 37 suites**, all passing. The new
+cases cover every CR boundary, the reported row, the table's headings/order/actor
+columns, the folder link, and the watermark's source and CSS.
+
+### Limits / what is next
+
+No file was moved: app uploads still live under the old root until the evidence-root
+unification (point 4). Sharing, the customer-portal intake, the app-owned intake
+store and the email crawler are the next releases. The audits are a baseline, not a
+migration.
+
+⚠ `backend.gs` changes and **`API_VERSION` moves to 22** (`getPassbook` gained
+`folderUrl`). Paste it into both `/exec` deployments as a **New version**, confirm
+`ping` answers **22**, then run `setByIdFolder('<the By ID folder id>')` once from
+the editor. Until that runs, the Report tab simply shows no folder link.
+
+---
+
+## 27. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

@@ -625,8 +625,9 @@ ok('...and choosing the board re-measures once the fold has been applied',
 // on the switch, not here.
 head('the grid draws the same rows as tiles, from fields an IR actually has');
 
+const gridTileCode = (appJs.match(/function gridTile\(ir\)[\s\S]*?\n\}/) || [''])[0];
 const gridCode = [
-  (appJs.match(/function gridTile\(ir\)[\s\S]*?\n\}/) || [''])[0],
+  gridTileCode,
   (appJs.match(/function renderIRGrid\(records\)[\s\S]*?\n\}/) || [''])[0],
 ].join('\n');
 // ⚠ COMMENTS STRIPPED FIRST, and for the third time in this file it is not tidiness.
@@ -675,7 +676,7 @@ ok('...and every value on it is escaped, as the row and the card are',
 // The monogram is `initialsOf()`, the one reader it has left since the row's circle
 // was removed in September. There are no avatars in this app and nothing uploads one.
 ok('the assignee is a monogram from the app\'s own initials helper, not an avatar',
-  /initialsOf\(owner\)/.test(gridCode) && !/<img/.test(gridCode));
+  /initialsOf\(owner\)/.test(gridTileCode) && !/<img/.test(gridTileCode));
 ok('...and an unassigned ticket says so in the app\'s own words',
   /t\('common\.unassigned'\)/.test(gridCode));
 // ── The click target, REWRITTEN on 2026-10-11 ────────────────────────────────

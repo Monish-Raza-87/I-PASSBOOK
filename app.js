@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v123';
+const APP_VERSION = 'v124';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -7627,6 +7627,32 @@ function irMonthNumber(iso) {
   return d ? d.m : null;
 }
 
+// CR REPRESENTATIVE — the owner's date rule, applied to the IR's own date.
+//
+// It is a pure function of the raise date, not an import of legacy data and not a
+// second editable field. The boundaries are the owner's, given 2026-10-27:
+//
+//   before 27 Aug 2023                  Ravi Singh
+//   27 Aug 2023 - 31 Mar 2024           Monish Raza
+//   1 Apr 2024 - 16 Jun 2025            Ravi Singh
+//   17 Jun 2025 - 10 May 2026           Monish Raza
+//   11 May 2026 onward                  Adhik Nair
+//
+// A record with no readable date answers '' rather than guessing. The Overview uses
+// this as the DEFAULT for the editable CRM-owner box and shows it as a read-only
+// line, so a manual entry always wins and the derivation never overwrites it.
+const CR_REPRESENTATIVE_SWITCH = 20260511;   // 11 May 2026, as YYYYMMDD
+function crRepresentativeFor(ir) {
+  const d = parseISODate(ir && ir.dateRaisedISO);
+  if (!d) return '';
+  const n = d.y * 10000 + d.m * 100 + d.d;
+  if (n >= CR_REPRESENTATIVE_SWITCH) return 'Adhik Nair';
+  if (n >= 20250617) return 'Monish Raza';
+  if (n >= 20240401) return 'Ravi Singh';
+  if (n >= 20230827) return 'Monish Raza';
+  return 'Ravi Singh';
+}
+
 function fyLabel(startYear) { return startYear + '-' + String((startYear + 1) % 100).padStart(2, '0'); }
 
 // The dashboard's own filter state, separate from the IR list's strips.
@@ -11841,6 +11867,7 @@ function renderIRGrid(records) {
   // already says so in `.empty-state`, and "No more IRs — 0 shown" underneath that
   // would be two screens arguing.
   irGrid.innerHTML = records.map(gridTile).join('') +
+    `<div class="grid-watermark" aria-hidden="true"><img src="assets/icon-mark.png" alt=""></div>` +
     `<p class="grid-foot">${escHtml(t('grid.foot', { n: records.length }))}</p>`;
   updateListCounts(records.length);
 }
@@ -12671,7 +12698,13 @@ function intakeBodyHTML(ir) {
 
   const report = String(valueOf('summaryLink') || '').trim();
   const openLink = report
-    ? `<a href="${escHtml(report)}" target="_blank" rel="noopener" class="intake-open">Open original report ↗</a>`
+    ? `<a href="${escHtml(report)}" target="_blank" rel="noopener" class="intake-open">Open original report \u2197</a>`
+    : '';
+  // The evidence folder itself, under By ID. The backend only returns this for staff,
+  // so the customer portal can never receive it through getPassbook.
+  const folder = String(ir.folderUrl || '').trim();
+  const folderLink = folder
+    ? `<a href="${escHtml(folder)}" target="_blank" rel="noopener" class="intake-open">Open IR folder \u2197</a>`
     : '';
 
   const extras = Array.isArray(ir.extra) ? ir.extra : [];
@@ -12697,8 +12730,8 @@ function intakeBodyHTML(ir) {
       `Records from before the app (${iconSvg('legacy')} Legacy) live in the old workbook.</p>`;
 
   return `<div class="intake-head">
-       <p class="intake-note">Read-only — exactly what the client submitted through the Google Form. The app never edits these values.</p>
-       ${openLink}
+       <p class="intake-note">Read-only �?" exactly what the client submitted through the Google Form. The app never edits these values.</p>
+       ${openLink}${folderLink}
      </div>` +
     noSheetNote + auditNote +
     `<div class="intake-list">${rows}</div>` +
@@ -12770,6 +12803,18 @@ function renderOverviewEditable() {
     return (v === undefined || v === null) ? (fallback || '') : v;
   };
   const ro = canWrite ? '' : ' disabled';
+  // The date rule is the DEFAULT, never an overwrite: a stored a_crmOwner wins, and
+  // the derived name is shown beside it so a reader can see why the box starts where
+  // it does. `currentIR?.spoc` stays last because an old record can carry a name and
+  // no usable date.
+  const crName = crRepresentativeFor(currentIR);
+  // An EMPTY saved value must fall through to the date rule just as an absent one
+  // does. `val()` only treats undefined/null as absent, and a blank string is the
+  // normal state of a ticket nobody has assigned yet.
+  const savedOwner = saved['a_crmOwner'];
+  const ownerValue = (savedOwner === undefined || savedOwner === null || String(savedOwner).trim() === '')
+    ? (crName || currentIR?.spoc || '')
+    : savedOwner;
   // Same per-field 🕓 History button the lettered sections' fields carry. These two
   // are hand-rendered here rather than built by buildField, but they are stored IR
   // data like any other field and their history is worth exactly as much — these are
@@ -12780,8 +12825,12 @@ function renderOverviewEditable() {
   el.innerHTML =
     `<div class="overview-edit-row">
        <label class="overview-edit-label" for="a_crmOwner">${escHtml(t('overview.crmOwner'))}${hist('a_crmOwner')}</label>
-       <input class="form-input" type="text" id="a_crmOwner" placeholder="${escHtml(t('overview.crmOwnerHint'))}" value="${escHtml(val('a_crmOwner', currentIR?.spoc))}"${ro} />
+       <input class="form-input" type="text" id="a_crmOwner" placeholder="${escHtml(t('overview.crmOwnerHint'))}" value="${escHtml(ownerValue)}"${ro} />
      </div>
+     ${crName ? `<div class="overview-edit-row overview-derived">
+       <span class="overview-edit-label">${escHtml(t('overview.crRepresentative'))}</span>
+       <span class="overview-derived-value">${escHtml(crName)} <span class="overview-derived-note">${escHtml(t('overview.crDerived'))}</span></span>
+     </div>` : ''}
      <div class="overview-edit-row">
        <label class="overview-edit-label" for="a_contactPhone">${escHtml(t('overview.contactPhone'))}${hist('a_contactPhone')}</label>
        <input class="form-input" type="tel" id="a_contactPhone" placeholder="${escHtml(t('overview.phoneHint'))}" value="${escHtml(val('a_contactPhone', currentIR?.contactPhone))}"${ro} />
@@ -12911,8 +12960,10 @@ function refreshActivityLog() {
   // Build the whole list and slice it here rather than passing the limit to
   // buildTimeline, so the header count can report the TRUE total: "40 of 128" is
   // honest, a bare "40" would not be.
-  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0, mail);
+  const all = buildTimeline(currentIR.irNumber, activityLogCache.entries, nudges, 0, mail,
+                            irReportedEvent(currentIR));
   renderTimelineInto(el, all.slice(-ACTIVITY_LIMIT), {
+    table: true,
     emptyText: 'No activity recorded yet for this IR.',
   });
   renderActivityCount(all.length, Math.min(all.length, ACTIVITY_LIMIT));
@@ -15033,6 +15084,16 @@ async function loadSectionData(irNumber) {
       // said, and openPassbook unions its keys straight into the ticket's `done` list
       // — so inventing a key here would mark a section COMPLETE that nobody saved.
       currentSectionData = data.sections;
+      // The staff-only evidence-folder link, resolved by the backend under By ID.
+      // Kept on the open record rather than in a second cache: the Report tab reads
+      // `currentIR.folderUrl`, and the next open replaces it.
+      if (currentIR && data.folderUrl !== undefined) {
+        currentIR.folderUrl = data.folderUrl;
+        // The dock's Report preview is built from the LIST record, not from
+        // currentIR, so the folder link has to reach that copy too.
+        const listed = allIRs.find(x => x.irNumber === currentIR.irNumber);
+        if (listed) listed.folderUrl = data.folderUrl;
+      }
       // Populate form fields.
       //
       // The section to populate is the one that DECLARES the field, never the one
@@ -18630,6 +18691,11 @@ const TIMELINE_KINDS = {
   // second history to keep in step with the first. The label is the plain noun a
   // reader already uses for it, and `by` on one of these rows is the sender.
   email:    { icon: 'mail',         label: 'Email' },
+  // The ticket's FIRST event. It is not an audit row - the customer's form submission
+  // wrote no `_store` line - so it is synthesized from the intake timestamp. Without
+  // it the timeline starts with the first person who touched the ticket, which reads
+  // as if the client never raised it.
+  reported: { icon: 'report',       label: 'IR reported' },
 };
 
 // PURE. No fetch, no DOM, no clock — so a suite can drive it with fixtures.
@@ -18642,8 +18708,29 @@ const TIMELINE_KINDS = {
 // these rows come from a different spreadsheet, are written by a crawl this app does
 // not run, and can never be edited here — but they belong in one list with the rest,
 // which is the whole point of building the timeline rather than rendering two.
-function buildTimeline(irNumber, auditEntries, nudgeItems, limit, emailMessages) {
+function buildTimeline(irNumber, auditEntries, nudgeItems, limit, emailMessages, reported) {
   const out = [];
+
+  // The FIRST event. `reported` is optional so every existing caller and fixture is
+  // unchanged; when the caller has the record it supplies `{at, timestamp, by, message}`.
+  // A row with no readable date still appears, at the oldest end, rather than being
+  // silently dropped: an undated report is a fact about the record, not a reason to
+  // pretend the ticket began with its first save.
+  if (reported) {
+    out.push({
+      at: Number(reported.at) || 0,
+      timestamp: reported.timestamp || '',
+      by: reported.by || '',
+      source: 'reported',
+      sectionId: '',
+      fieldId: '',
+      oldValue: '',
+      newValue: '',
+      kind: 'reported',
+      message: reported.message || '',
+      mentions: [],
+    });
+  }
 
   (Array.isArray(auditEntries) ? auditEntries : []).forEach(e => {
     if (!e) return;
@@ -18798,7 +18885,7 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit, emailMessages)
     // workflow, so the edit that caused a state change reads before the change.
     // Email ranks with comments — last — because it is context arriving alongside
     // the ticket rather than an event that changed it.
-    const rank = s => (s === 'section' ? 0 : s === 'workflow' ? 1 : 2);
+    const rank = s => (s === 'reported' ? -1 : s === 'section' ? 0 : s === 'workflow' ? 1 : 2);
     return rank(a.source) - rank(b.source);
   });
 
@@ -18806,10 +18893,35 @@ function buildTimeline(irNumber, auditEntries, nudgeItems, limit, emailMessages)
   return (cap && out.length > cap) ? out.slice(out.length - cap) : out;
 }
 
-// `someone@example.com` → `someone`. The local part only: the crawl's two mailboxes
+// The "IR reported" row is synthesized from the record. The backend has no audit
+// line for the customer form submission - it arrived before the app owned the
+// ticket - so the intake timestamp is the only true source. `dateRaisedISO` is the
+// clean field; `dateRaised` is display-only and is tried with the same tolerant
+// parser the audit uses. A record with neither still gets a row at the oldest end,
+// saying the date was not recorded rather than pretending it was.
+function irReportedEvent(ir) {
+  if (!ir || !ir.irNumber) return null;
+  let at = 0, timestamp = '';
+  const d = parseISODate(ir.dateRaisedISO);
+  if (d) {
+    at = new Date(d.y, d.m - 1, d.d).getTime();
+    timestamp = ir.dateRaisedISO;
+  } else if (ir.dateRaised) {
+    at = parseAuditTimestamp(ir.dateRaised) || 0;
+    timestamp = ir.dateRaised;
+  } else if (ir.createdAt) {
+    at = Number(ir.createdAt) || 0;
+    timestamp = at ? new Date(at).toISOString() : '';
+  }
+  const by = ir.customerName || ir.contactEmail || 'Client';
+  const message = [ir.companyName, ir.droneId].filter(Boolean).join(' · ');
+  return { at, timestamp: timestamp || 'Date not recorded', by, message };
+}
+
+// `someone@example.com` -> `someone`. The local part only: the crawl's two mailboxes
 // share a domain, so the domain carries none of the information and printing it would
 // put a second address beside the sender's on every row. Anything that is not an
-// address comes back as it stands — the Mailbox column is not this file's to assume
+// address comes back as it stands - the Mailbox column is not this file's to assume
 // the shape of, and a value this does not recognise must survive untouched rather than
 // be truncated into a lie.
 function shortMailbox(v) {
@@ -18980,124 +19092,151 @@ async function submitFieldRestore(value) {
 // One renderer for both consumers. Markup is the existing `.hist-*` block, reused
 // unchanged so the timeline inherits the modal's styling and the design system's
 // tokens with no new colours.
+function timelineViewFor(it, i, o) {
+  const clip = s => String(s == null ? '' : s).slice(0, 200);
+  const meta = TIMELINE_KINDS[it.kind] || { icon: 'dot', label: it.kind || 'Activity' };
+  // The restore control, and THREE answers rather than two - see restoreOfferFor.
+  // It exists only when the caller supplied a restore context, which today means
+  // only the field-history modal: the ticket-level view and the Overview's inline
+  // timeline mix every field together and have no single field to put a value back
+  // into, so they must render no button at all rather than a dead one.
+  let restoreRow = '';
+  if (o.restore) {
+    const offer = restoreOfferFor(it);
+    if (offer && offer.ok) {
+      restoreRow = `<div class="hist-restore-row"><button type="button" class="hist-restore-btn" data-hist-i="${i}" title="Put this earlier value back">${iconSvg('clock')}Put back ${escHtml(clip(it.oldValue))}</button></div>`;
+    } else if (offer) {
+      restoreRow = `<div class="hist-restore-row"><span class="hist-restore-note">${escHtml(offer.reason)}</span></div>`;
+    }
+  }
+  // A save row is a whole-section event and its label already says so, so the
+  // `(whole section)` chip that used to sit here only repeated it. A field row
+  // keeps its human label, resolved through the section index.
+  const field = (it.kind !== 'save' && it.fieldId)
+    ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '';
+  // "workflow" is the backend's own name for the __IRS__ sentinel store. The
+  // reader knows the action as Triage - the button, the modal and the toast all
+  // say so - so the chip says it too.
+  //
+  // The archive events are written through that same store, so they arrive as
+  // `source: 'workflow'` - but a folder move is not a triage edit, and chipping it
+  // "Triage" would put a word on the row that no button in the app uses for it.
+  const isArchiveEvent = it.kind === 'archived' || it.kind === 'restored';
+  const srcChip = (it.source === 'workflow' && !isArchiveEvent)
+    ? '<span class="hist-src">Triage</span>'
+    // The crawl's own Direction value, printed as it stands. It matters that the
+    // chip is here rather than in the body: an inbound mail and one we sent are
+    // otherwise identical rows, and the whole reason someone opens this list is to
+    // find out who said what to whom. It also earns its place for a duller reason -
+    // a mail delivered to BOTH mailboxes is two rows, and the mailbox on the by-line
+    // below is what stops those two looking like a rendering bug.
+    : (it.kind === 'email' && it.direction
+        ? `<span class="hist-src">${escHtml(it.direction)}</span>` : '');
+
+  let body = '';
+  if (it.kind === 'comment') {
+    // The mention chip belongs in the chip row with the field and source chips,
+    // not in a diff block of its own.
+    const mention = (it.mentions && it.mentions.length)
+      ? `<span class="hist-src">@mention</span>` : '';
+    body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
+    if (mention) body += `<div class="hist-diff">${mention}</div>`;
+  } else if (it.kind === 'edit' || it.kind === 'remove' || it.kind === 'revert') {
+    // One body for all three, because they read the same way and mean the same
+    // thing by it: `old` is what was there before this row's action and `new` is
+    // what is there after. For a `revert` that is "the value it replaced" and "the
+    // value put back", which is exactly the Was/Now a reader expects.
+    body = `<div class="hist-diff"><span class="hist-old">Was</span> ${escHtml(clip(it.oldValue))}</div>` +
+           `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
+  } else if (it.kind === 'add') {
+    body = `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
+  } else if (it.kind === 'reported') {
+    // The client's own report. The company and serial are in the message; the
+    // performed-by cell names the reporter, which is the fact the first row needs.
+    if (it.message) body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.message))}</span></div>`;
+  } else if (it.kind === 'email') {
+    // The subject carries a mail; the preview is what makes the row worth reading
+    // without opening it. Both are the CUSTOMER's words, so both are escaped like
+    // every other value here - a preview is exactly where a stray `<` would arrive.
+    if (it.subject) body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.subject))}</span></div>`;
+    if (it.preview) body += `<div class="nudge-msg">${escHtml(clip(it.preview))}</div>`;
+  } else if (it.newValue) {
+    body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
+  }
+
+  // ONE timestamp format for both halves of the list. Audit rows used to render
+  // the backend's raw `dd-MMM-yyyy HH:mm:ss` while comment rows rendered
+  // toDisplayDateTime's `DD Month YYYY, HH:MM` - two formats interleaved in one
+  // newest-first list, which reads as two different feeds. `at` is already the
+  // parsed instant for both halves, so format from it, and keep the raw string
+  // only as the fallback for a row the parser could not read.
+  const when = it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : (it.timestamp || '');
+  // A comment row's own label already says "Comment" and its field chip already
+  // names the field, so a third "by comment" suffix said nothing. A section row
+  // still names its section, and a triage row names itself.
+  // A mail names the MAILBOX it was crawled from, in the slot where a section row
+  // names its section. It is the only place the two-mailbox duplicate is explained:
+  // the same message delivered to both accounts is two rows with two ids, and
+  // without this they read as the app having printed the same mail twice.
+  const where = it.source === 'comment'
+    ? ''
+    : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : '')
+       || (it.kind === 'email' ? shortMailbox(it.mailbox) : ''));
+  return { meta, field, srcChip, body, when, where, restoreRow };
+}
+
+// One renderer for both consumers. The HISTORY modal keeps the card layout so it can
+// carry a restore button inside a row. The ACTIVITY tab asks for `table: true` and
+// gets the owner's three columns: date-time, activity, performed-by. The table is
+// OLDEST FIRST because it is meant to read as the ticket's life - it starts with the
+// report - while the history modal stays newest-first for triage.
 function renderTimelineInto(el, timeline, opts) {
   if (!el) return;
   const o = opts || {};
   const list = Array.isArray(timeline) ? timeline : [];
   if (!list.length) {
     el.innerHTML = `<div class="hist-list"><div class="nudge-empty">` +
-      escHtml(o.emptyText || 'No activity yet — save a section, triage the IR, upload a file or leave a comment, and it appears here.') +
+      escHtml(o.emptyText || 'No activity yet - save a section, triage the IR, upload a file or leave a comment, and it appears here.') +
       `</div></div>`;
     return;
   }
-  const clip = s => String(s == null ? '' : s).slice(0, 200);
-  // `i` is the index into the caller's OWN timeline — the array they passed, in its
-  // original oldest-first order — and it is what the restore button carries back.
-  // The render reverses for display; the handler must not, or it would read the
-  // wrong row's value back out of `fieldHistView`.
-  const rows = list.map((it, i) => ({ it, i })).reverse().map(({ it, i }) => {
-    const meta = TIMELINE_KINDS[it.kind] || { icon: 'dot', label: it.kind || 'Activity' };
-    // The restore control, and THREE answers rather than two — see restoreOfferFor.
-    // It exists only when the caller supplied a restore context, which today means
-    // only the field-history modal: the ticket-level view and the Overview's inline
-    // timeline mix every field together and have no single field to put a value back
-    // into, so they must render no button at all rather than a dead one.
-    let restoreRow = '';
-    if (o.restore) {
-      const offer = restoreOfferFor(it);
-      if (offer && offer.ok) {
-        restoreRow = `<div class="hist-restore-row"><button type="button" class="hist-restore-btn" data-hist-i="${i}" title="Put this earlier value back">${iconSvg('clock')}Put back ${escHtml(clip(it.oldValue))}</button></div>`;
-      } else if (offer) {
-        restoreRow = `<div class="hist-restore-row"><span class="hist-restore-note">${escHtml(offer.reason)}</span></div>`;
-      }
-    }
-    // A save row is a whole-section event and its label already says so, so the
-    // `(whole section)` chip that used to sit here only repeated it. A field row
-    // keeps its human label, resolved through the section index.
-    const field = (it.kind !== 'save' && it.fieldId)
-      ? `<span class="hist-field">${escHtml(fieldLabelFor(it.fieldId))}</span>` : '';
-    // "workflow" is the backend's own name for the __IRS__ sentinel store. The
-    // reader knows the action as Triage — the button, the modal and the toast all
-    // say so — so the chip says it too.
-    //
-    // The archive events are written through that same store, so they arrive as
-    // `source: 'workflow'` — but a folder move is not a triage edit, and chipping it
-    // "Triage" would put a word on the row that no button in the app uses for it.
-    const isArchiveEvent = it.kind === 'archived' || it.kind === 'restored';
-    const srcChip = (it.source === 'workflow' && !isArchiveEvent)
-      ? '<span class="hist-src">Triage</span>'
-      // The crawl's own Direction value, printed as it stands. It matters that the
-      // chip is here rather than in the body: an inbound mail and one we sent are
-      // otherwise identical rows, and the whole reason someone opens this list is to
-      // find out who said what to whom. It also earns its place for a duller reason —
-      // a mail delivered to BOTH mailboxes is two rows, and the mailbox on the by-line
-      // below is what stops those two looking like a rendering bug.
-      : (it.kind === 'email' && it.direction
-          ? `<span class="hist-src">${escHtml(it.direction)}</span>` : '');
 
-    let body = '';
-    if (it.kind === 'comment') {
-      // The mention chip belongs in the chip row with the field and source chips,
-      // not in a diff block of its own.
-      const mention = (it.mentions && it.mentions.length)
-        ? `<span class="hist-src">@mention</span>` : '';
-      body = `<div class="nudge-msg">${escHtml(clip(it.message))}</div>`;
-      if (mention) body += `<div class="hist-diff">${mention}</div>`;
-    } else if (it.kind === 'edit' || it.kind === 'remove' || it.kind === 'revert') {
-      // One body for all three, because they read the same way and mean the same
-      // thing by it: `old` is what was there before this row's action and `new` is
-      // what is there after. For a `revert` that is "the value it replaced" and "the
-      // value put back", which is exactly the Was/Now a reader expects.
-      body = `<div class="hist-diff"><span class="hist-old">Was</span> ${escHtml(clip(it.oldValue))}</div>` +
-             `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
-    } else if (it.kind === 'add') {
-      body = `<div class="hist-diff"><span class="hist-new">Now</span> ${escHtml(clip(it.newValue))}</div>`;
-    } else if (it.kind === 'email') {
-      // The subject carries a mail; the preview is what makes the row worth reading
-      // without opening it. Both are the CUSTOMER's words, so both are escaped like
-      // every other value here — a preview is exactly where a stray `<` would arrive.
-      if (it.subject) body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.subject))}</span></div>`;
-      if (it.preview) body += `<div class="nudge-msg">${escHtml(clip(it.preview))}</div>`;
-    } else if (it.newValue) {
-      body = `<div class="hist-diff"><span class="hist-new">${escHtml(clip(it.newValue))}</span></div>`;
-    }
+  const views = list.map((it, i) => ({ it, i, view: timelineViewFor(it, i, o) }));
 
-    // ONE timestamp format for both halves of the list. Audit rows used to render
-    // the backend's raw `dd-MMM-yyyy HH:mm:ss` while comment rows rendered
-    // toDisplayDateTime's `DD Month YYYY, HH:MM` — two formats interleaved in one
-    // newest-first list, which reads as two different feeds. `at` is already the
-    // parsed instant for both halves, so format from it, and keep the raw string
-    // only as the fallback for a row the parser could not read.
-    const when = it.at ? toDisplayDateTime(new Date(it.at).toISOString()) : (it.timestamp || '');
-    // A comment row's own label already says "Comment" and its field chip already
-    // names the field, so a third "· comment" suffix said nothing. A section row
-    // still names its section, and a triage row names itself.
-    // A mail names the MAILBOX it was crawled from, in the slot where a section row
-    // names its section. It is the only place the two-mailbox duplicate is explained:
-    // the same message delivered to both accounts is two rows with two ids, and
-    // without this they read as the app having printed the same mail twice.
-    const where = it.source === 'comment'
-      ? ''
-      : (sectionDisplayName(it.sectionId) || (it.source === 'workflow' ? 'Triage' : '')
-         || (it.kind === 'email' ? shortMailbox(it.mailbox) : ''));
-    return `<div class="hist-item">
-      <div class="hist-top"><span class="hist-ev">${iconSvg(meta.icon)}${escHtml(meta.label)}</span>${field}${srcChip}<span class="hist-time">${escHtml(when)}</span></div>
-      <div class="hist-by">by ${escHtml(it.by || 'unknown')}${where ? ' · ' + escHtml(where) : ''}</div>
-      ${body}
-      ${restoreRow}
-    </div>`;
-  }).join('');
-  el.innerHTML = `<div class="hist-list">${rows}</div>`;
+  if (o.table) {
+    const rows = views.map(({ it, view }) => `
+      <div class="hist-table-row">
+        <div class="hist-table-date">${escHtml(view.when)}</div>
+        <div class="hist-table-act">
+          <div class="hist-table-act-head"><span class="hist-ev">${iconSvg(view.meta.icon)}${escHtml(view.meta.label)}</span>${view.field}${view.srcChip}</div>
+          ${view.body}
+          ${view.restoreRow}
+        </div>
+        <div class="hist-table-by">${escHtml(it.by || 'unknown')}${view.where ? `<span class="hist-table-where">${escHtml(view.where)}</span>` : ''}</div>
+      </div>`).join('');
+    el.innerHTML = `<div class="hist-table">` +
+      `<div class="hist-table-head"><span>Date &amp; time</span><span>Activity</span><span>Performed by</span></div>` +
+      rows + `</div>`;
+  } else {
+    const rows = views.slice().reverse().map(({ it, view }) => `
+      <div class="hist-item">
+        <div class="hist-top"><span class="hist-ev">${iconSvg(view.meta.icon)}${escHtml(view.meta.label)}</span>${view.field}${view.srcChip}<span class="hist-time">${escHtml(view.when)}</span></div>
+        <div class="hist-by">by ${escHtml(it.by || 'unknown')}${view.where ? ' - ' + escHtml(view.where) : ''}</div>
+        ${view.body}
+        ${view.restoreRow}
+      </div>`).join('');
+    el.innerHTML = `<div class="hist-list">${rows}</div>`;
+  }
+
   // Bound here rather than inlined into an `onclick`, because the payload is a field
   // value of up to 500 characters and it must reach `confirm()` intact. The button
-  // carries an index into the timeline the caller handed us — see fieldHistView.
+  // carries an index into the timeline the caller handed us - see fieldHistView.
   if (o.restore) {
     el.querySelectorAll('.hist-restore-btn').forEach(b => {
       b.addEventListener('click', () => putFieldValueBack(Number(b.dataset.histI)));
     });
   }
 }
-
 // ─── AUDIT TRAIL / EDIT HISTORY ───────────────────────────────────────────────
 // Shows the whole story for the open IR: every section save, field correction,
 // upload, triage change and comment — newest first. Needs the redeployed backend
@@ -19172,7 +19311,10 @@ async function openHistoryModal(opts) {
   // story — but a field view takes only that field's, through the same helper the 💬
   // buttons already use.
   const comments = fieldId ? commentsForCtx('field', null, fieldId) : (Array.isArray(nudges) ? nudges : []);
-  const timeline = buildTimeline(irNumber, entries, comments, 400);
+  // The ticket-level history starts with the report itself. A FIELD history does not:
+  // the report is not a change to that field.
+  const timeline = buildTimeline(irNumber, entries, comments, 400, [],
+                                 fieldId ? null : irReportedEvent(currentIR));
   // The restore context, and the ONE thing that decides whether any restore control
   // is drawn. It is set only for a field view, so the ticket-level modal and the
   // Overview's inline timeline cannot sprout a button with no single field to write

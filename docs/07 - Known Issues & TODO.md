@@ -322,7 +322,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **4693 cases across 37 suites**, all passing.
+`node tools/smoke-all.mjs` — **4717 cases across 37 suites**, all passing.
 (The figure in the heading is MEASURED by summing the run, never carried forward: it
 said "2273 across 16 suites" long after both numbers had stopped being true, which is
 the same drift the emoji ledger below had to be corrected for. It also said 4273
@@ -941,7 +941,8 @@ is left is small.
       rather than trust `getSheets()`.
 
       The other half of the owner's ask, the **CR representative derived from the IR's
-      date**, stays blocked on this one: it has no caller until an ingest exists.
+      date**, no longer waits on this: it is built as a pure function in v124 (see the
+      checkbox below). It needs no ingest — the IR's own raise date is the input.
 
 - [x] **The `Email_Index` reaches the app** — **built 2026-10-09 as `API_VERSION 10`.**
       The tab and its 10-column schema were confirmed that day, and it lives in a file
@@ -964,14 +965,14 @@ is left is small.
       concerned (the recorded example: IR013 losing a 26-message thread to IR012). The
       owner decided on 2026-10-06 to change that to *file under every IR it mentions* —
       that change is in the **crawl**, not in the app, and is not made.
-- [ ] **The IR's CR primary representative, derived from its date.** The rule is the
-      owner's, given 2026-10-08, and is recorded here because it exists nowhere else in
-      the repo: **from 11 May 2026 onward, Adhik; before that, Monish Raza — except before
-      27 Aug 2023 and between 1 Apr 2024 and 16 Jun 2025, when it is Ravi Singh.** It is
-      deterministic in the IR's date, so it is a pure function and a test rather than a
-      judgement, but it has no caller until the ingest above lands. Note the open question:
-      whether this belongs in the Overview's "Customer Relations Manager" field, which is
-      per-ticket and human-editable, or in a separate read-only field of its own.
+- [x] **The IR's CR primary representative, derived from its date — built 2026-10-27 (v124).**
+      The owner confirmed the switch date on 2026-10-27: **from 11 May 2026 onward, Adhik
+      Nair; before that, Monish Raza — except before 27 Aug 2023 and between 1 Apr 2024 and
+      16 Jun 2025, when it is Ravi Singh.** It is a pure function of `dateRaisedISO`
+      (`crRepresentativeFor` in app.js), and the Overview shows it as a read-only line.
+      The editable CRM-owner box still wins when a value is stored; when it is empty, the
+      derived name is its default. `smoke-ui.mjs` pins every boundary. No backend paste is
+      needed for this half.
 - [x] **"Assigned to" in the Allot panel offers no onboarded employees.** Built
       2026-10-09 as **`API_VERSION 9`** — a new authenticated action, `listTeam`, that
       returns `{email, name}` for every ACTIVE account that is not a customer, and

@@ -279,7 +279,11 @@ var CONFIG = {
   // 20 = the customer portal's own store and corrections.
   // 21 = I-INSPECTOR's save-failure notice (`reportInspectorAlert`): a failed auto-save
   //      tells the person on screen AND the admin by mail, through the one notice path.
-  API_VERSION: 21,
+  // 22 = the evidence folder. `getPassbook` gains `folderUrl` for staff (never for a
+  //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
+  //      older frontend, but it IS a response-shape change, so it is bumped here.
+  //      `setByIdFolder` and the two audits are editor-run and add no route.
+  API_VERSION: 22,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -546,6 +550,58 @@ function rootFolderId() {
                     'See getRootFolder() for what to set and where.');
   }
   return id;
+}
+
+// ── THE EVIDENCE ROOT: the owner's "By ID" folder ─────────────────────────────
+// Every IR's evidence lives in `By ID/IRxxx`: the form's N/Q attachments and its
+// summary doc, the app's own uploads, the email text/attachments the crawler files,
+// and any inward/dispatch files. It is a DATABASE, not a cache — the app links to it
+// from the Report tab, and a future RAG index will read it.
+//
+// The id is a Script Property, not a source literal: this repository is public. It
+// is separate from STORE_ROOT_FOLDER_ID because the evidence root is a different
+// folder with a different audience (Indrones staff + the client's own contacts),
+// while `_store/` holds hashes and session tokens and stays private.
+var BY_ID_FOLDER_PROPERTY = 'BY_ID_FOLDER_ID';
+var BY_ID_IR_TTL_SECONDS = 21600;
+
+// The evidence root, or '' when it has not been configured. A read path must answer
+// "no folder link yet" rather than throw: the app is still usable before the owner
+// sets this, and a missing link is visible without taking the ticket down.
+function byIdFolderId() {
+  var id = null;
+  try { id = PropertiesService.getScriptProperties().getProperty(BY_ID_FOLDER_PROPERTY); }
+  catch (e) { /* treat as unset */ }
+  return String(id || '').trim();
+}
+
+// `By ID/IRxxx`, cached by IR for six hours. Only a FOUND id is cached: a missing
+// folder must be looked for again, because the form script or the app may create it
+// a moment later. The cache is a speed-up and nothing else — every use is inside
+// try/catch, and a miss falls back to the Drive search.
+function byIdIRFolderId(irNumber) {
+  var ir = String(irNumber || '').trim();
+  if (!/^IR\d+$/.test(ir)) return '';
+  var key = 'byid:' + byIdFolderId() + ':' + ir;
+  try {
+    var hit = CacheService.getScriptCache().get(key);
+    if (hit) return hit;
+  } catch (e) { /* cache unavailable: search */ }
+
+  var rootId = byIdFolderId();
+  if (!rootId) return '';
+  try {
+    var it = DriveApp.getFolderById(rootId).getFoldersByName(ir);
+    if (!it.hasNext()) return '';
+    var id = it.next().getId();
+    try { CacheService.getScriptCache().put(key, id, BY_ID_IR_TTL_SECONDS); } catch (e2) { /* latency only */ }
+    return id;
+  } catch (e3) { return ''; }
+}
+
+function byIdIRFolderUrl(irNumber) {
+  var id = byIdIRFolderId(irNumber);
+  return id ? 'https://drive.google.com/drive/folders/' + id : '';
 }
 
 // The `_store/` folder. Never CREATED from here: a read path that quietly made the
@@ -2061,6 +2117,34 @@ function setStoreRootFolder(id) {
   _rootFolderMemo = null;
   _storeFolderMemo = null;   // the next read must resolve against the NEW folder
   return report(ROOT_FOLDER_PROPERTY + ' set.\nNow run seedStoreIds() (if you have not), then initializeStore().');
+}
+
+// Set the evidence root. Editor-run, like setStoreRootFolder(), because it is a
+// deployment fact rather than app data:
+//
+//   setByIdFolder('1yN_...')     // the owner's "By ID" folder
+//
+// It validates that the folder is readable by this account before storing the id.
+// A wrong id that is silently saved would make every folder link empty and every
+// audit read "not configured", which is the harder failure to diagnose.
+function setByIdFolder(id) {
+  id = String(id || '').trim();
+  if (!id) {
+    var cur = byIdFolderId();
+    return report(BY_ID_FOLDER_PROPERTY + ' is ' + (cur ? 'set.' : 'NOT set.') +
+                  '\nCall setByIdFolder(\'<the By ID folder id>\') to set it.');
+  }
+  var folder = null, name = '';
+  try {
+    folder = DriveApp.getFolderById(id);
+    name = folder.getName();
+  } catch (e) {
+    return report('Could not open that folder: ' + ((e && e.message) || String(e)) +
+                  '\nNothing was changed. Check the id and that this account can read the folder.');
+  }
+  PropertiesService.getScriptProperties().setProperty(BY_ID_FOLDER_PROPERTY, id);
+  return report(BY_ID_FOLDER_PROPERTY + ' set to "' + name + '".\n' +
+                'The Report tab will now link each IR to its folder under it.');
 }
 
 // The ONE place a stored value becomes a Date.
@@ -6582,7 +6666,14 @@ function getPassbook(irNumber, authEmail) {
     sections[secId] = (fields && typeof fields === 'object') ? fields : {};
   });
 
-  return { status: 'ok', sections: sections };
+  // The evidence folder link is STAFF-ONLY. A customer's portal has its own ticket
+  // view and must never be handed the internal folder: it holds email text and
+  // internal attachments as well as the client's own uploads. Sentinel reads have
+  // no IR folder at all.
+  var folderUrl = (!isSentinel && /^IR\d+$/.test(String(irNumber)) && access.role !== 'customer')
+    ? byIdIRFolderUrl(irNumber)
+    : '';
+  return { status: 'ok', sections: sections, folderUrl: folderUrl };
 }
 
 // Reduce a sentinel app store to what a CUSTOMER may see. Returns a new object; never
@@ -8856,6 +8947,212 @@ function migrateCostingFields(apply) {
   say((dry ? 'Would move' : 'Moved') + ' costing field(s) on ' + changed.length +
       ' ticket(s); ' + conflicts.length + ' conflict(s); ' + failed.length + ' failure(s).');
   return out.join('\n');
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// EVIDENCE FOLDER AUDITS — editor-run, read-only, NOT routed.
+// ──────────────────────────────────────────────────────────────────────────────
+// The owner's By ID folder is the evidence database: form attachments N/Q, the
+// summary doc, app uploads, email text/attachments, inward/dispatch files. These
+// two functions answer "is what we think is there actually there?" without moving
+// a byte. They are deliberately NOT actions: an audit reachable from the app would
+// be a new API surface for a question an operator asks from the editor.
+// manifest.json, per IR folder — the crawler/app will write it, the app reads it:
+//
+//   { ir, folderId, updatedAt,
+//     items: [{ source: 'form'|'app'|'email'|'chat'|'inward'|'dispatch',
+//               kind: 'file'|'email'|'summary'|'folder',
+//               name, fileId, messageId, threadId,
+//               at, from, to, subject, sha256 }] }
+//
+// It is an INDEX, not a copy: the bytes stay where they are, and a later RAG pass
+// can enumerate the folder without re-crawling the mailbox.
+var IR_FOLDER_MANIFEST_NAME = 'manifest.json';
+
+function evidenceColumnIndexes(headerRow) {
+  var header = (headerRow || []).map(function (h) { return String(h == null ? '' : h).toLowerCase(); });
+  function find(needles) {
+    for (var n = 0; n < needles.length; n++) {
+      for (var c = 0; c < header.length; c++) {
+        if (header[c].indexOf(needles[n]) > -1) return c;
+      }
+    }
+    return -1;
+  }
+  return {
+    n: find(['evidence: attach files from the incident', 'attach files from the incident']),
+    q: find(['evidence: attach screenshot of uav forecast', 'attach screenshot of uav forecast', 'uav forecast'])
+  };
+}
+
+// Every file id a cell could name: a Drive URL, an `id=` URL, or a bare id. The
+// form's evidence cell is free text written by Google Forms, so both shapes occur.
+function driveFileIdsInCell(value) {
+  var out = [], seen = {};
+  function add(id) {
+    if (!id || seen[id]) return;
+    seen[id] = true;
+    out.push(id);
+  }
+  var text = String(value == null ? '' : value);
+  (text.match(/https?:\/\/[^\s,]+/g) || []).forEach(function (url) {
+    var m = url.match(/\/d\/([-\w]{25,})/) || url.match(/[?&]id=([-\w]{25,})/);
+    if (m) add(m[1]);
+  });
+  text.split(/[\s,]+/).forEach(function (token) {
+    token = String(token).trim();
+    if (/^[-\w]{25,}$/.test(token)) add(token);
+  });
+  return out;
+}
+
+// Is this file anywhere under `folderId`? Walking parents rather than comparing the
+// immediate parent means an IR file filed in a section subfolder still counts as
+// "in the IR folder" - which it is - while a file in another IR's folder does not.
+function fileIsUnderFolder(file, folderId) {
+  var stack = listAll(file.getParents()), seen = {}, steps = 0;
+  while (stack.length && steps < 30) {
+    steps++;
+    var f = stack.pop();
+    if (!f) continue;
+    var id = String(f.getId());
+    if (id === String(folderId)) return true;
+    if (seen[id]) continue;
+    seen[id] = true;
+    stack = stack.concat(listAll(f.getParents()));
+  }
+  return false;
+}
+
+// One IR folder's file and subfolder names, for the inventory. Google Docs show the
+// name the form script gave them (`IR409.docx`) even though the MIME type is a Doc.
+function irFolderContents(folder) {
+  var files = listAll(folder.getFiles()).map(function (f) { return String(f.getName()); });
+  var subs = listAll(folder.getFolders()).map(function (f) { return String(f.getName()); });
+  return { files: files, subs: subs };
+}
+
+// Read the optional manifest a crawler/app writes. A missing or unreadable manifest
+// is null, never a throw: this is a readout, not a gate.
+function readIRFolderManifest(irNumber) {
+  var id = byIdIRFolderId(irNumber);
+  if (!id) return null;
+  try {
+    var it = DriveApp.getFolderById(id).getFilesByName(IR_FOLDER_MANIFEST_NAME);
+    if (!it.hasNext()) return null;
+    return JSON.parse(it.next().getBlob().getDataAsString());
+  } catch (e) { return null; }
+}
+
+// EDITOR-RUN: are the form's N/Q evidence files actually inside By ID/IRxxx?
+//
+// READ-ONLY. It never moves, copies or re-shares anything. The form script is the
+// writer; this exists because the form script can fail on one file (quota, a share
+// change, a deleted parent) and the Sheet still shows a working-looking link. A
+// missing file and a file left in the wrong folder are different failures and are
+// counted separately.
+function auditFormEvidence() {
+  var rootId = byIdFolderId();
+  if (!rootId) return report('EVIDENCE AUDIT: BY_ID_FOLDER_ID is not set. Run setByIdFolder(\'<the By ID folder id>\') first.');
+  var root = null;
+  try { root = DriveApp.getFolderById(rootId); }
+  catch (e) { return report('EVIDENCE AUDIT: could not open the By ID folder: ' + ((e && e.message) || String(e))); }
+
+  var grid = intakeGrid();
+  if (!grid || grid.length < 2) return report('EVIDENCE AUDIT: the intake sheet has no data rows.');
+  var header = grid[0];
+  var irCol = irNumberColumnIndex(header);
+  var cols = evidenceColumnIndexes(header);
+  if (irCol < 0) return report('EVIDENCE AUDIT: no IR Number column in the intake header.');
+  if (cols.n < 0 && cols.q < 0) return report('EVIDENCE AUDIT: could not find either evidence column (N or Q) by header.');
+
+  var lines = [];
+  var rows = 0, cells = 0, ids = 0, inPlace = 0, misplaced = 0, missing = 0, textOnly = 0, noIR = 0;
+  var wrong = [], gone = [], noFolder = {};
+
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var ir = irKey(row[irCol]);
+    if (!ir) { noIR++; continue; }
+    if (!/^IR\d+$/.test(ir)) { noIR++; continue; }
+    rows++;
+
+    var folderIt = root.getFoldersByName(ir);
+    var irFolder = folderIt.hasNext() ? folderIt.next() : null;
+    if (!irFolder) noFolder[ir] = true;
+
+    [cols.n, cols.q].forEach(function (c) {
+      if (c < 0) return;
+      var cell = String(row[c] == null ? '' : row[c]).trim();
+      if (!cell) return;
+      cells++;
+      var fileIds = driveFileIdsInCell(cell);
+      if (!fileIds.length) { textOnly++; return; }
+      fileIds.forEach(function (id) {
+        ids++;
+        var file = null;
+        try { file = DriveApp.getFileById(id); } catch (e) { file = null; }
+        if (!file) { missing++; gone.push('  ' + ir + '  file id ' + id + '  NOT FOUND'); return; }
+        if (!irFolder) { misplaced++; wrong.push('  ' + ir + '  "' + file.getName() + '"  has no ' + ir + ' folder'); return; }
+        if (fileIsUnderFolder(file, irFolder.getId())) { inPlace++; return; }
+        misplaced++;
+        var parents = listAll(file.getParents()).map(function (p) { return p.getName(); });
+        wrong.push('  ' + ir + '  "' + file.getName() + '"  is under: ' + (parents.join(' > ') || '(unknown)'));
+      });
+    });
+  }
+
+  lines.push('FORM EVIDENCE AUDIT - read-only, nothing moved');
+  lines.push('By ID folder: ' + root.getName());
+  lines.push('Rows with an IR: ' + rows + ' · evidence cells: ' + cells + ' · file links: ' + ids);
+  lines.push('In the IR folder: ' + inPlace + ' · misplaced: ' + misplaced + ' · missing: ' + missing +
+             ' · text-only cells: ' + textOnly + ' · rows with no IR: ' + noIR);
+  if (Object.keys(noFolder).length) lines.push('IR folders that do not exist yet: ' + Object.keys(noFolder).join(', '));
+  if (wrong.length) { lines.push(''); lines.push('MISPLACED:'); lines = lines.concat(wrong); }
+  if (gone.length) { lines.push(''); lines.push('MISSING FILES:'); lines = lines.concat(gone); }
+  lines.push('');
+  lines.push('Nothing was moved, copied or re-shared. Fix the source files by hand or ask for a migration plan.');
+  lines.forEach(function (l) { report(l); });
+  return 'Form evidence audit: ' + inPlace + ' in place, ' + misplaced + ' misplaced, ' + missing + ' missing.';
+}
+
+// EDITOR-RUN: what is actually inside each IR folder under By ID?
+//
+// READ-ONLY. It reports the folder name, file count, subfolder names, whether the
+// form script's summary doc is present, and whether a manifest exists. This is the
+// baseline the email crawler and the app uploads will extend, and the thing to look
+// at before any "where did that file go?" question.
+function auditIRFolders() {
+  var rootId = byIdFolderId();
+  if (!rootId) return report('FOLDER AUDIT: BY_ID_FOLDER_ID is not set. Run setByIdFolder(\'<the By ID folder id>\') first.');
+  var root = null;
+  try { root = DriveApp.getFolderById(rootId); }
+  catch (e) { return report('FOLDER AUDIT: could not open the By ID folder: ' + ((e && e.message) || String(e))); }
+
+  var folders = listAll(root.getFolders());
+  var irFolders = folders.filter(function (f) { return /^IR\d+$/.test(String(f.getName())); });
+  var other = folders.filter(function (f) { return !/^IR\d+$/.test(String(f.getName())); });
+  var lines = ['IR FOLDER AUDIT - read-only, nothing moved',
+               'By ID folder: ' + root.getName(),
+               'IR folders: ' + irFolders.length + ' · other folders: ' + other.length +
+               (other.length ? ' (' + other.map(function (f) { return f.getName(); }).join(', ') + ')' : '')];
+  var withSummary = 0, withManifest = 0;
+  irFolders.sort(function (a, b) { return a.getName() < b.getName() ? -1 : 1; }).forEach(function (f) {
+    var ir = String(f.getName());
+    var c = irFolderContents(f);
+    var summary = c.files.indexOf(ir + '.docx') > -1;
+    var manifest = c.files.indexOf(IR_FOLDER_MANIFEST_NAME) > -1;
+    if (summary) withSummary++;
+    if (manifest) withManifest++;
+    lines.push('  ' + ir + '  files ' + c.files.length + '  subfolders ' + (c.subs.length ? c.subs.join(' / ') : '-') +
+               '  summary ' + (summary ? 'yes' : 'NO') + '  manifest ' + (manifest ? 'yes' : 'NO'));
+  });
+  lines.push('');
+  lines.push('Summary docs present: ' + withSummary + ' of ' + irFolders.length +
+             ' · manifests present: ' + withManifest + ' of ' + irFolders.length);
+  lines.push('No file was moved, copied or re-shared.');
+  lines.forEach(function (l) { report(l); });
+  return 'IR folder audit: ' + irFolders.length + ' folder(s), ' + withSummary + ' with a summary doc.';
 }
 
 // Read the sign-in audit — `audit/signins.jsonl`, written on every successful

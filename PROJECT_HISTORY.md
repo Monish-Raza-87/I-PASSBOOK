@@ -1451,7 +1451,69 @@ siblings of `#detail-view`, and the browser route probe still paints each one.
 
 ---
 
-## 23. Future Roadmap (Planned)
+## 23. v122 — the small lies closed (2026-10-27)
+
+### What this pass is
+
+A closure sweep over defects that were already written down and small enough to
+fix without a new screen. Two of them share a shape: the code said something
+that was not true, and nothing failed loudly. The third is the checkout trap
+that made a fresh clone tell a different story from this machine.
+
+### An assignment email no longer reads as a comment
+
+`sendNudgeEmail` had one subject and one opening line, both about comments.
+Assignment notifications ride the same transport on purpose — the bell, the
+unread badge, the 90s poll and the mail — so an assignee was told *"you have a
+comment"* and went looking for a message nobody wrote.
+
+The assignment path now sends `kind: 'assignment'`; the backend chooses the
+subject (*you have been assigned*) and the opening line (*assigned this ticket
+to you*) from it. A missing kind still means comment, so a client that predates
+the field behaves exactly as before, and the client's own toast says
+**Assignment** on that path instead of claiming a comment was posted.
+
+`smoke-store.mjs` drives both kinds against the real backend (including the
+absent-kind fallback); `smoke-ui.mjs` pins the flag on the request, because a
+backend test cannot see a client that stopped sending it.
+
+### `truncated` is true only when a row was actually dropped
+
+`getAuditLog` sliced the rows first and then compared the SLICED length to the
+cap, so a ticket holding exactly 400 entries claimed something had been hidden.
+Nothing in `app.js` reads the flag today — which is exactly why it sat wrong:
+the next reader would trust it. It now asks `entries.length > cap` **before**
+slicing. `smoke-store.mjs` pins exactly-at-cap (false) and one-over (true,
+newest rows kept).
+
+### A fresh Windows clone now gets LF
+
+`.gitattributes` carries `* text=auto eol=lf`. Several suites read `app.js`,
+`views.css` and `components.css` as source text and match patterns containing
+`\n`; with `core.autocrlf=true`, a fresh clone checked them out as CRLF and those
+suites failed while this machine passed. The blobs were already LF, so this is a
+one-file change and needed no renormalise commit.
+
+### Two items already closed by earlier work
+
+- The Insights facet is labelled **Reported by**, and a separate **Company**
+  axis reads Col R through the register (2026-10-19). The docs item describing
+  the old ambiguity is now marked done.
+- The duplicate "ids index for the fixed-name store files" TODO is removed; the
+  decision against it (2026-10-09) is recorded once, above.
+
+### Verification
+
+`node tools/smoke-all.mjs` — **4658 cases across 37 suites**, all passing. The
+new cases are 6 in `smoke-store.mjs` and 3 in `smoke-ui.mjs`.
+
+⚠ `backend.gs` changes, but **`API_VERSION` stays 21** — no new action and no
+new field. Paste it into both `/exec` deployments as a **New version**, and
+publish the frontend first as always.
+
+---
+
+## 24. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

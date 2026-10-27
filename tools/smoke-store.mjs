@@ -681,6 +681,43 @@ r.ok('a second comment APPENDS to the array rather than replacing the key',
     return ctx.getPassbook('__NUDGES__', 'angad.kumbhar@indrones.com').sections['all'].items.length === 2;
   })());
 
+// ── 4b. An assignment is not a comment, even though it rides the same mailer ──
+// The bell, the unread badge and the email are one transport deliberately. What
+// must NOT be shared is the wording: "you have a comment" sends the assignee
+// looking for a message nobody wrote. `kind` is the one value that separates them,
+// and an absent kind must stay a comment so an older client is unchanged.
+r.head('an assignment email says assigned, and a comment email still says comment');
+
+reexec(); mails.length = 0;
+ctx.sendNudgeEmail({
+  to: 'angad.kumbhar@indrones.com', irNumber: 'IR409',
+  message: 'You have been assigned IR409.', kind: 'assignment',
+}, ADMIN);
+const assignMail = mails[0];
+r.ok('the assignment subject names an assignment, not a comment',
+  !!assignMail && /you have been assigned/.test(assignMail.subject) &&
+  !/you have a comment/.test(assignMail.subject), assignMail && assignMail.subject);
+r.ok('and the opening line says the ticket was assigned',
+  !!assignMail && /assigned this ticket to you/.test(assignMail.body) &&
+  !/mentioned you in a comment/.test(assignMail.body), assignMail && assignMail.body);
+
+mails.length = 0;
+ctx.sendNudgeEmail({
+  to: 'angad.kumbhar@indrones.com', irNumber: 'IR409',
+  message: 'Please look at this.', kind: 'comment',
+}, ADMIN);
+const commentMail = mails[0];
+r.ok('a comment still says comment',
+  !!commentMail && /you have a comment/.test(commentMail.subject) &&
+  /mentioned you in a comment/.test(commentMail.body), commentMail && commentMail.subject);
+
+mails.length = 0;
+ctx.sendNudgeEmail({
+  to: 'angad.kumbhar@indrones.com', irNumber: 'IR409', message: 'No kind sent.',
+}, ADMIN);
+r.ok('an older client that sends no kind gets the comment wording, not a crash',
+  mails.length === 1 && /you have a comment/.test(mails[0].subject), mails.map(m => m.subject));
+
 // ── 5. readJson refuses to turn a broken file into an empty one ───────────────
 r.head('readJson throws on a corrupt or unreadable file, and answers null only for a truly absent one');
 
@@ -998,6 +1035,29 @@ reexec();
 const capNoisy = ctx.getAuditLog('IR612', 50);
 r.ok('the OLDEST real row survives 450 dead ones — the filter runs BEFORE the cap',
   capNoisy.entries.some(e => e.fieldId === 'b_old_real'), capNoisy.entries.length + ' entries returned');
+
+// The truncated flag is the one answer nobody reads today, which is why it was
+// allowed to be wrong: it compared the sliced length to the cap, so a ticket with
+// EXACTLY `cap` entries claimed something had been hidden. A flag a future reader
+// will trust has to be true before it is needed.
+r.head('truncated is true only when a row was actually dropped');
+const auditRows = n => Array.from({ length: n }, (_, i) => JSON.stringify({
+  t: '04-Jan-2026 10:00:0' + i, ir: 'IR613', sec: 'sec-b', by: ADMIN,
+  ev: 'changed', fid: 'f' + i, old: 'a', nw: 'b',
+})).join('\n') + '\n';
+ctx.saveSection('IR613', 'sec-b', { b_remarks: 'seed' }, [], ADMIN);
+reexec();
+auditFile('IR613').setContent(auditRows(2));
+reexec();
+const exact = ctx.getAuditLog('IR613', 2);
+r.ok('exactly the cap is NOT truncated - nothing was dropped',
+  exact.entries.length === 2 && exact.truncated === false, exact);
+auditFile('IR613').setContent(auditRows(3));
+reexec();
+const over = ctx.getAuditLog('IR613', 2);
+r.ok('one over the cap IS truncated, and keeps the newest two',
+  over.entries.length === 2 && over.truncated === true &&
+  over.entries[1].fieldId === 'f2', over);
 
 // ── 7d. The Overview is a MERGE — and only the Overview ───────────────────────
 // The Overview is the ONE section whose payload is a SUBSET of its record:

@@ -7174,6 +7174,13 @@ function sendNudgeEmail(params, authEmail) {
   var irNumber = params.irNumber || '';
   var message  = params.message || '';
   var context  = params.context || '';
+  // WHY A KIND AT ALL. An assignment already rides the comment machinery - the bell,
+  // the unread badge and this mail - so it used to arrive with a comment's subject and
+  // a comment's opening line. "You have a comment" is false for an assignment, and the
+  // person reading it goes looking for a message nobody wrote. One explicit value keeps
+  // the two notifications apart without inventing a second transport. Anything that is
+  // not the one known alternative stays a comment, so an older client is unchanged.
+  var kind     = (params.kind === 'assignment') ? 'assignment' : 'comment';
   var sectionId = (params.sectionId || '').toString();
   // Sender is the verified caller — a client can't spoof the reply-to address.
   var from     = authEmail || '';
@@ -7207,11 +7214,15 @@ function sendNudgeEmail(params, authEmail) {
     throw new Error('Email can only be sent to @' + CONFIG.ALLOWED_DOMAIN + ' addresses or to someone with an I-PASSBOOK account.');
   }
 
-  var subject = '[I-PASSBOOK] ' + irNumber + ' — you have a comment';
+  var isAssignment = (kind === 'assignment');
+  var subject = '[I-PASSBOOK] ' + irNumber +
+    (isAssignment ? ' — you have been assigned' : ' — you have a comment');
   var lines = [
     'Hi,',
     '',
-    fromName + ' mentioned you in a comment on I-PASSBOOK.',
+    isAssignment
+      ? fromName + ' assigned this ticket to you on I-PASSBOOK.'
+      : fromName + ' mentioned you in a comment on I-PASSBOOK.',
     '',
     'IR: ' + irNumber
   ];
@@ -7492,8 +7503,13 @@ function getAuditLog(irNumber, limit, fieldId, authEmail) {
   var cap = parseInt(limit, 10);
   if (isNaN(cap) || cap <= 0) cap = AUDIT_RESPONSE_CAP;
   if (cap > AUDIT_RESPONSE_CAP) cap = AUDIT_RESPONSE_CAP;
-  if (entries.length > cap) entries = entries.slice(entries.length - cap);
-  return { status: 'ok', entries: entries, truncated: entries.length === cap };
+  // Ask BEFORE slicing. `entries.length === cap` after the slice says "truncated" for
+  // a ticket holding exactly the cap, where nothing was hidden at all. The flag is
+  // read by nothing in app.js today, which is exactly why it sat wrong: a reader
+  // added later would trust it.
+  var truncated = entries.length > cap;
+  if (truncated) entries = entries.slice(entries.length - cap);
+  return { status: 'ok', entries: entries, truncated: truncated };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

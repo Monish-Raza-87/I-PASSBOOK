@@ -937,6 +937,19 @@ r.ok('the call sites use it instead of the emoji',
   (appCode.match(/.*[💬🔔].*/g) || []).concat(indexCode.match(/.*[💬🔔].*/g) || []));
 r.ok('the placeholder icon is not the ticket emoji either',
   !/🎫/.test(appCode) && !/🎫/.test(indexCode));
+
+r.head('an assignment email is not worded as a comment');
+// The backend chooses its subject from `kind`; the client is the only thing that
+// knows which kind this is. If the flag stops travelling, the mail silently reads
+// as a comment again - the exact bug this pair of assertions exists to keep shut.
+r.ok('the assignment path tells the mailer it is an assignment',
+  /sendNudgeEmailBackend\(n,\s*'assignment'\)/.test(appCode),
+  (appCode.match(/[^\n]*sendNudgeEmailBackend\([^\n]*/g) || []));
+r.ok('the request carries the kind, and defaults to comment',
+  /fd\.append\('kind',\s*isAssignment\s*\?\s*'assignment'\s*:\s*'comment'\)/.test(appCode),
+  (appCode.match(/[^\n]*append\('kind'[^\n]*/g) || []));
+r.ok('the toast says Assignment on that path rather than Comment',
+  /const what = isAssignment \? 'Assignment' : 'Comment'/.test(appCode));
 // The rule is "no GLYPH and no artwork is hand-drawn in the markup" — index.html never
 // runs initIcons(), so an inline icon there is an icon that renders in exactly one
 // place and is invisible everywhere the app draws its own.

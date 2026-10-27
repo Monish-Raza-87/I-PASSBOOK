@@ -1,0 +1,6 @@
+# The repository's blobs are LF, but Windows machines with core.autocrlf=true would
+# check them out as CRLF. Several suites read app.js, views.css and components.css as
+# SOURCE TEXT and match patterns containing "\n", so a fresh clone on Windows would
+# fail suites that pass on the machine that wrote them. This makes the checkout agree
+# with the blobs, and with the suites, everywhere.
+* text=auto eol=lf

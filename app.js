@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v122';
+const APP_VERSION = 'v123';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -228,6 +228,11 @@ function clearLocalAuth() {
     // on the way out for the opposite reason to the IR list's: there is no scoped read
     // to protect, because the modal it feeds refuses to open for a non-admin.
     localStorage.removeItem(ACCESS_CACHE_KEY);
+    // The dock's worklist is the same kind of leftover: a list of ticket numbers the
+    // last person had open. Its key is cleared here, and the in-memory strip with it,
+    // so the next account does not inherit somebody else's work.
+    try { localStorage.removeItem(DOCK_KEY); } catch { /* key not defined yet */ }
+    try { dockIRs.length = 0; } catch { /* app.js has not reached the declaration */ }
     localStorage.removeItem(USER_KEY);
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem('ipb_user');   // legacy key from the sessionStorage build
@@ -1317,6 +1322,9 @@ async function loadIRState() {
 function setAllIRs(records) {
   allIRs = Array.isArray(records) ? records : [];
   applyIRStateToAllIRs();
+  // Once the rows exist, the strip can come back. It waits for a non-empty list so a
+  // first paint from an empty cache cannot throw the worklist away.
+  restoreDockWorklist();
   // The dashboard counts these same rows, so every fetch path offers it a repaint
   // here — the Sheet read, the GAS fallback, the demo fallback and an in-page
   // re-login. renderInsights() is what decides whether that costs anything: while
@@ -4839,6 +4847,33 @@ function goTicket(irNumber) {
 
 let dockIRs = [];   // irNumbers, left to right — the strip's order
 let dockOpen    = null; // the one ticket whose sheet is up, or null
+const DOCK_KEY = 'ipb_dock_irs';
+let _dockRestored = false;
+
+// The strip is a WORKLIST, not a view preference: losing it on reload was the one
+// thing the owner could not explain to himself. It is restored ONCE per page, from
+// the IR numbers this device last had open, and only for tickets that are still in
+// the loaded list - a ticket that left the repository must not leave a tab that
+// opens a sheet of blanks. The open sheet is deliberately NOT restored: the list is
+// the convenience, a window popping up by itself is not.
+function persistDockWorklist() {
+  try { localStorage.setItem(DOCK_KEY, JSON.stringify(dockIRs)); } catch { /* private mode */ }
+}
+function restoreDockWorklist() {
+  if (_dockRestored || !allIRs.length) return;
+  _dockRestored = true;
+  let saved = [];
+  try {
+    const raw = localStorage.getItem(DOCK_KEY);
+    saved = raw ? JSON.parse(raw) : [];
+  } catch { saved = []; }
+  if (!Array.isArray(saved)) saved = [];
+  const alive = new Set(allIRs.map(ir => ir.irNumber));
+  const kept = saved.filter((id, i) => typeof id === 'string' && alive.has(id) && saved.indexOf(id) === i);
+  dockIRs = kept;
+  if (kept.length !== saved.length) persistDockWorklist();  // drop what can no longer resolve
+  renderDock();
+}
 
 // WHICH DRAWING IS LIT — the one question, asked in one place. A row or tile is lit
 // when the screen is currently about that ticket, and there are exactly two ways
@@ -5064,6 +5099,7 @@ function openDock(irNumber) {
   if (!irNumber) return;
   if (!dockIRs.includes(irNumber)) dockIRs.push(irNumber);
   dockOpen = irNumber;
+  persistDockWorklist();
   renderDock();
   const sheet = document.querySelector('#ir-dock .dock-sheet-body');
   // Focus moves into the sheet so Escape works from the keyboard without a click
@@ -5105,6 +5141,7 @@ function closeDockTab(irNumber) {
   // strip itself follows when a tab leaves, so the sheet never jumps to a tab the eye
   // did not see move.
   if (wasOpen) dockOpen = dockIRs[i] || dockIRs[i - 1] || null;
+  persistDockWorklist();
   if (wasMax) { showIndex(); goIndex(); }
   renderDock();
 }
@@ -12508,12 +12545,17 @@ async function openPassbook(irNumber) {
   // Build all section forms
   buildSectionForms(irNumber);
 
+  // A failed read must not leave the PREVIOUS ticket's record in memory: the forms
+  // are rebuilt empty, but the Overview and the evidence merge both read this cache.
+  currentSectionData = {};
+  paintSectionsLoading();
+
   // The client's original report. Read-only and Sheet-only, so it needs no
   // reload after a section save — only after the IR itself changes.
   renderIntake();
 
   // Load saved data for this IR, then restore any unsaved drafts on top
-  await loadSectionData(irNumber);
+  const loadedOk = await loadSectionData(irNumber);
   if (seq !== _openSeq) return;   // superseded by a newer openPassbook()
 
   // Which sections have saved rows is exactly what getPassbook just told us, so
@@ -12527,6 +12569,13 @@ async function openPassbook(irNumber) {
   }
 
   restoreDrafts();
+  paintSectionsLoaded(loadedOk);
+  if (!loadedOk) {
+    // The forms are usable below, and a draft is intact, but the SAVED record did not
+    // arrive. Saying so once is the difference between "this ticket is empty" and
+    // "this ticket could not be read" - two states that look identical on screen.
+    showToast('Could not load saved data for ' + irNumber + ' - your draft is safe. Check the connection and reopen.');
+  }
   refreshDraftBanner();
   refreshCommentCounts();   // show comment counts on each section/field 💬 button
   renderDispatchChecklist('h_dispatchChecklist'); // pick up any Section A draft values
@@ -14956,6 +15005,24 @@ function handleFilePreview(e) {
 }
 
 // ─── LOAD / SAVE SECTION DATA ─────────────────────────────────────────────────
+// The forms are built EMPTY before the read that fills them, so for as long as that
+// read is in flight every section looks like a ticket nobody has filled in. These two
+// paint that interval on the indicator the section already owns - one honest word in
+// the footer instead of a silent lie in the body.
+//
+// A restored draft is NOT "loaded": it is an unsaved edit sitting on top of the saved
+// record, and saying "Saved just now" over it would be the same class of lie this
+// release exists to remove.
+function paintSectionsLoading() {
+  Object.keys(SECTIONS).forEach(secId => setAutosaveNote(secId, 'loading'));
+}
+function paintSectionsLoaded(ok) {
+  Object.keys(SECTIONS).forEach(secId => {
+    if (_dirtySections.has(secId)) setAutosaveNote(secId, 'draft');
+    else setAutosaveNote(secId, ok ? 'saved' : 'load-error');
+  });
+}
+
 async function loadSectionData(irNumber) {
   try {
     const url = `${CONFIG.GAS_URL}?action=getPassbook&irNumber=${encodeURIComponent(irNumber)}`;
@@ -14997,10 +15064,13 @@ async function loadSectionData(irNumber) {
         placed.add(fieldId);
         populateFieldValue(home, fieldId, value);
       });
+      return true;
     }
   } catch {
-    // Offline or error — just show empty forms
+    // Offline or error. The caller paints "couldn't load" over the empty forms; the
+    // drafts are still on disk and are restored on top either way.
   }
+  return false;
 }
 
 // Resolve a saved imageEvidence field's entries: captions saved with an empty link
@@ -15511,10 +15581,18 @@ function discardAllDrafts() {
 // is actually finished — and that is what finally makes the 4/6 chip on the list
 // card mean something.
 const AUTOSAVE_PAUSE_MS = 1500;
-const AUTOSAVE_RETRY_MS = 10000;   // after a failure, and it keeps retrying
+// Retrying is worth doing, but not forever and not at a fixed rate. A server that is
+// down for a minute turns a fixed 10-second loop into six identical requests and six
+// identical toasts. The wait therefore doubles, caps at a minute, and stops after
+// AUTOSAVE_RETRY_LIMIT attempts; the final state says so in words and the draft is
+// still on disk. A NEW KEYSTROKE is a new intent to save, so it resets the count.
+const AUTOSAVE_RETRY_MS      = 10000;
+const AUTOSAVE_RETRY_MAX_MS  = 60000;
+const AUTOSAVE_RETRY_LIMIT   = 6;
 const _autosaveTimers    = Object.create(null);
 const _autosaveSnapshots = Object.create(null);   // sectionId → JSON of last saved fields
 const _autosaveFailed    = Object.create(null);   // sectionId → true while unsaved
+const _autosaveAttempts  = Object.create(null);   // sectionId → failures since the last edit
 const _autosaveSavedAt   = Object.create(null);   // sectionId → ms of the last real save
 const _saveFailureSent   = Object.create(null);   // irNumber+section → true once reported
 
@@ -15595,6 +15673,7 @@ async function autoSaveUnit(unitId) {
     const saved = await postSectionSave(unitId, irNumber, { withFiles: true, collected });
     _autosaveSnapshots[unitId] = JSON.stringify(saved || {});
     delete _autosaveFailed[unitId];
+    delete _autosaveAttempts[unitId];
     clearDraft(unitId);
     refreshDraftBanner();
     _dirtySections.delete(unitId);
@@ -15607,13 +15686,22 @@ async function autoSaveUnit(unitId) {
     // NOT silent, and NOT final. The entry is still in the draft and the section
     // is still marked dirty, so the retry below has something to send.
     _autosaveFailed[unitId] = true;
-    setAutosaveNote(unitId, 'error');
+    const attempt = (_autosaveAttempts[unitId] || 0) + 1;
+    _autosaveAttempts[unitId] = attempt;
     alertUnsavedChange(unitId, err);
     clearTimeout(_autosaveTimers[unitId]);
+    if (attempt >= AUTOSAVE_RETRY_LIMIT) {
+      // Six failures is no longer a blip. Stop the loop, keep the draft, and say the
+      // one thing that is still true: this is not saved and a person has to act.
+      setAutosaveNote(unitId, 'save-failed');
+      return;
+    }
+    setAutosaveNote(unitId, 'retrying');
+    const wait = Math.min(AUTOSAVE_RETRY_MS * Math.pow(2, attempt - 1), AUTOSAVE_RETRY_MAX_MS);
     _autosaveTimers[unitId] = setTimeout(() => {
       delete _autosaveTimers[unitId];
       autoSaveUnit(unitId);
-    }, AUTOSAVE_RETRY_MS);
+    }, wait);
   } finally {
     _savesInFlight.delete(unitId);
   }
@@ -15638,6 +15726,14 @@ function setAutosaveNote(unitId, state) {
     el.textContent = t('common.saving');
   } else if (state === 'failed') {
     el.textContent = t('common.notSaved');
+  } else if (state === 'save-failed') {
+    el.textContent = t('common.notSavedFinal');
+  } else if (state === 'loading') {
+    el.textContent = t('common.loadingSaved');
+  } else if (state === 'load-error') {
+    el.textContent = t('common.loadFailed');
+  } else if (state === 'draft') {
+    el.textContent = t('common.draftRestored');
   } else {
     el.textContent = t('common.retrying');
   }
@@ -16173,6 +16269,10 @@ function isTrackedUnit(unitId) {
 
 function markSectionDirty(unitId) {
   if (!isTrackedUnit(unitId)) return;      // the read-only 📋 Report tab has no save
+  // A new keystroke is a new intent to save, so the retry budget starts again. This
+  // is what makes a capped retry safe: after the loop stops, typing one character
+  // puts a fresh attempt in flight instead of leaving the user with no way forward.
+  _autosaveAttempts[unitId] = 0;
   // Scheduled BEFORE the early return below, and that placement is the point: the
   // return fires on every keystroke after the first, so a schedule placed after it
   // would never be pushed out by continued typing and the save would land in the
@@ -16934,6 +17034,19 @@ function evidencePreviewUrl(e) {
   }
   return '';
 }
+// A PDF that has been uploaded needs Drive's own preview endpoint, not `/view`: the
+// latter is a download page and refuses to frame. A file still on this device has a
+// blob URL that a browser can frame directly. This is a PREVIEW, so an empty answer
+// means "no frame" - the Open link beside it still works.
+function evidencePdfPreviewUrl(e) {
+  if (e.url) return e.url;
+  if (e.link) {
+    const id = driveFileId(e.link);
+    if (id) return `https://drive.google.com/file/d/${id}/preview`;
+    return e.link;
+  }
+  return '';
+}
 function guessEvidenceType(e) {
   if (e.type) return e.type;
   const n = (e.name || e.link || e.caption || '').toLowerCase();
@@ -16951,13 +17064,26 @@ function renderImageEvidence(fieldId) {
       ? (() => {
           const href = e.link || e.url || '';
           const name = e.name || (e.file ? e.file.name : 'PDF document');
-          return href
+          const frame = evidencePdfPreviewUrl(e);
+          const link = href
             ? `<a class="evidence-pdf-link" href="${escHtml(href)}" target="_blank" rel="noopener">
                  <span class="evidence-pdf-icon">${iconSvg('file')}</span>
                  <span class="evidence-pdf-name">${escHtml(name)}</span>
                  <span class="evidence-pdf-open">Open ↗</span>
                </a>`
             : `<div class="evidence-pdf-link"><span class="evidence-pdf-icon">${iconSvg('file')}</span><span class="evidence-pdf-name">${escHtml(name)}</span></div>`;
+          // A fold rather than an always-mounted frame: a section can hold several
+          // PDFs, and a page full of PDF viewers is a cost nobody asked for. Opening
+          // this one is the deliberate act; the link above stays the escape hatch if
+          // the browser or the file refuses to frame.
+          return `<div class="evidence-pdf-block">${link}${frame
+            ? `<details class="evidence-pdf-preview">
+                 <summary>Preview PDF</summary>
+                 <iframe class="evidence-pdf-frame" src="${escHtml(frame)}"
+                         title="${escHtml(name)}" loading="lazy"
+                         referrerpolicy="no-referrer"></iframe>
+               </details>`
+            : ''}</div>`;
         })()
       : (() => {
           const src = evidencePreviewUrl(e);

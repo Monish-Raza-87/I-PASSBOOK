@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v121';
+const APP_VERSION = 'v122';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -13437,8 +13437,9 @@ async function applyTriage(irNumber, p = '') {
 
   // Assignment notifies through the comment machinery already in place — the
   // bell, the unread badge, the 90s poll and the email all work unchanged.
-  // Known wart: the email's subject is hardcoded to comment wording in
-  // backend.gs, so an assignment notification reads as a comment.
+  // `kind` is what keeps the mail from reading as a comment: the backend chooses
+  // its subject and opening line from it, and the fallback is still a comment, so
+  // a client that does not send it behaves exactly as before.
   if (email && email.toLowerCase() !== prev) {
     const n = {
       id: nudgeId(), irNumber, scope: 'ir',
@@ -13450,7 +13451,7 @@ async function applyTriage(irNumber, p = '') {
       resolvedAt: null, resolvedBy: null,
     };
     await addNudge(n);
-    sendNudgeEmailBackend(n);
+    sendNudgeEmailBackend(n, 'assignment');
   }
 }
 
@@ -18122,7 +18123,9 @@ async function sendComment() {
 // it just toasts, so commenting is never blocked by an email popup. The email
 // starts working automatically the moment the backend (sendNudgeEmail) is
 // deployed + authorised.
-async function sendNudgeEmailBackend(nudge) {
+async function sendNudgeEmailBackend(nudge, kind) {
+  const isAssignment = kind === 'assignment';
+  const what = isAssignment ? 'Assignment' : 'Comment';
   try {
     const fd = new FormData();
     fd.append('action', 'sendNudgeEmail');
@@ -18133,12 +18136,15 @@ async function sendNudgeEmailBackend(nudge) {
     fd.append('sectionId', nudge.sectionId || '');
     fd.append('context',  scopeContextText(nudge));
     fd.append('message',  nudge.message || '');
+    // The backend's fallback is a comment, so the assignment flag is the ONE thing
+    // that has to travel for the subject and opening line to tell the truth.
+    fd.append('kind',     isAssignment ? 'assignment' : 'comment');
     const res  = await fetch(CONFIG.GAS_URL, { method: 'POST', body: fd });
     const data = await res.json();
-    if (data.status === 'ok') { showToast('Comment posted · email sent to ' + nudge.to); return; }
-    showToast('Comment saved · email pending: ' + (data.message || 'backend error'));
+    if (data.status === 'ok') { showToast(what + ' saved · email sent to ' + nudge.to); return; }
+    showToast(what + ' saved · email pending: ' + (data.message || 'backend error'));
   } catch {
-    showToast('Comment saved in app · email will send automatically once the backend is connected');
+    showToast(what + ' saved in app · email will send automatically once the backend is connected');
   }
 }
 

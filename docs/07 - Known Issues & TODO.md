@@ -322,7 +322,7 @@ in `backend.gs`; the mechanism is in [04](04 - Backend API Reference.md).
 
 ## Tests
 
-`node tools/smoke-all.mjs` — **4724 cases across 37 suites**, all passing.
+`node tools/smoke-all.mjs` — **4727 cases across 37 suites**, all passing.
 (The figure in the heading is MEASURED by summing the run, never carried forward: it
 said "2273 across 16 suites" long after both numbers had stopped being true, which is
 the same drift the emoji ledger below had to be corrected for. It also said 4273

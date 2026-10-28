@@ -9547,37 +9547,49 @@ function buildResponse(data) {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────────
 // EVIDENCE NORMALIZATION — PLAN ONLY, then a separate apply.
 // ──────────────────────────────────────────────────────────────────────────────
-// The audit found 620 files outside the canonical IR folder: Google Forms left
-// evidence in `Evidence: … (File responses)` subfolders, some IR folders carry a
-// suffix (`IR001 (STR004)`), some IRs have no folder at all, and some IR folders are
-// duplicated or nested inside another. This planner reads the intake sheet and the
-// whole By ID tree and writes ONE JSON plan under `By ID/_review/`. It does not move,
-// rename, create or delete a single evidence file.
+// The owner's invariant, 2026-10-27: every IR that exists in Form Responses has
+//   · one `By ID/IRxxx/` folder at the By ID root,
+//   · a summary doc inside it,
+//   · that summary's link in the response sheet (column B, or the Summary header),
+//   · its evidence files directly inside the folder.
+// Same evidence may live in more than one IR folder when it genuinely belongs to
+// more than one IR for that client/drone. Files are never deleted.
 //
-// The apply step (separate, deliberately) performs only what this plan lists, moves
-// files by FILE ID so every saved link keeps working, and deletes a folder only when
-// it is empty after the merge. The owner's rules, 2026-10-27:
-//   · all files live directly inside `By ID/IRxxx/`;
-//   · no suffix on an IR folder;
-//   · every IR folder sits at the By ID root;
-//   · duplicate/suffix/nested folders are merged, and deleted only if empty;
-//   · a missing summary doc is created and its link is written to the blank
-//     Summary cell (column B, or the header named Summary);
-//   · a file referenced by more than one IR is left alone and reported.
+// This planner reads the sheet and the whole By ID tree and writes ONE JSON plan
+// under `By ID/_review/`. It moves, renames, creates and deletes NOTHING.
 var NORMALIZATION_REVIEW_FOLDER = '_review';
+var NO_SHEET_FOLDER_NAME = 'Folders of IRs Not In Response Sheet';
+
+function normalizeIRNumber(raw) {
+  var s = String(raw == null ? '' : raw).toUpperCase().replace(/\s+/g, '');
+  var m = /^IR(\d+)$/.exec(s);
+  if (!m) return '';
+  return 'IR' + String(parseInt(m[1], 10)).padStart(3, '0');
+}
+
+function irNumbersInName(name) {
+  var out = [], re = /IR\s*(\d+)/ig, m;
+  var text = String(name == null ? '' : name);
+  while ((m = re.exec(text))) {
+    var v = normalizeIRNumber('IR' + m[1]);
+    if (v && out.indexOf(v) < 0) out.push(v);
+  }
+  return out;
+}
 
 function summaryColumnIndex(headerRow) {
   var header = headerRow || [];
   for (var c = 0; c < header.length; c++) {
     if (String(header[c] == null ? '' : header[c]).trim().toLowerCase() === 'summary') return c;
   }
-  return 1; // column B, which is where the owner says it lives
+  return 1; // column B
 }
 
-// Every folder under By ID, with its path and the IR number its name starts with.
-// `depth` is bounded because a malformed Drive tree must not become a stack overflow.
+// Every folder under By ID. The quarantine folder is deliberately not descended:
+// once a no-sheet folder is moved there, a later plan must not process it again.
 function collectByIDFolders(root) {
   var out = [], seen = {};
   function walk(folder, path, parentId, depth) {
@@ -9586,11 +9598,12 @@ function collectByIDFolders(root) {
     if (seen[id]) return;
     seen[id] = true;
     var name = folder.getName();
-    var m = /^(IR\d+)/i.exec(name);
+    if (name === NO_SHEET_FOLDER_NAME) return;
+    var irs = irNumbersInName(name);
     out.push({
       folder: folder, id: id, name: name, path: path, parentId: parentId,
-      depth: depth, ir: m ? m[1].toUpperCase() : '',
-      exact: /^IR\d+$/.test(name)
+      depth: depth, ir: irs[0] || '', irs: irs, multi: irs.length > 1,
+      exact: irs.length === 1 && /^IR\d+$/i.test(name)
     });
     listAll(folder.getFolders()).forEach(function (sub) {
       walk(sub, path + '/' + sub.getName(), id, depth + 1);
@@ -9604,8 +9617,14 @@ function folderIsEmpty(folder) {
   return !folder.getFiles().hasNext() && !folder.getFolders().hasNext();
 }
 
-// The form script names a summary `IRxxx.docx` but stores it as a Google Doc. It is
-// the only summary this app creates; a different name is left alone and reported.
+function folderFileCount(folder) {
+  return listAll(folder.getFiles()).length;
+}
+
+function folderSubfolderNames(folder) {
+  return listAll(folder.getFolders()).map(function (f) { return f.getName(); });
+}
+
 function summaryDocInFolder(folder, ir) {
   try {
     var it = folder.getFilesByName(ir + '.docx');
@@ -9613,8 +9632,13 @@ function summaryDocInFolder(folder, ir) {
       var f = it.next();
       if (f.getMimeType() === MimeType.GOOGLE_DOCS) return { file: f, folder: folder };
     }
-  } catch (e) { /* a folder that cannot be read is not a reason to fail the plan */ }
+  } catch (e) { /* a folder that cannot be read does not fail the plan */ }
   return null;
+}
+
+function driveFileIdFromUrl(url) {
+  var ids = driveFileIdsInCell(url);
+  return ids.length ? ids[0] : '';
 }
 
 function byIdReviewFolder(root) {
@@ -9639,7 +9663,6 @@ function planEvidenceNormalization() {
   var sumCol = summaryColumnIndex(header);
   if (irCol < 0) return report('NORMALIZATION PLAN: no IR Number column in the intake header.');
 
-  // The sheet is the source of truth for which file belongs to which IR.
   var byIR = {}, fileRefs = {};
   for (var r = 1; r < grid.length; r++) {
     var row = grid[r] || [];
@@ -9660,44 +9683,77 @@ function planEvidenceNormalization() {
     });
     byIR[ir] = rec;
   }
+  var sheetSet = {};
+  Object.keys(byIR).forEach(function (ir) { sheetSet[ir] = true; });
 
   var inventory = collectByIDFolders(root);
   var byId = {};
   inventory.forEach(function (f) { byId[f.id] = f; });
-  var groups = {};
-  inventory.forEach(function (f) {
-    if (!f.ir) return;
-    if (!groups[f.ir]) groups[f.ir] = [];
-    groups[f.ir].push(f);
-  });
 
   var plan = {
     generatedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
     byIdFolderId: byIdRootId,
     byIdName: root.getName(),
     createFolders: [], renameFolders: [], moveFolders: [], mergeFolders: [],
-    flattenFolders: [], emptyFolders: [], moveFiles: [], createSummaries: [],
-    moveSummaries: [], duplicateSummaries: [], sheetLinks: [],
-    conflicts: { multiIR: [], missingFiles: [], noSheetRow: [], summaryLinkWithoutDoc: [] },
+    flattenFolders: [], emptyFolders: [], moveFiles: [],
+    multiIRFolders: [], multiIRFiles: [],
+    noSheetFolders: [], quarantineFolders: [],
+    createSummaries: [], fixSummaryDocs: [], moveSummaries: [],
+    duplicateSummaries: [], sheetLinks: [],
+    conflicts: { missingFiles: [], summaryLinkWithoutDoc: [], folderIRsNotInSheet: [] },
     counts: {}
   };
 
-  var allIRs = {};
-  Object.keys(byIR).forEach(function (ir) { allIRs[ir] = true; });
-  Object.keys(groups).forEach(function (ir) { allIRs[ir] = true; });
+  // Multi-IR folder names are split, never merged into the first IR they name.
+  inventory.forEach(function (f) {
+    if (!f.multi) return;
+    var notInSheet = f.irs.filter(function (x) { return !sheetSet[x]; });
+    plan.multiIRFolders.push({
+      id: f.id, path: f.path, irs: f.irs, fileCount: folderFileCount(f.folder),
+      irsNotInSheet: notInSheet
+    });
+  });
+
+  var groups = {};
+  inventory.forEach(function (f) {
+    if (!f.ir || f.multi) return;
+    if (!groups[f.ir]) groups[f.ir] = [];
+    groups[f.ir].push(f);
+  });
+
+  // No-sheet folders are inspected and quarantined, not normalised.
+  Object.keys(groups).forEach(function (ir) {
+    if (sheetSet[ir]) return;
+    plan.conflicts.folderIRsNotInSheet.push(ir);
+    groups[ir].forEach(function (f) {
+      var subs = folderSubfolderNames(f.folder);
+      var fileCount = folderFileCount(f.folder);
+      var otherIR = subs.some(function (n) {
+        return irNumbersInName(n).some(function (x) { return x !== ir; });
+      });
+      var entry = {
+        id: f.id, path: f.path, ir: ir, fileCount: fileCount, subfolders: subs,
+        safe: !otherIR && fileCount > 0,
+        reason: otherIR ? 'contains a subfolder naming another IR' : (fileCount ? '' : 'empty')
+      };
+      plan.noSheetFolders.push(entry);
+      if (entry.safe) plan.quarantineFolders.push({ id: f.id, path: f.path, ir: ir });
+    });
+  });
+
   var inPlace = 0;
-
-  Object.keys(allIRs).sort().forEach(function (ir) {
+  Object.keys(byIR).sort().forEach(function (ir) {
     var group = groups[ir] || [];
-    var rec = byIR[ir] || null;
-    if (!rec && group.length) plan.conflicts.noSheetRow.push(ir);
+    var rec = byIR[ir];
 
-    // 1. The canonical folder: an exact IR folder at the By ID root. If there is
-    //    none, promote a root suffix folder (rename) or a nested folder (move out).
+    // 1. Canonical IR folder at the By ID root.
     var exactRoot = group.filter(function (f) { return f.parentId === byIdRootId && f.exact; });
     var canonical = null;
     if (exactRoot.length) {
       canonical = exactRoot.filter(function (f) { return !!summaryDocInFolder(f.folder, ir); })[0] || exactRoot[0];
+      if (canonical.name !== ir) {
+        plan.renameFolders.push({ id: canonical.id, from: canonical.name, to: ir, path: canonical.path });
+      }
     } else {
       var rootFolders = group.filter(function (f) { return f.parentId === byIdRootId; });
       if (rootFolders.length) {
@@ -9714,17 +9770,16 @@ function planEvidenceNormalization() {
       }
     }
 
-    // 2. Every other folder for this IR is merged into the canonical one. Empty
-    //    duplicates are listed for removal; a non-empty one becomes empty only
-    //    after the apply step, so the apply step re-checks it.
+    // 2. Duplicates are merged; a non-empty one is deleted only after the merge.
     group.forEach(function (f) {
       if (canonical && f.id === canonical.id) return;
       plan.mergeFolders.push({ id: f.id, path: f.path, ir: ir });
       if (folderIsEmpty(f.folder)) plan.emptyFolders.push({ id: f.id, path: f.path, ir: ir });
     });
 
-    // 3. Non-IR subfolders inside the canonical folder are flattened into its
-    //    root. Nested IR folders are handled by their own group above.
+    // 3. Non-IR subfolders inside the canonical folder are flattened. A subfolder
+    //    that names an IR is either another IR or a multi-IR folder; both have their
+    //    own plan entries and must not be flattened here.
     if (canonical) {
       inventory.forEach(function (f) {
         if (f.parentId !== canonical.id || f.ir) return;
@@ -9733,9 +9788,8 @@ function planEvidenceNormalization() {
       });
     }
 
-    // 4. Summaries. Prefer the canonical folder's doc; otherwise the first one
-    //    found among the IR's duplicate folders. Missing docs are created only when
-    //    the sheet has no summary link at all for that IR.
+    // 4. Summaries. Find one already in the group; otherwise follow the sheet's
+    //    summary link to the real document (IR137 is named IR001.docx).
     var summary = canonical ? summaryDocInFolder(canonical.folder, ir) : null;
     var summaryFrom = summary ? canonical : null;
     var foundSummaries = [];
@@ -9759,44 +9813,58 @@ function planEvidenceNormalization() {
         plan.duplicateSummaries.push({ fileId: x.s.file.getId(), ir: ir, fromPath: x.folder.path });
       });
     }
-    var hasAnySummaryLink = rec && rec.rows.some(function (x) { return !!x.summary; });
-    if (!summary && rec && !hasAnySummaryLink) {
-      plan.createSummaries.push({ ir: ir, row: rec.rows[0].row });
-    }
-    if (!summary && hasAnySummaryLink) plan.conflicts.summaryLinkWithoutDoc.push(ir);
 
-    // 5. Sheet summary links: only BLANK cells are filled, per the owner's rule.
-    if (rec) {
-      rec.rows.forEach(function (x) {
-        if (x.summary) return;
-        plan.sheetLinks.push({ ir: ir, row: x.row, needsSummary: !summary,
-                               url: summary ? summary.file.getUrl() : '' });
-      });
-    }
-
-    // 6. The evidence files the sheet names. A file in more than one IR is left
-    //    alone; a file whose immediate parent is the canonical root is already
-    //    right. Anything deeper is flattened to the root.
-    if (rec) {
-      Object.keys(rec.fileIds).sort().forEach(function (fileId) {
-        var refs = fileRefs[fileId] || [];
-        if (refs.length > 1) {
-          plan.conflicts.multiIR.push({ fileId: fileId, irs: refs });
-          return;
-        }
-        var file = null;
-        try { file = DriveApp.getFileById(fileId); } catch (e) { file = null; }
-        if (!file) { plan.conflicts.missingFiles.push({ fileId: fileId, ir: ir }); return; }
-        var parents = listAll(file.getParents());
-        var atRoot = canonical && parents.some(function (p) { return p.getId() === canonical.id; });
-        if (atRoot) { inPlace++; return; }
-        plan.moveFiles.push({
-          fileId: fileId, name: file.getName(), ir: ir,
-          from: parents.map(function (p) { return byId[p.getId()] ? byId[p.getId()].path : p.getName(); }),
+    var linkRows = rec.rows.filter(function (x) { return !!x.summary; });
+    var hasAnySummaryLink = linkRows.length > 0;
+    if (!summary && hasAnySummaryLink) {
+      var fileId = driveFileIdFromUrl(linkRows[0].summary);
+      var f = null;
+      try { f = fileId ? DriveApp.getFileById(fileId) : null; } catch (e) { f = null; }
+      if (f) {
+        plan.fixSummaryDocs.push({
+          ir: ir, fileId: f.getId(), currentName: f.getName(), targetName: ir + '.docx',
+          fromParents: listAll(f.getParents()).map(function (p) { return p.getName(); }),
           toFolderId: canonical ? canonical.id : null
         });
-      });
+      } else {
+        plan.conflicts.summaryLinkWithoutDoc.push(ir);
+      }
     }
+    if (!summary && !hasAnySummaryLink) {
+      plan.createSummaries.push({ ir: ir, row: rec.rows[0].row });
+    }
+
+    // 5. Sheet links: only BLANK cells are filled.
+    rec.rows.forEach(function (x) {
+      if (x.summary) return;
+      plan.sheetLinks.push({
+        ir: ir, row: x.row,
+        needsSummary: !summary && !plan.fixSummaryDocs.some(function (d) { return d.ir === ir; }),
+        url: summary ? summary.file.getUrl() : ''
+      });
+    });
+
+    // 6. Evidence named by the sheet. A file already directly at the canonical root
+    //    is in place; anything deeper is flattened. A file referenced by more than
+    //    one IR gets a copy in each IR folder (the owner permits the duplication).
+    Object.keys(rec.fileIds).sort().forEach(function (fid) {
+      var file = null;
+      try { file = DriveApp.getFileById(fid); } catch (e) { file = null; }
+      if (!file) { plan.conflicts.missingFiles.push({ fileId: fid, ir: ir }); return; }
+      var refs = fileRefs[fid] || [ir];
+      if (refs.length > 1) {
+        plan.multiIRFiles.push({ fileId: fid, name: file.getName(), irs: refs });
+        return;
+      }
+      var parents = listAll(file.getParents());
+      var atRoot = canonical && parents.some(function (p) { return p.getId() === canonical.id; });
+      if (atRoot) { inPlace++; return; }
+      plan.moveFiles.push({
+        fileId: fid, name: file.getName(), ir: ir,
+        from: parents.map(function (p) { return byId[p.getId()] ? byId[p.getId()].path : p.getName(); }),
+        toFolderId: canonical ? canonical.id : null
+      });
+    });
   });
 
   plan.counts = {
@@ -9810,13 +9878,17 @@ function planEvidenceNormalization() {
     emptyFolders: plan.emptyFolders.length,
     filesAlreadyInPlace: inPlace,
     filesToMove: plan.moveFiles.length,
+    multiIRFiles: plan.multiIRFiles.length,
+    multiIRFolders: plan.multiIRFolders.length,
+    noSheetFolders: plan.noSheetFolders.length,
+    quarantineFolders: plan.quarantineFolders.length,
     missingFiles: plan.conflicts.missingFiles.length,
-    multiIRFiles: plan.conflicts.multiIR.length,
     summariesToCreate: plan.createSummaries.length,
-    summaryLinksToWrite: plan.sheetLinks.length,
+    summaryDocsToFix: plan.fixSummaryDocs.length,
+    sheetLinksToWrite: plan.sheetLinks.length,
     duplicateSummaries: plan.duplicateSummaries.length,
     summaryLinkWithoutDoc: plan.conflicts.summaryLinkWithoutDoc.length,
-    folderIRsNotInSheet: plan.conflicts.noSheetRow.length
+    folderIRsNotInSheet: plan.conflicts.folderIRsNotInSheet.length
   };
 
   var review = byIdReviewFolder(root);
@@ -9836,17 +9908,22 @@ function planEvidenceNormalization() {
              ' · empty candidates ' + plan.counts.emptyFolders);
   lines.push('Files: already at IR root ' + plan.counts.filesAlreadyInPlace +
              ' · to move ' + plan.counts.filesToMove +
-             ' · missing ' + plan.counts.missingFiles +
-             ' · multi-IR (left alone) ' + plan.counts.multiIRFiles);
+             ' · multi-IR files/copies ' + plan.counts.multiIRFiles +
+             ' · multi-IR folders ' + plan.counts.multiIRFolders +
+             ' · missing ' + plan.counts.missingFiles);
   lines.push('Summaries: create ' + plan.counts.summariesToCreate +
-             ' · blank sheet links to fill ' + plan.counts.summaryLinksToWrite +
+             ' · docs to fix/move ' + plan.counts.summaryDocsToFix +
+             ' · blank sheet links to fill ' + plan.counts.sheetLinksToWrite +
              ' · duplicate summaries ' + plan.counts.duplicateSummaries +
              ' · link but no doc ' + plan.counts.summaryLinkWithoutDoc);
+  lines.push('No-sheet folders: ' + plan.counts.noSheetFolders + ' found, ' +
+             plan.counts.quarantineFolders + ' safe to quarantine');
   lines.push('');
   function sample(label, arr) {
     if (!arr.length) return;
     lines.push(label + ':');
     arr.slice(0, 8).forEach(function (x) {
+      if (typeof x === 'string') { lines.push('  ' + x); return; }
       lines.push('  ' + (x.path || x.fromPath || x.ir || '') +
                  (x.to ? ' -> ' + x.to : '') +
                  (x.irs ? ' (' + x.irs.join(', ') + ')' : ''));
@@ -9857,9 +9934,14 @@ function planEvidenceNormalization() {
   sample('Move nested IR folders', plan.moveFolders);
   sample('Merge duplicates', plan.mergeFolders);
   sample('Flatten subfolders', plan.flattenFolders);
-  sample('Multi-IR files', plan.conflicts.multiIR);
+  sample('Multi-IR folders', plan.multiIRFolders);
+  sample('Multi-IR files', plan.multiIRFiles);
+  sample('No-sheet folders', plan.noSheetFolders);
+  sample('Quarantine', plan.quarantineFolders);
+  sample('Summary docs to fix', plan.fixSummaryDocs);
+  sample('Duplicate summaries', plan.duplicateSummaries);
   sample('Missing files', plan.conflicts.missingFiles);
-  sample('Folders with no sheet row', plan.conflicts.noSheetRow);
+  sample('Link but no doc', plan.conflicts.summaryLinkWithoutDoc);
   lines.push('');
   lines.push('Review the plan file. Nothing has been moved. The apply step is separate.');
   lines.forEach(function (l) { report(l); });

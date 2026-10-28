@@ -1332,13 +1332,23 @@ r.ok('its only write is the plan file, under _review',
 r.ok('the summary column falls back to B when the header is not named',
   /function summaryColumnIndex/.test(code) &&
   /return 1; \/\/ column B/.test(fnBody('summaryColumnIndex')));
-r.ok('the planner keeps multi-IR files out of the move list',
-  /conflicts\.multiIR\.push/.test(norm) && /refs\.length > 1/.test(norm));
+r.ok('the planner turns multi-IR files into copies, not a refusal',
+  /multiIRFiles\.push/.test(norm) && /refs\.length > 1/.test(norm));
+r.ok('multi-IR folder NAMES are detected separately from files',
+  /multiIRFolders\.push/.test(norm) && /f\.multi/.test(norm) &&
+  /irNumbersInName/.test(norm) && /normalizeIRNumber/.test(code));
+r.ok('no-sheet folders are quarantined, never merged',
+  /NO_SHEET_FOLDER_NAME\s*=\s*'Folders of IRs Not In Response Sheet'/.test(code) &&
+  /quarantineFolders\.push/.test(norm) &&
+  /folderIRsNotInSheet/.test(norm));
+r.ok('a summary link with no matching doc is followed to the real file',
+  /fixSummaryDocs\.push/.test(norm) && /driveFileIdFromUrl/.test(norm) &&
+  /currentName:/.test(norm) && /targetName: ir \+ '\.docx'/.test(norm));
 r.ok('the planner names the folder families it will handle',
   /collectByIDFolders/.test(norm) && /folderIsEmpty/.test(norm) &&
   /summaryDocInFolder/.test(norm) && /flattenFolders/.test(norm) &&
   /mergeFolders/.test(norm) && /renameFolders/.test(norm) &&
-  /moveFolders/.test(norm));
+  /moveFolders/.test(norm) && /duplicateSummaries/.test(norm));
 
 r.head('the legacy record read is one tab at a time, as the sheet displays it');
 r.ok('getLegacyIR exists and is routed behind the token gate',

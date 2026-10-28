@@ -1679,22 +1679,29 @@ The plan lists:
 - duplicate folders to merge, and those that are empty now;
 - non-IR subfolders to flatten into the IR root;
 - each sheet-linked file's current path and target (`By ID/IRxxx/`);
-- files referenced by more than one IR — left alone and reported;
+- files referenced by more than one IR, copied into each IR folder (the owner permits
+  the duplication when the evidence genuinely belongs to several IRs);
+- folder names that contain several IRs (`IR077, IR078, IR079 and IR080 …`), split
+  into one folder per IR with the same files in each;
 - missing files (0 expected);
-- summary docs to create and blank Summary cells (column B, header wins) to fill;
-- duplicate summary docs to move to `_review/duplicate-summaries/`;
-- IR folders with no Form Responses row.
+- summary docs to create, blank Summary cells (column B, header wins) to fill, and the
+  three link-but-no-doc IRs (IR137's doc is named `IR001.docx`; IR262/IR263 are
+  correctly named) followed by their sheet link so the real file can be renamed/moved;
+- duplicate summary docs listed for a text comparison; the canonical one stays, the
+  others go to `_review/duplicate-summaries/`;
+- IR folders with no Form Responses row, inspected for another IR's evidence, then
+  quarantined under `By ID/Folders of IRs Not In Response Sheet/` when safe.
 
-The owner's rules are encoded: all files directly in `IRxxx`, no suffix, every IR
-folder at the By ID root, merge duplicates, delete only folders that are empty after
-merge, create missing summaries, fill only blank summary cells, leave multi-IR files.
+The owner's rules are encoded: every sheet IR has one `IRxxx` folder, a summary doc,
+its link in the sheet, and its evidence directly inside; no suffix; every IR folder at
+the By ID root; merge duplicates; delete only folders that are empty after the merge;
+multi-IR evidence is duplicated, not dropped.
 
 ### Verification
 
-`node tools/smoke-all.mjs` — **4724 cases across 37 suites**, all passing. The new
+`node tools/smoke-all.mjs` — **4727 cases across 37 suites**, all passing. The new
 backend cases pin that the planner is not routed, moves/renames/trashes nothing,
-writes no sheet cell, writes only the `_review` plan file, keeps multi-IR files out of
-the move list, and handles rename/move/merge/flatten families.
+writes no sheet cell, writes only the `_review` plan file, turns multi-IR files and folder names into copies, quarantines no-sheet folders, follows a summary link to its real file, and handles rename/move/merge/flatten families.
 
 ⚠ `backend.gs` changes but **`API_VERSION` stays 22** — the planner is editor-run and
 adds no route. Paste the current backend into both `/exec` deployments as a **New

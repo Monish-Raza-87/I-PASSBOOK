@@ -1311,6 +1311,35 @@ r.ok('auditIRFolders exists, is not routed, and writes NOTHING',
 r.ok('the manifest filename is one named constant',
   /IR_FOLDER_MANIFEST_NAME\s*=\s*'manifest\.json'/.test(code));
 
+r.head('the evidence normalization planner is read-only and not a route');
+const norm = fnBody('planEvidenceNormalization');
+r.ok('it exists and is NOT routed - no API surface, no button',
+  /function planEvidenceNormalization\s*\(/.test(code) &&
+  !/planEvidenceNormalization\s*:/.test(code) &&
+  !/\bplanEvidenceNormalization\b/.test(fnBody('doGet')) &&
+  !/\bplanEvidenceNormalization\b/.test(fnBody('doPost')),
+  (code.match(/[^\n]*planEvidenceNormalization[^\n]*/g) || []).slice(0, 3));
+r.ok('it moves, renames and trashes NOTHING',
+  !/moveTo|setName|setTrashed|trash/.test(norm),
+  (norm.match(/[^\n]*(moveTo|setName|setTrashed|trash)[^\n]*/g) || ['none - correct']));
+r.ok('it writes no sheet cell - the plan is a file, not an edit',
+  !/setValue|appendRow|deleteRow|insertRow/.test(norm),
+  (norm.match(/[^\n]*(setValue|appendRow)[^\n]*/g) || ['none - correct']));
+r.ok('its only write is the plan file, under _review',
+  /byIdReviewFolder\(root\)/.test(norm) &&
+  /NORMALIZATION_REVIEW_FOLDER\s*=\s*'_review'/.test(code) &&
+  /createFile\('evidence-plan-/.test(norm));
+r.ok('the summary column falls back to B when the header is not named',
+  /function summaryColumnIndex/.test(code) &&
+  /return 1; \/\/ column B/.test(fnBody('summaryColumnIndex')));
+r.ok('the planner keeps multi-IR files out of the move list',
+  /conflicts\.multiIR\.push/.test(norm) && /refs\.length > 1/.test(norm));
+r.ok('the planner names the folder families it will handle',
+  /collectByIDFolders/.test(norm) && /folderIsEmpty/.test(norm) &&
+  /summaryDocInFolder/.test(norm) && /flattenFolders/.test(norm) &&
+  /mergeFolders/.test(norm) && /renameFolders/.test(norm) &&
+  /moveFolders/.test(norm));
+
 r.head('the legacy record read is one tab at a time, as the sheet displays it');
 r.ok('getLegacyIR exists and is routed behind the token gate',
   /function getLegacyIR\s*\(/.test(code) && /getLegacyIR:\s*function/.test(code),

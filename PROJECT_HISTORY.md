@@ -1655,7 +1655,56 @@ the editor. Until that runs, the Report tab simply shows no folder link.
 
 ---
 
-## 27. Future Roadmap (Planned)
+## 27. v124 backend — the evidence normalization planner (2026-10-27)
+
+### What the audit found
+
+Against the live By ID folder: **403 IR folders, 400 summary docs, 0 manifests**;
+**694 evidence links, 74 already at the IR root, 620 elsewhere, 0 missing.** The 620
+split into Google Forms' own `Evidence: … (File responses)` subfolders, root folders
+with suffixes (`IR001 (STR004)`), IRs with no folder at all, and duplicate/nested IR
+folders (`IR001` four times; `IR340`/`IR341` three times; `IR244/IR251`; `IR301/IR301`).
+The audit confirmed the files exist; this is an organization problem, not data loss.
+
+### The planner
+
+`planEvidenceNormalization()` is editor-run and **read-only for evidence**. It reads
+the Form Responses sheet and walks the whole By ID tree, then writes ONE JSON plan to
+`By ID/_review/evidence-plan-<stamp>.json`. It moves, renames, creates and deletes
+**nothing**.
+
+The plan lists:
+
+- canonical folder per IR; create/rename/move-to-root actions;
+- duplicate folders to merge, and those that are empty now;
+- non-IR subfolders to flatten into the IR root;
+- each sheet-linked file's current path and target (`By ID/IRxxx/`);
+- files referenced by more than one IR — left alone and reported;
+- missing files (0 expected);
+- summary docs to create and blank Summary cells (column B, header wins) to fill;
+- duplicate summary docs to move to `_review/duplicate-summaries/`;
+- IR folders with no Form Responses row.
+
+The owner's rules are encoded: all files directly in `IRxxx`, no suffix, every IR
+folder at the By ID root, merge duplicates, delete only folders that are empty after
+merge, create missing summaries, fill only blank summary cells, leave multi-IR files.
+
+### Verification
+
+`node tools/smoke-all.mjs` — **4724 cases across 37 suites**, all passing. The new
+backend cases pin that the planner is not routed, moves/renames/trashes nothing,
+writes no sheet cell, writes only the `_review` plan file, keeps multi-IR files out of
+the move list, and handles rename/move/merge/flatten families.
+
+⚠ `backend.gs` changes but **`API_VERSION` stays 22** — the planner is editor-run and
+adds no route. Paste the current backend into both `/exec` deployments as a **New
+version**, then run `planEvidenceNormalization()` and review the plan file. The apply
+step is separate and will be batched/resumable; nothing is moved until the plan is
+approved.
+
+---
+
+## 28. Future Roadmap (Planned)
 
 ### Log Analysis Visualization
 - **3D Flight Simulation**: Integration of `Three.js` to visualize the flight path during identified "Alert" periods.

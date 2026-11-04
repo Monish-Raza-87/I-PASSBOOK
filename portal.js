@@ -58,7 +58,7 @@
       <button type="button" class="tile" data-panel="report">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12"/><circle cx="12" cy="12" r="9"/></svg></span>
         <span class="tile-name">Report an IR</span>
-        <span class="tile-desc">Access customer help desk to report your issue or submit your feedback. Use the Customer Support Form, or ask the guide beside it.</span>
+        <span class="tile-desc">Access customer help desk to report your issue or submit your feedback. Use the in-app report form, or ask the guide beside it.</span>
         <span class="tile-meta" id="tile-meta-report"></span>
       </button>
 
@@ -95,10 +95,10 @@
     <section class="panel" id="panel-report" hidden>
       <div class="panel-head"><h2>Report an IR</h2></div>
       <p class="sub">Every request reaches the service desk the moment you submit it, and gets an IR
-      number the same day. Use the form below; if you are not sure which form fits, the guide under
+      number the same day. Use the form below; if you are not sure which option fits, the guide under
       it narrows it down in three short questions.</p>
       <div class="panel-actions">
-        <a class="btn btn-primary" id="raise-p" href="#" target="_blank" rel="noopener">Customer Support Form</a>
+        <a class="btn btn-primary" id="raise-p" href="#" target="_blank" rel="noopener">Raise an IR</a>
         <a class="btn" id="feedback-p" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
       </div>
 
@@ -429,6 +429,156 @@
   // would mark the button disabled rather than open nothing, because a button that
   // opens nothing is worse than no button.
   const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc0S3JVIFhOAL4-HweZ3gA6DM2cvQGXYT84lzWXI-qTiwVimA/viewform';
+  // ── IN-APP IR REPORTING ────────────────────────────────────────────────────
+  // The model chooses the prefix; the customer types only the numeric body.
+  const REPORT_MODELS = [
+    { value: 'SIGMA25G',    label: 'SIGMA25G',    prefix: 'S25' },
+    { value: 'SIGMA 25 PRO',label: 'SIGMA 25 PRO',prefix: 'S25P' },
+    { value: 'SIGMA 100',   label: 'SIGMA 100',   prefix: 'S100-' },
+    { value: 'SIGMA 75',    label: 'SIGMA 75',    prefix: 'S75' }
+  ];
+
+  function reportPrefixFor(model) {
+    const hit = REPORT_MODELS.find(x => x.value === model);
+    return hit ? hit.prefix : '';
+  }
+
+  function readFileBase64(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const s = String(r.result || '');
+        resolve(s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : '');
+      };
+      r.onerror = () => reject(new Error('Could not read ' + file.name + '.'));
+      r.readAsDataURL(file);
+    });
+  }
+
+  function openReportForm() {
+    if (!token()) { showSignin('Sign in to raise an IR, then try again.'); return; }
+    const old = document.getElementById('report-sheet');
+    if (old) old.remove();
+    const today = new Date().toISOString().slice(0, 10);
+    const modal = document.createElement('div');
+    modal.className = 'sheet report-sheet';
+    modal.id = 'report-sheet';
+    modal.innerHTML = `
+      <div class="sheet-card">
+        <button type="button" class="sheet-x" id="report-x" aria-label="Close">&times;</button>
+        <h2>Report an IR</h2>
+        <p class="sheet-note">Your report gets an IR number as soon as it is received.</p>
+        <form id="report-form" class="report-grid" novalidate>
+          <div class="field">
+            <label for="rep-model">UAS model</label>
+            <select id="rep-model" required>
+              <option value="">Select the model</option>
+              ${REPORT_MODELS.map(m => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label for="rep-suffix">UAS serial number</label>
+            <div class="serial-wrap">
+              <span class="serial-fixed" id="rep-prefix">S—</span>
+              <input id="rep-suffix" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3"
+                     placeholder="001" autocomplete="off" required>
+            </div>
+            <p class="report-hint">The model fixes the prefix. Enter the three-digit number only.</p>
+          </div>
+          <div class="report-grid two">
+            <div class="field"><label for="rep-date">Date of incident</label><input id="rep-date" type="date" value="${today}"></div>
+            <div class="field"><label for="rep-type">Support required</label>
+              <select id="rep-type">
+                <option>Repair</option><option>Maintenance</option><option>Inspection</option>
+                <option>Training</option><option>Spare / consumable</option><option>Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="field"><label for="rep-desc">Describe the problem</label>
+            <textarea id="rep-desc" required placeholder="What happened, and what should we look at?"></textarea>
+          </div>
+          <div class="field"><label for="rep-loc">Incident location and weather</label>
+            <textarea id="rep-loc" placeholder="Where did it happen? What were the conditions?"></textarea>
+          </div>
+          <div class="report-grid two">
+            <div class="field"><label for="rep-phone">Contact phone</label><input id="rep-phone" type="tel" autocomplete="tel"></div>
+            <div class="field"><label for="rep-spoc">SPOC</label><input id="rep-spoc" autocomplete="name"></div>
+          </div>
+          <div class="field"><label for="rep-files">Incident files</label>
+            <input id="rep-files" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,.bin,.log,.txt">
+            <p class="report-hint">Photos, PDFs, logs — up to 20 MB each.</p>
+          </div>
+          <div class="field"><label for="rep-flight">Flight log</label>
+            <input id="rep-flight" type="file" accept=".bin,.log,.txt,application/octet-stream">
+          </div>
+          <p class="msg" id="rep-msg" aria-live="polite"></p>
+          <button type="submit" class="btn btn-primary" id="rep-submit">Submit report</button>
+        </form>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    document.getElementById('report-x').addEventListener('click', close);
+    const modelEl = document.getElementById('rep-model');
+    const prefixEl = document.getElementById('rep-prefix');
+    const msgEl = document.getElementById('rep-msg');
+    const updatePrefix = () => {
+      const p = reportPrefixFor(modelEl.value);
+      prefixEl.textContent = p || 'S—';
+      prefixEl.dataset.prefix = p;
+    };
+    modelEl.addEventListener('change', updatePrefix);
+    const form = document.getElementById('report-form');
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      msgEl.className = 'msg err';
+      msgEl.textContent = '';
+      const model = modelEl.value;
+      const suffix = String(document.getElementById('rep-suffix').value || '').replace(/[^0-9]/g, '');
+      const desc = String(document.getElementById('rep-desc').value || '').trim();
+      if (!model) { msgEl.textContent = 'Select the UAS model.'; return; }
+      if (!/^[0-9]{1,3}$/.test(suffix)) { msgEl.textContent = 'Enter a serial number from 001 to 999.'; return; }
+      if (!desc) { msgEl.textContent = 'Describe the problem before submitting.'; return; }
+      const btn = document.getElementById('rep-submit');
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+      try {
+        const files = [];
+        const add = async (input, fieldId) => {
+          for (const f of Array.from(input.files || [])) {
+            if (f.size > 20 * 1024 * 1024) throw new Error(f.name + ' is larger than 20 MB.');
+            files.push({ name: f.name, mimeType: f.type || '', base64: await readFileBase64(f), fieldId: fieldId });
+          }
+        };
+        await add(document.getElementById('rep-files'), 'evidenceFormN');
+        await add(document.getElementById('rep-flight'), 'evidenceFormQ');
+        const res = await apiPost('createIR', {
+          droneModel: model,
+          serialSuffix: suffix,
+          incidentDate: document.getElementById('rep-date').value || '',
+          issueType: document.getElementById('rep-type').value || '',
+          issueDesc: desc,
+          incidentLocationWeather: document.getElementById('rep-loc').value || '',
+          contactPhone: document.getElementById('rep-phone').value || '',
+          spoc: document.getElementById('rep-spoc').value || '',
+          files: JSON.stringify(files)
+        });
+        if (!res || res.status !== 'ok') {
+          if (isUnauthorized(res)) { close(); forget(); setSignedOut(); showSignin('Your sign-in expired. Sign in and try again.'); return; }
+          throw new Error(msgOf(res));
+        }
+        form.innerHTML = `<div class="report-ok"><b>IR ${esc(res.irNumber)} raised.</b><br>
+          We have received your report and the service desk will take it up.</div>
+          <button type="button" class="btn" id="rep-done">Close</button>`;
+        document.getElementById('rep-done').addEventListener('click', () => { close(); if (typeof loadTickets === 'function') loadTickets(); });
+      } catch (err) {
+        msgEl.className = 'msg err';
+        msgEl.textContent = (err && err.message) || 'Could not submit the report.';
+        btn.disabled = false;
+        btn.textContent = 'Submit report';
+      }
+    });
+  }
 
   const wire = (id, url) => {
     const el = document.getElementById(id);
@@ -437,10 +587,14 @@
     el.href = url;
     el.removeAttribute('aria-disabled');
   };
-  wire('raise', SUPPORT_FORM_URL);
-  wire('raise-2', SUPPORT_FORM_URL);
-  wire('raise-3', SUPPORT_FORM_URL);
-  wire('raise-p', SUPPORT_FORM_URL);
+  const wireReport = (id) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.href = '#';
+    el.removeAttribute('aria-disabled');
+    el.addEventListener('click', (e) => { e.preventDefault(); openReportForm(); });
+  };
+  ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
   wire('feedback', FEEDBACK_FORM_URL);
   wire('feedback-p', FEEDBACK_FORM_URL);
 
@@ -980,7 +1134,7 @@
     },
     raise: {
       say: 'Use the Customer Support Form above — it is the same form every request comes through, so it gets an IR number the same working day. If you are reporting a fault, have the UAS serial number and, if you have one, the flight log to hand; both save a round trip.',
-      choices: [['Open the support form', 'form'], ['Back', 'start']]
+      choices: [['Open the report form', 'form'], ['Back', 'start']]
     },
     status: {
       say: 'Your ticket list is one panel down — every IR carries the stage it has reached, from Open through to Delivered. Open it and press a ticket to see what the desk has recorded.',
@@ -1011,7 +1165,7 @@
       b.className = 'btn';
       b.textContent = label;
       b.addEventListener('click', () => {
-        if (go === 'form')  { window.open(SUPPORT_FORM_URL, '_blank', 'noopener'); return; }
+        if (go === 'form')  { openReportForm(); return; }
         if (go === 'history') { openPanel('history'); $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
         if (go === 'library') { openPanel('library'); $('panel-library').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
         if (go === 'contact') { openPanel('contact'); $('panel-contact').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }

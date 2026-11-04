@@ -336,6 +336,29 @@
   }
   .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .field input[readonly] { color: var(--fg-muted); }
+  .field select, .field textarea {
+    min-height: 44px; padding: 10px 12px;
+    font: inherit; font-size: 16px;
+    border: 1px solid var(--line-strong); border-radius: var(--radius);
+    background: var(--surface-2); color: var(--fg);
+    width: 100%; box-sizing: border-box;
+  }
+  .field textarea { min-height: 96px; resize: vertical; }
+  .field select:focus-visible, .field textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .report-sheet .sheet-card { max-width: 560px; max-height: 92vh; overflow-y: auto; }
+  .report-grid { display: grid; gap: 12px; }
+  .report-grid.two { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 480px) { .report-grid.two { grid-template-columns: 1fr; } }
+  .serial-wrap { display: flex; align-items: stretch; }
+  .serial-fixed {
+    display: inline-flex; align-items: center; padding: 0 12px;
+    border: 1px solid var(--line-strong); border-right: 0;
+    border-radius: var(--radius) 0 0 var(--radius);
+    background: var(--surface-3, var(--surface-2)); font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .serial-wrap input { border-radius: 0 var(--radius) var(--radius) 0; }
+  .report-hint { font-size: 12px; color: var(--fg-muted); margin: 0; }
+  .report-ok { background: var(--ok-soft, #e8f6ee); border: 1px solid var(--ok, #2f7d4f); border-radius: var(--radius); padding: 12px; }
   #signin-code { font-variant-numeric: tabular-nums; letter-spacing: .22em; }
   .sheet-card .btn { justify-self: stretch; }
   .msg { margin: 0; font-size: 14px; min-height: 1.4em; }

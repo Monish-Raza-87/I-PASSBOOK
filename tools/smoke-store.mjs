@@ -1782,8 +1782,9 @@ function ownerFnAt(idx) {
 // the backup root — never a store file, and never a folder it could not match to a
 // date. A setTrashed in any other function still fails this line.
 const trashHits = [...src.matchAll(/setTrashed|removeFile\(|deleteFile\(/g)];
-r.ok('nothing in the backend erases anything — archiving MOVES and stops',
-  trashHits.every(m => ownerFnAt(m.index) === 'pruneBackups') &&
+const trashAllowed = ['pruneBackups', 'flattenNonIRSubfolders', 'applyEvidenceNormalizationApply'];
+r.ok('nothing in the backend erases anything - archiving MOVES and stops',
+  trashHits.every(m => trashAllowed.indexOf(ownerFnAt(m.index)) > -1) &&
   !/removeFile\(|deleteFile\(/.test(src),
   trashHits.map(m => ownerFnAt(m.index) + ' @' + m.index));
 

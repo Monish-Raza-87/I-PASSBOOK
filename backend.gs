@@ -31,7 +31,52 @@
 // ============================================================
 
 // ──────────────────────────────────────────────────────────────────────────────
-// CONFIG — NO FILE IDS LIVE HERE ANY MORE
+// ADMIN TASK RUNNER (CONFIG follows below)
+// ============================================================
+//  ADMIN TASK RUNNER
+//  The Apps Script function picker is large. Change ADMIN_TASK below, then run
+//  A0_RUN_ADMIN_TASK(). A0_... sorts first in the picker.
+// ============================================================
+var ADMIN_TASK = 'planAppUploadMigration';
+var ADMIN_IR = '';
+var ADMIN_THREAD_ID = '';
+var ADMIN_MESSAGE_ID = '';
+
+function A0_RUN_ADMIN_TASK() {
+  var tasks = {
+    listTasks: function () {
+      return report('ADMIN TASKS: ' + Object.keys(tasks).sort().join(', '));
+    },
+    setIRConfirmationThread: function () {
+      return setIRConfirmationThread(ADMIN_IR, ADMIN_THREAD_ID, ADMIN_MESSAGE_ID);
+    },
+    planAppUploadMigration: planAppUploadMigration,
+    migrateAppUploadsToByIdApply: migrateAppUploadsToByIdApply,
+    mergeEmailConversationsApply: mergeEmailConversationsApply,
+    searchEmailSourceForIRApply: searchEmailSourceForIRApply,
+    syncNewEmailApply: syncNewEmailApply,
+    installDailyEmailSync: installDailyEmailSync,
+    removeDailyEmailSync: removeDailyEmailSync,
+    auditEmailCoverage: auditEmailCoverage,
+    auditIRRegistry: auditIRRegistry,
+    auditNightlyBackup: auditNightlyBackup,
+    auditSerialNomenclature: auditSerialNomenclature,
+    seedIRRegistry: seedIRRegistry,
+    seedEmailCoverageApply: seedEmailCoverageApply,
+    installEmailSearchAutoRun: installEmailSearchAutoRun,
+    removeEmailSearchAutoRun: removeEmailSearchAutoRun,
+    installEmailMergeAutoRun: installEmailMergeAutoRun,
+    removeEmailMergeAutoRun: removeEmailMergeAutoRun
+  };
+  var name = String(ADMIN_TASK || '').trim();
+  var fn = tasks[name];
+  if (!fn) {
+    return report('ADMIN TASK: unknown "' + name + '". Valid: ' + Object.keys(tasks).sort().join(', '));
+  }
+  report('ADMIN TASK: ' + name);
+  return fn();
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // ⚠ THIS FILE IS IN A PUBLIC REPOSITORY. Every Sheet and Drive FOLDER ID that used
 // to sit in this block has been moved out of the source and into private storage,
@@ -283,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 22,
+  API_VERSION: 23,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -411,6 +456,7 @@ var STORE_SECTIONS_DIR = 'sections';
 var STORE_AUDIT_DIR    = 'audit';
 var STORE_BACKUP_DIR   = 'backups';
 var STORE_INDEX        = 'sections/index.json';
+var IR_REGISTRY_FILE   = 'ir-registry.json';
 
 // ── THE FILE IDS, AND WHY THEY ARE NOT IN THE SOURCE ──────────────────────────
 //
@@ -563,6 +609,8 @@ function rootFolderId() {
 // folder with a different audience (Indrones staff + the client's own contacts),
 // while `_store/` holds hashes and session tokens and stays private.
 var BY_ID_FOLDER_PROPERTY = 'BY_ID_FOLDER_ID';
+var FORM_EVIDENCE_FOLDER_PROPERTY = 'FORM_RESPONSE_EVIDENCE_FOLDER_ID';
+var EMAIL_IMPORT_SHEET_PROPERTY = 'EMAIL_IMPORT_SHEET_ID';
 var BY_ID_IR_TTL_SECONDS = 21600;
 
 // The evidence root, or '' when it has not been configured. A read path must answer
@@ -602,6 +650,228 @@ function byIdIRFolderId(irNumber) {
 function byIdIRFolderUrl(irNumber) {
   var id = byIdIRFolderId(irNumber);
   return id ? 'https://drive.google.com/drive/folders/' + id : '';
+}
+
+// ── THE APP-OWNED IR REGISTRY ────────────────────────────────────────────────
+// Form Responses is temporary. Every IR the app creates is registered here, with
+// the folder, summary and confirmation-email thread it owns. During cutover the
+// sheet is still a fallback source, but it is never the long-term authority.
+function irRegistry() {
+  var r = readJson(IR_REGISTRY_FILE);
+  if (!r || typeof r !== 'object') return { irs: {} };
+  if (!r.irs || typeof r.irs !== 'object') r.irs = {};
+  return r;
+}
+
+// The current IR set: registry plus, during transition, Form Responses. The sheet
+// read is deliberately best-effort; once it is gone the registry answers alone.
+function currentIRRegistry() {
+  var out = {};
+  var reg = irRegistry();
+  Object.keys(reg.irs).forEach(function (ir) {
+    var n = normalizeIRNumber(ir);
+    if (n) out[n] = { source: 'registry', record: reg.irs[ir] || {} };
+  });
+  try {
+    var grid = intakeGrid();
+    var irCol = grid && grid.length ? irNumberColumnIndex(grid[0]) : -1;
+    if (irCol >= 0) {
+      for (var r = 1; r < grid.length; r++) {
+        var n = normalizeIRNumber((grid[r] || [])[irCol]);
+        if (!n) continue;
+        if (!out[n]) out[n] = { source: 'form-sheet', record: {} };
+      }
+    }
+  } catch (e) { /* after cutover the sheet is gone; registry still answers */ }
+  return out;
+}
+
+// Create-only, idempotent seed of every current sheet IR. It never overwrites an
+// app-created record, so re-running after cutover cannot replace new metadata.
+function seedIRRegistry() {
+  var sheet = null, grid = null;
+  try { sheet = intakeSheet(); grid = intakeGrid(sheet); }
+  catch (e) { return report('IR REGISTRY: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!grid || grid.length < 2) return report('IR REGISTRY: the response sheet has no rows.');
+  var irCol = irNumberColumnIndex(grid[0]);
+  if (irCol < 0) return report('IR REGISTRY: no IR Number column.');
+
+  var found = [];
+  for (var r = 1; r < grid.length; r++) {
+    var n = normalizeIRNumber((grid[r] || [])[irCol]);
+    if (n && found.indexOf(n) < 0) found.push(n);
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('IR REGISTRY: another run holds the lock.');
+  var created = [], kept = 0;
+  try {
+    var reg = readJsonLocked(IR_REGISTRY_FILE);
+    if (!reg || typeof reg !== 'object') reg = { irs: {} };
+    if (!reg.irs || typeof reg.irs !== 'object') reg.irs = {};
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    found.forEach(function (ir) {
+      if (reg.irs[ir]) { kept++; return; }
+      reg.irs[ir] = {
+        irNumber: ir,
+        source: 'form-sheet',
+        status: 'active',
+        folderId: byIdIRFolderId(ir),
+        summaryFileId: '',
+        emailThreadId: '',
+        emailMessageId: '',
+        createdAt: stamp,
+        updatedAt: stamp
+      };
+      created.push(ir);
+    });
+    writeJsonLocked(IR_REGISTRY_FILE, reg);
+  } finally {
+    lock.releaseLock();
+  }
+  report('IR REGISTRY - seed');
+  report('Sheet IRs: ' + found.length + ' · created: ' + created.length + ' · kept: ' + kept);
+  if (created.length) report('Created: ' + created.join(', '));
+  return 'IR registry: ' + created.length + ' created, ' + kept + ' kept.';
+}
+
+function auditIRRegistry() {
+  var current = currentIRRegistry();
+  var reg = irRegistry();
+  var regSet = {}, sheetOnly = [], missing = [], extra = [];
+  Object.keys(reg.irs).forEach(function (k) { var n = normalizeIRNumber(k); if (n) regSet[n] = true; });
+  Object.keys(current).sort().forEach(function (ir) {
+    if (!regSet[ir]) sheetOnly.push(ir);
+  });
+  Object.keys(regSet).sort().forEach(function (ir) {
+    if (!current[ir]) extra.push(ir);
+  });
+  var lines = ['IR REGISTRY AUDIT - read-only',
+               'Registry IRs: ' + Object.keys(regSet).length,
+               'Current IRs (registry + sheet): ' + Object.keys(current).length,
+               'In sheet but not registry: ' + sheetOnly.length,
+               'In registry but not current: ' + extra.length];
+  if (sheetOnly.length) lines.push('  NOT REGISTERED: ' + sheetOnly.slice(0, 100).join(', '));
+  if (extra.length) lines.push('  REGISTRY-ONLY: ' + extra.slice(0, 100).join(', '));
+  lines.forEach(function (l) { report(l); });
+  return 'IR registry audit: ' + sheetOnly.length + ' unregistered, ' + extra.length + ' extra.';
+}
+
+// Store the Gmail thread that the app's own confirmation email created. The
+// sender (the app's mail path or the form's confirmation script) knows the
+// thread id; this is the one place that persists it, so a later email pass can
+// map a reply without guessing from the subject.
+function recordIRConfirmationThread(irNumber, threadId, messageId) {
+  assertRealIR(irNumber);
+  var ir = normalizeIRNumber(irNumber);
+  var tid = String(threadId == null ? '' : threadId).trim();
+  var mid = String(messageId == null ? '' : messageId).trim();
+  if (!ir) return { status: 'error', message: 'A real IR number is required.' };
+  if (!tid) return { status: 'error', message: 'A Gmail thread id is required.' };
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return { status: 'error', message: 'Another run holds the lock.' };
+  try {
+    var reg = readJsonLocked(IR_REGISTRY_FILE);
+    if (!reg || typeof reg !== 'object') reg = { irs: {} };
+    if (!reg.irs || typeof reg.irs !== 'object') reg.irs = {};
+    var rec = reg.irs[ir] || (reg.irs[ir] = {});
+    rec.confirmationThreadId = tid;
+    if (mid) rec.confirmationMessageId = mid;
+    rec.folderId = rec.folderId || byIdIRFolderId(ir) || '';
+    rec.updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    writeJsonLocked(IR_REGISTRY_FILE, reg);
+    return { status: 'ok', irNumber: ir, threadId: tid,
+             message: 'Confirmation thread stored for ' + ir + '.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Editor-run convenience: setIRConfirmationThread('IR486', '<gmail thread id>', '<message id>')
+function setIRConfirmationThread(irNumber, threadId, messageId) {
+  var r = recordIRConfirmationThread(irNumber, threadId, messageId);
+  return report(r.message || 'Confirmation thread not stored.');
+}
+// ── EMAIL COVERAGE LEDGER ────────────────────────────────────────────────────
+// A Drive JSON file under By ID/_review. It records, per current IR, whether the
+// canonical conversation has been produced or why it has not. Completion is
+// impossible while any IR is still `not_processed`.
+var EMAIL_COVERAGE_FILE = 'email-coverage.json';
+
+function emailCoverageFile(root, create) {
+  var it = root.getFoldersByName(NORMALIZATION_REVIEW_FOLDER);
+  var review = it.hasNext() ? it.next() : (create ? root.createFolder(NORMALIZATION_REVIEW_FOLDER) : null);
+  if (!review) return null;
+  var fits = review.getFilesByName(EMAIL_COVERAGE_FILE);
+  if (fits.hasNext()) return fits.next();
+  return create ? review.createFile(EMAIL_COVERAGE_FILE, '{"irs":{}}', MimeType.PLAIN_TEXT) : null;
+}
+
+function readEmailCoverage(root) {
+  var f = emailCoverageFile(root, false);
+  if (!f) return { irs: {} };
+  try {
+    var d = JSON.parse(f.getBlob().getDataAsString() || '{}');
+    if (!d || typeof d !== 'object') return { irs: {} };
+    if (!d.irs || typeof d.irs !== 'object') d.irs = {};
+    return d;
+  } catch (e) { return { irs: {} }; }
+}
+
+function seedEmailCoverageApply() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL COVERAGE: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL COVERAGE: BY_ID_FOLDER_ID is not set.');
+  var current = currentIRRegistry();
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL COVERAGE: another run holds the lock.');
+  var created = 0, kept = 0;
+  try {
+    var file = emailCoverageFile(root, true);
+    var data = readEmailCoverage(root);
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss');
+    Object.keys(current).sort().forEach(function (ir) {
+      if (data.irs[ir]) { kept++; return; }
+      data.irs[ir] = { ir: ir, status: 'not_processed', updatedAt: stamp };
+      created++;
+    });
+    file.setContent(JSON.stringify(data, null, 2));
+  } finally {
+    lock.releaseLock();
+  }
+  report('EMAIL COVERAGE - seed');
+  report('Created: ' + created + ' · kept: ' + kept);
+  return 'Email coverage: ' + created + ' created, ' + kept + ' kept.';
+}
+
+function auditEmailCoverage() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL COVERAGE AUDIT: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL COVERAGE AUDIT: BY_ID_FOLDER_ID is not set.');
+  var data = readEmailCoverage(root);
+  var current = emailCurrentIRs(root, data);
+  var counts = {}, missing = [], notTerminal = [];
+  var terminal = { canonical_ready: true, searched_no_hits: true, expected_email_missing: true };
+  Object.keys(current).sort().forEach(function (ir) {
+    var rec = data.irs[ir];
+    if (!rec) { missing.push(ir); return; }
+    var s = String(rec.status || 'not_processed');
+    counts[s] = (counts[s] || 0) + 1;
+    if (!terminal[s]) notTerminal.push(ir + ':' + s);
+  });
+  var lines = ['EMAIL COVERAGE AUDIT - read-only',
+               'Current IRs: ' + Object.keys(current).length,
+               'Coverage entries: ' + Object.keys(data.irs).length,
+               'Missing from ledger: ' + missing.length,
+               'Not terminal: ' + notTerminal.length];
+  Object.keys(counts).sort().forEach(function (s) { lines.push('  ' + s + ': ' + counts[s]); });
+  if (missing.length) lines.push('  MISSING: ' + missing.slice(0, 100).join(', '));
+  if (notTerminal.length) lines.push('  NOT TERMINAL: ' + notTerminal.slice(0, 100).join(', '));
+  lines.forEach(function (l) { report(l); });
+  return 'Email coverage audit: ' + missing.length + ' missing, ' + notTerminal.length + ' not terminal.';
 }
 
 // The `_store/` folder. Never CREATED from here: a read path that quietly made the
@@ -1587,6 +1857,29 @@ function installBackupTrigger() {
 // Read by admins only. It reports what HAPPENED, and says "never" plainly when the
 // export has never run — which is the state a fresh paste is in, and the one most
 // likely to be mistaken for "fine".
+// EDITOR-RUN, read-only: turn the two return-only health calls into a visible
+// verdict. getBackupHealth/backupPulse deliberately return objects; the Apps
+// Script editor does not print return values, which looks like "no output".
+function auditNightlyBackup() {
+  var h = readBackupHealth();
+  var p = backupPulse();
+  var lines = ['NIGHTLY BACKUP HEALTH - read-only',
+               'Pulse ok: ' + p.ok,
+               'Last run ms: ' + p.atMs];
+  if (!p.atMs) {
+    lines.push('No backup has run yet.');
+  } else {
+    lines.push('Last run: ' + (h.lastRunAt || '') + ' (' + backupAgeLabel(h.lastRunMs) + ')');
+    lines.push('Recorded ok: ' + (h.ok !== false));
+    lines.push('IRs: ' + (h.irs || 0) + ' · accounts: ' + (h.users || 0) + ' · files read: ' + (h.files || 0));
+    if (h.sheetUrl) lines.push('Backup sheet: ' + h.sheetUrl);
+    if (h.message) lines.push('Message: ' + h.message);
+    if (p.ok !== true) lines.push('VERDICT: STALE OR FAILED — check the last run and backup folder.');
+    else lines.push('VERDICT: HEALTHY.');
+  }
+  lines.forEach(function (l) { report(l); });
+  return 'Nightly backup: ' + (p.ok ? 'healthy' : 'not healthy') + '.';
+}
 function getBackupHealth(email) {
   if (!isAdminEmail(email)) return { status: 'error', message: 'Admins only.' };
   var h = readBackupHealth();
@@ -1997,7 +2290,8 @@ function initializeStore() {
    // and so the backup's file count includes it from the first night.
    [PORTAL_STORE_FILE, { cr: {}, library: [], companies: {} }],
    [STORE_IDS_FILE, {}],
-   [STORE_INDEX, { irs: {} }]
+   [STORE_INDEX, { irs: {} }],
+   [IR_REGISTRY_FILE, { irs: {} }]
   ].forEach(function (pair) {
     if (findStoreFile(pair[0], false)) return;
     writeJson(pair[0], pair[1]);
@@ -2145,6 +2439,59 @@ function setByIdFolder(id) {
   PropertiesService.getScriptProperties().setProperty(BY_ID_FOLDER_PROPERTY, id);
   return report(BY_ID_FOLDER_PROPERTY + ' set to "' + name + '".\n' +
                 'The Report tab will now link each IR to its folder under it.');
+}
+
+function folderIdFromUrl(value) {
+  var s = String(value == null ? '' : value).trim();
+  if (/^[-\w]{25,}$/.test(s)) return s;
+  var m = s.match(/\/folders\/([-\w]{25,})/) || s.match(/[?&]id=([-\w]{25,})/);
+  return m ? m[1] : '';
+}
+
+function formResponseEvidenceFolderId() {
+  try {
+    return String(PropertiesService.getScriptProperties()
+      .getProperty(FORM_EVIDENCE_FOLDER_PROPERTY) || '').trim();
+  } catch (e) { return ''; }
+}
+
+function setFormResponseEvidenceFolder(idOrUrl) {
+  var id = folderIdFromUrl(idOrUrl);
+  if (!id) {
+    var cur = formResponseEvidenceFolderId();
+    return report(FORM_EVIDENCE_FOLDER_PROPERTY + ' is ' + (cur ? 'set.' : 'NOT set.') +
+                  '\nCall setFormResponseEvidenceFolder(\'<the Form upload folder URL or id>\') once.');
+  }
+  var name = '';
+  try { name = DriveApp.getFolderById(id).getName(); }
+  catch (e) {
+    return report('Could not open that folder: ' + ((e && e.message) || String(e)) +
+                  '\nNothing was changed. Check the URL and that this account can read it.');
+  }
+  PropertiesService.getScriptProperties().setProperty(FORM_EVIDENCE_FOLDER_PROPERTY, id);
+  return report(FORM_EVIDENCE_FOLDER_PROPERTY + ' set to "' + name + '".\n' +
+                'Now run auditFormResponseEvidence() before importing.');
+}
+
+function setEmailImportSheetId(idOrUrl) {
+  var s = String(idOrUrl == null ? '' : idOrUrl).trim();
+  var id = (s.match(/\/spreadsheets\/d\/([-\w]{25,})/) || s.match(/[?&]id=([-\w]{25,})/) || [])[1] || s;
+  if (!/^[-\w]{25,}$/.test(id)) {
+    var cur = '';
+    try { cur = PropertiesService.getScriptProperties().getProperty(EMAIL_IMPORT_SHEET_PROPERTY) || ''; }
+    catch (e) { /* unset */ }
+    return report(EMAIL_IMPORT_SHEET_PROPERTY + ' is ' + (cur ? 'set.' : 'NOT set.') +
+                  '\nCall setEmailImportSheetId(\'<Form Responses spreadsheet URL>\') once.');
+  }
+  var ss = null;
+  try { ss = SpreadsheetApp.openById(id); }
+  catch (e) {
+    return report('Could not open that spreadsheet: ' + ((e && e.message) || String(e)) +
+                  '\nNothing was changed. Share it with this account as Viewer, then try again.');
+  }
+  PropertiesService.getScriptProperties().setProperty(EMAIL_IMPORT_SHEET_PROPERTY, id);
+  return report(EMAIL_IMPORT_SHEET_PROPERTY + ' set to "' + ss.getName() + '".\n' +
+                'The email importers can now read Email_Index without the private _store.');
 }
 
 // The ONE place a stored value becomes a Date.
@@ -4269,7 +4616,7 @@ function doGet(e) {
       // The ticket's own correspondence, read live from the email crawl's tab in the
       // intake spreadsheet. Context, not content: nobody edits a mail here, so it is
       // a plain read with no payload and no write path anywhere near it.
-      listIRThreads: function () { return listIRThreads(e.parameter.irNumber); },
+      listIRThreads: function () { return listIRThreads(e.parameter.irNumber, email); },
       listLegacyIRs: function () { return listLegacyIRs(email); },
       getLegacyIR:   function () { return getLegacyIR(e.parameter.irNumber, email); },
       listUsers:     function () { return listUsers(email); },
@@ -4320,6 +4667,12 @@ function doPost(e) {
     if (!email) return buildResponse(unauthorizedResponse());
 
     var authed = {
+      createIR: function () {
+        var p = {};
+        Object.keys(params).forEach(function (k) { p[k] = params[k]; });
+        try { p.files = JSON.parse(params.files || '[]'); } catch (e) { p.files = []; }
+        return createIRFromApp(p, email);
+      },
       saveSection: function () {
         var fields = JSON.parse(params.fields || '{}');
         var files  = JSON.parse(params.files  || '[]');
@@ -4370,6 +4723,9 @@ function doPost(e) {
       // never by the client, and the two-hour gap is a Script Property so it survives
       // a redeploy. See sendPostmaster() for the three refusals.
       sendPostmaster:    function () { return sendPostmaster(params, email); },
+      // The app's confirmation mail path stores the Gmail thread it created. The
+      // sender supplies the ids; this endpoint never invents one.
+      recordIRThread:    function () { requireAdmin(email); return recordIRConfirmationThread(params.irNumber, params.threadId, params.messageId); },
       bulkCreateUsers:   function () { return bulkCreateUsers(params, email); },
       resetUserPassword: function () { return resetUserPassword(params, email); },
       setUserStatus:     function () { return setUserStatus(params, email); },
@@ -6215,8 +6571,183 @@ function purgeUsers(params, authEmail) {
 //    browser would still have posted all of it to their machine. The scope is read
 //    from access.json — one memoised read, and the only store this action touches;
 //    the "reads no store" rule below is about `__IRS__`, and this does not weaken it.
+// ── APP-OWNED IR INTAKE ──────────────────────────────────────────────────────
+// New IRs created in the app live in the registry, not the Form Responses tab.
+// listIRs appends them to the sheet grid so the existing mapper sees one shape.
+var APP_INTAKE_COLUMNS = [
+  { key: 'irNumber',               needles: ['ir number'] },
+  { key: 'dateRaised',             needles: ['timestamp', 'raised on'] },
+  { key: 'incidentDate',           needles: ['date of incident'] },
+  { key: 'droneId',                needles: ['drone serial', 'serial no', 'drone id'] },
+  { key: 'droneModel',             needles: ['drone model'] },
+  { key: 'companyName',            needles: ['where do you work', 'company name'] },
+  { key: 'customerName',           needles: ["who's reporting", 'reported by'] },
+  { key: 'contactPhone',           needles: ['contact phone', 'phone'] },
+  { key: 'contactEmail',           needles: ['email address'] },
+  { key: 'spoc',                   needles: ['spoc'] },
+  { key: 'issueType',              needles: ['what support', 'support required'] },
+  { key: 'issueDesc',              needles: ['please describe', 'description'] },
+  { key: 'incidentLocationWeather',needles: ['incident location and weather'] },
+  { key: 'evidenceFormN',          needles: ['attach files from the incident', 'incident files'] },
+  { key: 'evidenceFormQ',          needles: ['attach screenshot of uav forecast', 'uav forecast'] },
+  { key: 'summaryLink',            needles: ['summary'] }
+];
+
+function appIntakeRow(header, rec) {
+  var fields = (rec && rec.fields && typeof rec.fields === 'object') ? rec.fields : {};
+  var row = new Array(header.length);
+  var h = (header || []).map(function (v) { return String(v == null ? '' : v).toLowerCase().replace(/\s+/g, ' ').trim(); });
+  for (var c = 0; c < header.length; c++) {
+    var val = '';
+    for (var k = 0; k < APP_INTAKE_COLUMNS.length; k++) {
+      var col = APP_INTAKE_COLUMNS[k];
+      if (col.needles.some(function (n) { return h[c].indexOf(n) > -1; })) {
+        val = fields[col.key] == null ? '' : String(fields[col.key]);
+        break;
+      }
+    }
+    row[c] = val;
+  }
+  return row;
+}
+
+function appIRRows(grid) {
+  if (!grid || !grid.length) return grid || [];
+  var out = grid.slice();
+  var header = grid[0] || [];
+  var irCol = irNumberColumnIndex(header);
+  if (irCol < 0) return out;
+  var seen = {};
+  for (var r = 1; r < out.length; r++) {
+    var n = normalizeIRNumber((out[r] || [])[irCol]);
+    if (n) seen[n] = true;
+  }
+  var reg = null;
+  try { reg = irRegistry(); } catch (e) { reg = null; }
+  if (!reg) return out;
+  Object.keys(reg.irs).sort().forEach(function (k) {
+    var rec = reg.irs[k];
+    if (!rec || rec.source !== 'app' || !rec.fields) return;
+    var ir = normalizeIRNumber(rec.irNumber || k);
+    if (!ir || seen[ir]) return;
+    out.push(appIntakeRow(header, rec));
+    seen[ir] = true;
+  });
+  return out;
+}
+
+function appNextIRNumber(current) {
+  var max = 0;
+  Object.keys(current || {}).forEach(function (k) {
+    var m = /^IR(\d+)$/.exec(normalizeIRNumber(k) || '');
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return 'IR' + ('00' + (max + 1)).slice(-3);
+}
+
+function appSummaryText(ir, fields) {
+  var lines = ['IR Summary', 'IR Number: ' + ir];
+  Object.keys(fields).forEach(function (k) {
+    if (k === 'summaryLink' || k === 'irNumber') return;
+    var v = String(fields[k] == null ? '' : fields[k]).trim();
+    if (v) lines.push(k + ': ' + v);
+  });
+  return lines.join('\n');
+}
+
+function createIRFromApp(params, authEmail) {
+  var access = getEffectiveAccess(authEmail);
+  var isCustomer = access.role === 'customer';
+  var company = isCustomer ? String(access.customerOf || '').trim()
+                           : String(params.companyName || '').trim();
+  if (!company) throw new Error('A company is required to raise an IR.');
+  var model = String(params.droneModel || '').trim();
+  if (!model) throw new Error('Select the UAS model.');
+  var serial = params.serialSuffix
+    ? serialForModelSuffix(model, params.serialSuffix)
+    : assertSerialForModel(model, params.droneSerial);
+  if (!serial) throw new Error('Enter the UAS serial number.');
+  var issueDesc = String(params.issueDesc || '').trim();
+  if (!issueDesc) throw new Error('Describe the problem before submitting.');
+  var contactEmail = isCustomer ? usersKey(authEmail) : String(params.contactEmail || '').trim();
+  var customerName = isCustomer
+    ? String((findUser(usersKey(authEmail)) && userField(findUser(usersKey(authEmail)), 'name')) || authEmail).trim()
+    : String(params.customerName || '').trim();
+
+  var current = currentIRRegistry();
+  var ir = appNextIRNumber(current);
+  var now = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+  var fields = {
+    irNumber: ir,
+    dateRaised: now,
+    incidentDate: String(params.incidentDate || '').trim(),
+    droneId: serial,
+    droneModel: model,
+    companyName: company,
+    customerName: customerName,
+    contactPhone: String(params.contactPhone || '').trim(),
+    contactEmail: contactEmail,
+    spoc: String(params.spoc || '').trim(),
+    issueType: String(params.issueType || '').trim(),
+    issueDesc: issueDesc,
+    incidentLocationWeather: String(params.incidentLocationWeather || '').trim(),
+    evidenceFormN: '',
+    evidenceFormQ: '',
+    summaryLink: ''
+  };
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new Error('The service desk is busy. Try again in a moment.');
+  try {
+    var root = DriveApp.getFolderById(byIdFolderId());
+    var folder = findOrCreateIRFolder(root, ir);
+    var linksN = [], linksQ = [];
+    var files = params.files instanceof Array ? params.files : [];
+    files.forEach(function (f) {
+      if (!f || !f.name || !f.base64) return;
+      var mime = resolveMime(f.mimeType, f.name);
+      var blob = Utilities.newBlob(Utilities.base64Decode(f.base64), mime, cleanFileName(ir + ' - ' + f.name));
+      var uploaded = folder.createFile(blob);
+      uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      (String(f.fieldId || '') === 'evidenceFormQ' ? linksQ : linksN).push(uploaded.getUrl());
+    });
+    fields.evidenceFormN = linksN.join(', ');
+    fields.evidenceFormQ = linksQ.join(', ');
+    var summary = createSummaryDocInFolder(ir, folder, appSummaryText(ir, fields));
+    fields.summaryLink = summary.getUrl();
+
+    var reg = readJsonLocked(IR_REGISTRY_FILE);
+    if (!reg || typeof reg !== 'object') reg = { irs: {} };
+    if (!reg.irs || typeof reg.irs !== 'object') reg.irs = {};
+    reg.irs[ir] = {
+      irNumber: ir, source: 'app', status: 'active',
+      folderId: folder.getId(), summaryFileId: summary.getId(),
+      emailThreadId: '', emailMessageId: '',
+      createdBy: usersKey(authEmail), createdAt: now, updatedAt: now, fields: fields
+    };
+    writeJsonLocked(IR_REGISTRY_FILE, reg);
+
+    var cov = readEmailCoverage(root);
+    if (!cov.irs[ir]) cov.irs[ir] = { ir: ir, status: 'not_processed', updatedAt: now };
+    var covFile = emailCoverageFile(root, true);
+    if (covFile) covFile.setContent(JSON.stringify(cov, null, 2));
+
+    try {
+      if (contactEmail) {
+        sendAuthMail(contactEmail, 'I-PASSBOOK IR ' + ir + ' received',
+          'Your report has been received.\n\nIR Number: ' + ir + '\n' + issueDesc);
+      }
+    } catch (e) { /* the IR exists even if the acknowledgement cannot be sent */ }
+
+    return { status: 'ok', irNumber: ir, summaryUrl: isCustomer ? '' : summary.getUrl(),
+             message: 'IR ' + ir + ' raised.' };
+  } finally {
+    lock.releaseLock();
+  }
+}
 function listIRs(authEmail) {
   var grid = intakeGrid();
+  grid = appIRRows(grid);
 
   // Deliberately NOT wrapped in try/catch. customerCompany() throws on a malformed
   // access.json, and for THIS action that throw is the correct answer: the choice is
@@ -6235,9 +6766,13 @@ function listIRs(authEmail) {
 // The intake sheet as a grid, exactly as the sheet DISPLAYS it. One place, because
 // three actions now read it and a second copy of "open, find the tab, get the range"
 // is a second place for a bounds bug.
-function intakeGrid() {
+function intakeSheet() {
   var ss  = SpreadsheetApp.openById(requireStoreId('irRepoSheetId'));
-  var tab = ss.getSheetByName(CONFIG.IR_REPO_TAB);
+  return ss.getSheetByName(CONFIG.IR_REPO_TAB);
+}
+
+function intakeGrid(sheet) {
+  var tab = sheet || intakeSheet();
   if (!tab) throw new Error('Tab "' + CONFIG.IR_REPO_TAB + '" not found in IR Repository.');
 
   var lastRow = tab.getLastRow();
@@ -6365,9 +6900,17 @@ function rememberEmailThreads(ticket, result) {
 // ticket with no threads is the COMMON case — 82 of the 452 have nothing in either
 // mailbox — and those are exactly the reads that would otherwise pay a full sheet
 // scan for a known-empty answer.
-function listIRThreads(irNumber) {
+function listIRThreads(irNumber, authEmail) {
   var want = irKey(irNumber);
   if (!want) return { status: 'ok', messages: [], truncated: false };
+
+  // The frontend may pass any IR; a customer's portal must not be able to read the
+  // correspondence of another company's ticket. Staff see every IR, as everywhere
+  // else. The scope check is before the cache: a cached ticket is still private.
+  var access = getEffectiveAccess(authEmail);
+  var company = access.customerOf || '';
+  if (company && !customerOwnsIR(company, want))
+    throw new Error('Forbidden: ' + want + ' is not one of your tickets.');
 
   // An empty answer is cached like any other. See the note below on why this is a
   // speed-up and nothing else.
@@ -7383,11 +7926,20 @@ function getArchiveFolder(create) {
 function getOrCreateSectionFolder(irNumber, sectionId) {
   // The IR folder wherever it now lives — NOT always the root. An upload to an
   // archived ticket lands beside the files already there.
-  var found = findIRFolder(irNumber, true);
+  assertRealIR(irNumber);
+  var irFolder = null;
+  var evidenceRootId = byIdFolderId();
+  if (evidenceRootId) {
+    var evidenceRoot = DriveApp.getFolderById(evidenceRootId);
+    var it = evidenceRoot.getFoldersByName(irNumber);
+    irFolder = it.hasNext() ? it.next() : evidenceRoot.createFolder(irNumber);
+  } else {
+    irFolder = findIRFolder(irNumber, true).folder;
+  }
 
   // Section folder: e.g., "Section B - Inward Checklist"
   var sectionLabel = getSectionLabel(sectionId);
-  var sectionFolder = getOrCreateSubfolder(found.folder, sectionLabel);
+  var sectionFolder = getOrCreateSubfolder(irFolder, sectionLabel);
 
   return sectionFolder;
 }
@@ -7396,6 +7948,137 @@ function getOrCreateSubfolder(parent, name) {
   var it = parent.getFoldersByName(name);
   if (it.hasNext()) return it.next();
   return parent.createFolder(name);
+}
+// ── OLD APP UPLOADS → By ID ──────────────────────────────────────────────────
+// New uploads already land in By ID/IRxxx (getOrCreateSectionFolder). Uploads made
+// by older builds still sit in the app root's IRxxx folders. This is the one-time
+// migration: plan first, then merge. It never deletes a file; name collisions are
+// reported and left in place.
+function countAppUploadTree(folder) {
+  var files = 0, folders = 0;
+  var walk = function (f) {
+    files += listAll(f.getFiles()).length;
+    listAll(f.getFolders()).forEach(function (sub) { folders++; walk(sub); });
+  };
+  walk(folder);
+  return { files: files, folders: folders };
+}
+
+function appUploadMigrationPlan() {
+  var oldRoot = null, byIdId = byIdFolderId();
+  try { oldRoot = getRootFolder(); }
+  catch (e) { return { error: 'OLD ROOT: ' + ((e && e.message) || String(e)), items: [] }; }
+  if (!byIdId) return { error: 'BY_ID_FOLDER_ID is not set.', items: [] };
+  if (oldRoot.getId() === byIdId) return { error: 'The old app root and By ID are the same folder.', items: [] };
+  var byId = null;
+  try { byId = DriveApp.getFolderById(byIdId); }
+  catch (e) { return { error: 'BY ID: ' + ((e && e.message) || String(e)), items: [] }; }
+  var items = [];
+  listAll(oldRoot.getFolders()).forEach(function (folder) {
+    var name = String(folder.getName());
+    if (!/^IR\d+$/.test(name)) return;
+    var ir = normalizeIRNumber(name);
+    if (!ir) return;
+    var target = byId.getFoldersByName(ir).hasNext() ? byId.getFoldersByName(ir).next() : null;
+    var counts = countAppUploadTree(folder);
+    items.push({ ir: ir, oldName: name, action: target ? 'merge' : 'move-folder',
+                 files: counts.files, folders: counts.folders,
+                 targetFolderId: target ? target.getId() : '' });
+  });
+  return { error: '', oldRootId: oldRoot.getId(), byIdId: byIdId, items: items };
+}
+
+function planAppUploadMigration() {
+  var plan = appUploadMigrationPlan();
+  if (plan.error) return report('APP UPLOAD PLAN: ' + plan.error);
+  var lines = ['APP UPLOAD MIGRATION PLAN - read-only',
+               'Old IR folders to reconcile: ' + plan.items.length];
+  plan.items.forEach(function (x) {
+    lines.push('  ' + x.ir + ' (' + x.oldName + ') → ' + x.action +
+               ' · ' + x.files + ' file(s), ' + x.folders + ' subfolder(s)');
+  });
+  var review = byIdReviewFolder(DriveApp.getFolderById(plan.byIdId));
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HHmmss');
+  review.createFile('app-upload-migration-plan-' + stamp + '.json',
+                    JSON.stringify(plan, null, 2), MimeType.PLAIN_TEXT);
+  lines.forEach(function (l) { report(l); });
+  return 'App upload plan: ' + plan.items.length + ' old IR folder(s).';
+}
+
+function mergeAppUploadFolder(oldFolder, newFolder, result, path) {
+  listAll(oldFolder.getFiles()).forEach(function (f) {
+    var name = String(f.getName());
+    if (hasFileInFolder(newFolder, name)) {
+      result.collisions.push(path + '/' + name);
+      return;
+    }
+    f.moveTo(newFolder);
+    result.files++;
+  });
+  listAll(oldFolder.getFolders()).forEach(function (sub) {
+    var name = String(sub.getName());
+    var it = newFolder.getFoldersByName(name);
+    if (it.hasNext()) {
+      mergeAppUploadFolder(sub, it.next(), result, path + '/' + name);
+    } else {
+      sub.moveTo(newFolder);
+      result.folders++;
+    }
+  });
+}
+
+function migrateAppUploadsToByIdApply() {
+  var plan = appUploadMigrationPlan();
+  if (plan.error) return report('APP UPLOAD APPLY: ' + plan.error);
+  var byId = DriveApp.getFolderById(plan.byIdId);
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('APP UPLOAD APPLY: another run holds the lock.');
+  var result = { movedFolders: 0, movedFiles: 0, movedSubfolders: 0,
+                 collisions: [], errors: [], at: new Date().toISOString() };
+  try {
+    var oldRoot = DriveApp.getFolderById(plan.oldRootId);
+    listAll(oldRoot.getFolders()).forEach(function (folder) {
+      var name = String(folder.getName());
+      if (!/^IR\d+$/.test(name)) return;
+      var ir = normalizeIRNumber(name);
+      if (!ir) return;
+      var targetIt = byId.getFoldersByName(ir);
+      var target = targetIt.hasNext() ? targetIt.next() : null;
+      try {
+        if (!target) {
+          if (name !== ir) folder.setName(ir);
+          folder.moveTo(byId);
+          result.movedFolders++;
+          return;
+        }
+        mergeAppUploadFolder(folder, target, result, ir);
+        if (!folder.getFiles().hasNext() && !folder.getFolders().hasNext()) {
+          var review = byIdReviewFolder(byId);
+          var archive = getOrCreateSubfolder(review, 'legacy-app-upload-folders');
+          var destIt = archive.getFoldersByName(ir);
+          var dest = destIt.hasNext() ? destIt.next() : archive.createFolder(ir);
+          folder.moveTo(dest);
+          result.movedFolders++;
+        }
+      } catch (e) {
+        result.errors.push(ir + ': ' + ((e && e.message) || String(e)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  var review = byIdReviewFolder(byId);
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HHmmss');
+  review.createFile('app-upload-migration-' + stamp + '.json',
+                    JSON.stringify(result, null, 2), MimeType.PLAIN_TEXT);
+  report('APP UPLOAD MIGRATION');
+  report('Moved folders: ' + result.movedFolders + ' · files: ' + result.movedFiles +
+         ' · subfolders: ' + result.movedSubfolders);
+  report('Collisions left in place: ' + result.collisions.length +
+         ' · errors: ' + result.errors.length);
+  if (result.collisions.length) report('COLLISIONS: ' + result.collisions.slice(0, 50).join(', '));
+  if (result.errors.length) report('ERRORS: ' + result.errors.slice(0, 50).join(' | '));
+  return 'App upload migration: ' + result.movedFolders + ' folders, ' + result.movedFiles + ' files.';
 }
 
 // Drive folder label for a section's uploads. NOT the section's display name, and
@@ -8979,9 +9662,15 @@ function evidenceColumnIndexes(headerRow) {
     }
     return -1;
   }
+  var all = [];
+  for (var c = 0; c < header.length; c++) {
+    if (header[c].indexOf('evidence') > -1 || header[c].indexOf('attach') > -1 ||
+        header[c].indexOf('file response') > -1) all.push(c);
+  }
   return {
     n: find(['evidence: attach files from the incident', 'attach files from the incident']),
-    q: find(['evidence: attach screenshot of uav forecast', 'attach screenshot of uav forecast', 'uav forecast'])
+    q: find(['evidence: attach screenshot of uav forecast', 'attach screenshot of uav forecast', 'uav forecast']),
+    all: all
   };
 }
 
@@ -9625,6 +10314,2152 @@ function folderSubfolderNames(folder) {
   return listAll(folder.getFolders()).map(function (f) { return f.getName(); });
 }
 
+function hasFileInFolder(folder, name) {
+  try { return folder.getFilesByName(name).hasNext(); }
+  catch (e) { return false; }
+}
+
+function cleanFileName(name) {
+  return String(name == null ? '' : name).replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 240) || 'attachment';
+}
+
+function uniqueFileName(folder, name) {
+  var clean = cleanFileName(name);
+  if (!hasFileInFolder(folder, clean)) return clean;
+  var dot = clean.lastIndexOf('.');
+  var base = dot > 0 ? clean.slice(0, dot) : clean;
+  var ext = dot > 0 ? clean.slice(dot) : '';
+  for (var i = 2; i < 500; i++) {
+    var candidate = base + ' (' + i + ')' + ext;
+    if (!hasFileInFolder(folder, candidate)) return candidate;
+  }
+  return base + ' (' + Date.now() + ')' + ext;
+}
+
+function collectFormEvidenceSource(folder, path, out) {
+  listAll(folder.getFiles()).forEach(function (file) {
+    out.push({ file: file, path: path.slice(), name: file.getName() });
+  });
+  listAll(folder.getFolders()).forEach(function (sub) {
+    collectFormEvidenceSource(sub, path.concat([sub.getName()]), out);
+  });
+  return out;
+}
+
+// The deepest folder that names an IR wins. A folder such as
+// `IR244/IR251, IR244` returns both IRs, so its files are copied to both.
+function formEvidenceIRs(path, fileName) {
+  for (var i = path.length - 1; i >= 0; i--) {
+    var irs = irNumbersInName(path[i]);
+    if (irs.length) return irs;
+  }
+  return irNumbersInName(fileName);
+}
+
+function formResponseEvidenceEntries() {
+  var sourceId = formResponseEvidenceFolderId();
+  if (!sourceId) throw new Error(FORM_EVIDENCE_FOLDER_PROPERTY + ' is not set. Run setFormResponseEvidenceFolder(<url>) once.');
+  var source = DriveApp.getFolderById(sourceId);
+  return { folder: source, entries: collectFormEvidenceSource(source, [], []) };
+}
+
+// The sheet is the authority when a Form upload sits outside an IR folder or has
+// no IR in its name. Map every N/Q file id to the IR row that links it.
+function sheetEvidenceIRMap() {
+  var map = {};
+  try {
+    var sheet = intakeSheet();
+    var grid = intakeGrid(sheet);
+    if (!grid || grid.length < 2) return map;
+    var irCol = irNumberColumnIndex(grid[0]);
+    if (irCol < 0) return map;
+    for (var r = 1; r < grid.length; r++) {
+      var row = grid[r] || [];
+      var ir = normalizeIRNumber(row[irCol]);
+      if (!ir) continue;
+      // Scan EVERY column. The form has added evidence questions outside N/Q;
+      // the owner confirmed the IR086 file lives in O84.
+      for (var c = 0; c < row.length; c++) {
+        driveFileIdsInCell(row[c]).forEach(function (id) {
+          if (!map[id]) map[id] = [];
+          if (map[id].indexOf(ir) < 0) map[id].push(ir);
+        });
+      }
+    }
+  } catch (e) { /* no sheet answer: the path mapping still works */ }
+  return map;
+}
+
+function evidenceIRsForFile(file, path, name, sheetMap) {
+  var out = [];
+  (sheetMap[file.getId()] || []).forEach(function (ir) { if (out.indexOf(ir) < 0) out.push(ir); });
+  formEvidenceIRs(path, name).forEach(function (ir) { if (out.indexOf(ir) < 0) out.push(ir); });
+  return out;
+}
+
+function auditFormResponseEvidence() {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('FORM EVIDENCE AUDIT: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('FORM EVIDENCE AUDIT: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('FORM EVIDENCE AUDIT: BY_ID_FOLDER_ID is not set.');
+
+  var stats = { files: entries.length, already: 0, missing: 0, noIR: 0, missingFolders: 0 };
+  var samples = [], sheetMap = sheetEvidenceIRMap();
+  entries.forEach(function (e) {
+    var irs = evidenceIRsForFile(e.file, e.path, e.name, sheetMap);
+    if (!irs.length) { stats.noIR++; return; }
+    var anyMissing = false;
+    irs.forEach(function (ir) {
+      var it = root.getFoldersByName(ir);
+      if (!it.hasNext()) { stats.missingFolders++; anyMissing = true; return; }
+      if (!fileIsUnderFolder(e.file, it.next().getId())) anyMissing = true;
+    });
+    if (anyMissing) {
+      stats.missing++;
+      if (samples.length < 100) samples.push(e.path.concat([e.name]).join('/'));
+    } else {
+      stats.already++;
+    }
+  });
+
+  var lines = ['FORM EVIDENCE AUDIT - read-only',
+               'Source: ' + source.getName() + ' (' + source.getUrl() + ')',
+               'Files: ' + stats.files + ' · already in By ID: ' + stats.already +
+               ' · to import: ' + stats.missing + ' · no IR in path: ' + stats.noIR +
+               ' · target folders missing: ' + stats.missingFolders];
+  if (samples.length) {
+    lines.push('To import (first ' + samples.length + '):');
+    samples.forEach(function (s) { lines.push('  ' + s); });
+  }
+  lines.forEach(function (l) { report(l); });
+  return 'Form evidence audit: ' + stats.missing + ' to import, ' + stats.noIR + ' without an IR.';
+}
+
+// Read-only list of the files the normal importer cannot place: no IR in the
+// folder path and no IR in the file name. These are the files that need a manual
+// mapping or a serial-based mapping. Nothing is moved.
+function listFormResponseFilesWithoutIR() {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('UNMATCHED FORM FILES: ' + ((e && e.message) || String(e))); }
+
+  var lines = ['UNMATCHED FORM FILES - read-only', 'Source: ' + source.getName()];
+  var found = 0, sheetMap = sheetEvidenceIRMap();
+  entries.forEach(function (e) {
+    if (evidenceIRsForFile(e.file, e.path, e.name, sheetMap).length) return;
+    found++;
+    var created = '';
+    try { created = Utilities.formatDate(e.file.getDateCreated(), 'Asia/Kolkata', 'dd-MMM-yyyy'); }
+    catch (err) { created = '?'; }
+    lines.push('  ' + e.path.concat([e.name]).join('/') +
+               ' | ' + Math.round(e.file.getSize() / 1024) + ' KB | ' + created +
+               ' | id: ' + e.file.getId());
+  });
+  lines.push('');
+  lines.push('Files with no IR in folder or file name: ' + found);
+  lines.push('Nothing was moved. Send this list for mapping.');
+  lines.forEach(function (l) { report(l); });
+  return 'Unmatched Form files: ' + found + '.';
+}
+
+// Moves only the files that neither path/name nor the sheet N/Q link can place
+// into `By ID/_review/unmatched-form-files/`. Nothing is deleted and no file is
+// assigned to an IR; this is a holding area for manual mapping.
+function moveUnmatchedFormFilesApply() {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('MOVE UNMATCHED: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('MOVE UNMATCHED: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('MOVE UNMATCHED: BY_ID_FOLDER_ID is not set.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('MOVE UNMATCHED: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var it = review.getFoldersByName('unmatched-form-files');
+  var target = it.hasNext() ? it.next() : review.createFolder('unmatched-form-files');
+  var sheetMap = sheetEvidenceIRMap();
+  var lines = ['MOVE UNMATCHED FORM FILES - no deletion', 'Source: ' + source.getName()];
+  var moved = 0, skipped = 0, failed = 0;
+  try {
+    entries.forEach(function (e) {
+      if (evidenceIRsForFile(e.file, e.path, e.name, sheetMap).length) return;
+      try {
+        var original = e.file.getName();
+        var name = uniqueFileName(target, original);
+        e.file.moveTo(target);
+        if (name !== original) e.file.setName(name);
+        moved++;
+        if (moved <= 100) lines.push('  ' + e.name + ' -> ' + name);
+      } catch (err) {
+        failed++;
+        if (failed <= 20) lines.push('  ' + e.name + ' failed: ' + ((err && err.message) || String(err)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Moved: ' + moved + ' · skipped mapped: ' + skipped + ' · failed: ' + failed);
+  lines.push('They are in By ID/_review/unmatched-form-files. No IR was assigned.');
+  lines.forEach(function (l) { report(l); });
+  return 'Moved unmatched Form files: ' + moved + ', failed: ' + failed + '.';
+}
+
+function headerIndex(header, needles) {
+  var h = (header || []).map(function (v) { return String(v == null ? '' : v).toLowerCase(); });
+  for (var n = 0; n < needles.length; n++) {
+    for (var c = 0; c < h.length; c++) {
+      if (h[c].indexOf(needles[n]) > -1) return c;
+    }
+  }
+  return -1;
+}
+
+function serialKey(v) {
+  return String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// The owner's serial formats, copied from the app's canonicalSerial:
+// S25XXX, S75XXX, S25PXXX, S100-XXX, and the R&D version forms. A specific
+// filename typo the owner confirmed is kept in the alias table rather than
+// guessed by a broad rule.
+var SERIAL_FILE_ALIASES = { 'S24008': 'S25008' };
+
+// Owner-confirmed one-off mappings for the 67 Form files that cannot be inferred
+// safely. These are exact/prefix names, not heuristics.
+var MANUAL_FORM_EVIDENCE_MAP = {
+  '00000115 - Sanjay Prajapati.BIN': 'IR086',
+  'S25022 20 Dec, 2023': 'IR048',
+  'S24008-01': 'IR046',
+  'S25008': 'IR046',
+  '19 Dec 23 Good Flight': 'IR048'
+};
+
+function manualFormIR(name) {
+  var s = String(name == null ? '' : name);
+  if (MANUAL_FORM_EVIDENCE_MAP[s]) return MANUAL_FORM_EVIDENCE_MAP[s];
+  var keys = Object.keys(MANUAL_FORM_EVIDENCE_MAP);
+  for (var i = 0; i < keys.length; i++) {
+    if (s.indexOf(keys[i]) === 0) return MANUAL_FORM_EVIDENCE_MAP[keys[i]];
+  }
+  return '';
+}
+
+function canonicalSerialValue(raw) {
+  var s = String(raw == null ? '' : raw).toUpperCase().trim();
+  if (!s) return '';
+  var alias = SERIAL_FILE_ALIASES[serialKey(s)];
+  if (alias) s = alias;
+  var c75 = /^S75[-_ .]?([A-Z]{4,})$/.exec(s);
+  if (c75 && !/^V\d+$/.test(c75[1])) return 'S75-' + c75[1];
+  var rd = /^(S100|S25P|S75|S25)[-_ .]?V[-_ .]?(\d{1,2})(?:\s*R\s*&\s*D)?$/.exec(s);
+  if (rd) return rd[1] + '-V' + String(Number(rd[2]));
+  var m = /^(S100|S25P|S75|S25)[-_ .]?(\d{1,3})$/.exec(s);
+  if (!m) return s;
+  var head = m[1] === 'S100' ? 'S100-' : m[1];
+  return head + ('00' + m[2]).slice(-3);
+}
+
+// ── SERIAL NOMENCLATURE (shared rule for every intake path) ──────────────────
+// The model chooses the fixed prefix; the user only supplies the numeric body.
+// SIGMA 25 / SIGMA25G -> S25XXX, SIGMA 25 PRO -> S25PXXX,
+// SIGMA 100 -> S100-XXX, SIGMA 75 -> S75XXX.
+function serialModelPrefix(model) {
+  var m = String(model == null ? '' : model).toUpperCase();
+  if (/SIGMA\s*25\s*PRO/.test(m)) return 'S25P';
+  if (/SIGMA\s*100/.test(m)) return 'S100-';
+  if (/SIGMA\s*75/.test(m)) return 'S75';
+  if (/SIGMA\s*25\s*G|SIGMA\s*25G|SIGMA\s*25/.test(m)) return 'S25';
+  return '';
+}
+
+function serialForModelSuffix(model, suffix) {
+  var prefix = serialModelPrefix(model);
+  var digits = String(suffix == null ? '' : suffix).replace(/[^0-9]/g, '');
+  if (!prefix || !digits || digits.length > 3) return '';
+  return prefix + ('00' + digits).slice(-3);
+}
+
+function serialNomenclatureProblem(serial) {
+  var s = canonicalSerialValue(serial);
+  if (!s) return '';
+  if (/^S75-[A-Z]{4,}$/.test(s)) return '';
+  if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) || /^S100-V\d{1,2}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX (R&D: S100-Vn)';
+  if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) || /^S25P-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX (R&D: S25P-Vn)';
+  if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) || /^S75-V\d{1,2}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX (R&D: S75-Vn)';
+  if (/^S25/.test(s)) return /^S25\d{3}$/.test(s) || /^S25-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 serials read S25XXX (R&D: S25-Vn)';
+  return '';
+}
+
+function serialMatchesModel(model, serial) {
+  var prefix = serialModelPrefix(model);
+  var s = canonicalSerialValue(serial);
+  if (!prefix || !s) return true;
+  if (prefix === 'S25') return /^S25\d{3}$/.test(s) || /^S25-V\d{1,2}$/.test(s);
+  if (prefix === 'S25P') return /^S25P\d{3}$/.test(s) || /^S25P-V\d{1,2}$/.test(s);
+  if (prefix === 'S100-') return /^S100-\d{3}$/.test(s) || /^S100-V\d{1,2}$/.test(s);
+  if (prefix === 'S75') return /^S75\d{3}$/.test(s) || /^S75-V\d{1,2}$/.test(s);
+  return s.indexOf(prefix) === 0;
+}
+
+function assertSerialForModel(model, serial) {
+  var s = canonicalSerialValue(serial);
+  var why = serialNomenclatureProblem(s);
+  if (why) throw new Error('UAS serial "' + String(serial == null ? '' : serial) + '" is not valid: ' + why + '.');
+  if (!serialMatchesModel(model, s))
+    throw new Error('UAS serial "' + s + '" does not match ' + String(model || 'the selected model') + '.');
+  return s;
+}
+
+// Read-only: list existing IRs whose serial is malformed or auto-normalisable.
+function auditSerialNomenclature() {
+  var sheet = null, grid = null;
+  try { sheet = intakeSheet(); grid = intakeGrid(sheet); }
+  catch (e) { return report('SERIAL AUDIT: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!grid || grid.length < 2) return report('SERIAL AUDIT: no rows.');
+  var header = grid[0];
+  var irCol = irNumberColumnIndex(header);
+  var snCol = headerIndex(header, ['drone serial', 'serial no', 'drone id', 'serial']);
+  var modelCol = headerIndex(header, ['drone model', 'model']);
+  if (irCol < 0 || snCol < 0) return report('SERIAL AUDIT: no IR or serial column.');
+  var malformed = [], fixable = [], free = [], byModel = {}, canonical = 0;
+  for (var r = 1; r < grid.length; r++) {
+    var ir = normalizeIRNumber((grid[r] || [])[irCol]);
+    if (!ir) continue;
+    var raw = String((grid[r] || [])[snCol] == null ? '' : grid[r][snCol]).trim();
+    var model = modelCol >= 0 ? String((grid[r] || [])[modelCol] == null ? '' : grid[r][modelCol]).trim() : '';
+    if (!raw) continue;
+    byModel[model || '(blank)'] = (byModel[model || '(blank)'] || 0) + 1;
+    // Free-written equipment names (DJI, MAVIC, FIGHTER...) are outside R-108;\n    // only values that look like one of our serial prefixes are normalised/asked.\n    if (!/^S(100|25P|25|75)/i.test(raw)) { free.push({ ir: ir, raw: raw, model: model }); continue; }\n    var canon = canonicalSerialValue(raw);
+    var why = serialNomenclatureProblem(canon);
+    if (why) malformed.push({ ir: ir, raw: raw, model: model, why: why });
+    else if (canon !== raw) fixable.push({ ir: ir, raw: raw, canonical: canon, model: model });
+    else canonical++;
+  }
+  var lines = ['SERIAL NOMENCLATURE AUDIT - read-only',
+               'Rows with a serial: ' + Object.keys(byModel).reduce(function (n, k) { return n + byModel[k]; }, 0),
+               'Already canonical: ' + canonical,
+               'Auto-normalisable: ' + fixable.length,
+               'Malformed / needs CR: ' + malformed.length,
+               'Free-written / out of scope: ' + free.length];
+  Object.keys(byModel).sort().forEach(function (m) { lines.push('  ' + m + ': ' + byModel[m]); });
+  fixable.slice(0, 30).forEach(function (x) { lines.push('  FIX ' + x.ir + ': ' + x.raw + ' -> ' + x.canonical); });
+  malformed.slice(0, 30).forEach(function (x) { lines.push('  ASK ' + x.ir + ': ' + x.raw + ' (' + x.model + ') - ' + x.why); });
+  lines.forEach(function (l) { report(l); });
+  return 'Serial audit: ' + fixable.length + ' fixable, ' + malformed.length + ' malformed.';
+}
+function serialTokens(text) {
+  var out = [], seen = {};
+  var s = String(text == null ? '' : text);
+  // The lookahead prevents "S25022 20 Dec" becoming S2502220. Each branch stops
+  // at the real serial length; a separate S\\d{5} branch catches the S24008 typo
+  // so the alias table can correct it.
+  var re = /(S100[-\s]?\d{1,3}|S100[-\s]?V\d{1,2}|S25P[-\s]?\d{1,3}|S25P[-\s]?V\d{1,2}|S75[-\s]?\d{1,3}|S75[-\s]?V\d{1,2}|S25[-\s]?\d{1,3}|S25[-\s]?V\d{1,2}|S\d{5}|SIG[A-Z0-9]{4,})(?![0-9])/ig, m;
+  while ((m = re.exec(s))) {
+    var canonical = canonicalSerialValue(m[1]);
+    var k = serialKey(canonical);
+    if (k && !seen[k]) { seen[k] = true; out.push(k); }
+  }
+  return out;
+}
+
+function dayMs(value) {
+  if (value instanceof Date) return value.getTime();
+  var s = String(value == null ? '' : value).trim();
+  if (!s) return null;
+  var t = parseAuditTimestamp(s);
+  if (t !== null) return t;
+  if (/^\d{1,2}-[A-Za-z]{3}-\d{4}$/.test(s)) t = parseAuditTimestamp(s + ' 00:00:00');
+  if (t !== null) return t;
+  var d = Date.parse(s);
+  return isNaN(d) ? null : d;
+}
+
+function chooseIRBySerial(candidates, fileDay) {
+  if (!candidates.length) return null;
+  if (candidates.length === 1) return candidates[0];
+  if (fileDay === null) return null;
+  var scored = candidates.map(function (c) {
+    return { c: c, days: c.dateMs === null ? 99999 : Math.abs(c.dateMs - fileDay) / 86400000 };
+  }).sort(function (a, b) { return a.days - b.days; });
+  if (scored[0].days > 60) return null;
+  if (scored.length > 1 && scored[1].days - scored[0].days < 15) return null;
+  return scored[0].c;
+}
+
+function mapUnmatchedFormFilesBySerialApply() { return mapUnmatchedFormFilesBySerialCore(true); }
+function auditUnmatchedFormFilesBySerial() { return mapUnmatchedFormFilesBySerialCore(false); }
+
+function mapUnmatchedFormFilesBySerialCore(apply) {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('SERIAL MAP: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('SERIAL MAP: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('SERIAL MAP: BY_ID_FOLDER_ID is not set.');
+
+  var sheet = null, grid = null;
+  try {
+    sheet = intakeSheet();
+    grid = intakeGrid(sheet);
+  } catch (e) { return report('SERIAL MAP: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!grid || grid.length < 2) return report('SERIAL MAP: response sheet has no rows.');
+  var header = grid[0];
+  var irCol = irNumberColumnIndex(header);
+  var droneCol = headerIndex(header, ['drone serial', 'serial no', 'drone id', 'serial']);
+  var tsCol = headerIndex(header, ['timestamp']);
+  var incCol = headerIndex(header, ['date of incident']);
+  if (irCol < 0 || droneCol < 0) return report('SERIAL MAP: no IR or Drone Serial column.');
+
+  var bySerial = {};
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var ir = normalizeIRNumber(row[irCol]);
+    if (!ir) continue;
+    var k = serialKey(row[droneCol]);
+    // Evidence is dated by the incident, not by when the form was raised.
+    var dateMs = incCol >= 0 ? dayMs(row[incCol]) : null;
+    if (dateMs === null && tsCol >= 0) dateMs = dayMs(row[tsCol]);
+    if (!k) continue;
+    if (!bySerial[k]) bySerial[k] = [];
+    bySerial[k].push({ ir: ir, dateMs: dateMs });
+  }
+
+  var sheetMap = sheetEvidenceIRMap();
+  var archive = null;
+  if (apply) {
+    var review = byIdReviewFolder(root);
+    var it = review.getFoldersByName('unmatched-form-files');
+    archive = it.hasNext() ? it.next() : review.createFolder('unmatched-form-files');
+  }
+  var lock = apply ? LockService.getScriptLock() : null;
+  if (lock && !lock.tryLock(30000)) return report('SERIAL MAP: another run holds the lock.');
+
+  var lines = ['SERIAL MAP - ' + (apply ? 'APPLY' : 'DRY RUN'), 'Source: ' + source.getName()];
+  var matched = 0, archived = 0, failed = 0, decisions = [];
+  try {
+    entries.forEach(function (e) {
+      if (evidenceIRsForFile(e.file, e.path, e.name, sheetMap).length) return;
+      var manualIR = manualFormIR(e.name);
+      var tokens = serialTokens(e.path.concat([e.name]).join(' '));
+      var candidates = [], seen = {};
+      tokens.forEach(function (k) {
+        (bySerial[k] || []).forEach(function (c) {
+          if (!seen[c.ir]) { seen[c.ir] = true; candidates.push(c); }
+        });
+      });
+      var fileDay = dayMs(e.name);
+      if (fileDay === null) {
+        try { fileDay = e.file.getDateCreated().getTime(); } catch (err) { fileDay = null; }
+      }
+      // No serial means no automatic placement. Owner-confirmed cases are in
+      // MANUAL_FORM_EVIDENCE_MAP; everything else goes to review.
+      var pick = manualIR ? { ir: manualIR } : chooseIRBySerial(candidates, fileDay);
+      if (pick) {
+        matched++;
+        lines.push('  ' + (manualIR ? 'MANUAL MATCH ' : 'MATCH ') + e.name + ' -> ' + pick.ir +
+                   (manualIR ? ' (owner-confirmed)' : ' (serial ' + tokens.join(',') + ')'));
+        decisions.push({ file: e.name, path: e.path.join('/'), action: 'match', ir: pick.ir,
+                         reason: manualIR ? 'owner-confirmed' : 'serial/date',
+                         serials: tokens, candidates: candidates.map(function (c) { return c.ir; }) });
+        if (apply) {
+          try {
+            var folder = findOrCreateIRFolder(root, pick.ir);
+            var original = e.file.getName();
+            var name = uniqueFileName(folder, original);
+            e.file.moveTo(folder);
+            if (name !== original) e.file.setName(name);
+          } catch (err2) { failed++; lines.push('  MATCH FAILED ' + e.name + ': ' + err2.message); }
+        }
+      } else {
+        archived++;
+        lines.push('  ARCHIVE ' + e.name + (candidates.length ? ' (ambiguous: ' +
+                   candidates.map(function (c) { return c.ir; }).join(',') + ')' : ' (no serial)'));
+        decisions.push({ file: e.name, path: e.path.join('/'), action: 'archive',
+                         candidates: candidates.map(function (c) { return c.ir; }),
+                         reason: candidates.length ? 'ambiguous' : 'no serial' });
+        if (apply) {
+          try {
+            var original2 = e.file.getName();
+            var name2 = uniqueFileName(archive, original2);
+            e.file.moveTo(archive);
+            if (name2 !== original2) e.file.setName(name2);
+          } catch (err3) { failed++; lines.push('  ARCHIVE FAILED ' + e.name + ': ' + err3.message); }
+        }
+      }
+    });
+    if (apply) {
+      try {
+        var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+        var mapFile = review.createFile('unmatched-form-map-' + stamp + '.json',
+          JSON.stringify(decisions, null, 2), MimeType.PLAIN_TEXT);
+        lines.push('Mapping report: ' + mapFile.getUrl());
+      } catch (e) { lines.push('Mapping report failed: ' + ((e && e.message) || String(e))); }
+    }
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+  lines.push('Matched: ' + matched + ' A� archived: ' + archived + ' A� failed: ' + failed);
+  if (!apply) lines.push('Dry run only. Nothing moved.');
+  lines.forEach(function (l) { report(l); });
+  return 'Serial map: ' + matched + ' matched, ' + archived + ' archived, ' + failed + ' failed.';
+}
+
+// Final, owner-approved disposition of the 67 Form files: the five explicitly
+// decided files go to their IR folders; every other file is archived. No file is
+// deleted. This does not use heuristics.
+function archiveRemainingFormFilesApply() {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('FORM FILES FINAL: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('FORM FILES FINAL: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('FORM FILES FINAL: BY_ID_FOLDER_ID is not set.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('FORM FILES FINAL: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var it = review.getFoldersByName('unmatched-form-files');
+  var archive = it.hasNext() ? it.next() : review.createFolder('unmatched-form-files');
+  var actions = [], matched = 0, archived = 0, failed = 0;
+  try {
+    entries.forEach(function (e) {
+      var manual = manualFormIR(e.name);
+      var target = null, action = '';
+      try {
+        if (manual) { target = findOrCreateIRFolder(root, manual); action = 'match'; }
+        else { target = archive; action = 'archive'; }
+        var original = e.file.getName();
+        var name = uniqueFileName(target, original);
+        e.file.moveTo(target);
+        if (name !== original) e.file.setName(name);
+        if (manual) matched++; else archived++;
+        actions.push({ file: original, fileId: e.file.getId(), action: action,
+                       ir: manual || '', destination: target.getName(), finalName: name });
+      } catch (err) {
+        failed++;
+        actions.push({ file: e.name, fileId: e.file.getId(), action: action || 'unknown',
+                       ir: manual || '', error: (err && err.message) || String(err) });
+      }
+    });
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+    var reportFile = review.createFile('form-files-final-' + stamp + '.json',
+      JSON.stringify(actions, null, 2), MimeType.PLAIN_TEXT);
+    report('FORM FILES FINAL - APPLY');
+    report('Matched to IR: ' + matched + ' · archived: ' + archived + ' · failed: ' + failed);
+    report('Report: ' + reportFile.getUrl());
+    actions.forEach(function (x) { report('  ' + JSON.stringify(x)); });
+    return 'Form files final: ' + matched + ' matched, ' + archived + ' archived, ' + failed + ' failed.';
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function importFormResponseEvidenceApply() {
+  var source = null, entries = [];
+  try {
+    var got = formResponseEvidenceEntries();
+    source = got.folder;
+    entries = got.entries;
+  } catch (e) { return report('FORM EVIDENCE IMPORT: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('FORM EVIDENCE IMPORT: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('FORM EVIDENCE IMPORT: BY_ID_FOLDER_ID is not set.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('FORM EVIDENCE IMPORT: another run holds the lock.');
+  var moved = 0, copied = 0, skipped = 0, noIR = 0, failed = 0;
+  var lines = ['FORM EVIDENCE IMPORT - sheet untouched', 'Source: ' + source.getName()];
+  var sheetMap = sheetEvidenceIRMap();
+  try {
+    entries.forEach(function (e) {
+      var irs = evidenceIRsForFile(e.file, e.path, e.name, sheetMap);
+      if (!irs.length) { noIR++; return; }
+      var targets = [];
+      irs.forEach(function (ir) { targets.push({ ir: ir, folder: findOrCreateIRFolder(root, ir) }); });
+      var primary = null;
+      for (var i = 0; i < targets.length; i++) {
+        if (fileIsUnderFolder(e.file, targets[i].folder.getId())) { primary = targets[i]; break; }
+      }
+      if (!primary) primary = targets[0];
+      try {
+        var inPrimary = fileIsUnderFolder(e.file, primary.folder.getId());
+        if (!inPrimary) {
+          e.file.moveTo(primary.folder);
+          moved++;
+        } else {
+          skipped++;
+        }
+        targets.forEach(function (t) {
+          if (t.ir === primary.ir) return;
+          if (fileIsUnderFolder(e.file, t.folder.getId())) { skipped++; return; }
+          if (hasFileInFolder(t.folder, e.name)) { skipped++; return; }
+          e.file.makeCopy(e.name, t.folder);
+          copied++;
+        });
+      } catch (err) {
+        failed++;
+        if (failed <= 20) lines.push('  ' + e.path.concat([e.name]).join('/') + ' failed: ' + ((err && err.message) || String(err)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Files moved: ' + moved + ' · copies: ' + copied + ' · skipped: ' + skipped +
+             ' · no IR: ' + noIR + ' · failed: ' + failed);
+  lines.push('Rerun if needed; files already under the target are skipped.');
+  lines.forEach(function (l) { report(l); });
+  return 'Form evidence imported: ' + moved + ' moved, ' + copied + ' copied.';
+}
+
+// Read-only readiness check: does the sheet's IR spelling agree with the folder
+// spelling the normalizer uses? IR3 vs IR003 is the dangerous case.
+function auditIRNormalization() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('IR NORMALIZATION: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('IR NORMALIZATION: BY_ID_FOLDER_ID is not set.');
+  var grid = null;
+  try { grid = intakeGrid(); }
+  catch (e) { return report('IR NORMALIZATION: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!grid || grid.length < 2) return report('IR NORMALIZATION: response sheet has no rows.');
+  var irCol = irNumberColumnIndex(grid[0]);
+  if (irCol < 0) return report('IR NORMALIZATION: no IR Number column.');
+
+  var sheetNorm = {}, mismatches = [];
+  for (var r = 1; r < grid.length; r++) {
+    var raw = String((grid[r] || [])[irCol] == null ? '' : (grid[r] || [])[irCol]).trim();
+    if (!raw) continue;
+    var key = irKey(raw);
+    var norm = normalizeIRNumber(raw);
+    if (!norm) continue;
+    sheetNorm[norm] = true;
+    if (key !== norm) mismatches.push(raw + ' -> irKey=' + key + ', folder=' + norm);
+  }
+
+  var folderMap = {}, folderNorm = {};
+  listAll(root.getFolders()).forEach(function (f) {
+    var irs = irNumbersInName(f.getName());
+    if (irs.length !== 1) return;
+    var ir = irs[0];
+    folderNorm[ir] = true;
+    if (!folderMap[ir]) folderMap[ir] = [];
+    folderMap[ir].push(f.getName());
+  });
+  var duplicates = Object.keys(folderMap).filter(function (ir) { return folderMap[ir].length > 1; }).sort();
+  var missing = Object.keys(sheetNorm).filter(function (ir) { return !folderNorm[ir]; }).sort();
+  var noSheet = Object.keys(folderNorm).filter(function (ir) { return !sheetNorm[ir]; }).sort();
+  var lines = ['IR NORMALIZATION CHECK - read-only',
+               'Sheet IRs: ' + Object.keys(sheetNorm).length,
+               'Normalized root IR folders: ' + Object.keys(folderNorm).length,
+               'Spelling mismatches: ' + mismatches.length,
+               'Sheet IRs with no root folder: ' + missing.length,
+               'Root folders with no sheet row: ' + noSheet.length,
+               'Duplicate root folders for one IR: ' + duplicates.length];
+  mismatches.slice(0, 100).forEach(function (m) { lines.push('  MISMATCH ' + m); });
+  missing.slice(0, 100).forEach(function (ir) { lines.push('  MISSING FOLDER ' + ir); });
+  noSheet.slice(0, 100).forEach(function (ir) { lines.push('  NO SHEET ROW ' + ir); });
+  duplicates.slice(0, 100).forEach(function (ir) {
+    lines.push('  DUPLICATE FOLDER ' + ir + ': ' + folderMap[ir].join(' | '));
+  });
+  lines.forEach(function (l) { report(l); });
+  return 'IR normalization: ' + mismatches.length + ' mismatches, ' + missing.length + ' missing, ' +
+         noSheet.length + ' no-sheet, ' + duplicates.length + ' duplicate folders.';
+}
+
+// Read-only details for the two cases the summary check cannot resolve:
+// several root folders for one IR, and root folders with no sheet row.
+function auditRootIRFolders() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('ROOT IR DETAIL: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('ROOT IR DETAIL: BY_ID_FOLDER_ID is not set.');
+  var grid = null;
+  try { grid = intakeGrid(); }
+  catch (e) { return report('ROOT IR DETAIL: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  var irCol = grid && grid.length ? irNumberColumnIndex(grid[0]) : -1;
+  if (irCol < 0) return report('ROOT IR DETAIL: no IR Number column.');
+  var sheetSet = {};
+  for (var r = 1; r < grid.length; r++) {
+    var ir = normalizeIRNumber((grid[r] || [])[irCol]);
+    if (ir) sheetSet[ir] = true;
+  }
+
+  var byIR = {};
+  listAll(root.getFolders()).forEach(function (f) {
+    var irs = irNumbersInName(f.getName());
+    if (irs.length !== 1) return;
+    var ir = irs[0];
+    if (!byIR[ir]) byIR[ir] = [];
+    byIR[ir].push(f);
+  });
+  var lines = ['ROOT IR DETAIL - read-only', 'Sheet IRs: ' + Object.keys(sheetSet).length,
+               'Root IR folders: ' + Object.keys(byIR).length];
+  function detail(folder) {
+    var files = listAll(folder.getFiles()).map(function (f) { return f.getName(); });
+    lines.push('    name: ' + folder.getName());
+    lines.push('    id: ' + folder.getId());
+    lines.push('    url: ' + folder.getUrl());
+    lines.push('    files: ' + files.length + (files.length ? ' | ' + files.slice(0, 20).join(' ; ') : ''));
+    lines.push('    subfolders: ' + (folderSubfolderNames(folder).join(' ; ') || 'none'));
+    var s = summaryDocInFolder(folder, irNumbersInName(folder.getName())[0]);
+    lines.push('    summary: ' + (s ? s.file.getName() + ' | ' + s.file.getUrl() : 'none'));
+  }
+  Object.keys(byIR).sort().forEach(function (ir) {
+    var list = byIR[ir];
+    var noSheet = !sheetSet[ir];
+    if (list.length < 2 && !noSheet) return;
+    lines.push('');
+    lines.push((list.length > 1 ? 'DUPLICATE ' : 'NO SHEET ROW ') + ir +
+               (noSheet ? ' | no Form Responses row' : ''));
+    list.forEach(detail);
+  });
+  lines.forEach(function (l) { report(l); });
+  return 'Root IR detail: ' + Object.keys(byIR).length + ' IR groups.';
+}
+
+// Owner-approved repair: merge duplicate root IR folders into one, and move
+// no-sheet root folders to _review/archived-no-sheet. Files are never deleted.
+function repairRootFoldersApply() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('ROOT REPAIR: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('ROOT REPAIR: BY_ID_FOLDER_ID is not set.');
+  var grid = null;
+  try { grid = intakeGrid(); }
+  catch (e) { return report('ROOT REPAIR: could not read the response sheet: ' + ((e && e.message) || String(e))); }
+  var irCol = grid && grid.length ? irNumberColumnIndex(grid[0]) : -1;
+  if (irCol < 0) return report('ROOT REPAIR: no IR Number column.');
+  var sheetSet = {};
+  for (var r = 1; r < grid.length; r++) {
+    var ir = normalizeIRNumber((grid[r] || [])[irCol]);
+    if (ir) sheetSet[ir] = true;
+  }
+
+  var byIR = {};
+  listAll(root.getFolders()).forEach(function (f) {
+    var irs = irNumbersInName(f.getName());
+    if (irs.length !== 1) return;
+    if (!byIR[irs[0]]) byIR[irs[0]] = [];
+    byIR[irs[0]].push(f);
+  });
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('ROOT REPAIR: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var archive = null, empty = null;
+  var a = review.getFoldersByName('archived-no-sheet');
+  archive = a.hasNext() ? a.next() : review.createFolder('archived-no-sheet');
+  var eit = review.getFoldersByName('merged-empty-roots');
+  empty = eit.hasNext() ? eit.next() : review.createFolder('merged-empty-roots');
+  var actions = [], failed = 0, merged = 0, archived = 0;
+
+  function moveContents(from, to) {
+    listAll(from.getFiles()).forEach(function (f) {
+      try {
+        var original = f.getName();
+        var name = uniqueFileName(to, original);
+        f.moveTo(to);
+        if (name !== original) f.setName(name);
+        actions.push({ action: 'move', file: original, from: from.getName(), to: to.getName() });
+      } catch (err) { failed++; actions.push({ action: 'move', file: f.getName(), from: from.getName(), error: err.message }); }
+    });
+    listAll(from.getFolders()).forEach(function (sub) {
+      if (irNumbersInName(sub.getName()).length) {
+        actions.push({ action: 'left', folder: sub.getName(), reason: 'IR-named subfolder' });
+        return;
+      }
+      moveContents(sub, to);
+      if (folderIsEmpty(sub)) {
+        try { sub.moveTo(empty); actions.push({ action: 'archive-empty', folder: sub.getName() }); }
+        catch (err) { failed++; actions.push({ action: 'archive-empty', folder: sub.getName(), error: err.message }); }
+      }
+    });
+  }
+
+  try {
+    Object.keys(byIR).sort().forEach(function (ir) {
+      var list = byIR[ir];
+      if (!sheetSet[ir]) {
+        list.forEach(function (f) {
+          try { f.moveTo(archive); archived++; actions.push({ action: 'archive-no-sheet', folder: f.getName(), id: f.getId() }); }
+          catch (err) { failed++; actions.push({ action: 'archive-no-sheet', folder: f.getName(), error: err.message }); }
+        });
+        return;
+      }
+      if (list.length < 2) return;
+      var canonical = list.filter(function (f) { return !!summaryDocInFolder(f, ir); })[0] || list[0];
+      list.forEach(function (f) {
+        if (f.getId() === canonical.getId()) return;
+        moveContents(f, canonical);
+        if (folderIsEmpty(f)) {
+          try { f.moveTo(empty); actions.push({ action: 'archive-merged-root', folder: f.getName(), id: f.getId() }); }
+          catch (err) { failed++; actions.push({ action: 'archive-merged-root', folder: f.getName(), error: err.message }); }
+        } else {
+          actions.push({ action: 'left', folder: f.getName(), reason: 'not empty after merge' });
+        }
+        merged++;
+      });
+    });
+    var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+    var reportFile = review.createFile('root-folder-repair-' + stamp + '.json',
+      JSON.stringify({ actions: actions, failed: failed }, null, 2), MimeType.PLAIN_TEXT);
+    report('ROOT REPAIR - APPLY');
+    report('Merged duplicate folders: ' + merged + ' · archived no-sheet: ' + archived + ' · failed: ' + failed);
+    report('Report: ' + reportFile.getUrl());
+    actions.forEach(function (x) { report('  ' + JSON.stringify(x)); });
+    return 'Root repair: ' + merged + ' merged, ' + archived + ' archived, ' + failed + ' failed.';
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Email conversation text, from the same Email_Index the app already reads.
+// The crawl's rows are oldest-first per IR; this preserves that order. The index
+// carries a PREVIEW, not the full body, so the file says that explicitly rather
+// than pretending a truncated preview is the whole message.
+function emailIndexSheetForEvidence() {
+  var ss = null;
+  try {
+    var tab = intakeSheet();
+    if (tab) ss = tab.getParent();
+  } catch (e) { /* another account may not be able to read the private store */ }
+  if (!ss) {
+    var direct = '';
+    try { direct = PropertiesService.getScriptProperties().getProperty(EMAIL_IMPORT_SHEET_PROPERTY) || ''; }
+    catch (e) { direct = ''; }
+    if (direct) {
+      try { ss = SpreadsheetApp.openById(direct); }
+      catch (e) { ss = null; }
+    }
+  }
+  return ss ? ss.getSheetByName(CONFIG.IR_EMAIL_TAB) : null;
+}
+
+function emailIndexRowsForEvidence() {
+  var tab = emailIndexSheetForEvidence();
+  if (!tab) return null;
+  var lastRow = tab.getLastRow(), lastCol = tab.getLastColumn();
+  if (lastRow < 2 || lastCol < 1) return { rows: [], col: null };
+  var grid = tab.getRange(1, 1, lastRow, lastCol).getDisplayValues();
+  var col = emailIndexColumns(grid[0]);
+  if (col.ir < 0) return { rows: [], col: col };
+  var cell = function (row, i) { return i < 0 ? '' : String(row[i] == null ? '' : row[i]); };
+  var rows = [];
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var ir = normalizeIRNumber(cell(row, col.ir));
+    if (!ir) continue;
+    rows.push({
+      ir: ir,
+      threadId: cell(row, col.thread),
+      messageId: cell(row, col.message),
+      date: cell(row, col.date),
+      from: cell(row, col.from),
+      to: cell(row, col.to),
+      subject: cell(row, col.subject),
+      preview: cell(row, col.preview),
+      direction: cell(row, col.direction),
+      mailbox: cell(row, col.mailbox)
+    });
+  }
+  return { rows: rows, col: col };
+}
+
+function emailConversationText(ir, messages) {
+  var lines = [
+    'I-PASSBOOK email evidence',
+    'IR: ' + ir,
+    'Generated: ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    'Source: Email_Index (message metadata and previews; the index does not store full bodies)',
+    'Order: oldest first, as stored by the crawl',
+    'Messages: ' + messages.length,
+    '============================================================'
+  ];
+  messages.forEach(function (m) {
+    lines.push('');
+    lines.push((m.date || '(no date)') + ' | ' + (m.direction || '(no direction)') +
+               ' | mailbox: ' + (m.mailbox || '(unknown)'));
+    lines.push('From: ' + (m.from || ''));
+    lines.push('To: ' + (m.to || ''));
+    lines.push('Subject: ' + (m.subject || ''));
+    lines.push('Preview: ' + (m.preview || '(no preview stored)'));
+    lines.push('Thread: ' + (m.threadId || '') + ' | Message: ' + (m.messageId || ''));
+    lines.push('------------------------------------------------------------');
+  });
+  return lines.join('\n');
+}
+
+function syncEmailConversationsApply() {
+  var got = null;
+  try { got = emailIndexRowsForEvidence(); }
+  catch (e) { return report('EMAIL TEXT: could not read Email_Index: ' + ((e && e.message) || String(e))); }
+  if (!got) return report('EMAIL TEXT: Email_Index tab not found.');
+  if (!got.rows.length) return report('EMAIL TEXT: Email_Index has no usable rows.');
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL TEXT: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL TEXT: BY_ID_FOLDER_ID is not set.');
+
+  var byIR = {};
+  got.rows.forEach(function (m) {
+    if (!byIR[m.ir]) byIR[m.ir] = [];
+    byIR[m.ir].push(m);
+  });
+  var irs = Object.keys(byIR).sort();
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL TEXT: another run holds the lock.');
+  var created = 0, updated = 0, failed = 0;
+  var lines = ['EMAIL CONVERSATION TEXT - sheet untouched',
+               'IRs with email: ' + irs.length + ' · messages: ' + got.rows.length];
+  try {
+    irs.forEach(function (ir) {
+      try {
+        var folder = findOrCreateIRFolder(root, ir);
+        var name = ir + ' - Email Conversation.txt';
+        var content = emailConversationText(ir, byIR[ir]);
+        var it = folder.getFilesByName(name);
+        if (it.hasNext()) {
+          it.next().setContent(content);
+          updated++;
+        } else {
+          folder.createFile(name, content, MimeType.PLAIN_TEXT);
+          created++;
+        }
+      } catch (e) {
+        failed++;
+        if (failed <= 20) lines.push('  ' + ir + ' failed: ' + ((e && e.message) || String(e)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Created: ' + created + ' · updated: ' + updated + ' · failed: ' + failed);
+  if (failed) lines.push('Rerun; existing files are updated in place.');
+  lines.forEach(function (l) { report(l); });
+  return 'Email conversation text: ' + created + ' created, ' + updated + ' updated.';
+}
+
+// ── CANONICAL EMAIL SOURCES AND MERGE ────────────────────────────────────────
+// The IR folder gets ONE text file. Per-mailbox full sources live under
+// `_review/email-source/<account>/IRxxx.json`; old text layers are archived.
+var _emailSourceRootMemo = null;
+var _emailSourceAccountMemo = {};
+
+function emailSourceRoot(root, create) {
+  if (_emailSourceRootMemo) return _emailSourceRootMemo;
+  var review = byIdReviewFolder(root);
+  var found = create ? getOrCreateSubfolder(review, 'email-source')
+                     : (function () { var it = review.getFoldersByName('email-source'); return it.hasNext() ? it.next() : null; })();
+  if (found) _emailSourceRootMemo = found;
+  return found;
+}
+
+function emailAccountLabel(account) {
+  return cleanFileName(account).replace(/@/g, '_at_');
+}
+
+function emailSourceAccountFolder(root, account, create) {
+  var name = emailAccountLabel(account);
+  if (_emailSourceAccountMemo[name]) return _emailSourceAccountMemo[name];
+  var base = emailSourceRoot(root, create);
+  if (!base) return null;
+  var folder = create ? getOrCreateSubfolder(base, name)
+                     : (function () { var it = base.getFoldersByName(name); return it.hasNext() ? it.next() : null; })();
+  if (folder) _emailSourceAccountMemo[name] = folder;
+  return folder;
+}
+
+function readEmailSource(root, account, ir) {
+  var folder = emailSourceAccountFolder(root, account, false);
+  if (!folder) return [];
+  var it = folder.getFilesByName(ir + '.json');
+  if (!it.hasNext()) return [];
+  try {
+    var d = JSON.parse(it.next().getBlob().getDataAsString());
+    return (d && d.messages instanceof Array) ? d.messages : [];
+  } catch (e) { return []; }
+}
+
+function writeEmailSource(root, account, ir, messages) {
+  var folder = emailSourceAccountFolder(root, account, true);
+  var it = folder.getFilesByName(ir + '.json');
+  var existing = [];
+  if (it.hasNext()) {
+    try {
+      var d = JSON.parse(it.next().getBlob().getDataAsString());
+      existing = (d && d.messages instanceof Array) ? d.messages : [];
+    } catch (e) { existing = []; }
+  }
+  var byKey = {};
+  existing.concat(messages || []).forEach(function (m) {
+    var key = m.rfcMessageId || (m.dateMs + '|' + m.from + '|' + m.to + '|' + m.subject + '|' + m.body);
+    if (!byKey[key]) byKey[key] = m;
+  });
+  var out = Object.keys(byKey).map(function (k) { return byKey[k]; });
+  out.sort(function (a, b) { return (a.dateMs || 0) - (b.dateMs || 0); });
+  var f = it.hasNext() ? it.next() : folder.createFile(ir + '.json', '{}', MimeType.PLAIN_TEXT);
+  f.setContent(JSON.stringify({ ir: ir, account: account, messages: out }, null, 2));
+  return out;
+}
+
+function parseCompleteEmailMessages(file, accountLabel) {
+  var text = '';
+  try { text = file.getBlob().getDataAsString(); } catch (e) { return []; }
+  var lines = String(text).split(/\r?\n/);
+  var out = [], cur = null, inBody = false;
+  lines.forEach(function (line) {
+    var m = /^(\d{2}-[A-Za-z]{3}-\d{4} \d{2}:\d{2}:\d{2}) \| (.+)$/.exec(line);
+    if (m) {
+      if (cur) out.push(cur);
+      cur = { date: m[1], dateMs: parseAuditTimestamp(m[1]), messageId: m[2],
+              mailbox: accountLabel, sourceAccount: accountLabel, from: '', to: '', cc: '', subject: '', body: [], attachments: [] };
+      inBody = false;
+      return;
+    }
+    if (!cur) return;
+    if (/^From: /.test(line)) { cur.from = line.substring(6); return; }
+    if (/^To: /.test(line)) { cur.to = line.substring(4); return; }
+    if (/^Cc: /.test(line)) { cur.cc = line.substring(4); return; }
+    if (/^Subject: /.test(line)) { cur.subject = line.substring(9); return; }
+    if (/^Message-Id: /.test(line)) { cur.messageId = line.substring(12); return; }
+    if (/^Body:/.test(line)) { inBody = true; return; }
+    if (/^-{10,}/.test(line)) { out.push(cur); cur = null; inBody = false; return; }
+    if (inBody) cur.body.push(line);
+  });
+  if (cur) out.push(cur);
+  out.forEach(function (m) { m.body = m.body.join('\n'); });
+  return out;
+}
+
+function emailMessageKey(m) {
+  return m.rfcMessageId || (m.dateMs + '|' + m.from + '|' + m.to + '|' + m.subject + '|' + m.body);
+}
+
+function emailConversationCanonicalText(ir, messages) {
+  var mailboxes = {}, sources = {};
+  messages.forEach(function (m) { mailboxes[m.mailbox || 'unknown'] = true; sources[m.sourceAccount || m.mailbox || 'unknown'] = true; });
+  var out = [
+    'I-PASSBOOK email conversation',
+    'IR: ' + ir,
+    'Mailboxes: ' + Object.keys(mailboxes).sort().join(', '),
+    'Sources: ' + Object.keys(sources).sort().join(', '),
+    'Messages: ' + messages.length,
+    'Generated: ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    '============================================================'
+  ];
+  messages.forEach(function (m) {
+    out.push('');
+    out.push((m.date || '') + ' | ' + (m.mailbox || 'unknown') + ' | ' + (m.messageId || ''));
+    out.push('From: ' + (m.from || ''));
+    out.push('To: ' + (m.to || ''));
+    if (m.cc) out.push('Cc: ' + m.cc);
+    out.push('Subject: ' + (m.subject || ''));
+    if (m.rfcMessageId) out.push('Message-ID: ' + m.rfcMessageId);
+    out.push('Body:');
+    out.push(String(m.body || '').slice(0, 120000));
+    out.push('------------------------------------------------------------');
+  });
+  return out.join('\n');
+}
+
+function emailCurrentIRs(root, coverage) {
+  try {
+    var reg = currentIRRegistry();
+    if (reg && Object.keys(reg).length) return reg;
+  } catch (e) { /* fall through to the shared ledger */ }
+  var out = {};
+  Object.keys((coverage && coverage.irs) || {}).forEach(function (ir) { out[ir] = { ir: ir }; });
+  if (Object.keys(out).length) return out;
+  listAll(root.getFolders()).forEach(function (f) {
+    irNumbersInName(f.getName()).forEach(function (ir) { if (!out[ir]) out[ir] = { ir: ir, folderId: f.getId() }; });
+  });
+  return out;
+}
+function emailConversationSourceStamp(root, accounts, ir) {
+  var parts = [], present = [];
+  if (!accounts || !accounts.length) {
+    var base = emailSourceRoot(root, false);
+    if (base) accounts = listAll(base.getFolders()).map(function (f) { return f.getName(); });
+  }
+  accounts.forEach(function (a) {
+    var folder = emailSourceAccountFolder(root, a, false);
+    if (!folder) return;
+    var it = folder.getFilesByName(ir + '.json');
+    if (!it.hasNext()) return;
+    parts.push(a + ':' + it.next().getLastUpdated().getTime());
+    present.push(a);
+  });
+  return { stamp: parts.join('|'), accounts: present };
+}
+
+function mergeOneEmailConversation(root, ir, accounts, coverage, supersededRoot) {
+  var src = emailConversationSourceStamp(root, accounts, ir);
+  var rec = coverage.irs[ir];
+  if (rec && rec.status === 'canonical_ready' && rec.sourceStamp === src.stamp) {
+    return 'done';
+  }
+  var folder = null;
+  try { folder = root.getFoldersByName(ir).hasNext() ? root.getFoldersByName(ir).next() : null; } catch (e) { folder = null; }
+  if (!folder) return 'none';
+  var canonicalName = ir + ' - Email Conversation.txt';
+  var firstPass = !(rec && rec.sourceStamp);
+  var folderFiles = firstPass ? listAll(folder.getFiles()) : [];
+
+  var messages = [];
+  accounts.forEach(function (a) {
+    readEmailSource(root, a, ir).forEach(function (m) { messages.push(m); });
+  });
+  folderFiles.forEach(function (f) {
+    var name = String(f.getName());
+    if (!/ - Email Conversation - (Complete|Full) - /.test(name)) return;
+    var label = (name.split(' - Email Conversation - ')[1] || '').replace(/\.txt$/, '');
+    var parsed = parseCompleteEmailMessages(f, label);
+    if (parsed.length) {
+      writeEmailSource(root, label, ir, parsed);
+      parsed.forEach(function (m) { messages.push(m); });
+    }
+  });
+  if (!messages.length) {
+    if (rec && rec.accounts && Object.keys(rec.accounts).length >= 2) {
+      rec.status = 'searched_no_hits';
+      rec.updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss');
+    }
+    return 'none';
+  }
+
+  var byKey = {};
+  messages.forEach(function (m) { if (!byKey[emailMessageKey(m)]) byKey[emailMessageKey(m)] = m; });
+  var merged = Object.keys(byKey).map(function (k) { return byKey[k]; });
+  merged.sort(function (a, b) { return (a.dateMs || 0) - (b.dateMs || 0); });
+
+  var existingIt = folder.getFilesByName(canonicalName);
+  var existingFile = existingIt.hasNext() ? existingIt.next() : null;
+  var oldText = '', oldCount = 0;
+  if (existingFile) {
+    if (rec && rec.sourceStamp && rec.messageCount) {
+      oldCount = Number(rec.messageCount) || 0;
+    } else {
+      try {
+        oldText = existingFile.getBlob().getDataAsString();
+        var cm = /Messages:\s*(\d+)/.exec(oldText);
+        if (cm) oldCount = parseInt(cm[1], 10);
+      } catch (e) { oldText = ''; oldCount = 0; }
+    }
+  }
+  if (oldCount && merged.length < oldCount) {
+    var partial = folder.getFilesByName(ir + ' - Email Conversation - Partial.txt');
+    var ptext = emailConversationCanonicalText(ir, merged);
+    if (partial.hasNext()) partial.next().setContent(ptext);
+    else folder.createFile(ir + ' - Email Conversation - Partial.txt', ptext, MimeType.PLAIN_TEXT);
+    rec = coverage.irs[ir] || (coverage.irs[ir] = { ir: ir });
+    rec.status = 'partial';
+    rec.updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss');
+    return 'partial';
+  }
+
+  var destIt = supersededRoot.getFoldersByName(ir);
+  var dest = destIt.hasNext() ? destIt.next() : supersededRoot.createFolder(ir);
+  if (existingFile && oldText && oldText.indexOf('I-PASSBOOK email conversation') !== 0) {
+    var oldName = ir + ' - Email Conversation - old-preview.txt';
+    if (!hasFileInFolder(dest, oldName)) dest.createFile(oldName, oldText, MimeType.PLAIN_TEXT);
+  }
+  var text = emailConversationCanonicalText(ir, merged);
+  var cfile = existingFile || folder.createFile(canonicalName, text, MimeType.PLAIN_TEXT);
+  cfile.setContent(text);
+
+  folderFiles.forEach(function (f) {
+    var n = String(f.getName());
+    if (n === canonicalName) return;
+    if (!/ - Email Conversation - (Complete|Full|Partial) - | - Email Conversation - Partial\.txt$/.test(n)) return;
+    try { f.moveTo(dest); } catch (e) { /* keep going */ }
+  });
+
+  var sourceKeys = {};
+  merged.forEach(function (m) { sourceKeys[m.sourceAccount || m.mailbox || 'unknown'] = true; });
+  var finalSrc = emailConversationSourceStamp(root, accounts, ir);
+  rec = coverage.irs[ir] || (coverage.irs[ir] = { ir: ir });
+  rec.status = 'canonical_ready';
+  rec.sources = Object.keys(sourceKeys);
+  rec.sourceStamp = finalSrc.stamp;
+  rec.messageCount = merged.length;
+  rec.updatedAt = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss');
+  return oldCount ? 'updated' : 'created';
+}
+
+function mergeEmailConversationsApply() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL MERGE: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL MERGE: BY_ID_FOLDER_ID is not set.');
+  var coverage = readEmailCoverage(root);
+  var current = emailCurrentIRs(root, coverage);
+  var sourceRoot = emailSourceRoot(root, false);
+  var accounts = [];
+  if (sourceRoot) accounts = listAll(sourceRoot.getFolders()).map(function (f) { return f.getName(); });
+
+  var keys = Object.keys(current).sort();
+  var props = PropertiesService.getScriptProperties();
+  var cursorKey = 'EMAIL_MERGE_CURSOR';
+  var mergeDoneKey = 'EMAIL_MERGE_DONE';
+  try { props.deleteProperty(mergeDoneKey); } catch (e) { /* non-fatal */ }
+  var start = parseInt(props.getProperty(cursorKey) || '0', 10);
+  if (!isFinite(start) || start < 0 || start >= keys.length) start = 0;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL MERGE: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var supersededRoot = getOrCreateSubfolder(review, 'superseded-email');
+  var created = 0, updated = 0, skipped = 0, failed = 0, done = 0, processed = 0;
+  var deadline = Date.now() + (4 * 60 * 1000);
+  var lines = ['EMAIL MERGE - one canonical file per IR', 'Start: ' + start + ' of ' + keys.length];
+  var i = start;
+  try {
+    for (; i < keys.length; i++) {
+      if (Date.now() > deadline) { lines.push('Time budget reached; rerun to continue.'); break; }
+      props.setProperty(cursorKey, String(i));
+      var status = 'error';
+      try { status = mergeOneEmailConversation(root, keys[i], accounts, coverage, supersededRoot); }
+      catch (e) { failed++; lines.push('  ERROR ' + keys[i] + ': ' + ((e && e.message) || String(e))); }
+      if (status === 'created') created++;
+      else if (status === 'updated') updated++;
+      else if (status === 'partial') skipped++;
+      else if (status === 'done') done++;
+      else if (status === 'error') failed++;
+      props.setProperty(cursorKey, String(i + 1));
+      processed++;
+      if (processed % 10 === 0) emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+    }
+    emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+    if (i >= keys.length) {
+      props.setProperty(cursorKey, '0');
+      props.setProperty(mergeDoneKey, '1');
+    } else {
+      props.deleteProperty(mergeDoneKey);
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Created: ' + created + ' | updated: ' + updated + ' | done: ' + done +
+             ' | partial: ' + skipped + ' | failed: ' + failed);
+  lines.push(i >= keys.length ? 'Batch complete; cursor reset.' : 'Next cursor: ' + i + ' of ' + keys.length);
+  lines.forEach(function (l) { report(l); });
+  return 'Email merge: ' + created + ' created, ' + updated + ' updated, ' + done + ' done, ' + skipped + ' partial.';
+}
+
+function emailAttachmentAlreadyInFolder(folder, originalName) {
+  var clean = cleanFileName(originalName);
+  var files = listAll(folder.getFiles());
+  return files.some(function (f) {
+    var n = String(f.getName());
+    return n === clean || n.slice(-(clean.length + 3)) === ' - ' + clean;
+  });
+}
+
+function messageMentionsIR(msg, ir) {
+  try {
+    var text = String(msg.getSubject() || '') + ' ' + String(msg.getPlainBody() || '');
+    return irNumbersInName(text).indexOf(ir) >= 0;
+  } catch (e) { return false; }
+}
+
+function searchEmailSourceForIRApply() {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  if (!me) return report('EMAIL SEARCH: no running account.');
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL SEARCH: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL SEARCH: BY_ID_FOLDER_ID is not set.');
+  var coverage = readEmailCoverage(root);
+  var current = emailCurrentIRs(root, coverage);
+  var searched = 0, found = 0, failed = 0, stopped = false;
+  var deadline = Date.now() + (4 * 60 * 1000);
+  var props = PropertiesService.getScriptProperties();
+  var doneKey = 'EMAIL_SEARCH_DONE_' + emailAccountLabel(me);
+  try { props.deleteProperty(doneKey); } catch (e) { /* non-fatal */ }
+  try { props.deleteProperty('EMAIL_MERGE_DONE'); } catch (e) { /* non-fatal */ }
+  var lines = ['EMAIL SEARCH - ' + me + ' (IR-related only)'];
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL SEARCH: another run holds the lock.');
+  try {
+    Object.keys(current).sort().forEach(function (ir) {
+      if (Date.now() > deadline) { stopped = true; return; }
+      var existingRec = coverage.irs[ir] || (coverage.irs[ir] = { ir: ir });
+      if (existingRec.accounts && existingRec.accounts[me]) return;
+      var folder = null;
+      try { folder = root.getFoldersByName(ir).hasNext() ? root.getFoldersByName(ir).next() : null; } catch (e) { folder = null; }
+      if (!folder) {
+        try { folder = findOrCreateIRFolder(root, ir); } catch (e) { failed++; return; }
+      }
+      var canonical = folder.getFilesByName(ir + ' - Email Conversation.txt');
+      if (canonical.hasNext()) {
+        var ctext = '';
+        try { ctext = canonical.next().getBlob().getDataAsString(); } catch (e) { ctext = ''; }
+        var sm = /^Sources:\s*(.*)$/m.exec(ctext);
+        if (sm) {
+          var have = {};
+          sm[1].split(',').forEach(function (s) { have[String(s).trim()] = true; });
+          if (have[me] || have[emailAccountLabel(me)]) {
+            if (!existingRec.accounts) existingRec.accounts = {};
+            existingRec.accounts[me] = { searchedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss'),
+                                         found: null, skipped: 'already-in-canonical' };
+            searched++;
+            if (searched % 25 === 0) emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+            return;
+          }
+        }
+      }
+      var threads = [];
+      try {
+        var q = ['"' + ir + '"',
+                 '"' + ir.replace(/^IR0+/, 'IR') + '"',
+                 '"' + ir.replace(/^IR/, 'IR ') + '"'].join(' OR ');
+        threads = GmailApp.search(q, 0, 20);
+        if (!threads.length) threads = GmailApp.search(ir, 0, 20);
+      } catch (e) { failed++; return; }
+      var messages = [];
+      threads.forEach(function (thread) {
+        var tmsgs = [];
+        try { tmsgs = thread.getMessages(); } catch (e) { return; }
+        var relevant = tmsgs.some(function (m) { return messageMentionsIR(m, ir); });
+        if (!relevant) return;
+        tmsgs.forEach(function (msg) {
+          var body = '';
+          try { body = msg.getPlainBody() || ''; } catch (e) { body = ''; }
+          var rfc = '';
+          try { rfc = msg.getHeader('Message-ID') || ''; } catch (e) { rfc = ''; }
+          var date = msg.getDate();
+          messages.push({
+            date: Utilities.formatDate(date, 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+            dateMs: date.getTime(), messageId: msg.getId(), rfcMessageId: rfc,
+            threadId: msg.getThread().getId(), mailbox: me, sourceAccount: me,
+            from: msg.getFrom() || '', to: msg.getTo() || '', cc: msg.getCc() || '',
+            subject: msg.getSubject() || '', body: body, attachments: []
+          });
+          try {
+            msg.getAttachments().forEach(function (att, idx) {
+              if (att.getSize() > 20 * 1024 * 1024) return;
+              var nm = cleanFileName(ir + ' - ' + msg.getId() + ' - ' + (idx + 1) + ' - ' + att.getName());
+              if (hasFileInFolder(folder, nm) || emailAttachmentAlreadyInFolder(folder, att.getName())) return;
+              var blob = att.copyBlob();
+              blob.setName(nm);
+              folder.createFile(blob);
+            });
+          } catch (e) { /* attachments are best-effort */ }
+        });
+      });
+      if (messages.length) {
+        writeEmailSource(root, me, ir, messages);
+        found++;
+      }
+      var rec = coverage.irs[ir] || (coverage.irs[ir] = { ir: ir });
+      if (!rec.accounts) rec.accounts = {};
+      rec.accounts[me] = { searchedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss'),
+                          found: messages.length };
+      searched++;
+      if (searched % 25 === 0) {
+        emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+      }
+    });
+    emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('IRs searched: ' + searched + ' · with messages: ' + found + ' · failed: ' + failed);
+  if (stopped) lines.push('Time budget reached; rerun to continue.');
+  else lines.push('All current IRs already searched for this mailbox.');
+  try { if (stopped) props.deleteProperty(doneKey); else props.setProperty(doneKey, '1'); }
+  catch (e) { /* non-fatal */ }
+  lines.forEach(function (l) { report(l); });
+  return 'Email search: ' + searched + ' searched, ' + found + ' found.';
+}
+
+// ── DAILY INCREMENTAL EMAIL SYNC ─────────────────────────────────────────────
+// The one-time backfill is not a subscription. This pass keeps it current:
+//   · every current IR gets a coverage slot, including IRs added after the seed;
+//   · recent Gmail threads are scanned for new messages and for replies in an
+//     existing IR thread that do not repeat the IR number;
+//   · only messages that belong to a current IR are written;
+//   · source JSON is deduped by message id/RFC id and attachments by filename;
+//   · the canonical file is rebuilt only for IRs that actually changed.
+var EMAIL_SYNC_LAST_PREFIX = 'emailSyncLast:';
+var EMAIL_SYNC_OVERLAP_MS = 24 * 60 * 60 * 1000;
+var EMAIL_SYNC_INITIAL_DAYS = 7;
+
+function emailSyncLastKey(me) { return EMAIL_SYNC_LAST_PREFIX + emailAccountLabel(me); }
+
+function emailSyncMessageObject(msg, me) {
+  var body = '';
+  try { body = msg.getPlainBody() || ''; } catch (e) { body = ''; }
+  var rfc = '';
+  try { rfc = msg.getHeader('Message-ID') || ''; } catch (e) { rfc = ''; }
+  var date = msg.getDate();
+  return {
+    date: Utilities.formatDate(date, 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    dateMs: date.getTime(), messageId: msg.getId(), rfcMessageId: rfc,
+    threadId: msg.getThread().getId(), mailbox: me, sourceAccount: me,
+    from: msg.getFrom() || '', to: msg.getTo() || '', cc: msg.getCc() || '',
+    subject: msg.getSubject() || '', body: body, attachments: []
+  };
+}
+
+function saveEmailAttachmentsForIR(root, ir, msg) {
+  var folder = findOrCreateIRFolder(root, ir);
+  try {
+    msg.getAttachments().forEach(function (att, idx) {
+      if (att.getSize() > 20 * 1024 * 1024) return;
+      var nm = cleanFileName(ir + ' - ' + msg.getId() + ' - ' + (idx + 1) + ' - ' + att.getName());
+      if (hasFileInFolder(folder, nm) || emailAttachmentAlreadyInFolder(folder, att.getName())) return;
+      var blob = att.copyBlob();
+      blob.setName(nm);
+      folder.createFile(blob);
+    });
+  } catch (e) { /* attachments are best-effort */ }
+}
+
+function syncNewEmailApply() {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  if (!me) return report('EMAIL SYNC: no running account.');
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL SYNC: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL SYNC: BY_ID_FOLDER_ID is not set.');
+
+  var coverage = readEmailCoverage(root);
+  var current = emailCurrentIRs(root, coverage);
+  var newSlots = 0;
+  Object.keys(current).forEach(function (ir) {
+    if (!coverage.irs[ir]) { coverage.irs[ir] = { ir: ir, status: 'not_processed' }; newSlots++; }
+  });
+
+  var sourceRoot = emailSourceRoot(root, false);
+  var accounts = sourceRoot ? listAll(sourceRoot.getFolders()).map(function (f) { return f.getName(); }) : [];
+  var meLabel = emailAccountLabel(me);
+  if (!accounts.some(function (a) { return a === me || a === meLabel; })) accounts.push(me);
+
+  var props = PropertiesService.getScriptProperties();
+  var lastKey = emailSyncLastKey(me);
+  var runStart = Date.now();
+  var last = Number(props.getProperty(lastKey) || 0);
+  if (!isFinite(last) || last <= 0) last = runStart - (EMAIL_SYNC_INITIAL_DAYS * 24 * 60 * 60 * 1000);
+  var afterDate = Utilities.formatDate(new Date(Math.max(0, last - EMAIL_SYNC_OVERLAP_MS)),
+                                      'Asia/Kolkata', 'yyyy/MM/dd');
+  var query = 'after:' + afterDate + ' -in:chats';
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL SYNC: another run holds the lock.');
+  var changed = {}, processed = 0, stopped = false, failed = 0;
+  var lastProcessed = last;
+  var lines = ['EMAIL SYNC - ' + me, 'New coverage slots: ' + newSlots];
+  try {
+    var threads = [], start = 0;
+    while (start < 500) {
+      var batch = GmailApp.search(query, start, 100);
+      threads = threads.concat(batch);
+      if (batch.length < 100) break;
+      start += 100;
+    }
+
+    var entries = [];
+    threads.forEach(function (thread) {
+      var msgs = [];
+      try { msgs = thread.getMessages(); } catch (e) { return; }
+      var irs = {};
+      msgs.forEach(function (m) {
+        var text = '';
+        try { text = String(m.getSubject() || '') + ' ' + String(m.getPlainBody() || ''); } catch (e) { text = ''; }
+        irNumbersInName(text).forEach(function (ir) { if (current[ir]) irs[ir] = true; });
+      });
+      if (!Object.keys(irs).length) return;
+      msgs.forEach(function (m) {
+        var t = m.getDate().getTime();
+        if (t <= last) return;
+        entries.push({ msg: m, irs: Object.keys(irs) });
+      });
+    });
+    entries.sort(function (a, b) { return a.msg.getDate().getTime() - b.msg.getDate().getTime(); });
+
+    var deadline = Date.now() + (4 * 60 * 1000);
+    entries.forEach(function (entry) {
+      if (Date.now() > deadline) { stopped = true; return; }
+      var dateMs = entry.msg.getDate().getTime();
+      entry.irs.forEach(function (ir) {
+        var m = emailSyncMessageObject(entry.msg, me);
+        if (!changed[ir]) changed[ir] = [];
+        changed[ir].push(m);
+        saveEmailAttachmentsForIR(root, ir, entry.msg);
+      });
+      lastProcessed = Math.max(lastProcessed, dateMs);
+      processed++;
+    });
+
+    var review = byIdReviewFolder(root);
+    var supersededRoot = getOrCreateSubfolder(review, 'superseded-email');
+    Object.keys(changed).sort().forEach(function (ir) {
+      try {
+        writeEmailSource(root, me, ir, changed[ir]);
+        var rec = coverage.irs[ir] || (coverage.irs[ir] = { ir: ir });
+        if (!rec.accounts) rec.accounts = {};
+        rec.accounts[me] = { syncedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MM-yyyy HH:mm:ss'),
+                            found: changed[ir].length };
+        mergeOneEmailConversation(root, ir, accounts, coverage, supersededRoot);
+      } catch (e) {
+        failed++;
+        lines.push('  ERROR ' + ir + ': ' + ((e && e.message) || String(e)));
+      }
+    });
+    emailCoverageFile(root, true).setContent(JSON.stringify(coverage, null, 2));
+    var nextLast = failed ? last : (stopped ? lastProcessed : (runStart - 60 * 1000));
+    props.setProperty(lastKey, String(nextLast));
+  } catch (e) {
+    lines.push('ERROR: ' + ((e && e.message) || String(e)));
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Messages: ' + processed + ' · IRs changed: ' + Object.keys(changed).length +
+             ' · failed: ' + failed);
+  lines.push(stopped ? 'Time budget reached; next run continues from ' + lastProcessed + '.'
+                     : 'Sync complete through ' + Utilities.formatDate(new Date(runStart), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss') + '.');
+  lines.forEach(function (l) { report(l); });
+  return 'Email sync: ' + processed + ' messages, ' + Object.keys(changed).length + ' IRs changed.';
+}
+
+function removeDailyEmailSync() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runDailyEmailSync') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function installDailyEmailSync() {
+  removeDailyEmailSync();
+  ScriptApp.newTrigger('runDailyEmailSync').timeBased().atHour(2).nearMinute(30).everyDays(1).create();
+  return report('Daily email sync installed at 02:30. Run it once now, then it will continue by itself.');
+}
+
+function runDailyEmailSync() { return syncNewEmailApply(); }
+function removeEmailSearchAutoRun() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runEmailSearchAuto') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function removeEmailMergeAutoRun() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runEmailMergeAuto') ScriptApp.deleteTrigger(t);
+  });
+}
+
+function installEmailSearchAutoRun() {
+  removeEmailSearchAutoRun();
+  var key = 'EMAIL_SEARCH_DONE_' + emailAccountLabel(Session.getEffectiveUser().getEmail() || '');
+  if (PropertiesService.getScriptProperties().getProperty(key) === '1') {
+    return report('Email search is already complete for this mailbox; no trigger installed.');
+  }
+  ScriptApp.newTrigger('runEmailSearchAuto').timeBased().everyMinutes(5).create();
+  return report('Email search auto-run installed: every 5 minutes. Remove with removeEmailSearchAutoRun().');
+}
+
+function installEmailMergeAutoRun() {
+  removeEmailMergeAutoRun();
+  if (PropertiesService.getScriptProperties().getProperty('EMAIL_MERGE_DONE') === '1') {
+    return report('Email merge is already complete; no trigger installed.');
+  }
+  ScriptApp.newTrigger('runEmailMergeAuto').timeBased().everyMinutes(5).create();
+  return report('Email merge auto-run installed: every 5 minutes. Remove with removeEmailMergeAutoRun().');
+}
+
+function runEmailSearchAuto() {
+  var me = Session.getEffectiveUser().getEmail() || '';
+  var key = 'EMAIL_SEARCH_DONE_' + emailAccountLabel(me);
+  if (PropertiesService.getScriptProperties().getProperty(key) === '1') {
+    removeEmailSearchAutoRun();
+    return;
+  }
+  try { searchEmailSourceForIRApply(); } catch (e) { /* leave trigger for the next run */ }
+  if (PropertiesService.getScriptProperties().getProperty(key) === '1') removeEmailSearchAutoRun();
+}
+
+function runEmailMergeAuto() {
+  if (PropertiesService.getScriptProperties().getProperty('EMAIL_MERGE_DONE') === '1') {
+    removeEmailMergeAutoRun();
+    return;
+  }
+  try { mergeEmailConversationsApply(); } catch (e) { /* leave trigger for the next run */ }
+  if (PropertiesService.getScriptProperties().getProperty('EMAIL_MERGE_DONE') === '1') removeEmailMergeAutoRun();
+}
+function mailboxIsForCurrent(mailbox, email) {
+  var mb = String(mailbox == null ? '' : mailbox).trim().toLowerCase();
+  var me = String(email == null ? '' : email).trim().toLowerCase();
+  if (!mb || !me) return true;
+  if (mb.indexOf('@') > -1) return mb === me;
+  var local = me.split('@')[0];
+  return mb.indexOf(local) > -1 || local.indexOf(mb) > -1;
+}
+
+// Full bodies, from Gmail. GmailApp only reads the mailbox of the account that
+// runs this, so the file is per mailbox: one account writes its own file, the
+// other mailbox's file is written when the other account runs it. Messages that
+// cannot be read are skipped, never replaced with a preview pretending to be full.
+function syncEmailFullConversationsApply() {
+  var got = null;
+  try { got = emailIndexRowsForEvidence(); }
+  catch (e) { return report('EMAIL FULL TEXT: could not read Email_Index: ' + ((e && e.message) || String(e))); }
+  if (!got) return report('EMAIL FULL TEXT: Email_Index tab not found.');
+  if (!got.rows.length) return report('EMAIL FULL TEXT: Email_Index has no usable rows.');
+
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL FULL TEXT: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL FULL TEXT: BY_ID_FOLDER_ID is not set.');
+
+  var groups = {};
+  got.rows.forEach(function (m) {
+    if (!m.messageId) return;
+    if (!mailboxIsForCurrent(m.mailbox, me)) return;
+    var label = cleanFileName(m.mailbox || 'unknown').replace(/@/g, '_at_');
+    var key = m.ir + '|' + label;
+    if (!groups[key]) groups[key] = { ir: m.ir, label: label, messages: [] };
+    groups[key].messages.push(m);
+  });
+  var keys = Object.keys(groups).sort();
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMAIL FULL TEXT: another run holds the lock.');
+  var created = 0, updated = 0, denied = 0, failed = 0, bodies = 0;
+  var lines = ['EMAIL FULL TEXT - Gmail read, per mailbox', 'Account: ' + (me || '(unknown)'),
+               'IR/mailbox groups: ' + keys.length];
+  try {
+    keys.forEach(function (key) {
+      var g = groups[key];
+      var out = [
+        'I-PASSBOOK full email conversation',
+        'IR: ' + g.ir,
+        'Mailbox: ' + g.label,
+        'Generated: ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+        'Order: oldest first, as stored by the crawl',
+        '============================================================'
+      ];
+      var groupBodies = 0;
+      g.messages.forEach(function (m) {
+        var msg = null;
+        try { msg = GmailApp.getMessageById(m.messageId); }
+        catch (e) { denied++; return; }
+        var body = '';
+        try { body = msg.getPlainBody() || ''; }
+        catch (e) { body = ''; }
+        if (!body) body = '(no plain-text body returned by Gmail)';
+        bodies++;
+        groupBodies++;
+        out.push('');
+        out.push((m.date || '(no date)') + ' | ' + (m.direction || '') + ' | ' + (m.mailbox || ''));
+        out.push('From: ' + (m.from || ''));
+        out.push('To: ' + (m.to || ''));
+        out.push('Subject: ' + (m.subject || ''));
+        out.push('Message-Id: ' + m.messageId);
+        out.push('Body:');
+        out.push(String(body).slice(0, 120000));
+        out.push('------------------------------------------------------------');
+      });
+      if (!groupBodies) return;
+      var content = out.join('\n');
+      var folder = null;
+      try { folder = findOrCreateIRFolder(root, g.ir); }
+      catch (e) { failed++; return; }
+      var name = g.ir + ' - Email Conversation - Full - ' + g.label + '.txt';
+      try {
+        var it = folder.getFilesByName(name);
+        if (it.hasNext()) { it.next().setContent(content); updated++; }
+        else { folder.createFile(name, content, MimeType.PLAIN_TEXT); created++; }
+      } catch (e) { failed++; }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  lines.push('Bodies read: ' + bodies + ' · files created: ' + created + ' · updated: ' + updated +
+             ' · denied: ' + denied + ' · failed: ' + failed);
+  lines.push('Run this again as the other mailbox account to create that mailbox file.');
+  lines.forEach(function (l) { report(l); });
+  return 'Full email text: ' + created + ' created, ' + updated + ' updated, ' + denied + ' denied.';
+}
+
+// The row-per-message file above can only include messages the crawl indexed.
+// This pass follows the Thread_Id instead and asks Gmail for EVERY message in
+// the thread, so a thread with 15 messages produces 15 bodies even when the
+// index carried only the first one.
+function gmailThreadId(value) {
+  var s = String(value == null ? '' : value).trim();
+  var m = /thread-[fu]:(\d+)/i.exec(s);
+  return m ? m[1] : s;
+}
+
+function testEmailThreadAccess() {
+  var got = null;
+  try { got = emailIndexRowsForEvidence(); }
+  catch (e) { return report('THREAD CHECK: could not read Email_Index: ' + ((e && e.message) || String(e))); }
+  if (!got) return report('THREAD CHECK: Email_Index tab not found.');
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  var rows = got.rows.filter(function (m) {
+    return !!m.messageId && mailboxIsForCurrent(m.mailbox, me);
+  });
+  if (!rows.length) rows = got.rows.filter(function (m) { return !!m.messageId; }).slice(0, 5);
+  rows = rows.slice(0, 5);
+  var lines = ['THREAD ACCESS CHECK - read-only', 'Account: ' + (me || '(unknown)'),
+               'Sample rows: ' + rows.length];
+  rows.forEach(function (m) {
+    var raw = String(m.threadId == null ? '' : m.threadId);
+    var stripped = gmailThreadId(raw);
+    var tries = [];
+    [raw, stripped].forEach(function (v) {
+      if (!v || tries.some(function (t) { return t.id === v; })) return;
+      try {
+        var th = GmailApp.getThreadById(v);
+        tries.push({ id: v, ok: true, count: th.getMessageCount(), got: th.getMessages().length });
+      } catch (e) { tries.push({ id: v, ok: false, error: (e && e.message) || String(e) }); }
+    });
+    try {
+      var msg = GmailApp.getMessageById(m.messageId);
+      var th2 = msg.getThread();
+      tries.push({ id: 'message.getThread', ok: true, threadId: th2.getId(),
+                   count: th2.getMessageCount(), got: th2.getMessages().length });
+    } catch (e) {
+      tries.push({ id: 'message.getThread', ok: false, error: (e && e.message) || String(e) });
+    }
+    lines.push('  ' + m.ir + ' | ' + (m.date || '') + ' | ' + (m.subject || '') +
+               ' | message=' + m.messageId);
+    lines.push('    raw=' + raw + ' stripped=' + stripped);
+    tries.forEach(function (t) {
+      lines.push('    ' + (t.ok ? 'OK ' : 'FAIL ') + t.id +
+                 (t.ok ? ' count=' + t.count + ' got=' + t.got + (t.threadId ? ' thread=' + t.threadId : '') : ' ' + t.error));
+    });
+  });
+  lines.forEach(function (l) { report(l); });
+  return 'Thread access check: ' + rows.length + ' sampled.';
+}
+
+var EMAIL_THREAD_CURSOR_PROPERTY = 'EMAIL_THREAD_CURSOR';
+var EMAIL_THREAD_DONE_PROPERTY = 'EMAIL_THREAD_DONE';
+var EMAIL_THREAD_BATCH = 50;
+
+function syncEmailThreadConversationsApply() { return syncEmailThreadConversationsCore(30000); }
+
+function syncEmailThreadConversationsCore(lockWaitMs) {
+  var got = null;
+  try { got = emailIndexRowsForEvidence(); }
+  catch (e) { return report('EMAIL THREADS: could not read Email_Index: ' + ((e && e.message) || String(e))); }
+  if (!got) return report('EMAIL THREADS: Email_Index tab not found.');
+  if (!got.rows.length) return report('EMAIL THREADS: Email_Index has no usable rows.');
+
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL THREADS: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL THREADS: BY_ID_FOLDER_ID is not set.');
+
+  var groups = {};
+  got.rows.forEach(function (m) {
+    if (!mailboxIsForCurrent(m.mailbox, me)) return;
+    var label = cleanFileName(m.mailbox || 'unknown').replace(/@/g, '_at_');
+    var key = m.ir + '|' + label;
+    if (!groups[key]) groups[key] = { ir: m.ir, label: label, threads: [], messages: [] };
+    var g = groups[key];
+    var tid = gmailThreadId(m.threadId);
+    if (tid && g.threads.indexOf(tid) < 0) g.threads.push(tid);
+    if (m.messageId && g.messages.indexOf(m.messageId) < 0) g.messages.push(m.messageId);
+  });
+  var keys = Object.keys(groups).sort();
+  var props = PropertiesService.getScriptProperties();
+  var cursorKey = EMAIL_THREAD_CURSOR_PROPERTY + ':' + (me || 'unknown');
+  var doneKey = EMAIL_THREAD_DONE_PROPERTY + ':' + (me || 'unknown');
+  var fingerprint = got.rows.length + ':' + (got.rows.length ? got.rows[got.rows.length - 1].messageId : '');
+  if (!props.getProperty(cursorKey) && props.getProperty(doneKey) === fingerprint) {
+    return report('EMAIL THREADS: already complete for this mailbox; no new Email_Index rows.');
+  }
+  var start = parseInt(props.getProperty(cursorKey) || '0', 10);
+  if (!(start >= 0) || start >= keys.length) start = 0;
+  var end = Math.min(keys.length, start + EMAIL_THREAD_BATCH);
+
+  var lock = LockService.getScriptLock();
+  var wait = typeof lockWaitMs === 'number' ? lockWaitMs : 30000;
+  if (!lock.tryLock(wait)) return report('EMAIL THREADS: another run holds the lock.');
+  var created = 0, updated = 0, denied = 0, failed = 0, bodies = 0, threadCount = 0;
+  var lines = ['EMAIL COMPLETE THREADS - Gmail read, per mailbox', 'Account: ' + (me || '(unknown)'),
+               'IR/mailbox groups ' + (start + 1) + '-' + end + ' of ' + keys.length];
+  try {
+    for (var ki = start; ki < end; ki++) {
+      var key = keys[ki];
+      var g = groups[key];
+      var seen = {}, messages = [];
+      g.threads.forEach(function (tid) {
+        var thread = null;
+        try { thread = GmailApp.getThreadById(tid); }
+        catch (e) { denied++; return; }
+        if (!thread) { denied++; return; }
+        threadCount++;
+        try {
+          thread.getMessages().forEach(function (msg) {
+            var id = msg.getId();
+            if (!seen[id]) { seen[id] = true; messages.push(msg); }
+          });
+        } catch (e) { denied++; }
+      });
+      g.messages.forEach(function (mid) {
+        if (seen[mid]) return;
+        try {
+          var msg = GmailApp.getMessageById(mid);
+          if (msg) { seen[mid] = true; messages.push(msg); }
+        } catch (e) { denied++; }
+      });
+      if (!messages.length) continue;
+      messages.sort(function (a, b) { return a.getDate().getTime() - b.getDate().getTime(); });
+
+      var out = [
+        'I-PASSBOOK complete email thread',
+        'IR: ' + g.ir,
+        'Mailbox: ' + g.label,
+        'Generated: ' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+        'Source: Gmail threads referenced by Email_Index; all messages in each thread',
+        'Messages: ' + messages.length,
+        '============================================================'
+      ];
+      messages.forEach(function (msg) {
+        var body = '';
+        try { body = msg.getPlainBody() || ''; } catch (e) { body = ''; }
+        if (!body) body = '(no plain-text body returned by Gmail)';
+        bodies++;
+        out.push('');
+        out.push(Utilities.formatDate(msg.getDate(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss') + ' | ' + msg.getId());
+        out.push('From: ' + (msg.getFrom() || ''));
+        out.push('To: ' + (msg.getTo() || ''));
+        out.push('Subject: ' + (msg.getSubject() || ''));
+        out.push('Body:');
+        out.push(String(body).slice(0, 120000));
+        out.push('------------------------------------------------------------');
+      });
+
+      var folder = null;
+      try { folder = findOrCreateIRFolder(root, g.ir); }
+      catch (e) { failed++; continue; }
+      var name = g.ir + ' - Email Conversation - Complete - ' + g.label + '.txt';
+      try {
+        var it = folder.getFilesByName(name);
+        if (it.hasNext()) {
+          var existing = it.next();
+          var oldText = '';
+          try { oldText = existing.getBlob().getDataAsString(); } catch (err) { oldText = ''; }
+          var oldCount = 0;
+          var countMatch = /Messages:\s*(\d+)/.exec(oldText);
+          if (countMatch) oldCount = parseInt(countMatch[1], 10);
+          if (oldCount && messages.length < oldCount) {
+            var partialName = name.replace(/\.txt$/, ' - Partial.txt');
+            var pit = folder.getFilesByName(partialName);
+            if (pit.hasNext()) pit.next().setContent(out.join('\n'));
+            else folder.createFile(partialName, out.join('\n'), MimeType.PLAIN_TEXT);
+            failed++;
+            report('EMAIL THREADS: ' + g.ir + ' would shrink from ' + oldCount +
+                   ' to ' + messages.length + '; kept Complete and wrote Partial.');
+          } else {
+            existing.setContent(out.join('\n'));
+            updated++;
+          }
+        } else { folder.createFile(name, out.join('\n'), MimeType.PLAIN_TEXT); created++; }
+      } catch (e) { failed++; }
+    }
+    if (end < keys.length) props.setProperty(cursorKey, String(end));
+    else { props.deleteProperty(cursorKey); props.setProperty(doneKey, fingerprint); }
+  } finally {
+    lock.releaseLock();
+  }
+
+  lines.push('Threads read: ' + threadCount + ' A� bodies: ' + bodies +
+             ' A� created: ' + created + ' A� updated: ' + updated +
+             ' A� denied: ' + denied + ' A� failed: ' + failed);
+  if (end < keys.length) lines.push('Batch complete. Run again for the next ' + EMAIL_THREAD_BATCH + ' groups.');
+  else lines.push('All threads complete for this mailbox.');
+  lines.push('Run this again under the other mailbox to make its complete file too.');
+  lines.forEach(function (l) { report(l); });
+  return 'Complete email threads: ' + created + ' created, ' + updated + ' updated.';
+}
+
+function resetEmailThreadCursor() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.getKeys().forEach(function (k) {
+      if (k.indexOf(EMAIL_THREAD_CURSOR_PROPERTY) === 0 || k.indexOf(EMAIL_THREAD_DONE_PROPERTY) === 0) props.deleteProperty(k);
+    });
+  } catch (e) { /* nothing to reset */ }
+  return report('Email thread cursors reset. Each mailbox starts at group 1.');
+}
+
+function removeEmailThreadAutoRun() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'autoSyncEmailThreads') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return report('Automatic complete-thread runs removed: ' + removed + '.');
+}
+
+function installEmailThreadAutoRun() {
+  removeEmailThreadAutoRun();
+  ScriptApp.newTrigger('autoSyncEmailThreads')
+    .timeBased().everyMinutes(10).create();
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  return report('Automatic complete-thread runs installed for ' + (me || 'this account') +
+                '.\nIt runs every 10 minutes and stops itself when this mailbox is complete.' +
+                '\nInstall it once under the other mailbox account too.');
+}
+
+function autoSyncEmailThreads() {
+  syncEmailThreadConversationsCore(0);
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  var key = EMAIL_THREAD_CURSOR_PROPERTY + ':' + (me || 'unknown');
+  var pending = '';
+  try { pending = PropertiesService.getScriptProperties().getProperty(key) || ''; }
+  catch (e) { pending = ''; }
+  if (!pending) removeEmailThreadAutoRun();
+}
+
+function emailDailyHasPending() {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || 'unknown'; } catch (e) { me = 'unknown'; }
+  var props = PropertiesService.getScriptProperties();
+  var t = props.getProperty(EMAIL_THREAD_CURSOR_PROPERTY + ':' + me);
+  var a = props.getProperty(EMAIL_ATTACH_CURSOR_PROPERTY + ':all:' + me);
+  return !!(t || a);
+}
+
+function removeDailyEmailIngest() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'runDailyEmailIngest') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return report('Daily email ingest triggers removed: ' + removed + '.');
+}
+
+function installDailyEmailIngest() {
+  removeDailyEmailIngest();
+  removeEmailAttachmentAutoRun();
+  removeEmailThreadAutoRun();
+  ScriptApp.newTrigger('runDailyEmailIngest')
+    .timeBased().atHour(2).nearMinute(30).everyDays(1).create();
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  return report('Daily email ingest installed for ' + (me || 'this account') +
+                '.\nRuns about 02:30 daily, processes full threads and attachments, and keeps its progress.' +
+                '\nInstall it once under the other mailbox account too.');
+}
+
+function runDailyEmailIngest() {
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  var started = Date.now();
+  var rounds = 0;
+  report('DAILY EMAIL INGEST - ' + (me || 'unknown account'));
+  // 20 rounds x (50 thread groups + 250 attachment rows) fits comfortably in
+  // one daily window and resumes from the cursors if it does not.
+  while (Date.now() - started < 20 * 60 * 1000 && rounds < 20) {
+    syncEmailThreadConversationsCore(0);
+    importEmailAttachmentsCore(true, 0);
+    rounds++;
+    if (!emailDailyHasPending()) break;
+  }
+  report('Daily email ingest finished for now. Rounds: ' + rounds +
+         ' · pending: ' + (emailDailyHasPending() ? 'yes' : 'no'));
+}
+
+// Email attachments. This is the ONE Gmail read in the backend, and it is
+// editor-run only. Gmail scope is required; the account running it must be able
+// to read that message, so a customer.relations message may be denied unless the
+// account has delegated access. Batched by Script Property cursor so a run limit
+// does not lose progress; rerun until the log says "complete".
+var EMAIL_ATTACH_CURSOR_PROPERTY = 'EMAIL_ATTACH_CURSOR';
+var EMAIL_ATTACH_BATCH = 250;
+
+function resetEmailAttachmentCursor() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    props.getKeys().forEach(function (k) {
+      if (k.indexOf(EMAIL_ATTACH_CURSOR_PROPERTY) === 0) props.deleteProperty(k);
+    });
+  } catch (e) { /* nothing to reset */ }
+  return report('Email attachment cursors reset. Each mailbox starts at row 1.');
+}
+
+function importEmailAttachmentsApply() { return importEmailAttachmentsCore(false); }
+
+// The safe/no-trust mode: ignore the Mailbox column and attempt EVERY row with
+// the account that is running. Attachments the account can open are saved; the
+// rest are counted as denied. Run it under each mailbox account.
+function importEmailAttachmentsAllApply() { return importEmailAttachmentsCore(true); }
+
+function importEmailAttachmentsCore(ignoreMailbox, lockWaitMs) {
+  var got = null;
+  try { got = emailIndexRowsForEvidence(); }
+  catch (e) { return report('EMAIL ATTACHMENTS: could not read Email_Index: ' + ((e && e.message) || String(e))); }
+  if (!got) return report('EMAIL ATTACHMENTS: Email_Index tab not found.');
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail() || ''; } catch (e) { /* unknown */ }
+  var rows = got.rows.filter(function (m) {
+    return !!m.messageId && (ignoreMailbox || mailboxIsForCurrent(m.mailbox, me));
+  });
+  if (!rows.length) return report('EMAIL ATTACHMENTS: no messages in Email_Index belong to ' +
+                                  (me || 'this account') + '. Run this as the other mailbox account.');
+
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('EMAIL ATTACHMENTS: could not open By ID: ' + ((e && e.message) || String(e))); }
+  if (!root) return report('EMAIL ATTACHMENTS: BY_ID_FOLDER_ID is not set.');
+
+  var props = PropertiesService.getScriptProperties();
+  var cursorKey = EMAIL_ATTACH_CURSOR_PROPERTY + ':' + (ignoreMailbox ? 'all:' : '') + (me || 'unknown');
+  var start = parseInt(props.getProperty(cursorKey) || '0', 10);
+  if (!(start >= 0) || start >= rows.length) start = 0;
+  var end = Math.min(rows.length, start + EMAIL_ATTACH_BATCH);
+
+  var lock = LockService.getScriptLock();
+  var wait = typeof lockWaitMs === 'number' ? lockWaitMs : 30000;
+  if (!lock.tryLock(wait)) return report('EMAIL ATTACHMENTS: another run holds the lock.');
+  var saved = 0, skipped = 0, denied = 0, errors = 0, seen = {};
+  var lines = ['EMAIL ATTACHMENTS - Gmail read, editor-run',
+               'Mode: ' + (ignoreMailbox ? 'ALL rows, ignore Mailbox column' : 'this mailbox only'),
+               'Account: ' + (me || '(unknown)'),
+               'Rows ' + (start + 1) + '-' + end + ' of ' + rows.length];
+  try {
+    for (var i = start; i < end; i++) {
+      var m = rows[i];
+      if (seen[m.messageId]) continue;
+      seen[m.messageId] = true;
+      var folder = null;
+      try { folder = findOrCreateIRFolder(root, m.ir); }
+      catch (e) { errors++; continue; }
+      var message = null;
+      try { message = GmailApp.getMessageById(m.messageId); }
+      catch (e) {
+        denied++;
+        if (denied <= 10) lines.push('  ' + m.ir + ' / ' + m.messageId + ' denied: ' + ((e && e.message) || String(e)));
+        continue;
+      }
+      var attachments = [];
+      try { attachments = message.getAttachments(); }
+      catch (e) { errors++; continue; }
+      attachments.forEach(function (att, idx) {
+        try {
+          if (att.getSize() > 20 * 1024 * 1024) { skipped++; return; }
+          var oldName = cleanFileName(m.ir + ' - ' + m.messageId + ' - ' + att.getName());
+          if (hasFileInFolder(folder, oldName)) { skipped++; return; }
+          var name = idx === 0 ? oldName
+            : cleanFileName(m.ir + ' - ' + m.messageId + ' - ' + (idx + 1) + ' - ' + att.getName());
+          if (hasFileInFolder(folder, name)) { skipped++; return; }
+          var blob = att.copyBlob();
+          blob.setName(name);
+          folder.createFile(blob);
+          saved++;
+        } catch (e) {
+          errors++;
+          if (errors <= 10) lines.push('  ' + m.ir + ' attachment failed: ' + ((e && e.message) || String(e)));
+        }
+      });
+    }
+    if (end < rows.length) props.setProperty(cursorKey, String(end));
+    else props.deleteProperty(cursorKey);
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Saved: ' + saved + ' · skipped: ' + skipped + ' · denied: ' + denied + ' · failed: ' + errors);
+  if (end < rows.length) {
+    lines.push('Batch complete. Run importEmailAttachmentsApply() again for the next ' +
+               EMAIL_ATTACH_BATCH + ' rows.');
+  } else {
+    lines.push('Import complete.');
+  }
+  if (denied) {
+    lines.push(ignoreMailbox
+      ? 'Denied messages are not readable by this account. Run this all-rows mode under the other mailbox account.'
+      : 'Some messages were denied. Grant this account access to that mailbox, run resetEmailAttachmentCursor(), then rerun.');
+  }
+  lines.forEach(function (l) { report(l); });
+  return 'Email attachments: ' + saved + ' saved, ' + skipped + ' skipped, ' + denied + ' denied.';
+}
+
+// Automatic attachment runs. Install this under EACH mailbox account; the trigger
+// runs as that account, so it reads that mailbox. The trigger removes itself when
+// that account's all-rows cursor disappears (Import complete).
+function removeEmailAttachmentAutoRun() {
+  var removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'autoImportEmailAttachments') {
+      ScriptApp.deleteTrigger(t);
+      removed++;
+    }
+  });
+  return report('Automatic attachment runs removed: ' + removed + '.');
+}
+
+function installEmailAttachmentAutoRun() {
+  removeEmailAttachmentAutoRun();
+  ScriptApp.newTrigger('autoImportEmailAttachments')
+    .timeBased().everyMinutes(10).create();
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  return report('Automatic attachment runs installed for ' + (me || 'this account') +
+                '.\nIt runs every 10 minutes in ALL-rows mode and stops itself when complete.' +
+                '\nInstall it once under the other mailbox account too.');
+}
+
+function autoImportEmailAttachments() {
+  importEmailAttachmentsCore(true, 0);
+  var me = '';
+  try { me = Session.getEffectiveUser().getEmail(); } catch (e) { /* unknown */ }
+  var key = EMAIL_ATTACH_CURSOR_PROPERTY + ':all:' + (me || 'unknown');
+  var pending = '';
+  try { pending = PropertiesService.getScriptProperties().getProperty(key) || ''; }
+  catch (e) { pending = ''; }
+  if (!pending) removeEmailAttachmentAutoRun();
+}
+
 function summaryDocInFolder(folder, ir) {
   try {
     var it = folder.getFilesByName(ir + '.docx');
@@ -9641,6 +12476,46 @@ function driveFileIdFromUrl(url) {
   return ids.length ? ids[0] : '';
 }
 
+// A Summary cell may hold a visible URL, or a link whose display text is a word.
+// getDisplayValues() returns only the display text, so the rich-text link is the
+// second source. This is why IR262/IR263 looked like "link but no doc": the cell
+// had a hyperlink, not a visible URL.
+function summaryDocText(file) {
+  try {
+    return String(DocumentApp.openById(file.getId()).getBody().getText() || '');
+  } catch (e) { return ''; }
+}
+
+function summaryDocMentionsIR(text, ir) {
+  return irNumbersInName(text).indexOf(ir) >= 0;
+}
+
+function normalizeSummaryText(text) {
+  return String(text == null ? '' : text).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function summaryLinkForRow(sheet, row, col, displayText) {
+  var text = String(displayText == null ? '' : displayText).trim();
+  if (driveFileIdFromUrl(text)) return text;
+  if (!sheet || !row || !col) return text;
+  try {
+    var cell = sheet.getRange(row, col);
+    var formula = cell.getFormula ? cell.getFormula() : '';
+    var fm = /HYPERLINK\(\s*"([^"]+)"/i.exec(formula);
+    if (fm && driveFileIdFromUrl(fm[1])) return fm[1];
+    if (!cell.getRichTextValue) return text;
+    var rich = cell.getRichTextValue();
+    var url = (rich && rich.getLinkUrl) ? rich.getLinkUrl() : '';
+    if (url) return url;
+    var runs = (rich && rich.getRuns) ? rich.getRuns() : [];
+    for (var i = 0; i < runs.length; i++) {
+      var u = runs[i].getLinkUrl ? runs[i].getLinkUrl() : '';
+      if (u) return u;
+    }
+  } catch (e) { /* fall back to the display text */ }
+  return text;
+}
+
 function byIdReviewFolder(root) {
   var it = root.getFoldersByName(NORMALIZATION_REVIEW_FOLDER);
   return it.hasNext() ? it.next() : root.createFolder(NORMALIZATION_REVIEW_FOLDER);
@@ -9655,7 +12530,11 @@ function planEvidenceNormalization() {
   catch (e) { return report('NORMALIZATION PLAN: could not open the By ID folder: ' + ((e && e.message) || String(e))); }
   var byIdRootId = root.getId();
 
-  var grid = intakeGrid();
+  var sheet = null;
+  try { sheet = intakeSheet(); }
+  catch (e) { return report('NORMALIZATION PLAN: could not open the intake sheet: ' + ((e && e.message) || String(e))); }
+  if (!sheet) return report('NORMALIZATION PLAN: tab "' + CONFIG.IR_REPO_TAB + '" was not found.');
+  var grid = intakeGrid(sheet);
   if (!grid || grid.length < 2) return report('NORMALIZATION PLAN: the intake sheet has no data rows.');
   var header = grid[0];
   var irCol = irNumberColumnIndex(header);
@@ -9666,14 +12545,17 @@ function planEvidenceNormalization() {
   var byIR = {}, fileRefs = {};
   for (var r = 1; r < grid.length; r++) {
     var row = grid[r] || [];
-    var ir = irKey(row[irCol]);
-    if (!/^IR\d+$/.test(ir)) continue;
+    var ir = normalizeIRNumber(row[irCol]);
+    if (!ir) continue;
     var rec = byIR[ir] || { ir: ir, fileIds: {}, rows: [] };
+    var summaryText = String(row[sumCol] == null ? '' : row[sumCol]).trim();
     rec.rows.push({
       row: r + 1,
-      summary: String(row[sumCol] == null ? '' : row[sumCol]).trim()
+      summary: summaryText,
+      summaryUrl: summaryText ? summaryLinkForRow(sheet, r + 1, sumCol + 1, summaryText) : ''
     });
-    [evCols.n, evCols.q].forEach(function (c) {
+    var evidenceCols = evCols.all.length ? evCols.all : [evCols.n, evCols.q];
+    evidenceCols.forEach(function (c) {
       if (c < 0) return;
       driveFileIdsInCell(row[c]).forEach(function (id) {
         rec.fileIds[id] = true;
@@ -9700,7 +12582,10 @@ function planEvidenceNormalization() {
     noSheetFolders: [], quarantineFolders: [],
     createSummaries: [], fixSummaryDocs: [], moveSummaries: [],
     duplicateSummaries: [], sheetLinks: [],
-    conflicts: { missingFiles: [], summaryLinkWithoutDoc: [], folderIRsNotInSheet: [] },
+    conflicts: {
+      missingFiles: [], summaryLinkWithoutDoc: [], folderIRsNotInSheet: [],
+      summaryContentMismatch: []
+    },
     counts: {}
   };
 
@@ -9727,14 +12612,21 @@ function planEvidenceNormalization() {
     plan.conflicts.folderIRsNotInSheet.push(ir);
     groups[ir].forEach(function (f) {
       var subs = folderSubfolderNames(f.folder);
-      var fileCount = folderFileCount(f.folder);
+      var files = listAll(f.folder.getFiles());
+      var fileCount = files.length;
       var otherIR = subs.some(function (n) {
         return irNumbersInName(n).some(function (x) { return x !== ir; });
       });
+      var otherIRInFiles = files.some(function (ff) {
+        return irNumbersInName(ff.getName()).some(function (x) { return x !== ir; });
+      });
       var entry = {
         id: f.id, path: f.path, ir: ir, fileCount: fileCount, subfolders: subs,
-        safe: !otherIR && fileCount > 0,
-        reason: otherIR ? 'contains a subfolder naming another IR' : (fileCount ? '' : 'empty')
+        files: files.map(function (ff) { return ff.getName(); }),
+        safe: !otherIR && !otherIRInFiles && fileCount > 0,
+        reason: otherIR ? 'contains a subfolder naming another IR'
+              : otherIRInFiles ? 'contains a file name naming another IR'
+              : (fileCount ? '' : 'empty')
       };
       plan.noSheetFolders.push(entry);
       if (entry.safe) plan.quarantineFolders.push({ id: f.id, path: f.path, ir: ir });
@@ -9808,24 +12700,45 @@ function planEvidenceNormalization() {
     }
     if (foundSummaries.length > 1) {
       var keepId = summaryFrom ? summaryFrom.id : '';
+      var keepText = summaryFrom ? summaryDocText(summaryFrom.file) : '';
       foundSummaries.forEach(function (x) {
         if (x.folder.id === keepId) return;
-        plan.duplicateSummaries.push({ fileId: x.s.file.getId(), ir: ir, fromPath: x.folder.path });
+        var text = summaryDocText(x.s.file);
+        var sameText = !!(normalizeSummaryText(keepText) && normalizeSummaryText(text) &&
+                          normalizeSummaryText(keepText) === normalizeSummaryText(text));
+        plan.duplicateSummaries.push({
+          fileId: x.s.file.getId(), ir: ir, fromPath: x.folder.path, sameText: sameText
+        });
+        if (keepText && text && !sameText) {
+          plan.conflicts.summaryContentMismatch.push({
+            ir: ir, fileId: x.s.file.getId(), currentName: x.s.file.getName(),
+            reason: 'duplicate summary text differs from the canonical summary'
+          });
+        }
       });
     }
 
     var linkRows = rec.rows.filter(function (x) { return !!x.summary; });
     var hasAnySummaryLink = linkRows.length > 0;
     if (!summary && hasAnySummaryLink) {
-      var fileId = driveFileIdFromUrl(linkRows[0].summary);
+      var fileId = driveFileIdFromUrl(linkRows[0].summaryUrl || linkRows[0].summary);
       var f = null;
       try { f = fileId ? DriveApp.getFileById(fileId) : null; } catch (e) { f = null; }
       if (f) {
+        var docText = summaryDocText(f);
+        var contentOK = summaryDocMentionsIR(docText, ir);
         plan.fixSummaryDocs.push({
           ir: ir, fileId: f.getId(), currentName: f.getName(), targetName: ir + '.docx',
           fromParents: listAll(f.getParents()).map(function (p) { return p.getName(); }),
-          toFolderId: canonical ? canonical.id : null
+          toFolderId: canonical ? canonical.id : null,
+          contentOK: contentOK, contentHead: docText.slice(0, 200)
         });
+        if (!contentOK) {
+          plan.conflicts.summaryContentMismatch.push({
+            ir: ir, fileId: f.getId(), currentName: f.getName(),
+            reason: 'summary doc does not name ' + ir
+          });
+        }
       } else {
         plan.conflicts.summaryLinkWithoutDoc.push(ir);
       }
@@ -9888,6 +12801,7 @@ function planEvidenceNormalization() {
     sheetLinksToWrite: plan.sheetLinks.length,
     duplicateSummaries: plan.duplicateSummaries.length,
     summaryLinkWithoutDoc: plan.conflicts.summaryLinkWithoutDoc.length,
+    summaryContentMismatch: plan.conflicts.summaryContentMismatch.length,
     folderIRsNotInSheet: plan.conflicts.folderIRsNotInSheet.length
   };
 
@@ -9915,35 +12829,787 @@ function planEvidenceNormalization() {
              ' · docs to fix/move ' + plan.counts.summaryDocsToFix +
              ' · blank sheet links to fill ' + plan.counts.sheetLinksToWrite +
              ' · duplicate summaries ' + plan.counts.duplicateSummaries +
-             ' · link but no doc ' + plan.counts.summaryLinkWithoutDoc);
+             ' · link but no doc ' + plan.counts.summaryLinkWithoutDoc +
+             ' · content mismatches ' + plan.counts.summaryContentMismatch);
   lines.push('No-sheet folders: ' + plan.counts.noSheetFolders + ' found, ' +
              plan.counts.quarantineFolders + ' safe to quarantine');
   lines.push('');
-  function sample(label, arr) {
+  function sample(label, arr, max) {
     if (!arr.length) return;
+    max = max || 8;
     lines.push(label + ':');
-    arr.slice(0, 8).forEach(function (x) {
+    arr.slice(0, max).forEach(function (x) {
       if (typeof x === 'string') { lines.push('  ' + x); return; }
       lines.push('  ' + (x.path || x.fromPath || x.ir || '') +
                  (x.to ? ' -> ' + x.to : '') +
                  (x.irs ? ' (' + x.irs.join(', ') + ')' : ''));
     });
-    if (arr.length > 8) lines.push('  … ' + (arr.length - 8) + ' more in the plan file');
+    if (arr.length > max) lines.push('  … ' + (arr.length - max) + ' more in the plan file');
   }
   sample('Rename', plan.renameFolders);
   sample('Move nested IR folders', plan.moveFolders);
   sample('Merge duplicates', plan.mergeFolders);
   sample('Flatten subfolders', plan.flattenFolders);
-  sample('Multi-IR folders', plan.multiIRFolders);
-  sample('Multi-IR files', plan.multiIRFiles);
-  sample('No-sheet folders', plan.noSheetFolders);
-  sample('Quarantine', plan.quarantineFolders);
-  sample('Summary docs to fix', plan.fixSummaryDocs);
-  sample('Duplicate summaries', plan.duplicateSummaries);
+  sample('Multi-IR folders', plan.multiIRFolders, 100);
+  sample('Multi-IR files', plan.multiIRFiles, 100);
+  sample('No-sheet folders', plan.noSheetFolders, 100);
+  sample('Quarantine', plan.quarantineFolders, 100);
+  sample('Summary docs to fix', plan.fixSummaryDocs, 100);
+  sample('Duplicate summaries', plan.duplicateSummaries, 100);
+  sample('Summary content mismatches', plan.conflicts.summaryContentMismatch, 100);
   sample('Missing files', plan.conflicts.missingFiles);
   sample('Link but no doc', plan.conflicts.summaryLinkWithoutDoc);
   lines.push('');
+  if (plan.counts.summaryContentMismatch) {
+    lines.push('STOP: ' + plan.counts.summaryContentMismatch +
+               ' summary doc(s) do not match their IR. Inspect before applying.');
+  }
   lines.push('Review the plan file. Nothing has been moved. The apply step is separate.');
   lines.forEach(function (l) { report(l); });
   return 'Normalization plan written: ' + planFile.getUrl();
+}
+
+// Editor-run diagnostics for a plan already on disk. It reads the plan file and the
+// Summary cells only; it never writes. Run with no argument to use the newest plan.
+function latestEvidencePlanFile() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); } catch (e) { return null; }
+  var it = root.getFoldersByName(NORMALIZATION_REVIEW_FOLDER);
+  if (!it.hasNext()) return null;
+  var files = listAll(it.next().getFiles()).filter(function (f) {
+    return /^evidence-plan-.*\.json$/.test(f.getName());
+  });
+  files.sort(function (a, b) { return a.getName() < b.getName() ? 1 : -1; });
+  return files.length ? files[0] : null;
+}
+
+function summaryCellReportForIR(sheet, ir) {
+  if (!sheet) return [];
+  var grid = intakeGrid(sheet);
+  if (!grid || grid.length < 2) return [];
+  var irCol = irNumberColumnIndex(grid[0]);
+  var sumCol = summaryColumnIndex(grid[0]);
+  if (irCol < 0) return [];
+  var out = [];
+  for (var r = 1; r < grid.length; r++) {
+    if (irKey(grid[r][irCol]) !== ir) continue;
+    var cell = sheet.getRange(r + 1, sumCol + 1);
+    var rich = cell.getRichTextValue ? cell.getRichTextValue() : null;
+    var runs = (rich && rich.getRuns) ? rich.getRuns() : [];
+    var runOut = runs.map(function (run) {
+      return { text: run.getText ? run.getText() : '', url: run.getLinkUrl ? run.getLinkUrl() : '' };
+    });
+    var link = (rich && rich.getLinkUrl) ? rich.getLinkUrl() : '';
+    var candidates = [cell.getDisplayValue(), cell.getFormula(), link]
+      .concat(runOut.map(function (x) { return x.url; }));
+    var ids = [];
+    candidates.forEach(function (c) {
+      driveFileIdsInCell(c).forEach(function (id) { if (ids.indexOf(id) < 0) ids.push(id); });
+    });
+    out.push({
+      row: r + 1,
+      display: cell.getDisplayValue(),
+      formula: cell.getFormula(),
+      link: link,
+      runs: runOut,
+      ids: ids
+    });
+  }
+  return out;
+}
+
+function inspectEvidencePlan(planFileId) {
+  var file = null;
+  var raw = String(planFileId == null ? '' : planFileId).trim();
+  var id = driveFileIdFromUrl(raw) || (/^[-\w]{25,}$/.test(raw) ? raw : '');
+  if (id) {
+    try { file = DriveApp.getFileById(id); } catch (e) { file = null; }
+  }
+  if (!file) file = latestEvidencePlanFile();
+  if (!file) return report('INSPECT PLAN: no evidence-plan-*.json found under By ID/' +
+                           NORMALIZATION_REVIEW_FOLDER + '.');
+
+  var plan = null;
+  try { plan = JSON.parse(file.getBlob().getDataAsString()); }
+  catch (e) { return report('INSPECT PLAN: could not read ' + file.getUrl() + ': ' + ((e && e.message) || String(e))); }
+
+  var sheet = null;
+  try { sheet = intakeSheet(); } catch (e) { sheet = null; }
+  function oneLine(text) {
+    return String(text == null ? '' : text).replace(/\s+/g, ' ').trim().slice(0, 300);
+  }
+  function list(label, arr, fn) {
+    if (!arr || !arr.length) return;
+    lines.push(label + ':');
+    arr.forEach(function (x) { lines.push('  ' + fn(x)); });
+  }
+
+  var lines = [];
+  lines.push('INSPECT PLAN - read-only');
+  lines.push('Plan: ' + file.getUrl());
+  lines.push('Counts: ' + JSON.stringify(plan.counts || {}));
+  lines.push('');
+
+  list('Summary content mismatches', plan.conflicts && plan.conflicts.summaryContentMismatch, function (x) {
+    return x.ir + ' | ' + (x.currentName || '') + ' | ' + (x.reason || '') +
+           ' | head: ' + oneLine(x.contentHead);
+  });
+  list('Summary docs to fix/move', plan.fixSummaryDocs, function (x) {
+    return x.ir + ' | ' + x.currentName + ' -> ' + x.targetName +
+           ' | contentOK: ' + x.contentOK + ' | head: ' + oneLine(x.contentHead);
+  });
+  lines.push('Link but no doc:');
+  (plan.conflicts && plan.conflicts.summaryLinkWithoutDoc || []).forEach(function (ir) {
+    var cells = summaryCellReportForIR(sheet, ir);
+    if (!cells.length) { lines.push('  ' + ir + ' | no Summary cell found'); return; }
+    cells.forEach(function (c) {
+      lines.push('  ' + ir + ' | row ' + c.row + ' | display: ' + oneLine(c.display) +
+                 ' | formula: ' + oneLine(c.formula) + ' | link: ' + oneLine(c.link) +
+                 ' | ids: ' + (c.ids.join(', ') || 'none'));
+      if (c.runs.length) {
+        c.runs.forEach(function (run) {
+          lines.push('      run: "' + oneLine(run.text) + '" -> ' + oneLine(run.url));
+        });
+      }
+    });
+  });
+  list('No-sheet folders', plan.noSheetFolders, function (x) {
+    return x.path + ' | safe: ' + x.safe + ' | ' + (x.reason || '') +
+           ' | files: ' + ((x.files || []).join(' ; ') || 'none') +
+           ' | subfolders: ' + ((x.subfolders || []).join(' ; ') || 'none');
+  });
+  list('Duplicate summaries', plan.duplicateSummaries, function (x) {
+    return x.ir + ' | ' + x.fromPath + ' | sameText: ' + x.sameText;
+  });
+  list('Multi-IR folders', plan.multiIRFolders, function (x) {
+    return x.path + ' | ' + (x.irs || []).join(', ');
+  });
+  lines.push('');
+  lines.forEach(function (l) { report(l); });
+  return 'Plan inspected: ' + file.getUrl();
+}
+
+// Targeted, owner-approved repair. It writes ONLY: new summary Docs, the four
+// Summary cells, and a rename of a same-named WRONG doc (never a delete). It is
+// editor-run, not routed. Run repairFlaggedSummaries() for a dry run, then
+// repairFlaggedSummariesApply() to write.
+var SUMMARY_REPAIR_IRS = ['IR003', 'IR137', 'IR262', 'IR263'];
+
+function summaryDocBodyForRow(header, row, ir, evCols, sumCol) {
+  var lines = ['IR Summary', 'IR Number: ' + ir];
+  for (var c = 0; c < header.length; c++) {
+    if (c === sumCol || c === evCols.n || c === evCols.q) continue;
+    var label = String(header[c] == null ? '' : header[c]).trim();
+    var value = String(row[c] == null ? '' : row[c]).trim();
+    if (!label || !value) continue;
+    var low = label.toLowerCase();
+    if (low.indexOf('summary') > -1 || low.indexOf('ir number') > -1) continue;
+    lines.push(label + ': ' + value);
+  }
+  return lines.join('\n');
+}
+
+function findOrCreateIRFolder(root, ir) {
+  var it = root.getFoldersByName(ir);
+  if (it.hasNext()) return it.next();
+  return root.createFolder(ir);
+}
+
+function existingCorrectSummaryDoc(folder, ir) {
+  var it = folder.getFilesByName(ir + '.docx');
+  while (it.hasNext()) {
+    var f = it.next();
+    if (f.getMimeType() !== MimeType.GOOGLE_DOCS) continue;
+    if (summaryDocMentionsIR(summaryDocText(f), ir)) return f;
+  }
+  return null;
+}
+
+function supersedeWrongSummaryDocs(folder, ir, stamp) {
+  var out = [];
+  var it = folder.getFilesByName(ir + '.docx');
+  while (it.hasNext()) {
+    var f = it.next();
+    if (f.getMimeType() !== MimeType.GOOGLE_DOCS) continue;
+    if (summaryDocMentionsIR(summaryDocText(f), ir)) continue;
+    f.setName(ir + '-superseded-' + stamp + '.docx');
+    out.push(f.getName());
+  }
+  return out;
+}
+
+function createSummaryDocInFolder(ir, folder, content) {
+  var doc = DocumentApp.create(ir + '.docx');
+  doc.getBody().setText(content);
+  doc.saveAndClose();
+  var file = DriveApp.getFileById(doc.getId());
+  file.moveTo(folder);
+  return file;
+}
+
+function linkSummaryCellToFile(cell, file) {
+  function q(s) { return String(s).replace(/"/g, '""'); }
+  cell.clearContent();
+  cell.setFormula('=HYPERLINK("' + q(file.getUrl()) + '","' + q(file.getName()) + '")');
+}
+
+function repairFlaggedSummaries() { return repairFlaggedSummariesCore(false); }
+
+function repairFlaggedSummariesApply() { return repairFlaggedSummariesCore(true); }
+
+function repairFlaggedSummariesCore(apply) {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('SUMMARY REPAIR: could not open By ID: ' + ((e && e.message) || String(e))); }
+
+  var sheet = null;
+  try { sheet = intakeSheet(); }
+  catch (e) { return report('SUMMARY REPAIR: could not open the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!sheet) return report('SUMMARY REPAIR: tab "' + CONFIG.IR_REPO_TAB + '" was not found.');
+
+  var grid = intakeGrid(sheet);
+  if (!grid || !grid.length) return report('SUMMARY REPAIR: the response sheet is empty.');
+  var header = grid[0];
+  var irCol = irNumberColumnIndex(header);
+  var sumCol = summaryColumnIndex(header);
+  var evCols = evidenceColumnIndexes(header);
+  if (irCol < 0) return report('SUMMARY REPAIR: no IR Number column in the response sheet.');
+
+  var rowsByIR = {};
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var ir = normalizeIRNumber(row[irCol]);
+    if (!ir) continue;
+    if (!rowsByIR[ir]) rowsByIR[ir] = [];
+    rowsByIR[ir].push({ row: r + 1, values: row });
+  }
+
+  var actions = SUMMARY_REPAIR_IRS.map(function (ir) {
+    var rows = rowsByIR[ir] || [];
+    return {
+      ir: ir,
+      rows: rows,
+      content: rows.length
+        ? summaryDocBodyForRow(header, rows[0].values, ir, evCols, sumCol)
+        : 'IR Summary\nIR Number: ' + ir +
+          '\nNo Form Responses row was found for this IR; this summary was created from its folder.'
+    };
+  });
+
+  var lines = ['SUMMARY REPAIR - ' + (apply === true ? 'APPLY' : 'DRY RUN')];
+  actions.forEach(function (a) {
+    lines.push('  ' + a.ir + ' | rows: ' + a.rows.length +
+               ' | content: ' + a.content.split('\n').slice(0, 3).join(' / '));
+  });
+  if (apply !== true) {
+    lines.push('Nothing written. Run repairFlaggedSummariesApply() to apply.');
+    lines.forEach(function (l) { report(l); });
+    return 'Summary repair dry run.';
+  }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('SUMMARY REPAIR: another run holds the lock.');
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+  try {
+    actions.forEach(function (a) {
+      try {
+        var folder = findOrCreateIRFolder(root, a.ir);
+        var file = existingCorrectSummaryDoc(folder, a.ir);
+        if (!file) {
+          var old = supersedeWrongSummaryDocs(folder, a.ir, stamp);
+          file = createSummaryDocInFolder(a.ir, folder, a.content);
+          if (old.length) lines.push('  ' + a.ir + ' | renamed wrong doc(s): ' + old.join(', '));
+        }
+        if (!summaryDocMentionsIR(summaryDocText(file), a.ir)) {
+          throw new Error('created summary does not name ' + a.ir);
+        }
+        a.rows.forEach(function (r) {
+          linkSummaryCellToFile(sheet.getRange(r.row, sumCol + 1), file);
+        });
+        lines.push('  ' + a.ir + ' | ' + file.getUrl() +
+                   ' | linked cells: ' + a.rows.length);
+      } catch (e) {
+        lines.push('  ' + a.ir + ' | ERROR: ' + ((e && e.message) || String(e)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+  lines.push('Done. Re-run planEvidenceNormalization() later to confirm.');
+  lines.forEach(function (l) { report(l); });
+  return 'Summary repair applied.';
+}
+
+// Fills every BLANK Summary cell in the response sheet. It reuses a correct
+// `IRxxx.docx` in the IR's folder; otherwise it creates one from that row's
+// displayed fields. Blank cells only: it never overwrites an existing link.
+// Run fillAllSummaryLinksApply() from the editor. It is resumable: rerun it if
+// the execution limit is reached, and it will only fill what is still blank.
+function summaryFoldersForIR(root, inventory, ir) {
+  var exactRoot = [], exactAny = [], irRoot = [], irAny = [];
+  inventory.forEach(function (f) {
+    if (f.ir !== ir) return;
+    if (f.name === ir && f.parentId === root.getId()) exactRoot.push(f);
+    else if (f.name === ir) exactAny.push(f);
+    else if (f.parentId === root.getId()) irRoot.push(f);
+    else irAny.push(f);
+  });
+  return exactRoot.concat(exactAny, irRoot, irAny);
+}
+
+function fillAllSummaryLinksApply() {
+  var root = null;
+  try { root = DriveApp.getFolderById(byIdFolderId()); }
+  catch (e) { return report('FILL SUMMARIES: could not open By ID: ' + ((e && e.message) || String(e))); }
+
+  var sheet = null;
+  try { sheet = intakeSheet(); }
+  catch (e) { return report('FILL SUMMARIES: could not open the response sheet: ' + ((e && e.message) || String(e))); }
+  if (!sheet) return report('FILL SUMMARIES: tab "' + CONFIG.IR_REPO_TAB + '" was not found.');
+
+  var grid = intakeGrid(sheet);
+  if (!grid || !grid.length) return report('FILL SUMMARIES: the response sheet is empty.');
+  var header = grid[0];
+  var irCol = irNumberColumnIndex(header);
+  var sumCol = summaryColumnIndex(header);
+  var evCols = evidenceColumnIndexes(header);
+  if (irCol < 0) return report('FILL SUMMARIES: no IR Number column in the response sheet.');
+
+  var blankRowsByIR = {}, firstRowByIR = {}, blankCount = 0;
+  for (var r = 1; r < grid.length; r++) {
+    var row = grid[r] || [];
+    var ir = normalizeIRNumber(row[irCol]);
+    if (!ir) continue;
+    if (!firstRowByIR[ir]) firstRowByIR[ir] = { row: r + 1, values: row };
+    var cell = sheet.getRange(r + 1, sumCol + 1);
+    if (String(cell.getDisplayValue() == null ? '' : cell.getDisplayValue()).trim()) continue;
+    if (!blankRowsByIR[ir]) blankRowsByIR[ir] = [];
+    blankRowsByIR[ir].push(r + 1);
+    blankCount++;
+  }
+  var irs = Object.keys(blankRowsByIR).sort();
+  if (!irs.length) return report('FILL SUMMARIES: no blank Summary cells.');
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('FILL SUMMARIES: another run holds the lock.');
+  var inventory = collectByIDFolders(root);
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd-HHmmss');
+  var lines = ['FILL SUMMARIES - APPLY', 'Blank cells: ' + blankCount + ' across ' + irs.length + ' IR(s)'];
+  var created = 0, reused = 0, linked = 0;
+  try {
+    irs.forEach(function (ir) {
+      try {
+        var folders = summaryFoldersForIR(root, inventory, ir);
+        var folder = folders.length ? folders[0].folder : findOrCreateIRFolder(root, ir);
+        var file = null, wasNew = false;
+        for (var i = 0; i < folders.length; i++) {
+          file = existingCorrectSummaryDoc(folders[i].folder, ir);
+          if (file) break;
+        }
+        if (!file) {
+          supersedeWrongSummaryDocs(folder, ir, stamp);
+          file = createSummaryDocInFolder(ir, folder,
+            summaryDocBodyForRow(header, firstRowByIR[ir].values, ir, evCols, sumCol));
+          created++;
+          wasNew = true;
+        } else {
+          reused++;
+        }
+        if (!summaryDocMentionsIR(summaryDocText(file), ir)) {
+          throw new Error('summary does not name ' + ir);
+        }
+        var wrote = 0;
+        blankRowsByIR[ir].forEach(function (rowNo) {
+          var cell = sheet.getRange(rowNo, sumCol + 1);
+          if (String(cell.getDisplayValue() == null ? '' : cell.getDisplayValue()).trim()) return;
+          linkSummaryCellToFile(cell, file);
+          wrote++;
+          linked++;
+        });
+        lines.push('  ' + ir + ' | ' + file.getUrl() + ' | linked ' + wrote +
+                   ' | ' + (wasNew ? 'new' : 'existing'));
+      } catch (e) {
+        lines.push('  ' + ir + ' | ERROR: ' + ((e && e.message) || String(e)));
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  var remaining = 0;
+  for (var rr = 1; rr < grid.length; rr++) {
+    var c = sheet.getRange(rr + 1, sumCol + 1);
+    if (!String(c.getDisplayValue() == null ? '' : c.getDisplayValue()).trim()) remaining++;
+  }
+  lines.push('Created ' + created + ', reused ' + reused + ', linked ' + linked +
+             ' cell(s), remaining blank: ' + remaining);
+  lines.push('Done. Rerun fillAllSummaryLinksApply() if anything remains blank.');
+  lines.forEach(function (l) { report(l); });
+  return 'Summary cells filled: ' + linked + ', remaining blank: ' + remaining;
+}
+
+// FOLDER APPLY - the plan's evidence side, resumable and idempotent.
+// It never writes a sheet cell and never deletes a FILE. It trashes only folders
+// that are empty after their contents were moved. Rerun it if the execution limit
+// is reached: files already in the target and folders already moved are skipped.
+function folderIsUnder(folder, parentId) {
+  return listAll(folder.getParents()).some(function (p) { return p.getId() === parentId; });
+}
+
+function fileIsInFolder(file, folderId) {
+  return listAll(file.getParents()).some(function (p) { return p.getId() === folderId; });
+}
+
+function flattenNonIRSubfolders(irFolder) {
+  var moved = 0, trashed = 0, skipped = [];
+  function walk(sub) {
+    listAll(sub.getFolders()).forEach(function (child) {
+      if (irNumbersInName(child.getName()).length) return;
+      walk(child);
+    });
+    listAll(sub.getFiles()).forEach(function (f) {
+      try {
+        if (!fileIsInFolder(f, irFolder.getId())) { f.moveTo(irFolder); moved++; }
+      } catch (e) {
+        skipped.push(sub.getName() + ' / ' + f.getName() + ': ' + ((e && e.message) || String(e)));
+      }
+    });
+    if (folderIsEmpty(sub)) {
+      try { sub.setTrashed(true); trashed++; }
+      catch (e) { skipped.push(sub.getName() + ': ' + ((e && e.message) || String(e))); }
+    }
+  }
+  listAll(irFolder.getFolders()).forEach(function (sub) {
+    if (irNumbersInName(sub.getName()).length) return;
+    walk(sub);
+  });
+  return { moved: moved, trashed: trashed, skipped: skipped };
+}
+
+function applyEvidenceNormalizationApply() {
+  var planFile = latestEvidencePlanFile();
+  if (!planFile) return report('FOLDER APPLY: no evidence-plan-*.json found.');
+  var plan = null;
+  try { plan = JSON.parse(planFile.getBlob().getDataAsString()); }
+  catch (e) { return report('FOLDER APPLY: could not read plan: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(plan.byIdFolderId || byIdFolderId()); }
+  catch (e) { return report('FOLDER APPLY: could not open By ID: ' + ((e && e.message) || String(e))); }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('FOLDER APPLY: another run holds the lock.');
+  var lines = ['FOLDER APPLY - evidence only, sheet untouched', 'Plan: ' + planFile.getUrl()];
+  var did = { create: 0, rename: 0, move: 0, merge: 0, files: 0, flatten: 0, trash: 0, quarantine: 0, dup: 0 };
+  var skip = { missing: 0, occupied: 0, failed: 0 };
+  var canonical = {};
+
+  function rebuildCanonical() {
+    canonical = {};
+    listAll(root.getFolders()).forEach(function (f) {
+      var irs = irNumbersInName(f.getName());
+      if (irs.length !== 1 || f.getName() !== irs[0]) return;
+      if (!canonical[irs[0]]) canonical[irs[0]] = f;
+    });
+  }
+
+  try {
+    var all = collectByIDFolders(root), hasIR = {};
+    all.forEach(function (f) { if (f.ir) hasIR[f.ir] = true; });
+
+    (plan.createFolders || []).forEach(function (ir) {
+      if (hasIR[ir]) return;
+      try { root.createFolder(ir); hasIR[ir] = true; did.create++; }
+      catch (e) { skip.failed++; lines.push('  create ' + ir + ' ERROR: ' + e.message); }
+    });
+
+    (plan.renameFolders || []).forEach(function (a) {
+      try {
+        var f = DriveApp.getFolderById(a.id);
+        if (f.getName() !== a.to) { f.setName(a.to); did.rename++; }
+      } catch (e) { skip.missing++; }
+    });
+    (plan.moveFolders || []).forEach(function (a) {
+      try {
+        var f = DriveApp.getFolderById(a.id);
+        if (!folderIsUnder(f, root.getId())) { f.moveTo(root); did.move++; }
+      } catch (e) { skip.missing++; }
+    });
+
+    rebuildCanonical();
+
+    (plan.mergeFolders || []).forEach(function (a) {
+      var to = canonical[a.ir];
+      if (!to) { skip.missing++; return; }
+      var from = null;
+      try { from = DriveApp.getFolderById(a.id); } catch (e) { skip.missing++; return; }
+      if (from.getId() === to.getId()) return;
+      try {
+        listAll(from.getFiles()).forEach(function (f) {
+          if (!fileIsInFolder(f, to.getId())) { f.moveTo(to); did.files++; }
+        });
+        listAll(from.getFolders()).forEach(function (sub) {
+          if (irNumbersInName(sub.getName()).length) {
+            lines.push('  merge ' + a.path + ' left IR subfolder: ' + sub.getName());
+            return;
+          }
+          if (!folderIsUnder(sub, to.getId())) { sub.moveTo(to); did.move++; }
+        });
+        if (folderIsEmpty(from)) {
+          try { from.setTrashed(true); did.trash++; }
+          catch (e) { skip.failed++; lines.push('  trash ' + a.path + ' denied: ' + e.message); }
+        }
+        did.merge++;
+      } catch (e) { skip.failed++; lines.push('  merge ' + a.path + ' ERROR: ' + e.message); }
+    });
+
+    (plan.moveFiles || []).forEach(function (a) {
+      var target = null;
+      try { target = a.toFolderId ? DriveApp.getFolderById(a.toFolderId) : canonical[a.ir]; }
+      catch (e) { target = canonical[a.ir]; }
+      if (!target) { skip.missing++; return; }
+      try {
+        var f = DriveApp.getFileById(a.fileId);
+        if (!fileIsInFolder(f, target.getId())) { f.moveTo(target); did.files++; }
+      } catch (e) { skip.missing++; }
+    });
+
+    rebuildCanonical();
+    Object.keys(canonical).forEach(function (ir) {
+      try {
+        var r = flattenNonIRSubfolders(canonical[ir]);
+        did.flatten += r.moved;
+        did.trash += r.trashed;
+        (r.skipped || []).forEach(function (s) { lines.push('  flatten ' + ir + ' skipped: ' + s); });
+      } catch (e) {
+        skip.failed++;
+        lines.push('  flatten ' + ir + ' ERROR: ' + ((e && e.message) || String(e)));
+      }
+    });
+
+    var quarantine = null;
+    if ((plan.quarantineFolders || []).length) {
+      var qit = root.getFoldersByName(NO_SHEET_FOLDER_NAME);
+      quarantine = qit.hasNext() ? qit.next() : root.createFolder(NO_SHEET_FOLDER_NAME);
+    }
+    (plan.quarantineFolders || []).forEach(function (a) {
+      try {
+        var f = DriveApp.getFolderById(a.id);
+        if (folderIsUnder(f, quarantine.getId())) return;
+        f.moveTo(quarantine);
+        did.quarantine++;
+      } catch (e) { skip.missing++; }
+    });
+
+    if ((plan.duplicateSummaries || []).length) {
+      var review = byIdReviewFolder(root);
+      var dit = review.getFoldersByName('duplicate-summaries');
+      var dupFolder = dit.hasNext() ? dit.next() : review.createFolder('duplicate-summaries');
+      (plan.duplicateSummaries || []).forEach(function (a) {
+        if (a.sameText !== true) return;
+        try {
+          var f = DriveApp.getFileById(a.fileId);
+          if (folderIsUnder(f, dupFolder.getId())) return;
+          f.moveTo(dupFolder);
+          did.dup++;
+        } catch (e) { skip.missing++; }
+      });
+    }
+
+    (plan.emptyFolders || []).forEach(function (a) {
+      try {
+        var f = DriveApp.getFolderById(a.id);
+        if (!folderIsEmpty(f)) { skip.occupied++; return; }
+        try { f.setTrashed(true); did.trash++; }
+        catch (e) { skip.failed++; lines.push('  empty ' + a.path + ' denied: ' + e.message); }
+      } catch (e) { skip.missing++; }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  lines.push('Created folders: ' + did.create + ' · renamed: ' + did.rename +
+             ' · moved folders: ' + did.move + ' · merged: ' + did.merge);
+  lines.push('Files moved: ' + did.files + ' · flattened files: ' + did.flatten +
+             ' · empty folders trashed: ' + did.trash);
+  lines.push('Quarantined folders: ' + did.quarantine + ' · duplicate summaries moved: ' + did.dup);
+  lines.push('Skipped missing: ' + skip.missing + ' · occupied: ' + skip.occupied +
+             ' · failed: ' + skip.failed);
+  if ((plan.multiIRFolders || []).length) {
+    lines.push('Multi-IR folders still need a split (not touched):');
+    plan.multiIRFolders.forEach(function (x) { lines.push('  ' + x.path + ' (' + (x.irs || []).join(', ') + ')'); });
+  }
+  lines.push('Done. Rerun applyEvidenceNormalizationApply() if anything failed; it is idempotent.');
+  lines.forEach(function (l) { report(l); });
+  return 'Folder apply done: ' + did.files + ' files, ' + did.flatten + ' flattened, ' + did.trash + ' empty folders.';
+}
+
+// The shared-drive account can MOVE evidence but cannot TRASH folders. This pass
+// clears the empty shells a denied trash left behind by moving them to
+// `_review/empty-folders/`. It moves only folders that are empty, never a file,
+// and never a canonical root IRxxx folder.
+function cleanupEmptyFoldersApply() {
+  var planFile = latestEvidencePlanFile();
+  if (!planFile) return report('EMPTY CLEANUP: no evidence-plan-*.json found.');
+  var plan = null;
+  try { plan = JSON.parse(planFile.getBlob().getDataAsString()); }
+  catch (e) { return report('EMPTY CLEANUP: could not read plan: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(plan.byIdFolderId || byIdFolderId()); }
+  catch (e) { return report('EMPTY CLEANUP: could not open By ID: ' + ((e && e.message) || String(e))); }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('EMPTY CLEANUP: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var it = review.getFoldersByName('empty-folders');
+  var target = it.hasNext() ? it.next() : review.createFolder('empty-folders');
+  var lines = ['EMPTY CLEANUP - moving empty shells to _review/empty-folders', 'Plan: ' + planFile.getUrl()];
+  var moved = 0, left = 0;
+  var seen = {};
+
+  function dispose(folder, label) {
+    if (!folder || seen[folder.getId()]) return;
+    seen[folder.getId()] = true;
+    if (!folderIsEmpty(folder)) { left++; return; }
+    try {
+      folder.moveTo(target);
+      moved++;
+    } catch (e) {
+      left++;
+      lines.push('  ' + label + ' left: ' + ((e && e.message) || String(e)));
+    }
+  }
+
+  try {
+    (plan.mergeFolders || []).forEach(function (a) {
+      try { dispose(DriveApp.getFolderById(a.id), a.path); } catch (e) { left++; }
+    });
+    (plan.flattenFolders || []).forEach(function (a) {
+      try { dispose(DriveApp.getFolderById(a.id), a.path); } catch (e) { left++; }
+    });
+
+    listAll(root.getFolders()).forEach(function (base) {
+      var irs = irNumbersInName(base.getName());
+      if (irs.length !== 1 || base.getName() !== irs[0]) return;
+      function walk(sub) {
+        listAll(sub.getFolders()).forEach(function (child) { walk(child); });
+        if (irNumbersInName(sub.getName()).length) return;
+        dispose(sub, base.getName() + '/' + sub.getName());
+      }
+      listAll(base.getFolders()).forEach(function (sub) {
+        if (irNumbersInName(sub.getName()).length) return;
+        walk(sub);
+      });
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  lines.push('Moved empty folders: ' + moved + ' · left non-empty or denied: ' + left);
+  lines.push('No file or canonical IRxxx folder was moved.');
+  lines.forEach(function (l) { report(l); });
+  return 'Empty cleanup: moved ' + moved + ', left ' + left + '.';
+}
+
+// Splits a folder whose name lists several IRs into one root IRxxx folder per IR.
+// The first target gets the original file; every other target gets a copy, which
+// the owner explicitly allows when evidence belongs to more than one IR. No file
+// is deleted. The empty multi-IR folder moves to `_review/empty-folders/`.
+function collectFilesRecursively(folder, out) {
+  listAll(folder.getFiles()).forEach(function (f) { out.push(f); });
+  listAll(folder.getFolders()).forEach(function (sub) {
+    if (irNumbersInName(sub.getName()).length) return;
+    collectFilesRecursively(sub, out);
+  });
+  return out;
+}
+
+function splitMultiIRFoldersApply() {
+  var planFile = latestEvidencePlanFile();
+  if (!planFile) return report('MULTI-IR SPLIT: no evidence-plan-*.json found.');
+  var plan = null;
+  try { plan = JSON.parse(planFile.getBlob().getDataAsString()); }
+  catch (e) { return report('MULTI-IR SPLIT: could not read plan: ' + ((e && e.message) || String(e))); }
+
+  var root = null;
+  try { root = DriveApp.getFolderById(plan.byIdFolderId || byIdFolderId()); }
+  catch (e) { return report('MULTI-IR SPLIT: could not open By ID: ' + ((e && e.message) || String(e))); }
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return report('MULTI-IR SPLIT: another run holds the lock.');
+  var review = byIdReviewFolder(root);
+  var it = review.getFoldersByName('empty-folders');
+  var emptyTarget = it.hasNext() ? it.next() : review.createFolder('empty-folders');
+  var lines = ['MULTI-IR SPLIT - copy, never delete', 'Plan: ' + planFile.getUrl()];
+  var made = 0, copied = 0, moved = 0, left = 0;
+
+  function targetFor(ir) { return findOrCreateIRFolder(root, ir); }
+  function hasFile(folder, name) {
+    var hit = false;
+    var files = folder.getFilesByName(name);
+    while (files.hasNext()) { files.next(); hit = true; break; }
+    return hit;
+  }
+
+  try {
+    (plan.multiIRFolders || []).forEach(function (m) {
+      var multi = null;
+      try { multi = DriveApp.getFolderById(m.id); } catch (e) { left++; return; }
+      var irs = (m.irs || []).filter(function (ir) {
+        return (m.irsNotInSheet || []).indexOf(ir) < 0;
+      });
+      if (!irs.length) { lines.push('  ' + m.path + ' skipped: no sheet IR'); left++; return; }
+
+      var primary = irs[0];
+      var parent = listAll(multi.getParents())[0];
+      if (parent && irs.indexOf(parent.getName()) > -1) primary = parent.getName();
+
+      var targets = {};
+      irs.forEach(function (ir) { targets[ir] = targetFor(ir); });
+      var files = collectFilesRecursively(multi, []);
+      lines.push('  ' + m.path + ' -> ' + irs.join(', ') + ' | files: ' + files.length);
+      files.forEach(function (f) {
+        try {
+          var first = targets[primary];
+          if (first && !fileIsInFolder(f, first.getId())) { f.moveTo(first); moved++; }
+          irs.forEach(function (ir) {
+            if (ir === primary) return;
+            var to = targets[ir];
+            if (hasFile(to, f.getName())) return;
+            f.makeCopy(f.getName(), to);
+            copied++;
+          });
+        } catch (e) {
+          left++;
+          lines.push('  ' + m.path + ' / ' + f.getName() + ' failed: ' + ((e && e.message) || String(e)));
+        }
+      });
+
+      function clearEmpty(sub) {
+        listAll(sub.getFolders()).forEach(function (child) {
+          clearEmpty(child);
+          if (irNumbersInName(child.getName()).length) return;
+          if (!folderIsEmpty(child)) return;
+          try { child.moveTo(emptyTarget); }
+          catch (e) { lines.push('  ' + m.path + ' / ' + child.getName() + ' empty, left: ' + e.message); }
+        });
+      }
+      clearEmpty(multi);
+      if (folderIsEmpty(multi)) {
+        try { multi.moveTo(emptyTarget); made++; }
+        catch (e) { left++; lines.push('  ' + m.path + ' empty but not moved: ' + e.message); }
+      } else {
+        left++;
+        lines.push('  ' + m.path + ' still non-empty; inspect its subfolders');
+      }
+    });
+  } finally {
+    lock.releaseLock();
+  }
+
+  lines.push('Multi-IR folders emptied: ' + made + ' · files moved: ' + moved +
+             ' · copies made: ' + copied + ' · left: ' + left);
+  lines.forEach(function (l) { report(l); });
+  return 'Multi-IR split: ' + made + ' emptied, ' + copied + ' copies.';
 }

@@ -210,9 +210,15 @@ r.ok('both form URLs are set, not left as placeholders',
 // and the hero, the support aside and the empty state each keep theirs. The property is
 // still "every report button on the page is wired to the ONE support form" — a fifth
 // button with no URL, or a second form URL, is what this catches.
-r.ok('the support form is wired to every report button on the page',
-  (portal.match(/wire\('raise[^']*',\s*SUPPORT_FORM_URL\)/g) || []).length === 4,
-  (portal.match(/wire\('raise[^']*',[^)]*\)/g) || []));
+r.ok('the in-app report form is wired to every report button on the page',
+  /\['raise', 'raise-2', 'raise-3', 'raise-p'\]\.forEach\(wireReport\)/.test(portal) &&
+  /openReportForm\(\)/.test(portal) &&
+  /apiPost\('createIR'/.test(portal));
+r.ok('the report form fixes the prefix from the model and sends only the suffix',
+  /REPORT_MODELS/.test(portal) &&
+  /reportPrefixFor/.test(portal) &&
+  /serialSuffix: suffix/.test(portal) &&
+  /S100-/.test(portal) && /S25P/.test(portal));
 r.ok('...and the feedback form to the feedback button',
   /wire\('feedback',\s*FEEDBACK_FORM_URL\)/.test(portal));
 

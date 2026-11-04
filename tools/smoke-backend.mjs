@@ -115,8 +115,8 @@ r.head('the owner\'s security decisions');
 // below are about the two things that are invisible until they are wrong — that a
 // customer's company is always the session's and never the body's, and that a rating is
 // only taken on a ticket that is actually closed.
-r.ok('API_VERSION is 22, the evidence folder is in getPassbook',
-  /API_VERSION:\s*22\b/.test(code),
+r.ok('API_VERSION is 23, app IR creation is routed',
+  /API_VERSION:\s*23\b/.test(code) && /createIR: function/.test(code),
   (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('a per-IR reporter correction exists and is keyed by the ticket',
   /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));
@@ -1225,15 +1225,15 @@ r.head('the positional column layout is really gone, not adapted');
 // read of a file the app does not own is exactly the thing that must not be able to
 // appear without someone saying so.
 const ssSites = [...code.matchAll(/SpreadsheetApp\./g)];
-r.ok('SpreadsheetApp is used exactly eight times', ssSites.length === 8, ssSites.length);
+r.ok('SpreadsheetApp is used exactly ten times', ssSites.length === 10, ssSites.length);
 // The email reader is a PAIR: listIRThreads is the caching wrapper and the only name the
 // router knows, readEmailThreadsFromSheet is the one holding the sheet call. Both are
 // named here because either could grow the call; the wrapper must never gain one, since
 // its whole job is to answer before the spreadsheet is opened at all.
-const ssAllowed = ['intakeGrid', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
+const ssAllowed = ['intakeSheet', 'listLegacyIRs', 'getLegacyIR', 'inventoryLegacyWorkbook',
                    'exportStoreToFolder', 'inventoryEmailIndex',
                    'listIRThreads', 'readEmailThreadsFromSheet',
-                   'seedCompanyContacts'];
+                   'seedCompanyContacts', 'emailIndexSheetForEvidence', 'setEmailImportSheetId'];
 ssSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   r.ok('SpreadsheetApp site ' + (i + 1) + ' is a named site (' + (owner ? owner.name : 'top level') + ')',
@@ -1344,6 +1344,292 @@ r.ok('no-sheet folders are quarantined, never merged',
 r.ok('a summary link with no matching doc is followed to the real file',
   /fixSummaryDocs\.push/.test(norm) && /driveFileIdFromUrl/.test(norm) &&
   /currentName:/.test(norm) && /targetName: ir \+ '\.docx'/.test(norm));
+r.ok('a hyperlink-only Summary cell is read from rich text, not display text',
+  /function summaryLinkForRow/.test(code) &&
+  /getRichTextValue/.test(fnBody('summaryLinkForRow')) &&
+  /getRuns/.test(fnBody('summaryLinkForRow')) &&
+  /getLinkUrl/.test(fnBody('summaryLinkForRow')));
+r.ok('a no-sheet folder is unsafe if a FILE NAME also names another IR',
+  /otherIRInFiles/.test(norm) && /files\.some/.test(norm) &&
+  /files\.map/.test(norm));
+r.ok('a summary doc being moved/renamed is checked for its own IR',
+  /function summaryDocText/.test(code) &&
+  /DocumentApp\.openById/.test(fnBody('summaryDocText')) &&
+  /summaryDocMentionsIR/.test(norm) && /contentOK: contentOK/.test(norm));
+r.ok('duplicate summary text is compared, never assumed equal',
+  /sameText: sameText/.test(norm) && /normalizeSummaryText/.test(code) &&
+  /summaryContentMismatch/.test(norm));
+r.ok('plan diagnostics are editor-run and read the formula/rich link, never write',
+  /function inspectEvidencePlan/.test(code) &&
+  /function latestEvidencePlanFile/.test(code) &&
+  /getFormula/.test(fnBody('summaryCellReportForIR')) &&
+  /getRichTextValue/.test(fnBody('summaryCellReportForIR')) &&
+  !/setValue|appendRow|createFile/.test(fnBody('inspectEvidencePlan')));
+r.ok('a HYPERLINK formula Summary cell is followed to its URL',
+  /HYPERLINK/.test(fnBody('summaryLinkForRow')) &&
+  /driveFileIdFromUrl/.test(fnBody('summaryLinkForRow')));
+r.ok('the targeted Summary repair is editor-run and writes only the Summary cell',
+  /function repairFlaggedSummariesApply/.test(code) &&
+  !/repairFlaggedSummariesApply\s*:/.test(code) &&
+  /clearContent/.test(fnBody('linkSummaryCellToFile')) &&
+  /setFormula/.test(fnBody('linkSummaryCellToFile')) &&
+  /DocumentApp\.create/.test(fnBody('createSummaryDocInFolder')) &&
+  !/setTrashed|DriveApp\.getFileById\([^)]*\)\.setTrashed/.test(fnBody('repairFlaggedSummariesCore')));
+r.ok('the fill-all Summary pass is editor-run, blank-only and resumable',
+  /function fillAllSummaryLinksApply/.test(code) &&
+  !/fillAllSummaryLinksApply\s*:/.test(code) &&
+  /getDisplayValue/.test(fnBody('fillAllSummaryLinksApply')) &&
+  /existingCorrectSummaryDoc/.test(fnBody('fillAllSummaryLinksApply')) &&
+  /createSummaryDocInFolder/.test(fnBody('fillAllSummaryLinksApply')));
+r.ok('folder choice prefers an exact By ID root folder',
+  /function summaryFoldersForIR/.test(code) &&
+  /exactRoot\.concat/.test(fnBody('summaryFoldersForIR')));
+r.ok('the folder apply is editor-run, sheet-free and takes every plan phase',
+  /function applyEvidenceNormalizationApply/.test(code) &&
+  !/applyEvidenceNormalizationApply\s*:/.test(code) &&
+  !/SpreadsheetApp\./.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /plan\.createFolders/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /plan\.renameFolders/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /plan\.mergeFolders/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /plan\.moveFiles/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /plan\.quarantineFolders/.test(fnBody('applyEvidenceNormalizationApply')));
+r.ok('the folder apply trashes only folders that are empty, never files',
+  /folderIsEmpty\(sub\)/.test(fnBody('flattenNonIRSubfolders')) &&
+  /folderIsEmpty\(from\)/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  /folderIsEmpty\(f\)/.test(fnBody('applyEvidenceNormalizationApply')) &&
+  !/\.setTrashed/.test(fnBody('folderIsUnder')) &&
+  !/getFileById\([^)]*\)\.setTrashed/.test(code));
+r.ok('a folder that cannot be trashed is skipped, not allowed to abort the run',
+  /catch \(e\) \{ skipped\.push/.test(fnBody('flattenNonIRSubfolders')) &&
+  /flatten ' \+ ir \+ ' ERROR/.test(fnBody('applyEvidenceNormalizationApply')));
+r.ok('empty-shell cleanup is editor-run and moves only empty non-canonical folders',
+  /function cleanupEmptyFoldersApply/.test(code) &&
+  !/cleanupEmptyFoldersApply\s*:/.test(code) &&
+  !/SpreadsheetApp\./.test(fnBody('cleanupEmptyFoldersApply')) &&
+  /folderIsEmpty\(folder\)/.test(fnBody('cleanupEmptyFoldersApply')) &&
+  /irNumbersInName\(sub\.getName\(\)\)/.test(fnBody('cleanupEmptyFoldersApply')));
+r.ok('multi-IR split moves the original and copies into every other IR, never deletes',
+  /function splitMultiIRFoldersApply/.test(code) &&
+  !/splitMultiIRFoldersApply\s*:/.test(code) &&
+  /makeCopy/.test(fnBody('splitMultiIRFoldersApply')) &&
+  /moveTo\(first\)/.test(fnBody('splitMultiIRFoldersApply')) &&
+  !/setTrashed|removeFile\(|deleteFile\(/.test(fnBody('splitMultiIRFoldersApply')));
+r.ok('the Form upload folder is configured by property and imported by IR path',
+  /FORM_EVIDENCE_FOLDER_PROPERTY/.test(code) &&
+  /function setFormResponseEvidenceFolder/.test(code) &&
+  /function importFormResponseEvidenceApply/.test(code) &&
+  /(formEvidenceIRs|evidenceIRsForFile)/.test(fnBody('importFormResponseEvidenceApply')) &&
+  /moveTo\(primary\.folder\)/.test(fnBody('importFormResponseEvidenceApply')) &&
+  /makeCopy/.test(fnBody('importFormResponseEvidenceApply')) &&
+  !/SpreadsheetApp\./.test(fnBody('importFormResponseEvidenceApply')));
+r.ok('email conversation text is built from Email_Index and written as a .txt file',
+  /function syncEmailConversationsApply/.test(code) &&
+  /getParent\(\)/.test(fnBody('emailIndexSheetForEvidence')) &&
+  /getSheetByName/.test(fnBody('emailIndexSheetForEvidence')) &&
+  /Email Conversation\.txt/.test(fnBody('syncEmailConversationsApply')) &&
+  /createFile\(name, content, MimeType\.PLAIN_TEXT\)/.test(fnBody('syncEmailConversationsApply')) &&
+  !/GmailApp/.test(fnBody('syncEmailConversationsApply')));
+r.ok('email attachments use Gmail, copy the attachment and are resumable',
+  /function importEmailAttachmentsApply/.test(code) &&
+  /function importEmailAttachmentsCore/.test(code) &&
+  /GmailApp\.getMessageById/.test(fnBody('importEmailAttachmentsCore')) &&
+  /copyBlob/.test(fnBody('importEmailAttachmentsCore')) &&
+  /EMAIL_ATTACH_CURSOR_PROPERTY/.test(fnBody('importEmailAttachmentsCore')));
+r.ok('the all-rows attachment mode ignores the Mailbox label',
+  /function importEmailAttachmentsAllApply/.test(code) &&
+  /ignoreMailbox/.test(fnBody('importEmailAttachmentsCore')) &&
+  /importEmailAttachmentsAllApply/.test(code));
+r.ok('attachment auto-run installs for the current account and removes itself',
+  /function installEmailAttachmentAutoRun/.test(code) &&
+  /everyMinutes\(10\)/.test(fnBody('installEmailAttachmentAutoRun')) &&
+  /autoImportEmailAttachments/.test(fnBody('installEmailAttachmentAutoRun')) &&
+  /importEmailAttachmentsCore\(true,\s*0\)/.test(fnBody('autoImportEmailAttachments')) &&
+  /removeEmailAttachmentAutoRun/.test(fnBody('autoImportEmailAttachments')));
+r.ok('the batch cursor is saved before the lock is released',
+  /props\.setProperty\(cursorKey[\s\S]*lock\.releaseLock/.test(fnBody('importEmailAttachmentsCore')));
+r.ok('Form files with no IR in their path are mapped through the sheet N/Q links',
+  /function sheetEvidenceIRMap/.test(code) &&
+  /driveFileIdsInCell/.test(fnBody('sheetEvidenceIRMap')) &&
+  /evidenceIRsForFile/.test(fnBody('importFormResponseEvidenceApply')) &&
+  /sheetEvidenceIRMap/.test(fnBody('auditFormResponseEvidence')));
+r.ok('all Evidence columns and owner-confirmed manual mappings are honored',
+  /all: all/.test(fnBody('evidenceColumnIndexes')) &&
+  /for \(var c = 0; c < row\.length; c\+\+\)/.test(fnBody('sheetEvidenceIRMap')) &&
+  /MANUAL_FORM_EVIDENCE_MAP/.test(code) &&
+  /manualFormIR/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  /owner-confirmed/.test(fnBody('mapUnmatchedFormFilesBySerialCore')));
+r.ok('the app IR registry is separate, create-only and keeps the sheet as fallback',
+  /var IR_REGISTRY_FILE/.test(code) &&
+  /function seedIRRegistry/.test(code) &&
+  /function currentIRRegistry/.test(code) &&
+  /source: 'form-sheet'/.test(fnBody('seedIRRegistry')) &&
+  /writeJsonLocked\(IR_REGISTRY_FILE/.test(fnBody('seedIRRegistry')));
+r.ok('email merge writes one canonical file and archives the old layers',
+  /function mergeEmailConversationsApply/.test(code) &&
+  /emailConversationCanonicalText/.test(code) &&
+  /supersededRoot/.test(fnBody('mergeOneEmailConversation')) &&
+  /Partial/.test(fnBody('mergeOneEmailConversation')) &&
+  !/setTrashed/.test(fnBody('mergeOneEmailConversation')));
+r.ok('email merge is cursor-batched and time-budgeted',
+  /EMAIL_MERGE_CURSOR/.test(fnBody('mergeEmailConversationsApply')) &&
+  /Date.now\(\) \+ \(4 \* 60 \* 1000\)/.test(fnBody('mergeEmailConversationsApply')) &&
+  /mergeOneEmailConversation/.test(fnBody('mergeEmailConversationsApply')) &&
+  /sourceStamp/.test(fnBody('mergeOneEmailConversation')) &&
+  /messageCount/.test(fnBody('mergeOneEmailConversation')));
+r.ok('email passes fall back to the shared coverage ledger when the app store is unreadable',
+  /function emailCurrentIRs/.test(code) &&
+  /currentIRRegistry/.test(fnBody('emailCurrentIRs')) &&
+  /coverage\.irs/.test(fnBody('emailCurrentIRs')) &&
+  /emailCurrentIRs/.test(fnBody('searchEmailSourceForIRApply')) &&
+  /emailCurrentIRs/.test(fnBody('mergeEmailConversationsApply')));
+r.ok('email search checks coverage before Drive and records mailbox completion',
+  /existingRec\.accounts\[me\]/.test(fnBody('searchEmailSourceForIRApply')) &&
+  /EMAIL_SEARCH_DONE_/.test(fnBody('searchEmailSourceForIRApply')) &&
+  /All current IRs already searched/.test(fnBody('searchEmailSourceForIRApply')));
+r.ok('daily email sync grows existing IRs and picks up new ones incrementally',
+  /function syncNewEmailApply/.test(code) &&
+  /after:/.test(fnBody('syncNewEmailApply')) &&
+  /EMAIL_SYNC_LAST_PREFIX/.test(fnBody('emailSyncLastKey')) &&
+  /writeEmailSource/.test(fnBody('syncNewEmailApply')) &&
+  /mergeOneEmailConversation/.test(fnBody('syncNewEmailApply')) &&
+  /saveEmailAttachmentsForIR/.test(fnBody('syncNewEmailApply')) &&
+  /installDailyEmailSync/.test(fnBody('A0_RUN_ADMIN_TASK')) &&
+  /everyDays\(1\)/.test(fnBody('installDailyEmailSync')));
+r.ok('app-created IRs live in the registry and appear beside sheet rows',
+  /function appIRRows/.test(code) &&
+  /appIRRows\(grid\)/.test(fnBody('listIRs')) &&
+  /source !== 'app'/.test(fnBody('appIRRows')) &&
+  /appIntakeRow/.test(fnBody('appIRRows')));
+r.ok('createIR enforces the model prefix and creates the folder, summary and coverage',
+  /function createIRFromApp/.test(code) &&
+  /serialForModelSuffix/.test(fnBody('createIRFromApp')) &&
+  /assertSerialForModel/.test(fnBody('createIRFromApp')) &&
+  /findOrCreateIRFolder/.test(fnBody('createIRFromApp')) &&
+  /createSummaryDocInFolder/.test(fnBody('createIRFromApp')) &&
+  /IR_REGISTRY_FILE/.test(fnBody('createIRFromApp')) &&
+  /emailCoverageFile/.test(fnBody('createIRFromApp')));
+r.ok('the model fixes the serial prefix and the user supplies only the numeric body',
+  /function serialModelPrefix/.test(code) &&
+  /function serialForModelSuffix/.test(code) &&
+  /S100-/.test(fnBody('serialModelPrefix')) &&
+  /S25P/.test(fnBody('serialModelPrefix')));
+r.ok('serial rule is enforced for written serials and has a read-only audit',
+  /function assertSerialForModel/.test(code) &&
+  /function serialMatchesModel/.test(code) &&
+  /function auditSerialNomenclature/.test(code) &&
+  /serialNomenclatureProblem/.test(fnBody('assertSerialForModel')) &&
+  /auditSerialNomenclature/.test(fnBody('A0_RUN_ADMIN_TASK')));
+r.ok('nightly backup health has a visible editor report',
+  /function auditNightlyBackup/.test(code) &&
+  /readBackupHealth/.test(fnBody('auditNightlyBackup')) &&
+  /backupPulse/.test(fnBody('auditNightlyBackup')) &&
+  /report\(/.test(fnBody('auditNightlyBackup')));
+r.ok('one A0 admin runner is the single editor entry point',
+  /function A0_RUN_ADMIN_TASK\(\)/.test(code) &&
+  /var ADMIN_TASK = 'planAppUploadMigration'/.test(code) &&
+  /planAppUploadMigration: planAppUploadMigration/.test(fnBody('A0_RUN_ADMIN_TASK')) &&
+  /listTasks/.test(fnBody('A0_RUN_ADMIN_TASK')));
+r.ok('listIRThreads checks the customer scope before the cache',
+  /function listIRThreads\(irNumber, authEmail\)/.test(code) &&
+  /getEffectiveAccess/.test(fnBody('listIRThreads')) &&
+  /customerOwnsIR/.test(fnBody('listIRThreads')) &&
+  /cachedEmailThreads/.test(fnBody('listIRThreads')));
+r.ok('app confirmation thread ids are stored in the IR registry',
+  /function recordIRConfirmationThread/.test(code) &&
+  /confirmationThreadId/.test(fnBody('recordIRConfirmationThread')) &&
+  /writeJsonLocked/.test(fnBody('recordIRConfirmationThread')));
+r.ok('old app uploads are planned and merged into By ID without deletion',
+  /function appUploadMigrationPlan/.test(code) &&
+  /function migrateAppUploadsToByIdApply/.test(code) &&
+  /moveTo/.test(fnBody('migrateAppUploadsToByIdApply')) &&
+  !/setTrashed/.test(fnBody('migrateAppUploadsToByIdApply')));
+r.ok('email search and merge auto-runs stop themselves when complete',
+  /function installEmailSearchAutoRun/.test(code) &&
+  /function installEmailMergeAutoRun/.test(code) &&
+  /EMAIL_SEARCH_DONE_/.test(code) &&
+  /EMAIL_MERGE_DONE/.test(code) &&
+  /removeEmailSearchAutoRun/.test(fnBody('runEmailSearchAuto')));
+r.ok('direct Gmail search is IR-filtered and coverage-aware',
+  /function searchEmailSourceForIRApply/.test(code) &&
+  /messageMentionsIR/.test(fnBody('searchEmailSourceForIRApply')) &&
+  /GmailApp.search/.test(fnBody('searchEmailSourceForIRApply')) &&
+  /coverage.irs/.test(fnBody('searchEmailSourceForIRApply')));
+r.ok('the email coverage ledger is seeded but its audit writes nothing',
+  /function seedEmailCoverageApply/.test(code) &&
+  /function auditEmailCoverage/.test(code) &&
+  /status: 'not_processed'/.test(fnBody('seedEmailCoverageApply')) &&
+  !/setContent|createFile|writeJson/.test(fnBody('auditEmailCoverage')));
+r.ok('unmatched Form files can be listed without moving them',
+  /function listFormResponseFilesWithoutIR/.test(code) &&
+  /evidenceIRsForFile/.test(fnBody('listFormResponseFilesWithoutIR')) &&
+  /getDateCreated/.test(fnBody('listFormResponseFilesWithoutIR')) &&
+  !/moveTo|makeCopy|setTrashed/.test(fnBody('listFormResponseFilesWithoutIR')));
+r.ok('unmatched Form files move to review, never to an invented IR and never deleted',
+  /function moveUnmatchedFormFilesApply/.test(code) &&
+  /evidenceIRsForFile/.test(fnBody('moveUnmatchedFormFilesApply')) &&
+  /moveTo\(target\)/.test(fnBody('moveUnmatchedFormFilesApply')) &&
+  !/setTrashed|removeFile\(|deleteFile\(/.test(fnBody('moveUnmatchedFormFilesApply')));
+r.ok('unmatched Form files can map by serial and date or archive',
+  /function mapUnmatchedFormFilesBySerialApply/.test(code) &&
+  /serialTokens/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  /chooseIRBySerial/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  /getDateCreated/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  /moveTo\(folder\)/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  /moveTo\(archive\)/.test(fnBody('mapUnmatchedFormFilesBySerialCore')) &&
+  !/setTrashed|removeFile\(|deleteFile\(/.test(fnBody('mapUnmatchedFormFilesBySerialCore')));
+r.ok('the 67-file final disposition is manual-match or archive, never heuristic',
+  /function archiveRemainingFormFilesApply/.test(code) &&
+  /manualFormIR/.test(fnBody('archiveRemainingFormFilesApply')) &&
+  /unmatched-form-files/.test(fnBody('archiveRemainingFormFilesApply')) &&
+  !/setTrashed|removeFile|deleteFile/.test(fnBody('archiveRemainingFormFilesApply')));
+r.ok('daily email ingest combines complete threads and attachments with cursors',
+  /function runDailyEmailIngest/.test(code) &&
+  /syncEmailThreadConversationsCore/.test(fnBody('runDailyEmailIngest')) &&
+  /importEmailAttachmentsCore/.test(fnBody('runDailyEmailIngest')) &&
+  /everyDays/.test(fnBody('installDailyEmailIngest')) &&
+  /emailDailyHasPending/.test(fnBody('runDailyEmailIngest')));
+r.ok('full email bodies are Gmail-read per mailbox into a separate .txt',
+  /function syncEmailFullConversationsApply/.test(code) &&
+  /getPlainBody/.test(fnBody('syncEmailFullConversationsApply')) &&
+  /mailboxIsForCurrent/.test(fnBody('syncEmailFullConversationsApply')) &&
+  /Email Conversation - Full/.test(fnBody('syncEmailFullConversationsApply')) &&
+  !/SpreadsheetApp\./.test(fnBody('syncEmailFullConversationsApply')));
+r.ok('complete threads follow Thread_Id and read every message in the thread',
+  /function syncEmailThreadConversationsApply/.test(code) &&
+  /function syncEmailThreadConversationsCore/.test(code) &&
+  /getThreadById/.test(fnBody('syncEmailThreadConversationsCore')) &&
+  /thread\.getMessages/.test(fnBody('syncEmailThreadConversationsCore')) &&
+  /Email Conversation - Complete/.test(fnBody('syncEmailThreadConversationsCore')) &&
+  /gmailThreadId/.test(fnBody('syncEmailThreadConversationsCore')));
+r.ok('complete-thread auto-run is batched, zero-wait and removes itself',
+  /function installEmailThreadAutoRun/.test(code) &&
+  /everyMinutes\(10\)/.test(fnBody('installEmailThreadAutoRun')) &&
+  /autoSyncEmailThreads/.test(fnBody('installEmailThreadAutoRun')) &&
+  /syncEmailThreadConversationsCore\(0\)/.test(fnBody('autoSyncEmailThreads')) &&
+  /props\.setProperty\(cursorKey[\s\S]*lock\.releaseLock/.test(fnBody('syncEmailThreadConversationsCore')) &&
+  /removeEmailThreadAutoRun/.test(fnBody('autoSyncEmailThreads')));
+r.ok('the readiness check compares sheet IR spelling with folder spelling',
+  /function auditIRNormalization/.test(code) &&
+  /irKey/.test(fnBody('auditIRNormalization')) &&
+  /normalizeIRNumber/.test(fnBody('auditIRNormalization')) &&
+  !/setValue|appendRow|setFormula|createFile/.test(fnBody('auditIRNormalization')));
+r.ok('root IR detail lists duplicate and no-sheet folders without writing',
+  /function auditRootIRFolders/.test(code) &&
+  /DUPLICATE/.test(fnBody('auditRootIRFolders')) &&
+  /NO SHEET ROW/.test(fnBody('auditRootIRFolders')) &&
+  /summaryDocInFolder/.test(fnBody('auditRootIRFolders')) &&
+  !/setValue|appendRow|setFormula|createFile|moveTo|setTrashed/.test(fnBody('auditRootIRFolders')));
+r.ok('root repair merges duplicates and archives no-sheet without deleting files',
+  /function repairRootFoldersApply/.test(code) &&
+  /archived-no-sheet/.test(fnBody('repairRootFoldersApply')) &&
+  /moveContents/.test(fnBody('repairRootFoldersApply')) &&
+  !/setTrashed|removeFile\(|deleteFile\(/.test(fnBody('repairRootFoldersApply')));
+r.ok('the thread-access check probes raw, stripped and message.getThread without writing',
+  /function testEmailThreadAccess/.test(code) &&
+  /GmailApp\.getThreadById/.test(fnBody('testEmailThreadAccess')) &&
+  /getMessageById/.test(fnBody('testEmailThreadAccess')) &&
+  /\.getThread\(\)/.test(fnBody('testEmailThreadAccess')) &&
+  !/createFile|moveTo|setContent/.test(fnBody('testEmailThreadAccess')));
 r.ok('the planner names the folder families it will handle',
   /collectByIDFolders/.test(norm) && /folderIsEmpty/.test(norm) &&
   /summaryDocInFolder/.test(norm) && /flattenFolders/.test(norm) &&
@@ -2231,8 +2517,9 @@ r.head('nothing in the backend erases anything');
 // assertion is not weakened to "deleting is fine now" — it is NARROWED to one
 // function, and a setTrashed anywhere else still fails this line.
 const trashSites = [...code.matchAll(/setTrashed|removeFile\(|deleteFile\(/g)];
-r.ok('no setTrashed / removeFile / deleteFile anywhere except the backup rotation',
-  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && o.name === 'pruneBackups'; }),
+const trashAllowed = ['pruneBackups', 'flattenNonIRSubfolders', 'applyEvidenceNormalizationApply'];
+r.ok('no setTrashed / removeFile / deleteFile anywhere except the backup rotation and empty-folder cleanup',
+  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && trashAllowed.indexOf(o.name) > -1; }),
   trashSites.map(m => { const o = enclosingFn(m.index); return (o && o.name) || 'top level'; }));
 r.ok('...and there it can only reach the BACKUP root, never the live store',
   /getBackupRootFolder\(false\)/.test(fnBody('pruneBackups')) &&
@@ -2670,7 +2957,7 @@ r.ok('the resolver searches the archive but NEVER creates it as a side effect',
   /var archive = getArchiveFolder\(false\)/.test(fnBody('findIRFolder')),
   'an ordinary upload must not bring Archive IRs/ into existence');
 r.ok('nothing in the backend erases a folder or a file — bar the dated backup rotation',
-  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && o.name === 'pruneBackups'; }),
+  trashSites.every(m => { const o = enclosingFn(m.index); return !!o && trashAllowed.indexOf(o.name) > -1; }),
   trashSites.map(m => { const o = enclosingFn(m.index); return (o && o.name) || 'top level'; }));
 
 r.head('an upload with no MIME type still lands, and a broken one is never dropped quietly');

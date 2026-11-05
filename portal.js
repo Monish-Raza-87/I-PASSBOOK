@@ -794,8 +794,19 @@
   const CR_FALLBACK_WA = '918655366232';   // the desk's public WhatsApp, already on this page
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
+  function setAuthPending() {
+    // A session exists, so the one wrong word to show while it is being proved is
+    // "Sign in". Hide every signed-out affordance until the server answers.
+    $('header-signin').hidden = true;
+    $('signout').hidden = true;
+    $('header-who').hidden = true;
+    $('hero-cta').hidden = true;
+    document.body.classList.remove('portal-signed-in');
+  }
+
   async function boot() {
     if (!token()) return;                 // signed out: nothing to paint, nothing to ask for
+    setAuthPending();
 
     const me = await apiGet('getMyCustomer');
     if (!me || me.status !== 'ok') {
@@ -1276,6 +1287,9 @@
   // a state can never be updated in two of them and forgotten in the third — the failure
   // that had a signed-in customer still being offered "Sign in to your reports".
   function setSignedOut() {
+    document.body.classList.remove('portal-signed-in');
+    $('header-signin').hidden = false;
+    $('hero-cta').hidden = false;
     ME = null; TICKETS = []; STAGE = {}; STAGE_OK = false;
     PORTAL_DATA = null;
     PROFILE = { addresses: [], contacts: [], fleet: [] };
@@ -1296,6 +1310,8 @@
     $('access').hidden = false;
   }
   function setSignedIn(me) {
+    document.body.classList.add('portal-signed-in');
+    $('hero-cta').hidden = false;
     $('header-signin').hidden = true;
     $('signout').hidden = false;
     $('header-who').hidden = false;

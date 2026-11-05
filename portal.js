@@ -594,10 +594,6 @@
     el.removeAttribute('aria-disabled');
     el.addEventListener('click', (e) => { e.preventDefault(); openReportForm(); });
   };
-  ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
-  wire('feedback', FEEDBACK_FORM_URL);
-  wire('feedback-p', FEEDBACK_FORM_URL);
-
   // ══════════════════════════════════════════════════════════════════════════════
   //  THE SIGNED-IN HALF
   // ══════════════════════════════════════════════════════════════════════════════
@@ -1587,6 +1583,9 @@
     $('signin-go').addEventListener('click', submitSignin);
     $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
+    ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
+    wire('feedback', FEEDBACK_FORM_URL);
+    wire('feedback-p', FEEDBACK_FORM_URL);
     $('back-to-list').addEventListener('click', () => {
       $('report-one').hidden = true;
       $('reports-list').hidden = false;

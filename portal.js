@@ -1329,14 +1329,27 @@
   }
 
   // ── Sign out ──────────────────────────────────────────────────────────────────
+  // The app's own root is the ONE login page. Signing out leaves the portal entirely
+  // instead of painting a second signed-out landing with its own sign-in sheet.
+  function appLoginUrl() {
+    const p = String(location.pathname || '/');
+    const dir = p.replace(/[^/]*$/, '') || '/';
+    return dir + 'index.html';
+  }
   function signOut() {
     const t = token();
     forget();
-    setSignedOut();
-    // Revoke it on the server too, so the token is dead everywhere and not merely gone from
-    // this browser. Fired and not awaited: the page is already signed out, and a failure here
-    // must not keep somebody staring at a screen that has done what they asked.
-    if (t) apiPost('logout', { sessionToken: t });
+    // Revoke with keepalive: the redirect below must not cancel the one request that
+    // makes the token dead outside this browser.
+    if (t) {
+      try {
+        const fd = new FormData();
+        fd.append('action', 'logout');
+        fd.append('sessionToken', t);
+        fetch(PORTAL.GAS_URL, { method: 'POST', body: fd, keepalive: true }).catch(() => {});
+      } catch (e) { /* the local token is already gone */ }
+    }
+    location.replace(appLoginUrl());
   }
 
   // ── The sign-in sheet ──────────────────────────────────────────────────────────

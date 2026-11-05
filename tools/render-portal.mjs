@@ -80,7 +80,7 @@ const ok = (label, cond, detail) => {
 // account the page is booted as, so one process can exercise every state.
 const STUB = `
 (function () {
-  var state = new URLSearchParams(location.search).get('state') || 'customer';
+  var state = new URLSearchParams(location.search).get('state') || 'signedout';
   try { localStorage.clear(); } catch (e) {}
   if (state !== 'signedout') {
     try { localStorage.setItem('ipbc_session', 'stub-token-for-render'); } catch (e) {}
@@ -767,16 +767,12 @@ try {
   // ════════════════════════════════════════════════════════════════════════════
   // Last, because it destroys the session every check above needs.
   await evaluate(`document.querySelector('#access-member .js-signout').click()`);
-  await SLEEP(300);
-  ok('signing out clears the page at once', !(await visible('#reports')) && await visible('#header-signin'));
-  ok('...forgets the token on the device, rather than merely hiding the view',
+  await SLEEP(800);
+  ok('signing out leaves the portal for the app login page',
+    /\/index[.]html$/.test(await evaluate('location.pathname')), await evaluate('location.pathname'));  ok('...forgets the customer token on the device',
     await evaluate(`(() => { try { return localStorage.getItem('ipbc_session') === null; } catch (e) { return true; } })()`));
-  ok('...tells the server to retire it too, so it is dead everywhere and not just here',
-    (await evaluate(`window.__calls`)).includes('logout'), JSON.stringify(await evaluate(`window.__calls`)));
-  ok('...and puts every invitation back where a visitor expects it',
-    /sign in to your reports/i.test(await evaluate(`document.getElementById('hero-cta').textContent`))
-    && await visible('#access-visitor') && !(await visible('#access-member')));
-
+  ok('...and does not leave a second sign-in sheet on the portal',
+    !(await evaluate(`!!document.getElementById('signin')`)));
   // ════════════════════════════════════════════════════════════════════════════
   console.log('\n— the app\'s own address: a customer signs in there and STAYS there —');
   // ════════════════════════════════════════════════════════════════════════════

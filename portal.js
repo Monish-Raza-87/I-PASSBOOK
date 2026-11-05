@@ -593,7 +593,7 @@
           files: JSON.stringify(files)
         });
         if (!res || res.status !== 'ok') {
-          if (isUnauthorized(res)) { close(); forget(); setSignedOut(); showSignin('Your sign-in expired. Sign in and try again.'); return; }
+          if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
           throw new Error(msgOf(res));
         }
         form.innerHTML = `<div class="report-ok"><b>IR ${esc(res.irNumber)} raised.</b><br>
@@ -844,7 +844,7 @@
       // An expired session is the one failure that must clear itself, or every later
       // request carries a dead token and the customer sees the same error forever.
       // Anything else is a real failure and is shown in words.
-      if (isUnauthorized(me)) { forget(); setSignedOut(); return; }
+      if (isUnauthorized(me)) { forget(); location.replace(appLoginUrl()); return; }
       showSignin(msgOf(me));
       return;
     }
@@ -862,7 +862,7 @@
   async function loadPortal() {
     const res = await apiGet('getCustomerPortal');
     if (!res || res.status !== 'ok') {
-      if (isUnauthorized(res)) { forget(); setSignedOut(); return; }
+      if (isUnauthorized(res)) { forget(); location.replace(appLoginUrl()); return; }
       PORTAL_DATA = null;
       paintPortal();
       return;
@@ -957,7 +957,7 @@
 
     const res = await apiGet('listIRs');
     if (!res || res.status !== 'ok') {
-      if (isUnauthorized(res)) { forget(); setSignedOut(); return; }
+      if (isUnauthorized(res)) { forget(); location.replace(appLoginUrl()); return; }
       $('ticket-list').innerHTML = '<li><p class="error-box">' + esc(msgOf(res)) + '</p></li>';
       return;
     }

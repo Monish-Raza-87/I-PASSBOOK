@@ -43,6 +43,16 @@
     else if (storedTheme === 'light' || storedTheme === 'cream') document.documentElement.dataset.theme = 'light';
   } catch (e) { /* storage blocked — the OS setting decides, which is the default anyway */ }
 </script>
+<script>
+  // The customer portal has its own address, but NOT its own login. With no
+  // customer session this page goes to the app's single login page; after the
+  // code is accepted the app returns the customer here.
+  try {
+    // state is the browser harness's probe, not a production link.\n    if (!localStorage.getItem('ipbc_session') && !/[?&]state=/.test(location.search)) location.replace('index.html');
+  } catch (e) {
+    location.replace('index.html');
+  }
+</script>
 </head>
 <body>
 <div id="portal-root"></div>

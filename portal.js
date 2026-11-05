@@ -21,14 +21,18 @@
       <b>Indrones</b><span>Customer Space</span>
     </a>
     <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
-      <button type="button" data-nav="report">Report</button>
-      <button type="button" data-nav="library">Library</button>
-      <button type="button" data-nav="history">IR History</button>
-      <button type="button" data-nav="details">Your details</button>
+      <button type="button" data-nav="report">Customer support form</button>
+      <button type="button" data-nav="library">Product library</button>
+      <button type="button" data-nav="history">IR history</button>
       <button type="button" data-nav="contact">Contact</button>
     </nav>
     <span class="bar-spacer"></span>
-    <span class="who" id="header-who" hidden></span>
+    <div class="company-menu-wrap">
+      <button type="button" class="who" id="header-who" hidden aria-haspopup="menu" aria-expanded="false"></button>
+      <div class="company-menu" id="company-menu" hidden role="menu">
+        <button type="button" data-nav="details" role="menuitem">Your details</button>
+      </div>
+    </div>
     <a class="btn js-signin" id="header-signin" href="#signin">Sign in</a>
     <button type="button" class="btn js-signout" id="signout" hidden>Sign out</button>
   </div>
@@ -64,14 +68,14 @@
     <div class="tiles" id="portal-tiles">
       <button type="button" class="tile" data-panel="report">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12"/><circle cx="12" cy="12" r="9"/></svg></span>
-        <span class="tile-name">Report an IR</span>
+        <span class="tile-name">Customer support form</span>
         <span class="tile-desc">Access customer help desk to report your issue or submit your feedback. Use the in-app report form, or ask the guide beside it.</span>
         <span class="tile-meta" id="tile-meta-report"></span>
       </button>
 
       <button type="button" class="tile" data-panel="library">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h6a2 2 0 0 1 2 2V19a2 2 0 0 0-2-2H4z"/><path d="M20 5.5h-6a2 2 0 0 0-2 2V19a2 2 0 0 1 2-2h6z"/></svg></span>
-        <span class="tile-name">Access Library</span>
+        <span class="tile-name">Product library</span>
         <span class="tile-desc">Flight and user manuals, checklists, logbooks, training videos and the other documents your operations need.</span>
         <span class="tile-meta" id="tile-meta-library"></span>
       </button>
@@ -100,7 +104,7 @@
 
     <!-- ── REPORT ───────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-report" hidden>
-      <div class="panel-head"><h2>Report an IR</h2></div>
+      <div class="panel-head"><h2>Customer support form</h2></div>
       <p class="sub">Every request reaches the service desk the moment you submit it, and gets an IR
       number the same day. Use the form below; if you are not sure which option fits, the guide under
       it narrows it down in three short questions.</p>
@@ -122,7 +126,7 @@
 
     <!-- ── LIBRARY ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-library" hidden>
-      <div class="panel-head"><h2>Access Library</h2><span class="lib-n" id="lib-count"></span></div>
+      <div class="panel-head"><h2>Product library</h2><span class="lib-n" id="lib-count"></span></div>
       <p class="sub">Documents by platform, plus the training videos. Everything here is a link to a
       file the service desk maintains, so it is always the current version.</p>
       <div id="lib-body"></div>
@@ -491,7 +495,7 @@
     modal.innerHTML = `
       <div class="sheet-card">
         <button type="button" class="sheet-x" id="report-x" aria-label="Close">&times;</button>
-        <h2>Report an IR</h2>
+        <h2>Customer support form</h2>
         <p class="sheet-note">Your report gets an IR number as soon as it is received.</p>
         <form id="report-form" class="report-grid" novalidate>
           <div class="field">
@@ -828,6 +832,7 @@
     $('header-who').hidden = true;
     $('hero-cta').hidden = true;
     document.body.classList.remove('portal-signed-in');
+    closeCompanyMenu();
   }
 
   async function boot() {
@@ -908,6 +913,20 @@
     details: 'panel-details',
     contact: 'panel-contact'
   };
+  function closeCompanyMenu() {
+    const m = document.getElementById('company-menu');
+    const b = document.getElementById('header-who');
+    if (m) m.hidden = true;
+    if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function toggleCompanyMenu() {
+    const m = document.getElementById('company-menu');
+    const b = document.getElementById('header-who');
+    if (!m || !b || b.hidden) return;
+    const open = m.hidden;
+    m.hidden = !open;
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
   function setActiveNav(name) {
     document.querySelectorAll('#portal-nav button').forEach(b => {
       b.classList.toggle('is-active', b.dataset.nav === name);
@@ -924,6 +943,7 @@
       if (el) el.hidden = (k !== name);
     });
     setActiveNav(name);
+    closeCompanyMenu();
     const tiles = document.querySelectorAll('#portal-tiles .tile');
     for (let i = 0; i < tiles.length; i++) {
       tiles[i].setAttribute('aria-pressed', tiles[i].dataset.panel === name ? 'true' : 'false');
@@ -1183,8 +1203,8 @@
       choices: [['Open IR History', 'history'], ['Back', 'start']]
     },
     manual: {
-      say: 'Manuals, checklists and training videos are in the Access Library, grouped by platform. If something you need is missing, the desk can send it to you directly.',
-      choices: [['Open the Access Library', 'library'], ['Back', 'start']]
+      say: 'Manuals, checklists and training videos are in the Product library, grouped by platform. If something you need is missing, the desk can send it to you directly.',
+      choices: [['Open the product library', 'library'], ['Back', 'start']]
     },
     person: {
       say: 'For anything about a live ticket, your Customer Relations contact is in the Discuss Your Requirement tile — WhatsApp or email, and it reaches a person. For a new requirement, call the desk line.',
@@ -1359,6 +1379,7 @@
   // that had a signed-in customer still being offered "Sign in to your reports".
   function setSignedOut() {
     document.body.classList.remove('portal-signed-in');
+    closeCompanyMenu();
     $('portal-nav').hidden = true;
     $('header-signin').hidden = false;
     $('hero-cta').hidden = false;
@@ -1688,6 +1709,24 @@
 
     document.querySelectorAll('#portal-nav button').forEach(b => {
       b.addEventListener('click', () => { openPanel(b.dataset.nav); scrollToPanel(b.dataset.nav); });
+    });
+    $('header-who').addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleCompanyMenu();
+    });
+    document.querySelectorAll('#company-menu [data-nav]').forEach(b => {
+      b.addEventListener('click', () => {
+        const panel = b.dataset.nav;
+        closeCompanyMenu();
+        openPanel(panel);
+        scrollToPanel(panel);
+      });
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.company-menu-wrap')) closeCompanyMenu();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeCompanyMenu();
     });
     $('chat-fab').addEventListener('click', () => {
       if ($('chat-panel').hidden) openChat(); else closeChat();

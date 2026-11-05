@@ -553,14 +553,24 @@ try {
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
   // Header tabs and the floating support chat.
-  ok('the signed-in header has five section tabs',
-    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 5 &&
-    await visible('#portal-nav'));
+  ok('the signed-in header has four section tabs',
+    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 4 &&
+    await visible('#portal-nav') &&
+    /customer support form/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="report"]').textContent`)) &&
+    /product library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)));
   await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').click()`);
   await SLEEP(120);
   ok('a header tab opens and scrolls to its section',
     await visible('#panel-library') &&
     await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').classList.contains('is-active')`));
+  await evaluate(`document.getElementById('header-who').click()`);
+  await SLEEP(100);
+  ok('the company name opens a personalisation menu',
+    await visible('#company-menu') && /your details/i.test(await evaluate(`document.getElementById('company-menu').innerText`)));
+  await evaluate(`document.querySelector('#company-menu [data-nav="details"]').click()`);
+  await SLEEP(100);
+  ok('Your details opens from the company menu',
+    await visible('#panel-details') && !(await visible('#company-menu')));
   await evaluate(`document.getElementById('chat-fab').click()`);
   await SLEEP(120);
   ok('the floating support chat opens',
@@ -777,10 +787,10 @@ try {
   // be somewhere else, or a customer on a borrowed phone cannot tell whose account it is.
   await goto('customer', 360);
   await waitFor(`document.querySelectorAll('#ticket-list .ticket').length > 0`);
-  ok('at phone width the header yields the name, and the list carries it instead',
-    !(await visible('#header-who'))
-    && /signed in as reports@acmesurvey\.example/i.test(await evaluate(`document.getElementById('reports-sub').textContent`)),
-    await evaluate(`document.getElementById('reports-sub').textContent`));
+  ok('at phone width the company menu stays available',
+    await visible('#header-who')
+    && /Acme Survey/i.test(await evaluate(`document.getElementById('header-who').textContent`)),
+    await evaluate(`document.getElementById('header-who').textContent`));
 
   // ════════════════════════════════════════════════════════════════════════════
   console.log('\n— signing out —');

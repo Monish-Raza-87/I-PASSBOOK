@@ -965,3 +965,26 @@
     .chat-fab { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom, 0px)); }
     .chat-panel { right: 12px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); max-height: 62vh; }
   }
+
+  /* ── Company menu (Your details lives here) ─────────────────────────────── */
+  .company-menu-wrap { position: relative; display: flex; align-items: center; min-width: 0; }
+  .who {
+    max-width: 34vw; border: 0; background: transparent; padding: 8px 4px;
+    cursor: pointer; color: var(--fg); font: inherit;
+  }
+  .who::after { content: " ▾"; color: var(--fg-muted); }
+  .who:hover { color: var(--yellow-lo); }
+  .company-menu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 40;
+    min-width: 190px; padding: 6px; background: var(--surface);
+    border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,.18);
+  }
+  .company-menu button {
+    display: block; width: 100%; padding: 10px 12px; border: 0; background: transparent;
+    color: var(--fg); font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: .12em; text-transform: uppercase; text-align: left; cursor: pointer;
+  }
+  .company-menu button:hover { background: var(--surface-2); color: var(--fg); }
+  @media (max-width: 560px) {
+    .who { display: inline-block; max-width: 30vw; }
+  }

@@ -1347,12 +1347,11 @@ head('the landing page offers two doors, stacked, each of them collapsible');
   //   · finishing a customer sign-in must enter that mode rather than navigate;
   //   · customer mode must take the STAFF STYLESHEETS DOWN, because industrial.css
   //     claims `.btn`/`.card` by ID and would otherwise reach into the portal.
-  ok('a load with a customer session forks into the portal, before the staff shell is built',
-    /if \(!hasStoredSession\(\) && hasCustomerSession\(\)\) \{ enterCustomerMode\(\); return; \}/.test(appCode) &&
+  ok('a load with a customer session goes to the separate customer URL, before the staff shell is built',
+    /if \(!hasStoredSession\(\) && hasCustomerSession\(\)\) \{ location\.replace\('customer\.html'\); return; \}/.test(appCode) &&
     /function hasCustomerSession\(\) \{[\s\S]*?localStorage\.getItem\('ipbc_session'\)/.test(appCode));
-  ok('...and a finished customer sign-in enters the portal instead of navigating away',
-    /function finishCustomerAuth\(email, d\) \{[\s\S]*?enterCustomerMode\(\);\s*\}/.test(appCode) &&
-    !/location\.href = 'customer\.html'/.test(appCode));
+  ok('...and a finished customer sign-in hands off to customer.html',
+    /function finishCustomerAuth\(email, d\) \{[\s\S]*?location\.replace\('customer\.html'\);\s*\}/.test(appCode));
   ok('...and customer mode drops the staff stylesheets before mounting',
     /function enterCustomerMode\(\) \{[\s\S]*?link\[rel="stylesheet"\][\s\S]*?portal\.css[\s\S]*?l\.remove\(\)/.test(appCode));
   ok('...and it is never entered twice on one load',

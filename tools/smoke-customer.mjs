@@ -545,9 +545,8 @@ r.ok('...and NO password ever travels by email',
 // "the customer page" and "the staff app" are now the same address. What still has to be
 // true is that the URL carries no page name and no query: the root is the only spelling
 // that opens the customer door for them.
-r.ok('...and the link it offers is the app root, with no page name to land on the wrong door',
-  /https:\/\/[^\s/]+\/I-PASSBOOK\/(?:\s|,|$)/.test(inv.mails[0].body) &&
-  !/customer\.html/.test(inv.mails[0].body) && !/index\.html/.test(inv.mails[0].body),
+r.ok('...and the link it offers is the customer portal address',
+  /https:\/\/[^\s/]+\/I-PASSBOOK\/customer\.html(?:\s|,|$)/.test(inv.mails[0].body),
   (inv.mails[0].body.match(/https?:\/\/\S+/) || ['(no link)'])[0]);
 
 // ── THE ONE DOOR, AND THE THREE RESENDS ────────────────────────────────────────

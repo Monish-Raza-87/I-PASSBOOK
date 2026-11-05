@@ -80,11 +80,8 @@ const ok = (label, cond, detail) => {
 // account the page is booted as, so one process can exercise every state.
 const STUB = `
 (function () {
-  var state = new URLSearchParams(location.search).get('state') || 'signedout';
-  try { localStorage.clear(); } catch (e) {}
-  if (state !== 'signedout') {
-    try { localStorage.setItem('ipbc_session', 'stub-token-for-render'); } catch (e) {}
-  }
+  var state = new URLSearchParams(location.search).get('state');
+  // A navigation without ?state is the app sending a real session to customer.html,\n  // or a sign-out returning with none. Preserve whatever storage already holds; only\n  // an explicit ?state is a fresh probe.\n  if (state) {\n    try { localStorage.clear(); } catch (e) {}\n    if (state !== 'signedout') {\n      try { localStorage.setItem('ipbc_session', 'stub-token-for-render'); } catch (e) {}\n    }\n  }
 
   // A faithful stand-in for the intake header row: the columns the Form writes, in a
   // plausible order, including three the portal must NOT render (Issue Status, Priority,
@@ -813,12 +810,12 @@ try {
   await gotoApp('customer', 414);
   const appMode = await waitFor(
     "!!document.getElementById('portal-root') && document.querySelectorAll('#portal-tiles .tile').length === 5", 6000);
-  ok('a customer session at the app address opens the portal, not the staff shell', appMode);
-  ok('...and the portal is the only thing on the page',
-    await evaluate("document.body.children.length === 1 && document.body.firstElementChild.id === 'portal-root'"),
+  ok('a customer session at the app address hands off to customer.html', appMode);
+  ok('...and no staff shell is left on the page',
+    await evaluate("!!document.getElementById('portal-root') && !document.getElementById('app-container') && !document.getElementById('auth-container')"),
     await evaluate("Array.from(document.body.children).map(e => e.id || e.tagName)"));
-  ok('...served from the address they typed, with nothing navigated to',
-    /\/index\.html$/.test(await evaluate('location.pathname')), await evaluate('location.pathname'));
+  ok('...at the separate customer URL',
+    /\/customer\.html$/.test(await evaluate('location.pathname')), await evaluate('location.pathname'));
   ok('...under the portal\'s stylesheet only, never the app\'s',
     await evaluate("Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).every(l => /portal[.]css/.test(l.href))"),
     await evaluate("Array.from(document.querySelectorAll('link[rel=\"stylesheet\"]')).map(l => l.getAttribute('href'))"));

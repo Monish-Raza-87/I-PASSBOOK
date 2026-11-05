@@ -1809,7 +1809,7 @@ window.addEventListener('load', () => {
   // screen's business. The check is "a customer session and no staff one": a member
   // of staff who once opened the portal on this device must still reach their own
   // app, so the staff session wins when both are present.
-  if (!hasStoredSession() && hasCustomerSession()) { enterCustomerMode(); return; }
+  if (!hasStoredSession() && hasCustomerSession()) { location.replace('customer.html'); return; }
 
   // Start the update watch FIRST, above every early return below. Two of the three
   // paths out of this handler — an already-signed-in device and a Google return — are
@@ -3734,7 +3734,7 @@ function finishCustomerAuth(email, d) {
       customerOf: (d && d.access && d.access.customerOf) || '',
     }));
   } catch (e) { /* private mode — the portal will ask for a code again, which is honest */ }
-  enterCustomerMode();
+  location.replace('customer.html');
 }
 
 // True when this device holds a CUSTOMER's session. Deliberately a different key
@@ -3833,7 +3833,7 @@ function paintCustomerDoor() {
   const openBtn = document.getElementById('customer-space-open');
   if (openBtn && !openBtn.dataset.wired) {
     openBtn.dataset.wired = '1';
-    openBtn.addEventListener('click', ev => { ev.preventDefault(); enterCustomerMode(); });
+    openBtn.addEventListener('click', ev => { ev.preventDefault(); location.href = 'customer.html'; });
   }
 }
 
@@ -6266,7 +6266,7 @@ function customerPortalLink() {
   // and keeps a lifted screen photographable.
   const here = String(location.pathname || '/');
   const origin = location.origin || (String(location.protocol || 'https:') + '//' + String(location.hostname || 'localhost'));
-  return origin + here.replace(/[^/]*$/, '');
+  return origin + here.replace(/[^/]*$/, '') + 'customer.html';
 }
 
 // ─── THE COMPANY REGISTER (v96) ──────────────────────────────────────────────

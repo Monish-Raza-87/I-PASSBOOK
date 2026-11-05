@@ -787,11 +787,11 @@ r.head('the portal link is built from where this app is served, not from a const
   // subdirectory is still kept and customer.html is no longer a destination the
   // desk hands out — it survives only as a loader for links already emailed.
   r.ok('the link is the app root, so a Pages subdirectory is kept',
-    A.T.customerPortalLink() === 'https://example.github.io/I-PASSBOOK/',
+    A.T.customerPortalLink() === 'https://example.github.io/I-PASSBOOK/customer.html',
     A.T.customerPortalLink());
   const txt = A.T.customerHandoverTxt('ops@acme.in', 'Acme Survey');
   r.ok('the handover text names the link, the address and the one button to press',
-    txt.indexOf('https://example.github.io/I-PASSBOOK/') > 0 &&
+    txt.indexOf('https://example.github.io/I-PASSBOOK/customer.html') > 0 &&
     txt.indexOf('ops@acme.in') > 0 && /press Continue/.test(txt));
   r.ok('...and carries no password of any kind', !/[Pp]assword:/.test(txt), txt.split('\n').filter(l => /assword/.test(l)));
   r.ok('...and matches the door the invitation email names',

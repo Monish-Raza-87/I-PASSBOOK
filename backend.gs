@@ -5405,7 +5405,7 @@ function listUsers(authEmail) {
 function customerPortalUrl() {
   var base = String(CONFIG.APP_URL || '');
   if (!base) return '';
-  return base.replace(/[^/]*$/, '');
+  return base.replace(/[^/]*$/, '') + 'customer.html';
 }
 
 // The portal's boot call: "who am I, and what am I scoped to". Available to any

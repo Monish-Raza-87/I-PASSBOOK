@@ -10591,8 +10591,9 @@ function serialModelPrefix(model) {
 function serialForModelSuffix(model, suffix) {
   var prefix = serialModelPrefix(model);
   var digits = String(suffix == null ? '' : suffix).replace(/[^0-9]/g, '');
-  if (!prefix || !digits || digits.length > 3) return '';
-  return prefix + ('00' + digits).slice(-3);
+  var n = Number(digits);
+  if (!prefix || !digits || digits.length > 3 || !isFinite(n) || n < 1 || n > 999) return '';
+  return prefix + ('00' + String(n)).slice(-3);
 }
 
 function serialNomenclatureProblem(serial) {

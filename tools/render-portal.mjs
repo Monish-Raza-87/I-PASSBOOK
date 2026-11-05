@@ -217,6 +217,9 @@ const STUB = `
     // a reply rather than against its own optimism — a save that never reached the server
     // and a save that did look identical from inside the page.
     var bp = (opts && opts.body && opts.body.get) ? opts.body : new URLSearchParams();
+    if (action === 'createIR') {
+      return env({ status: 'ok', irNumber: 'IR999', message: 'IR IR999 raised.' });
+    }
     if (action === 'rateIR') {
       return env({ status: 'ok', irNumber: bp.get('irNumber'), rating: Number(bp.get('stars')), apiVersion: 20 });
     }
@@ -529,6 +532,26 @@ try {
   ok('the list paints', await visible('#reports') && await visible('#reports-list'));
   ok('...and the header names the account, not the person', /Acme Survey/.test(await evaluate(`document.getElementById('header-who').textContent`)));
 
+  // The in-app report form: the owner's new door must actually open, and the
+  // model dropdown must own the serial prefix.
+  await evaluate(`document.getElementById('raise-p').click()`);
+  await SLEEP(180);
+  ok('the in-app report form opens from the Report panel',
+    await visible('#report-sheet') && await visible('#rep-model') && await visible('#rep-suffix'));
+  await evaluate(`(() => { const m = document.getElementById('rep-model'); m.value = 'SIGMA 100'; m.dispatchEvent(new Event('change')); })()`);
+  ok('choosing SIGMA 100 fixes the serial prefix to S100-',
+    (await evaluate(`document.getElementById('rep-prefix').textContent`)).trim() === 'S100-');
+  await evaluate(`(() => { const m = document.getElementById('rep-model'); m.value = 'SIGMA25G'; m.dispatchEvent(new Event('change')); })()`);
+  ok('choosing SIGMA25G fixes the serial prefix to S25',
+    (await evaluate(`document.getElementById('rep-prefix').textContent`)).trim() === 'S25');
+  await evaluate(`document.getElementById('rep-suffix').value = '012'`);
+  await evaluate(`document.getElementById('rep-desc').value = 'Motor noise on takeoff'`);
+  await evaluate(`document.getElementById('rep-submit').click()`);
+  ok('submitting the in-app report uses createIR and shows the IR number',
+    await waitFor(`/IR999/.test(document.getElementById('report-form').innerText)`));
+  await evaluate(`document.getElementById('rep-done').click()`);
+  await SLEEP(80);
+  ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
   const cards = await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).map(b => ({
     ir: b.querySelector('.ticket-ir').textContent,
     pill: b.querySelector('.pill') ? b.querySelector('.pill').textContent : '',

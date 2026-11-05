@@ -20,6 +20,13 @@
       <img src="assets/icon-mark.png" alt="">
       <b>Indrones</b><span>Customer Space</span>
     </a>
+    <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
+      <button type="button" data-nav="report">Report</button>
+      <button type="button" data-nav="library">Library</button>
+      <button type="button" data-nav="history">IR History</button>
+      <button type="button" data-nav="details">Your details</button>
+      <button type="button" data-nav="contact">Contact</button>
+    </nav>
     <span class="bar-spacer"></span>
     <span class="who" id="header-who" hidden></span>
     <a class="btn js-signin" id="header-signin" href="#signin">Sign in</a>
@@ -413,6 +420,24 @@
     <p class="sheet-note">Looking for the service desk app? It is on the <a href="./index.html">same page as this one</a>, behind the Employee door.</p>
   </div>
 </div>
+
+<!-- Floating support chat: a WhatsApp-style entry point to the fixed guide and the
+     in-app report form. It is not a second login or a second intake. -->
+<button type="button" class="chat-fab" id="chat-fab" aria-label="Open customer support chat" aria-expanded="false">
+  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.6-.75L3 21l1.9-5.6A8.2 8.2 0 0 1 3.9 11.5 8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/>
+    <path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01"/>
+  </svg>
+</button>
+<section class="chat-panel" id="chat-panel" hidden aria-label="Customer support chat">
+  <div class="chat-head">
+    <span><b>Support chat</b><small>Indrones Customer Relations</small></span>
+    <button type="button" class="chat-x" id="chat-x" aria-label="Close chat">&times;</button>
+  </div>
+  <div class="chat-log" id="chat-log" aria-live="polite"></div>
+  <div class="chat-choices" id="chat-choices"></div>
+  <p class="chat-note">A guide with fixed answers. To raise an IR, it opens the same in-app form.</p>
+</section>
 `;
   // ── The two form URLs, in ONE place each ───────────────────────────────────
   // Both are the SHARE link (`/d/e/…/viewform`), not the editor link, which opens
@@ -798,6 +823,7 @@
     // A session exists, so the one wrong word to show while it is being proved is
     // "Sign in". Hide every signed-out affordance until the server answers.
     $('header-signin').hidden = true;
+    $('portal-nav').hidden = true;
     $('signout').hidden = true;
     $('header-who').hidden = true;
     $('hero-cta').hidden = true;
@@ -882,18 +908,27 @@
     details: 'panel-details',
     contact: 'panel-contact'
   };
+  function setActiveNav(name) {
+    document.querySelectorAll('#portal-nav button').forEach(b => {
+      b.classList.toggle('is-active', b.dataset.nav === name);
+    });
+  }
+  function scrollToPanel(name) {
+    const el = document.getElementById(PANEL_IDS[name]);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   function openPanel(name) {
     if (!PANEL_IDS[name]) name = 'history';
     Object.keys(PANEL_IDS).forEach(k => {
       const el = document.getElementById(PANEL_IDS[k]);
       if (el) el.hidden = (k !== name);
     });
+    setActiveNav(name);
     const tiles = document.querySelectorAll('#portal-tiles .tile');
     for (let i = 0; i < tiles.length; i++) {
       tiles[i].setAttribute('aria-pressed', tiles[i].dataset.panel === name ? 'true' : 'false');
     }
   }
-
   async function loadTickets() {
     openPanel('history');
     $('reports-list').hidden = false;
@@ -1182,6 +1217,42 @@
     });
   }
 
+  // ── Floating support chat ───────────────────────────────────────────────────
+  function chatShow(key) {
+    const step = BOT[key] || BOT.start;
+    const log = $('chat-log');
+    const p = document.createElement('p');
+    p.className = 'chat-say';
+    p.textContent = step.say;
+    log.appendChild(p);
+    log.scrollTop = log.scrollHeight;
+    const box = $('chat-choices');
+    box.innerHTML = '';
+    step.choices.forEach(([label, go]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn';
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        if (go === 'form') { closeChat(); openReportForm(); return; }
+        if (go === 'history' || go === 'library' || go === 'contact') {
+          closeChat(); openPanel(go); scrollToPanel(go); return;
+        }
+        chatShow(go);
+      });
+      box.appendChild(b);
+    });
+  }
+  function openChat() {
+    $('chat-panel').hidden = false;
+    $('chat-fab').setAttribute('aria-expanded', 'true');
+    $('chat-log').innerHTML = '';
+    chatShow('start');
+  }
+  function closeChat() {
+    $('chat-panel').hidden = true;
+    $('chat-fab').setAttribute('aria-expanded', 'false');
+  }
   // ── One ticket ────────────────────────────────────────────────────────────────
   async function openTicket(t) {
     $('reports-list').hidden = true;
@@ -1288,6 +1359,7 @@
   // that had a signed-in customer still being offered "Sign in to your reports".
   function setSignedOut() {
     document.body.classList.remove('portal-signed-in');
+    $('portal-nav').hidden = true;
     $('header-signin').hidden = false;
     $('hero-cta').hidden = false;
     ME = null; TICKETS = []; STAGE = {}; STAGE_OK = false;
@@ -1311,6 +1383,7 @@
   }
   function setSignedIn(me) {
     document.body.classList.add('portal-signed-in');
+    $('portal-nav').hidden = false;
     $('hero-cta').hidden = false;
     $('header-signin').hidden = true;
     $('signout').hidden = false;
@@ -1612,6 +1685,14 @@
     $('signin-go').addEventListener('click', submitSignin);
     $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
+
+    document.querySelectorAll('#portal-nav button').forEach(b => {
+      b.addEventListener('click', () => { openPanel(b.dataset.nav); scrollToPanel(b.dataset.nav); });
+    });
+    $('chat-fab').addEventListener('click', () => {
+      if ($('chat-panel').hidden) openChat(); else closeChat();
+    });
+    $('chat-x').addEventListener('click', closeChat);
     ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
     wire('feedback', FEEDBACK_FORM_URL);
     wire('feedback-p', FEEDBACK_FORM_URL);

@@ -552,6 +552,26 @@ try {
   await evaluate(`document.getElementById('rep-done').click()`);
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
+  // Header tabs and the floating support chat.
+  ok('the signed-in header has five section tabs',
+    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 5 &&
+    await visible('#portal-nav'));
+  await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').click()`);
+  await SLEEP(120);
+  ok('a header tab opens and scrolls to its section',
+    await visible('#panel-library') &&
+    await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').classList.contains('is-active')`));
+  await evaluate(`document.getElementById('chat-fab').click()`);
+  await SLEEP(120);
+  ok('the floating support chat opens',
+    await visible('#chat-panel') && /what can i help/i.test(await evaluate(`document.getElementById('chat-log').innerText`)));
+  await evaluate(`Array.from(document.querySelectorAll('#chat-choices .btn')).find(b => /raise a request/i.test(b.textContent)).click()`);
+  await SLEEP(100);
+  await evaluate(`Array.from(document.querySelectorAll('#chat-choices .btn')).find(b => /report form/i.test(b.textContent)).click()`);
+  await SLEEP(150);
+  ok('the chat can open the in-app report form', await visible('#report-sheet'));
+  await evaluate(`document.getElementById('report-x').click()`);
+  await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').click()`);
   const cards = await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).map(b => ({
     ir: b.querySelector('.ticket-ir').textContent,
     pill: b.querySelector('.pill') ? b.querySelector('.pill').textContent : '',

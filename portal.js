@@ -491,6 +491,7 @@
     <a href="./faq.html">Help &amp; FAQ</a>
     <a href="https://indrones.com/" target="_blank" rel="noopener">indrones.com</a>
   </div>
+  <div class="foot-warranty" id="warranty-links" hidden></div>
 </footer>
 
 <!-- ── THE SIGN-IN SHEET ───────────────────────────────────────────────────────
@@ -1012,6 +1013,7 @@
     renderLibrary();
     renderCompliance();
     renderMandates();
+    renderWarranty();
     renderAnnouncements();
     if (profile) { PROFILE = profile; renderDetails(); renderFleet(); }
     renderContact();
@@ -1446,6 +1448,16 @@
     await loadPortalUsers();
     const m2 = $('user-msg');
     if (m2) { m2.className = 'msg ok'; m2.textContent = 'Saved — CR has been notified.'; }
+  }
+  function renderWarranty() {
+    const host = $('warranty-links');
+    if (!host) return;
+    const docs = ((PORTAL_DATA && PORTAL_DATA.library) || []).filter(it => it.category === 'Warranty');
+    host.hidden = !docs.length;
+    host.innerHTML = docs.length
+      ? '<span>Warranty clauses</span>' + docs.map(it =>
+          '<a href="' + esc(it.url) + '" target="_blank" rel="noopener noreferrer">' + esc(it.label) + '</a>').join('')
+      : '';
   }
   function renderCompliance() {
     const host = $('compliance-docs');

@@ -182,6 +182,7 @@
         <article class="route-card"><b>eGCA signup SOP</b><span>Step-by-step help for signing up on the eGCA portal.</span></article>
         <article class="route-card"><b>Certificate of Conformity</b><span>Issued per UAS for type-certified models.</span></article>
       </div>
+    <div id="compliance-docs"></div>
     </section>
 
     <!-- ── USER ACCESS ────────────────────────────────────────────────────── -->
@@ -199,6 +200,7 @@
         <article class="route-card" id="mandate-sb"><b>Service bulletins</b><span>Published bulletins for each UAS model. Email alerts are controlled by the service desk.</span></article>
         <article class="route-card" id="mandate-ack"><b>Acknowledgement</b><span>Signed delivery acknowledgement documents for your aircraft.</span></article>
       </div>
+    <div id="mandates-docs"></div>
     </section>
 
     <!-- ── WHAT WE OFFER ──────────────────────────────────────────────────── -->
@@ -996,6 +998,8 @@
     $('tile-meta-contact').textContent = cr.name ? 'Your contact: ' + cr.name : 'Call · WhatsApp · website';
 
     renderLibrary();
+    renderCompliance();
+    renderMandates();
     renderAnnouncements();
     if (profile) { PROFILE = profile; renderDetails(); renderFleet(); }
     renderContact();
@@ -1211,6 +1215,7 @@
     'Training Videos'
   ];
   function libCategory(it) {
+    if (it && it.category) return String(it.category);
     const s = String((it && it.label) || '');
     if (it && it.kind === 'video') return 'Training Videos';
     if (/quick|start here|getting started/i.test(s)) return 'Quick User Guide';
@@ -1355,6 +1360,35 @@
           '</article>';
       }).join('');
     }
+  }
+  function renderCompliance() {
+    const host = $('compliance-docs');
+    if (!host) return;
+    const docs = ((PORTAL_DATA && PORTAL_DATA.library) || []).filter(it =>
+      ['eGCA Signup SOP', 'Certificate of Conformity'].indexOf(it.category) >= 0);
+    const certs = (PROFILE.fleet || []).filter(f => f.cert);
+    const bits = [];
+    if (certs.length) {
+      bits.push('<div class="lib-group"><h3>UIN certificates</h3><ul class="lib-list">' +
+        certs.map(f => '<li><a class="lib-item" href="' + esc(f.cert) + '" target="_blank" rel="noopener noreferrer">' +
+          '<b>' + esc(f.sn || 'UIN certificate') + '</b><span>' + esc(f.model || '') + ' · UIN certificate</span></a></li>').join('') +
+        '</ul></div>');
+    }
+    if (docs.length) {
+      bits.push('<div class="lib-group"><h3>Compliance documents</h3><ul class="lib-list">' +
+        docs.map(libItemHtml).join('') + '</ul></div>');
+    }
+    host.innerHTML = bits.join('') || '<p class="detail-empty">Compliance documents and UIN certificates will appear here when uploaded.</p>';
+  }
+
+  function renderMandates() {
+    const host = $('mandates-docs');
+    if (!host) return;
+    const docs = ((PORTAL_DATA && PORTAL_DATA.library) || []).filter(it =>
+      ['Service Bulletin', 'Acknowledgement'].indexOf(it.category) >= 0);
+    host.innerHTML = docs.length
+      ? '<div class="lib-group"><h3>Published documents</h3><ul class="lib-list">' + docs.map(libItemHtml).join('') + '</ul></div>'
+      : '<p class="detail-empty">Service bulletins and acknowledgements will appear here when the service desk publishes them.</p>';
   }
   // ── Announcements: service bulletins by UAS model ───────────────────────────
   const ANN_MODELS = ['SIGMA25G', 'SIGMA 100', 'SIGMA 25 PRO'];

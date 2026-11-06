@@ -328,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 23,
+  API_VERSION: 24,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4711,6 +4711,7 @@ function doPost(e) {
       saveCustomerProfile: function () { return saveCustomerProfile(params, email); },
       rateIR:              function () { return rateIR(params, email); },
       savePortalConfig:    function () { return savePortalConfig(params, email); },
+      uploadPortalDocument:function () { return uploadPortalDocument(params, email); },
       // The Company & Contact register (v96). Admin-only, like everything else that
       // touches who may be scoped to what.
       saveCompany:       function () { return saveCompany(params, email); },
@@ -5505,15 +5506,57 @@ function portalLibraryArray() {
     // — a bare id, a `javascript:` string — is shown as text and never made clickable.
     if (url && !/^https?:\/\//i.test(url)) url = '';
     out.push({
-      sku:   String(r.sku || '').trim().slice(0, 40),
-      label: label,
-      url:   url,
-      kind:  String(r.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
+      sku:      String(r.sku || '').trim().slice(0, 40),
+      label:    label,
+      category: String(r.category || '').trim().slice(0, 80),
+      url:      url,
+      kind:     String(r.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
     });
   });
   return out;
 }
 
+// POST uploadPortalDocument (admin) — the employee content gateway. The file is
+// stored in a link-shared folder beside the app root; the portal only ever receives
+// the URL and the metadata in portal.json.
+function uploadPortalDocument(params, authEmail) {
+  requireAdmin(authEmail);
+  var name = cleanFileName(String(params.fileName || 'portal document.pdf'));
+  var b64 = String(params.fileBase64 || '');
+  if (!name || !b64) return { status: 'error', message: 'Choose a file to upload.' };
+  var bytes;
+  try { bytes = Utilities.base64Decode(b64); } catch (e) { return { status: 'error', message: 'The file could not be read.' }; }
+  if (bytes.length > 20 * 1024 * 1024) return { status: 'error', message: 'The file is larger than 20 MB.' };
+  var folder = getOrCreateSubfolder(getRootFolder(), 'I-PASSBOOK portal content');
+  var blob = Utilities.newBlob(bytes, resolveMime(params.mimeType, name), name);
+  var file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var item = {
+    sku:      String(params.sku || '').trim().slice(0, 40),
+    label:    String(params.label || name).trim().slice(0, 160),
+    category: String(params.category || '').trim().slice(0, 80),
+    url:      file.getUrl(),
+    kind:     String(params.kind || '').trim().toLowerCase() === 'video' ? 'video' : 'doc',
+    uploadedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+    uploadedBy: usersKey(authEmail)
+  };
+  return withRowLockOrThrow(function () {
+    var st = readJsonLocked(PORTAL_STORE_FILE);
+    if (!st || typeof st !== 'object') st = {};
+    if (!(st.library instanceof Array)) st.library = [];
+    var replaced = false;
+    for (var i = 0; i < st.library.length; i++) {
+      var r = st.library[i];
+      if (r && r.sku === item.sku && r.category === item.category && r.label === item.label) {
+        st.library[i] = item; replaced = true; break;
+      }
+    }
+    if (!replaced) st.library.push(item);
+    st.library = st.library.slice(-120);
+    writeJsonLocked(PORTAL_STORE_FILE, st);
+    return { status: 'ok', item: item, library: portalLibraryArray(), apiVersion: CONFIG.API_VERSION };
+  });
+}
 // GET getCustomerPortal — everything a signed-in customer's landing page needs, in ONE
 // round trip: their profile, the library, and the CR contact. A staff account gets an
 // empty answer rather than a refusal, exactly as getMyCustomer does.
@@ -5677,10 +5720,11 @@ function savePortalConfig(params, authEmail) {
       var url = String(r.url || '').trim().slice(0, 400);
       if (url && !/^https?:\/\//i.test(url)) url = '';
       return {
-        sku:   String(r.sku   || '').trim().slice(0, 40),
-        label: String(r.label || '').trim().slice(0, 160),
-        url:   url,
-        kind:  String(r.kind  || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
+        sku:      String(r.sku   || '').trim().slice(0, 40),
+        label:    String(r.label || '').trim().slice(0, 160),
+        category: String(r.category || '').trim().slice(0, 80),
+        url:      url,
+        kind:     String(r.kind  || '').trim().toLowerCase() === 'video' ? 'video' : 'doc'
       };
     }).filter(function (r) { return r.label && r.url; });
     st.updatedAt = new Date().toISOString();

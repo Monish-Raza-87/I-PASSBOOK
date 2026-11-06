@@ -9279,7 +9279,7 @@ function portalAdminHTML() {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
   const co = portalAdmin.company || '';
   const libLines = (portalAdmin.library || [])
-    .map(l => [l.sku || '', l.label || '', l.url || '', l.kind || 'doc'].join(' | ')).join('\n');
+    .map(l => [l.sku || '', l.label || '', l.url || '', l.kind || 'doc', l.category || ''].join(' | ')).join('\n');
   const fleetLines = (portalAdmin.fleet || [])
     .map(f => [f.sn || '', f.model || '', f.uin || '', f.cert || ''].join(' | ')).join('\n');
 
@@ -9312,6 +9312,39 @@ function portalAdminHTML() {
                 autocomplete="off" placeholder="SIGMA25G | User manual | https://… | doc">${escHtml(libLines)}</textarea>
     </fieldset>
 
+    <fieldset class="portal-group">
+      <legend>Upload a portal document</legend>
+      <p class="inward-options-hint">Upload a PDF or training video. The file is link-shared and its
+      URL is written into portal.json. Re-uploading the same model, category and title replaces
+      the previous revision.</p>
+      <div class="portal-fields">
+        <label for="portal-doc-sku">Model</label>
+        <select id="portal-doc-sku" class="form-input">
+          <option value="SIGMA25G">SIGMA25G</option>
+          <option value="SIGMA 100">SIGMA 100</option>
+          <option value="SIGMA 25 PRO">SIGMA 25 PRO</option>
+          <option value="">General / training video</option>
+        </select>
+        <label for="portal-doc-category">Category</label>
+        <select id="portal-doc-category" class="form-input">
+          <option>Quick User Guide</option>
+          <option>Flight User Manual</option>
+          <option>User Level Maintenance Manual</option>
+          <option>Flight Checklist</option>
+          <option>Training Videos</option>
+          <option>eGCA Signup SOP</option>
+          <option>Certificate of Conformity</option>
+          <option>Warranty</option>
+          <option>Acknowledgement</option>
+          <option>Service Bulletin</option>
+        </select>
+        <label for="portal-doc-label">Title</label>
+        <input id="portal-doc-label" class="form-input" type="text" autocomplete="off" placeholder="SIGMA100 Quick User Guide">
+        <label for="portal-doc-file">File</label>
+        <input id="portal-doc-file" class="form-input" type="file" accept=".pdf,video/*">
+        <button type="button" class="btn btn-secondary" id="portal-upload">Upload document</button>
+      </div>
+    </fieldset>
     <fieldset class="portal-group">
       <legend>Aircraft and UIN certificates</legend>
       <p class="inward-options-hint">One per line — <code>UAS SN | Model | UIN | Certificate URL</code>.
@@ -9404,6 +9437,7 @@ function openPortalModal() {
     if (t.id === 'portal-retry') { loadPortalAdmin(portalAdmin.company); return; }
     if (t.id === 'portal-cr-save') { portalSave('cr'); return; }
     if (t.id === 'portal-lib-save') { portalSave('library'); return; }
+    if (t.id === 'portal-upload') { portalUpload(); return; }
     if (t.id === 'portal-fleet-save') { portalSave('fleet'); return; }
   });
   // Choosing a company is a READ, so it re-locks the form until the fleet arrives. The
@@ -9485,6 +9519,49 @@ function portalSave(kind) {
     .then(r => done(r, kind === 'cr' ? 'contact' : 'library'));
 }
 
+function portalUpload() {
+  if (!portalAdmin.loaded || portalAdmin.busy) return;
+  const fileEl  = document.getElementById('portal-doc-file');
+  const labelEl = document.getElementById('portal-doc-label');
+  const skuEl   = document.getElementById('portal-doc-sku');
+  const catEl   = document.getElementById('portal-doc-category');
+  const file = fileEl && fileEl.files && fileEl.files[0];
+  if (!file) { showToast('Choose a file first'); return; }
+  if (file.size > 20 * 1024 * 1024) { showToast('The file is larger than 20 MB'); return; }
+  const label = String((labelEl && labelEl.value) || file.name).trim();
+  if (!label) { showToast('Give the document a title'); return; }
+  const sku = String((skuEl && skuEl.value) || '').trim();
+  const category = String((catEl && catEl.value) || '').trim();
+  const kind = (category === 'Training Videos' || /^video\//i.test(file.type || '')) ? 'video' : 'doc';
+  const reader = new FileReader();
+  reader.onload = () => {
+    const s = String(reader.result || '');
+    const b64 = s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : '';
+    if (!b64) { showToast('The file could not be read'); return; }
+    portalAdmin.busy = true;
+    paintPortalAdmin();
+    adminPost('uploadPortalDocument', {
+      sku: sku, category: category, label: label, kind: kind,
+      fileName: file.name, mimeType: file.type || '', fileBase64: b64
+    }).then(res => {
+      portalAdmin.busy = false;
+      if (!res || res.status !== 'ok') {
+        paintPortalAdmin();
+        showToast((res && res.message) || 'Could not upload the document');
+        return;
+      }
+      portalAdmin.library = res.library || portalAdmin.library;
+      paintPortalAdmin();
+      showToast('Uploaded — the portal shows it now');
+    }).catch(() => {
+      portalAdmin.busy = false;
+      paintPortalAdmin();
+      showToast('Could not reach the backend');
+    });
+  };
+  reader.onerror = () => showToast('The file could not be read');
+  reader.readAsDataURL(file);
+}
 function renderSetup() {
   if (currentView !== 'setup') return;
   const body = document.getElementById('setup-body');

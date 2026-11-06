@@ -17,15 +17,21 @@
 <header class="bar">
   <div class="wrap bar-in">
     <a class="brand" href="./">
-      <img src="assets/icon-mark.png" alt="">
+      <img src="assets/icon-mark-silver.png" alt="">
       <b>Indrones</b><span>Customer Space</span>
     </a>
     <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
-      <button type="button" data-nav="report">Customer support form</button>
-      <button type="button" data-nav="history">Support history</button>
-      <button type="button" data-nav="library">Product library</button>
-      <button type="button" data-nav="feedback">Customer feedback form</button>
-      <button type="button" data-nav="contact">Business enquiry</button>
+      <div class="portal-nav-drop" id="form-nav">
+        <button type="button" data-nav-group="form" aria-haspopup="true" aria-expanded="false">Form</button>
+        <div class="portal-drop" id="form-menu">
+          <button type="button" data-nav="report">Customer support form</button>
+          <button type="button" data-nav="feedback">Feedback form</button>
+        </div>
+      </div>
+      <button type="button" data-nav="library">Library</button>
+      <button type="button" data-nav="fleet">Fleet</button>
+      <button type="button" data-nav="history">Tickets (IRs)</button>
+      <button type="button" data-nav="announcements">Announcements</button>
     </nav>
     <span class="bar-spacer"></span>
     <div class="company-menu-wrap">
@@ -143,6 +149,20 @@
       <div id="lib-body"></div>
     </section>
 
+    <!-- ── FLEET ──────────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-fleet" hidden>
+      <div class="panel-head"><h2>Fleet</h2><span class="lib-n" id="fleet-panel-count"></span></div>
+      <p class="sub">The aircraft registered against your company. The UIN is the registration number the aircraft flies under; the certificate is its DGCA document.</p>
+      <div class="fleet-grid" id="fleet-panel-list"></div>
+      <p class="detail-empty" id="fleet-panel-empty" hidden>No aircraft is registered against your company yet. The service desk adds it from the serial numbers on your tickets.</p>
+    </section>
+
+    <!-- ── ANNOUNCEMENTS ─────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-announcements" hidden>
+      <div class="panel-head"><h2>Announcements</h2></div>
+      <p class="sub">Service bulletins are grouped by UAS model. Open a model to read what has been published for your fleet.</p>
+      <div class="ann-models" id="ann-models"></div>
+    </section>
     <!-- ── DETAILS ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-details" hidden>
       <div class="panel-head"><h2>Company profile</h2></div>
@@ -906,6 +926,7 @@
     $('tile-meta-contact').textContent = cr.name ? 'Your contact: ' + cr.name : 'Call · WhatsApp · website';
 
     renderLibrary();
+    renderAnnouncements();
     if (profile) { PROFILE = profile; renderDetails(); renderFleet(); }
     renderContact();
   }
@@ -919,6 +940,8 @@
     report:  'panel-report',
     history: 'reports',
     library: 'panel-library',
+    fleet: 'panel-fleet',
+    announcements: 'panel-announcements',
     feedback: 'panel-feedback',
     details: 'panel-details',
     contact: 'panel-contact'
@@ -937,10 +960,20 @@
     m.hidden = !open;
     b.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
+  function closeFormMenu() {
+    const g = document.getElementById('form-nav');
+    if (g) {
+      g.classList.remove('is-open');
+      const b = g.querySelector('[data-nav-group]');
+      if (b) b.setAttribute('aria-expanded', 'false');
+    }
+  }
   function setActiveNav(name) {
-    document.querySelectorAll('#portal-nav button').forEach(b => {
+    document.querySelectorAll('#portal-nav button[data-nav]').forEach(b => {
       b.classList.toggle('is-active', b.dataset.nav === name);
     });
+    const g = document.getElementById('form-nav');
+    if (g) g.classList.toggle('is-active', name === 'report' || name === 'feedback');
   }
   function scrollToPanel(name) {
     const el = document.getElementById(PANEL_IDS[name]);
@@ -960,6 +993,7 @@
     });
     setActiveNav(name);
     closeCompanyMenu();
+    closeFormMenu();
     const tiles = document.querySelectorAll('#portal-tiles .tile');
     for (let i = 0; i < tiles.length; i++) {
       tiles[i].setAttribute('aria-pressed', tiles[i].dataset.panel === name ? 'true' : 'false');
@@ -1051,60 +1085,77 @@
   // spelling this list does not carry still renders — it sorts after these, before the
   // General bucket. A SKU list that DROPS an unknown spelling would delete documents
   // from the page.
-  const PORTAL_ORDER = ['SIGMA25G', 'SIGMA 25 PRO', 'SIGMA100'];
+  const PORTAL_ORDER = ['SIGMA25G', 'SIGMA 25 PRO', 'SIGMA 100'];
   const PORTAL_ORDER_N = PORTAL_ORDER.map(libNorm);
   const ytId = url => {
     const m = String(url || '').match(/(?:youtu\.be\/|[?&]v=|embed\/)([\w-]{11})/);
     return m ? m[1] : '';
   };
 
+  const LIB_CATEGORIES = [
+    'Quick User Guide',
+    'Flight User Manual',
+    'User Level Maintenance Manual',
+    'Flight Checklist',
+    'Training Videos'
+  ];
+  function libCategory(it) {
+    const s = String((it && it.label) || '');
+    if (it && it.kind === 'video') return 'Training Videos';
+    if (/quick|start here|getting started/i.test(s)) return 'Quick User Guide';
+    if (/maintenance|maintain|service manual/i.test(s)) return 'User Level Maintenance Manual';
+    if (/checklist/i.test(s)) return 'Flight Checklist';
+    if (/manual|user guide|flight guide/i.test(s)) return 'Flight User Manual';
+    return 'Flight User Manual';
+  }
+  function libSkuKey(sku) {
+    const n = libNorm(sku);
+    if (n.indexOf('SIGMA25PRO') === 0) return 'SIGMA 25 PRO';
+    if (n.indexOf('SIGMA25G') === 0) return 'SIGMA25G';
+    if (n.indexOf('SIGMA100') === 0) return 'SIGMA 100';
+    return String(sku || 'General').trim() || 'General';
+  }
+  function libItemHtml(it) {
+    const id = it.kind === 'video' ? ytId(it.url) : '';
+    const host = (function () { try { return new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
+    return '<li><a class="lib-item' + (id ? ' video' : '') + '" href="' + esc(it.url) +
+      '" target="_blank" rel="noopener noreferrer">' +
+      (id ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">' : '') +
+      '<b>' + esc(it.label) + '</b>' +
+      '<span>' + (it.kind === 'video' ? 'Training video' : 'Document') + (host ? ' · ' + esc(host) : '') +
+      '</span></a></li>';
+  }
   function renderLibrary() {
     const body  = $('lib-body');
     const items = (PORTAL_DATA && PORTAL_DATA.library) || [];
     $('lib-count').textContent = items.length
       ? items.length + ' item' + (items.length === 1 ? '' : 's') : '';
 
+    const models = PORTAL_ORDER.slice();
+    items.forEach(it => {
+      const k = libSkuKey(it.sku);
+      if (k !== 'General' && models.indexOf(k) < 0) models.push(k);
+    });
     if (!items.length) {
-      body.innerHTML = '<p class="detail-empty">Nothing has been filed here yet. Manuals, ' +
-        'checklists and training videos will appear here as the service desk adds them — ' +
-        'if you need one today, ask the desk on WhatsApp and it will be sent to you.</p>';
+      body.innerHTML = '<p class="detail-empty">Nothing has been filed here yet. The service desk adds the manuals, checklists and training videos for each platform.</p>';
       return;
     }
 
-    const groups = {};
-    items.forEach(it => {
-      // TRAINING VIDEOS ARE ONE SHELF, NOT ONE PER AIRCRAFT. The owner, 2026-10-22:
-      // "Training videos are going to be stored in a folder irrespective of SKUs."
-      // A `sku` on a video entry is therefore ignored, never honoured — otherwise the
-      // same flight video would appear once per model on the day it was filed twice,
-      // which is the opposite of the single folder he described.
-      const k = it.kind === 'video' ? 'Training videos' : (it.sku || 'General');
-      (groups[k] = groups[k] || []).push(it);
-    });
-    const rank = k => {
-      if (k === 'Training videos') return 1000;          // the one shelf after every aircraft
-      const i = PORTAL_ORDER_N.indexOf(libNorm(k));
-      return i >= 0 ? i : (libNorm(k) === 'GENERAL' ? 999 : 500);
-    };
-    const keys = Object.keys(groups).sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-
-    body.innerHTML = keys.map(k => {
-      const rows = groups[k];
-      return '<div class="lib-group">' +
-        '<h3>' + esc(k) + '<span class="lib-n">' + rows.length + '</span></h3>' +
-        '<ul class="lib-list">' + rows.map(it => {
-          const id = it.kind === 'video' ? ytId(it.url) : '';
-          const host = (function () { try { return new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
-          return '<li><a class="lib-item' + (id ? ' video' : '') + '" href="' + esc(it.url) +
-            '" target="_blank" rel="noopener noreferrer">' +
-            (id ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">' : '') +
-            '<b>' + esc(it.label) + '</b>' +
-            '<span>' + (it.kind === 'video' ? 'Training video' : 'Document') + (host ? ' · ' + esc(host) : '') + '</span>' +
-            '</a></li>';
-        }).join('') + '</ul></div>';
+    body.innerHTML = models.map(model => {
+      const mine = items.filter(it => libSkuKey(it.sku) === model ||
+        (it.kind === 'video' && !String(it.sku || '').trim()));
+      const cats = LIB_CATEGORIES.map(cat => {
+        const rows = mine.filter(it => libCategory(it) === cat);
+        return '<div class="lib-group"><h3>' + esc(cat) +
+          '<span class="lib-n">' + rows.length + '</span></h3>' +
+          (rows.length
+            ? '<ul class="lib-list">' + rows.map(libItemHtml).join('') + '</ul>'
+            : '<p class="detail-empty">To be added by the service desk.</p>') +
+          '</div>';
+      }).join('');
+      return '<section class="lib-model"><h3 class="lib-model-name">' + esc(model) + '</h3>' + cats + '</section>';
     }).join('');
   }
-
   // ── Your details: addresses and contacts ─────────────────────────────────────
   // The rows are edited in place and posted as one list on Save. Nothing saves itself:
   // a half-typed address is worse than the old one, and an autosave on every keystroke
@@ -1160,14 +1211,17 @@
   // ── Your aircraft, and the UIN certificate ───────────────────────────────────
   function renderFleet() {
     const list = $('fleet-list');
+    const panel = $('fleet-panel-list');
     const f    = PROFILE.fleet || [];
     const certified = ((PORTAL_DATA && PORTAL_DATA.certified) || []).map(libNorm);
     $('fleet-empty').hidden = f.length > 0;
+    if ($('fleet-panel-empty')) $('fleet-panel-empty').hidden = f.length > 0;
+    if ($('fleet-panel-count')) $('fleet-panel-count').textContent = f.length ? f.length + ' aircraft' : '';
 
     list.innerHTML = f.map(x => {
       const isCert = certified.indexOf(libNorm(x.model)) >= 0;
       return '<li>' +
-        '<span class="sn">' + esc(x.sn || '—') + '</span>' +
+        '<span class="sn">' + esc(x.sn || '-') + '</span>' +
         '<span class="uin">' + esc(x.model || '') + '</span>' +
         (x.uin
           ? '<span class="uin">UIN <b>' + esc(x.uin) + '</b></span>'
@@ -1177,8 +1231,46 @@
           : (isCert ? '<span class="cert none">Certificate not on file</span>' : '')) +
         '</li>';
     }).join('');
-  }
 
+    if (panel) {
+      panel.innerHTML = f.map(x => {
+        const isCert = certified.indexOf(libNorm(x.model)) >= 0;
+        return '<article class="fleet-card">' +
+          '<b>' + esc(x.sn || '-') + '</b>' +
+          '<span>' + esc(x.model || '') + '</span>' +
+          (x.uin ? '<span>UIN ' + esc(x.uin) + '</span>' : (isCert ? '<span>UIN not on file</span>' : '')) +
+          (x.cert ? '<a href="' + esc(x.cert) + '" target="_blank" rel="noopener noreferrer">UIN certificate &#8599;</a>'
+                  : (isCert ? '<span>Certificate not on file</span>' : '')) +
+          '</article>';
+      }).join('');
+    }
+  }
+  // ── Announcements: service bulletins by UAS model ───────────────────────────
+  const ANN_MODELS = ['SIGMA25G', 'SIGMA 100', 'SIGMA 25 PRO'];
+  function renderAnnouncements() {
+    const host = $('ann-models');
+    if (!host) return;
+    const all = (PORTAL_DATA && PORTAL_DATA.bulletins) || [];
+    host.innerHTML = ANN_MODELS.map(model => {
+      const rows = all.filter(b => libSkuKey(b.model || b.sku) === model);
+      const list = rows.length
+        ? '<ul hidden>' + rows.map(b =>
+            '<li>' + (b.date ? esc(b.date) + ' — ' : '') +
+            (b.url ? '<a href="' + esc(b.url) + '" target="_blank" rel="noopener noreferrer">' +
+                     esc(b.title || 'Service bulletin') + '</a>'
+                   : esc(b.title || 'Service bulletin')) + '</li>').join('') + '</ul>'
+        : '<ul hidden><li>No service bulletins published for this model yet.</li></ul>';
+      return '<article class="ann-model">' +
+        '<button type="button" data-ann-model="' + esc(model) + '">' +
+        '<span>' + esc(model) + '</span><span>' + rows.length + '</span></button>' + list + '</article>';
+    }).join('');
+    host.querySelectorAll('[data-ann-model]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const ul = btn.parentElement.querySelector('ul');
+        if (ul) ul.hidden = !ul.hidden;
+      });
+    });
+  }
   // ── The CR contact ───────────────────────────────────────────────────────────
   // The person, from the store — never a name written into this page, because this
   // file is published. If nothing is configured yet the card is simply absent and the
@@ -1725,9 +1817,19 @@
     $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
 
-    document.querySelectorAll('#portal-nav button').forEach(b => {
+    document.querySelectorAll('#portal-nav button[data-nav]').forEach(b => {
       b.addEventListener('click', () => { openPanel(b.dataset.nav); scrollToPanel(b.dataset.nav); });
     });
+    const formGroup = document.querySelector('#form-nav [data-nav-group]');
+    if (formGroup) {
+      formGroup.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const g = document.getElementById('form-nav');
+        const open = !g.classList.contains('is-open');
+        g.classList.toggle('is-open', open);
+        formGroup.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    }
     $('header-who').addEventListener('click', (e) => {
       e.stopPropagation();
       toggleCompanyMenu();
@@ -1741,6 +1843,7 @@
     });
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.company-menu-wrap')) closeCompanyMenu();
+      if (!e.target.closest('#form-nav')) closeFormMenu();
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeCompanyMenu();

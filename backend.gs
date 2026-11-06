@@ -328,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 26,
+  API_VERSION: 27,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4712,6 +4712,7 @@ function doPost(e) {
       // The library, the CR contact and every aircraft/UIN are admin-only.
       saveCustomerProfile: function () { return saveCustomerProfile(params, email); },
       savePortalUser:    function () { return savePortalUser(params, email); },
+      signAcknowledgement:function () { return signAcknowledgement(params, email); },
       rateIR:              function () { return rateIR(params, email); },
       savePortalConfig:    function () { return savePortalConfig(params, email); },
       uploadPortalDocument:function () { return uploadPortalDocument(params, email); },
@@ -5489,7 +5490,15 @@ function portalProfileFor(company) {
   var all = portalRead().companies;
   var p = (k && all && all[k]) ? all[k] : {};
   var d = (p.details && typeof p.details === 'object') ? p.details : {};
+  var acks = (p.acknowledgements instanceof Array ? p.acknowledgements : []).map(function (a) {
+    return { id: String(a.id || ''), title: String(a.title || 'Acknowledgement'),
+      url: /^https?:\/\//i.test(String(a.url || '')) ? String(a.url) : '',
+      serial: String(a.serial || ''), signedAt: String(a.signedAt || ''),
+      signedBy: String(a.signedBy || ''), signerName: String(a.signerName || ''),
+      signedUrl: /^https?:\/\//i.test(String(a.signedUrl || '')) ? String(a.signedUrl) : '' };
+  });
   return {
+    acknowledgements: acks,
     details: {
       companyName:       String(d.companyName || '').slice(0, 160),
       gst:               String(d.gst || '').slice(0, 40),
@@ -5647,6 +5656,53 @@ function savePortalUser(params, authEmail) {
   try { appendPortalNotice(company, usersKey(authEmail), notice); } catch (e) { /* notice is best-effort */ }
   return portalUsersList(authEmail);
 }
+// POST signAcknowledgement (customer) — the electronic delivery acknowledgement.
+// The original PDF remains linked; a signed cover PDF is generated and stored beside it.
+function signAcknowledgement(params, authEmail) {
+  var company = customerCompany(authEmail);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+  var id = String(params.id || '').trim();
+  var signer = String(params.signerName || '').trim().slice(0, 160);
+  if (!id) return { status: 'error', message: 'Which acknowledgement?' };
+  if (!signer) return { status: 'error', message: 'Type your full name to sign.' };
+  var key = sameCompanyKey(company);
+  var out = withRowLockOrThrow(function () {
+    var st = readJsonLocked(PORTAL_STORE_FILE) || {};
+    var rec = st.companies && st.companies[key];
+    if (!rec || !(rec.acknowledgements instanceof Array)) return { status: 'error', message: 'Acknowledgement not found.' };
+    var ack = null;
+    rec.acknowledgements.forEach(function (a) { if (a && a.id === id) ack = a; });
+    if (!ack) return { status: 'error', message: 'Acknowledgement not found.' };
+    if (ack.signedAt) return { status: 'ok', acknowledgement: ack, message: 'Already signed.' };
+    var at = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss');
+    ack.signedAt = at;
+    ack.signedBy = usersKey(authEmail);
+    ack.signerName = signer;
+    try {
+      var html = '<div style="font-family:Arial;padding:32px">' +
+        '<h2>Delivery Acknowledgement</h2>' +
+        '<p><b>Company:</b> ' + signer.replace(/[<>&]/g, '') + '</p>' +
+        '<p><b>Customer:</b> ' + company.replace(/[<>&]/g, '') + '</p>' +
+        '<p><b>Document:</b> ' + String(ack.title || '').replace(/[<>&]/g, '') + '</p>' +
+        '<p><b>UAS serial:</b> ' + String(ack.serial || '').replace(/[<>&]/g, '') + '</p>' +
+        '<p><b>Signed by:</b> ' + signer.replace(/[<>&]/g, '') + ' &lt;' + usersKey(authEmail) + '&gt;</p>' +
+        '<p><b>Signed at:</b> ' + at + ' IST</p>' +
+        '<p>This electronic acknowledgement records that the customer received the UAS, its documents and understood the handover requirements.</p>' +
+        '</div>';
+      var pdf = HtmlService.createHtmlOutput(html).getAs(MimeType.PDF).setName('Acknowledgement - ' + company + '.pdf');
+      var folder = getOrCreateSubfolder(getRootFolder(), 'I-PASSBOOK portal content');
+      var file = folder.createFile(pdf);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      ack.signedUrl = file.getUrl();
+    } catch (e) { /* record still stands even if a generated cover cannot be made */ }
+    writeJsonLocked(PORTAL_STORE_FILE, st);
+    appendAuditLinesLocked('PORTAL', [{ at: at, by: usersKey(authEmail), action: 'acknowledgement-signed',
+      company: company, email: ack.serial || '', status: 'signed' }]);
+    return { status: 'ok', acknowledgement: ack, message: 'Acknowledgement signed.' };
+  });
+  try { appendPortalNotice(company, usersKey(authEmail), 'signed an acknowledgement'); } catch (e) { /* best effort */ }
+  return out;
+}
 // GET getPortalActivity (admin) — the employee-visible timeline for customer
 // portal changes. The audit file is written by savePortalUser/saveCustomerProfile.
 function getPortalActivity(authEmail) {
@@ -5691,6 +5747,23 @@ function uploadPortalDocument(params, authEmail) {
     var st = readJsonLocked(PORTAL_STORE_FILE);
     if (!st || typeof st !== 'object') st = {};
     if (!(st.library instanceof Array)) st.library = [];
+    if (item.category === 'Acknowledgement') {
+      var co = String(params.company || '').trim();
+      if (!co) return { status: 'error', message: 'Choose the company this acknowledgement belongs to.' };
+      var ck = sameCompanyKey(co);
+      if (!st.companies || typeof st.companies !== 'object') st.companies = {};
+      var crec = (st.companies[ck] && typeof st.companies[ck] === 'object') ? st.companies[ck] : {};
+      if (!(crec.acknowledgements instanceof Array)) crec.acknowledgements = [];
+      item.id = 'ack-' + Utilities.getUuid();
+      item.serial = String(params.serial || '').trim().slice(0, 60);
+      item.signedAt = ''; item.signedBy = ''; item.signerName = ''; item.signedUrl = '';
+      crec.acknowledgements.push(item);
+      st.companies[ck] = crec;
+      writeJsonLocked(PORTAL_STORE_FILE, st);
+      appendAuditLinesLocked('PORTAL', [{ at: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+        by: usersKey(authEmail), action: 'acknowledgement-upload', company: co, email: item.serial || '', status: 'unsigned' }]);
+      return { status: 'ok', item: item, library: portalLibraryArray(), apiVersion: CONFIG.API_VERSION };
+    }
     var replaced = false;
     for (var i = 0; i < st.library.length; i++) {
       var r = st.library[i];
@@ -10556,7 +10629,7 @@ function hasFileInFolder(folder, name) {
 }
 
 function cleanFileName(name) {
-  return String(name == null ? '' : name).replace(/[\\/:*?"<>|]+/g, '_').trim().slice(0, 240) || 'attachment';
+  return String(name == null ? '' : name).replace(/[\/:*?"<>|]+/g, '_').trim().slice(0, 240) || 'attachment';
 }
 
 function uniqueFileName(folder, name) {

@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v128';
+const APP_VERSION = 'v129';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9325,6 +9325,13 @@ function portalAdminHTML() {
           <option value="SIGMA 25 PRO">SIGMA 25 PRO</option>
           <option value="">General / training video</option>
         </select>
+        <label for="portal-doc-company">Company (Acknowledgement only)</label>
+        <select id="portal-doc-company" class="form-input">
+          <option value="">— not company-specific —</option>
+          ${companies.map(c => `<option value="${escHtml(c.name)}">${escHtml(c.name)}</option>`).join('')}
+        </select>
+        <label for="portal-doc-serial">UAS serial (Acknowledgement only)</label>
+        <input id="portal-doc-serial" class="form-input" type="text" autocomplete="off">
         <label for="portal-doc-category">Category</label>
         <select id="portal-doc-category" class="form-input">
           <option>Quick User Guide</option>
@@ -9354,7 +9361,7 @@ function portalAdminHTML() {
       <label for="portal-co" class="portal-co-label">Company</label>
       <select id="portal-co" class="form-input">
         <option value="">— choose a company —</option>
-        ${companies.map(c => `<option value="${escHtml(c.name)}"${String(c.name) === co ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('')}
+          ${companies.map(c => `<option value="${escHtml(c.name)}">${escHtml(c.name)}</option>`).join('')}
       </select>
       <textarea id="portal-fleet" class="form-input portal-lines" rows="4" spellcheck="false"
                 autocomplete="off" placeholder="S25G0001 | SIGMA25G | UIN… | https://…"
@@ -9568,6 +9575,8 @@ function portalUpload() {
     adminPost('uploadPortalDocument', {
       sku: sku, category: category, label: label, kind: kind,
       fileName: file.name, mimeType: file.type || '', fileBase64: b64,
+      company: (document.getElementById('portal-doc-company') && document.getElementById('portal-doc-company').value) || '',
+      serial: (document.getElementById('portal-doc-serial') && document.getElementById('portal-doc-serial').value) || '',
       emailUsers: (document.getElementById('portal-doc-email') && document.getElementById('portal-doc-email').checked) ? '1' : ''
     }).then(res => {
       portalAdmin.busy = false;

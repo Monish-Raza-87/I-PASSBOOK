@@ -1482,11 +1482,31 @@
   function renderMandates() {
     const host = $('mandates-docs');
     if (!host) return;
-    const docs = ((PORTAL_DATA && PORTAL_DATA.library) || []).filter(it =>
-      ['Service Bulletin', 'Acknowledgement'].indexOf(it.category) >= 0);
-    host.innerHTML = docs.length
-      ? '<div class="lib-group"><h3>Published documents</h3><ul class="lib-list">' + docs.map(libItemHtml).join('') + '</ul></div>'
-      : '<p class="detail-empty">Service bulletins and acknowledgements will appear here when the service desk publishes them.</p>';
+    const docs = ((PORTAL_DATA && PORTAL_DATA.library) || []).filter(it => it.category === 'Service Bulletin');
+    const acks = (PORTAL_DATA && PORTAL_DATA.profile && PORTAL_DATA.profile.acknowledgements) || [];
+    const sb = docs.length
+      ? '<div class="lib-group"><h3>Service bulletins</h3><ul class="lib-list">' + docs.map(libItemHtml).join('') + '</ul></div>'
+      : '<div class="lib-group"><h3>Service bulletins</h3><p class="detail-empty">No service bulletins published yet.</p></div>';
+    const ack = '<div class="lib-group"><h3>Acknowledgements</h3>' + (acks.length
+      ? '<ul class="lib-list">' + acks.map(a =>
+          '<li><div class="ack-row"><b>' + esc(a.title || 'Acknowledgement') + '</b>' +
+          '<span>' + esc(a.serial || '') + '</span>' +
+          (a.signedAt
+            ? '<span class="ack-signed">Signed by ' + esc(a.signerName || a.signedBy) + ' on ' + esc(a.signedAt) + '</span>' +
+              (a.signedUrl ? '<a class="btn btn-sm" href="' + esc(a.signedUrl) + '" target="_blank" rel="noopener">Open signed PDF</a>' : '')
+            : '<button type="button" class="btn btn-sm ack-sign" data-ack-id="' + esc(a.id) + '">Sign acknowledgement</button>') +
+          '</div></li>').join('') + '</ul>'
+      : '<p class="detail-empty">No acknowledgement has been issued for your fleet yet.</p>') + '</div>';
+    host.innerHTML = sb + ack;
+    host.querySelectorAll('.ack-sign').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = prompt('Type your full name to sign this acknowledgement:');
+        if (!name) return;
+        const r = await apiPost('signAcknowledgement', { id: btn.dataset.ackId, signerName: name });
+        if (!r || r.status !== 'ok') { alert(msgOf(r)); return; }
+        await loadPortal();
+      });
+    });
   }
   // ── Announcements: service bulletins by UAS model ───────────────────────────
   const ANN_MODELS = ['SIGMA25G', 'SIGMA 100', 'SIGMA 25 PRO'];

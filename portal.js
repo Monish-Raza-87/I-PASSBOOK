@@ -21,17 +21,39 @@
       <b>Indrones</b><span>Customer Space</span>
     </a>
     <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
-      <div class="portal-nav-drop" id="form-nav">
-        <button type="button" data-nav-group="form" aria-haspopup="true" aria-expanded="false">Form</button>
-        <div class="portal-drop" id="form-menu">
-          <button type="button" data-nav="report">Customer support form</button>
-          <button type="button" data-nav="feedback">Feedback form</button>
+      <div class="portal-nav-drop" id="support-nav">
+        <button type="button" data-nav-group="support" aria-haspopup="true" aria-expanded="false">Support</button>
+        <div class="portal-drop" id="support-menu">
+          <button type="button" data-route="support/new">Report new issue</button>
+          <button type="button" data-route="support/history">Support history</button>
         </div>
       </div>
-      <button type="button" data-nav="library">Library</button>
-      <button type="button" data-nav="fleet">Fleet</button>
-      <button type="button" data-nav="history">Tickets (IRs)</button>
-      <button type="button" data-nav="announcements">Announcements</button>
+      <div class="portal-nav-drop" id="library-nav">
+        <button type="button" data-nav-group="library" aria-haspopup="true" aria-expanded="false">Library</button>
+        <div class="portal-drop" id="library-menu">
+          <button type="button" data-route="library" data-model="SIGMA25G">SIGMA25G</button>
+          <button type="button" data-route="library" data-model="SIGMA 100">SIGMA 100</button>
+          <button type="button" data-route="library" data-model="SIGMA 25 PRO">SIGMA 25 PRO</button>
+          <button type="button" data-route="library" data-model="TRAINING VIDEOS">Training videos</button>
+        </div>
+      </div>
+      <button type="button" data-route="compliance">Compliance</button>
+      <div class="portal-nav-drop" id="profile-nav">
+        <button type="button" data-nav-group="profile" aria-haspopup="true" aria-expanded="false">Profile</button>
+        <div class="portal-drop" id="profile-menu">
+          <button type="button" data-route="profile/company">Company details</button>
+          <button type="button" data-route="profile/users">User access</button>
+          <button type="button" data-route="profile/fleet">Fleet</button>
+        </div>
+      </div>
+      <div class="portal-nav-drop" id="mandates-nav">
+        <button type="button" data-nav-group="mandates" aria-haspopup="true" aria-expanded="false">Mandates</button>
+        <div class="portal-drop" id="mandates-menu">
+          <button type="button" data-route="mandates/sb">Service bulletins</button>
+          <button type="button" data-route="mandates/ack">Acknowledgement</button>
+        </div>
+      </div>
+      <button type="button" data-route="offer">What we offer</button>
     </nav>
     <span class="bar-spacer"></span>
     <div class="company-menu-wrap">
@@ -49,12 +71,12 @@
 
 <main>
 
-  <section class="hero wrap">
-    <p class="eyebrow">After-sales</p>
-    <h1>Everything about your aircraft, in one place.</h1>
-    <p class="lede">Raise a request, follow what we are doing about it, and read the record of
-    every service we have carried out on your fleet. No phone calls to find out where things stand.</p>
-    <div class="btn-row">
+  <section class="hero wrap home-hero">
+    <p class="eyebrow home-eyebrow">After-sales</p>
+    <h1 class="home-title">This is your space</h1>
+    <p class="home-statement">I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY WITH INDRONES, ALL IN ONE PLACE</p>
+    <p class="lede">Raise a support request, Track support history, Access Operation Documents for Your Drone, Dedicated Training Videos, Your Fleet Information and much more. This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
+    <div class="btn-row" hidden>
       <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
       <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
     </div>
@@ -139,6 +161,53 @@
       <p class="sub">Tell us how the service felt, not just whether the aircraft was fixed. Your feedback goes to Customer Relations and is kept against your company.</p>
       <div class="panel-actions">
         <a class="btn btn-primary" id="feedback-panel-open" href="#" target="_blank" rel="noopener">Open feedback form</a>
+      </div>
+    </section>
+    <!-- ── SUPPORT ────────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-support" hidden>
+      <div class="panel-head"><h2>Support</h2></div>
+      <p class="sub">Raise a new issue, or follow the tickets your company has already reported.</p>
+      <div class="route-cards">
+        <button type="button" class="route-card" data-route="support/new"><b>Report new issue</b><span>Open the customer support form and get an IR number.</span></button>
+        <button type="button" class="route-card" data-route="support/history"><b>Support history</b><span>Every IR your company has raised with us.</span></button>
+      </div>
+    </section>
+
+    <!-- ── COMPLIANCE ─────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-compliance" hidden>
+      <div class="panel-head"><h2>Compliance</h2></div>
+      <p class="sub">Your aircraft registration and regulatory documents.</p>
+      <div class="route-cards">
+        <article class="route-card"><b>UIN certificates</b><span>Registration and certificate documents for the aircraft in your fleet.</span></article>
+        <article class="route-card"><b>eGCA signup SOP</b><span>Step-by-step help for signing up on the eGCA portal.</span></article>
+        <article class="route-card"><b>Certificate of Conformity</b><span>Issued per UAS for type-certified models.</span></article>
+      </div>
+    </section>
+
+    <!-- ── USER ACCESS ────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-users" hidden>
+      <div class="panel-head"><h2>User access</h2></div>
+      <p class="sub">Approved users for your company. The official contact email is the permanent admin identity and cannot be removed here.</p>
+      <div id="portal-users-body"><p class="detail-empty">User access management will appear here after the customer-management backend is connected.</p></div>
+    </section>
+
+    <!-- ── MANDATES ───────────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-mandates" hidden>
+      <div class="panel-head"><h2>Mandates</h2></div>
+      <p class="sub">Service bulletins and delivery acknowledgements for your fleet.</p>
+      <div class="route-cards">
+        <article class="route-card" id="mandate-sb"><b>Service bulletins</b><span>Published bulletins for each UAS model. Email alerts are controlled by the service desk.</span></article>
+        <article class="route-card" id="mandate-ack"><b>Acknowledgement</b><span>Signed delivery acknowledgement documents for your aircraft.</span></article>
+      </div>
+    </section>
+
+    <!-- ── WHAT WE OFFER ──────────────────────────────────────────────────── -->
+    <section class="panel" id="panel-offer" hidden>
+      <div class="panel-head"><h2>What we offer</h2></div>
+      <p class="sub">The platforms and software behind Indrones' on-demand geospatial intelligence.</p>
+      <div class="route-cards two">
+        <a class="route-card" href="https://indrones.com/#platforms" target="_blank" rel="noopener noreferrer"><b>Hardware platforms</b><span>Eigenspace multi-rotor, fixed-wing and hybrid VTOL aircraft.</span><span class="route-link">Explore on indrones.com ↗</span></a>
+        <a class="route-card" href="https://indrones.com/#software" target="_blank" rel="noopener noreferrer"><b>Software platforms</b><span>Incharge, Inflight.live and Inspect.</span><span class="route-link">Explore on indrones.com ↗</span></a>
       </div>
     </section>
     <!-- ── LIBRARY ──────────────────────────────────────────────────────────── -->
@@ -885,6 +954,7 @@
     // BESIDE that read rather than after it: two cold Apps Script executions in
     // parallel is one wait, two in sequence is two.
     await Promise.all([loadTickets(), loadPortal()]);
+    showPortalPage(portalRouteFromHash());
   }
 
   // ── The portal's one read ─────────────────────────────────────────────────────
@@ -937,10 +1007,15 @@
   // decides visibility, so `#reports` cannot be shown by loadTickets() while another
   // panel is up.
   const PANEL_IDS = {
+    support: 'panel-support',
     report:  'panel-report',
     history: 'reports',
     library: 'panel-library',
     fleet: 'panel-fleet',
+    compliance: 'panel-compliance',
+    users: 'panel-users',
+    mandates: 'panel-mandates',
+    offer: 'panel-offer',
     announcements: 'panel-announcements',
     feedback: 'panel-feedback',
     details: 'panel-details',
@@ -960,20 +1035,56 @@
     m.hidden = !open;
     b.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
+  const PAGE_PANEL = {
+    support: 'panel-support',
+    'support/new': 'panel-report',
+    'support/history': 'reports',
+    library: 'panel-library',
+    compliance: 'panel-compliance',
+    profile: 'panel-details',
+    'profile/company': 'panel-details',
+    'profile/users': 'panel-users',
+    'profile/fleet': 'panel-fleet',
+    mandates: 'panel-mandates',
+    'mandates/sb': 'panel-mandates',
+    'mandates/ack': 'panel-mandates',
+    offer: 'panel-offer'
+  };
+  function portalRouteFromHash() {
+    const h = String(location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
+    return h || 'home';
+  }
+  function showPortalPage(route) {
+    const isHome = !route || route === 'home';
+    const portal = $('portal');
+    const hero = document.querySelector('.hero');
+    if (hero) hero.hidden = false;
+    if (isHome) {
+      if (portal) portal.hidden = true;
+      if ($('portal-nav')) $('portal-nav').hidden = false;
+      return;
+    }
+    const panel = PAGE_PANEL[route] || 'panel-support';
+    if (portal) portal.hidden = false;
+    const tiles = $('portal-tiles');
+    if (tiles) tiles.hidden = true;
+    openPanel(panel.replace(/^panel-/, '').replace(/^reports$/, 'history'));
+    const el = document.getElementById(panel);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const group = route.split('/')[0];
+    document.querySelectorAll('#portal-nav .portal-nav-drop').forEach(g => {
+      g.classList.toggle('is-active', g.id === group + '-nav');
+    });
+  }
   function closeFormMenu() {
-    const g = document.getElementById('form-nav');
-    if (g) {
+    document.querySelectorAll('#portal-nav .portal-nav-drop').forEach(g => {
       g.classList.remove('is-open');
       const b = g.querySelector('[data-nav-group]');
       if (b) b.setAttribute('aria-expanded', 'false');
-    }
+    });
   }
   function setActiveNav(name) {
-    document.querySelectorAll('#portal-nav button[data-nav]').forEach(b => {
-      b.classList.toggle('is-active', b.dataset.nav === name);
-    });
-    const g = document.getElementById('form-nav');
-    if (g) g.classList.toggle('is-active', name === 'report' || name === 'feedback');
+    // The current page's top-level group is marked by showPortalPage().
   }
   function scrollToPanel(name) {
     const el = document.getElementById(PANEL_IDS[name]);
@@ -1530,7 +1641,7 @@
     $('access-member-who').textContent = me.customerOf || me.email || '';
     // The portal is the signed-in page. "How access works" is about getting one, so it
     // has no business under a customer who already has one.
-    $('portal').hidden = false;
+    $('portal').hidden = !!me.customerOf;
     $('access').hidden = true;
   }
 
@@ -1759,7 +1870,6 @@
         saveSession(res.sessionToken, { email: email, customerOf: (res.access && res.access.customerOf) || '' });
         hideSignin();
         await boot();
-        $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
       }
       if (res && res.status === 'ok' && res.otpRequired) {
@@ -1817,19 +1927,29 @@
     $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
 
-    document.querySelectorAll('#portal-nav button[data-nav]').forEach(b => {
-      b.addEventListener('click', () => { openPanel(b.dataset.nav); scrollToPanel(b.dataset.nav); });
-    });
-    const formGroup = document.querySelector('#form-nav [data-nav-group]');
-    if (formGroup) {
-      formGroup.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const g = document.getElementById('form-nav');
-        const open = !g.classList.contains('is-open');
-        g.classList.toggle('is-open', open);
-        formGroup.setAttribute('aria-expanded', open ? 'true' : 'false');
+    document.querySelectorAll('[data-route]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (el.tagName === 'A' && el.getAttribute('href') && el.getAttribute('href').indexOf('#') !== 0) return;
+        e.preventDefault();
+        const route = String(el.dataset.route || 'home');
+        if (location.hash === '#/' + route) showPortalPage(route);
+        else location.hash = '#/' + route;
       });
-    }
+    });
+    document.querySelectorAll('#portal-nav [data-nav-group]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const g = btn.closest('.portal-nav-drop');
+        if (!g) return;
+        const open = !g.classList.contains('is-open');
+        closeFormMenu();
+        g.classList.toggle('is-open', open);
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    });
+    window.addEventListener('hashchange', () => {
+      if (token() && ME) showPortalPage(portalRouteFromHash());
+    });
     $('header-who').addEventListener('click', (e) => {
       e.stopPropagation();
       toggleCompanyMenu();
@@ -1843,7 +1963,7 @@
     });
     document.addEventListener('click', (e) => {
       if (!e.target.closest('.company-menu-wrap')) closeCompanyMenu();
-      if (!e.target.closest('#form-nav')) closeFormMenu();
+      if (!e.target.closest('.portal-nav-drop')) closeFormMenu();
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeCompanyMenu();

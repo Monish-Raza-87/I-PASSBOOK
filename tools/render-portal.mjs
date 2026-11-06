@@ -550,19 +550,37 @@ try {
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
   // Header tabs and the floating support chat.
-  ok('the signed-in header has the five support tabs, in order',
-    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 5 &&
+  ok('the signed-in header has Form, Library, Fleet, Tickets and Announcements',
     await visible('#portal-nav') &&
-    /customer support form/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="report"]').textContent`)) &&
-    /support history/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').textContent`)) &&
-    /product library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)) &&
-    /customer feedback form/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="feedback"]').textContent`)) &&
-    /business enquiry/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="contact"]').textContent`)));
+    /form/i.test(await evaluate(`document.querySelector('#form-nav [data-nav-group]').textContent`)) &&
+    /library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)) &&
+    /fleet/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="fleet"]').textContent`)) &&
+    /tickets \(irs\)/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').textContent`)) &&
+    /announcements/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="announcements"]').textContent`)));
+  await evaluate(`document.querySelector('#form-nav [data-nav-group]').click()`);
+  await SLEEP(100);
+  ok('the Form menu lists the two intake forms',
+    await visible('#form-menu') &&
+    /customer support form/i.test(await evaluate(`document.getElementById('form-menu').innerText`)) &&
+    /feedback form/i.test(await evaluate(`document.getElementById('form-menu').innerText`)));
+  await evaluate(`document.querySelector('#portal-nav [data-nav="report"]').click()`);
+  await SLEEP(100);
+  ok('the customer support form opens from the Form menu', await visible('#panel-report'));
   await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').click()`);
   await SLEEP(120);
   ok('a header tab opens and scrolls to its section',
     await visible('#panel-library') &&
     await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').classList.contains('is-active')`));
+  await evaluate(`document.querySelector('#portal-nav [data-nav="fleet"]').click()`);
+  await SLEEP(100);
+  ok('Fleet opens with the customer aircraft cards',
+    await visible('#panel-fleet') &&
+    (await evaluate(`document.querySelectorAll('#fleet-panel-list .fleet-card').length`)) > 0);
+  await evaluate(`document.querySelector('#portal-nav [data-nav="announcements"]').click()`);
+  await SLEEP(100);
+  ok('Announcements lists the three UAS models for Service Bulletins',
+    await visible('#panel-announcements') &&
+    (await evaluate(`document.querySelectorAll('#ann-models .ann-model').length`)) === 3);
   await evaluate(`document.getElementById('header-who').click()`);
   await SLEEP(100);
   ok('the company name opens the personalisation menu',
@@ -631,14 +649,16 @@ try {
   // (2026-10-22) is ONE training folder regardless of airframe, so the two videos in
   // the stub — one filed with no SKU, one filed against SIGMA100 — must sit on ONE
   // shelf at the end. A third group is the failure this measures.
-  const groups = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-group h3')).map(h => h.textContent)`);
-  ok('documents group by airframe, and every training video sits on one shelf after them',
-    groups.length === 3 && /^SIGMA25G/.test(groups[0]) && /^SIGMA100/.test(groups[1]) &&
-    /^Training videos/.test(groups[2]),
-    JSON.stringify(groups));
-  ok('...and that shelf holds both videos, whatever SKU each was filed under',
-    await evaluate(`document.querySelector('#lib-body .lib-group:last-child').querySelectorAll('.lib-item').length`) === 2,
-    await evaluate(`document.querySelector('#lib-body .lib-group:last-child').querySelectorAll('.lib-item').length`));
+  const models = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model-name')).map(h => h.textContent)`);
+  ok('the library lists the three UAS models first',
+    JSON.stringify(models) === JSON.stringify(['SIGMA25G', 'SIGMA 25 PRO', 'SIGMA 100']), JSON.stringify(models));
+  ok('...and every model carries the five document categories',
+    await evaluate(`document.querySelectorAll('#lib-body .lib-model').length`) === 3 &&
+    await evaluate(`document.querySelectorAll('#lib-body .lib-group').length`) === 15,
+    { models: await evaluate(`document.querySelectorAll('#lib-body .lib-model').length`),
+      groups: await evaluate(`document.querySelectorAll('#lib-body .lib-group').length`) });
+  ok('...with training videos inside a model, not one orphan shelf',
+    await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model')).every(m => /Training Videos/i.test(m.innerText))`));
   ok('a video shows a thumbnail rather than a bare row of text',
     await evaluate(`!!document.querySelector('#lib-body .lib-item.video img[src*="img.youtube.com/vi/"]')`));
   ok('every library item opens in its own tab', await evaluate(

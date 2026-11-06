@@ -115,7 +115,8 @@ const SERVED = [
   'assets/brand-intro.mp4',
   'assets/icon-192.png',
   'assets/icon-512.png',
-  'assets/icon-mark.png'
+  'assets/icon-mark.png',
+  'assets/icon-mark-silver.png'
 ]
 
 // Present on gh-pages but not in the repo's main tree — carried over untouched.

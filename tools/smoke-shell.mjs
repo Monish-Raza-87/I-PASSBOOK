@@ -492,7 +492,7 @@ head('the app icon');
 // judged at the wrong size; it was rendered at 16/24/32/48 on both light and dark chrome
 // before this changed. See tools/make-icons.ps1 for why the two files differ at all.
 ok('index.html points the TAB at the clean mark and keeps the plated tile for iOS',
-  /rel="icon"[^>]*assets\/icon-mark\.png/.test(htmlCode) &&
+  /rel="icon"[^>]*assets\/icon-mark-silver\.png/.test(htmlCode) &&
   /rel="apple-touch-icon"[^>]*assets\/apple-touch-icon\.png/.test(htmlCode) &&
   !/rel="icon"[^>]*assets\/icon-192\.png/.test(htmlCode) &&
   !/assets\/logo\.png/.test(htmlCode));
@@ -501,7 +501,7 @@ ok('index.html points the TAB at the clean mark and keeps the plated tile for iO
 // Same mark, or the tab changes appearance when someone opens the FAQ.
 for (const page of ['faq.html', 'privacy.html', 'terms.html', 'customer.html']) {
   ok(`${page} carries the same tab icon as the app`,
-    /rel="icon"[^>]*assets\/icon-mark\.png/.test(read('../' + page)),
+    /rel="icon"[^>]*assets\/icon-mark-silver\.png/.test(read('../' + page)),
     (read('../' + page).match(/<link rel="icon"[^>]*>/) || ['no icon link at all'])[0]);
 }
 // The mark moved out of the card and into the common head above both doors, so it is

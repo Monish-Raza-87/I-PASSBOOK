@@ -5701,6 +5701,11 @@ function uploadPortalDocument(params, authEmail) {
     if (!replaced) st.library.push(item);
     st.library = st.library.slice(-120);
     writeJsonLocked(PORTAL_STORE_FILE, st);
+    appendAuditLinesLocked('PORTAL', [{
+      at: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+      by: usersKey(authEmail), action: 'content-upload', company: 'All customers',
+      email: item.sku || '', status: item.category || ''
+    }]);
     if (item.category === 'Service Bulletin' && item.sku && String(params.emailUsers || '') === '1') {
       var modelKey = String(item.sku).toUpperCase().replace(/[^A-Z0-9]/g, '');
       var acc = accessStore().customers || {};
@@ -5800,6 +5805,10 @@ function saveCustomerProfile(params, authEmail) {
       updatedBy: usersKey(authEmail)
     };
     writeJson(PORTAL_STORE_FILE, st);
+    appendAuditLinesLocked('PORTAL', [{
+      at: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+      by: usersKey(authEmail), action: 'company-details', company: company
+    }]);
     return { status: 'ok', profile: portalProfileFor(company), apiVersion: CONFIG.API_VERSION };
   });
   try { appendPortalNotice(company, usersKey(authEmail), 'updated company details'); } catch (e) { /* notice is best-effort */ }

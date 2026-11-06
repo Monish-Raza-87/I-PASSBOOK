@@ -1077,3 +1077,10 @@
   .ack-row b { font-size: 14px; }
   .ack-row span { color: var(--fg-muted); font-size: 12px; }
   .ack-signed { color: var(--ok) !important; }
+
+  .doc-viewer { z-index: 70; }
+  .doc-card { width: min(1000px, 96vw); height: min(88vh, 900px); background: var(--surface); border: 1px solid var(--line); display: flex; flex-direction: column; }
+  .doc-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .doc-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .doc-head .sheet-x { position: static; margin-left: auto; }
+  .doc-card iframe { flex: 1; width: 100%; border: 0; background: var(--surface-2); }

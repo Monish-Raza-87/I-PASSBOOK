@@ -660,9 +660,13 @@ try {
     await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model')).every(m => /Training Videos/i.test(m.innerText))`));
   ok('a video shows a thumbnail rather than a bare row of text',
     await evaluate(`!!document.querySelector('#lib-body .lib-item.video img[src*="img.youtube.com/vi/"]')`));
-  ok('every library item opens in its own tab', await evaluate(
-    `Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.target === '_blank' && /noopener/.test(a.rel))`));
-
+  ok('documents open in the lean in-portal viewer, videos in a new tab',
+    await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.classList.contains('video') ? (a.target === '_blank' && /noopener/.test(a.rel)) : !!a.dataset.docUrl)`));
+  await evaluate(`document.querySelector('#lib-body .lib-item:not(.video)').click()`);
+  await SLEEP(120);
+  ok('the document viewer opens with an iframe and a new-tab escape',
+    await visible('#doc-viewer') && await evaluate(`!!document.querySelector('#doc-viewer iframe')`));
+  await evaluate(`document.getElementById('doc-close').click()`);
   // Your details: the addresses we ship to, and the people we call.
   await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="details"]').click()`);
   await SLEEP(120);

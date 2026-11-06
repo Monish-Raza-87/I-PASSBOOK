@@ -1250,11 +1250,28 @@
     const id = it.kind === 'video' ? ytId(it.url) : '';
     const host = (function () { try { return new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
     return '<li><a class="lib-item' + (id ? ' video' : '') + '" href="' + esc(it.url) +
-      '" target="_blank" rel="noopener noreferrer">' +
+      '" data-doc-url="' + esc(it.url) + '" data-doc-title="' + esc(it.label) + '"' +
+      (id ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' +
       (id ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">' : '') +
       '<b>' + esc(it.label) + '</b>' +
       '<span>' + (it.kind === 'video' ? 'Training video' : 'Document') + (host ? ' · ' + esc(host) : '') +
       '</span></a></li>';
+  }
+  function openDocViewer(url, title) {
+    const m = String(url || '').match(/\/d\/([^/]+)/) || String(url || '').match(/[?&]id=([^&]+)/);
+    const src = m ? 'https://drive.google.com/file/d/' + m[1] + '/preview' : url;
+    const old = document.getElementById('doc-viewer');
+    if (old) old.remove();
+    const modal = document.createElement('div');
+    modal.className = 'sheet doc-viewer';
+    modal.id = 'doc-viewer';
+    modal.innerHTML = '<div class="doc-card"><div class="doc-head"><b>' + esc(title || 'Document') +
+      '</b><a class="btn btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Open in new tab</a>' +
+      '<button type="button" class="sheet-x" id="doc-close" aria-label="Close">&times;</button></div>' +
+      '<iframe src="' + esc(src) + '" title="' + esc(title || 'Document') + '"></iframe></div>';
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.getElementById('doc-close').addEventListener('click', () => modal.remove());
   }
   function renderLibrary() {
     const body  = $('lib-body');
@@ -2078,6 +2095,12 @@
     $('signin-go').addEventListener('click', submitSignin);
     $('signin-resend').addEventListener('click', e => { e.preventDefault(); resendCode(); });
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest && e.target.closest('.lib-item[data-doc-url]');
+      if (!a || a.classList.contains('video')) return;
+      e.preventDefault();
+      openDocViewer(a.dataset.docUrl, a.dataset.docTitle);
+    });
 
     document.querySelectorAll('[data-route]').forEach(el => {
       el.addEventListener('click', (e) => {

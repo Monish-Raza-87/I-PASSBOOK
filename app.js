@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v124';
+const APP_VERSION = 'v125';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -1834,15 +1834,20 @@ window.addEventListener('load', () => {
       // Restore the server session token so backend calls are authorized with no
       // sign-in prompt. localStorage, so this survives a full app close.
       currentUser.sessionToken = storedSession;
-      showApp();
-      // Refresh role/permissions + departments (drives per-section save-button
-      // gating). Best-effort; the gating fallback is view-only.
-      // No mustChangePassword handling here: a stored session can only exist for
-      // an account whose flag is already cleared — the backend mints no token
-      // while it is set — so a stale stored session simply fails sessionCheck and
-      // takes the ordinary expiry path.
-      refreshMyAccess().then(() => {
-        if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+      // A link is not proof of a session. Validate the stored token BEFORE showing
+      // the staff shell; an expired/revoked token must land on the login screen,
+      // not paint a routes-visible shell that every API call will reject.
+      confirmSessionAlive().then((alive) => {
+        if (!alive) {
+          clearLocalAuth();
+          currentUser = null;
+          showAuth();
+          return;
+        }
+        showApp();
+        refreshMyAccess().then(() => {
+          if (typeof applySectionAccessGating === 'function') applySectionAccessGating();
+        });
       });
     } else if (shouldUseDevAuthBypass()) {
       currentUser = createDevUser();

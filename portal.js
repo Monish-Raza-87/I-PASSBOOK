@@ -22,15 +22,18 @@
     </a>
     <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
       <button type="button" data-nav="report">Customer support form</button>
+      <button type="button" data-nav="history">Support history</button>
       <button type="button" data-nav="library">Product library</button>
-      <button type="button" data-nav="history">IR history</button>
-      <button type="button" data-nav="contact">Contact</button>
+      <button type="button" data-nav="feedback">Customer feedback form</button>
+      <button type="button" data-nav="contact">Business enquiry</button>
     </nav>
     <span class="bar-spacer"></span>
     <div class="company-menu-wrap">
       <button type="button" class="who" id="header-who" hidden aria-haspopup="menu" aria-expanded="false"></button>
       <div class="company-menu" id="company-menu" hidden role="menu">
-        <button type="button" data-nav="details" role="menuitem">Your details</button>
+        <button type="button" data-detail="company" role="menuitem">Company info</button>
+        <button type="button" data-detail="users" role="menuitem">Approved users</button>
+        <button type="button" data-detail="fleet" role="menuitem">Your fleet</button>
       </div>
     </div>
     <a class="btn js-signin" id="header-signin" href="#signin">Sign in</a>
@@ -82,21 +85,21 @@
 
       <button type="button" class="tile" data-panel="history">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
-        <span class="tile-name">IR History</span>
+        <span class="tile-name">Support history</span>
         <span class="tile-desc">Every request your company has raised with us, under one sign-in, for the life of your fleet.</span>
         <span class="tile-meta" id="tile-meta-history"></span>
       </button>
 
       <button type="button" class="tile" data-panel="details">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="8.5" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/></svg></span>
-        <span class="tile-name">Your details</span>
+        <span class="tile-name">Company profile</span>
         <span class="tile-desc">The addresses we ship to, the people we call, and the aircraft we hold a UIN certificate for.</span>
         <span class="tile-meta" id="tile-meta-details"></span>
       </button>
 
       <button type="button" class="tile" data-panel="contact">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M4 5.5h16v11H9l-5 4z"/></svg></span>
-        <span class="tile-name">Discuss Your Requirement</span>
+        <span class="tile-name">Business enquiry</span>
         <span class="tile-desc">A new platform, a service contract, or something you have in mind that no one has built yet — talk it through with us.</span>
         <span class="tile-meta" id="tile-meta-contact"></span>
       </button>
@@ -124,6 +127,14 @@
       </div>
     </section>
 
+    <!-- ── CUSTOMER FEEDBACK ──────────────────────────────────────────────── -->
+    <section class="panel" id="panel-feedback" hidden>
+      <div class="panel-head"><h2>Customer feedback form</h2></div>
+      <p class="sub">Tell us how the service felt, not just whether the aircraft was fixed. Your feedback goes to Customer Relations and is kept against your company.</p>
+      <div class="panel-actions">
+        <a class="btn btn-primary" id="feedback-panel-open" href="#" target="_blank" rel="noopener">Open feedback form</a>
+      </div>
+    </section>
     <!-- ── LIBRARY ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-library" hidden>
       <div class="panel-head"><h2>Product library</h2><span class="lib-n" id="lib-count"></span></div>
@@ -134,19 +145,20 @@
 
     <!-- ── DETAILS ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-details" hidden>
-      <div class="panel-head"><h2>Your details</h2></div>
-      <p class="sub">Keep these right and we will never have to ask you twice — not at a dispatch,
+      <div class="panel-head"><h2>Company profile</h2></div>
+      <p class="sub" id="company-name"></p>
+      <p class='sub'>Keep these right and we will never have to ask you twice — not at a dispatch,
       and not in the middle of a breakdown. Only your own company can see this page.</p>
 
-      <div class="detail-block">
-        <h3>Ship-to addresses</h3>
+      <div class="detail-block" id="detail-company">
+        <h3>Company info</h3>
         <div id="addr-rows"></div>
         <p class="detail-empty" id="addr-empty" hidden>No address on file yet. Add the one we should ship to.</p>
         <button type="button" class="btn" id="addr-add">Add an address</button>
       </div>
 
-      <div class="detail-block">
-        <h3>People we contact</h3>
+      <div class="detail-block" id="detail-users">
+        <h3>Approved users</h3>
         <div id="cont-rows"></div>
         <p class="detail-empty" id="cont-empty" hidden>No contact on file yet. Add the person we should call.</p>
         <button type="button" class="btn" id="cont-add">Add a person</button>
@@ -157,8 +169,8 @@
         <span class="msg" id="profile-msg" aria-live="polite"></span>
       </div>
 
-      <div class="detail-block">
-        <h3>Your aircraft</h3>
+      <div class="detail-block" id="detail-fleet">
+        <h3>Your fleet</h3>
         <p class="sub" style="margin-bottom:6px">The UIN is the registration number your aircraft
         flies under, and the certificate is the DGCA document for it. Both are issued to you — tell
         the service desk if a serial is missing or a certificate is out of date.</p>
@@ -170,7 +182,7 @@
 
     <!-- ── CONTACT ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-contact" hidden>
-      <div class="panel-head"><h2>Discuss Your Requirement</h2></div>
+      <div class="panel-head"><h2>Business enquiry</h2></div>
       <p class="sub">A payload that does not exist yet, a fleet that needs to fly further, a service
       contract, or simply a question you have been carrying for a while — tell us, and we will give
       you a straight answer from the people who build and fly these machines.</p>
@@ -191,7 +203,7 @@
          state and the single-ticket view are all the same code paths as before. -->
     <section id="reports" class="panel" hidden>
     <div class="reports-head">
-      <h2>IR History</h2>
+      <h2>Support history</h2>
       <span class="bar-spacer"></span>
     </div>
     <p class="sub" id="reports-sub"></p>
@@ -427,15 +439,12 @@
 
 <!-- Floating support chat: a WhatsApp-style entry point to the fixed guide and the
      in-app report form. It is not a second login or a second intake. -->
-<button type="button" class="chat-fab" id="chat-fab" aria-label="Open customer support chat" aria-expanded="false">
-  <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9 9 0 0 1-3.6-.75L3 21l1.9-5.6A8.2 8.2 0 0 1 3.9 11.5 8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/>
-    <path d="M8 11.5h.01M12 11.5h.01M16 11.5h.01"/>
-  </svg>
+<button type="button" class="chat-fab" id="chat-fab" aria-label="Open IPSA, the I-PASSBOOK Support Assistant" aria-expanded="false">
+  <span class="chat-fab-ip" aria-hidden="true">IP</span>
 </button>
-<section class="chat-panel" id="chat-panel" hidden aria-label="Customer support chat">
+<section class="chat-panel" id="chat-panel" hidden aria-label="IPSA, the I-PASSBOOK Support Assistant">
   <div class="chat-head">
-    <span><b>Support chat</b><small>Indrones Customer Relations</small></span>
+    <span><b>IPSA</b><small>I-PASSBOOK Support Assistant</small><small>Indrones Customer Relations</small></span>
     <button type="button" class="chat-x" id="chat-x" aria-label="Close chat">&times;</button>
   </div>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
@@ -908,8 +917,9 @@
   // panel is up.
   const PANEL_IDS = {
     report:  'panel-report',
-    library: 'panel-library',
     history: 'reports',
+    library: 'panel-library',
+    feedback: 'panel-feedback',
     details: 'panel-details',
     contact: 'panel-contact'
   };
@@ -934,6 +944,12 @@
   }
   function scrollToPanel(name) {
     const el = document.getElementById(PANEL_IDS[name]);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  function scrollToDetail(key) {
+    const ids = { company: 'detail-company', users: 'detail-users', fleet: 'detail-fleet' };
+    openPanel('details');
+    const el = document.getElementById(ids[key] || 'detail-company');
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function openPanel(name) {
@@ -1109,6 +1125,8 @@
   }
 
   function renderDetails() {
+    const cn = document.getElementById('company-name');
+    if (cn) cn.textContent = (ME && ME.customerOf) ? 'Company: ' + ME.customerOf : '';
     const a = PROFILE.addresses || [];
     const c = PROFILE.contacts || [];
     $('addr-rows').innerHTML = a.map((r, i) => detailRow('addr', ADDR_KEYS, ADDR_PH, r, i)).join('');
@@ -1207,7 +1225,7 @@
       choices: [['Open the product library', 'library'], ['Back', 'start']]
     },
     person: {
-      say: 'For anything about a live ticket, your Customer Relations contact is in the Discuss Your Requirement tile — WhatsApp or email, and it reaches a person. For a new requirement, call the desk line.',
+      say: 'For anything about a live ticket, your Customer Relations contact is in the Business enquiry tile — WhatsApp or email, and it reaches a person. For a new requirement, call the desk line.',
       choices: [['Open your contact', 'contact'], ['Back', 'start']]
     }
   };
@@ -1714,12 +1732,11 @@
       e.stopPropagation();
       toggleCompanyMenu();
     });
-    document.querySelectorAll('#company-menu [data-nav]').forEach(b => {
+    document.querySelectorAll('#company-menu [data-detail]').forEach(b => {
       b.addEventListener('click', () => {
-        const panel = b.dataset.nav;
+        const detail = b.dataset.detail;
         closeCompanyMenu();
-        openPanel(panel);
-        scrollToPanel(panel);
+        scrollToDetail(detail);
       });
     });
     document.addEventListener('click', (e) => {
@@ -1735,6 +1752,7 @@
     ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
     wire('feedback', FEEDBACK_FORM_URL);
     wire('feedback-p', FEEDBACK_FORM_URL);
+    wire('feedback-panel-open', FEEDBACK_FORM_URL);
     $('back-to-list').addEventListener('click', () => {
       $('report-one').hidden = true;
       $('reports-list').hidden = false;
@@ -1845,6 +1863,10 @@
   window.CustomerPortal = {
     mount: function (root) {
       if (!root) return;
+      if (!token() && !/[?&]state=/.test(location.search)) {
+        location.replace(appLoginUrl());
+        return;
+      }
       root.innerHTML = PORTAL_HTML;
       wirePortal();   // now that the markup is really in the document
       boot();

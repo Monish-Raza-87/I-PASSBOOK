@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v127';
+const APP_VERSION = 'v128';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9419,6 +9419,8 @@ function openPortalModal() {
       may reach, the Access Library, and one company's aircraft with their UIN certificates. It is
       stored privately — never in the app's published files.</p>
       <div class="inward-options-body" id="portal-admin-body"></div>
+      <div class="inward-options-subhead">Recent portal changes</div>
+      <div class="portal-activity" id="portal-activity"></div>
       <div class="inward-options-foot">
         <button type="button" class="btn" id="portal-cancel">Close</button>
         <button type="button" class="btn btn-secondary" id="portal-cr-save" disabled>Save contact</button>
@@ -9449,8 +9451,30 @@ function openPortalModal() {
   });
 
   loadPortalAdmin('');
+  loadPortalActivity();
 }
 
+function loadPortalActivity() {
+  const host = document.getElementById('portal-activity');
+  if (!host) return;
+  host.innerHTML = '<p class="inward-options-hint">Reading recent changes…</p>';
+  fetch(CONFIG.GAS_URL + '?action=getPortalActivity', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(res => {
+      if (!res || res.status !== 'ok') {
+        host.innerHTML = '<p class="inward-options-hint">Could not read portal activity.</p>';
+        return;
+      }
+      const rows = res.entries || [];
+      host.innerHTML = rows.length
+        ? '<ul class="portal-activity-list">' + rows.map(e =>
+            '<li><b>' + escHtml(e.company || '') + '</b> · ' + escHtml(e.email || '') +
+            ' · ' + escHtml(e.status || '') + '<span>' + escHtml(e.at || '') +
+            ' · ' + escHtml(e.by || '') + '</span></li>').join('') + '</ul>'
+        : '<p class="inward-options-hint">No customer portal changes recorded yet.</p>';
+    })
+    .catch(() => { host.innerHTML = '<p class="inward-options-hint">Could not reach the backend.</p>'; });
+}
 function closePortalModal() {
   document.getElementById('portal-admin-modal')?.remove();
   portalAdmin = { loaded: false, busy: false, error: '',

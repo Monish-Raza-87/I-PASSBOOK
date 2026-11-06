@@ -678,6 +678,29 @@
   }
   .hero .lede { font-size: clamp(16px, 2vw, 19px); max-width: 62ch; }
   .hero .btn-row { margin-top: 28px; gap: 12px; }
+  .home-hero { padding-block: clamp(40px, 8vw, 96px) clamp(34px, 6vw, 64px); }
+  .home-eyebrow { justify-content: center; }
+  .home-title {
+    max-width: none; margin: 18px 0 22px; text-align: center;
+    font-size: clamp(42px, 8vw, 92px); line-height: .9;
+  }
+  .home-statement {
+    max-width: 62ch; margin: 0; font-family: var(--mono);
+    font-size: clamp(13px, 1.6vw, 16px); font-weight: 600; line-height: 1.5;
+    letter-spacing: .08em; text-transform: uppercase;
+  }
+  .route-cards { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+  .route-cards.two { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+  .route-card {
+    display: grid; gap: 6px; padding: 18px; text-align: left;
+    border: 1px solid var(--line); border-top: 2px solid var(--yellow);
+    background: var(--surface); color: var(--fg); text-decoration: none;
+  }
+  button.route-card { cursor: pointer; font: inherit; }
+  .route-card b { font-size: 18px; }
+  .route-card span { color: var(--fg-muted); font-size: 13.5px; line-height: 1.45; }
+  .route-card:hover { border-color: var(--fg); }
+  .route-link { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg) !important; margin-top: 4px; }
 
   /* Signed in, the marketing hero is a header, not a landing page: keep the two
      actions close to the bar instead of pushing them below a phone viewport. */

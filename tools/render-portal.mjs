@@ -549,38 +549,44 @@ try {
   await evaluate(`document.getElementById('rep-done').click()`);
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
-  // Header tabs and the floating support chat.
-  ok('the signed-in header has Form, Library, Fleet, Tickets and Announcements',
+  // Header navigation and the floating support chat.
+  ok('the signed-in header has Support, Library, Compliance, Profile, Mandates and What we offer',
     await visible('#portal-nav') &&
-    /form/i.test(await evaluate(`document.querySelector('#form-nav [data-nav-group]').textContent`)) &&
-    /library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)) &&
-    /fleet/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="fleet"]').textContent`)) &&
-    /tickets \(irs\)/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').textContent`)) &&
-    /announcements/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="announcements"]').textContent`)));
-  await evaluate(`document.querySelector('#form-nav [data-nav-group]').click()`);
+    /support/i.test(await evaluate(`document.querySelector('#support-nav [data-nav-group]').textContent`)) &&
+    /library/i.test(await evaluate(`document.querySelector('#library-nav [data-nav-group]').textContent`)) &&
+    /compliance/i.test(await evaluate(`document.querySelector('#portal-nav [data-route="compliance"]').textContent`)) &&
+    /profile/i.test(await evaluate(`document.querySelector('#profile-nav [data-nav-group]').textContent`)) &&
+    /mandates/i.test(await evaluate(`document.querySelector('#mandates-nav [data-nav-group]').textContent`)) &&
+    /what we offer/i.test(await evaluate(`document.querySelector('#portal-nav [data-route="offer"]').textContent`)));
+  await evaluate(`document.querySelector('#support-nav [data-nav-group]').click()`);
   await SLEEP(100);
-  ok('the Form menu lists the two intake forms',
-    await visible('#form-menu') &&
-    /customer support form/i.test(await evaluate(`document.getElementById('form-menu').innerText`)) &&
-    /feedback form/i.test(await evaluate(`document.getElementById('form-menu').innerText`)));
-  await evaluate(`document.querySelector('#portal-nav [data-nav="report"]').click()`);
-  await SLEEP(100);
-  ok('the customer support form opens from the Form menu', await visible('#panel-report'));
-  await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').click()`);
+  ok('the Support menu lists Report new issue and Support history',
+    await visible('#support-menu') &&
+    /report new issue/i.test(await evaluate(`document.getElementById('support-menu').innerText`)) &&
+    /support history/i.test(await evaluate(`document.getElementById('support-menu').innerText`)));
+  await evaluate(`document.querySelector('#support-menu [data-route="support/new"]').click()`);
   await SLEEP(120);
-  ok('a header tab opens and scrolls to its section',
-    await visible('#panel-library') &&
-    await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').classList.contains('is-active')`));
-  await evaluate(`document.querySelector('#portal-nav [data-nav="fleet"]').click()`);
-  await SLEEP(100);
+  ok('Report new issue opens the customer support form', await visible('#panel-report'));
+  await evaluate(`document.querySelector('#library-nav [data-nav-group]').click()`);
+  await SLEEP(80);
+  await evaluate(`document.querySelector('#library-menu [data-route="library"]').click()`);
+  await SLEEP(120);
+  ok('Library opens its model and category page', await visible('#panel-library'));
+  await evaluate(`document.querySelector('#profile-nav [data-nav-group]').click()`);
+  await SLEEP(80);
+  await evaluate(`document.querySelector('#profile-menu [data-route="profile/fleet"]').click()`);
+  await SLEEP(120);
   ok('Fleet opens with the customer aircraft cards',
     await visible('#panel-fleet') &&
     (await evaluate(`document.querySelectorAll('#fleet-panel-list .fleet-card').length`)) > 0);
-  await evaluate(`document.querySelector('#portal-nav [data-nav="announcements"]').click()`);
+  await evaluate(`document.querySelector('#portal-nav [data-route="compliance"]').click()`);
   await SLEEP(100);
-  ok('Announcements lists the three UAS models for Service Bulletins',
-    await visible('#panel-announcements') &&
-    (await evaluate(`document.querySelectorAll('#ann-models .ann-model').length`)) === 3);
+  ok('Compliance opens its compliance page', await visible('#panel-compliance'));
+  await evaluate(`document.querySelector('#mandates-nav [data-nav-group]').click()`);
+  await SLEEP(80);
+  await evaluate(`document.querySelector('#mandates-menu [data-route="mandates/sb"]').click()`);
+  await SLEEP(100);
+  ok('Mandates opens Service bulletins and Acknowledgement', await visible('#panel-mandates'));
   await evaluate(`document.getElementById('header-who').click()`);
   await SLEEP(100);
   ok('the company name opens the personalisation menu',
@@ -602,8 +608,8 @@ try {
   await SLEEP(150);
   ok('the chat can open the in-app report form', await visible('#report-sheet'));
   await evaluate(`document.getElementById('report-x').click()`);
-  await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').click()`);
-  const cards = await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).map(b => ({
+  await evaluate(`document.querySelector('#support-menu [data-route="support/history"]').click()`);
+  await SLEEP(120);  const cards = await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).map(b => ({
     ir: b.querySelector('.ticket-ir').textContent,
     pill: b.querySelector('.pill') ? b.querySelector('.pill').textContent : '',
     cls: b.querySelector('.pill') ? b.querySelector('.pill').className : ''
@@ -631,20 +637,13 @@ try {
   // Measured rather than read, because the failure this catches is a panel that only
   // LOOKS closed: a second panel visible under the first still reads fine in source.
   const openPanels = `Array.from(document.querySelectorAll('#portal > .panel')).filter(p => !p.hidden).map(p => p.id)`;
-  ok('the customer lands on the space, with the tile row shown', await visible('#portal-tiles'));
-  ok('there are five doors', await evaluate(`document.querySelectorAll('#portal-tiles .tile').length`) === 5);
-  ok('IR History is the one open on arrival', JSON.stringify(await evaluate(openPanels)) === JSON.stringify(['reports']),
-    await evaluate(openPanels));
-  ok('the open door says so, rather than leaving a screen reader to guess',
-    await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="history"]').getAttribute('aria-pressed')`) === 'true');
-
-  // Opening a door CLOSES the other one — the same assertion, after a real press.
-  await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="library"]').click()`);
-  await SLEEP(120);
-  ok('pressing a door opens its panel and closes the one before it',
-    JSON.stringify(await evaluate(openPanels)) === JSON.stringify(['panel-library']),
-    await evaluate(openPanels));
-
+  await waitFor("document.getElementById('portal').hidden && !!document.querySelector('.home-hero')", 5000);
+  await evaluate("location.hash = ''");  ok('the customer lands on the space with the approved hero only',
+    await visible('.home-hero') &&
+    /this is your space/i.test(await evaluate(`document.querySelector('.home-title').textContent`)) &&
+    /I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY/i.test(await evaluate(`document.querySelector('.home-statement').textContent`)) &&
+    !(await visible('#portal')));
+  ok('the header still provides the six Level 1 destinations', await visible('#portal-nav'));
   // Documents group by SKU, in the product order. VIDEOS do not: the owner's rule
   // (2026-10-22) is ONE training folder regardless of airframe, so the two videos in
   // the stub — one filed with no SKU, one filed against SIGMA100 — must sit on ONE
@@ -716,6 +715,10 @@ try {
 
   // ════════════════════════════════════════════════════════════════════════════
   console.log('\n— one ticket —');
+  // Open the Support History page explicitly; the home route intentionally hides
+  // the panel, and innerText loses line breaks inside a display:none subtree.
+  await evaluate("location.hash = '#/support/history'");
+  await waitFor("!document.getElementById('portal').hidden && !document.getElementById('reports').hidden", 5000);
   // ════════════════════════════════════════════════════════════════════════════
   await call('Emulation.setDeviceMetricsOverride', { width: 414, height: 1000, deviceScaleFactor: 1, mobile: true });
   await evaluate(`Array.from(document.querySelectorAll('#ticket-list .ticket')).find(b => b.querySelector('.ticket-ir').textContent === 'IR 107').click()`);

@@ -1073,6 +1073,7 @@
     const tiles = $('portal-tiles');
     if (tiles) tiles.hidden = true;
     openPanel(panel.replace(/^panel-/, '').replace(/^reports$/, 'history'));
+    if (route === 'profile/users') loadPortalUsers();
     const el = document.getElementById(panel);
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const group = route.split('/')[0];
@@ -1360,6 +1361,73 @@
           '</article>';
       }).join('');
     }
+  }
+  async function loadPortalUsers() {
+    const host = $('portal-users-body');
+    if (!host) return;
+    host.innerHTML = '<p class="detail-empty">Reading approved users…</p>';
+    const res = await apiGet('portalUsers');
+    if (!res || res.status !== 'ok') {
+      if (isUnauthorized(res)) { forget(); location.replace(appLoginUrl()); return; }
+      host.innerHTML = '<p class="error-box">' + esc(msgOf(res)) + '</p>';
+      return;
+    }
+    const rows = res.users || [];
+    host.innerHTML =
+      '<div class="user-list">' + rows.map(u =>
+        '<div class="user-row" data-email="' + esc(u.email) + '">' +
+          '<div class="user-main"><b>' + esc(u.name || u.email) + '</b><span>' + esc(u.email) + '</span></div>' +
+          (u.official ? '<span class="user-official">Official contact</span>' : '') +
+          '<input class="form-input user-name" value="' + esc(u.name || '') + '" placeholder="Name" ' + (u.official ? 'disabled' : '') + '>' +
+          '<input class="form-input user-phone" value="' + esc(u.phone || '') + '" placeholder="Contact number">' +
+          '<select class="form-input user-status" ' + (u.official ? 'disabled' : '') + '>' +
+            '<option value="active"' + (u.status === 'active' ? ' selected' : '') + '>Active</option>' +
+            '<option value="inactive"' + (u.status === 'inactive' ? ' selected' : '') + '>Inactive</option>' +
+          '</select>' +
+          '<button type="button" class="btn btn-sm user-save">Save</button>' +
+        '</div>').join('') + '</div>' +
+      '<div class="user-add">' +
+        '<h3>Add an approved user</h3>' +
+        '<div class="report-grid two">' +
+          '<input id="user-new-name" class="form-input" placeholder="Name">' +
+          '<input id="user-new-phone" class="form-input" placeholder="Contact number">' +
+          '<input id="user-new-email" class="form-input" type="email" placeholder="Email ID">' +
+        '</div>' +
+        '<button type="button" class="btn btn-primary" id="user-add-btn">+ Add user</button>' +
+        '<p class="msg" id="user-msg" aria-live="polite"></p>' +
+      '</div>';
+    host.querySelectorAll('.user-row .user-save').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.user-row');
+        savePortalUser({
+          action: 'update', email: row.dataset.email,
+          name: row.querySelector('.user-name').value,
+          phone: row.querySelector('.user-phone').value,
+          status: row.querySelector('.user-status').value
+        });
+      });
+    });
+    const add = $('user-add-btn');
+    if (add) add.addEventListener('click', () => {
+      savePortalUser({
+        action: 'add',
+        email: $('user-new-email').value,
+        name: $('user-new-name').value,
+        phone: $('user-new-phone').value
+      });
+    });
+  }
+
+  async function savePortalUser(fields) {
+    const msg = $('user-msg');
+    const res = await apiPost('savePortalUser', fields);
+    if (!res || res.status !== 'ok') {
+      if (msg) { msg.className = 'msg err'; msg.textContent = msgOf(res); }
+      return;
+    }
+    await loadPortalUsers();
+    const m2 = $('user-msg');
+    if (m2) { m2.className = 'msg ok'; m2.textContent = 'Saved — CR has been notified.'; }
   }
   function renderCompliance() {
     const host = $('compliance-docs');

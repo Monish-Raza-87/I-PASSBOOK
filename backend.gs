@@ -328,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 24,
+  API_VERSION: 25,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4610,6 +4610,7 @@ function doGet(e) {
       // Everything the portal's landing page paints, in the same round trip: profile,
       // library and the CR contact. Adding a call here is how a customer waits twice.
       getCustomerPortal: function () { return getCustomerPortal(email, e.parameter.company); },
+      portalUsers:   function () { return portalUsersList(email); },
       listIRs:       function () { return listIRs(email); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
       getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId, email); },
@@ -4709,6 +4710,7 @@ function doPost(e) {
       // contacts, and rate a closed ticket; both derive the company from the SESSION.
       // The library, the CR contact and every aircraft/UIN are admin-only.
       saveCustomerProfile: function () { return saveCustomerProfile(params, email); },
+      savePortalUser:    function () { return savePortalUser(params, email); },
       rateIR:              function () { return rateIR(params, email); },
       savePortalConfig:    function () { return savePortalConfig(params, email); },
       uploadPortalDocument:function () { return uploadPortalDocument(params, email); },
@@ -5516,6 +5518,119 @@ function portalLibraryArray() {
   return out;
 }
 
+// ── CUSTOMER USER ACCESS ─────────────────────────────────────────────────────
+// The company's official customer account is the oldest scoped account. It is the
+// permanent admin identity; the portal can edit its display details but never its
+// email or active state. Every other customer user is self-managed immediately.
+function portalOfficialEmail(company) {
+  var users = allUsers();
+  var best = '', bestMs = Infinity;
+  Object.keys(users).forEach(function (email) {
+    if (!sameCompany(customerCompany(email), company)) return;
+    var u = users[email] || {};
+    var ms = Number(u.createdAt || 0) || Infinity;
+    if (!best || ms < bestMs) { best = email; bestMs = ms; }
+  });
+  return best;
+}
+
+function portalUsersList(authEmail) {
+  var company = customerCompany(authEmail);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+  var official = portalOfficialEmail(company);
+  var users = allUsers();
+  var out = [];
+  Object.keys(users).sort().forEach(function (email) {
+    if (!sameCompany(customerCompany(email), company)) return;
+    var u = users[email] || {};
+    out.push({
+      email: email,
+      name: userField(u, 'name'),
+      phone: userField(u, 'phone'),
+      status: String(userField(u, 'status') || 'active').toLowerCase() === 'disabled' ? 'inactive' : 'active',
+      official: email === official
+    });
+  });
+  return { status: 'ok', company: company, officialEmail: official, users: out };
+}
+
+function appendPortalNotice(company, actor, message) {
+  var recipients = postmasterRecipients ? postmasterRecipients() : [];
+  if (!recipients.length) return;
+  return withRowLockOrThrow(function () {
+    var file = sentinelStoreFile('__NUDGES__');
+    var store = readJsonLocked(file) || {};
+    var keyed = (store.all && typeof store.all === 'object') ? store.all : {};
+    var items = (keyed.items instanceof Array) ? keyed.items : [];
+    items.push({
+      id: 'portal-' + Utilities.getUuid(), irNumber: '', scope: 'portal',
+      sectionId: '', fieldId: '', sectionLabel: 'Customer portal', fieldLabel: 'User access',
+      from: actor, fromName: actor, to: recipients.join(','), mentions: recipients,
+      message: company + ': ' + message, createdAt: Date.now(), readBy: [], status: 'open',
+      resolvedAt: null, resolvedBy: null
+    });
+    keyed.items = items; store.all = keyed; writeJsonLocked(file, store);
+  });
+}
+
+function savePortalUser(params, authEmail) {
+  var company = customerCompany(authEmail);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+  var action = String(params.action || 'update').toLowerCase();
+  var target = usersKey(params.email);
+  var name = String(params.name || '').trim().slice(0, 120);
+  var phone = String(params.phone || '').trim().slice(0, 40);
+  var official = portalOfficialEmail(company);
+  var notice = '';
+
+  if (action === 'add') {
+    if (!validEmail(target)) return { status: 'error', message: 'Enter a valid email address.' };
+    if (findUser(target)) return { status: 'error', message: 'An account already exists for ' + target + '.' };
+    withRowLockOrThrow(function () {
+      var acc = readJsonLocked('access.json') || {};
+      if (!acc.customers || typeof acc.customers !== 'object') acc.customers = {};
+      acc.customers[target] = company;
+      writeJsonLocked('access.json', acc);
+    });
+    try {
+      createUserRow(target, name, authEmail);
+      withRowLockOrThrow(function () {
+        var users = readJsonLocked('users.json') || {};
+        if (users[target]) { users[target].phone = phone; writeJsonLocked('users.json', users); }
+      });
+    } catch (e) {
+      withRowLockOrThrow(function () {
+        var acc = readJsonLocked('access.json') || {};
+        if (acc.customers) { delete acc.customers[target]; writeJsonLocked('access.json', acc); }
+      });
+      return { status: 'error', message: 'Could not create the user: ' + ((e && e.message) || 'unknown error') };
+    }
+    notice = 'added user ' + target + (name ? ' (' + name + ')' : '');
+  } else {
+    if (!target || !findUser(target)) return { status: 'error', message: 'No user found for ' + target + '.' };
+    if (target === official && String(params.status || '') === 'inactive')
+      return { status: 'error', message: 'The official contact account cannot be deactivated.' };
+    notice = 'updated user ' + target + (name ? ' (' + name + ')' : '');
+    withRowLockOrThrow(function () {
+      var users = readJsonLocked('users.json') || {};
+      var u = users[target];
+      if (!u) return;
+      if (name) u.name = name;
+      if (phone) u.phone = phone;
+      if (target !== official && params.status) {
+        u.status = String(params.status).toLowerCase() === 'inactive' ? 'disabled' : 'active';
+      }
+      writeJsonLocked('users.json', users);
+      appendAuditLinesLocked('PORTAL', [{
+        at: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
+        by: usersKey(authEmail), action: 'user-access', company: company,
+        email: target, status: userField(u, 'status') || 'active'
+      }]);
+    });
+  }
+  try { appendPortalNotice(company, usersKey(authEmail), notice); } catch (e) { /* notice is best-effort */ }
+  return portalUsersList(authEmail);
+}
 // POST uploadPortalDocument (admin) — the employee content gateway. The file is
 // stored in a link-shared folder beside the app root; the portal only ever receives
 // the URL and the metadata in portal.json.

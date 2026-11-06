@@ -1063,3 +1063,7 @@
 
   .portal-check { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--fg-muted); }
   .portal-check input { width: 16px; height: 16px; }
+
+  .foot-warranty { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--fg-muted); }
+  .foot-warranty a { color: var(--fg); text-decoration: none; }
+  .foot-warranty a:hover { text-decoration: underline; }

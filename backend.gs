@@ -5487,7 +5487,17 @@ function portalProfileFor(company) {
   var k = sameCompanyKey(company);
   var all = portalRead().companies;
   var p = (k && all && all[k]) ? all[k] : {};
+  var d = (p.details && typeof p.details === 'object') ? p.details : {};
   return {
+    details: {
+      companyName:       String(d.companyName || '').slice(0, 160),
+      gst:               String(d.gst || '').slice(0, 40),
+      egcaId:            String(d.egcaId || '').slice(0, 60),
+      registeredAddress: String(d.registeredAddress || '').slice(0, 240),
+      additionalAddress: String(d.additionalAddress || '').slice(0, 240),
+      contactPhone:      String(d.contactPhone || '').slice(0, 40),
+      contactEmail:      String(d.contactEmail || '').slice(0, 160)
+    },
     addresses: portalCleanList(p.addresses, ['label', 'text'], 8, 200),
     contacts:  portalCleanList(p.contacts, ['name', 'role', 'phone', 'email'], 8, 140),
     // Forty is a fleet, not a customer's whole history; an aircraft that has gone is
@@ -5741,20 +5751,32 @@ function saveCustomerProfile(params, authEmail) {
   var key = sameCompanyKey(company);
   if (!key) throw new Error('Forbidden: this account has no customer scope.');
 
-  var addresses, contacts;
+  var addresses, contacts, details;
   try { addresses = JSON.parse(params.addresses || '[]'); } catch (e) { addresses = []; }
   try { contacts  = JSON.parse(params.contacts  || '[]'); } catch (e) { contacts  = []; }
+  try { details   = JSON.parse(params.details   || '{}'); } catch (e) { details = {}; }
+  details = (details && typeof details === 'object') ? details : {};
 
   var cleanAddr = portalCleanList(addresses, ['label', 'text'], 8, 200);
   var cleanCont = portalCleanList(contacts, ['name', 'role', 'phone', 'email'], 8, 140);
+  var cleanDetails = {
+    companyName:       String(details.companyName || '').slice(0, 160),
+    gst:               String(details.gst || '').slice(0, 40),
+    egcaId:            String(details.egcaId || '').slice(0, 60),
+    registeredAddress: String(details.registeredAddress || '').slice(0, 240),
+    additionalAddress: String(details.additionalAddress || '').slice(0, 240),
+    contactPhone:      String(details.contactPhone || '').slice(0, 40),
+    contactEmail:      String(details.contactEmail || '').slice(0, 160)
+  };
 
-  return withRowLockOrThrow(function () {
+  var result = withRowLockOrThrow(function () {
     var st = readJsonLocked(PORTAL_STORE_FILE);
     if (!st || typeof st !== 'object') st = {};
     if (!st.companies || typeof st.companies !== 'object') st.companies = {};
     var prev = (st.companies[key] && typeof st.companies[key] === 'object') ? st.companies[key] : {};
     // The fleet is the desk's, so it is carried across untouched.
     st.companies[key] = {
+      details:   cleanDetails,
       addresses: cleanAddr,
       contacts:  cleanCont,
       fleet:     prev.fleet instanceof Array ? prev.fleet : [],
@@ -5764,6 +5786,8 @@ function saveCustomerProfile(params, authEmail) {
     writeJson(PORTAL_STORE_FILE, st);
     return { status: 'ok', profile: portalProfileFor(company), apiVersion: CONFIG.API_VERSION };
   });
+  try { appendPortalNotice(company, usersKey(authEmail), 'updated company details'); } catch (e) { /* notice is best-effort */ }
+  return result;
 }
 
 // POST rateIR — one rating, on one ticket, once.

@@ -238,6 +238,18 @@
     <section class="panel" id="panel-details" hidden>
       <div class="panel-head"><h2>Company profile</h2></div>
       <p class="sub" id="company-name"></p>
+      <div class="detail-block" id="detail-company-info">
+        <h3>Company details</h3>
+        <div class="report-grid two">
+          <div class="field"><label for="co-name">Company name</label><input id="co-name" class="form-input"></div>
+          <div class="field"><label for="co-gst">GST number</label><input id="co-gst" class="form-input"></div>
+          <div class="field"><label for="co-egca">eGCA ID</label><input id="co-egca" class="form-input"></div>
+          <div class="field"><label for="co-phone">Official contact number</label><input id="co-phone" class="form-input" type="tel"></div>
+          <div class="field"><label for="co-email">Official email ID</label><input id="co-email" class="form-input" type="email"></div>
+        </div>
+        <div class="field"><label for="co-reg-address">Registered address</label><textarea id="co-reg-address"></textarea></div>
+        <div class="field"><label for="co-add-address">Additional address</label><textarea id="co-add-address"></textarea></div>
+      </div>
       <p class='sub'>Keep these right and we will never have to ask you twice — not at a dispatch,
       and not in the middle of a breakdown. Only your own company can see this page.</p>
 
@@ -1295,6 +1307,12 @@
   function renderDetails() {
     const cn = document.getElementById('company-name');
     if (cn) cn.textContent = (ME && ME.customerOf) ? 'Company: ' + ME.customerOf : '';
+    const d = PROFILE.details || {};
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    set('co-name', d.companyName || (ME && ME.customerOf));
+    set('co-gst', d.gst); set('co-egca', d.egcaId);
+    set('co-phone', d.contactPhone); set('co-email', d.contactEmail);
+    set('co-reg-address', d.registeredAddress); set('co-add-address', d.additionalAddress);
     const a = PROFILE.addresses || [];
     const c = PROFILE.contacts || [];
     $('addr-rows').innerHTML = a.map((r, i) => detailRow('addr', ADDR_KEYS, ADDR_PH, r, i)).join('');
@@ -2123,12 +2141,19 @@
       // pair together, so sending one and not the other would empty what was not sent.
       const addresses = collectRows('#addr-rows', ADDR_KEYS);
       const contacts  = collectRows('#cont-rows', CONT_KEYS);
+      const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+      const details = {
+        companyName: val('co-name'), gst: val('co-gst'), egcaId: val('co-egca'),
+        contactPhone: val('co-phone'), contactEmail: val('co-email'),
+        registeredAddress: val('co-reg-address'), additionalAddress: val('co-add-address')
+      };
       btn.disabled = true;
       msg.className = 'msg';
       msg.textContent = 'Saving…';
       const res = await apiPost('saveCustomerProfile', {
         addresses: JSON.stringify(addresses),
-        contacts:  JSON.stringify(contacts)
+        contacts:  JSON.stringify(contacts),
+        details:   JSON.stringify(details)
       });
       btn.disabled = false;
       if (res && res.status === 'ok') {

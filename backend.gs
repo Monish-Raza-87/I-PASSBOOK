@@ -5598,6 +5598,11 @@ function savePortalUser(params, authEmail) {
         var users = readJsonLocked('users.json') || {};
         if (users[target]) { users[target].phone = phone; writeJsonLocked('users.json', users); }
       });
+      try {
+        sendAuthMail(target, 'Your Indrones Customer Space account',
+          'Your I-PASSBOOK access has been created.\\n\\nOpen ' + (customerPortalUrl() || 'the customer portal') +
+          ' and sign in with this email address. We will mail you a 6-digit code; there is no password.');
+      } catch (e) { /* the account exists even if the invitation cannot be sent */ }
     } catch (e) {
       withRowLockOrThrow(function () {
         var acc = readJsonLocked('access.json') || {};

@@ -328,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 25,
+  API_VERSION: 26,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4611,6 +4611,7 @@ function doGet(e) {
       // library and the CR contact. Adding a call here is how a customer waits twice.
       getCustomerPortal: function () { return getCustomerPortal(email, e.parameter.company); },
       portalUsers:   function () { return portalUsersList(email); },
+      getPortalActivity: function () { return getPortalActivity(email); },
       listIRs:       function () { return listIRs(email); },
       getPassbook:   function () { return getPassbook(e.parameter.irNumber, email); },
       getAuditLog:   function () { return getAuditLog(e.parameter.irNumber, e.parameter.limit, e.parameter.fieldId, email); },
@@ -5645,6 +5646,21 @@ function savePortalUser(params, authEmail) {
   }
   try { appendPortalNotice(company, usersKey(authEmail), notice); } catch (e) { /* notice is best-effort */ }
   return portalUsersList(authEmail);
+}
+// GET getPortalActivity (admin) — the employee-visible timeline for customer
+// portal changes. The audit file is written by savePortalUser/saveCustomerProfile.
+function getPortalActivity(authEmail) {
+  requireAdmin(authEmail);
+  var file = findStoreFile(STORE_AUDIT_DIR + '/PORTAL.jsonl', false);
+  if (!file) return { status: 'ok', entries: [], apiVersion: CONFIG.API_VERSION };
+  var out = [];
+  String(file.getBlob().getDataAsString() || '').split('\n').forEach(function (line) {
+    var t = line.trim();
+    if (!t) return;
+    try { out.push(JSON.parse(t)); } catch (e) { /* skip a bad line */ }
+  });
+  out.reverse();
+  return { status: 'ok', entries: out.slice(0, 200), apiVersion: CONFIG.API_VERSION };
 }
 // POST uploadPortalDocument (admin) — the employee content gateway. The file is
 // stored in a link-shared folder beside the app root; the portal only ever receives

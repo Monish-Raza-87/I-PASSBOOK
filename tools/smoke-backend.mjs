@@ -115,8 +115,8 @@ r.head('the owner\'s security decisions');
 // below are about the two things that are invisible until they are wrong — that a
 // customer's company is always the session's and never the body's, and that a rating is
 // only taken on a ticket that is actually closed.
-r.ok('API_VERSION is 25, portal uploads and customer user access are routed',
-  /API_VERSION:\s*25\b/.test(code) && /uploadPortalDocument:function/.test(code) && /savePortalUser:/.test(code),
+r.ok('API_VERSION is 26, portal user access and activity are routed',
+  /API_VERSION:\s*26\b/.test(code) && /savePortalUser:/.test(code) && /getPortalActivity: function/.test(code),
   (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('a per-IR reporter correction exists and is keyed by the ticket',
   /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));

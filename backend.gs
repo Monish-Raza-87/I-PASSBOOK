@@ -5660,6 +5660,7 @@ function uploadPortalDocument(params, authEmail) {
     uploadedAt: Utilities.formatDate(new Date(), 'Asia/Kolkata', 'dd-MMM-yyyy HH:mm:ss'),
     uploadedBy: usersKey(authEmail)
   };
+  var emailed = 0;
   return withRowLockOrThrow(function () {
     var st = readJsonLocked(PORTAL_STORE_FILE);
     if (!st || typeof st !== 'object') st = {};
@@ -5674,7 +5675,29 @@ function uploadPortalDocument(params, authEmail) {
     if (!replaced) st.library.push(item);
     st.library = st.library.slice(-120);
     writeJsonLocked(PORTAL_STORE_FILE, st);
-    return { status: 'ok', item: item, library: portalLibraryArray(), apiVersion: CONFIG.API_VERSION };
+    if (item.category === 'Service Bulletin' && item.sku && String(params.emailUsers || '') === '1') {
+      var modelKey = String(item.sku).toUpperCase().replace(/[^A-Z0-9]/g, '');
+      var acc = accessStore().customers || {};
+      var seen = {};
+      Object.keys(st.companies || {}).forEach(function (coKey) {
+        var co = st.companies[coKey] || {};
+        var owns = (co.fleet || []).some(function (f) {
+          return String(f.model || '').toUpperCase().replace(/[^A-Z0-9]/g, '') === modelKey;
+        });
+        if (!owns) return;
+        var coName = String(co.name || coKey);
+        Object.keys(acc).forEach(function (email) {
+          if (seen[email] || !sameCompany(acc[email], coName)) return;
+          seen[email] = true;
+          try {
+            if (sendAuthMail(email, '[I-PASSBOOK] Service Bulletin — ' + item.label,
+              'A service bulletin has been published for ' + item.sku + '.\\n\\n' + item.label +
+              '\\n\\nOpen the customer portal → Mandates → Service bulletins to read it.\\n' + item.url)) emailed++;
+          } catch (e) { /* one mailbox must not stop the rest */ }
+        });
+      });
+    }
+    return { status: 'ok', item: item, emailed: emailed, library: portalLibraryArray(), apiVersion: CONFIG.API_VERSION };
   });
 }
 // GET getCustomerPortal — everything a signed-in customer's landing page needs, in ONE

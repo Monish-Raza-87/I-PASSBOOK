@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v126';
+const APP_VERSION = 'v127';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9342,6 +9342,7 @@ function portalAdminHTML() {
         <input id="portal-doc-label" class="form-input" type="text" autocomplete="off" placeholder="SIGMA100 Quick User Guide">
         <label for="portal-doc-file">File</label>
         <input id="portal-doc-file" class="form-input" type="file" accept=".pdf,video/*">
+        <label class="portal-check"><input type="checkbox" id="portal-doc-email"> Email customers using this model (Service Bulletin only)</label>
         <button type="button" class="btn btn-secondary" id="portal-upload">Upload document</button>
       </div>
     </fieldset>
@@ -9542,7 +9543,8 @@ function portalUpload() {
     paintPortalAdmin();
     adminPost('uploadPortalDocument', {
       sku: sku, category: category, label: label, kind: kind,
-      fileName: file.name, mimeType: file.type || '', fileBase64: b64
+      fileName: file.name, mimeType: file.type || '', fileBase64: b64,
+      emailUsers: (document.getElementById('portal-doc-email') && document.getElementById('portal-doc-email').checked) ? '1' : ''
     }).then(res => {
       portalAdmin.busy = false;
       if (!res || res.status !== 'ok') {

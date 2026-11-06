@@ -550,11 +550,14 @@ try {
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
   // Header tabs and the floating support chat.
-  ok('the signed-in header has four section tabs',
-    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 4 &&
+  ok('the signed-in header has the five support tabs, in order',
+    (await evaluate(`document.querySelectorAll('#portal-nav button').length`)) === 5 &&
     await visible('#portal-nav') &&
     /customer support form/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="report"]').textContent`)) &&
-    /product library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)));
+    /support history/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="history"]').textContent`)) &&
+    /product library/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').textContent`)) &&
+    /customer feedback form/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="feedback"]').textContent`)) &&
+    /business enquiry/i.test(await evaluate(`document.querySelector('#portal-nav [data-nav="contact"]').textContent`)));
   await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').click()`);
   await SLEEP(120);
   ok('a header tab opens and scrolls to its section',
@@ -562,12 +565,15 @@ try {
     await evaluate(`document.querySelector('#portal-nav [data-nav="library"]').classList.contains('is-active')`));
   await evaluate(`document.getElementById('header-who').click()`);
   await SLEEP(100);
-  ok('the company name opens a personalisation menu',
-    await visible('#company-menu') && /your details/i.test(await evaluate(`document.getElementById('company-menu').innerText`)));
-  await evaluate(`document.querySelector('#company-menu [data-nav="details"]').click()`);
+  ok('the company name opens the personalisation menu',
+    await visible('#company-menu') &&
+    /company info/i.test(await evaluate(`document.getElementById('company-menu').innerText`)) &&
+    /approved users/i.test(await evaluate(`document.getElementById('company-menu').innerText`)) &&
+    /your fleet/i.test(await evaluate(`document.getElementById('company-menu').innerText`)));
+  await evaluate(`document.querySelector('#company-menu [data-detail="users"]').click()`);
   await SLEEP(100);
-  ok('Your details opens from the company menu',
-    await visible('#panel-details') && !(await visible('#company-menu')));
+  ok('Approved users opens from the company menu',
+    await visible('#panel-details') && await visible('#detail-users') && !(await visible('#company-menu')));
   await evaluate(`document.getElementById('chat-fab').click()`);
   await SLEEP(120);
   ok('the floating support chat opens',

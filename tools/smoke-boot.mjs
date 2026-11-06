@@ -432,7 +432,10 @@ const INTRO_STUB = `<script>
       return Promise.resolve(new Response('{"status":"ok","apiVersion":3}',
         { status: 200, headers: { 'Content-Type': 'application/json' } }));
     }
-    return Promise.resolve(new Response(INTRO_ERR,
+    if (/action=sessionCheck/.test(u)) {
+      return Promise.resolve(new Response('{"status":"ok","alive":true}',
+        { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }    return Promise.resolve(new Response(INTRO_ERR,
       { status: 200, headers: { 'Content-Type': 'application/json' } }));
   };
 <\/script>

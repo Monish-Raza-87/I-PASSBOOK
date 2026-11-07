@@ -200,12 +200,12 @@ r.ok('...and sw.js does NOT put it in the shell',
   !/customer\.html/.test(swJs), (swJs.match(/'[^']*customer[^']*'/) || [])[0]);
 
 // ═══════════════════════════════════════════════════════════════════════════════
-r.head('the two forms the owner asked to reuse are the two that are wired');
+r.head('the support form is reused, and customer feedback is now in-app');
 // ═══════════════════════════════════════════════════════════════════════════════
-const urls = [...portal.matchAll(/(SUPPORT_FORM_URL|FEEDBACK_FORM_URL)\s*=\s*'([^']+)'/g)]
+const urls = [...portal.matchAll(/(SUPPORT_FORM_URL)\s*=\s*'([^']+)'/g)]
   .map(m => [m[1], m[2]]);
-r.ok('both form URLs are set, not left as placeholders',
-  urls.length === 2 && urls.every(([, u]) => /^https:\/\/docs\.google\.com\/forms\//.test(u)), urls);
+r.ok('the support form URL is set, not a placeholder',
+  urls.length === 1 && /^https:\/\/docs\.google\.com\/forms\//.test(urls[0][1]), urls);
 // Four now, not three: the portal's Report tile opens its own panel with its own button,
 // and the hero, the support aside and the empty state each keep theirs. The property is
 // still "every report button on the page is wired to the ONE support form" — a fifth
@@ -217,10 +217,16 @@ r.ok('the in-app report form is wired to every report button on the page',
 r.ok('the report form fixes the prefix from the model and sends only the suffix',
   /REPORT_MODELS/.test(portal) &&
   /reportPrefixFor/.test(portal) &&
-  /serialSuffix: suffix/.test(portal) &&
+  /payload\.serialSuffix = suffix/.test(portal) &&
   /S100-/.test(portal) && /S25P/.test(portal));
-r.ok('...and the feedback form to the feedback button',
-  /wire\('feedback',\s*FEEDBACK_FORM_URL\)/.test(portal));
+r.ok('...and the rare platforms take a full serial instead of a guessed prefix',
+  /OTHER - RS2/.test(portal) && /reportFreeSerial/.test(portal) &&
+  /payload\.droneSerial = fullSerial/.test(portal));
+r.ok('the feedback form is built in-app, not a Google Form link',
+  /function openFeedbackForm\(\)/.test(portal) &&
+  /apiPost\('submitFeedback'/.test(portal) &&
+  /\['feedback', 'feedback-p'\]\.forEach/.test(portal) &&
+  !/FEEDBACK_FORM_URL/.test(portal));
 
 // A staff session and a customer session are different keys, so the only thing that could
 // still cross the two pages is a LINK. The old anchor into the app's customer sign-in is

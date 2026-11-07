@@ -328,7 +328,7 @@ var CONFIG = {
   //      customer), resolved under the owner's "By ID" folder. Additive and safe on an
   //      older frontend, but it IS a response-shape change, so it is bumped here.
   //      `setByIdFolder` and the two audits are editor-run and add no route.
-  API_VERSION: 27,
+  API_VERSION: 28,
 
   // The ONE admin. Admins bypass every permission check and are the only accounts
   // that can provision people, set department grants or reset passwords. Must
@@ -4711,6 +4711,7 @@ function doPost(e) {
       // contacts, and rate a closed ticket; both derive the company from the SESSION.
       // The library, the CR contact and every aircraft/UIN are admin-only.
       saveCustomerProfile: function () { return saveCustomerProfile(params, email); },
+      submitFeedback:    function () { return submitCustomerFeedback(params, email); },
       savePortalUser:    function () { return savePortalUser(params, email); },
       signAcknowledgement:function () { return signAcknowledgement(params, email); },
       rateIR:              function () { return rateIR(params, email); },
@@ -5888,6 +5889,55 @@ function saveCustomerProfile(params, authEmail) {
   return result;
 }
 
+// POST submitFeedback - the in-app feedback form.
+//
+// The company comes from the session, never the body. The customer's words go to
+// Customer Relations by email (reply-to the customer, no CC) and a copy is kept in
+// portal.json under `feedback` for the desk. Nothing here touches a ticket, an IR
+// number or the intake sheet.
+function submitCustomerFeedback(params, authEmail) {
+  var email = usersKey(authEmail);
+  var company = customerCompany(email);
+  if (!company) throw new Error('Forbidden: this account has no customer scope.');
+
+  var stars = Math.round(Number(params.stars));
+  if (!(stars >= 1 && stars <= 5)) throw new Error('Choose a rating from 1 to 5.');
+  var message = String(params.message || '').trim().slice(0, 4000);
+  if (!message) throw new Error('Write a few words before sending.');
+
+  var cr = portalRead().cr || {};
+  var to = String(cr.email || 'customer.relations@indrones.com').trim();
+  if (!to || !isMailRecipientAllowed(to)) throw new Error('The feedback inbox is not configured.');
+
+  var body = 'Customer feedback\n\n' +
+    'Company: ' + company + '\n' +
+    'From: ' + email + '\n' +
+    'Rating: ' + stars + '/5\n\n' + message +
+    '\n\n--\nSent from the I-PASSBOOK customer portal.';
+  var sent = false;
+  if (mailQuotaOk('feedback')) {
+    try {
+      MailApp.sendEmail(to, 'I-PASSBOOK feedback - ' + company + ' - ' + stars + '/5', body,
+                        { name: 'I-PASSBOOK', replyTo: email });
+      sent = true;
+    } catch (e) { sent = false; }
+  }
+  if (!sent) throw new Error('Could not send the feedback just now. Try again in a moment.');
+
+  // Keep a copy for the desk. The email is the record; this append is best-effort.
+  try {
+    var st = readJsonLocked(PORTAL_STORE_FILE);
+    if (!st || typeof st !== 'object') st = {};
+    if (!(st.feedback instanceof Array)) st.feedback = [];
+    st.feedback.push({ company: company, email: email, stars: stars,
+                       message: message, at: new Date().toISOString() });
+    st.feedback = st.feedback.slice(-200);
+    writeJson(PORTAL_STORE_FILE, st);
+  } catch (e) { /* the email already carried it */ }
+
+  return { status: 'ok', message: 'Thank you. Your feedback has reached Customer Relations.',
+           apiVersion: CONFIG.API_VERSION };
+}
 // POST rateIR — one rating, on one ticket, once.
 //
 // Two refusals carry the whole value of the number: it is only taken on a ticket that
@@ -6982,6 +7032,41 @@ function createIRFromApp(params, authEmail) {
   var customerName = isCustomer
     ? String((findUser(usersKey(authEmail)) && userField(findUser(usersKey(authEmail)), 'name')) || authEmail).trim()
     : String(params.customerName || '').trim();
+
+  // SAMPLE MODE (?sample=1 in the portal). The owner may test the whole form and the
+  // email without touching master data: nothing is uploaded, no IR number is drawn, no
+  // folder, summary doc, registry row or coverage row is written. The only side effect
+  // is one email to the reporter (the session's own address), from the deployment
+  // account, with no CC - exactly the rule given on 2026-11-08.
+  if (String(params.sample || '') === '1') {
+    var sampleRef = 'SAMPLE-' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
+    var sampleFiles = params.files instanceof Array ? params.files : [];
+    var sampleLines = [
+      'This is a SAMPLE report. No IR was created and no record was written.',
+      '',
+      'Model: ' + model,
+      'Serial: ' + serial,
+      'Support required: ' + String(params.issueType || '').trim(),
+      'Reported by: ' + customerName + ' <' + contactEmail + '>',
+      'Company: ' + company,
+      'Incident date: ' + String(params.incidentDate || '').trim(),
+      'Location and weather: ' + String(params.incidentLocationWeather || '').trim(),
+      'Contact phone: ' + String(params.contactPhone || '').trim(),
+      'Contact name: ' + String(params.spoc || '').trim(),
+      '',
+      'Issue:',
+      issueDesc
+    ];
+    var sampleNames = sampleFiles.map(function (f) { return f && f.name; }).filter(function (n) { return !!n; });
+    if (sampleNames.length) sampleLines.push('', 'Evidence files selected: ' + sampleNames.join(', '));
+    var sampleSent = contactEmail
+      ? sendAuthMail(contactEmail, 'I-PASSBOOK sample report ' + sampleRef, sampleLines.join('\n'))
+      : false;
+    return { status: 'ok', irNumber: sampleRef, sample: true,
+             message: sampleSent
+               ? 'Sample emailed to ' + contactEmail + '. No IR was created.'
+               : 'Sample checked, but the email could not be sent.' };
+  }
 
   var current = currentIRRegistry();
   var ir = appNextIRNumber(current);

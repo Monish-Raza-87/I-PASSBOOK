@@ -535,6 +535,9 @@ try {
   await SLEEP(180);
   ok('the in-app report form opens from the Report panel',
     await visible('#report-sheet') && await visible('#rep-model') && await visible('#rep-suffix'));
+  await evaluate(`(() => { const m = document.getElementById('rep-model'); m.value = 'FUJIN'; m.dispatchEvent(new Event('change')); })()`);
+  ok('a rare platform asks for the full serial, not a guessed prefix',
+    await visible('#rep-serial-full') && !(await visible('#rep-serial-prefixed')));
   await evaluate(`(() => { const m = document.getElementById('rep-model'); m.value = 'SIGMA 100'; m.dispatchEvent(new Event('change')); })()`);
   ok('choosing SIGMA 100 fixes the serial prefix to S100-',
     (await evaluate(`document.getElementById('rep-prefix').textContent`)).trim() === 'S100-');

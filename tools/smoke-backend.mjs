@@ -115,8 +115,9 @@ r.head('the owner\'s security decisions');
 // below are about the two things that are invisible until they are wrong — that a
 // customer's company is always the session's and never the body's, and that a rating is
 // only taken on a ticket that is actually closed.
-r.ok('API_VERSION is 27, portal activity and acknowledgement signing are routed',
-  /API_VERSION:\s*27\b/.test(code) && /getPortalActivity: function/.test(code) && /signAcknowledgement:function/.test(code),
+r.ok('API_VERSION is 28, customer feedback and the portal writes are routed',
+  /API_VERSION:\s*28\b/.test(code) && /submitFeedback:\s*function/.test(code) &&
+  /getPortalActivity: function/.test(code) && /signAcknowledgement:function/.test(code),
   (code.match(/API_VERSION:[^\n]*/) || [''])[0]);
 r.ok('a per-IR reporter correction exists and is keyed by the ticket',
   /kind === 'person-ir'/.test(code) && /'person:ir:'/.test(code));
@@ -761,7 +762,7 @@ r.ok('the reserve is non-zero and strictly below the cap',
 // added and nobody looked at the daily ceiling — which is how a busy day
 // silently disables password recovery for the whole company.
 const sendSites = [...code.matchAll(/MailApp\.sendEmail/g)];
-r.ok('there are exactly four send sites', sendSites.length === 4, sendSites.length);
+r.ok('there are exactly five send sites', sendSites.length === 5, sendSites.length);
 sendSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   const body  = owner ? fnBody(owner.name) : '';

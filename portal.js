@@ -172,14 +172,6 @@
       </div>
     </section>
 
-    <!-- ── CUSTOMER FEEDBACK ──────────────────────────────────────────────── -->
-    <section class="panel" id="panel-feedback" hidden>
-      <div class="panel-head"><h2>Customer feedback form</h2></div>
-      <p class="sub">Tell us how the service felt, not just whether the aircraft was fixed. Your feedback goes to Customer Relations and is kept against your company.</p>
-      <div class="panel-actions">
-        <a class="btn btn-primary" id="feedback-panel-open" href="#" target="_blank" rel="noopener">Open feedback form</a>
-      </div>
-    </section>
     <!-- ── SUPPORT ────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-support" hidden>
       <div class="panel-head"><h2>Support</h2></div>
@@ -384,9 +376,19 @@
   </section>
 
   <section id="products" class="wrap">
-    <h2>Our products</h2>
-    <p class="sub">The platforms we offer, and what each one carries.</p>
-    <div class="cards">
+    <div class="section-head">
+      <div>
+        <h2>Our products</h2>
+        <p class="sub">The platforms we offer, and what each one carries.</p>
+      </div>
+      <div class="carousel-controls">
+        <button type="button" class="carousel-btn" data-carousel-prev aria-label="Previous product">&#8592;</button>
+        <button type="button" class="carousel-btn" data-carousel-next aria-label="Next product">&#8594;</button>
+      </div>
+    </div>
+    <div class="carousel product-carousel" data-carousel aria-roledescription="carousel" aria-label="Our products">
+      <div class="carousel-track" data-carousel-track>
+
 
       <article class="card">
         <span class="chip">DGCA Type Certified</span>
@@ -458,6 +460,7 @@
         </ul>
       </article>
 
+      </div>
     </div>
   </section>
 
@@ -671,23 +674,32 @@
   // every other one does. Nothing about it changes.
   const SUPPORT_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScKxygN_FWBo_pD-uc9g6y5fPx4Mc0BB7pyA8Vy2BPTXAkJlw/viewform';
 
-  // The customer feedback form — a DIFFERENT form from the one above, on its own
-  // Google Form id, which is the whole reason it has its own constant here. Empty
-  // would mark the button disabled rather than open nothing, because a button that
-  // opens nothing is worse than no button.
-  const FEEDBACK_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLSc0S3JVIFhOAL4-HweZ3gA6DM2cvQGXYT84lzWXI-qTiwVimA/viewform';
   // ── IN-APP IR REPORTING ────────────────────────────────────────────────────
   // The model chooses the prefix; the customer types only the numeric body.
   const REPORT_MODELS = [
     { value: 'SIGMA25G',    label: 'SIGMA25G',    prefix: 'S25' },
     { value: 'SIGMA 25 PRO',label: 'SIGMA 25 PRO',prefix: 'S25P' },
     { value: 'SIGMA 100',   label: 'SIGMA 100',   prefix: 'S100-' },
-    { value: 'SIGMA 75',    label: 'SIGMA 75',    prefix: 'S75' }
+    { value: 'SIGMA 75',    label: 'SIGMA 75',    prefix: 'S75' },
+    // Less frequent platforms. Their serial formats are not the Sigma S-prefix
+    // scheme, so the form asks for the full serial as printed on the aircraft
+    // instead of inventing a prefix.
+    { value: 'OTHER - RS2',    label: 'OTHER - RS2',    prefix: '' },
+    { value: 'OTHER - AGISOFT',label: 'OTHER - AGISOFT',prefix: '' },
+    { value: 'STRIVER',        label: 'STRIVER',        prefix: '' },
+    { value: 'TALON',          label: 'TALON',          prefix: '' },
+    { value: 'HECTOR',         label: 'HECTOR',         prefix: '' },
+    { value: 'VECTOR',         label: 'VECTOR',         prefix: '' },
+    { value: 'FUJIN',          label: 'FUJIN',          prefix: '' }
   ];
 
   function reportPrefixFor(model) {
     const hit = REPORT_MODELS.find(x => x.value === model);
     return hit ? hit.prefix : '';
+  }
+  function reportFreeSerial(model) {
+    const hit = REPORT_MODELS.find(x => x.value === model);
+    return !!hit && !hit.prefix;
   }
 
   function readFileBase64(file) {
@@ -707,6 +719,9 @@
     const old = document.getElementById('report-sheet');
     if (old) old.remove();
     const today = new Date().toISOString().slice(0, 10);
+    // ?sample=1 is the owner's safe test door: the backend validates and emails the
+    // report to the reporter, but creates no IR, folder, summary or registry entry.
+    const SAMPLE = /[?&]sample=1(?:&|$)/.test(location.search);
     const modal = document.createElement('div');
     modal.className = 'sheet report-sheet';
     modal.id = 'report-sheet';
@@ -723,21 +738,26 @@
               ${REPORT_MODELS.map(m => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}
             </select>
           </div>
-          <div class="field">
+                    <div class="field">
             <label for="rep-suffix">UAS serial number</label>
-            <div class="serial-wrap">
-              <span class="serial-fixed" id="rep-prefix">S—</span>
+            <div class="serial-wrap" id="rep-serial-prefixed">
+              <span class="serial-fixed" id="rep-prefix">S-</span>
               <input id="rep-suffix" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3"
-                     placeholder="001" autocomplete="off" required>
+                     placeholder="001" autocomplete="off">
             </div>
-            <p class="report-hint">The model fixes the prefix. Enter the three-digit number only.</p>
+            <input id="rep-serial-full" type="text" placeholder="Full UAS serial number"
+                   autocomplete="off" hidden>
+            <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter the three-digit number only.</p>
           </div>
           <div class="report-grid two">
             <div class="field"><label for="rep-date">Date of incident</label><input id="rep-date" type="date" value="${today}"></div>
             <div class="field"><label for="rep-type">Support required</label>
               <select id="rep-type">
-                <option>Repair</option><option>Maintenance</option><option>Inspection</option>
-                <option>Training</option><option>Spare / consumable</option><option>Other</option>
+                <option>A Crash Related Support</option>
+                <option>Problems or Issues Without Crash</option>
+                <option>Any Other Assistance</option>
+                <option>Service/Maintenance (Under-Warranty)</option>
+                <option>Service/Maintenance (Out Of Warranty)</option>
               </select>
             </div>
           </div>
@@ -749,42 +769,65 @@
           </div>
           <div class="report-grid two">
             <div class="field"><label for="rep-phone">Contact phone</label><input id="rep-phone" type="tel" autocomplete="tel"></div>
-            <div class="field"><label for="rep-spoc">SPOC</label><input id="rep-spoc" autocomplete="name"></div>
+            <div class="field"><label for="rep-spoc">Contact name</label><input id="rep-spoc" autocomplete="name"></div>
           </div>
-          <div class="field"><label for="rep-files">Incident files</label>
+                    <div class="field">
+            <label for="rep-files">Evidence files</label>
             <input id="rep-files" type="file" multiple accept="image/png,image/jpeg,image/webp,application/pdf,.bin,.log,.txt">
-            <p class="report-hint">Photos, PDFs, logs — up to 20 MB each.</p>
+            <div class="evidence-camera">
+              <label class="btn" for="rep-camera">Take a photo</label>
+              <input id="rep-camera" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" multiple hidden>
+            </div>
+            <p class="report-hint">Attach photos, PDFs or logs &mdash; you can add more than one (up to 20 MB each).</p>
           </div>
-          <div class="field"><label for="rep-flight">Flight log</label>
-            <input id="rep-flight" type="file" accept=".bin,.log,.txt,application/octet-stream">
-          </div>
+          <p class="report-hint" id="rep-sample-note" hidden>Sample mode &mdash; this emails the
+          report to you and creates no IR.</p>
           <p class="msg" id="rep-msg" aria-live="polite"></p>
           <button type="submit" class="btn btn-primary" id="rep-submit">Submit report</button>
         </form>
       </div>`;
     document.body.appendChild(modal);
+    if (SAMPLE) document.getElementById('rep-sample-note').hidden = false;
     const close = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
     document.getElementById('report-x').addEventListener('click', close);
     const modelEl = document.getElementById('rep-model');
     const prefixEl = document.getElementById('rep-prefix');
+    const prefixedEl = document.getElementById('rep-serial-prefixed');
+    const fullEl = document.getElementById('rep-serial-full');
+    const serialHintEl = document.getElementById('rep-serial-hint');
     const msgEl = document.getElementById('rep-msg');
-    const updatePrefix = () => {
-      const p = reportPrefixFor(modelEl.value);
-      prefixEl.textContent = p || 'S—';
-      prefixEl.dataset.prefix = p;
+    const updateSerialMode = () => {
+      const free = !!modelEl.value && reportFreeSerial(modelEl.value);
+      prefixedEl.hidden = free;
+      fullEl.hidden = !free;
+      serialHintEl.textContent = free
+        ? 'Enter the full serial number as printed on the aircraft.'
+        : 'The model fixes the prefix. Enter the three-digit number only.';
+      if (!free) {
+        const p = reportPrefixFor(modelEl.value);
+        prefixEl.textContent = p || 'S-';
+        prefixEl.dataset.prefix = p;
+      }
     };
-    modelEl.addEventListener('change', updatePrefix);
+    modelEl.addEventListener('change', updateSerialMode);
     const form = document.getElementById('report-form');
     form.addEventListener('submit', async e => {
       e.preventDefault();
       msgEl.className = 'msg err';
       msgEl.textContent = '';
       const model = modelEl.value;
+      const freeSerial = reportFreeSerial(model);
       const suffix = String(document.getElementById('rep-suffix').value || '').replace(/[^0-9]/g, '');
+      const fullSerial = String(document.getElementById('rep-serial-full').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
       if (!model) { msgEl.textContent = 'Select the UAS model.'; return; }
-      if (!/^[0-9]{1,3}$/.test(suffix)) { msgEl.textContent = 'Enter a serial number from 001 to 999.'; return; }
+      if (freeSerial ? !fullSerial : !/^[0-9]{1,3}$/.test(suffix)) {
+        msgEl.textContent = freeSerial
+          ? 'Enter the UAS serial number.'
+          : 'Enter a serial number from 001 to 999.';
+        return;
+      }
       if (!desc) { msgEl.textContent = 'Describe the problem before submitting.'; return; }
       const btn = document.getElementById('rep-submit');
       btn.disabled = true;
@@ -798,10 +841,9 @@
           }
         };
         await add(document.getElementById('rep-files'), 'evidenceFormN');
-        await add(document.getElementById('rep-flight'), 'evidenceFormQ');
-        const res = await apiPost('createIR', {
+        await add(document.getElementById('rep-camera'), 'evidenceFormN');
+        const payload = {
           droneModel: model,
-          serialSuffix: suffix,
           incidentDate: document.getElementById('rep-date').value || '',
           issueType: document.getElementById('rep-type').value || '',
           issueDesc: desc,
@@ -809,13 +851,20 @@
           contactPhone: document.getElementById('rep-phone').value || '',
           spoc: document.getElementById('rep-spoc').value || '',
           files: JSON.stringify(files)
-        });
+        };
+        if (freeSerial) payload.droneSerial = fullSerial;
+        else payload.serialSuffix = suffix;
+        if (SAMPLE) payload.sample = '1';
+        const res = await apiPost('createIR', payload);
         if (!res || res.status !== 'ok') {
           if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
           throw new Error(msgOf(res));
         }
-        form.innerHTML = `<div class="report-ok"><b>IR ${esc(res.irNumber)} raised.</b><br>
-          We have received your report and the service desk will take it up.</div>
+        const okTitle = SAMPLE ? 'Sample report received.' : 'IR ' + esc(res.irNumber) + ' raised.';
+        const okBody = SAMPLE
+          ? 'No IR was created. The sample was emailed to you.'
+          : 'We have received your report and the service desk will take it up.';
+        form.innerHTML = `<div class="report-ok"><b>${okTitle}</b><br>${okBody}</div>
           <button type="button" class="btn" id="rep-done">Close</button>`;
         document.getElementById('rep-done').addEventListener('click', () => { close(); if (typeof loadTickets === 'function') loadTickets(); });
       } catch (err) {
@@ -827,13 +876,79 @@
     });
   }
 
-  const wire = (id, url) => {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (!url) { el.setAttribute('aria-disabled', 'true'); return; }
-    el.href = url;
-    el.removeAttribute('aria-disabled');
-  };
+  function openFeedbackForm() {
+    if (!token()) { showSignin('Sign in to send feedback, then try again.'); return; }
+    const old = document.getElementById('feedback-sheet');
+    if (old) old.remove();
+    const modal = document.createElement('div');
+    modal.className = 'sheet report-sheet';
+    modal.id = 'feedback-sheet';
+    modal.innerHTML = `
+      <div class="sheet-card">
+        <button type="button" class="sheet-x" id="feedback-x" aria-label="Close">&times;</button>
+        <h2>Customer feedback</h2>
+        <p class="sheet-note">Tell us how the service felt. It goes straight to Customer Relations.</p>
+        <form id="feedback-form" class="report-grid" novalidate>
+          <div class="rate" id="feedback-rate">
+            <p>How would you rate the service?</p>
+            <div class="rate-row">
+              <button type="button" class="rate-star" data-stars="1" aria-pressed="false" aria-label="1 out of 5">&#9733;</button>
+              <button type="button" class="rate-star" data-stars="2" aria-pressed="false" aria-label="2 out of 5">&#9733;</button>
+              <button type="button" class="rate-star" data-stars="3" aria-pressed="false" aria-label="3 out of 5">&#9733;</button>
+              <button type="button" class="rate-star" data-stars="4" aria-pressed="false" aria-label="4 out of 5">&#9733;</button>
+              <button type="button" class="rate-star" data-stars="5" aria-pressed="false" aria-label="5 out of 5">&#9733;</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="feedback-text">What worked, what dragged, what would you change?</label>
+            <textarea id="feedback-text" required placeholder="A few honest lines are enough."></textarea>
+          </div>
+          <p class="msg" id="feedback-msg" aria-live="polite"></p>
+          <button type="submit" class="btn btn-primary" id="feedback-submit">Send feedback</button>
+        </form>
+      </div>`;
+    document.body.appendChild(modal);
+    const close = () => modal.remove();
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    document.getElementById('feedback-x').addEventListener('click', close);
+    let stars = 0;
+    modal.querySelectorAll('.rate-star').forEach(b => {
+      b.addEventListener('click', () => {
+        stars = Number(b.dataset.stars);
+        modal.querySelectorAll('.rate-star').forEach(x =>
+          x.setAttribute('aria-pressed', Number(x.dataset.stars) <= stars ? 'true' : 'false'));
+      });
+    });
+    const form = document.getElementById('feedback-form');
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const msg = document.getElementById('feedback-msg');
+      msg.className = 'msg err';
+      msg.textContent = '';
+      const text = String(document.getElementById('feedback-text').value || '').trim();
+      if (!stars) { msg.textContent = 'Choose a rating from 1 to 5.'; return; }
+      if (!text) { msg.textContent = 'Write a few words before sending.'; return; }
+      const btn = document.getElementById('feedback-submit');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        const res = await apiPost('submitFeedback', { stars: String(stars), message: text });
+        if (!res || res.status !== 'ok') {
+          if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
+          throw new Error(msgOf(res));
+        }
+        form.innerHTML = '<div class="report-ok"><b>Thank you.</b><br>Your feedback has reached ' +
+          'Customer Relations.</div><button type="button" class="btn" id="feedback-done">Close</button>';
+        document.getElementById('feedback-done').addEventListener('click', close);
+      } catch (err) {
+        msg.className = 'msg err';
+        msg.textContent = (err && err.message) || 'Could not send the feedback.';
+        btn.disabled = false;
+        btn.textContent = 'Send feedback';
+      }
+    });
+  }
+
   const wireReport = (id) => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -1152,7 +1267,6 @@
     mandates: 'panel-mandates',
     offer: 'panel-offer',
     announcements: 'panel-announcements',
-    feedback: 'panel-feedback',
     details: 'panel-details',
     contact: 'panel-contact'
   };
@@ -1783,7 +1897,7 @@
                 ['Find a manual or checklist', 'manual'], ['Talk to a person', 'person']]
     },
     raise: {
-      say: 'Use the Customer Support Form above — it is the same form every request comes through, so it gets an IR number the same working day. If you are reporting a fault, have the UAS serial number and, if you have one, the flight log to hand; both save a round trip.',
+      say: 'Use the Customer Support Form above — it is the same form every request comes through, so it gets an IR number the same working day. If you are reporting a fault, have the UAS serial number ready and attach the flight log as evidence if you have one; both save a round trip.',
       choices: [['Open the report form', 'form'], ['Back', 'start']]
     },
     status: {
@@ -2277,6 +2391,7 @@
         return card.getBoundingClientRect().width + gap;
       };
       const atEnd = () => track.scrollLeft + track.clientWidth >= track.scrollWidth - 2;
+      const noOverflow = () => track.scrollWidth <= track.clientWidth + 4;
       const move = dir => {
         if (dir > 0 && atEnd()) {
           // Wrap to the start instantly: a smooth sweep back across ten cards reads
@@ -2290,7 +2405,9 @@
       const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
       const start = () => {
         stop();
-        if (reduce || !inView) return;
+        // A row whose cards already fit (the three products on a wide screen) has
+        // nowhere to slide; a timer there would only reset scrollLeft every cycle.
+        if (reduce || !inView || noOverflow()) return;
         timer = setInterval(() => {
           if (!paused && !document.hidden) move(1);
         }, 4500);
@@ -2408,9 +2525,14 @@
     });
     $('chat-x').addEventListener('click', closeChat);
     ['raise', 'raise-2', 'raise-3', 'raise-p'].forEach(wireReport);
-    wire('feedback', FEEDBACK_FORM_URL);
-    wire('feedback-p', FEEDBACK_FORM_URL);
-    wire('feedback-panel-open', FEEDBACK_FORM_URL);
+    ['feedback', 'feedback-p'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.removeAttribute('aria-disabled');
+      el.removeAttribute('target');
+      el.setAttribute('href', '#');
+      el.addEventListener('click', (e) => { e.preventDefault(); openFeedbackForm(); });
+    });
     $('back-to-list').addEventListener('click', () => {
       $('report-one').hidden = true;
       $('reports-list').hidden = false;

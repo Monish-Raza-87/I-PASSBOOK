@@ -1370,3 +1370,11 @@
   .lib-training { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); }
   .lib-training .lib-model-name { border-bottom-width: 3px; }
   #lib-training, .lib-model[data-model] { scroll-margin-top: 84px; }
+  /* -- Evidence capture and the product carousel ----------------------------- */
+  .evidence-camera { display: none; align-items: center; gap: 10px; margin-top: 8px; }
+  .evidence-camera .btn { cursor: pointer; }
+  @media (hover: none) and (pointer: coarse), (max-width: 640px) {
+    .evidence-camera { display: flex; }
+  }
+  .product-carousel .carousel-track { align-items: stretch; }
+  .product-carousel .card { height: 100%; }

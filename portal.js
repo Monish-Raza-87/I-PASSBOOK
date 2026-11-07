@@ -83,7 +83,7 @@
         <li>Dedicated training videos</li>
         <li>Your fleet information and much more</li>
       </ul>
-      <p class="home-coda">This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
+      <p class="home-coda">This is <b>I-PASSBOOK</b>; Support <mark>Simplified</mark>. Support <mark>Centralised</mark>. Support <mark>Intelligentized</mark>.</p>
       <div class="btn-row" hidden>
         <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
         <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>

@@ -1169,6 +1169,12 @@
     content: ""; display: inline-block; width: 28px; height: 2px;
     margin-right: 12px; vertical-align: middle; background: var(--yellow);
   }
+  .home-coda b { color: #f0f0ea; font-weight: 800; }
+  .home-coda mark {
+    background: var(--yellow); color: #1a1a1b; font-weight: 800;
+    padding: 0 .22em;
+    -webkit-box-decoration-break: clone; box-decoration-break: clone;
+  }
   .home-hero-band .btn { color: #f5f5f2; border-color: rgba(255,255,255,.28); background: transparent; }
   .home-hero-band .btn:hover { background: #f5f5f2; color: #131416; border-color: #f5f5f2; }
   .home-hero-band .btn-primary { background: var(--yellow); color: #1a1a1b; border-color: var(--yellow); }

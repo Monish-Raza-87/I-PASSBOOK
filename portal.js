@@ -155,15 +155,18 @@
         <div class="form-door">
           <span class="form-door-kicker">Something needs fixing</span>
           <h3>Customer support form</h3>
-          <p>Report a fault, damage, missing part or service request. Attach what you have and we
-          open an IR the same working day.</p>
+          <p>If you want to report an issue, require support, or need any assistance with our
+          product(s), reach out to us through this Customer Support Form. Click the
+          <b>RAISE AN IR</b> button below, and make sure you attach sufficient evidence so we can
+          understand it better.</p>
           <a class="btn btn-primary" id="raise-p" href="#" target="_blank" rel="noopener">Raise an IR</a>
         </div>
         <div class="form-door">
           <span class="form-door-kicker">How did we do</span>
           <h3>Feedback form</h3>
           <p>Tell us what worked, what dragged and what you would change. It goes straight to
-          Customer Relations, against your company.</p>
+          Customer Relations, and from there to the correct team at Indrones who can do justice to
+          your feedback. Click the <b>GIVE FEEDBACK</b> button below &mdash; thank you.</p>
           <a class="btn" id="feedback-p" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
         </div>
       </div>
@@ -382,7 +385,7 @@
 
   <section id="products" class="wrap">
     <h2>Our products</h2>
-    <p class="sub">The platforms we support, and what each one carries.</p>
+    <p class="sub">The platforms we offer, and what each one carries.</p>
     <div class="cards">
 
       <article class="card">

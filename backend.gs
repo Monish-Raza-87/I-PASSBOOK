@@ -3482,6 +3482,36 @@ function sendIrAcknowledgement(to, fields, ir, sample) {
     return true;
   } catch (e) { return false; }
 }
+// EDITOR-RUN, NOT ROUTED. Sends the real acknowledgement for the most recent IR
+// that has fields, preferring one with evidence, to the address you pass in (or the
+// SAMPLE_ACK_TO Script Property). This is how the email format is checked without a
+// customer submission. It sends no CC and creates nothing. Run it from the Apps
+// Script editor after deploying this file:
+//
+//   sendSampleAcknowledgementToOwner('you@example.com')
+//
+// The address is deliberately an argument/property, not a literal in this file: the
+// repository must never carry an external mailbox in its source.
+function sendSampleAcknowledgementToOwner(to) {
+  var target = String(to || '').trim() ||
+    String(PropertiesService.getScriptProperties().getProperty('SAMPLE_ACK_TO') || '').trim();
+  if (!target) return 'Pass the destination address, or set the SAMPLE_ACK_TO Script Property.';
+  var reg = currentIRRegistry();
+  var entries = Object.keys(reg.irs || {}).map(function (k) { return reg.irs[k]; })
+    .filter(function (r) { return r && r.fields && r.irNumber; });
+  if (!entries.length) return 'No IR with fields found.';
+  entries.sort(function (a, b) {
+    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+  });
+  var withEvidence = entries.filter(function (r) {
+    return String(r.fields.evidenceFormN || '').trim();
+  });
+  var pick = withEvidence[0] || entries[0];
+  var sent = sendIrAcknowledgement(target, pick.fields, pick.irNumber, false);
+  return sent
+    ? 'Sample acknowledgement for ' + pick.irNumber + ' sent.'
+    : 'The acknowledgement could not be sent.';
+}
 
 
 // ──────────────────────────────────────────────────────────────────────────────

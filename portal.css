@@ -1384,3 +1384,54 @@
   .lib-other-sop { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); }
   .lib-other-sop .lib-model-name { border-bottom-width: 3px; }
   #lib-other-sop { scroll-margin-top: 84px; }
+  /* -- Right-side page rail -------------------------------------------------- */
+  .page-rail {
+    position: fixed; right: 14px; top: 50%; transform: translateY(-50%); z-index: 39;
+    display: flex; flex-direction: column; gap: 4px; padding: 8px 6px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    border: 1px solid var(--line); backdrop-filter: blur(8px);
+  }
+  .page-rail a { position: relative; width: 14px; height: 14px; display: grid; place-items: center; text-decoration: none; }
+  .page-rail a::before {
+    content: ""; width: 6px; height: 6px; border: 1px solid var(--fg-muted);
+    background: transparent; transition: background .2s ease, border-color .2s ease;
+  }
+  .page-rail a span {
+    position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
+    white-space: nowrap; padding: 4px 8px; background: var(--surface);
+    border: 1px solid var(--line); color: var(--fg);
+    font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+    opacity: 0; pointer-events: none; transition: opacity .15s ease;
+  }
+  .page-rail a:hover span, .page-rail a.is-active span { opacity: 1; }
+  .page-rail a.is-active::before { background: var(--yellow); border-color: var(--yellow); }
+  .page-rail a:hover::before { border-color: var(--fg); }
+  body.portal-panel-open .page-rail { display: none; }
+  @media (max-width: 900px) { .page-rail { display: none; } }
+
+  /* -- Collapsible library sections ----------------------------------------- */
+  summary.lib-model-name {
+    cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between;
+  }
+  summary.lib-model-name::-webkit-details-marker { display: none; }
+  summary.lib-model-name::after {
+    content: "\25BE"; color: var(--fg-muted); font-size: 11px; transition: transform .2s ease;
+  }
+  details.lib-model:not([open]) > summary.lib-model-name::after { transform: rotate(-90deg); }
+
+  /* -- Document previews in the library ------------------------------------- */
+  .lib-item.doc .doc-thumb-wrap {
+    position: relative; width: 100%; aspect-ratio: 16 / 9; display: block;
+    margin-bottom: 6px; background: var(--surface-2); border: 1px solid var(--line); overflow: hidden;
+  }
+  .lib-item.doc .doc-thumb-wrap .doc-thumb {
+    position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
+    object-fit: cover; object-position: top center; display: block;
+  }
+  .lib-item.doc .doc-thumb-fallback {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 4px;
+    color: var(--fg-muted); font-family: var(--mono); font-size: 9px;
+    letter-spacing: .12em; text-transform: uppercase;
+  }
+  .doc-thumb-fallback svg { width: 26px; height: 26px; }

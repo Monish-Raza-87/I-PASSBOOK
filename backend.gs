@@ -6044,6 +6044,7 @@ function submitCustomerFeedback(params, authEmail) {
   var challenges = String(params.challenges || params.message || '').trim().slice(0, 4000);
   var droneRating = Math.round(Number(params.droneRating || (params.stars ? params.stars : 0)));
   var supportRating = Math.round(Number(params.supportRating || (params.stars ? params.stars : 0)));
+  var droneReason = String(params.droneReason || '').trim().slice(0, 2000);
   var supportReason = String(
     params.supportReason || (supportRating <= 3 ? (params.message || '') : '') || ''
   ).trim().slice(0, 2000);
@@ -6057,9 +6058,15 @@ function submitCustomerFeedback(params, authEmail) {
     throw new Error('Rate the overall performance of your drone.');
   if (!(supportRating >= 1 && supportRating <= 5))
     throw new Error('Rate our support and services.');
-  if (supportRating <= 3 && !supportReason)
+
+  var droneLow = droneRating <= 3;
+  var supportLow = supportRating <= 3;
+  var average = (droneRating + supportRating) / 2;
+  if (droneLow && !supportLow && !droneReason)
+    throw new Error("Tell us why you rated your drone's performance 3 or less.");
+  if (supportLow && !supportReason)
     throw new Error('Tell us why you rated our support and services 3 or less.');
-  if (supportRating >= 4 && testimonial !== 'Yes' && testimonial !== 'No')
+  if (average > 3 && testimonial !== 'Yes' && testimonial !== 'No')
     throw new Error('Tell us whether you would give a testimonial.');
 
   var cr = portalRead().cr || {};
@@ -6073,11 +6080,12 @@ function submitCustomerFeedback(params, authEmail) {
     'From: ' + email,
     'Is the drone active and operational? ' + droneActive,
     'Can the customer operate the UAS fluently? ' + fluency,
-    'Drone performance: ' + droneRating + '/5',
-    'Support and services: ' + supportRating + '/5'
+    'Drone performance: ' + droneRating + '/5' +
+      (droneLow && !supportLow ? ' - ' + droneReason : ''),
+    'Support and services: ' + supportRating + '/5' +
+      (supportLow ? ' - ' + supportReason : '')
   ];
-  if (supportRating <= 3) lines.push('Reason for the support rating: ' + supportReason);
-  if (supportRating >= 4) lines.push('Willing to give a testimonial: ' + testimonial);
+  if (average > 3) lines.push('Willing to give a testimonial: ' + testimonial);
   lines.push('', 'Operational challenges / suggestions:', challenges || '-',
              '', '--', 'Sent from the I-PASSBOOK customer portal.');
   var body = lines.join('\n');
@@ -6100,7 +6108,8 @@ function submitCustomerFeedback(params, authEmail) {
     st.feedback.push({
       company: company, email: email, droneActive: droneActive, fluency: fluency,
       challenges: challenges, droneRating: droneRating, supportRating: supportRating,
-      supportReason: supportReason, testimonial: testimonial, at: new Date().toISOString()
+      droneReason: droneReason, supportReason: supportReason, testimonial: testimonial,
+      at: new Date().toISOString()
     });
     st.feedback = st.feedback.slice(-200);
     writeJson(PORTAL_STORE_FILE, st);

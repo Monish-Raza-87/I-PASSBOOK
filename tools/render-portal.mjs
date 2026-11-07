@@ -553,14 +553,14 @@ try {
   await SLEEP(80);
   ok('the report form closes without leaving an overlay', !(await evaluate(`!!document.getElementById('report-sheet')`)));
   // Header navigation and the floating support chat.
-  ok('the signed-in header has Support, Library, Compliance, Profile, Mandates and What we offer',
+  ok('the signed-in header has Support, Library, Compliance, Mandates and What we offer, and no Profile',
     await visible('#portal-nav') &&
     /support/i.test(await evaluate(`document.querySelector('#support-nav [data-nav-group]').textContent`)) &&
     /library/i.test(await evaluate(`document.querySelector('#library-nav [data-nav-group]').textContent`)) &&
     /compliance/i.test(await evaluate(`document.querySelector('#portal-nav [data-route="compliance"]').textContent`)) &&
-    /profile/i.test(await evaluate(`document.querySelector('#profile-nav [data-nav-group]').textContent`)) &&
     /mandates/i.test(await evaluate(`document.querySelector('#mandates-nav [data-nav-group]').textContent`)) &&
-    /what we offer/i.test(await evaluate(`document.querySelector('#portal-nav [data-route="offer"]').textContent`)));
+    /what we offer/i.test(await evaluate(`document.querySelector('#portal-nav [data-route="offer"]').textContent`)) &&
+    !(await evaluate(`!!document.getElementById('profile-nav')`)));
   await evaluate(`document.querySelector('#support-nav [data-nav-group]').click()`);
   await SLEEP(100);
   ok('the Support menu lists Report new issue and Support history',
@@ -575,9 +575,9 @@ try {
   await evaluate(`document.querySelector('#library-menu [data-route="library"]').click()`);
   await SLEEP(120);
   ok('Library opens its model and category page', await visible('#panel-library'));
-  await evaluate(`document.querySelector('#profile-nav [data-nav-group]').click()`);
+  await evaluate(`document.getElementById('header-who').click()`);
   await SLEEP(80);
-  await evaluate(`document.querySelector('#profile-menu [data-route="profile/fleet"]').click()`);
+  await evaluate(`document.querySelector('#company-menu [data-detail="fleet"]').click()`);
   await SLEEP(120);
   ok('Fleet opens with the customer aircraft cards',
     await visible('#panel-fleet') &&
@@ -594,9 +594,9 @@ try {
   await SLEEP(100);
   ok('the company name opens the personalisation menu',
     await visible('#company-menu') &&
-    /company info/i.test(await evaluate(`document.getElementById('company-menu').innerText`)) &&
+    /company details/i.test(await evaluate(`document.getElementById('company-menu').innerText`)) &&
     /approved users/i.test(await evaluate(`document.getElementById('company-menu').innerText`)) &&
-    /your fleet/i.test(await evaluate(`document.getElementById('company-menu').innerText`)));
+    /fleet/i.test(await evaluate(`document.getElementById('company-menu').innerText`)));
   await evaluate(`document.querySelector('#company-menu [data-detail="users"]').click()`);
   await SLEEP(100);
   ok('Approved users opens from the company menu',
@@ -666,8 +666,15 @@ try {
     await evaluate(`!!document.querySelector('#lib-training .lib-item.video img[src*="img.youtube.com/vi/"]')`));
   ok('...and the Other SOP shelf carries the camera setup docs',
     await evaluate(`!!document.querySelector('#lib-other-sop .lib-item[data-doc-url*="1NvQ5LFSAL3T7Cvr0AnBpjwQkIY5I5Lar"]')`));
-  ok('documents open in the lean in-portal viewer, videos in a new tab',
-    await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.classList.contains('video') ? (a.target === '_blank' && /noopener/.test(a.rel)) : !!a.dataset.docUrl)`));
+  ok('documents open in the lean in-portal viewer, videos in the in-app player',
+    await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.classList.contains('video') ? !!a.dataset.videoId : !!a.dataset.docUrl)`));
+  await evaluate(`document.querySelector('#lib-body .lib-item.video').click()`);
+  await SLEEP(150);
+  ok('a video opens in the in-app player, with a separate YouTube escape',
+    await visible('#video-player') &&
+    await evaluate(`!!document.querySelector('#video-player iframe')`) &&
+    await evaluate(`Array.from(document.querySelectorAll('#video-player a[target="_blank"]')).some(a => /youtube\\.com/.test(a.href))`));
+  await evaluate(`document.getElementById('video-close').click()`);
   await evaluate(`document.querySelector('#lib-body .lib-item:not(.video)').click()`);
   await SLEEP(120);
   ok('the document viewer opens with an iframe and a new-tab escape',

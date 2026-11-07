@@ -1359,6 +1359,7 @@
   .form-door p {
     margin: 0 0 6px; color: var(--fg-muted);
     font-size: 14px; line-height: 1.55; max-width: 46ch;
+    text-align: justify; text-align-last: left;
   }
   .form-door .btn { align-self: flex-start; margin-top: auto; }
   @media (max-width: 700px) {

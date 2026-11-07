@@ -963,7 +963,7 @@
   @media (max-width: 900px) {
     .portal-drop { position: fixed; left: 12px; right: 12px; top: 70px; min-width: 0; }
   }
-  .fleet-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .fleet-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
   .fleet-card { border: 1px solid var(--line); border-top: 2px solid var(--yellow); background: var(--surface); padding: 14px; }
   .fleet-card b { display: block; font-size: 18px; margin-bottom: 2px; }
   .fleet-card span { display: block; color: var(--fg-muted); font-size: 13px; }
@@ -1384,31 +1384,10 @@
   .lib-other-sop { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); }
   .lib-other-sop .lib-model-name { border-bottom-width: 3px; }
   #lib-other-sop { scroll-margin-top: 84px; }
-  /* -- Right-side page rail -------------------------------------------------- */
-  .page-rail {
-    position: fixed; right: 14px; top: 50%; transform: translateY(-50%); z-index: 39;
-    display: flex; flex-direction: column; gap: 4px; padding: 8px 6px;
-    background: color-mix(in srgb, var(--surface) 82%, transparent);
-    border: 1px solid var(--line); backdrop-filter: blur(8px);
-  }
-  .page-rail a { position: relative; width: 14px; height: 14px; display: grid; place-items: center; text-decoration: none; }
-  .page-rail a::before {
-    content: ""; width: 6px; height: 6px; border: 1px solid var(--fg-muted);
-    background: transparent; transition: background .2s ease, border-color .2s ease;
-  }
-  .page-rail a span {
-    position: absolute; right: 22px; top: 50%; transform: translateY(-50%);
-    white-space: nowrap; padding: 4px 8px; background: var(--surface);
-    border: 1px solid var(--line); color: var(--fg);
-    font-family: var(--mono); font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
-    opacity: 0; pointer-events: none; transition: opacity .15s ease;
-  }
-  .page-rail a:hover span, .page-rail a.is-active span { opacity: 1; }
-  .page-rail a.is-active::before { background: var(--yellow); border-color: var(--yellow); }
-  .page-rail a:hover::before { border-color: var(--fg); }
-  body.portal-panel-open .page-rail { display: none; }
-  @media (max-width: 900px) { .page-rail { display: none; } }
-
+  /* -- Panel routes: the marketing sections live on the home page only -------- */
+  body.portal-panel-open #products,
+  body.portal-panel-open #support,
+  body.portal-panel-open #reach { display: none; }
   /* -- Collapsible library sections ----------------------------------------- */
   summary.lib-model-name {
     cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between;
@@ -1586,3 +1565,37 @@
   @media (max-width: 1000px) { .offer-groups { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 700px) { .offer-hero { grid-template-columns: 1fr; } }
   @media (max-width: 560px) { .offer-groups { grid-template-columns: 1fr; } }
+  /* -- Company profile form: additional addresses and text rules ------------- */
+  .detail-note {
+    margin: 10px 0; color: var(--fg-muted); font-size: 13px; line-height: 1.55;
+    text-align: justify; text-align-last: left;
+  }
+  .panel .sub, .detail-block > p, .foot-warranty { text-align: justify; text-align-last: left; }
+  .add-addr-row { display: grid; gap: 6px; margin-bottom: 10px; }
+  .add-addr-row label {
+    font-family: var(--mono); font-size: 9px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--fg-muted);
+  }
+  .add-addr-row textarea {
+    min-height: 80px; resize: vertical; padding: 10px 12px; font: inherit; font-size: 15px;
+    border: 1px solid var(--line-strong); border-radius: 0; background: var(--surface-2);
+    color: var(--fg); width: 100%; box-sizing: border-box;
+  }
+  .add-addr-row .detail-del { justify-self: start; }
+
+  /* -- Fleet: a visual shelf, one card per aircraft -------------------------- */
+  .fleet-card.fleet-visual {
+    display: flex; flex-direction: column; gap: 5px; padding: 0 0 14px; overflow: hidden;
+  }
+  .fleet-photo {
+    width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
+    background: var(--surface-2); border-bottom: 1px solid var(--line);
+  }
+  .fleet-photo-empty { display: block; }
+  .fleet-card.fleet-visual .fleet-model,
+  .fleet-card.fleet-visual span,
+  .fleet-card.fleet-visual a { margin-inline: 14px; }
+  .fleet-card.fleet-visual .fleet-model {
+    font-size: 20px; font-weight: 800; text-transform: uppercase; margin-top: 8px;
+  }
+  .fleet-card.fleet-visual span { font-size: 12.5px; }

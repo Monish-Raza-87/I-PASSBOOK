@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v130';
+const APP_VERSION = 'v131';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3770,6 +3770,12 @@ function enterCustomerMode() {
   if (chosen === 'cream') document.documentElement.dataset.theme = 'light';
   document.title = 'Indrones Customer Space';
 
+  // Keep the first frame the portal's own ground colour. The staff stylesheets are
+  // about to be removed, and a white flash before portal.css lands reads as a
+  // broken layout rather than as a load.
+  document.documentElement.style.backgroundColor =
+    document.documentElement.dataset.theme === 'dark' ? '#0f0f0f' : '#f1f1ee';
+
   document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
     if ((link.getAttribute('href') || '').indexOf('portal.css') === -1) link.remove();
   });
@@ -3787,16 +3793,33 @@ function enterCustomerMode() {
   // Versioned, so a stale-while-revalidate cache cannot pair this build's app.js
   // with an older portal.js.
   const v = encodeURIComponent(APP_VERSION);
-  if (!document.querySelector('link[data-portal-css]')) {
-    const css = document.createElement('link');
+  let css = document.querySelector('link[data-portal-css]');
+  if (!css) {
+    css = document.createElement('link');
     css.rel = 'stylesheet';
     css.href = 'portal.css?v=' + v;
     css.setAttribute('data-portal-css', '1');
     document.head.appendChild(css);
   }
 
+  // Do NOT inject the portal's markup before its stylesheet is in force. Mounting
+  // first paints the raw document for a frame (or until the CSS arrives), and the
+  // header and hero visibly jump when the rules land — the owner reported exactly
+  // that flash on 2026-11-07. `link.sheet` is set once an already-loaded sheet is
+  // ready; otherwise wait for the link's own load event.
+  const cssReady = new Promise((resolve, reject) => {
+    if (css.sheet) { resolve(); return; }
+    css.addEventListener('load', () => resolve(), { once: true });
+    css.addEventListener('error', () => reject(new Error('portal.css')), { once: true });
+  });
+
   const mount = () => {
-    if (window.CustomerPortal) window.CustomerPortal.mount(root);
+    cssReady.then(() => {
+      if (window.CustomerPortal) window.CustomerPortal.mount(root);
+    }).catch(() => {
+      root.innerHTML = '<p style="padding:2rem;font:15px/1.5 system-ui,sans-serif">' +
+        'Could not load your space. Check your connection, then reload this page.</p>';
+    });
   };
   if (window.CustomerPortal) { mount(); return; }
 

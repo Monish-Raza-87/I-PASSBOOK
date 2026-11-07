@@ -748,19 +748,20 @@
             </div>
             <input id="rep-serial-full" type="text" placeholder="Full UAS serial number"
                    autocomplete="off" hidden>
-            <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter the three-digit number only.</p>
+            <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter a number from 1 to 999; 000 is not valid.</p>
           </div>
           <div class="report-grid two">
             <div class="field"><label for="rep-date">Date of incident</label><input id="rep-date" type="date" value="${today}"></div>
-            <div class="field"><label for="rep-type">Support required</label>
-              <select id="rep-type">
-                <option>A Crash Related Support</option>
-                <option>Problems or Issues Without Crash</option>
-                <option>Any Other Assistance</option>
-                <option>Service/Maintenance (Under-Warranty)</option>
-                <option>Service/Maintenance (Out Of Warranty)</option>
-              </select>
-            </div>
+            <div class="field"><label for="rep-time">Time of incident</label><input id="rep-time" type="time"></div>
+          </div>
+          <div class="field"><label for="rep-type">Support required</label>
+            <select id="rep-type">
+              <option>A Crash Related Support</option>
+              <option>Problems or Issues Without Crash</option>
+              <option>Any Other Assistance</option>
+              <option>Service/Maintenance (Under-Warranty)</option>
+              <option>Service/Maintenance (Out Of Warranty)</option>
+            </select>
           </div>
           <div class="field"><label for="rep-desc">Describe the problem</label>
             <textarea id="rep-desc" required placeholder="What happened, and what should we look at?"></textarea>
@@ -771,6 +772,10 @@
           <div class="report-grid two">
             <div class="field"><label for="rep-phone">Contact phone</label><input id="rep-phone" type="tel" autocomplete="tel"></div>
             <div class="field"><label for="rep-spoc">Contact name</label><input id="rep-spoc" autocomplete="name"></div>
+          </div>
+          <div class="field">
+            <label for="rep-courier">Courier tracking ID or courier contact (optional)</label>
+            <input id="rep-courier" placeholder="Only if we should track your courier">
           </div>
                     <div class="field">
             <label for="rep-files">Evidence files</label>
@@ -823,10 +828,10 @@
       const fullSerial = String(document.getElementById('rep-serial-full').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
       if (!model) { msgEl.textContent = 'Select the UAS model.'; return; }
-      if (freeSerial ? !fullSerial : !/^[0-9]{1,3}$/.test(suffix)) {
+      if (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1)) {
         msgEl.textContent = freeSerial
           ? 'Enter the UAS serial number.'
-          : 'Enter a serial number from 001 to 999.';
+          : 'Enter a serial number from 1 to 999; 000 is not valid.';
         return;
       }
       if (!desc) { msgEl.textContent = 'Describe the problem before submitting.'; return; }
@@ -846,11 +851,13 @@
         const payload = {
           droneModel: model,
           incidentDate: document.getElementById('rep-date').value || '',
+          incidentTime: document.getElementById('rep-time').value || '',
           issueType: document.getElementById('rep-type').value || '',
           issueDesc: desc,
           incidentLocationWeather: document.getElementById('rep-loc').value || '',
           contactPhone: document.getElementById('rep-phone').value || '',
           spoc: document.getElementById('rep-spoc').value || '',
+          courierTracking: document.getElementById('rep-courier').value || '',
           files: JSON.stringify(files)
         };
         if (freeSerial) payload.droneSerial = fullSerial;
@@ -861,10 +868,12 @@
           if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
           throw new Error(msgOf(res));
         }
-        const okTitle = SAMPLE ? 'Sample report received.' : 'IR ' + esc(res.irNumber) + ' raised.';
+        const okTitle = SAMPLE
+          ? 'Sample report received.'
+          : 'Your Incident Report (No. ' + esc(res.irNumber) + ') has been registered.';
         const okBody = SAMPLE
           ? 'No IR was created. The sample was emailed to you.'
-          : 'We have received your report and the service desk will take it up.';
+          : 'The acknowledgement email with the IR number has been sent to you.';
         form.innerHTML = `<div class="report-ok"><b>${okTitle}</b><br>${okBody}</div>
           <button type="button" class="btn" id="rep-done">Close</button>`;
         document.getElementById('rep-done').addEventListener('click', () => { close(); if (typeof loadTickets === 'function') loadTickets(); });
@@ -881,6 +890,9 @@
     if (!token()) { showSignin('Sign in to send feedback, then try again.'); return; }
     const old = document.getElementById('feedback-sheet');
     if (old) old.remove();
+    const starsHtml = [1, 2, 3, 4, 5].map(n =>
+      '<button type="button" class="rate-star" data-stars="' + n +
+      '" aria-pressed="false" aria-label="' + n + ' out of 5">&#9733;</button>').join('');
     const modal = document.createElement('div');
     modal.className = 'sheet report-sheet';
     modal.id = 'feedback-sheet';
@@ -888,21 +900,42 @@
       <div class="sheet-card">
         <button type="button" class="sheet-x" id="feedback-x" aria-label="Close">&times;</button>
         <h2>Customer feedback</h2>
-        <p class="sheet-note">Tell us how the service felt. It goes straight to Customer Relations.</p>
+        <p class="sheet-note">A few questions about your drone and the support you received. It goes straight to Customer Relations.</p>
         <form id="feedback-form" class="report-grid" novalidate>
-          <div class="rate" id="feedback-rate">
-            <p>How would you rate the service?</p>
-            <div class="rate-row">
-              <button type="button" class="rate-star" data-stars="1" aria-pressed="false" aria-label="1 out of 5">&#9733;</button>
-              <button type="button" class="rate-star" data-stars="2" aria-pressed="false" aria-label="2 out of 5">&#9733;</button>
-              <button type="button" class="rate-star" data-stars="3" aria-pressed="false" aria-label="3 out of 5">&#9733;</button>
-              <button type="button" class="rate-star" data-stars="4" aria-pressed="false" aria-label="4 out of 5">&#9733;</button>
-              <button type="button" class="rate-star" data-stars="5" aria-pressed="false" aria-label="5 out of 5">&#9733;</button>
-            </div>
+          <div class="field">
+            <label for="fb-active">Is your drone currently active and operational?</label>
+            <select id="fb-active">
+              <option value="">Select</option><option>Yes</option><option>No</option>
+            </select>
           </div>
           <div class="field">
-            <label for="feedback-text">What worked, what dragged, what would you change?</label>
-            <textarea id="feedback-text" required placeholder="A few honest lines are enough."></textarea>
+            <label for="fb-fluency">Are you able to operate and use your UAS fluently?</label>
+            <select id="fb-fluency">
+              <option value="">Select</option>
+              <option>Yes, perfectly</option>
+              <option>Yes, with some difficulties</option>
+              <option>No</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="fb-challenges">Share with us (if) any operational challenges you encountered or (if) any suggestions you may have for improvement.</label>
+            <textarea id="fb-challenges" placeholder="Optional. What should we know?"></textarea>
+          </div>
+          <div class="rate" id="fb-drone-rate">
+            <p>Rate the overall performance of your drone?</p>
+            <div class="rate-row">${starsHtml}</div>
+          </div>
+          <div class="rate" id="fb-support-rate">
+            <p>How would you rate our support and services?</p>
+            <div class="rate-row">${starsHtml}</div>
+          </div>
+          <div class="field" id="fb-reason-wrap" hidden>
+            <label for="fb-reason">What made you rate our support and services this way?</label>
+            <textarea id="fb-reason" placeholder="Tell us what went wrong or what we could do better."></textarea>
+          </div>
+          <div class="field" id="fb-testimonial-wrap" hidden>
+            <label for="fb-testimonial">Would you be willing to provide a testimonial about your experience with our drone?</label>
+            <select id="fb-testimonial"><option value="">Select</option><option>Yes</option><option>No</option></select>
           </div>
           <p class="msg" id="feedback-msg" aria-live="polite"></p>
           <button type="submit" class="btn btn-primary" id="feedback-submit">Send feedback</button>
@@ -912,28 +945,53 @@
     const close = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
     document.getElementById('feedback-x').addEventListener('click', close);
-    let stars = 0;
-    modal.querySelectorAll('.rate-star').forEach(b => {
-      b.addEventListener('click', () => {
-        stars = Number(b.dataset.stars);
-        modal.querySelectorAll('.rate-star').forEach(x =>
-          x.setAttribute('aria-pressed', Number(x.dataset.stars) <= stars ? 'true' : 'false'));
-      });
-    });
+    let droneStars = 0, supportStars = 0;
+    const paint = (boxId, value) => {
+      modal.querySelectorAll('#' + boxId + ' .rate-star').forEach(x =>
+        x.setAttribute('aria-pressed', Number(x.dataset.stars) <= value ? 'true' : 'false'));
+    };
+    modal.querySelectorAll('#fb-drone-rate .rate-star').forEach(b => b.addEventListener('click', () => {
+      droneStars = Number(b.dataset.stars);
+      paint('fb-drone-rate', droneStars);
+    }));
+    const reasonWrap = document.getElementById('fb-reason-wrap');
+    const testiWrap = document.getElementById('fb-testimonial-wrap');
+    modal.querySelectorAll('#fb-support-rate .rate-star').forEach(b => b.addEventListener('click', () => {
+      supportStars = Number(b.dataset.stars);
+      paint('fb-support-rate', supportStars);
+      reasonWrap.hidden = !(supportStars > 0 && supportStars <= 3);
+      testiWrap.hidden = !(supportStars >= 4);
+    }));
     const form = document.getElementById('feedback-form');
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const msg = document.getElementById('feedback-msg');
       msg.className = 'msg err';
       msg.textContent = '';
-      const text = String(document.getElementById('feedback-text').value || '').trim();
-      if (!stars) { msg.textContent = 'Choose a rating from 1 to 5.'; return; }
-      if (!text) { msg.textContent = 'Write a few words before sending.'; return; }
+      const active = document.getElementById('fb-active').value;
+      const fluency = document.getElementById('fb-fluency').value;
+      const challenges = String(document.getElementById('fb-challenges').value || '').trim();
+      const reason = String(document.getElementById('fb-reason').value || '').trim();
+      const testimonial = document.getElementById('fb-testimonial').value;
+      if (!active) { msg.textContent = 'Tell us whether your drone is active and operational.'; return; }
+      if (!fluency) { msg.textContent = 'Choose how fluently you can operate the UAS.'; return; }
+      if (!droneStars) { msg.textContent = 'Rate the overall performance of your drone.'; return; }
+      if (!supportStars) { msg.textContent = 'Rate our support and services.'; return; }
+      if (supportStars <= 3 && !reason) { msg.textContent = 'Tell us why you rated our support and services 3 or less.'; return; }
+      if (supportStars >= 4 && !testimonial) { msg.textContent = 'Tell us whether you would give a testimonial.'; return; }
       const btn = document.getElementById('feedback-submit');
       btn.disabled = true;
-      btn.textContent = 'Sending…';
+      btn.textContent = 'Sending.';
       try {
-        const res = await apiPost('submitFeedback', { stars: String(stars), message: text });
+        const res = await apiPost('submitFeedback', {
+          droneActive: active,
+          fluency: fluency,
+          challenges: challenges,
+          droneRating: String(droneStars),
+          supportRating: String(supportStars),
+          supportReason: supportStars <= 3 ? reason : '',
+          testimonial: supportStars >= 4 ? testimonial : ''
+        });
         if (!res || res.status !== 'ok') {
           if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
           throw new Error(msgOf(res));
@@ -949,6 +1007,7 @@
       }
     });
   }
+
 
   const wireReport = (id) => {
     const el = document.getElementById(id);

@@ -762,7 +762,7 @@ r.ok('the reserve is non-zero and strictly below the cap',
 // added and nobody looked at the daily ceiling — which is how a busy day
 // silently disables password recovery for the whole company.
 const sendSites = [...code.matchAll(/MailApp\.sendEmail/g)];
-r.ok('there are exactly five send sites', sendSites.length === 5, sendSites.length);
+r.ok('there are exactly six send sites', sendSites.length === 6, sendSites.length);
 sendSites.forEach((m, i) => {
   const owner = enclosingFn(m.index);
   const body  = owner ? fnBody(owner.name) : '';

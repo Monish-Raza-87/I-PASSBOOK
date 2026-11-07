@@ -3376,6 +3376,114 @@ function sendAuthMail(to, subject, body) {
   } catch (e) { return false; }
 }
 
+// The customer's acknowledgement. One email, to the reporter only; the sender is
+// the Apps Script account and replies are pointed at Customer Relations. The body
+// is the owner's template (2026-11-08): a short letter above a two-column table of
+// every field the form collected.
+function irEvidenceHtml(raw) {
+  var urls = String(raw || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  if (!urls.length) return '&mdash;';
+  return urls.map(function (u) {
+    var safe = htmlEscape(u);
+    return /^https?:\/\//i.test(u) ? '<a href="' + safe + '">' + safe + '</a>' : safe;
+  }).join('<br>');
+}
+
+function irAcknowledgementText(fields, ir, sample) {
+  fields = fields || {};
+  var name = String(fields.customerName || fields.contactEmail || 'Customer').trim();
+  var who = [String(fields.spoc || '').trim() || String(fields.customerName || '').trim(),
+             String(fields.contactPhone || '').trim(),
+             String(fields.contactEmail || '').trim()].filter(Boolean).join(' | ');
+  var lines = [
+    'Your Incident Report (No. ' + ir + ') Has Been Registered',
+    '',
+    'Dear ' + name + ',',
+    '',
+    "Thank you for submitting your incident report to Indrones Support. We've registered your report under the unique Complaint ID: " + ir + '.',
+    '',
+    'Our team is currently reviewing the details of your submission. One of our representatives will get back to you within 48 hours with updates or a resolution.',
+    '',
+    'Submission Details:',
+    'Field\tDetails',
+    "Who's Reporting? (Pilot/Respondent Name And Contact Info)\t" + who,
+    'Where Do You Work?\t' + String(fields.companyName || ''),
+    'What Support Is Required?\t' + String(fields.issueType || ''),
+    'Please Describe Your Problem/Purpose/Required Assistance In A Few Words\t' + String(fields.issueDesc || ''),
+    'Date of Incident\t' + String(fields.incidentDate || ''),
+    'Time of Incident\t' + String(fields.incidentTime || ''),
+    'Mention the Drone Serial No (S250XX)\t' + String(fields.droneId || ''),
+    'Incident Location and Weather\t' + String(fields.incidentLocationWeather || ''),
+    'Evidence: Attach Files From The Incident\t' + String(fields.evidenceFormN || ''),
+    "Do You Want Us To Track Your Courier? Share Your Courier Tracking ID or Courier Handling Person's Contact Info.\t" + String(fields.courierTracking || '')
+  ];
+  if (sample) lines.push('', 'This is a SAMPLE. No IR was created and no record was written.');
+  lines.push('',
+    'Please save this email for future reference. If you need to share additional information or have any questions, feel free to reply to this email or contact us at customer.relations@indrones.com.',
+    '',
+    "Thank you for choosing Indrones Support. We're here to assist you and ensure your concerns are resolved promptly.",
+    '',
+    'Best regards,',
+    'The Indrones Support Team');
+  return lines.join('\n');
+}
+
+function irAcknowledgementHtml(fields, ir, sample) {
+  fields = fields || {};
+  var name = htmlEscape(String(fields.customerName || fields.contactEmail || 'Customer').trim());
+  var who = [String(fields.spoc || '').trim() || String(fields.customerName || '').trim(),
+             String(fields.contactPhone || '').trim(),
+             String(fields.contactEmail || '').trim()].filter(Boolean).map(function (x) { return htmlEscape(x); }).join(' | ');
+  var rows = [
+    ["Who's Reporting? (Pilot/Respondent Name And Contact Info)", who || '&mdash;'],
+    ['Where Do You Work?', htmlEscape(String(fields.companyName || '')) || '&mdash;'],
+    ['What Support Is Required?', htmlEscape(String(fields.issueType || '')) || '&mdash;'],
+    ['Please Describe Your Problem/Purpose/Required Assistance In A Few Words', htmlEscape(String(fields.issueDesc || '')).replace(/\n/g, '<br>') || '&mdash;'],
+    ['Date of Incident', htmlEscape(String(fields.incidentDate || '')) || '&mdash;'],
+    ['Time of Incident', htmlEscape(String(fields.incidentTime || '')) || '&mdash;'],
+    ['Mention the Drone Serial No (S250XX)', htmlEscape(String(fields.droneId || '')) || '&mdash;'],
+    ['Incident Location and Weather', htmlEscape(String(fields.incidentLocationWeather || '')).replace(/\n/g, '<br>') || '&mdash;'],
+    ['Evidence: Attach Files From The Incident', irEvidenceHtml(fields.evidenceFormN)],
+    ["Do You Want Us To Track Your Courier? Share Your Courier Tracking ID or Courier Handling Person's Contact Info.", htmlEscape(String(fields.courierTracking || '')) || '&mdash;']
+  ];
+  var trs = rows.map(function (r) {
+    return '<tr><td style="border:1px solid #d9d9d9;padding:8px 10px;background:#f7f7f7;font-weight:600;vertical-align:top;width:42%">' + r[0] + '</td>' +
+           '<td style="border:1px solid #d9d9d9;padding:8px 10px;vertical-align:top">' + (r[1] || '&mdash;') + '</td></tr>';
+  }).join('');
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#1a1a1b">' +
+    '<h2 style="font-size:18px;margin:0 0 14px">Your Incident Report (No. ' + htmlEscape(ir) + ') Has Been Registered</h2>' +
+    '<p>Dear ' + name + ',</p>' +
+    "<p>Thank you for submitting your incident report to Indrones Support. We've registered your report under the unique Complaint ID: <b>" + htmlEscape(ir) + '</b>.</p>' +
+    '<p>Our team is currently reviewing the details of your submission. One of our representatives will get back to you within 48 hours with updates or a resolution.</p>' +
+    (sample ? '<p style="background:#fff7c2;border:1px solid #e6c200;padding:8px 10px"><b>This is a sample.</b> No IR was created and no record was written.</p>' : '') +
+    '<p><b>Submission Details:</b></p>' +
+    '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:13px">' +
+      '<tr><th align="left" style="border:1px solid #d9d9d9;padding:8px 10px;background:#f0f0ee">Field</th>' +
+      '<th align="left" style="border:1px solid #d9d9d9;padding:8px 10px;background:#f0f0ee">Details</th></tr>' +
+      trs +
+    '</table>' +
+    '<p>Please save this email for future reference. If you need to share additional information or have any questions, feel free to reply to this email or contact us at <a href="mailto:customer.relations@indrones.com">customer.relations@indrones.com</a>.</p>' +
+    "<p>Thank you for choosing Indrones Support. We're here to assist you and ensure your concerns are resolved promptly.</p>" +
+    '<p>Best regards,<br>The Indrones Support Team</p>' +
+  '</div>';
+}
+
+function sendIrAcknowledgement(to, fields, ir, sample) {
+  if (!to) return false;
+  if (!mailQuotaOk('auth')) return false;
+  var subject = 'I-PASSBOOK query (No. ' + ir + ') has been registered with Indrones Customer Relations';
+  if (sample) subject = 'I-PASSBOOK sample report (No. ' + ir + ') has been registered with Indrones Customer Relations';
+  try {
+    MailApp.sendEmail(to, subject, irAcknowledgementText(fields, ir, sample), {
+      name: 'I-PASSBOOK',
+      htmlBody: irAcknowledgementHtml(fields, ir, sample),
+      replyTo: 'customer.relations@indrones.com'
+    });
+    return true;
+  } catch (e) { return false; }
+}
+
+
 // ──────────────────────────────────────────────────────────────────────────────
 // ADMIN NOTICES — one email per event the admin should hear about as it happens.
 // ──────────────────────────────────────────────────────────────────────────────
@@ -5899,24 +6007,55 @@ function submitCustomerFeedback(params, authEmail) {
   var company = customerCompany(email);
   if (!company) throw new Error('Forbidden: this account has no customer scope.');
 
-  var stars = Math.round(Number(params.stars));
-  if (!(stars >= 1 && stars <= 5)) throw new Error('Choose a rating from 1 to 5.');
-  var message = String(params.message || '').trim().slice(0, 4000);
-  if (!message) throw new Error('Write a few words before sending.');
+  // New form fields. The old `stars`/`message` pair is still accepted so a cached
+  // portal can never fail while the page catches up.
+  var droneActive = String(params.droneActive || '').trim();
+  var fluency = String(params.fluency || '').trim();
+  var challenges = String(params.challenges || params.message || '').trim().slice(0, 4000);
+  var droneRating = Math.round(Number(params.droneRating || (params.stars ? params.stars : 0)));
+  var supportRating = Math.round(Number(params.supportRating || (params.stars ? params.stars : 0)));
+  var supportReason = String(
+    params.supportReason || (supportRating <= 3 ? (params.message || '') : '') || ''
+  ).trim().slice(0, 2000);
+  var testimonial = String(params.testimonial || '').trim();
+
+  if (droneActive !== 'Yes' && droneActive !== 'No')
+    throw new Error('Tell us whether your drone is active and operational.');
+  if (['Yes, perfectly', 'Yes, with some difficulties', 'No'].indexOf(fluency) < 0)
+    throw new Error('Choose how fluently you can operate the UAS.');
+  if (!(droneRating >= 1 && droneRating <= 5))
+    throw new Error('Rate the overall performance of your drone.');
+  if (!(supportRating >= 1 && supportRating <= 5))
+    throw new Error('Rate our support and services.');
+  if (supportRating <= 3 && !supportReason)
+    throw new Error('Tell us why you rated our support and services 3 or less.');
+  if (supportRating >= 4 && testimonial !== 'Yes' && testimonial !== 'No')
+    throw new Error('Tell us whether you would give a testimonial.');
 
   var cr = portalRead().cr || {};
   var to = String(cr.email || 'customer.relations@indrones.com').trim();
   if (!to || !isMailRecipientAllowed(to)) throw new Error('The feedback inbox is not configured.');
 
-  var body = 'Customer feedback\n\n' +
-    'Company: ' + company + '\n' +
-    'From: ' + email + '\n' +
-    'Rating: ' + stars + '/5\n\n' + message +
-    '\n\n--\nSent from the I-PASSBOOK customer portal.';
+  var lines = [
+    'Customer feedback',
+    '',
+    'Company: ' + company,
+    'From: ' + email,
+    'Is the drone active and operational? ' + droneActive,
+    'Can the customer operate the UAS fluently? ' + fluency,
+    'Drone performance: ' + droneRating + '/5',
+    'Support and services: ' + supportRating + '/5'
+  ];
+  if (supportRating <= 3) lines.push('Reason for the support rating: ' + supportReason);
+  if (supportRating >= 4) lines.push('Willing to give a testimonial: ' + testimonial);
+  lines.push('', 'Operational challenges / suggestions:', challenges || '-',
+             '', '--', 'Sent from the I-PASSBOOK customer portal.');
+  var body = lines.join('\n');
+
   var sent = false;
   if (mailQuotaOk('feedback')) {
     try {
-      MailApp.sendEmail(to, 'I-PASSBOOK feedback - ' + company + ' - ' + stars + '/5', body,
+      MailApp.sendEmail(to, 'I-PASSBOOK feedback - ' + company + ' - ' + supportRating + '/5', body,
                         { name: 'I-PASSBOOK', replyTo: email });
       sent = true;
     } catch (e) { sent = false; }
@@ -5928,8 +6067,11 @@ function submitCustomerFeedback(params, authEmail) {
     var st = readJsonLocked(PORTAL_STORE_FILE);
     if (!st || typeof st !== 'object') st = {};
     if (!(st.feedback instanceof Array)) st.feedback = [];
-    st.feedback.push({ company: company, email: email, stars: stars,
-                       message: message, at: new Date().toISOString() });
+    st.feedback.push({
+      company: company, email: email, droneActive: droneActive, fluency: fluency,
+      challenges: challenges, droneRating: droneRating, supportRating: supportRating,
+      supportReason: supportReason, testimonial: testimonial, at: new Date().toISOString()
+    });
     st.feedback = st.feedback.slice(-200);
     writeJson(PORTAL_STORE_FILE, st);
   } catch (e) { /* the email already carried it */ }
@@ -5937,6 +6079,7 @@ function submitCustomerFeedback(params, authEmail) {
   return { status: 'ok', message: 'Thank you. Your feedback has reached Customer Relations.',
            apiVersion: CONFIG.API_VERSION };
 }
+
 // POST rateIR — one rating, on one ticket, once.
 //
 // Two refusals carry the whole value of the number: it is only taken on a ticket that
@@ -7040,26 +7183,25 @@ function createIRFromApp(params, authEmail) {
   if (String(params.sample || '') === '1') {
     var sampleRef = 'SAMPLE-' + Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyyMMdd-HHmmss');
     var sampleFiles = params.files instanceof Array ? params.files : [];
-    var sampleLines = [
-      'This is a SAMPLE report. No IR was created and no record was written.',
-      '',
-      'Model: ' + model,
-      'Serial: ' + serial,
-      'Support required: ' + String(params.issueType || '').trim(),
-      'Reported by: ' + customerName + ' <' + contactEmail + '>',
-      'Company: ' + company,
-      'Incident date: ' + String(params.incidentDate || '').trim(),
-      'Location and weather: ' + String(params.incidentLocationWeather || '').trim(),
-      'Contact phone: ' + String(params.contactPhone || '').trim(),
-      'Contact name: ' + String(params.spoc || '').trim(),
-      '',
-      'Issue:',
-      issueDesc
-    ];
-    var sampleNames = sampleFiles.map(function (f) { return f && f.name; }).filter(function (n) { return !!n; });
-    if (sampleNames.length) sampleLines.push('', 'Evidence files selected: ' + sampleNames.join(', '));
+    var sampleFields = {
+      irNumber: sampleRef,
+      incidentDate: String(params.incidentDate || '').trim(),
+      incidentTime: String(params.incidentTime || '').trim(),
+      droneId: serial,
+      droneModel: model,
+      companyName: company,
+      customerName: customerName,
+      contactPhone: String(params.contactPhone || '').trim(),
+      contactEmail: contactEmail,
+      spoc: String(params.spoc || '').trim(),
+      issueType: String(params.issueType || '').trim(),
+      issueDesc: issueDesc,
+      incidentLocationWeather: String(params.incidentLocationWeather || '').trim(),
+      courierTracking: String(params.courierTracking || '').trim(),
+      evidenceFormN: sampleFiles.map(function (f) { return f && f.name; }).filter(Boolean).join(', ')
+    };
     var sampleSent = contactEmail
-      ? sendAuthMail(contactEmail, 'I-PASSBOOK sample report ' + sampleRef, sampleLines.join('\n'))
+      ? sendIrAcknowledgement(contactEmail, sampleFields, sampleRef, true)
       : false;
     return { status: 'ok', irNumber: sampleRef, sample: true,
              message: sampleSent
@@ -7074,6 +7216,7 @@ function createIRFromApp(params, authEmail) {
     irNumber: ir,
     dateRaised: now,
     incidentDate: String(params.incidentDate || '').trim(),
+    incidentTime: String(params.incidentTime || '').trim(),
     droneId: serial,
     droneModel: model,
     companyName: company,
@@ -7081,6 +7224,7 @@ function createIRFromApp(params, authEmail) {
     contactPhone: String(params.contactPhone || '').trim(),
     contactEmail: contactEmail,
     spoc: String(params.spoc || '').trim(),
+    courierTracking: String(params.courierTracking || '').trim(),
     issueType: String(params.issueType || '').trim(),
     issueDesc: issueDesc,
     incidentLocationWeather: String(params.incidentLocationWeather || '').trim(),
@@ -7127,8 +7271,7 @@ function createIRFromApp(params, authEmail) {
 
     try {
       if (contactEmail) {
-        sendAuthMail(contactEmail, 'I-PASSBOOK IR ' + ir + ' received',
-          'Your report has been received.\n\nIR Number: ' + ir + '\n' + issueDesc);
+        sendIrAcknowledgement(contactEmail, fields, ir, false);
       }
     } catch (e) { /* the IR exists even if the acknowledgement cannot be sent */ }
 
@@ -10993,6 +11136,9 @@ function serialNomenclatureProblem(serial) {
   var s = canonicalSerialValue(serial);
   if (!s) return '';
   if (/^S75-[A-Z]{4,}$/.test(s)) return '';
+  // XXX is a natural-number body: 000 is not a serial, it is a placeholder. The
+  // suffix form already refuses it; this keeps a hand-typed full serial honest too.
+  if (/^(?:S100-|S25P|S75|S25)000$/.test(s)) return 'the serial body cannot be 000; use 001-999';
   if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) || /^S100-V\d{1,2}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX (R&D: S100-Vn)';
   if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) || /^S25P-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX (R&D: S25P-Vn)';
   if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) || /^S75-V\d{1,2}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX (R&D: S75-Vn)';

@@ -1040,6 +1040,11 @@
     min-width: 190px; padding: 6px; background: var(--surface);
     border: 1px solid var(--line); box-shadow: 0 12px 32px rgba(0,0,0,.18);
   }
+  /* Bridges the 8px gap to the button, so a hover that travels from the name to
+     the menu never leaves the wrapper (which would close it on the way down). */
+  .company-menu::before {
+    content: ""; position: absolute; left: 0; right: 0; top: -10px; height: 10px;
+  }
   .company-menu button {
     display: block; width: 100%; padding: 10px 12px; border: 0; background: transparent;
     color: var(--fg); font-family: var(--mono); font-size: 10px; font-weight: 600;

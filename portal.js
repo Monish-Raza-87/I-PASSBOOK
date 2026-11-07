@@ -106,7 +106,6 @@
        company. Nothing here is ever read back out of storage — see the note on
        PORTAL in the script. -->
   <section id="portal" class="wrap" hidden>
-    <p class="eyebrow">Customer space</p>
     <h1 id="portal-title">Your space</h1>
     <p class="lede" id="portal-sub"></p>
 
@@ -381,7 +380,7 @@
   </section>
 
   <section id="products" class="wrap">
-    <h2>Your products</h2>
+    <h2>Our products</h2>
     <p class="sub">The platforms we support, and what each one carries.</p>
     <div class="cards">
 
@@ -560,13 +559,13 @@
           <span class="reach-kicker">Call</span>
           <h3>Phone</h3>
           <p>For something urgent, call the service desk directly.</p>
-          <a class="reach-contact" href="tel:+919594160160">+91 9594 160 160</a>
+          <a class="reach-contact" href="tel:+918655366232">+91 86553 66232</a>
         </article>
         <article class="reach-card">
           <span class="reach-kicker">Write</span>
           <h3>Email</h3>
           <p>Send the details and we will open a request against your company.</p>
-          <a class="reach-contact" href="mailto:info@indrones.com">info@indrones.com</a>
+          <a class="reach-contact" href="mailto:customer.relations@indrones.com">customer.relations@indrones.com</a>
         </article>
       </div>
     </div>
@@ -2294,6 +2293,18 @@
       e.stopPropagation();
       toggleCompanyMenu();
     });
+    // Mouse users expect the company menu to open on hover, like the section tabs.
+    // Only where hover exists: on a touch screen a synthetic mouseenter would open
+    // the menu and the following tap would close it again.
+    if (window.matchMedia && window.matchMedia('(hover: hover)').matches) {
+      const companyWrap = document.querySelector('.company-menu-wrap');
+      if (companyWrap) {
+        companyWrap.addEventListener('mouseenter', () => {
+          if (!$('header-who').hidden && $('company-menu').hidden) toggleCompanyMenu();
+        });
+        companyWrap.addEventListener('mouseleave', closeCompanyMenu);
+      }
+    }
     document.querySelectorAll('#company-menu [data-detail]').forEach(b => {
       b.addEventListener('click', () => {
         const detail = b.dataset.detail;

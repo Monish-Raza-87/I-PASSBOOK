@@ -232,8 +232,8 @@
     <!-- ── LIBRARY ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-library" hidden>
       <div class="panel-head"><h2>Product library</h2><span class="lib-n" id="lib-count"></span></div>
-      <p class="sub">Documents by platform, plus the training videos. Everything here is a link to a
-      file the service desk maintains, so it is always the current version.</p>
+      <p class="sub">Manuals and documents by platform, then the full training curriculum &mdash; from
+      unboxing to geotagging. Every item is a link the service desk keeps current.</p>
       <div id="lib-body"></div>
     </section>
 
@@ -1346,6 +1346,29 @@
     'Flight Checklist',
     'Training Videos'
   ];
+
+  // The after-sales training curriculum. The desk can also file videos in the shared
+  // library store; those win by YouTube id, so a video is never listed twice. Keeping
+  // the course here means a new customer sees the full path — unboxing to geotagging —
+  // even before the store has been populated.
+  const TRAINING_CURRICULUM = [
+    { group: 'Video content', kind: 'video', label: 'Unboxing & assembly', url: 'https://youtu.be/0yWctjpmxik' },
+    { group: 'Video content', kind: 'video', label: 'Charging', url: 'https://youtu.be/Bsei9NOUY4M' },
+    { group: 'Video content', kind: 'video', label: 'Setting up base & rover', url: 'https://youtu.be/swKAQ1A6LbQ' },
+    { group: 'Video content', kind: 'video', label: 'Camera settings and SD card issues', url: 'https://youtu.be/nBwetvI3PQU' },
+    { group: 'Video content', kind: 'video', label: 'Camera settings and SD card issues (part 2)', url: 'https://youtu.be/_zI_uXdC9ZA' },
+    { group: 'Video content', kind: 'doc', label: 'Camera setup docs', url: 'https://drive.google.com/drive/folders/1kngSIWZFvON3fTDR4mY5BgwXDJjkXs3S?usp=sharing' },
+    { group: 'Calibration', kind: 'video', label: 'Radio calibration', url: 'https://youtu.be/1Sldd9Rp6Pw' },
+    { group: 'Calibration', kind: 'video', label: 'Accelerometer calibration', url: 'https://youtu.be/WpCxuCQUack' },
+    { group: 'Calibration', kind: 'video', label: 'Compass calibration', url: 'https://youtu.be/UWBNk01IaaY' },
+    { group: 'Flight control', kind: 'video', label: 'Basic flight planning', url: 'https://youtu.be/qsFg9vD_qgw' },
+    { group: 'Flight control', kind: 'video', label: 'Terrain following and planning multiple flights', url: 'https://youtu.be/_kkeOEIuB2c' },
+    { group: 'Post-flight process', kind: 'video', label: 'Downloading the log and tlog from the drone', url: 'https://youtu.be/cgr4BDXyRvo' },
+    { group: 'Post-flight process', kind: 'video', label: 'Indrones Geotagging Utility', url: 'https://youtu.be/BAS1tmFAMa8' },
+    { group: 'Post-flight process', kind: 'video', label: 'Mission Planner geotagging', url: 'https://youtu.be/DEc5r4akOQA' },
+    { group: 'Post-flight process', kind: 'video', label: 'RedtoolBox geotagging', url: 'https://youtu.be/iD8uhQOVtJ8' },
+    { group: 'Post-flight process', kind: 'video', label: 'Emlid Studio geotagging', url: 'https://youtu.be/3mjgRJLjNwQ' }
+  ];
   function libCategory(it) {
     if (it && it.category) return String(it.category);
     const s = String((it && it.label) || '');
@@ -1365,10 +1388,12 @@
   }
   function libItemHtml(it) {
     const id = it.kind === 'video' ? ytId(it.url) : '';
+    const externalDoc = it.kind !== 'video' && /\/folders\//.test(String(it.url || ''));
     const host = (function () { try { return new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
     return '<li><a class="lib-item' + (id ? ' video' : '') + '" href="' + esc(it.url) +
       '" data-doc-url="' + esc(it.url) + '" data-doc-title="' + esc(it.label) + '"' +
-      (id ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' +
+      (id || externalDoc ? ' target="_blank" rel="noopener noreferrer"' : '') +
+      (externalDoc ? ' data-doc-external="1"' : '') + '>' +
       (id ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">' : '') +
       '<b>' + esc(it.label) + '</b>' +
       '<span>' + (it.kind === 'video' ? 'Training video' : 'Document') + (host ? ' · ' + esc(host) : '') +
@@ -1390,26 +1415,60 @@
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
     document.getElementById('doc-close').addEventListener('click', () => modal.remove());
   }
+  function isTrainingItem(it) {
+    if (!it) return false;
+    if (String(it.sku || '').trim().toUpperCase() === 'TRAINING VIDEOS') return true;
+    if (it.kind === 'video') return true;
+    return libCategory(it) === 'Training Videos';
+  }
+  function asTrainingItem(it, group) {
+    return {
+      sku: 'TRAINING VIDEOS',
+      category: 'Training Videos',
+      group: group || it.group || 'More training',
+      kind: it.kind === 'video' ? 'video' : 'doc',
+      label: it.label,
+      url: it.url
+    };
+  }
   function renderLibrary() {
     const body  = $('lib-body');
-    const items = (PORTAL_DATA && PORTAL_DATA.library) || [];
-    $('lib-count').textContent = items.length
-      ? items.length + ' item' + (items.length === 1 ? '' : 's') : '';
+    const stored = (PORTAL_DATA && PORTAL_DATA.library) || [];
 
-    const models = PORTAL_ORDER.slice();
-    items.forEach(it => {
-      const k = libSkuKey(it.sku);
-      if (k !== 'General' && models.indexOf(k) < 0) models.push(k);
-    });
-    if (!items.length) {
+    // Split the store: platform documents stay in their model sections; every video and
+    // anything filed as Training Videos moves to one curriculum page at the end. The
+    // static curriculum is merged by YouTube id so a video the desk also filed is not
+    // listed twice.
+    const docs = stored.filter(it => !isTrainingItem(it));
+    const training = [];
+    const seen = {};
+    const addTraining = (it) => {
+      const key = it.kind === 'video' ? (ytId(it.url) || String(it.url || '')) : String(it.url || '');
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      training.push(it);
+    };
+    stored.filter(isTrainingItem).forEach(it => addTraining(asTrainingItem(it)));
+    TRAINING_CURRICULUM.forEach(it => addTraining(asTrainingItem(it, it.group)));
+
+    const total = docs.length + training.length;
+    $('lib-count').textContent = total
+      ? total + ' item' + (total === 1 ? '' : 's') : '';
+    if (!total) {
       body.innerHTML = '<p class="detail-empty">Nothing has been filed here yet. The service desk adds the manuals, checklists and training videos for each platform.</p>';
       return;
     }
 
-    body.innerHTML = models.map(model => {
-      const mine = items.filter(it => libSkuKey(it.sku) === model ||
-        (it.kind === 'video' && !String(it.sku || '').trim()));
-      const cats = LIB_CATEGORIES.map(cat => {
+    const models = PORTAL_ORDER.slice();
+    docs.forEach(it => {
+      const k = libSkuKey(it.sku);
+      if (k !== 'General' && models.indexOf(k) < 0) models.push(k);
+    });
+    if (docs.some(it => libSkuKey(it.sku) === 'General')) models.push('General');
+
+    const modelHtml = models.map(model => {
+      const mine = docs.filter(it => libSkuKey(it.sku) === model);
+      const cats = LIB_CATEGORIES.filter(cat => cat !== 'Training Videos').map(cat => {
         const rows = mine.filter(it => libCategory(it) === cat);
         return '<div class="lib-group"><h3>' + esc(cat) +
           '<span class="lib-n">' + rows.length + '</span></h3>' +
@@ -1418,8 +1477,29 @@
             : '<p class="detail-empty">To be added by the service desk.</p>') +
           '</div>';
       }).join('');
-      return '<section class="lib-model"><h3 class="lib-model-name">' + esc(model) + '</h3>' + cats + '</section>';
+      return '<section class="lib-model" data-model="' + esc(model) + '">' +
+        '<h3 class="lib-model-name">' + esc(model) + '</h3>' + cats + '</section>';
     }).join('');
+
+    const groups = [];
+    training.forEach(it => {
+      const name = it.group || 'Training videos';
+      let bucket = groups.find(g => g.name === name);
+      if (!bucket) { bucket = { name: name, items: [] }; groups.push(bucket); }
+      bucket.items.push(it);
+    });
+    const trainingHtml = training.length
+      ? '<section class="lib-model lib-training" id="lib-training" data-model="TRAINING VIDEOS">' +
+          '<h3 class="lib-model-name">Training Videos</h3>' +
+          groups.map(g =>
+            '<div class="lib-group"><h3>' + esc(g.name) +
+              '<span class="lib-n">' + g.items.length + '</span></h3>' +
+              '<ul class="lib-list">' + g.items.map(libItemHtml).join('') + '</ul></div>'
+          ).join('') +
+        '</section>'
+      : '';
+
+    body.innerHTML = modelHtml + trainingHtml;
   }
   // ── Your details: addresses and contacts ─────────────────────────────────────
   // The rows are edited in place and posted as one list on Save. Nothing saves itself:
@@ -2248,7 +2328,7 @@
     document.querySelectorAll('.js-signout').forEach(el => el.addEventListener('click', signOut));
     document.addEventListener('click', (e) => {
       const a = e.target.closest && e.target.closest('.lib-item[data-doc-url]');
-      if (!a || a.classList.contains('video')) return;
+      if (!a || a.classList.contains('video') || a.dataset.docExternal) return;
       e.preventDefault();
       openDocViewer(a.dataset.docUrl, a.dataset.docTitle);
     });
@@ -2260,6 +2340,23 @@
         const route = String(el.dataset.route || 'home');
         if (location.hash === '#/' + route) showPortalPage(route);
         else location.hash = '#/' + route;
+        // The Library menu names a platform (or Training videos). The panel opens at
+        // the top, so take the customer to the section they picked. The library is
+        // painted after the landing read, so retry briefly instead of assuming it is
+        // already in the document.
+        const model = String(el.dataset.model || '').trim();
+        if (model) {
+          let tries = 0;
+          const jump = () => {
+            const target = model.toUpperCase() === 'TRAINING VIDEOS'
+              ? document.getElementById('lib-training')
+              : Array.from(document.querySelectorAll('#lib-body .lib-model[data-model]'))
+                  .find(s => s.dataset.model === model);
+            if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
+            if (tries++ < 24) setTimeout(jump, 150);
+          };
+          setTimeout(jump, 150);
+        }
       });
     });
     document.querySelectorAll('#portal-nav [data-nav-group]').forEach(btn => {

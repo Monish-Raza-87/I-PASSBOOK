@@ -438,7 +438,9 @@
   .lib-group h3 { display: flex; align-items: baseline; gap: 8px; }
   .lib-group h3 .lib-n { font-family: var(--mono); font-size: 11px; color: var(--fg-muted); font-weight: 400; }
   .lib-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px;
-              grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+              grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 900px) { .lib-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 560px) { .lib-list { grid-template-columns: 1fr; } }
   .lib-item {
     display: grid; gap: 3px; padding: 12px 14px; text-decoration: none; color: inherit;
     background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
@@ -1378,3 +1380,7 @@
   }
   .product-carousel .carousel-track { align-items: stretch; }
   .product-carousel .card { height: 100%; }
+  /* -- Other SOP: the catch-all shelf ---------------------------------------- */
+  .lib-other-sop { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .lib-other-sop .lib-model-name { border-bottom-width: 3px; }
+  #lib-other-sop { scroll-margin-top: 84px; }

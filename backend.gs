@@ -5729,7 +5729,6 @@ function uploadPortalDocument(params, authEmail) {
   if (!name || !b64) return { status: 'error', message: 'Choose a file to upload.' };
   var bytes;
   try { bytes = Utilities.base64Decode(b64); } catch (e) { return { status: 'error', message: 'The file could not be read.' }; }
-  if (bytes.length > 20 * 1024 * 1024) return { status: 'error', message: 'The file is larger than 20 MB.' };
   var folder = getOrCreateSubfolder(getRootFolder(), 'I-PASSBOOK portal content');
   var blob = Utilities.newBlob(bytes, resolveMime(params.mimeType, name), name);
   var file = folder.createFile(blob);

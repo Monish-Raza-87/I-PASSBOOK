@@ -62,10 +62,10 @@
         <button type="button" data-detail="company" role="menuitem">Company info</button>
         <button type="button" data-detail="users" role="menuitem">Approved users</button>
         <button type="button" data-detail="fleet" role="menuitem">Your fleet</button>
+        <button type="button" class="js-signout menu-signout" id="signout" role="menuitem" hidden>Sign out</button>
       </div>
     </div>
     <a class="btn js-signin" id="header-signin" href="#signin">Sign in</a>
-    <button type="button" class="btn js-signout" id="signout" hidden>Sign out</button>
   </div>
 </header>
 
@@ -73,34 +73,26 @@
 
   <div class="home-hero-band">
   <section class="hero wrap home-hero">
-    <div class="home-hero-grid">
-      <div class="home-hero-copy">
-        <p class="eyebrow home-eyebrow">After-sales</p>
-        <h1 class="home-title"><span class="home-title-line">This is</span> <span class="home-title-line home-title-accent">your space</span></h1>
-        <p class="home-statement">I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY WITH INDRONES, ALL IN ONE PLACE</p>
-        <p class="lede">Raise a support request, Track support history, Access Operation Documents for Your Drone, Dedicated Training Videos, Your Fleet Information and much more. This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
-        <div class="btn-row" hidden>
-          <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
-          <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
-        </div>
+    <div class="home-hero-copy">
+      <h1 class="home-title"><span class="home-title-line">THIS IS</span> <span class="home-title-line home-title-accent">I-PASSBOOK</span></h1>
+      <p class="home-statement home-statement-dynamic">EVERYTHING RELATED TO YOUR AFTERSALES JOURNEY WITH INDRONES, ALL IN ONE PLACE</p>
+      <ul class="home-capabilities" aria-label="What you can do in I-PASSBOOK">
+        <li>Raise a support request</li>
+        <li>Track support history</li>
+        <li>Access operation documents for your drone</li>
+        <li>Dedicated training videos</li>
+        <li>Your fleet information and much more</li>
+      </ul>
+      <p class="home-coda">This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
+      <div class="btn-row" hidden>
+        <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
+        <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
       </div>
-      <aside class="home-index" aria-label="I-PASSBOOK service index">
-        <p class="home-index-head">Service index</p>
-        <ol class="home-index-list">
-          <li><span class="home-index-num">01</span><span class="home-index-name">Support simplified</span></li>
-          <li><span class="home-index-num">02</span><span class="home-index-name">Support centralised</span></li>
-          <li><span class="home-index-num">03</span><span class="home-index-name">Support intelligentized</span></li>
-        </ol>
-        <p class="home-index-foot"><span class="home-lamp" aria-hidden="true"></span>After-sales desk online</p>
-      </aside>
     </div>
-    <ul class="home-tags" aria-label="What you can do here">
-      <li>Raise a request</li>
-      <li>Track support history</li>
-      <li>Operation documents</li>
-      <li>Training videos</li>
-      <li>Fleet information</li>
-    </ul>
+    <a class="home-scroll" href="#products" aria-label="Scroll to explore">
+      <span>Scroll to explore</span>
+      <svg width="13" height="26" viewBox="0 0 13 26" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 1v22M1.5 17.5 6.5 23l5-5.5"/></svg>
+    </a>
   </section>
   </div>
 
@@ -467,40 +459,120 @@
   </section>
 
   <section id="support" class="wrap">
-    <div class="split">
+    <div class="section-head">
       <div>
         <h2>What happens when you raise a request</h2>
         <p class="sub">Every request gets an IR number the moment it reaches us, and it is worked
         through the same ten stages every time. You can watch it move.</p>
-        <ol class="steps">
-          <li><b>Open</b><span>Your report has reached the service desk and is waiting to be taken up.</span></li>
-          <li><b>Inward</b><span>The aircraft or component is on its way to us, and we log it in when it arrives.</span></li>
-          <li><b>Inspection</b><span>We look over the unit and record its condition as received.</span></li>
-          <li><b>Investigation</b><span>Our engineers find the cause and write up what they found.</span></li>
-          <li><b>Production</b><span>The repair or replacement is carried out.</span></li>
-          <li><b>Quality Test</b><span>The work is tested before it leaves us.</span></li>
-          <li><b>PDI / Dispatch</b><span>Final checks, packing, and the dispatch note to you.</span></li>
-          <li><b>Delivered</b><span>It is back with you. The request is closed.</span></li>
-        </ol>
-        <p class="card-note">Two of the ten are not steps in that sequence: <b>On Hold</b> means work
-        is paused — usually waiting on a part or on your approval — and <b>Remote Support</b> means
-        we are helping you without the unit coming in.</p>
       </div>
-
-      <div class="aside">
-        <h3>Reach the service desk</h3>
-        <p>Use the form that matches what you need. Both go straight to the desk, and both give you
-        a record you can point back to.</p>
-        <a class="btn btn-primary" id="raise-2" href="#" target="_blank" rel="noopener">Report a problem</a>
-        <a class="btn" id="feedback" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
-        <p>The form is made with Google Forms. If this device is not already signed in to a Google
-        account, Google will ask you to sign in first — that is Google asking, not Indrones.</p>
-        <div class="contact">
-          <div><span class="k">Phone</span><span class="v">+91 9594 160 160</span></div>
-          <div><span class="k">Email</span><span class="v">info@indrones.com</span></div>
-        </div>
+      <div class="carousel-controls" data-carousel-controls>
+        <button type="button" class="carousel-btn" data-carousel-prev aria-label="Previous stages">&#8592;</button>
+        <button type="button" class="carousel-btn" data-carousel-next aria-label="Next stages">&#8594;</button>
       </div>
     </div>
+    <div class="carousel" data-carousel aria-roledescription="carousel" aria-label="The ten service stages">
+      <div class="carousel-track" data-carousel-track>
+        <article class="stage-card">
+          <span class="stage-num">01</span>
+          <h3>Open</h3>
+          <p>Your report has reached the service desk and is waiting to be taken up.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">02</span>
+          <h3>Inward</h3>
+          <p>The aircraft or component is on its way to us, and we log it in when it arrives.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">03</span>
+          <h3>Inspection</h3>
+          <p>We look over the unit and record its condition as received.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">04</span>
+          <h3>Investigation</h3>
+          <p>Our engineers find the cause and write up what they found.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">05</span>
+          <h3>Production</h3>
+          <p>The repair or replacement is carried out.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">06</span>
+          <h3>Quality Test</h3>
+          <p>The work is tested before it leaves us.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">07</span>
+          <h3>PDI / Dispatch</h3>
+          <p>Final checks, packing, and the dispatch note to you.</p>
+        </article>
+        <article class="stage-card">
+          <span class="stage-num">08</span>
+          <h3>Delivered</h3>
+          <p>It is back with you. The request is closed.</p>
+        </article>
+        <article class="stage-card stage-exception">
+          <span class="stage-num">09</span>
+          <h3>On Hold</h3>
+          <p>Work is paused &mdash; usually waiting on a part or on your approval.</p>
+          <span class="stage-tag">Not a step in the sequence</span>
+        </article>
+        <article class="stage-card stage-exception">
+          <span class="stage-num">10</span>
+          <h3>Remote Support</h3>
+          <p>We are helping you without the unit coming in.</p>
+          <span class="stage-tag">Not a step in the sequence</span>
+        </article>
+      </div>
+    </div>
+    <p class="card-note">The first eight are the sequence every request follows. <b>On Hold</b> and
+    <b>Remote Support</b> are the two that sit outside it.</p>
+  </section>
+
+  <section id="reach" class="wrap">
+    <div class="section-head">
+      <div>
+        <h2>Reach the service desk</h2>
+        <p class="sub">Use the form that matches what you need. Both go straight to the desk, and
+        both give you a record you can point back to.</p>
+      </div>
+      <div class="carousel-controls" data-carousel-controls>
+        <button type="button" class="carousel-btn" data-carousel-prev aria-label="Previous contact options">&#8592;</button>
+        <button type="button" class="carousel-btn" data-carousel-next aria-label="Next contact options">&#8594;</button>
+      </div>
+    </div>
+    <div class="carousel" data-carousel aria-roledescription="carousel" aria-label="Ways to reach the service desk">
+      <div class="carousel-track" data-carousel-track>
+        <article class="reach-card">
+          <span class="reach-kicker">Raise it</span>
+          <h3>Report a problem</h3>
+          <p>Tell us what went wrong and attach what you have. It becomes an IR you can track.</p>
+          <a class="btn btn-primary" id="raise-2" href="#" target="_blank" rel="noopener">Report a problem</a>
+        </article>
+        <article class="reach-card">
+          <span class="reach-kicker">Tell us</span>
+          <h3>Give feedback</h3>
+          <p>How did the service feel, good or bad? It goes to the same desk that handles your case.</p>
+          <a class="btn" id="feedback" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
+        </article>
+        <article class="reach-card">
+          <span class="reach-kicker">Call</span>
+          <h3>Phone</h3>
+          <p>For something urgent, call the service desk directly.</p>
+          <a class="reach-contact" href="tel:+919594160160">+91 9594 160 160</a>
+        </article>
+        <article class="reach-card">
+          <span class="reach-kicker">Write</span>
+          <h3>Email</h3>
+          <p>Send the details and we will open a request against your company.</p>
+          <a class="reach-contact" href="mailto:info@indrones.com">info@indrones.com</a>
+        </article>
+      </div>
+    </div>
+    <p class="card-note">The form is made with Google Forms. If this device is not already signed in
+    to a Google account, Google will ask you to sign in first &mdash; that is Google asking,
+    not Indrones.</p>
   </section>
 
 </main>
@@ -810,6 +882,12 @@
       localStorage.removeItem(PORTAL.USER_KEY);
     } catch (e) { /* nothing to clear */ }
   }
+  // The profile written by saveSession. It is a LAYOUT hint, never an authorisation:
+  // boot() still asks getMyCustomer and replaces (or clears) this a moment later.
+  function storedMe() {
+    try { return JSON.parse(localStorage.getItem(PORTAL.USER_KEY) || 'null'); }
+    catch (e) { return null; }
+  }
 
   // ── Talking to the backend ───────────────────────────────────────────────────
   // Two thin wrappers, and no interceptor: this page has no other backend traffic, so the
@@ -959,14 +1037,19 @@
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
   function setAuthPending() {
-    // A session exists, so the one wrong word to show while it is being proved is
-    // "Sign in". Hide every signed-out affordance until the server answers.
+    // A session exists. Paint the signed-in LAYOUT immediately, before the server
+    // answers, so the header and hero never jump a frame later. The company name is
+    // filled from the stored profile when there is one; getMyCustomer replaces it.
+    // This runs synchronously inside boot(), before the browser can paint the
+    // freshly injected markup.
+    const cached = storedMe();
     $('header-signin').hidden = true;
-    $('portal-nav').hidden = true;
-    $('signout').hidden = true;
-    $('header-who').hidden = true;
+    $('portal-nav').hidden = false;
+    $('signout').hidden = false;
     $('hero-cta').hidden = true;
-    document.body.classList.remove('portal-signed-in');
+    $('header-who').hidden = !cached;
+    if (cached) $('header-who').textContent = cached.customerOf || cached.email || '';
+    document.body.classList.add('portal-signed-in');
     closeCompanyMenu();
   }
 
@@ -980,6 +1063,7 @@
       // request carries a dead token and the customer sees the same error forever.
       // Anything else is a real failure and is shown in words.
       if (isUnauthorized(me)) { forget(); location.replace(appLoginUrl()); return; }
+      setSignedOut();
       showSignin(msgOf(me));
       return;
     }
@@ -2106,6 +2190,65 @@
   // It used to run as this file was EVALUATED, which was invisible while the portal
   // owned the whole document — the markup had already been parsed by then. Mounted, the
   // document is empty at evaluation time, so the first `$('signin-close')` is null and
+  // Automatic card rows. The native horizontal scroll does the moving; this only
+  // advances it on a timer, pauses while the pointer or keyboard focus is inside or
+  // the row is off screen, and honours prefers-reduced-motion. The arrows are real
+  // buttons, so the row can always be driven by hand.
+  function wireCarousels() {
+    const reduce = !!(window.matchMedia &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    document.querySelectorAll('[data-carousel]').forEach(root => {
+      const track = root.querySelector('[data-carousel-track]');
+      if (!track) return;
+      const section = root.closest('section');
+      const prev = section ? section.querySelector('[data-carousel-prev]') : null;
+      const next = section ? section.querySelector('[data-carousel-next]') : null;
+      let paused = false, timer = null, inView = true;
+      const cardStep = () => {
+        const card = track.children[0];
+        if (!card) return track.clientWidth * .8;
+        const gap = parseFloat(getComputedStyle(track).columnGap) || 0;
+        return card.getBoundingClientRect().width + gap;
+      };
+      const atEnd = () => track.scrollLeft + track.clientWidth >= track.scrollWidth - 2;
+      const move = dir => {
+        if (dir > 0 && atEnd()) {
+          // Wrap to the start instantly: a smooth sweep back across ten cards reads
+          // as a glitch, not as a slide.
+          track.scrollTo({ left: 0, behavior: 'auto' });
+          return;
+        }
+        if (dir < 0 && track.scrollLeft <= 2) return;
+        track.scrollBy({ left: dir * cardStep(), behavior: reduce ? 'auto' : 'smooth' });
+      };
+      const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+      const start = () => {
+        stop();
+        if (reduce || !inView) return;
+        timer = setInterval(() => {
+          if (!paused && !document.hidden) move(1);
+        }, 4500);
+      };
+      if (prev) prev.addEventListener('click', () => { move(-1); start(); });
+      if (next) next.addEventListener('click', () => { move(1); start(); });
+      root.addEventListener('mouseenter', () => { paused = true; });
+      root.addEventListener('mouseleave', () => { paused = false; });
+      root.addEventListener('focusin', () => { paused = true; });
+      root.addEventListener('focusout', () => { paused = false; });
+      root.addEventListener('pointerdown', stop);
+      root.addEventListener('pointerup', start);
+      if ('IntersectionObserver' in window) {
+        new IntersectionObserver(entries => {
+          entries.forEach(entry => {
+            inView = entry.isIntersecting;
+            if (inView) start(); else stop();
+          });
+        }, { threshold: 0.15 }).observe(root);
+      }
+      start();
+    });
+  }
+
   // the throw takes `window.CustomerPortal` down with it: the portal then never appears
   // at all, and the only symptom is a blank page.
   function wirePortal() {
@@ -2280,6 +2423,8 @@
         openPanel(a.getAttribute('data-open-panel'));
       });
     });
+
+    wireCarousels();
 
     // A link from the invitation email may carry them straight to the sheet.
     if (location.hash === '#signin' && !token()) showSignin('');

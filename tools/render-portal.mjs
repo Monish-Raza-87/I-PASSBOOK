@@ -640,8 +640,8 @@ try {
   await waitFor("document.getElementById('portal').hidden && !!document.querySelector('.home-hero')", 5000);
   await evaluate("location.hash = ''");  ok('the customer lands on the space with the approved hero only',
     await visible('.home-hero') &&
-    /this is your space/i.test(await evaluate(`document.querySelector('.home-title').textContent`)) &&
-    /I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY/i.test(await evaluate(`document.querySelector('.home-statement').textContent`)) &&
+    /this is i-passbook/i.test(await evaluate(`document.querySelector('.home-title').textContent`)) &&
+    /EVERYTHING RELATED TO YOUR AFTERSALES JOURNEY/i.test(await evaluate(`document.querySelector('.home-statement').textContent`)) &&
     !(await visible('#portal')));
   ok('the header still provides the six Level 1 destinations', await visible('#portal-nav'));
   // Documents group by SKU, in the product order. VIDEOS do not: the owner's rule

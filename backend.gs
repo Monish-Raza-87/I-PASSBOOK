@@ -3532,11 +3532,19 @@ function latestIntakeFields() {
 function sendSampleAcknowledgementToOwner(to) {
   var target = String(to || '').trim() ||
     String(PropertiesService.getScriptProperties().getProperty('SAMPLE_ACK_TO') || '').trim();
+  Logger.log('sendSampleAcknowledgementToOwner start; target=' + (target || '(empty)'));
   if (!target) return 'Pass the destination address, or set the SAMPLE_ACK_TO Script Property.';
-  var reg = currentIRRegistry();
-  var entries = Object.keys(reg.irs || {}).map(function (k) { return reg.irs[k]; })
-    .filter(function (r) { return r && r.fields && r.irNumber; });
-  Logger.log('IR entries with fields: ' + entries.length);
+
+  var entries = [];
+  try {
+    var reg = currentIRRegistry();
+    entries = Object.keys(reg.irs || {}).map(function (k) { return reg.irs[k]; })
+      .filter(function (r) { return r && r.fields && r.irNumber; });
+    Logger.log('IR entries with fields: ' + entries.length);
+  } catch (e) {
+    Logger.log('Registry read failed: ' + (e && e.message));
+  }
+
   var pick = null;
   if (entries.length) {
     entries.sort(function (a, b) {
@@ -3550,10 +3558,17 @@ function sendSampleAcknowledgementToOwner(to) {
   if (!pick) {
     try {
       var fallback = latestIntakeFields();
-      if (fallback) pick = { irNumber: fallback.irNumber || 'IR-UNKNOWN', fields: fallback };
+      if (fallback) {
+        pick = { irNumber: fallback.irNumber || 'IR-UNKNOWN', fields: fallback };
+        Logger.log('Using intake-sheet fallback: ' + pick.irNumber);
+      }
     } catch (e) { Logger.log('Intake fallback failed: ' + (e && e.message)); }
   }
-  if (!pick) return 'No IR with fields found.';
+  if (!pick) {
+    Logger.log('No IR with fields found; nothing was sent.');
+    return 'No IR with fields found.';
+  }
+
   Logger.log('Picked ' + pick.irNumber + ' for ' + target);
   var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
   Logger.log('Mail count today: ' +
@@ -3578,29 +3593,27 @@ function sendSampleAcknowledgementToOwner(to) {
     : 'The acknowledgement could not be sent. See the execution log.';
 }
 
-// EDITOR-RUN, NOT ROUTED. Puts the test fleet on MM INDIA so the visual fleet shelf
-// can be checked. It touches only that company's fleet list, and it creates no IR.
 // Alias for the name used in the owner's note.
 function sendSampleAcknowledgementEmailToOwner(to) {
   return sendSampleAcknowledgementToOwner(to);
 }
 
+// EDITOR-RUN, NOT ROUTED. Puts the test fleet on MM INDIA so the visual fleet shelf
+// can be checked. It creates the company's portal record if it has never saved one,
+// and it touches only that company's fleet list.
 function seedMmIndiaFleet() {
   var target = sameCompanyKey('MM INDIA');
   return withRowLockOrThrow(function () {
     var st = readJsonLocked(PORTAL_STORE_FILE);
     if (!st || typeof st !== 'object') st = {};
     if (!st.companies || typeof st.companies !== 'object') st.companies = {};
+    Logger.log('Company keys: ' + Object.keys(st.companies).join(' | '));
     var key = target;
     if (!st.companies[key]) {
       var found = Object.keys(st.companies).find(function (k) {
         return sameCompanyKey(k) === target;
       });
       if (found) key = found;
-    }
-    if (!st.companies[key]) {
-      Logger.log('MM INDIA not found in portal.json');
-      return 'Company MM INDIA not found.';
     }
     var rec = (st.companies[key] && typeof st.companies[key] === 'object') ? st.companies[key] : {};
     rec.fleet = [
@@ -3611,11 +3624,12 @@ function seedMmIndiaFleet() {
     ];
     st.companies[key] = rec;
     writeJsonLocked(PORTAL_STORE_FILE, st);
-    Logger.log('Seeded 4 aircraft for MM INDIA.');
+    Logger.log('Seeded 4 aircraft for MM INDIA under key ' + key + '.');
     return 'Seeded 4 aircraft for MM INDIA.';
   });
 }
 
+// EDITOR-RUN, NOT ROUTED. Puts the test fleet on MM INDIA so the visual fleet shelf
 // ──────────────────────────────────────────────────────────────────────────────
 // ADMIN NOTICES — one email per event the admin should hear about as it happens.
 // ──────────────────────────────────────────────────────────────────────────────

@@ -71,16 +71,38 @@
 
 <main>
 
+  <div class="home-hero-band">
   <section class="hero wrap home-hero">
-    <p class="eyebrow home-eyebrow">After-sales</p>
-    <h1 class="home-title">This is your space</h1>
-    <p class="home-statement">I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY WITH INDRONES, ALL IN ONE PLACE</p>
-    <p class="lede">Raise a support request, Track support history, Access Operation Documents for Your Drone, Dedicated Training Videos, Your Fleet Information and much more. This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
-    <div class="btn-row" hidden>
-      <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
-      <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
+    <div class="home-hero-grid">
+      <div class="home-hero-copy">
+        <p class="eyebrow home-eyebrow">After-sales</p>
+        <h1 class="home-title"><span class="home-title-line">This is</span> <span class="home-title-line home-title-accent">your space</span></h1>
+        <p class="home-statement">I-PASSBOOK: EVERYTHING ABOUT YOUR AFTERSALES JOURNEY WITH INDRONES, ALL IN ONE PLACE</p>
+        <p class="lede">Raise a support request, Track support history, Access Operation Documents for Your Drone, Dedicated Training Videos, Your Fleet Information and much more. This is I-PASSBOOK; Support Simplified. Support Centralised. Support Intelligentized.</p>
+        <div class="btn-row" hidden>
+          <a class="btn btn-primary" id="raise" href="#" target="_blank" rel="noopener">Report a problem</a>
+          <a class="btn" id="hero-cta" href="#access">Sign in to your reports</a>
+        </div>
+      </div>
+      <aside class="home-index" aria-label="I-PASSBOOK service index">
+        <p class="home-index-head">Service index</p>
+        <ol class="home-index-list">
+          <li><span class="home-index-num">01</span><span class="home-index-name">Support simplified</span></li>
+          <li><span class="home-index-num">02</span><span class="home-index-name">Support centralised</span></li>
+          <li><span class="home-index-num">03</span><span class="home-index-name">Support intelligentized</span></li>
+        </ol>
+        <p class="home-index-foot"><span class="home-lamp" aria-hidden="true"></span>After-sales desk online</p>
+      </aside>
     </div>
+    <ul class="home-tags" aria-label="What you can do here">
+      <li>Raise a request</li>
+      <li>Track support history</li>
+      <li>Operation documents</li>
+      <li>Training videos</li>
+      <li>Fleet information</li>
+    </ul>
   </section>
+  </div>
 
   <!-- ── THE PORTAL ───────────────────────────────────────────────────────────
        The signed-in landing, and the shape the owner described on 2026-10-22: big

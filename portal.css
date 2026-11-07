@@ -1084,3 +1084,121 @@
   .doc-head b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .doc-head .sheet-x { position: static; margin-left: auto; }
   .doc-card iframe { flex: 1; width: 100%; border: 0; background: var(--surface-2); }
+
+  /* --------------------------------------------------------------------------
+     HOME HERO - INDrones.COM EDITORIAL BAND (v116)
+     --------------------------------------------------------------------------
+     The owner's reference is indrones.com: a dark instrument band, a giant
+     left-aligned headline, one yellow keyline, small mono labels and a series
+     index on the flank. The previous hero centred the headline while leaving
+     the statement and lede left-aligned, so the two halves fought each other
+     and the right side of a desktop view was empty. This block replaces that
+     composition; it does not change a single word of the copy.
+     -------------------------------------------------------------------------- */
+  .home-hero-band {
+    position: relative; isolation: isolate; overflow: hidden;
+    background: #131416; color: #f5f5f2;
+    border-bottom: 3px solid var(--yellow);
+  }
+  .home-hero-band::before {
+    content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,.055) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,.055) 1px, transparent 1px);
+    background-size: 64px 64px;
+    -webkit-mask-image: radial-gradient(125% 105% at 0% 0%, #000 0%, transparent 74%);
+    mask-image: radial-gradient(125% 105% at 0% 0%, #000 0%, transparent 74%);
+  }
+  .home-hero-band::after {
+    content: ""; position: absolute; z-index: -1; pointer-events: none;
+    width: 46vw; height: 46vw; max-width: 640px; max-height: 640px;
+    right: -10vw; top: -18vw;
+    background: radial-gradient(circle at 50% 50%, rgba(255,212,0,.16), transparent 68%);
+  }
+  .home-hero-band .home-hero { padding-block: clamp(56px, 8vw, 112px) clamp(40px, 6vw, 72px); }
+  .home-hero-grid {
+    display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(240px, .6fr);
+    gap: clamp(28px, 5vw, 72px); align-items: start;
+  }
+  .home-hero-copy { min-width: 0; }
+  .home-hero-band .home-eyebrow {
+    justify-content: flex-start; color: #b7b7b0;
+    font-size: 10px; letter-spacing: .26em;
+  }
+  .home-hero-band .home-title {
+    max-width: none; margin: 18px 0 24px; text-align: left;
+    color: #f7f7f4; font-size: clamp(56px, 9.5vw, 132px);
+    line-height: .86; letter-spacing: -.035em; font-weight: 800;
+    text-transform: uppercase; text-wrap: balance;
+  }
+  .home-hero-band .home-title-line { display: block; }
+  .home-hero-band .home-title-accent { color: #c9be72; }
+  .home-hero-band .home-statement {
+    max-width: 48ch; margin: 0 0 20px; padding-left: 14px;
+    border-left: 3px solid var(--yellow);
+    color: #f0f0ea; font-family: var(--mono);
+    font-size: clamp(12px, 1.35vw, 15px); font-weight: 600;
+    line-height: 1.6; letter-spacing: .10em; text-transform: uppercase;
+  }
+  .home-hero-band .lede {
+    max-width: 58ch; color: #a8a8a1;
+    font-size: clamp(15px, 1.6vw, 18px); line-height: 1.6;
+  }
+  .home-hero-band .btn { color: #f5f5f2; border-color: rgba(255,255,255,.28); background: transparent; }
+  .home-hero-band .btn:hover { background: #f5f5f2; color: #131416; border-color: #f5f5f2; }
+  .home-hero-band .btn-primary { background: var(--yellow); color: #1a1a1b; border-color: var(--yellow); }
+  .home-hero-band .btn-primary:hover { background: var(--yellow-hi); color: #1a1a1b; border-color: var(--yellow-hi); }
+
+  .home-index {
+    align-self: end; padding: 18px 20px 16px;
+    border: 1px solid rgba(255,255,255,.16);
+    background: rgba(255,255,255,.035);
+  }
+  .home-index-head {
+    display: flex; align-items: center; gap: 9px; margin: 0;
+    font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+    letter-spacing: .22em; text-transform: uppercase; color: #b8b8b1;
+  }
+  .home-index-head::before { content: ""; width: 7px; height: 7px; flex: none; background: var(--yellow); }
+  .home-index-list { list-style: none; margin: 12px 0 0; padding: 0; }
+  .home-index-list li {
+    display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: baseline;
+    padding: 14px 0; border-top: 1px solid rgba(255,255,255,.13);
+  }
+  .home-index-list li:last-child { border-bottom: 1px solid rgba(255,255,255,.13); }
+  .home-index-num { font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: var(--yellow); }
+  .home-index-name { font-size: 12.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: #f2f2ec; }
+  .home-index-foot {
+    display: flex; align-items: center; gap: 8px; margin: 14px 0 0;
+    font-family: var(--mono); font-size: 9px; letter-spacing: .16em;
+    text-transform: uppercase; color: #9d9d96;
+  }
+  .home-lamp { width: 7px; height: 7px; flex: none; background: #5fd18b; box-shadow: 0 0 10px #5fd18b; }
+
+  .home-tags {
+    display: flex; flex-wrap: wrap; gap: 10px 0;
+    list-style: none; margin: clamp(28px, 4vw, 44px) 0 0; padding: 18px 0 0;
+    border-top: 1px solid rgba(255,255,255,.14);
+  }
+  .home-tags li {
+    display: flex; align-items: center; gap: 9px; padding: 0 20px;
+    border-left: 1px solid rgba(255,255,255,.16);
+    font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: #b4b4ad;
+  }
+  .home-tags li::before { content: "/"; color: var(--yellow); font-weight: 700; }
+  .home-tags li:first-child { padding-left: 0; border-left: 0; }
+
+  @media (max-width: 900px) {
+    .home-hero-grid { grid-template-columns: 1fr; gap: 30px; }
+    .home-index { max-width: 420px; }
+  }
+  @media (max-width: 640px) {
+    .home-hero-band .home-title { font-size: clamp(46px, 14vw, 78px); }
+    .home-tags { gap: 6px 18px; }
+    .home-tags li { padding: 4px 14px 4px 0; border-left: 0; }
+  }
+  body.portal-signed-in .home-hero-grid { grid-template-columns: 1fr; }
+  body.portal-signed-in .home-index,
+  body.portal-signed-in .home-tags { display: none; }
+  body.portal-signed-in .home-hero-band .home-title { font-size: clamp(32px, 5vw, 56px); }

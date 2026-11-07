@@ -1366,3 +1366,7 @@
     .form-doors { grid-template-columns: 1fr; }
     .form-door + .form-door { border-left: 0; border-top: 1px solid var(--line); }
   }
+  /* -- Training curriculum: one page, grouped by the course's own sections ----- */
+  .lib-training { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); }
+  .lib-training .lib-model-name { border-bottom-width: 3px; }
+  #lib-training, .lib-model[data-model] { scroll-margin-top: 84px; }

@@ -648,18 +648,19 @@ try {
   // (2026-10-22) is ONE training folder regardless of airframe, so the two videos in
   // the stub — one filed with no SKU, one filed against SIGMA100 — must sit on ONE
   // shelf at the end. A third group is the failure this measures.
-  const models = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model-name')).map(h => h.textContent)`);
+  const models = await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model:not(.lib-training) .lib-model-name')).map(h => h.textContent)`);
   ok('the library lists the three UAS models first',
     JSON.stringify(models) === JSON.stringify(['SIGMA25G', 'SIGMA 25 PRO', 'SIGMA 100']), JSON.stringify(models));
-  ok('...and every model carries the five document categories',
-    await evaluate(`document.querySelectorAll('#lib-body .lib-model').length`) === 3 &&
-    await evaluate(`document.querySelectorAll('#lib-body .lib-group').length`) === 15,
-    { models: await evaluate(`document.querySelectorAll('#lib-body .lib-model').length`),
-      groups: await evaluate(`document.querySelectorAll('#lib-body .lib-group').length`) });
-  ok('...with training videos inside a model, not one orphan shelf',
-    await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-model')).every(m => /Training Videos/i.test(m.innerText))`));
+  ok('...and every model carries the four document categories',
+    await evaluate(`document.querySelectorAll('#lib-body .lib-model:not(.lib-training)').length`) === 3 &&
+    await evaluate(`document.querySelectorAll('#lib-body .lib-model:not(.lib-training) .lib-group').length`) === 12,
+    { models: await evaluate(`document.querySelectorAll('#lib-body .lib-model:not(.lib-training)').length`),
+      groups: await evaluate(`document.querySelectorAll('#lib-body .lib-model:not(.lib-training) .lib-group').length`) });
+  ok('...and the training videos sit in their own curriculum section',
+    await evaluate(`!!document.getElementById('lib-training')`) &&
+    await evaluate(`document.querySelectorAll('#lib-training .lib-item.video').length`) >= 10);
   ok('a video shows a thumbnail rather than a bare row of text',
-    await evaluate(`!!document.querySelector('#lib-body .lib-item.video img[src*="img.youtube.com/vi/"]')`));
+    await evaluate(`!!document.querySelector('#lib-training .lib-item.video img[src*="img.youtube.com/vi/"]')`));
   ok('documents open in the lean in-portal viewer, videos in a new tab',
     await evaluate(`Array.from(document.querySelectorAll('#lib-body .lib-item')).every(a => a.classList.contains('video') ? (a.target === '_blank' && /noopener/.test(a.rel)) : !!a.dataset.docUrl)`));
   await evaluate(`document.querySelector('#lib-body .lib-item:not(.video)').click()`);

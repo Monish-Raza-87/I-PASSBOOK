@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v137';
+const APP_VERSION = 'v138';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9361,6 +9361,7 @@ function portalAdminHTML() {
           <option>Flight User Manual</option>
           <option>User Level Maintenance Manual</option>
           <option>Flight Checklist</option>
+          <option>Logbooks</option>
           <option>Training Videos</option>
           <option>eGCA Signup SOP</option>
           <option>Certificate of Conformity</option>
@@ -9582,7 +9583,6 @@ function portalUpload() {
   const catEl   = document.getElementById('portal-doc-category');
   const file = fileEl && fileEl.files && fileEl.files[0];
   if (!file) { showToast('Choose a file first'); return; }
-  if (file.size > 20 * 1024 * 1024) { showToast('The file is larger than 20 MB'); return; }
   const label = String((labelEl && labelEl.value) || file.name).trim();
   if (!label) { showToast('Give the document a title'); return; }
   const sku = String((skuEl && skuEl.value) || '').trim();

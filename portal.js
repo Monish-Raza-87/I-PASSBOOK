@@ -34,8 +34,9 @@
           <button type="button" data-route="library" data-model="SIGMA25G">SIGMA25G</button>
           <button type="button" data-route="library" data-model="SIGMA 100">SIGMA 100</button>
           <button type="button" data-route="library" data-model="SIGMA 25 PRO">SIGMA 25 PRO</button>
-          <button type="button" data-route="library" data-model="TRAINING VIDEOS">Training videos</button>
-        </div>
+        <button type="button" data-route="library" data-model="TRAINING VIDEOS">Training videos</button>
+        <button type="button" data-route="library" data-model="OTHER SOP">Other SOP</button>
+      </div>
       </div>
       <button type="button" data-route="compliance">Compliance</button>
       <div class="portal-nav-drop" id="profile-nav">
@@ -1458,6 +1459,7 @@
     'Flight User Manual',
     'User Level Maintenance Manual',
     'Flight Checklist',
+    'Logbooks',
     'Training Videos'
   ];
 
@@ -1471,18 +1473,25 @@
     { group: 'Video content', kind: 'video', label: 'Setting up base & rover', url: 'https://youtu.be/swKAQ1A6LbQ' },
     { group: 'Video content', kind: 'video', label: 'Camera settings and SD card issues', url: 'https://youtu.be/nBwetvI3PQU' },
     { group: 'Video content', kind: 'video', label: 'Camera settings and SD card issues (part 2)', url: 'https://youtu.be/_zI_uXdC9ZA' },
-    { group: 'Video content', kind: 'doc', label: 'Camera setup docs', url: 'https://drive.google.com/drive/folders/1kngSIWZFvON3fTDR4mY5BgwXDJjkXs3S?usp=sharing' },
     { group: 'Calibration', kind: 'video', label: 'Radio calibration', url: 'https://youtu.be/1Sldd9Rp6Pw' },
     { group: 'Calibration', kind: 'video', label: 'Accelerometer calibration', url: 'https://youtu.be/WpCxuCQUack' },
     { group: 'Calibration', kind: 'video', label: 'Compass calibration', url: 'https://youtu.be/UWBNk01IaaY' },
-    { group: 'Flight control', kind: 'video', label: 'Basic flight planning', url: 'https://youtu.be/qsFg9vD_qgw' },
-    { group: 'Flight control', kind: 'video', label: 'Terrain following and planning multiple flights', url: 'https://youtu.be/_kkeOEIuB2c' },
+    { group: 'Flight planning', kind: 'video', label: 'Basic flight planning', url: 'https://youtu.be/qsFg9vD_qgw' },
+    { group: 'Flight planning', kind: 'video', label: 'Terrain following and planning multiple flights', url: 'https://youtu.be/_kkeOEIuB2c' },
     { group: 'Post-flight process', kind: 'video', label: 'Downloading the log and tlog from the drone', url: 'https://youtu.be/cgr4BDXyRvo' },
     { group: 'Post-flight process', kind: 'video', label: 'Indrones Geotagging Utility', url: 'https://youtu.be/BAS1tmFAMa8' },
     { group: 'Post-flight process', kind: 'video', label: 'Mission Planner geotagging', url: 'https://youtu.be/DEc5r4akOQA' },
     { group: 'Post-flight process', kind: 'video', label: 'RedtoolBox geotagging', url: 'https://youtu.be/iD8uhQOVtJ8' },
     { group: 'Post-flight process', kind: 'video', label: 'Emlid Studio geotagging', url: 'https://youtu.be/3mjgRJLjNwQ' }
   ];
+
+  // SOPs that belong to no platform and no course section. The desk can also file
+  // documents under the Other SOP category; those are merged in by URL.
+  const OTHER_SOPS = [
+    { sku: 'OTHER SOP', category: 'Other SOP', kind: 'doc', label: 'Camera setup docs',
+      url: 'https://drive.google.com/file/d/1NvQ5LFSAL3T7Cvr0AnBpjwQkIY5I5Lar/view?usp=sharing' }
+  ];
+
   function libCategory(it) {
     if (it && it.category) return String(it.category);
     const s = String((it && it.label) || '');
@@ -1545,15 +1554,38 @@
       url: it.url
     };
   }
+    function isOtherSopItem(it) {
+    if (!it) return false;
+    if (String(it.sku || '').trim().toUpperCase() === 'OTHER SOP') return true;
+    return String(it.category || '').trim().toLowerCase() === 'other sop';
+  }
+  function asOtherSopItem(it) {
+    return {
+      sku: 'OTHER SOP',
+      category: 'Other SOP',
+      kind: it.kind === 'video' ? 'video' : 'doc',
+      label: it.label,
+      url: it.url
+    };
+  }
   function renderLibrary() {
     const body  = $('lib-body');
     const stored = (PORTAL_DATA && PORTAL_DATA.library) || [];
 
-    // Split the store: platform documents stay in their model sections; every video and
-    // anything filed as Training Videos moves to one curriculum page at the end. The
-    // static curriculum is merged by YouTube id so a video the desk also filed is not
-    // listed twice.
-    const docs = stored.filter(it => !isTrainingItem(it));
+    // Three shelves: platform documents, the training curriculum, and the Other SOP
+    // catch-all. A video or an Other SOP doc is never repeated inside a model section.
+    const other = [];
+    const seenOther = {};
+    const addOther = (it) => {
+      const key = String(it.url || '');
+      if (!key || seenOther[key]) return;
+      seenOther[key] = true;
+      other.push(it);
+    };
+    stored.filter(isOtherSopItem).forEach(it => addOther(asOtherSopItem(it)));
+    OTHER_SOPS.forEach(it => addOther(asOtherSopItem(it)));
+
+    const docs = stored.filter(it => !isTrainingItem(it) && !isOtherSopItem(it));
     const training = [];
     const seen = {};
     const addTraining = (it) => {
@@ -1562,10 +1594,10 @@
       seen[key] = true;
       training.push(it);
     };
-    stored.filter(isTrainingItem).forEach(it => addTraining(asTrainingItem(it)));
+    stored.filter(it => isTrainingItem(it) && !isOtherSopItem(it)).forEach(it => addTraining(asTrainingItem(it)));
     TRAINING_CURRICULUM.forEach(it => addTraining(asTrainingItem(it, it.group)));
 
-    const total = docs.length + training.length;
+    const total = docs.length + training.length + other.length;
     $('lib-count').textContent = total
       ? total + ' item' + (total === 1 ? '' : 's') : '';
     if (!total) {
@@ -1613,7 +1645,16 @@
         '</section>'
       : '';
 
-    body.innerHTML = modelHtml + trainingHtml;
+    const otherHtml = other.length
+      ? '<section class="lib-model lib-other-sop" id="lib-other-sop" data-model="OTHER SOP">' +
+          '<h3 class="lib-model-name">Other SOP</h3>' +
+          '<div class="lib-group"><h3>Standard operating procedures' +
+            '<span class="lib-n">' + other.length + '</span></h3>' +
+            '<ul class="lib-list">' + other.map(libItemHtml).join('') + '</ul></div>' +
+        '</section>'
+      : '';
+
+    body.innerHTML = modelHtml + trainingHtml + otherHtml;
   }
   // ── Your details: addresses and contacts ─────────────────────────────────────
   // The rows are edited in place and posted as one list on Save. Nothing saves itself:

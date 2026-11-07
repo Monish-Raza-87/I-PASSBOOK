@@ -72,7 +72,14 @@
 
 <main>
 
-  <div class="home-hero-band">
+  <nav class="page-rail" id="page-rail" aria-label="Page sections" hidden>
+    <a href="#top" aria-label="Top"><span>Top</span></a>
+    <a href="#products" aria-label="Our products"><span>Our products</span></a>
+    <a href="#support" aria-label="Service stages"><span>Service stages</span></a>
+    <a href="#reach" aria-label="Reach the service desk"><span>Reach the desk</span></a>
+  </nav>
+
+  <div class="home-hero-band" id="top">
   <section class="hero wrap home-hero">
     <div class="home-hero-copy">
       <h1 class="home-title"><span class="home-title-line">THIS IS</span> <span class="home-title-line home-title-accent">I-PASSBOOK</span></h1>
@@ -922,11 +929,11 @@
             <textarea id="fb-challenges" placeholder="Optional. What should we know?"></textarea>
           </div>
           <div class="rate" id="fb-drone-rate">
-            <p>Rate the overall performance of your drone?</p>
+            <p>How would you rate the overall performance of your drone? (5 stars)</p>
             <div class="rate-row">${starsHtml}</div>
           </div>
           <div class="rate" id="fb-support-rate">
-            <p>How would you rate our support and services?</p>
+            <p>How would you rate our support and services? (5 stars)</p>
             <div class="rate-row">${starsHtml}</div>
           </div>
           <div class="field" id="fb-reason-wrap" hidden>
@@ -1365,6 +1372,7 @@
   }
   function showPortalPage(route) {
     const isHome = !route || route === 'home';
+    document.body.classList.toggle('portal-panel-open', !isHome);
     const portal = $('portal');
     const hero = document.querySelector('.hero');
     if (hero) hero.hidden = false;
@@ -1407,6 +1415,7 @@
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function openPanel(name) {
+    document.body.classList.add('portal-panel-open');
     if (!PANEL_IDS[name]) name = 'history';
     Object.keys(PANEL_IDS).forEach(k => {
       const el = document.getElementById(PANEL_IDS[k]);
@@ -1568,19 +1577,46 @@
     if (n.indexOf('SIGMA100') === 0) return 'SIGMA 100';
     return String(sku || 'General').trim() || 'General';
   }
+  function libFileExt(it) {
+    const u = String(it.url || '').split('?')[0];
+    const m = u.match(/\.([a-z0-9]{2,5})$/i);
+    if (m) return m[1].toUpperCase();
+    if (/docs\.google\.com\/document/.test(u)) return 'DOC';
+    if (/docs\.google\.com\/spreadsheets/.test(u)) return 'SHEET';
+    if (/docs\.google\.com\/presentation/.test(u)) return 'SLIDES';
+    if (/drive\.google\.com/.test(u)) return 'DRIVE';
+    return 'FILE';
+  }
   function libItemHtml(it) {
     const id = it.kind === 'video' ? ytId(it.url) : '';
     const externalDoc = it.kind !== 'video' && /\/folders\//.test(String(it.url || ''));
     const host = (function () { try { return new URL(it.url).hostname.replace(/^www\./, ''); } catch (e) { return ''; } })();
-    return '<li><a class="lib-item' + (id ? ' video' : '') + '" href="' + esc(it.url) +
+    const driveMatch = String(it.url || '').match(/\/d\/([^/]+)/) || String(it.url || '').match(/[?&]id=([^&]+)/);
+    const driveId = driveMatch ? driveMatch[1] : '';
+    // A video keeps its YouTube still. A Drive file gets Drive's own first-page
+    // thumbnail, so a PDF shows the page instead of a generic icon; anything else
+    // gets the same-sized tile with its file type, so every card's image area is
+    // the same 16:9 box regardless of how many items its category holds.
+    const fallback = '<span class="doc-thumb-fallback" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2.5h8l4 4v15H6z"/><path d="M14 2.5v4h4"/></svg>' +
+      '<em>' + esc(libFileExt(it)) + '</em></span>';
+    const preview = id
+      ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">'
+      : (driveId
+          ? '<span class="doc-thumb-wrap">' + fallback +
+              '<img class="doc-thumb" src="https://drive.google.com/thumbnail?id=' + esc(encodeURIComponent(driveId)) + '&amp;sz=w600" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">' +
+            '</span>'
+          : '<span class="doc-thumb-wrap">' + fallback + '</span>');
+    return '<li><a class="lib-item' + (id ? ' video' : ' doc') + '" href="' + esc(it.url) +
       '" data-doc-url="' + esc(it.url) + '" data-doc-title="' + esc(it.label) + '"' +
       (id || externalDoc ? ' target="_blank" rel="noopener noreferrer"' : '') +
       (externalDoc ? ' data-doc-external="1"' : '') + '>' +
-      (id ? '<img src="https://img.youtube.com/vi/' + esc(id) + '/hqdefault.jpg" alt="" loading="lazy">' : '') +
+      preview +
       '<b>' + esc(it.label) + '</b>' +
       '<span>' + (it.kind === 'video' ? 'Training video' : 'Document') + (host ? ' · ' + esc(host) : '') +
       '</span></a></li>';
   }
+
   function openDocViewer(url, title) {
     const m = String(url || '').match(/\/d\/([^/]+)/) || String(url || '').match(/[?&]id=([^&]+)/);
     const src = m ? 'https://drive.google.com/file/d/' + m[1] + '/preview' : url;
@@ -1679,11 +1715,11 @@
           '<span class="lib-n">' + rows.length + '</span></h3>' +
           (rows.length
             ? '<ul class="lib-list">' + rows.map(libItemHtml).join('') + '</ul>'
-            : '<p class="detail-empty">To be added by the service desk.</p>') +
+            : '<p class="detail-empty">To be uploaded.</p>') +
           '</div>';
       }).join('');
-      return '<section class="lib-model" data-model="' + esc(model) + '">' +
-        '<h3 class="lib-model-name">' + esc(model) + '</h3>' + cats + '</section>';
+      return '<details class="lib-model" data-model="' + esc(model) + '" open>' +
+        '<summary class="lib-model-name">' + esc(model) + '</summary>' + cats + '</details>';
     }).join('');
 
     const groups = [];
@@ -1694,23 +1730,23 @@
       bucket.items.push(it);
     });
     const trainingHtml = training.length
-      ? '<section class="lib-model lib-training" id="lib-training" data-model="TRAINING VIDEOS">' +
-          '<h3 class="lib-model-name">Training Videos</h3>' +
+      ? '<details class="lib-model lib-training" id="lib-training" data-model="TRAINING VIDEOS" open>' +
+          '<summary class="lib-model-name">Training Videos</summary>' +
           groups.map(g =>
             '<div class="lib-group"><h3>' + esc(g.name) +
               '<span class="lib-n">' + g.items.length + '</span></h3>' +
               '<ul class="lib-list">' + g.items.map(libItemHtml).join('') + '</ul></div>'
           ).join('') +
-        '</section>'
+        '</details>'
       : '';
 
     const otherHtml = other.length
-      ? '<section class="lib-model lib-other-sop" id="lib-other-sop" data-model="OTHER SOP">' +
-          '<h3 class="lib-model-name">Other SOP</h3>' +
+      ? '<details class="lib-model lib-other-sop" id="lib-other-sop" data-model="OTHER SOP" open>' +
+          '<summary class="lib-model-name">Other SOP</summary>' +
           '<div class="lib-group"><h3>Standard operating procedures' +
             '<span class="lib-n">' + other.length + '</span></h3>' +
             '<ul class="lib-list">' + other.map(libItemHtml).join('') + '</ul></div>' +
-        '</section>'
+        '</details>'
       : '';
 
     body.innerHTML = modelHtml + trainingHtml + otherHtml;
@@ -2470,6 +2506,40 @@
   // It used to run as this file was EVALUATED, which was invisible while the portal
   // owned the whole document — the markup had already been parsed by then. Mounted, the
   // document is empty at evaluation time, so the first `$('signin-close')` is null and
+  // The right-side page rail. It lists the home page's own sections, follows the
+  // scroll to mark the current one, and hides itself when a portal panel is open.
+  function wirePageRail() {
+    const rail = document.getElementById('page-rail');
+    if (!rail) return;
+    const links = Array.from(rail.querySelectorAll('a'));
+    const targetFor = (a) => {
+      const href = a.getAttribute('href');
+      return href === '#top' ? document.querySelector('.home-hero-band') : document.querySelector(href);
+    };
+    const items = links.map(a => ({ a: a, target: targetFor(a) })).filter(x => x.target);
+    rail.hidden = items.length < 2;
+    if (!items.length) return;
+    links.forEach(a => a.addEventListener('click', e => {
+      const target = targetFor(a);
+      if (!target) return;
+      e.preventDefault();
+      if (a.getAttribute('href') === '#top') window.scrollTo({ top: 0, behavior: 'smooth' });
+      else target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }));
+    const paint = () => {
+      if (document.body.classList.contains('portal-panel-open')) return;
+      const y = window.scrollY + window.innerHeight * 0.35;
+      let current = items[0];
+      items.forEach(it => {
+        const top = it.target.getBoundingClientRect().top + window.scrollY;
+        if (top <= y) current = it;
+      });
+      items.forEach(it => it.a.classList.toggle('is-active', it === current));
+    };
+    window.addEventListener('scroll', paint, { passive: true });
+    window.addEventListener('resize', paint);
+    paint();
+  }
   // Automatic card rows. The native horizontal scroll does the moving; this only
   // advances it on a timer, pauses while the pointer or keyboard focus is inside or
   // the row is off screen, and honours prefers-reduced-motion. The arrows are real
@@ -2742,6 +2812,7 @@
     });
 
     wireCarousels();
+    wirePageRail();
 
     // A link from the invitation email may carry them straight to the sheet.
     if (location.hash === '#signin' && !token()) showSignin('');

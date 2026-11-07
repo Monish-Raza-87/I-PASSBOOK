@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v139';
+const APP_VERSION = 'v140';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9263,6 +9263,7 @@ function renderInsights() {
 // value the store did not take.
 let portalAdmin = {
   loaded: false, busy: false, error: '',
+  uploadStatus: '', uploadKind: '',
   cr: { name: '', email: '', whatsapp: '' },
   library: [], company: '', fleet: []
 };
@@ -9374,7 +9375,8 @@ function portalAdminHTML() {
         <label for="portal-doc-file">File</label>
         <input id="portal-doc-file" class="form-input" type="file" accept=".pdf,video/*">
         <label class="portal-check"><input type="checkbox" id="portal-doc-email"> Email customers using this model (Service Bulletin only)</label>
-        <button type="button" class="btn btn-secondary" id="portal-upload">Upload document</button>
+        <button type="button" class="btn btn-secondary" id="portal-upload"${portalAdmin.busy ? ' disabled' : ''}>${portalAdmin.busy ? 'Uploading…' : 'Upload document'}</button>
+        <p class="msg ${portalAdmin.uploadKind || ''}" id="portal-upload-status" aria-live="polite">${escHtml(portalAdmin.uploadStatus || '')}</p>
       </div>
     </fieldset>
     <fieldset class="portal-group">
@@ -9509,8 +9511,9 @@ function loadPortalActivity() {
 function closePortalModal() {
   document.getElementById('portal-admin-modal')?.remove();
   portalAdmin = { loaded: false, busy: false, error: '',
-                  cr: { name: '', email: '', whatsapp: '' },
-                  library: [], company: '', fleet: [] };
+    uploadStatus: '', uploadKind: '',
+    cr: { name: '', email: '', whatsapp: '' },
+    library: [], company: '', fleet: [] };
 }
 
 // POST one half. Both shared saves carry the CR AND the library, because the backend
@@ -9588,12 +9591,25 @@ function portalUpload() {
   const sku = String((skuEl && skuEl.value) || '').trim();
   const category = String((catEl && catEl.value) || '').trim();
   const kind = (category === 'Training Videos' || /^video\//i.test(file.type || '')) ? 'video' : 'doc';
+  const mb = (file.size / (1024 * 1024)).toFixed(1);
+  portalAdmin.uploadStatus = 'Reading ' + file.name + ' (' + mb + ' MB)…';
+  portalAdmin.uploadKind = '';
+  portalAdmin.busy = true;
+  paintPortalAdmin();
+  const fail = (message) => {
+    portalAdmin.busy = false;
+    portalAdmin.uploadStatus = message;
+    portalAdmin.uploadKind = 'err';
+    paintPortalAdmin();
+    showToast(message);
+  };
   const reader = new FileReader();
   reader.onload = () => {
     const s = String(reader.result || '');
     const b64 = s.indexOf(',') >= 0 ? s.slice(s.indexOf(',') + 1) : '';
-    if (!b64) { showToast('The file could not be read'); return; }
-    portalAdmin.busy = true;
+    if (!b64) { fail('The file could not be read.'); return; }
+    portalAdmin.uploadStatus = 'Uploading ' + file.name + ' (' + mb + ' MB)…';
+    portalAdmin.uploadKind = '';
     paintPortalAdmin();
     adminPost('uploadPortalDocument', {
       sku: sku, category: category, label: label, kind: kind,
@@ -9604,20 +9620,26 @@ function portalUpload() {
     }).then(res => {
       portalAdmin.busy = false;
       if (!res || res.status !== 'ok') {
+        portalAdmin.uploadStatus = (res && res.message) || 'Could not upload the document.';
+        portalAdmin.uploadKind = 'err';
         paintPortalAdmin();
-        showToast((res && res.message) || 'Could not upload the document');
+        showToast(portalAdmin.uploadStatus);
         return;
       }
       portalAdmin.library = res.library || portalAdmin.library;
+      portalAdmin.uploadStatus = 'Uploaded "' + label + '". The customer portal shows it now.';
+      portalAdmin.uploadKind = 'ok';
       paintPortalAdmin();
       showToast('Uploaded — the portal shows it now');
     }).catch(() => {
       portalAdmin.busy = false;
+      portalAdmin.uploadStatus = 'Could not reach the backend.';
+      portalAdmin.uploadKind = 'err';
       paintPortalAdmin();
       showToast('Could not reach the backend');
     });
   };
-  reader.onerror = () => showToast('The file could not be read');
+  reader.onerror = () => fail('The file could not be read.');
   reader.readAsDataURL(file);
 }
 function renderSetup() {

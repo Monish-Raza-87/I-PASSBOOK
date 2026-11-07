@@ -113,7 +113,7 @@
       <button type="button" class="tile" data-panel="report">
         <span class="tile-icon" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 6v12M6 12h12"/><circle cx="12" cy="12" r="9"/></svg></span>
         <span class="tile-name">Customer support form</span>
-        <span class="tile-desc">Access customer help desk to report your issue or submit your feedback. Use the in-app report form, or ask the guide beside it.</span>
+        <span class="tile-desc">Report a fault or tell us how the service felt. Both reach the service desk directly, and every report gets an IR number.</span>
         <span class="tile-meta" id="tile-meta-report"></span>
       </button>
 
@@ -148,23 +148,24 @@
 
     <!-- ── REPORT ───────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-report" hidden>
-      <div class="panel-head"><h2>Customer support form</h2></div>
-      <p class="sub">Every request reaches the service desk the moment you submit it, and gets an IR
-      number the same day. Use the form below; if you are not sure which option fits, the guide under
-      it narrows it down in three short questions.</p>
-      <div class="panel-actions">
-        <a class="btn btn-primary" id="raise-p" href="#" target="_blank" rel="noopener">Raise an IR</a>
-        <a class="btn" id="feedback-p" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
-      </div>
-
-      <!-- THE GUIDE. A fixed conversation, not a model: every answer is a sentence we
-           wrote, and the last choice on every branch is a person. It cannot invent a
-           promise, and it costs nothing to run because nothing leaves the browser. -->
-      <div class="bot" id="bot">
-        <div class="bot-log" id="bot-log" aria-live="polite"></div>
-        <div class="bot-choices" id="bot-choices"></div>
-        <p class="bot-note">A guide with fixed answers — it can point you to the right form, your
-        ticket list or a manual. It cannot raise a request or change one.</p>
+      <div class="panel-head"><h2>Support &amp; feedback</h2></div>
+      <p class="sub">Two doors, one desk. Raise an issue when something needs fixing, or tell us how
+      the service felt. Both reach Customer Relations directly.</p>
+      <div class="form-doors">
+        <div class="form-door">
+          <span class="form-door-kicker">Something needs fixing</span>
+          <h3>Customer support form</h3>
+          <p>Report a fault, damage, missing part or service request. Attach what you have and we
+          open an IR the same working day.</p>
+          <a class="btn btn-primary" id="raise-p" href="#" target="_blank" rel="noopener">Raise an IR</a>
+        </div>
+        <div class="form-door">
+          <span class="form-door-kicker">How did we do</span>
+          <h3>Feedback form</h3>
+          <p>Tell us what worked, what dragged and what you would change. It goes straight to
+          Customer Relations, against your company.</p>
+          <a class="btn" id="feedback-p" href="#" target="_blank" rel="noopener" aria-disabled="true">Give feedback</a>
+        </div>
       </div>
     </section>
 
@@ -636,17 +637,25 @@
 
 <!-- Floating support chat: a WhatsApp-style entry point to the fixed guide and the
      in-app report form. It is not a second login or a second intake. -->
-<button type="button" class="chat-fab" id="chat-fab" aria-label="Open IPSA, the I-PASSBOOK Support Assistant" aria-expanded="false">
-  <span class="chat-fab-ip" aria-hidden="true">IP</span>
+<button type="button" class="chat-fab" id="chat-fab" aria-label="Open AERO, the I-PASSBOOK Support Assistant" aria-expanded="false">
+  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M3.5 5h17v11.5H9.8L3.5 20.5z"/>
+    <path d="M14.9 8.2l-1.6 4.1-4.1 1.6 1.6-4.1z" fill="currentColor" stroke="none"/>
+  </svg>
 </button>
-<section class="chat-panel" id="chat-panel" hidden aria-label="IPSA, the I-PASSBOOK Support Assistant">
+<section class="chat-panel" id="chat-panel" hidden aria-label="AERO, the I-PASSBOOK Support Assistant">
   <div class="chat-head">
-    <span><b>IPSA</b><small>I-PASSBOOK Support Assistant</small><small>Indrones Customer Relations</small></span>
+    <div class="chat-head-icon" aria-hidden="true">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3.5 5h17v11.5H9.8L3.5 20.5z"/>
+        <path d="M14.9 8.2l-1.6 4.1-4.1 1.6 1.6-4.1z" fill="currentColor" stroke="none"/>
+      </svg>
+    </div>
+    <span><b>AERO</b><small>I-PASSBOOK Support Assistant</small><small>Indrones Customer Relations</small></span>
     <button type="button" class="chat-x" id="chat-x" aria-label="Close chat">&times;</button>
   </div>
   <div class="chat-log" id="chat-log" aria-live="polite"></div>
   <div class="chat-choices" id="chat-choices"></div>
-  <p class="chat-note">A guide with fixed answers. To raise an IR, it opens the same in-app form.</p>
 </section>
 `;
   // ── The two form URLs, in ONE place each ───────────────────────────────────
@@ -1680,9 +1689,10 @@
     }
   }
 
-  // ── The guide, under the report buttons ──────────────────────────────────────
-  // A fixed tree with written answers. It cannot raise a request, cannot promise a
-  // date, and every branch ends with a door that a person answers.
+  // ── AERO's answer tree ───────────────────────────────────────────────────────
+  // A fixed tree with written answers, used by the floating chat at the bottom
+  // right. It cannot raise a request, cannot promise a date, and every branch ends
+  // with a door that a person answers.
   const BOT = {
     start: {
       say: 'What can I help you with?',
@@ -1706,32 +1716,6 @@
       choices: [['Open your contact', 'contact'], ['Back', 'start']]
     }
   };
-  function botShow(key) {
-    const step = BOT[key] || BOT.start;
-    const log  = $('bot-log');
-    const div  = document.createElement('p');
-    div.className = 'bot-say';
-    div.textContent = step.say;
-    log.innerHTML = '';
-    log.appendChild(div);
-    const box = $('bot-choices');
-    box.innerHTML = '';
-    step.choices.forEach(([label, go]) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'btn';
-      b.textContent = label;
-      b.addEventListener('click', () => {
-        if (go === 'form')  { openReportForm(); return; }
-        if (go === 'history') { openPanel('history'); $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-        if (go === 'library') { openPanel('library'); $('panel-library').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-        if (go === 'contact') { openPanel('contact'); $('panel-contact').scrollIntoView({ behavior: 'smooth', block: 'start' }); return; }
-        botShow(go);
-      });
-      box.appendChild(b);
-    });
-  }
-
   // ── Floating support chat ───────────────────────────────────────────────────
   function chatShow(key) {
     const step = BOT[key] || BOT.start;
@@ -2422,7 +2406,7 @@
       }
     });
 
-    botShow('start');
+
 
     // The footer's two links used to LEAVE — they were `customer.html#products` and
     // `customer.html#support`, addresses into this same page. They now open the panel

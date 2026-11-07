@@ -3468,9 +3468,12 @@ function irAcknowledgementHtml(fields, ir, sample) {
   '</div>';
 }
 
-function sendIrAcknowledgement(to, fields, ir, sample) {
-  if (!to) return false;
-  if (!mailQuotaOk('auth')) return false;
+function sendIrAcknowledgement(to, fields, ir, sample, debug) {
+  if (!to) { if (debug) Logger.log('No recipient.'); return false; }
+  if (!mailQuotaOk('auth')) {
+    if (debug) Logger.log('Daily mail quota reached; the acknowledgement was not sent.');
+    return false;
+  }
   var subject = 'I-PASSBOOK query (No. ' + ir + ') has been registered with Indrones Customer Relations';
   if (sample) subject = 'I-PASSBOOK sample report (No. ' + ir + ') has been registered with Indrones Customer Relations';
   try {
@@ -3480,7 +3483,10 @@ function sendIrAcknowledgement(to, fields, ir, sample) {
       replyTo: 'customer.relations@indrones.com'
     });
     return true;
-  } catch (e) { return false; }
+  } catch (e) {
+    if (debug) Logger.log('MailApp send failed: ' + (e && e.message));
+    return false;
+  }
 }
 // EDITOR-RUN, NOT ROUTED. Sends the real acknowledgement for the most recent IR
 // that has fields, preferring one with evidence, to the address you pass in (or the
@@ -3488,10 +3494,41 @@ function sendIrAcknowledgement(to, fields, ir, sample) {
 // customer submission. It sends no CC and creates nothing. Run it from the Apps
 // Script editor after deploying this file:
 //
-//   sendSampleAcknowledgementToOwner('you@example.com')
+//   sendSampleAcknowledgementToOwner('<your address>')
 //
 // The address is deliberately an argument/property, not a literal in this file: the
-// repository must never carry an external mailbox in its source.
+// repository must never carry an external mailbox in its source. The execution log
+// names the picked IR, the mail count and the exact MailApp result.
+// EDITOR-RUN helper for sendSampleAcknowledgementToOwner. If the registry has no
+// fields (older IRs), read the newest intake-sheet row so the sample email still
+// renders real data. Read-only.
+function latestIntakeFields() {
+  var grid = intakeGrid();
+  if (!grid || grid.length < 2) return null;
+  var header = grid[0] || [];
+  var row = grid[grid.length - 1] || [];
+  var get = function (names) {
+    var j = headerIndex(header, names);
+    return j >= 0 ? String(row[j] == null ? '' : row[j]).trim() : '';
+  };
+  return {
+    irNumber: get(['IR Number', 'IR No']),
+    dateRaised: get(['Timestamp']),
+    incidentDate: get(['Date of Incident']),
+    incidentTime: '',
+    droneId: get(['Drone Serial No', 'Serial No', 'Drone ID', 'Serial']),
+    droneModel: '',
+    companyName: get(['Where Do You Work']),
+    customerName: get(["Who's Reporting", 'Who is Reporting', 'Reporter']),
+    contactEmail: get(['Email Address', 'Email']),
+    spoc: get(['SPOC']),
+    issueType: get(['What Support Do You Need?', 'What Support Is Required?', 'Support Required']),
+    issueDesc: get(['Please Describe The Issue In Detail', 'Describe The Issue', 'Issue Description']),
+    incidentLocationWeather: get(['Incident Location and Weather', 'Incident Location']),
+    evidenceFormN: get(['Evidence: Attach Files From The Incident', 'Evidence: Attach Files']),
+    courierTracking: ''
+  };
+}
 function sendSampleAcknowledgementToOwner(to) {
   var target = String(to || '').trim() ||
     String(PropertiesService.getScriptProperties().getProperty('SAMPLE_ACK_TO') || '').trim();
@@ -3499,20 +3536,85 @@ function sendSampleAcknowledgementToOwner(to) {
   var reg = currentIRRegistry();
   var entries = Object.keys(reg.irs || {}).map(function (k) { return reg.irs[k]; })
     .filter(function (r) { return r && r.fields && r.irNumber; });
-  if (!entries.length) return 'No IR with fields found.';
-  entries.sort(function (a, b) {
-    return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
-  });
-  var withEvidence = entries.filter(function (r) {
-    return String(r.fields.evidenceFormN || '').trim();
-  });
-  var pick = withEvidence[0] || entries[0];
-  var sent = sendIrAcknowledgement(target, pick.fields, pick.irNumber, false);
+  Logger.log('IR entries with fields: ' + entries.length);
+  var pick = null;
+  if (entries.length) {
+    entries.sort(function (a, b) {
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+    });
+    var withEvidence = entries.filter(function (r) {
+      return String(r.fields.evidenceFormN || '').trim();
+    });
+    pick = withEvidence[0] || entries[0];
+  }
+  if (!pick) {
+    try {
+      var fallback = latestIntakeFields();
+      if (fallback) pick = { irNumber: fallback.irNumber || 'IR-UNKNOWN', fields: fallback };
+    } catch (e) { Logger.log('Intake fallback failed: ' + (e && e.message)); }
+  }
+  if (!pick) return 'No IR with fields found.';
+  Logger.log('Picked ' + pick.irNumber + ' for ' + target);
+  var today = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy-MM-dd');
+  Logger.log('Mail count today: ' +
+    (PropertiesService.getScriptProperties().getProperty('mailcount:' + today) || 0));
+  var sent = sendIrAcknowledgement(target, pick.fields, pick.irNumber, false, true);
+  Logger.log('sendIrAcknowledgement returned ' + sent);
+  if (!sent) {
+    if (!mailQuotaOk('auth')) {
+      Logger.log('Daily mail quota reached; the direct test was skipped.');
+    } else {
+      try {
+        MailApp.sendEmail(target, 'I-PASSBOOK test', 'Test email from the I-PASSBOOK script.',
+                          { name: 'I-PASSBOOK' });
+        Logger.log('Direct plain test email sent.');
+      } catch (e) {
+        Logger.log('Direct test failed: ' + (e && e.message));
+      }
+    }
+  }
   return sent
     ? 'Sample acknowledgement for ' + pick.irNumber + ' sent.'
-    : 'The acknowledgement could not be sent.';
+    : 'The acknowledgement could not be sent. See the execution log.';
 }
 
+// EDITOR-RUN, NOT ROUTED. Puts the test fleet on MM INDIA so the visual fleet shelf
+// can be checked. It touches only that company's fleet list, and it creates no IR.
+// Alias for the name used in the owner's note.
+function sendSampleAcknowledgementEmailToOwner(to) {
+  return sendSampleAcknowledgementToOwner(to);
+}
+
+function seedMmIndiaFleet() {
+  var target = sameCompanyKey('MM INDIA');
+  return withRowLockOrThrow(function () {
+    var st = readJsonLocked(PORTAL_STORE_FILE);
+    if (!st || typeof st !== 'object') st = {};
+    if (!st.companies || typeof st.companies !== 'object') st.companies = {};
+    var key = target;
+    if (!st.companies[key]) {
+      var found = Object.keys(st.companies).find(function (k) {
+        return sameCompanyKey(k) === target;
+      });
+      if (found) key = found;
+    }
+    if (!st.companies[key]) {
+      Logger.log('MM INDIA not found in portal.json');
+      return 'Company MM INDIA not found.';
+    }
+    var rec = (st.companies[key] && typeof st.companies[key] === 'object') ? st.companies[key] : {};
+    rec.fleet = [
+      { sn: 'S250001', model: 'SIGMA25G', uin: 'UIN-TEST-S25G-001', cert: '' },
+      { sn: 'S25P001', model: 'SIGMA 25 PRO', uin: 'UIN-TEST-S25P-001', cert: '' },
+      { sn: 'S100-001', model: 'SIGMA 100', uin: 'UIN-TEST-S100-001', cert: '' },
+      { sn: 'S100-002', model: 'SIGMA 100', uin: 'UIN-TEST-S100-002', cert: '' }
+    ];
+    st.companies[key] = rec;
+    writeJsonLocked(PORTAL_STORE_FILE, st);
+    Logger.log('Seeded 4 aircraft for MM INDIA.');
+    return 'Seeded 4 aircraft for MM INDIA.';
+  });
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // ADMIN NOTICES — one email per event the admin should hear about as it happens.
@@ -5642,11 +5744,14 @@ function portalProfileFor(company) {
       companyName:       String(d.companyName || '').slice(0, 160),
       gst:               String(d.gst || '').slice(0, 40),
       egcaId:            String(d.egcaId || '').slice(0, 60),
-      registeredAddress: String(d.registeredAddress || '').slice(0, 240),
-      additionalAddress: String(d.additionalAddress || '').slice(0, 240),
-      contactPhone:      String(d.contactPhone || '').slice(0, 40),
-      contactEmail:      String(d.contactEmail || '').slice(0, 160)
-    },
+    registeredAddress: String(d.registeredAddress || '').slice(0, 240),
+    additionalAddress: String(d.additionalAddress || '').slice(0, 240),
+    additionalAddresses: (d.additionalAddresses instanceof Array ? d.additionalAddresses : [])
+      .map(function (x) { return String(x || '').trim().slice(0, 240); })
+      .filter(Boolean).slice(0, 6),
+    contactPhone:      String(d.contactPhone || '').slice(0, 40),
+    contactEmail:      String(d.contactEmail || '').slice(0, 160)
+  },
     addresses: portalCleanList(p.addresses, ['label', 'text'], 8, 200),
     contacts:  portalCleanList(p.contacts, ['name', 'role', 'phone', 'email'], 8, 140),
     // Forty is a fleet, not a customer's whole history; an aircraft that has gone is
@@ -5997,6 +6102,9 @@ function saveCustomerProfile(params, authEmail) {
     egcaId:            String(details.egcaId || '').slice(0, 60),
     registeredAddress: String(details.registeredAddress || '').slice(0, 240),
     additionalAddress: String(details.additionalAddress || '').slice(0, 240),
+    additionalAddresses: (details.additionalAddresses instanceof Array ? details.additionalAddresses : [])
+      .map(function (x) { return String(x || '').trim().slice(0, 240); })
+      .filter(Boolean).slice(0, 6),
     contactPhone:      String(details.contactPhone || '').slice(0, 40),
     contactEmail:      String(details.contactEmail || '').slice(0, 160)
   };

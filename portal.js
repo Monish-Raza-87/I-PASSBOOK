@@ -18,7 +18,7 @@
   <div class="wrap bar-in">
     <a class="brand" href="./">
       <img src="assets/icon-mark-silver.png" alt="">
-      <b>Indrones</b><span>Customer Space</span>
+      <b>Indrones</b><span>I-PASSBOOK</span>
     </a>
     <nav class="portal-nav" id="portal-nav" aria-label="Customer space sections" hidden>
       <div class="portal-nav-drop" id="support-nav">
@@ -63,13 +63,6 @@
 </header>
 
 <main>
-
-  <nav class="page-rail" id="page-rail" aria-label="Page sections" hidden>
-    <a href="#top" aria-label="Top"><span>Top</span></a>
-    <a href="#products" aria-label="Our products"><span>Our products</span></a>
-    <a href="#support" aria-label="Service stages"><span>Service stages</span></a>
-    <a href="#reach" aria-label="Reach the service desk"><span>Reach the desk</span></a>
-  </nav>
 
   <div class="home-hero-band" id="top">
   <section class="hero wrap home-hero">
@@ -288,40 +281,26 @@
           <div class="field"><label for="co-email">Official email ID</label><input id="co-email" class="form-input" type="email"></div>
         </div>
         <div class="field"><label for="co-reg-address">Registered address</label><textarea id="co-reg-address"></textarea></div>
-        <div class="field"><label for="co-add-address">Additional address</label><textarea id="co-add-address"></textarea></div>
-      </div>
-      <p class='sub'>Keep these right and we will never have to ask you twice — not at a dispatch,
-      and not in the middle of a breakdown. Only your own company can see this page.</p>
-
-      <div class="detail-block" id="detail-company">
-        <h3>Company info</h3>
-        <div id="addr-rows"></div>
-        <p class="detail-empty" id="addr-empty" hidden>No address on file yet. Add the one we should ship to.</p>
-        <button type="button" class="btn" id="addr-add">Add an address</button>
-      </div>
-
-      <div class="detail-block" id="detail-users">
-        <h3>Approved users</h3>
-        <div id="cont-rows"></div>
-        <p class="detail-empty" id="cont-empty" hidden>No contact on file yet. Add the person we should call.</p>
-        <button type="button" class="btn" id="cont-add">Add a person</button>
-      </div>
-
-      <div class="panel-actions">
-        <button type="button" class="btn btn-primary" id="profile-save">Save details</button>
-        <span class="msg" id="profile-msg" aria-live="polite"></span>
-      </div>
-
-      <div class="detail-block" id="detail-fleet">
-        <h3>Your fleet</h3>
-        <p class="sub" style="margin-bottom:6px">The UIN is the registration number your aircraft
-        flies under, and the certificate is the DGCA document for it. Both are issued to you — tell
-        the service desk if a serial is missing or a certificate is out of date.</p>
-        <ul class="fleet" id="fleet-list"></ul>
-        <p class="detail-empty" id="fleet-empty" hidden>No aircraft is registered against your
-        company yet. The service desk adds it from the serial numbers on your tickets.</p>
+        <div class="detail-block" id="detail-add-addresses">
+          <h3>Additional addresses</h3>
+          <div id="add-addr-rows"></div>
+          <p class="detail-empty" id="add-addr-empty" hidden>No additional address. Add one only if we should ship there.</p>
+          <button type="button" class="btn" id="add-addr-add">Add additional address</button>
+        </div>
+        <div class="detail-block" id="detail-users">
+          <h3>Approved users</h3>
+          <div id="cont-rows"></div>
+          <p class="detail-empty" id="cont-empty" hidden>No contact on file yet. Add the person we should call.</p>
+          <button type="button" class="btn" id="cont-add">Add a person</button>
+        </div>
+        <p class="detail-note">Keep these right and we will never have to ask you twice &mdash; not at a dispatch, and not in the middle of a breakdown. Only your own company can see this page.</p>
+        <div class="panel-actions">
+          <button type="button" class="btn btn-primary" id="profile-save">Save details</button>
+          <span class="msg" id="profile-msg" aria-live="polite"></span>
+        </div>
       </div>
     </section>
+
 
     <!-- ── CONTACT ──────────────────────────────────────────────────────────── -->
     <section class="panel" id="panel-contact" hidden>
@@ -616,7 +595,7 @@
 
 <footer class="foot wrap">
   <div class="row">
-    <span>Indrones Customer Space</span>
+    <span>Indrones I-PASSBOOK</span>
     <a href="#library" data-open-panel="library">Products</a>
     <a href="#contact" data-open-panel="contact">Support</a>
     <a href="./faq.html">Help &amp; FAQ</a>
@@ -1276,6 +1255,7 @@
   // their addresses by pressing Save on a blank page.
   let PORTAL_DATA = null;
   let PROFILE = { addresses: [], contacts: [], fleet: [] };
+  let DETAIL_ADDRS = [];   // additional addresses being edited, in display order
   const CR_FALLBACK_WA = '918655366232';   // the desk's public WhatsApp, already on this page
 
   // ── Boot ──────────────────────────────────────────────────────────────────────
@@ -1344,9 +1324,7 @@
     const cr      = (PORTAL_DATA && PORTAL_DATA.cr) || {};
 
     $('portal-title').textContent = ME && ME.customerOf ? ME.customerOf : 'Your space';
-    $('portal-sub').textContent = ME
-      ? 'Signed in as ' + ME.email + '. Everything below is your company\'s own record — nothing here is shared with another customer.'
-      : '';
+    $('portal-sub').textContent = ME ? 'Signed in as ' + ME.email + '.' : '';
 
     $('tile-meta-history').textContent = TICKETS.length
       ? TICKETS.length + ' IR' + (TICKETS.length === 1 ? '' : 's') + ' on file' : '';
@@ -1467,9 +1445,9 @@
       if (fleet) fleet.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
-    const ids = { company: 'detail-company', users: 'detail-users' };
+    const ids = { company: 'detail-company-info', users: 'detail-users' };
     openPanel('details');
-    const el = document.getElementById(ids[key] || 'detail-company');
+    const el = document.getElementById(ids[key] || 'detail-company-info');
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function openPanel(name) {
@@ -1964,7 +1942,28 @@
       '" aria-label="Remove this row">Remove</button></div>';
   }
 
-  function renderDetails() {
+  function paintAddAddresses() {
+    const host = $('add-addr-rows');
+    if (!host) return;
+    host.innerHTML = DETAIL_ADDRS.map((text, i) =>
+      '<div class="add-addr-row" data-i="' + i + '">' +
+        '<label>Additional address ' + (i + 1) + '</label>' +
+        '<textarea data-k="text" placeholder="Full address with PIN code">' + esc(text || '') + '</textarea>' +
+        '<button type="button" class="detail-del" data-del-addr="' + i + '" aria-label="Remove this address">Remove</button>' +
+      '</div>').join('');
+    const empty = $('add-addr-empty');
+    if (empty) empty.hidden = DETAIL_ADDRS.length > 0;
+  }
+
+  function paintContacts() {
+    const c = PROFILE.contacts || [];
+    const rows = $('cont-rows');
+    if (rows) rows.innerHTML = c.map((r, i) => detailRow('cont', CONT_KEYS, CONT_PH, r, i)).join('');
+    const empty = $('cont-empty');
+    if (empty) empty.hidden = c.length > 0;
+  }
+
+  function renderDetails(reloadAddrs) {
     const cn = document.getElementById('company-name');
     if (cn) cn.textContent = (ME && ME.customerOf) ? 'Company: ' + ME.customerOf : '';
     const d = PROFILE.details || {};
@@ -1972,16 +1971,16 @@
     set('co-name', d.companyName || (ME && ME.customerOf));
     set('co-gst', d.gst); set('co-egca', d.egcaId);
     set('co-phone', d.contactPhone); set('co-email', d.contactEmail);
-    set('co-reg-address', d.registeredAddress); set('co-add-address', d.additionalAddress);
-    const a = PROFILE.addresses || [];
-    const c = PROFILE.contacts || [];
-    $('addr-rows').innerHTML = a.map((r, i) => detailRow('addr', ADDR_KEYS, ADDR_PH, r, i)).join('');
-    $('cont-rows').innerHTML = c.map((r, i) => detailRow('cont', CONT_KEYS, CONT_PH, r, i)).join('');
-    $('addr-empty').hidden = a.length > 0;
-    $('cont-empty').hidden = c.length > 0;
+    set('co-reg-address', d.registeredAddress);
+    if (reloadAddrs !== false) {
+      DETAIL_ADDRS = (d.additionalAddresses instanceof Array ? d.additionalAddresses.slice() : []);
+      if (!DETAIL_ADDRS.length && d.additionalAddress) DETAIL_ADDRS = [d.additionalAddress];
+    }
+    paintAddAddresses();
+    paintContacts();
 
-    // A failed read leaves the form EMPTY, so pressing Save would send two empty lists
-    // and delete the profile. The button is the thing that has to know.
+    // A failed read leaves the form EMPTY, so pressing Save would send empty lists and
+    // delete the profile. The button is the thing that has to know.
     const ok = !!(PORTAL_DATA && PORTAL_DATA.profile);
     $('profile-save').disabled = !ok;
     if (!ok) $('profile-msg').textContent = 'Your details could not be loaded, so saving is turned off — reload the page, and tell the desk if it keeps happening.';
@@ -2004,42 +2003,34 @@
   }
 
   // ── Your aircraft, and the UIN certificate ───────────────────────────────────
+  const FLEET_IMAGES = {
+    SIGMA25G: 'https://media-inspect.indrones.com/ind/assets/enterprise/images/drone-thumbnails/s25g-iso-top-bg.webp',
+    SIGMA25PRO: 'https://media-inspect.indrones.com/ind/assets/enterprise/images/drone-thumbnails/s25pro-iso-top-bg.webp',
+    SIGMA100: 'https://media-inspect.indrones.com/ind/assets/enterprise/images/drone-thumbnails/s100-iso-top-bg.webp'
+  };
   function renderFleet() {
-    const list = $('fleet-list');
     const panel = $('fleet-panel-list');
-    const f    = PROFILE.fleet || [];
+    const f = PROFILE.fleet || [];
     const certified = ((PORTAL_DATA && PORTAL_DATA.certified) || []).map(libNorm);
-    $('fleet-empty').hidden = f.length > 0;
     if ($('fleet-panel-empty')) $('fleet-panel-empty').hidden = f.length > 0;
     if ($('fleet-panel-count')) $('fleet-panel-count').textContent = f.length ? f.length + ' aircraft' : '';
-
-    list.innerHTML = f.map(x => {
+    if (!panel) return;
+    panel.innerHTML = f.map(x => {
       const isCert = certified.indexOf(libNorm(x.model)) >= 0;
-      return '<li>' +
-        '<span class="sn">' + esc(x.sn || '-') + '</span>' +
-        '<span class="uin">' + esc(x.model || '') + '</span>' +
-        (x.uin
-          ? '<span class="uin">UIN <b>' + esc(x.uin) + '</b></span>'
-          : (isCert ? '<span class="uin">UIN not on file</span>' : '')) +
-        (x.cert
-          ? '<a class="cert" href="' + esc(x.cert) + '" target="_blank" rel="noopener noreferrer">Download UIN certificate &#8599;</a>'
-          : (isCert ? '<span class="cert none">Certificate not on file</span>' : '')) +
-        '</li>';
+      const img = FLEET_IMAGES[libNorm(x.model)] || '';
+      return '<article class="fleet-card fleet-visual">' +
+        (img
+          ? '<img class="fleet-photo" src="' + esc(img) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()">'
+          : '<span class="fleet-photo fleet-photo-empty" aria-hidden="true"></span>') +
+        '<b class="fleet-model">' + esc(x.model || 'UAS') + '</b>' +
+        '<span>SN ' + esc(x.sn || '-') + '</span>' +
+        (x.uin ? '<span>UIN ' + esc(x.uin) + '</span>' : (isCert ? '<span>UIN not on file</span>' : '')) +
+        (x.cert ? '<a href="' + esc(x.cert) + '" target="_blank" rel="noopener noreferrer">UIN certificate &#8599;</a>'
+                : (isCert ? '<span>Certificate not on file</span>' : '')) +
+        '</article>';
     }).join('');
-
-    if (panel) {
-      panel.innerHTML = f.map(x => {
-        const isCert = certified.indexOf(libNorm(x.model)) >= 0;
-        return '<article class="fleet-card">' +
-          '<b>' + esc(x.sn || '-') + '</b>' +
-          '<span>' + esc(x.model || '') + '</span>' +
-          (x.uin ? '<span>UIN ' + esc(x.uin) + '</span>' : (isCert ? '<span>UIN not on file</span>' : '')) +
-          (x.cert ? '<a href="' + esc(x.cert) + '" target="_blank" rel="noopener noreferrer">UIN certificate &#8599;</a>'
-                  : (isCert ? '<span>Certificate not on file</span>' : '')) +
-          '</article>';
-      }).join('');
-    }
   }
+
   async function loadPortalUsers() {
     const host = $('portal-users-body');
     if (!host) return;
@@ -2700,40 +2691,6 @@
   // It used to run as this file was EVALUATED, which was invisible while the portal
   // owned the whole document — the markup had already been parsed by then. Mounted, the
   // document is empty at evaluation time, so the first `$('signin-close')` is null and
-  // The right-side page rail. It lists the home page's own sections, follows the
-  // scroll to mark the current one, and hides itself when a portal panel is open.
-  function wirePageRail() {
-    const rail = document.getElementById('page-rail');
-    if (!rail) return;
-    const links = Array.from(rail.querySelectorAll('a'));
-    const targetFor = (a) => {
-      const href = a.getAttribute('href');
-      return href === '#top' ? document.querySelector('.home-hero-band') : document.querySelector(href);
-    };
-    const items = links.map(a => ({ a: a, target: targetFor(a) })).filter(x => x.target);
-    rail.hidden = items.length < 2;
-    if (!items.length) return;
-    links.forEach(a => a.addEventListener('click', e => {
-      const target = targetFor(a);
-      if (!target) return;
-      e.preventDefault();
-      if (a.getAttribute('href') === '#top') window.scrollTo({ top: 0, behavior: 'smooth' });
-      else target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }));
-    const paint = () => {
-      if (document.body.classList.contains('portal-panel-open')) return;
-      const y = window.scrollY + window.innerHeight * 0.35;
-      let current = items[0];
-      items.forEach(it => {
-        const top = it.target.getBoundingClientRect().top + window.scrollY;
-        if (top <= y) current = it;
-      });
-      items.forEach(it => it.a.classList.toggle('is-active', it === current));
-    };
-    window.addEventListener('scroll', paint, { passive: true });
-    window.addEventListener('resize', paint);
-    paint();
-  }
   // Automatic card rows. The native horizontal scroll does the moving; this only
   // advances it on a timer, pauses while the pointer or keyboard focus is inside or
   // the row is off screen, and honours prefers-reduced-motion. The arrows are real
@@ -2918,21 +2875,44 @@
     // Add / remove a row. The index is position in the CURRENT lists, and renderDetails()
     // is what puts them back on screen — so an add or a remove is one re-render, and no
     // state exists anywhere else.
-    function addRow(kind) {
-      if (kind === 'addr') { PROFILE.addresses = (PROFILE.addresses || []).concat([{ label: '', text: '' }]); }
-      else                 { PROFILE.contacts  = (PROFILE.contacts  || []).concat([{ name: '', role: '', phone: '', email: '' }]); }
-      renderDetails();
+    function readContactsFromDom() {
+      return Array.from(document.querySelectorAll('#cont-rows .detail-row')).map(row => {
+        const one = {};
+        CONT_KEYS.forEach(k => {
+          const el = row.querySelector('[data-k="' + k + '"]');
+          one[k] = el ? el.value : '';
+        });
+        return one;
+      });
     }
-    $('addr-add').addEventListener('click', () => addRow('addr'));
-    $('cont-add').addEventListener('click', () => addRow('cont'));
+    function syncAddresses() {
+      const host = $('add-addr-rows');
+      if (host) DETAIL_ADDRS = Array.from(host.querySelectorAll('textarea')).map(t => t.value);
+    }
+    function addRow() {
+      PROFILE.contacts = readContactsFromDom();
+      PROFILE.contacts.push({ name: '', role: '', phone: '', email: '' });
+      paintContacts();
+    }
+    $('add-addr-add').addEventListener('click', () => {
+      syncAddresses();
+      DETAIL_ADDRS.push('');
+      paintAddAddresses();
+    });
+    $('cont-add').addEventListener('click', () => addRow());
 
     $('panel-details').addEventListener('click', e => {
       const b = e.target.closest ? e.target.closest('.detail-del') : null;
       if (!b) return;
-      const i = Number(b.dataset.i);
-      if (b.dataset.del === 'addr') PROFILE.addresses.splice(i, 1);
-      else                          PROFILE.contacts.splice(i, 1);
-      renderDetails();
+      if (b.dataset.delAddr != null) {
+        syncAddresses();
+        DETAIL_ADDRS.splice(Number(b.dataset.delAddr), 1);
+        paintAddAddresses();
+        return;
+      }
+      PROFILE.contacts = readContactsFromDom();
+      PROFILE.contacts.splice(Number(b.dataset.i), 1);
+      paintContacts();
     });
 
     $('profile-save').addEventListener('click', async () => {
@@ -2940,13 +2920,16 @@
       const btn = $('profile-save');
       // The lists are read from the DOM, then BOTH are posted: the backend replaces the
       // pair together, so sending one and not the other would empty what was not sent.
-      const addresses = collectRows('#addr-rows', ADDR_KEYS);
+      const addresses = PROFILE.addresses || [];
       const contacts  = collectRows('#cont-rows', CONT_KEYS);
       const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+      const additionalAddresses = Array.from(document.querySelectorAll('#add-addr-rows textarea'))
+        .map(t => t.value.trim()).filter(Boolean);
       const details = {
         companyName: val('co-name'), gst: val('co-gst'), egcaId: val('co-egca'),
         contactPhone: val('co-phone'), contactEmail: val('co-email'),
-        registeredAddress: val('co-reg-address'), additionalAddress: val('co-add-address')
+        registeredAddress: val('co-reg-address'),
+        additionalAddresses: additionalAddresses
       };
       btn.disabled = true;
       msg.className = 'msg';
@@ -3006,7 +2989,6 @@
     });
 
     wireCarousels();
-    wirePageRail();
     wireVideoCards();
 
     // A link from the invitation email may carry them straight to the sheet.

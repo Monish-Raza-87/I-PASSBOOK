@@ -680,19 +680,20 @@ try {
   ok('the document viewer opens with an iframe and a new-tab escape',
     await visible('#doc-viewer') && await evaluate(`!!document.querySelector('#doc-viewer iframe')`));
   await evaluate(`document.getElementById('doc-close').click()`);
-  // Your details: the addresses we ship to, and the people we call.
+  // Company profile: the company form and the people we call, in one place.
   await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="details"]').click()`);
   await SLEEP(120);
-  ok('your details carries the addresses already on file, not an empty form',
-    await evaluate(`document.querySelectorAll('#addr-rows .detail-row').length`) === 2);
-  ok('...and the contacts too', await evaluate(`document.querySelectorAll('#cont-rows .detail-row').length`) === 2);
+  ok('your details opens the company profile form, not a list at the bottom',
+    await visible('#detail-company-info'));
+  ok('...and the contacts already on file',
+    await evaluate(`document.querySelectorAll('#cont-rows .detail-row').length`) === 2);
   ok('...and Save is live, because the profile really loaded',
     !(await evaluate(`document.getElementById('profile-save').disabled`)));
-  const fleetText = await evaluate(`document.getElementById('fleet-list').innerText`);
+  const fleetText = await evaluate(`document.getElementById('fleet-panel-list').innerText`);
   ok('an aircraft shows its own UIN, which is the compliance number the customer needs',
     /UIN-EXAMPLE-1/.test(fleetText), fleetText);
   ok('...and a certified airframe offers the certificate as a download',
-    await evaluate(`!!document.querySelector('#fleet-list a.cert[href$="cert.pdf"]')`), fleetText);
+    await evaluate(`!!document.querySelector('#fleet-panel-list a[href$="cert.pdf"]')`), fleetText);
 
   // Discuss your requirement: the desk's own line, and the named CR from the store.
   await evaluate(`document.querySelector('#portal-tiles .tile[data-panel="contact"]').click()`);

@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v141';
+const APP_VERSION = 'v142';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -3768,7 +3768,7 @@ function enterCustomerMode() {
   // points cannot disagree about what a stored preference means.
   const chosen = document.documentElement.dataset.theme;
   if (chosen === 'cream') document.documentElement.dataset.theme = 'light';
-  document.title = 'Indrones Customer Space';
+  document.title = 'Indrones I-PASSBOOK';
 
   // Keep the first frame the portal's own ground colour. The staff stylesheets are
   // about to be removed, and a white flash before portal.css lands reads as a

@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v144';
+const APP_VERSION = 'v145';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -5611,6 +5611,31 @@ function adminPost(action, fields) {
     .catch(() => ({ status: 'error', message: 'Could not reach the backend.' }));
 }
 
+// The same POST, with an upload-progress callback. The global fetch wrapper appends
+// the session token; XMLHttpRequest is not intercepted, so it is appended here too.
+// Used by the portal document upload so the browser can show a real percentage.
+function adminPostWithProgress(action, fields, onProgress) {
+  return new Promise((resolve, reject) => {
+    const fd = new FormData();
+    fd.append('action', action);
+    Object.keys(fields || {}).forEach(k => fd.append(k, fields[k]));
+    const token = currentUser && currentUser.sessionToken;
+    if (token) fd.append('sessionToken', token);
+    if (currentUser && currentUser.email) fd.append('userEmail', currentUser.email);
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', CONFIG.GAS_URL);
+    xhr.upload.onprogress = e => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      try { resolve(JSON.parse(xhr.responseText)); }
+      catch (e) { reject(new Error('Could not read the backend reply.')); }
+    };
+    xhr.onerror = () => reject(new Error('Could not reach the backend.'));
+    xhr.send(fd);
+  });
+}
+
 function copyText(text) {
   const ok = () => showToast('Copied to clipboard');
   const fallback = () => {
@@ -9263,7 +9288,8 @@ function renderInsights() {
 // value the store did not take.
 let portalAdmin = {
   loaded: false, busy: false, error: '',
-  uploadStatus: '', uploadKind: '',
+  uploadStatus: '', uploadKind: '', uploadProgress: 0,
+  uploadForm: { sku: '', category: 'Quick User Guide', label: '' },
   cr: { name: '', email: '', whatsapp: '' },
   library: [], company: '', fleet: []
 };
@@ -9302,6 +9328,7 @@ function portalAdminHTML() {
     .slice()
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' }));
   const co = portalAdmin.company || '';
+  const uf = portalAdmin.uploadForm || { sku: '', category: 'Quick User Guide', label: '' };
   const libLines = (portalAdmin.library || [])
     .map(l => [l.sku || '', l.label || '', l.url || '', l.kind || 'doc', l.category || ''].join(' | ')).join('\n');
   const fleetLines = (portalAdmin.fleet || [])
@@ -9344,10 +9371,10 @@ function portalAdminHTML() {
       <div class="portal-fields">
         <label for="portal-doc-sku">Model</label>
         <select id="portal-doc-sku" class="form-input">
-          <option value="SIGMA25G">SIGMA25G</option>
-          <option value="SIGMA 100">SIGMA 100</option>
-          <option value="SIGMA 25 PRO">SIGMA 25 PRO</option>
-          <option value="">General / training video</option>
+          <option value="SIGMA25G"${uf.sku === 'SIGMA25G' ? ' selected' : ''}>SIGMA25G</option>
+          <option value="SIGMA 100"${uf.sku === 'SIGMA 100' ? ' selected' : ''}>SIGMA 100</option>
+          <option value="SIGMA 25 PRO"${uf.sku === 'SIGMA 25 PRO' ? ' selected' : ''}>SIGMA 25 PRO</option>
+          <option value=""${!uf.sku ? ' selected' : ''}>General / training video</option>
         </select>
         <label for="portal-doc-company">Company (Acknowledgement only)</label>
         <select id="portal-doc-company" class="form-input">
@@ -9358,24 +9385,22 @@ function portalAdminHTML() {
         <input id="portal-doc-serial" class="form-input" type="text" autocomplete="off">
         <label for="portal-doc-category">Category</label>
         <select id="portal-doc-category" class="form-input">
-          <option>Quick User Guide</option>
-          <option>Flight User Manual</option>
-          <option>User Level Maintenance Manual</option>
-          <option>Flight Checklist</option>
-          <option>Logbooks</option>
-          <option>Training Videos</option>
-          <option>eGCA Signup SOP</option>
-          <option>Certificate of Conformity</option>
-          <option>Warranty</option>
-          <option>Acknowledgement</option>
-          <option>Service Bulletin</option>
+          ${['Quick User Guide', 'Flight User Manual', 'User Level Maintenance Manual',
+             'Flight Checklist', 'Logbooks', 'Training Videos', 'eGCA Signup SOP',
+             'Certificate of Conformity', 'Warranty', 'Acknowledgement', 'Service Bulletin']
+            .map(c => `<option${uf.category === c ? ' selected' : ''}>${c}</option>`).join('')}
         </select>
         <label for="portal-doc-label">Title</label>
-        <input id="portal-doc-label" class="form-input" type="text" autocomplete="off" placeholder="SIGMA100 Quick User Guide">
+        <input id="portal-doc-label" class="form-input" type="text" autocomplete="off"
+               placeholder="SIGMA100 Quick User Guide" value="${escHtml(uf.label || '')}">
         <label for="portal-doc-file">File</label>
         <input id="portal-doc-file" class="form-input" type="file" accept=".pdf,video/*">
         <label class="portal-check"><input type="checkbox" id="portal-doc-email"> Email customers using this model (Service Bulletin only)</label>
         <button type="button" class="btn btn-secondary" id="portal-upload"${portalAdmin.busy ? ' disabled' : ''}>${portalAdmin.busy ? 'Uploading…' : 'Upload document'}</button>
+        <div class="portal-upload-progress" id="portal-upload-progress"${(portalAdmin.uploadProgress > 0 || portalAdmin.busy) ? '' : ' hidden'}>
+          <div class="portal-upload-bar"><span id="portal-upload-fill" style="width:${Math.max(0, Math.min(100, Math.round(portalAdmin.uploadProgress || 0)))}%"></span></div>
+          <span class="portal-upload-pct" id="portal-upload-pct">${Math.round(portalAdmin.uploadProgress || 0)}%</span>
+        </div>
         <p class="msg ${portalAdmin.uploadKind || ''}" id="portal-upload-status" aria-live="polite">${escHtml(portalAdmin.uploadStatus || '')}</p>
       </div>
     </fieldset>
@@ -9511,7 +9536,8 @@ function loadPortalActivity() {
 function closePortalModal() {
   document.getElementById('portal-admin-modal')?.remove();
   portalAdmin = { loaded: false, busy: false, error: '',
-    uploadStatus: '', uploadKind: '',
+    uploadStatus: '', uploadKind: '', uploadProgress: 0,
+    uploadForm: { sku: '', category: 'Quick User Guide', label: '' },
     cr: { name: '', email: '', whatsapp: '' },
     library: [], company: '', fleet: [] };
 }
@@ -9592,10 +9618,23 @@ function portalUpload() {
   const category = String((catEl && catEl.value) || '').trim();
   const kind = (category === 'Training Videos' || /^video\//i.test(file.type || '')) ? 'video' : 'doc';
   const mb = (file.size / (1024 * 1024)).toFixed(1);
+
+  portalAdmin.uploadForm = { sku: sku, category: category, label: label };
+  portalAdmin.uploadProgress = 0;
   portalAdmin.uploadStatus = 'Reading ' + file.name + ' (' + mb + ' MB)…';
   portalAdmin.uploadKind = '';
   portalAdmin.busy = true;
   paintPortalAdmin();
+
+  const setProgress = (percent) => {
+    portalAdmin.uploadProgress = Math.max(0, Math.min(100, Math.round(percent)));
+    const wrap = document.getElementById('portal-upload-progress');
+    const fill = document.getElementById('portal-upload-fill');
+    const pct  = document.getElementById('portal-upload-pct');
+    if (wrap) wrap.hidden = false;
+    if (fill) fill.style.width = portalAdmin.uploadProgress + '%';
+    if (pct) pct.textContent = portalAdmin.uploadProgress + '%';
+  };
   const fail = (message) => {
     portalAdmin.busy = false;
     portalAdmin.uploadStatus = message;
@@ -9611,12 +9650,19 @@ function portalUpload() {
     portalAdmin.uploadStatus = 'Uploading ' + file.name + ' (' + mb + ' MB)…';
     portalAdmin.uploadKind = '';
     paintPortalAdmin();
-    adminPost('uploadPortalDocument', {
+    adminPostWithProgress('uploadPortalDocument', {
       sku: sku, category: category, label: label, kind: kind,
       fileName: file.name, mimeType: file.type || '', fileBase64: b64,
       company: (document.getElementById('portal-doc-company') && document.getElementById('portal-doc-company').value) || '',
       serial: (document.getElementById('portal-doc-serial') && document.getElementById('portal-doc-serial').value) || '',
       emailUsers: (document.getElementById('portal-doc-email') && document.getElementById('portal-doc-email').checked) ? '1' : ''
+    }, fraction => {
+      setProgress(fraction * 100);
+      if (fraction >= 1) {
+        portalAdmin.uploadStatus = 'Processing on the server…';
+        const status = document.getElementById('portal-upload-status');
+        if (status) status.textContent = portalAdmin.uploadStatus;
+      }
     }).then(res => {
       portalAdmin.busy = false;
       if (!res || res.status !== 'ok') {
@@ -9626,22 +9672,27 @@ function portalUpload() {
         showToast(portalAdmin.uploadStatus);
         return;
       }
+      portalAdmin.uploadProgress = 100;
       portalAdmin.library = res.library || portalAdmin.library;
       portalAdmin.uploadStatus = 'Uploaded "' + label + '". The customer portal shows it now.';
       portalAdmin.uploadKind = 'ok';
+      // Keep the model and category, clear the title and file so the next document
+      // can be lined up in the same open window.
+      portalAdmin.uploadForm = { sku: sku, category: category, label: '' };
       paintPortalAdmin();
       showToast('Uploaded — the portal shows it now');
-    }).catch(() => {
+    }).catch(err => {
       portalAdmin.busy = false;
-      portalAdmin.uploadStatus = 'Could not reach the backend.';
+      portalAdmin.uploadStatus = (err && err.message) || 'Could not reach the backend.';
       portalAdmin.uploadKind = 'err';
       paintPortalAdmin();
-      showToast('Could not reach the backend');
+      showToast(portalAdmin.uploadStatus);
     });
   };
   reader.onerror = () => fail('The file could not be read.');
   reader.readAsDataURL(file);
 }
+
 function renderSetup() {
   if (currentView !== 'setup') return;
   const body = document.getElementById('setup-body');

@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v145';
+const APP_VERSION = 'v146';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -9650,19 +9650,28 @@ function portalUpload() {
     portalAdmin.uploadStatus = 'Uploading ' + file.name + ' (' + mb + ' MB)…';
     portalAdmin.uploadKind = '';
     paintPortalAdmin();
-    adminPostWithProgress('uploadPortalDocument', {
+    const fields = {
       sku: sku, category: category, label: label, kind: kind,
       fileName: file.name, mimeType: file.type || '', fileBase64: b64,
       company: (document.getElementById('portal-doc-company') && document.getElementById('portal-doc-company').value) || '',
       serial: (document.getElementById('portal-doc-serial') && document.getElementById('portal-doc-serial').value) || '',
       emailUsers: (document.getElementById('portal-doc-email') && document.getElementById('portal-doc-email').checked) ? '1' : ''
-    }, fraction => {
+    };
+    // The XHR gives the real upload percentage. If a browser refuses that path
+    // (an Apps Script redirect can trip XHR's CORS handling while fetch survives),
+    // fall back to the fetch upload that has always worked; the file still lands.
+    adminPostWithProgress('uploadPortalDocument', fields, fraction => {
       setProgress(fraction * 100);
       if (fraction >= 1) {
         portalAdmin.uploadStatus = 'Processing on the server…';
         const status = document.getElementById('portal-upload-status');
         if (status) status.textContent = portalAdmin.uploadStatus;
       }
+    }).catch(() => {
+      portalAdmin.uploadStatus = 'Uploading…';
+      const status = document.getElementById('portal-upload-status');
+      if (status) status.textContent = portalAdmin.uploadStatus;
+      return adminPost('uploadPortalDocument', fields);
     }).then(res => {
       portalAdmin.busy = false;
       if (!res || res.status !== 'ok') {

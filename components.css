@@ -1608,3 +1608,21 @@ body.has-dock #toast.show { transform: translateX(-50%) translateY(0); }
 }
 .legacy-sheet td.is-empty,
 .legacy-sheet th.is-empty { background: var(--surface-gray-1); }
+
+/* -- Customer portal document upload: real progress ------------------------- */
+.portal-upload-progress {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 10px;
+  margin: 0.35rem 0 0;
+}
+.portal-upload-bar {
+  flex: 1; height: 6px; border: 1px solid var(--ind-line);
+  background: var(--ind-inset); overflow: hidden;
+}
+.portal-upload-bar span {
+  display: block; height: 100%; width: 0;
+  background: var(--accent-bar); transition: width .15s linear;
+}
+.portal-upload-pct {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+  color: var(--ind-muted); min-width: 38px; text-align: right;
+}

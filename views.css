@@ -3696,3 +3696,4 @@ body.has-dock #detail-view { padding-bottom: var(--dock-tab-h); }
 @media (prefers-reduced-motion: no-preference) {
   .ir-card:hover { transform: translateX(3px); }
 }
+

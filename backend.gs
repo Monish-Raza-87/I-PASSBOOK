@@ -3468,7 +3468,33 @@ function irAcknowledgementHtml(fields, ir, sample) {
   '</div>';
 }
 
-function sendIrAcknowledgement(to, fields, ir, sample, debug) {
+// The owner's CC map (2026-11-08). A customer's report goes to the base desk
+// list; an employee's report adds the team's extra person. The reporter is always
+// the To; these are only CC.
+var IR_CC_BASE = [
+  'monish.raza@indrones.com',
+  'ravi@indrones.com',
+  'harshad@indrones.com',
+  'angad.kumbhar@indrones.com',
+  'ganesh.suryavanshi@indrones.com',
+  'customer.relations@indrones.com',
+  'vaibhav.panchal@indrones.com',
+  'tushar.kadam@indrones.com',
+  'lavlesh.poyarekar@indrones.com',
+  'adhik.nair@indrones.com'
+];
+var IR_CC_TEAMS = {
+  'QC/Testing Team': IR_CC_BASE,
+  'R&D Team': IR_CC_BASE.concat(['apurva@indrones.com']),
+  'Operations Team': IR_CC_BASE.concat(['suraj.singh@indrones.com'])
+};
+function irAcknowledgementCc(isEmployee, reporterTeam) {
+  if (!isEmployee) return IR_CC_BASE.slice();
+  var team = String(reporterTeam || '').trim();
+  return (IR_CC_TEAMS[team] || IR_CC_BASE).slice();
+}
+
+function sendIrAcknowledgement(to, fields, ir, sample, debug, cc) {
   if (!to) { if (debug) Logger.log('No recipient.'); return false; }
   if (!mailQuotaOk('auth')) {
     if (debug) Logger.log('Daily mail quota reached; the acknowledgement was not sent.');
@@ -3476,12 +3502,14 @@ function sendIrAcknowledgement(to, fields, ir, sample, debug) {
   }
   var subject = 'I-PASSBOOK query (No. ' + ir + ') has been registered with Indrones Customer Relations';
   if (sample) subject = 'I-PASSBOOK sample report (No. ' + ir + ') has been registered with Indrones Customer Relations';
+  var options = {
+    name: 'I-PASSBOOK',
+    htmlBody: irAcknowledgementHtml(fields, ir, sample),
+    replyTo: 'customer.relations@indrones.com'
+  };
+  if (cc && cc.length) options.cc = cc.join(',');
   try {
-    MailApp.sendEmail(to, subject, irAcknowledgementText(fields, ir, sample), {
-      name: 'I-PASSBOOK',
-      htmlBody: irAcknowledgementHtml(fields, ir, sample),
-      replyTo: 'customer.relations@indrones.com'
-    });
+    MailApp.sendEmail(to, subject, irAcknowledgementText(fields, ir, sample), options);
     return true;
   } catch (e) {
     if (debug) Logger.log('MailApp send failed: ' + (e && e.message));
@@ -3533,7 +3561,10 @@ function sendSampleAcknowledgementToOwner(to) {
   var target = String(to || '').trim() ||
     String(PropertiesService.getScriptProperties().getProperty('SAMPLE_ACK_TO') || '').trim();
   Logger.log('sendSampleAcknowledgementToOwner start; target=' + (target || '(empty)'));
-  if (!target) return 'Pass the destination address, or set the SAMPLE_ACK_TO Script Property.';
+  if (!target) {
+    Logger.log('No target. Call sendSampleAcknowledgementToOwner with your address, or set SAMPLE_ACK_TO.');
+    return 'Pass the destination address, or set the SAMPLE_ACK_TO Script Property.';
+  }
 
   var entries = [];
   try {
@@ -7331,10 +7362,12 @@ function createIRFromApp(params, authEmail) {
   if (!serial) throw new Error('Enter the UAS serial number.');
   var issueDesc = String(params.issueDesc || '').trim();
   if (!issueDesc) throw new Error('Describe the problem before submitting.');
-  var contactEmail = isCustomer ? usersKey(authEmail) : String(params.contactEmail || '').trim();
+  var contactEmail = String(params.contactEmail || '').trim() || usersKey(authEmail);
   var customerName = isCustomer
     ? String((findUser(usersKey(authEmail)) && userField(findUser(usersKey(authEmail)), 'name')) || authEmail).trim()
     : String(params.customerName || '').trim();
+  var reporterTeam = String(params.reporterTeam || '').trim();
+  var reporterIsEmployee = /@indrones\.com$/i.test(usersKey(authEmail));
 
   // SAMPLE MODE (?sample=1 in the portal). The owner may test the whole form and the
   // email without touching master data: nothing is uploaded, no IR number is drawn, no
@@ -7353,9 +7386,10 @@ function createIRFromApp(params, authEmail) {
       companyName: company,
       customerName: customerName,
       contactPhone: String(params.contactPhone || '').trim(),
-      contactEmail: contactEmail,
-      spoc: String(params.spoc || '').trim(),
-      issueType: String(params.issueType || '').trim(),
+    contactEmail: contactEmail,
+    spoc: String(params.spoc || '').trim(),
+    reporterTeam: reporterIsEmployee ? reporterTeam : '',
+    issueType: String(params.issueType || '').trim(),
       issueDesc: issueDesc,
       incidentLocationWeather: String(params.incidentLocationWeather || '').trim(),
       courierTracking: String(params.courierTracking || '').trim(),
@@ -7432,7 +7466,8 @@ function createIRFromApp(params, authEmail) {
 
     try {
       if (contactEmail) {
-        sendIrAcknowledgement(contactEmail, fields, ir, false);
+        sendIrAcknowledgement(contactEmail, fields, ir, false, false,
+                              irAcknowledgementCc(reporterIsEmployee, reporterTeam));
       }
     } catch (e) { /* the IR exists even if the acknowledgement cannot be sent */ }
 

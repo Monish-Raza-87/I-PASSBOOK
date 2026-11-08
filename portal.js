@@ -772,6 +772,15 @@
               <option>Service/Maintenance (Out Of Warranty)</option>
             </select>
           </div>
+          <div class="field" id="rep-team-wrap" hidden>
+            <label for="rep-team">Which team do you belong to?</label>
+            <select id="rep-team">
+              <option value="">Select your team</option>
+              <option>QC/Testing Team</option>
+              <option>R&amp;D Team</option>
+              <option>Operations Team</option>
+            </select>
+          </div>
           <div class="field"><label for="rep-desc">Describe the problem</label>
             <textarea id="rep-desc" required placeholder="What happened, and what should we look at?"></textarea>
           </div>
@@ -803,6 +812,8 @@
       </div>`;
     document.body.appendChild(modal);
     if (SAMPLE) document.getElementById('rep-sample-note').hidden = false;
+    const employee = /@indrones\.com$/i.test((ME && ME.email) || '');
+    if (employee) document.getElementById('rep-team-wrap').hidden = false;
     const close = () => modal.remove();
     modal.addEventListener('click', e => { if (e.target === modal) close(); });
     document.getElementById('report-x').addEventListener('click', close);
@@ -833,10 +844,12 @@
       msgEl.textContent = '';
       const model = modelEl.value;
       const freeSerial = reportFreeSerial(model);
+      const team = employee ? document.getElementById('rep-team').value : '';
       const suffix = String(document.getElementById('rep-suffix').value || '').replace(/[^0-9]/g, '');
       const fullSerial = String(document.getElementById('rep-serial-full').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
       if (!model) { msgEl.textContent = 'Select the UAS model.'; return; }
+      if (employee && !team) { msgEl.textContent = 'Choose the team you belong to.'; return; }
       if (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1)) {
         msgEl.textContent = freeSerial
           ? 'Enter the UAS serial number.'
@@ -861,6 +874,7 @@
           droneModel: model,
           incidentDate: document.getElementById('rep-date').value || '',
           incidentTime: document.getElementById('rep-time').value || '',
+          reporterTeam: team,
           issueType: document.getElementById('rep-type').value || '',
           issueDesc: desc,
           incidentLocationWeather: document.getElementById('rep-loc').value || '',

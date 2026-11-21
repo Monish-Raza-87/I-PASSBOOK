@@ -2441,6 +2441,54 @@ function setByIdFolder(id) {
                 'The Report tab will now link each IR to its folder under it.');
 }
 
+// EDITOR-RUN, NOT ROUTED. Answers the one question "Access denied: DriveApp"
+// raises: which account is the script actually running as, and what does that
+// account see at the two folders the upload path touches? It is read-only; add no
+// route for this, and create no probe file (the suites forbid erasing, and a
+// leftover probe in By ID would confuse the normalisation planner).
+function diagnosePreRelease() {
+  var out = [];
+  var eff = '', active = '';
+  try { eff = Session.getEffectiveUser().getEmail(); } catch (e) {}
+  try { active = Session.getActiveUser().getEmail(); } catch (e) {}
+  out.push('Script runs as (effective user): ' + (eff || '(unreadable)'));
+  out.push('Browser user (active user): ' + (active || '(unreadable)'));
+  try {
+    var acc = accessStore();
+    var keys = Object.keys(acc.customers || {});
+    if (!keys.length) out.push('Customer accounts: NONE');
+    keys.forEach(function (k) { out.push('Customer: ' + k + ' -> ' + acc.customers[k]); });
+  } catch (e) {
+    out.push('access.json could not be read: ' + ((e && e.message) || e));
+  }
+  var id = byIdFolderId();
+  out.push('By ID folder id: ' + (id || '(NOT SET - run setByIdFolder(...))'));
+  if (id) {
+    var folder = null;
+    try {
+      folder = DriveApp.getFolderById(id);
+      out.push('By ID folder: "' + folder.getName() + '"');
+    } catch (e) {
+      out.push('By ID folder OPEN FAILED: ' + ((e && e.message) || e));
+    }
+    if (folder) describeDriveFolder_(folder, 'By ID', out);
+  }
+  try { describeDriveFolder_(getRootFolder(), 'App root', out); }
+  catch (e) { out.push('App root: OPEN FAILED - ' + ((e && e.message) || e)); }
+  out.push('If a submission still says "Access denied: DriveApp", the effective user above');
+  out.push('needs EDITOR access to that By ID folder (or it is a Shared Drive where');
+  out.push('DriveApp cannot create files). Share the folder, or deploy the script under');
+  out.push('the account that owns it, then paste a New version.');
+  return report(out.join('\n'));
+}
+function describeDriveFolder_(folder, label, out) {
+  try { out.push(label + ': owner ' + folder.getOwner().getEmail()); }
+  catch (e) { out.push(label + ': owner (unreadable - normal on a shared drive)'); }
+  try { out.push(label + ': sharing ' + folder.getSharingAccess()); }
+  catch (e) { out.push(label + ': sharing (unreadable)'); }
+}
+
+
 function folderIdFromUrl(value) {
   var s = String(value == null ? '' : value).trim();
   if (/^[-\w]{25,}$/.test(s)) return s;
@@ -3468,6 +3516,18 @@ function irAcknowledgementHtml(fields, ir, sample) {
   '</div>';
 }
 
+// PRE-RELEASE TEST MODE (2026-11-21). While the owner walks the live flow as the
+// customer (monishamarpatan@gmail.com), every acknowledgement is kept inside the
+// three test mailboxes: whichever of the two internal accounts RUNS the script is
+// the sender, and the other is the only CC. Flip PRE_RELEASE_ACK to false to
+// restore the owner's real CC map below; nothing else has to change.
+var PRE_RELEASE_ACK = true;
+var PRE_RELEASE_ACK_CC = [
+  'customer.relations@indrones.com',
+  'monish.raza@indrones.com'
+];
+var PRE_RELEASE_SUBJECT_TAG = 'PRE-RELEASE TEST EMAIL';
+
 // The owner's CC map (2026-11-08). A customer's report goes to the base desk
 // list; an employee's report adds the team's extra person. The reporter is always
 // the To; these are only CC.
@@ -3489,6 +3549,15 @@ var IR_CC_TEAMS = {
   'Operations Team': IR_CC_BASE.concat(['suraj.singh@indrones.com'])
 };
 function irAcknowledgementCc(isEmployee, reporterTeam) {
+  if (PRE_RELEASE_ACK) {
+    var sender = '';
+    try {
+      sender = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase();
+    } catch (e) {}
+    return PRE_RELEASE_ACK_CC.filter(function (a) {
+      return String(a).trim().toLowerCase() !== sender;
+    });
+  }
   if (!isEmployee) return IR_CC_BASE.slice();
   var team = String(reporterTeam || '').trim();
   return (IR_CC_TEAMS[team] || IR_CC_BASE).slice();
@@ -3500,14 +3569,27 @@ function sendIrAcknowledgement(to, fields, ir, sample, debug, cc) {
     if (debug) Logger.log('Daily mail quota reached; the acknowledgement was not sent.');
     return false;
   }
-  var subject = 'I-PASSBOOK query (No. ' + ir + ') has been registered with Indrones Customer Relations';
-  if (sample) subject = 'I-PASSBOOK sample report (No. ' + ir + ') has been registered with Indrones Customer Relations';
+  var prefix = PRE_RELEASE_ACK ? '[' + PRE_RELEASE_SUBJECT_TAG + '] ' : '';
+  var subject = prefix + 'I-PASSBOOK query (No. ' + ir + ') has been registered with Indrones Customer Relations';
+  if (sample) subject = prefix + 'I-PASSBOOK sample report (No. ' + ir + ') has been registered with Indrones Customer Relations';
   var options = {
     name: 'I-PASSBOOK',
     htmlBody: irAcknowledgementHtml(fields, ir, sample),
     replyTo: 'customer.relations@indrones.com'
   };
-  if (cc && cc.length) options.cc = cc.join(',');
+  if (cc && cc.length) {
+    var toKey = String(to).trim().toLowerCase();
+    var seen = {};
+    var list = [];
+    cc.forEach(function (a) {
+      a = String(a || '').trim();
+      var k = a.toLowerCase();
+      if (!a || k === toKey || seen[k]) return;
+      seen[k] = true;
+      list.push(a);
+    });
+    if (list.length) options.cc = list.join(',');
+  }
   try {
     MailApp.sendEmail(to, subject, irAcknowledgementText(fields, ir, sample), options);
     return true;
@@ -6226,6 +6308,18 @@ function submitCustomerFeedback(params, authEmail) {
   var to = String(cr.email || 'customer.relations@indrones.com').trim();
   if (!to || !isMailRecipientAllowed(to)) throw new Error('The feedback inbox is not configured.');
 
+  // Pre-release: feedback stays between the three test mailboxes too. The inbox is
+  // forced to Customer Relations and the internal account that is NOT sending is the
+  // only CC, so no real desk member sees a test message.
+  var preCc = [];
+  if (PRE_RELEASE_ACK) {
+    to = 'customer.relations@indrones.com';
+    preCc = irAcknowledgementCc(false, '').filter(function (a) {
+      return String(a).toLowerCase() !== to.toLowerCase();
+    });
+  }
+
+
   var lines = [
     'Customer feedback',
     '',
@@ -6246,8 +6340,11 @@ function submitCustomerFeedback(params, authEmail) {
   var sent = false;
   if (mailQuotaOk('feedback')) {
     try {
-      MailApp.sendEmail(to, 'I-PASSBOOK feedback - ' + company + ' - ' + supportRating + '/5', body,
-                        { name: 'I-PASSBOOK', replyTo: email });
+      var feedbackSubject = (PRE_RELEASE_ACK ? '[' + PRE_RELEASE_SUBJECT_TAG + '] ' : '') +
+        'I-PASSBOOK feedback - ' + company + ' - ' + supportRating + '/5';
+      var feedbackOptions = { name: 'I-PASSBOOK', replyTo: email };
+      if (preCc.length) feedbackOptions.cc = preCc.join(',');
+      MailApp.sendEmail(to, feedbackSubject, body, feedbackOptions);
       sent = true;
     } catch (e) { sent = false; }
   }
@@ -7428,25 +7525,64 @@ function createIRFromApp(params, authEmail) {
     summaryLink: ''
   };
 
+  var files = params.files instanceof Array ? params.files : [];
+  files.forEach(function (f) {
+    if (!f || !f.name || !f.base64) return;
+    if (Math.floor(String(f.base64).length * 3 / 4) > 50 * 1024 * 1024) {
+      throw new Error('"' + f.name + '" is larger than 50 MB.');
+    }
+  });
+
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(30000)) throw new Error('The service desk is busy. Try again in a moment.');
   try {
-    var root = DriveApp.getFolderById(byIdFolderId());
-    var folder = findOrCreateIRFolder(root, ir);
+    var root = null;
+    try {
+      root = DriveApp.getFolderById(byIdFolderId());
+    } catch (e) {
+      throw new Error('The evidence folder is not accessible to the service account (' +
+                      ((e && e.message) || e) + '). Run diagnosePreRelease() in the editor.');
+    }
+    var folder = null;
+    try {
+      folder = findOrCreateIRFolder(root, ir);
+    } catch (e) {
+      throw new Error('The IR folder could not be created under the evidence folder (' +
+                      ((e && e.message) || e) + '). Run diagnosePreRelease() in the editor.');
+    }
     var linksN = [], linksQ = [];
-    var files = params.files instanceof Array ? params.files : [];
     files.forEach(function (f) {
       if (!f || !f.name || !f.base64) return;
       var mime = resolveMime(f.mimeType, f.name);
       var blob = Utilities.newBlob(Utilities.base64Decode(f.base64), mime, cleanFileName(ir + ' - ' + f.name));
-      var uploaded = folder.createFile(blob);
-      uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      var uploaded = null;
+      try {
+        uploaded = folder.createFile(blob);
+      } catch (e) {
+        throw new Error('Evidence "' + f.name + '" could not be saved (' +
+                        ((e && e.message) || e) + '). Run diagnosePreRelease() in the editor.');
+      }
+      try {
+        uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      } catch (e) {
+        // The IR must still be raised: a sharing refusal (often a shared-drive or
+        // domain policy) leaves the file in the folder for the desk, which is better
+        // than losing the customer's report. The link may need the desk to share it.
+        Logger.log('Evidence link sharing failed for ' + f.name + ': ' + ((e && e.message) || e));
+      }
       (String(f.fieldId || '') === 'evidenceFormQ' ? linksQ : linksN).push(uploaded.getUrl());
     });
     fields.evidenceFormN = linksN.join(', ');
     fields.evidenceFormQ = linksQ.join(', ');
-    var summary = createSummaryDocInFolder(ir, folder, appSummaryText(ir, fields));
+    var summary = null;
+    try {
+      summary = createSummaryDocInFolder(ir, folder, appSummaryText(ir, fields));
+    } catch (e) {
+      throw new Error('The summary document could not be created (' +
+                      ((e && e.message) || e) + '). Run diagnosePreRelease() in the editor.');
+    }
     fields.summaryLink = summary.getUrl();
+
 
     var reg = readJsonLocked(IR_REGISTRY_FILE);
     if (!reg || typeof reg !== 'object') reg = { irs: {} };

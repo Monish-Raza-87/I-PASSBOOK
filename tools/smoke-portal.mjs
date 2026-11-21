@@ -222,6 +222,12 @@ r.ok('the report form fixes the prefix from the model and sends only the suffix'
 r.ok('...and the rare platforms take a full serial instead of a guessed prefix',
   /OTHER - RS2/.test(portal) && /reportFreeSerial/.test(portal) &&
   /payload\.droneSerial = fullSerial/.test(portal));
+r.ok('evidence is capped at 50 MB and every staged file can be removed before submit',
+  /MAX_EVIDENCE_BYTES = 50 \* 1024 \* 1024/.test(portal) &&
+  /larger than 50 MB/.test(portal) &&
+  /rep-evidence-list/.test(portal) &&
+  /evidence-remove/.test(portal) &&
+  /staged\.splice\(idx, 1\)/.test(portal));
 r.ok('the feedback form is built in-app, not a Google Form link',
   /function openFeedbackForm\(\)/.test(portal) &&
   /apiPost\('submitFeedback'/.test(portal) &&

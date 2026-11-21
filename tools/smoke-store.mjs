@@ -718,6 +718,54 @@ ctx.sendNudgeEmail({
 r.ok('an older client that sends no kind gets the comment wording, not a crash',
   mails.length === 1 && /you have a comment/.test(mails[0].subject), mails.map(m => m.subject));
 
+// ── 4c. Pre-release acknowledgements stay inside the three test mailboxes ─────
+// The owner is walking the live flow as a customer before release. Every
+// acknowledgement must stay between monishamarpatan@gmail.com (the customer To)
+// and whichever internal account is not sending. Flipping the switch must restore
+// the real CC map unchanged, so the test drives both states.
+r.head('pre-release acknowledgements stay inside the test mailboxes, and say so');
+
+r.ok('the switch is ON and names exactly the two internal accounts',
+  ctx.PRE_RELEASE_ACK === true && ctx.PRE_RELEASE_ACK_CC.length === 2 &&
+  ctx.PRE_RELEASE_ACK_CC.indexOf('customer.relations@indrones.com') > -1 &&
+  ctx.PRE_RELEASE_ACK_CC.indexOf('monish.raza@indrones.com') > -1,
+  ctx.PRE_RELEASE_ACK_CC);
+
+const preCc = ctx.irAcknowledgementCc(false, '');
+r.ok('a customer report CCs only the internal account that is not the sender',
+  preCc.length === 1 && preCc[0] === 'customer.relations@indrones.com', preCc);
+r.ok('an employee report is not widened to the team list in pre-release',
+  ctx.irAcknowledgementCc(true, 'R&D Team').length === 1,
+  ctx.irAcknowledgementCc(true, 'R&D Team'));
+
+mails.length = 0;
+ctx.sendIrAcknowledgement('monishamarpatan@gmail.com', {}, 'IR999', false, false, preCc);
+const preMail = mails[0];
+r.ok('the customer is the To and the internal account is the only CC',
+  !!preMail && preMail.to === 'monishamarpatan@gmail.com' &&
+  preMail.options && preMail.options.cc === 'customer.relations@indrones.com', preMail);
+r.ok('the subject says PRE-RELEASE TEST',
+  !!preMail && /PRE-RELEASE TEST EMAIL/.test(preMail.subject), preMail && preMail.subject);
+
+mails.length = 0;
+ctx.sendIrAcknowledgement('customer.relations@indrones.com', {}, 'IR999', false, false,
+  ['customer.relations@indrones.com', 'monish.raza@indrones.com']);
+r.ok('a CC never duplicates the To',
+  !!mails[0] && mails[0].options && mails[0].options.cc === 'monish.raza@indrones.com',
+  mails[0] && mails[0].options);
+
+ctx.PRE_RELEASE_ACK = false;
+const realCustomer = ctx.irAcknowledgementCc(false, '');
+const realRnd = ctx.irAcknowledgementCc(true, 'R&D Team');
+mails.length = 0;
+ctx.sendIrAcknowledgement('monishamarpatan@gmail.com', {}, 'IR999', false, false, realCustomer);
+const realMail = mails[0];
+ctx.PRE_RELEASE_ACK = true;
+r.ok('flipping the switch restores the full base list and its team extra',
+  realCustomer.length === 10 && realRnd.indexOf('apurva@indrones.com') > -1, realRnd);
+r.ok('...and the restored email carries no pre-release tag',
+  !!realMail && !/PRE-RELEASE TEST EMAIL/.test(realMail.subject), realMail && realMail.subject);
+
 // ── 5. readJson refuses to turn a broken file into an empty one ───────────────
 r.head('readJson throws on a corrupt or unreadable file, and answers null only for a truly absent one');
 
@@ -3105,6 +3153,19 @@ r.ok('...and the reply keeps status:"ok" as the success word, with the state bes
   dis.status === 'ok' && dis.userStatus === 'disabled', dis);
 const scoped = ctx.setCustomerCompany({ email: 'buyer@acme.com', company: 'Acme' }, ADMIN);
 r.ok('and the customer account is scoped to a company', scoped.status === 'ok', scoped);
+
+mails.length = 0;
+const fb = ctx.submitCustomerFeedback({
+  droneActive: 'Yes', fluency: 'Yes, perfectly',
+  droneRating: 5, supportRating: 5, testimonial: 'No',
+  challenges: 'pre-release walkthrough'
+}, 'buyer@acme.com');
+const fbMail = mails[0];
+r.ok('pre-release feedback stays in the test mailboxes and is tagged',
+  fb.status === 'ok' && !!fbMail &&
+  fbMail.to === 'customer.relations@indrones.com' &&
+  /PRE-RELEASE TEST EMAIL/.test(fbMail.subject) &&
+  !(fbMail.options && fbMail.options.cc), fbMail);
 
 ctx._storeMemo = {};
 const team = ctx.listTeam();

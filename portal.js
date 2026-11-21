@@ -802,8 +802,10 @@
               <label class="btn" for="rep-camera">Take a photo</label>
               <input id="rep-camera" type="file" accept="image/png,image/jpeg,image/webp" capture="environment" multiple hidden>
             </div>
-            <p class="report-hint">Attach photos, PDFs or logs &mdash; you can add more than one (up to 20 MB each).</p>
+            <p class="report-hint">Attach photos, PDFs or logs &mdash; you can add more than one (up to 50 MB each). Remove any file before submitting if you picked the wrong one.</p>
+            <div id="rep-evidence-list" class="evidence-list" aria-live="polite"></div>
           </div>
+
           <p class="report-hint" id="rep-sample-note" hidden>Sample mode &mdash; this emails the
           report to you and creates no IR.</p>
           <p class="msg" id="rep-msg" aria-live="polite"></p>
@@ -823,6 +825,48 @@
     const fullEl = document.getElementById('rep-serial-full');
     const serialHintEl = document.getElementById('rep-serial-hint');
     const msgEl = document.getElementById('rep-msg');
+    const MAX_EVIDENCE_BYTES = 50 * 1024 * 1024;
+    const evidenceListEl = document.getElementById('rep-evidence-list');
+    const staged = [];
+    const humanSize = n => n >= 1024 * 1024
+      ? (n / (1024 * 1024)).toFixed(1) + ' MB'
+      : Math.max(1, Math.round(n / 1024)) + ' KB';
+    const paintEvidence = () => {
+      evidenceListEl.innerHTML = '';
+      staged.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = 'evidence-item';
+        const name = document.createElement('span');
+        name.className = 'evidence-item-name';
+        name.textContent = item.file.name;
+        const size = document.createElement('span');
+        size.className = 'evidence-item-size';
+        size.textContent = humanSize(item.file.size);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'evidence-remove';
+        remove.setAttribute('aria-label', 'Remove ' + item.file.name);
+        remove.title = 'Remove ' + item.file.name;
+        remove.textContent = '×';
+        remove.addEventListener('click', () => { staged.splice(idx, 1); paintEvidence(); });
+        row.appendChild(name); row.appendChild(size); row.appendChild(remove);
+        evidenceListEl.appendChild(row);
+      });
+    };
+    const stage = (input, fieldId) => {
+      for (const file of Array.from(input.files || [])) {
+        if (file.size > MAX_EVIDENCE_BYTES) {
+          msgEl.className = 'msg err';
+          msgEl.textContent = file.name + ' is larger than 50 MB.';
+          continue;
+        }
+        staged.push({ file: file, fieldId: fieldId });
+      }
+      input.value = '';
+      paintEvidence();
+    };
+    document.getElementById('rep-files').addEventListener('change', e => stage(e.target, 'evidenceFormN'));
+    document.getElementById('rep-camera').addEventListener('change', e => stage(e.target, 'evidenceFormN'));
     const updateSerialMode = () => {
       const free = !!modelEl.value && reportFreeSerial(modelEl.value);
       prefixedEl.hidden = free;
@@ -862,14 +906,18 @@
       btn.textContent = 'Submitting…';
       try {
         const files = [];
-        const add = async (input, fieldId) => {
-          for (const f of Array.from(input.files || [])) {
-            if (f.size > 20 * 1024 * 1024) throw new Error(f.name + ' is larger than 20 MB.');
-            files.push({ name: f.name, mimeType: f.type || '', base64: await readFileBase64(f), fieldId: fieldId });
+        for (const item of staged) {
+          if (item.file.size > MAX_EVIDENCE_BYTES) {
+            throw new Error(item.file.name + ' is larger than 50 MB.');
           }
-        };
-        await add(document.getElementById('rep-files'), 'evidenceFormN');
-        await add(document.getElementById('rep-camera'), 'evidenceFormN');
+          files.push({
+            name: item.file.name,
+            mimeType: item.file.type || '',
+            base64: await readFileBase64(item.file),
+            fieldId: item.fieldId
+          });
+        }
+
         const payload = {
           droneModel: model,
           incidentDate: document.getElementById('rep-date').value || '',

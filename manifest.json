@@ -1,21 +1,47 @@
 {
+  "id": "./",
   "name": "I-PASSBOOK Indrones",
   "short_name": "I-PASSBOOK",
   "description": "Indrones Product After-Sales Summary Book Intelligence Platform.",
+  "lang": "en",
+  "dir": "ltr",
   "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
+  "categories": ["business", "productivity"],
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "assets/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "assets/icon-512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Raise an IR",
+      "short_name": "Raise IR",
+      "description": "Open the customer support form",
+      "url": "./customer.html?route=support/new",
+      "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Support history",
+      "short_name": "History",
+      "description": "See every request your company has raised",
+      "url": "./customer.html?route=support/history",
+      "icons": [{ "src": "assets/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

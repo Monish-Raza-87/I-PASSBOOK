@@ -20,7 +20,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v149';
+const CACHE_NAME = 'ipassbook-v150';
 const SHELL = [
   './',
   './index.html',
@@ -45,6 +45,7 @@ const SHELL = [
   // deliberately stay OUT of the shell: they would be paid for on every device's
   // first visit and read by almost nobody.
   './faq.html',
+  './pwa.js',
   './assets/icon-192.png',
   './assets/icon-mark.png',   // the borderless mark the app itself shows
 ];
@@ -94,9 +95,15 @@ self.addEventListener('fetch', (event) => {
   //    fallback below depends on). Offline is unaffected: the revalidation fails,
   //    fetch rejects, and the catch serves the cached shell.
   if (req.mode === 'navigate') {
+    // A navigation to a page this device has already opened (customer.html, index.html)
+    // is served from the runtime cache when the network is gone. `ignoreSearch` is what
+    // makes a shortcut like customer.html?route=... hit the cached page. If this device
+    // has never opened that page, the app shell is the honest fallback.
     event.respondWith(
       fetch(req, { cache: 'no-cache' })
-        .catch(() => caches.match('./index.html').then(r => r || caches.match('./')))
+        .catch(() => caches.match(req, { ignoreSearch: true })
+          .then(r => r || caches.match('./index.html'))
+          .then(r => r || caches.match('./')))
     );
     return;
   }

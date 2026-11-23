@@ -358,6 +358,11 @@
   }
   .serial-wrap input { border-radius: 0 var(--radius) var(--radius) 0; }
   .report-hint { font-size: 12px; color: var(--fg-muted); margin: 0; }
+  .draft-note { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .draft-clear {
+    padding: 0; border: 0; background: none; color: var(--accent);
+    font: inherit; text-decoration: underline; cursor: pointer;
+  }
   .evidence-list { display: grid; gap: 6px; }
   .evidence-item {
     display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px;

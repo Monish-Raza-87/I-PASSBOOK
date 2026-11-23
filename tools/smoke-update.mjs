@@ -66,8 +66,9 @@ r.ok('...and SHELL is left as plain strings, so every other suite can still read
 // reuses the stored body and the HTTP entry the offline fallback needs survives.
 r.ok('navigations revalidate instead of trusting the HTTP cache',
   /fetch\(req, \{ cache: 'no-cache' \}\)/.test(SW), (SW.match(/[^\n]*no-cache[^\n]*/) || [''])[0]);
-r.ok('...and the offline fallback is untouched',
-  /\.catch\(\(\) => caches\.match\('\.\/index\.html'\)\.then\(r => r \|\| caches\.match\('\.\/'\)\)\)/.test(SW));
+r.ok('...and the offline fallback serves the requested cached page, then index.html',
+  /caches\.match\(req, \{ ignoreSearch: true \}\)/.test(SW) &&
+  /caches\.match\('\.\/index\.html'\)/.test(SW));
 
 // skipWaiting is the reason a plain REFRESH delivers a new build — which is the
 // owner's actual habit, and the reason the classic waiting-worker pattern would

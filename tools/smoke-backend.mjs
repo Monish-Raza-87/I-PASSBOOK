@@ -1860,6 +1860,11 @@ r.ok('AGISOFT is software with no serial, and RS2 is an accessory outside the ai
   /isRs2/.test(fnBody('createIRFromApp')) &&
   /Enter the RS2 serial number/.test(fnBody('createIRFromApp')) &&
   /!isAgisoft && !isRs2/.test(fnBody('createIRFromApp')));
+r.ok('any other accessory needs a name and no serial',
+  /isAccessory/.test(fnBody('createIRFromApp')) &&
+  /accessoryName/.test(fnBody('createIRFromApp')) &&
+  /Name the accessory or product/.test(fnBody('createIRFromApp')) &&
+  /Product \/ UAS model/.test(fnBody('irAcknowledgementHtml')));
 r.ok('...and the alias comparison is the SAME normaliser the scope store uses',
   /sameCompany\(cell, names\[i\]\)/.test(fnBody('matchesAnyCompany')) && /sameCompanyKey\(/.test(fnBody('sameCompany')));
 r.ok('a company named only as a placeholder is not a company',

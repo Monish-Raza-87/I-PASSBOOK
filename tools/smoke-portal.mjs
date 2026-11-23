@@ -196,8 +196,13 @@ r.ok('deploy-ghpages.mjs serves it', /'customer\.html'/.test(deploy));
 r.ok('...and the two files it now needs are served with it',
   /'portal\.css'/.test(deploy) && /'portal\.js'/.test(deploy));
 // A cached copy of somebody's tickets is the one thing the shell must never hand out.
-r.ok('...and sw.js does NOT put it in the shell',
-  !/customer\.html/.test(swJs), (swJs.match(/'[^']*customer[^']*'/) || [])[0]);
+// The vendored portal code stays OUT of the precache: it is fetched at runtime and the
+// runtime cache takes it from there. The check is scoped to the SHELL list so a comment
+// naming customer.html does not read as a precache entry.
+const portalShell = (swJs.match(/const SHELL = \[[\s\S]*?\]/) || [''])[0];
+r.ok('...and sw.js does NOT precache the portal or the customer page',
+  !/customer\.html/.test(portalShell) && !/portal\.(js|css)/.test(portalShell),
+  (portalShell.match(/'[^']*(customer|portal)[^']*'/g) || []));
 
 // ═══════════════════════════════════════════════════════════════════════════════
 r.head('the support form is reused, and customer feedback is now in-app');
@@ -243,6 +248,12 @@ r.ok('AGISOFT is software with no serial, while RS2 keeps its own serial field',
   /RS2-XXX/.test(portal) &&
   /Enter the RS2 serial number/.test(portal) &&
   /AGISOFT is software, so no UAS serial is needed/.test(portal));
+r.ok('another accessory asks for its name and no serial',
+  /OTHER - ACCESSORY/.test(portal) &&
+  /reportIsAccessory/.test(portal) &&
+  /rep-accessory/.test(portal) &&
+  /Accessory \/ product name/.test(portal) &&
+  /Name the accessory or product/.test(portal));
 r.ok('the feedback form is built in-app, not a Google Form link',
   /function openFeedbackForm\(\)/.test(portal) &&
   /apiPost\('submitFeedback'/.test(portal) &&

@@ -1556,8 +1556,9 @@
        tools/build-faq.mjs, which regenerates the standalone faq.html the signed-out
        door still needs. Two renderers, one text — so a change to an answer can
        never land in one of them and miss the other. -->
-  <script src="faq-content.js"></script>
-  <script src="app.js"></script>
+<script src="faq-content.js"></script>
+<script src="pwa.js"></script>
+<script src="app.js"></script>
   <script>
     // Register the service worker so the app is installable + offline-capable on
     // phones. The SW never caches the Apps Script backend (live data stays live).

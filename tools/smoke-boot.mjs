@@ -1010,6 +1010,14 @@ let secondIntro = await runIntroLoad(45000);
 // A headless launch can occasionally lose the probe without a product failure. Retry
 // once with the SAME profile, because the property under test is the stored version.
 if (!secondIntro) { await new Promise(r => setTimeout(r, 2000)); secondIntro = await runIntroLoad(45000); }
+// Windows hard-kills Chrome, and the FIRST load's LevelDB flush can be lost even though
+// it wrote the key; the second load then writes it. One more load with the same profile
+// is the honest retry: the property is "a device that HAS the key skips", and this load
+// reads it. A product that never records delivery still plays here and fails.
+if (secondIntro && secondIntro.brandMode !== 'rest') {
+  await new Promise(r => setTimeout(r, 2000));
+  secondIntro = await runIntroLoad(45000);
+}
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
   ok('a device that has already been given this version\'s intro is not given it again',

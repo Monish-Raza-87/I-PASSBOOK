@@ -81,6 +81,7 @@ const SERVED = [
   'portal.css',
   'portal.js',
   'privacy.html',
+  'pwa.js',
   'sw.js',
   'terms.html',
   'theme.css',

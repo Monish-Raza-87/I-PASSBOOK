@@ -697,6 +697,7 @@
     // instead of inventing a prefix.
     { value: 'OTHER - RS2',    label: 'RS2 (accessory)',    prefix: '' },
     { value: 'OTHER - AGISOFT',label: 'AGISOFT (software)',prefix: '' },
+    { value: 'OTHER - ACCESSORY', label: 'Other accessory / product', prefix: '' },
     { value: 'STRIVER',        label: 'STRIVER',        prefix: '' },
     { value: 'TALON',          label: 'TALON',          prefix: '' },
     { value: 'HECTOR',         label: 'HECTOR',         prefix: '' },
@@ -715,10 +716,13 @@
   // AGISOFT is software: no serial to ask for. RS2 is an accessory: it has its own
   // serial, but it is not an airframe and is not in the customer's fleet.
   function reportNoSerial(model) {
-    return /AGISOFT/i.test(String(model || ''));
+    return /AGISOFT/i.test(String(model || '')) || reportIsAccessory(model);
   }
   function reportIsRs2(model) {
     return /RS2/i.test(String(model || ''));
+  }
+  function reportIsAccessory(model) {
+    return /OTHER\s*-\s*ACCESSORY|^ACCESSORY$/i.test(String(model || ''));
   }
 
   function readFileBase64(file) {
@@ -749,6 +753,10 @@
         <button type="button" class="sheet-x" id="report-x" aria-label="Close">&times;</button>
         <h2>Customer support form</h2>
         <p class="sheet-note">Your report gets an IR number as soon as it is received.</p>
+        <p class="report-hint draft-note" id="rep-draft-note" hidden>
+          Draft restored on this device. Re-attach any evidence files you had chosen.
+          <button type="button" class="draft-clear" id="rep-draft-clear">Clear draft</button>
+        </p>
         <form id="report-form" class="report-grid" novalidate>
           <div class="field" id="rep-fleet-wrap" hidden>
             <label for="rep-fleet">Your aircraft</label>
@@ -775,6 +783,11 @@
               <input id="rep-serial-full" type="text" placeholder="Full UAS serial number"
                      autocomplete="off" hidden>
               <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter a number from 1 to 999; 000 is not valid.</p>
+            </div>
+            <div class="field" id="rep-accessory-wrap" hidden>
+              <label for="rep-accessory">Accessory / product name</label>
+              <input id="rep-accessory" type="text" placeholder="Battery, charger, bag, propeller…" autocomplete="off">
+              <p class="report-hint">Name the item you are reporting. No serial number is needed.</p>
             </div>
           </div>
 
@@ -845,6 +858,7 @@
     const serialHintEl = document.getElementById('rep-serial-hint');
     const serialFieldEl = document.getElementById('rep-serial-field');
     const serialLabelEl = document.getElementById('rep-serial-label');
+    const accessoryWrap = document.getElementById('rep-accessory-wrap');
     const msgEl = document.getElementById('rep-msg');
     const MAX_EVIDENCE_BYTES = 50 * 1024 * 1024;
     const evidenceListEl = document.getElementById('rep-evidence-list');
@@ -932,9 +946,15 @@
 
     const updateSerialMode = () => {
       const model = String(modelEl.value || '');
+      const accessory = reportIsAccessory(model);
       const noSerial = reportNoSerial(model);
       const rs2 = reportIsRs2(model);
+      accessoryWrap.hidden = !accessory;
       serialFieldEl.hidden = noSerial;
+      if (accessory) {
+        serialHintEl.textContent = 'Name the accessory or product; no serial is needed.';
+        return;
+      }
       if (noSerial) {
         serialHintEl.textContent = 'AGISOFT is software, so no UAS serial is needed.';
         return;
@@ -963,6 +983,100 @@
     };
     modelEl.addEventListener('change', updateSerialMode);
     const form = document.getElementById('report-form');
+
+    // ── Offline draft ──────────────────────────────────────────────────────────
+    // The words survive a lost connection or a closed tab. Evidence FILES do not:
+    // a File object is not serialisable, and silently keeping 50 MB in localStorage
+    // would be worse than asking the customer to attach it again. The note says so.
+    const DRAFT_KEY = 'ipbc_report_draft_v1';
+    const draftNote = document.getElementById('rep-draft-note');
+    const draftClear = document.getElementById('rep-draft-clear');
+    const draftField = id => document.getElementById(id);
+    const draftValue = id => { const el = draftField(id); return el ? String(el.value || '') : ''; };
+    const setDraftValue = (id, v) => {
+      const el = draftField(id);
+      if (el && v != null) el.value = String(v);
+    };
+    const readReportDraft = () => {
+      try { return JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); }
+      catch (e) { return null; }
+    };
+    const writeReportDraft = () => {
+      if (SAMPLE) return;
+      const data = {
+        savedAt: Date.now(),
+        fleet: fleetEl.value,
+        model: draftValue('rep-model'),
+        suffix: draftValue('rep-suffix'),
+        full: draftValue('rep-serial-full'),
+        date: draftValue('rep-date'),
+        time: draftValue('rep-time'),
+        type: draftValue('rep-type'),
+        team: draftValue('rep-team'),
+        desc: draftValue('rep-desc'),
+        loc: draftValue('rep-loc'),
+        phone: draftValue('rep-phone'),
+        spoc: draftValue('rep-spoc'),
+        courier: draftValue('rep-courier'),
+        accessory: draftValue('rep-accessory')
+      };
+      const meaningful = ['model', 'suffix', 'full', 'fleet', 'team', 'desc', 'loc',
+        'phone', 'spoc', 'courier', 'accessory'].some(k => String(data[k] || '').trim());
+      try {
+        if (meaningful) localStorage.setItem(DRAFT_KEY, JSON.stringify(data));
+        else localStorage.removeItem(DRAFT_KEY);
+      } catch (e) { /* storage blocked: the form still works, it just cannot resume */ }
+    };
+    let draftTimer = null;
+    const queueReportDraft = () => {
+      clearTimeout(draftTimer);
+      draftTimer = setTimeout(writeReportDraft, 350);
+    };
+    const restoreReportDraft = () => {
+      if (SAMPLE) return;
+      const d = readReportDraft();
+      if (!d) return;
+      if (fleet.length) {
+        if (d.fleet === '__manual') {
+          fleetEl.value = '__manual';
+          fleetChoice = null;
+          showManualSerial(true);
+        } else if (d.fleet !== '' && fleet[Number(d.fleet)]) {
+          fleetEl.value = d.fleet;
+          fleetChoice = fleet[Number(d.fleet)] || null;
+          showManualSerial(false);
+        } else {
+          fleetEl.value = '';
+          fleetChoice = null;
+          showManualSerial(true);
+        }
+      }
+      setDraftValue('rep-model', d.model);
+      setDraftValue('rep-suffix', d.suffix);
+      setDraftValue('rep-serial-full', d.full);
+      setDraftValue('rep-date', d.date);
+      setDraftValue('rep-time', d.time);
+      setDraftValue('rep-type', d.type);
+      setDraftValue('rep-team', d.team);
+      setDraftValue('rep-desc', d.desc);
+      setDraftValue('rep-loc', d.loc);
+      setDraftValue('rep-phone', d.phone);
+      setDraftValue('rep-spoc', d.spoc);
+      setDraftValue('rep-courier', d.courier);
+      setDraftValue('rep-accessory', d.accessory);
+      updateSerialMode();
+      if (draftNote) draftNote.hidden = false;
+    };
+    form.addEventListener('input', queueReportDraft);
+    form.addEventListener('change', queueReportDraft);
+    if (draftClear) {
+      draftClear.addEventListener('click', () => {
+        try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* ignore */ }
+        if (draftNote) draftNote.hidden = true;
+      });
+    }
+    restoreReportDraft();
+
     form.addEventListener('submit', async e => {
       e.preventDefault();
       msgEl.className = 'msg err';
@@ -979,6 +1093,8 @@
       const rs2Serial = (!useFleet && reportIsRs2(model))
         ? fullSerial.toUpperCase().replace(/^RS2[-_ .]?/, 'RS2-')
         : '';
+      const isAccessory = !useFleet && reportIsAccessory(model);
+      const accessoryName = String(document.getElementById('rep-accessory').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
       if (fleet.length && !useFleet && fleetEl.value !== '__manual') {
         msgEl.textContent = 'Select your aircraft.';
@@ -1000,6 +1116,10 @@
       }
       if (!useFleet && reportIsRs2(model) && !/^RS2-(?!000)\d{3}$/.test(rs2Serial)) {
         msgEl.textContent = 'Enter the RS2 serial as RS2-XXX (001-999).';
+        return;
+      }
+      if (isAccessory && !accessoryName) {
+        msgEl.textContent = 'Name the accessory or product you are reporting.';
         return;
       }
       if (!desc) { msgEl.textContent = 'Describe the problem before submitting.'; return; }
@@ -1041,12 +1161,15 @@
         } else if (freeSerial) {
           payload.droneSerial = reportIsRs2(model) ? rs2Serial : fullSerial;
         } else payload.serialSuffix = suffix;
+        if (isAccessory) payload.accessoryName = accessoryName;
         if (SAMPLE) payload.sample = '1';
         const res = await apiPost('createIR', payload);
         if (!res || res.status !== 'ok') {
           if (isUnauthorized(res)) { close(); forget(); location.replace(appLoginUrl()); return; }
           throw new Error(msgOf(res));
         }
+        try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* already gone / blocked */ }
+        if (draftNote) draftNote.hidden = true;
         const okTitle = SAMPLE
           ? 'Sample report received.'
           : 'Your Incident Report (No. ' + esc(res.irNumber) + ') has been registered.';
@@ -1377,6 +1500,7 @@
       ir:    i('ir number'),
       date:  i('timestamp'),
       drone: i('drone serial no'),
+      model: i('drone model'),
       issue: i('what support'),
       desc:  i('please describe'),
       where: i('incident location and weather'),
@@ -1396,6 +1520,7 @@
         // ticket and the store always spells it the second way.
         key: ir.toUpperCase().replace(/\s+/g, ''),
         date: cell(row, c.date),   drone: cell(row, c.drone),
+        model: cell(row, c.model),
         issue: cell(row, c.issue), desc: cell(row, c.desc),
         where: cell(row, c.where),
         evN: cell(row, c.evN),     evQ: cell(row, c.evQ),
@@ -1566,7 +1691,12 @@
   };
   function portalRouteFromHash() {
     const h = String(location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
-    return h || 'home';
+    if (h) return h;
+    // An app shortcut (manifest) can name a panel without a hash, e.g.
+    // customer.html?route=support/history. A hash wins because in-app navigation
+    // writes one; the query is only the cold-entry hint.
+    try { return new URLSearchParams(location.search).get('route') || 'home'; }
+    catch (e) { return 'home'; }
   }
   function showPortalPage(route) {
     const isHome = !route || route === 'home';
@@ -2493,6 +2623,7 @@
             (st ? '<span class="pill ' + stageClass(st) + '">' + esc(st) + '</span>' : '') +
           '</div>' +
           row('Being worked on by', esc(who)) +
+          row('Product / UAS model', esc(t.model)) +
           row('Drone serial no.', esc(t.drone)) +
           row('Raised on', esc(t.date)) +
         '</div>' +

@@ -3491,6 +3491,7 @@ function irAcknowledgementText(fields, ir, sample) {
     'Field\tDetails',
     "Who's Reporting? (Pilot/Respondent Name And Contact Info)\t" + who,
     'Where Do You Work?\t' + String(fields.companyName || ''),
+    'Product / UAS model\t' + String(fields.droneModel || ''),
     'What Support Is Required?\t' + String(fields.issueType || ''),
     'Please Describe Your Problem/Purpose/Required Assistance In A Few Words\t' + String(fields.issueDesc || ''),
     'Date of Incident\t' + String(fields.incidentDate || ''),
@@ -3520,6 +3521,7 @@ function irAcknowledgementHtml(fields, ir, sample) {
   var rows = [
     ["Who's Reporting? (Pilot/Respondent Name And Contact Info)", who || '&mdash;'],
     ['Where Do You Work?', htmlEscape(String(fields.companyName || '')) || '&mdash;'],
+    ['Product / UAS model', htmlEscape(String(fields.droneModel || '')) || '&mdash;'],
     ['What Support Is Required?', htmlEscape(String(fields.issueType || '')) || '&mdash;'],
     ['Please Describe Your Problem/Purpose/Required Assistance In A Few Words', htmlEscape(String(fields.issueDesc || '')).replace(/\n/g, '<br>') || '&mdash;'],
     ['Date of Incident', htmlEscape(String(fields.incidentDate || '')) || '&mdash;'],
@@ -7563,12 +7565,19 @@ function createIRFromApp(params, authEmail) {
   var modelKey = model.toUpperCase().replace(/[^A-Z0-9]/g, '');
   var isAgisoft = modelKey.indexOf('AGISOFT') > -1;
   var isRs2 = modelKey === 'OTHERRS2' || modelKey === 'RS2';
+  var isAccessory = modelKey === 'OTHERACCESSORY' || modelKey === 'ACCESSORY';
+  var accessoryName = String(params.accessoryName || '').trim().slice(0, 120);
+  if (isAccessory && !accessoryName) throw new Error('Name the accessory or product you are reporting.');
+  var displayModel = isAccessory ? ('Other accessory - ' + accessoryName)
+                   : isAgisoft ? 'AGISOFT (software)'
+                   : isRs2 ? 'RS2 (accessory)'
+                   : model;
 
-  // AGISOFT is software and carries no serial at all. RS2 is an accessory, so it has
-  // its own serial but is not one of the company's aircraft. The rest are airframes
-  // and follow the normal rules.
+  // AGISOFT is software and carries no serial at all. RS2 is an accessory with its own
+  // RS2-XXX serial. Any other accessory (battery, charger, bag, propeller...) needs a
+  // name and no serial. The rest are airframes and follow the normal rules.
   var serial = '';
-  if (isAgisoft) {
+  if (isAgisoft || isAccessory) {
     serial = '';
   } else if (isRs2) {
     serial = assertSerialForModel(model, params.droneSerial);
@@ -7583,12 +7592,12 @@ function createIRFromApp(params, authEmail) {
       ? serialForModelSuffix(model, params.serialSuffix)
       : assertSerialForModel(model, params.droneSerial);
   }
-  if (!serial && !isAgisoft) throw new Error('Enter the UAS serial number.');
+  if (!serial && !isAgisoft && !isAccessory) throw new Error('Enter the UAS serial number.');
   // A customer may only report against an aircraft the company actually holds. The
   // list is the portal profile's fleet, which the desk controls. When the fleet is
   // empty (not seeded yet) manual entry is allowed rather than blocking the report.
-  // AGISOFT (software) and RS2 (accessory) are deliberately outside that list.
-  if (isCustomer && !isAgisoft && !isRs2 && customerFleet(company).length &&
+  // AGISOFT (software), RS2 (accessory) and any other accessory are outside that list.
+  if (isCustomer && !isAgisoft && !isRs2 && !isAccessory && customerFleet(company).length &&
       !customerFleetHasSerial(company, serial)) {
     throw new Error('UAS serial "' + serial + '" is not registered to your company. ' +
                     'Choose one of your aircraft from the list, or ask Customer Relations to add it.');
@@ -7615,7 +7624,8 @@ function createIRFromApp(params, authEmail) {
       incidentDate: String(params.incidentDate || '').trim(),
       incidentTime: String(params.incidentTime || '').trim(),
       droneId: serial,
-      droneModel: model,
+      droneModel: displayModel,
+      accessoryName: isAccessory ? accessoryName : '',
       companyName: company,
       customerName: customerName,
       contactPhone: String(params.contactPhone || '').trim(),
@@ -7646,7 +7656,8 @@ function createIRFromApp(params, authEmail) {
     incidentDate: String(params.incidentDate || '').trim(),
     incidentTime: String(params.incidentTime || '').trim(),
     droneId: serial,
-    droneModel: model,
+    droneModel: displayModel,
+    accessoryName: isAccessory ? accessoryName : '',
     companyName: company,
     customerName: customerName,
     contactPhone: String(params.contactPhone || '').trim(),

@@ -695,8 +695,8 @@
     // Less frequent platforms. Their serial formats are not the Sigma S-prefix
     // scheme, so the form asks for the full serial as printed on the aircraft
     // instead of inventing a prefix.
-    { value: 'OTHER - RS2',    label: 'OTHER - RS2',    prefix: '' },
-    { value: 'OTHER - AGISOFT',label: 'OTHER - AGISOFT',prefix: '' },
+    { value: 'OTHER - RS2',    label: 'RS2 (accessory)',    prefix: '' },
+    { value: 'OTHER - AGISOFT',label: 'AGISOFT (software)',prefix: '' },
     { value: 'STRIVER',        label: 'STRIVER',        prefix: '' },
     { value: 'TALON',          label: 'TALON',          prefix: '' },
     { value: 'HECTOR',         label: 'HECTOR',         prefix: '' },
@@ -711,6 +711,14 @@
   function reportFreeSerial(model) {
     const hit = REPORT_MODELS.find(x => x.value === model);
     return !!hit && !hit.prefix;
+  }
+  // AGISOFT is software: no serial to ask for. RS2 is an accessory: it has its own
+  // serial, but it is not an airframe and is not in the customer's fleet.
+  function reportNoSerial(model) {
+    return /AGISOFT/i.test(String(model || ''));
+  }
+  function reportIsRs2(model) {
+    return /RS2/i.test(String(model || ''));
   }
 
   function readFileBase64(file) {
@@ -751,14 +759,14 @@
           </div>
           <div id="rep-manual-serial" class="report-grid">
             <div class="field">
-              <label for="rep-model">UAS model</label>
+              <label for="rep-model">Product or UAS model</label>
               <select id="rep-model" required>
                 <option value="">Select the model</option>
                 ${REPORT_MODELS.map(m => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}
               </select>
             </div>
-                      <div class="field">
-              <label for="rep-suffix">UAS serial number</label>
+                      <div class="field" id="rep-serial-field">
+              <label for="rep-suffix" id="rep-serial-label">UAS serial number</label>
               <div class="serial-wrap" id="rep-serial-prefixed">
                 <span class="serial-fixed" id="rep-prefix">S-</span>
                 <input id="rep-suffix" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3"
@@ -835,6 +843,8 @@
     const prefixedEl = document.getElementById('rep-serial-prefixed');
     const fullEl = document.getElementById('rep-serial-full');
     const serialHintEl = document.getElementById('rep-serial-hint');
+    const serialFieldEl = document.getElementById('rep-serial-field');
+    const serialLabelEl = document.getElementById('rep-serial-label');
     const msgEl = document.getElementById('rep-msg');
     const MAX_EVIDENCE_BYTES = 50 * 1024 * 1024;
     const evidenceListEl = document.getElementById('rep-evidence-list');
@@ -899,7 +909,7 @@
       });
       const manualOpt = document.createElement('option');
       manualOpt.value = '__manual';
-      manualOpt.textContent = 'My serial is not listed — enter it manually';
+      manualOpt.textContent = 'Not listed / another product — choose the model';
       fleetEl.appendChild(manualOpt);
       showManualSerial(false);
       fleetEl.addEventListener('change', () => {
@@ -921,14 +931,32 @@
     }
 
     const updateSerialMode = () => {
-      const free = !!modelEl.value && reportFreeSerial(modelEl.value);
+      const model = String(modelEl.value || '');
+      const noSerial = reportNoSerial(model);
+      const rs2 = reportIsRs2(model);
+      serialFieldEl.hidden = noSerial;
+      if (noSerial) {
+        serialHintEl.textContent = 'AGISOFT is software, so no UAS serial is needed.';
+        return;
+      }
+      if (rs2) {
+        prefixedEl.hidden = true;
+        fullEl.hidden = false;
+        fullEl.placeholder = 'RS2-XXX';
+        serialLabelEl.textContent = 'RS2 serial number';
+        serialHintEl.textContent = 'Enter the RS2 serial as RS2-XXX (001-999).';
+        return;
+      }
+      serialLabelEl.textContent = 'UAS serial number';
+      fullEl.placeholder = 'Full UAS serial number';
+      const free = !!model && reportFreeSerial(model);
       prefixedEl.hidden = free;
       fullEl.hidden = !free;
       serialHintEl.textContent = free
         ? 'Enter the full serial number as printed on the aircraft.'
         : 'The model fixes the prefix. Enter the three-digit number only.';
       if (!free) {
-        const p = reportPrefixFor(modelEl.value);
+        const p = reportPrefixFor(model);
         prefixEl.textContent = p || 'S-';
         prefixEl.dataset.prefix = p;
       }
@@ -944,9 +972,13 @@
         ? String(fleetChoice.model || '').trim()
         : String(modelEl.value || '').trim();
       const freeSerial = useFleet ? false : reportFreeSerial(model);
+      const noSerial = useFleet ? false : reportNoSerial(model);
       const team = employee ? document.getElementById('rep-team').value : '';
       const suffix = String(document.getElementById('rep-suffix').value || '').replace(/[^0-9]/g, '');
       const fullSerial = String(document.getElementById('rep-serial-full').value || '').trim();
+      const rs2Serial = (!useFleet && reportIsRs2(model))
+        ? fullSerial.toUpperCase().replace(/^RS2[-_ .]?/, 'RS2-')
+        : '';
       const desc = String(document.getElementById('rep-desc').value || '').trim();
       if (fleet.length && !useFleet && fleetEl.value !== '__manual') {
         msgEl.textContent = 'Select your aircraft.';
@@ -955,14 +987,19 @@
       if (!model) {
         msgEl.textContent = useFleet
           ? 'That aircraft has no model on record. Ask Customer Relations to fix the fleet list.'
-          : 'Select the UAS model.';
+          : 'Select the product or UAS model.';
         return;
       }
       if (employee && !team) { msgEl.textContent = 'Choose the team you belong to.'; return; }
-      if (!useFleet && (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1))) {
-        msgEl.textContent = freeSerial
-          ? 'Enter the UAS serial number.'
-          : 'Enter a serial number from 1 to 999; 000 is not valid.';
+      if (!useFleet && !noSerial &&
+          (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1))) {
+        msgEl.textContent = reportIsRs2(model)
+          ? 'Enter the RS2 serial number.'
+          : (freeSerial ? 'Enter the UAS serial number.' : 'Enter a serial number from 1 to 999; 000 is not valid.');
+        return;
+      }
+      if (!useFleet && reportIsRs2(model) && !/^RS2-(?!000)\d{3}$/.test(rs2Serial)) {
+        msgEl.textContent = 'Enter the RS2 serial as RS2-XXX (001-999).';
         return;
       }
       if (!desc) { msgEl.textContent = 'Describe the problem before submitting.'; return; }
@@ -999,8 +1036,11 @@
         if (useFleet) {
           payload.droneSerial = String(fleetChoice.sn || '').trim();
           payload.serialFromFleet = '1';
-        } else if (freeSerial) payload.droneSerial = fullSerial;
-        else payload.serialSuffix = suffix;
+        } else if (noSerial) {
+          // AGISOFT is software: the report carries no UAS serial at all.
+        } else if (freeSerial) {
+          payload.droneSerial = reportIsRs2(model) ? rs2Serial : fullSerial;
+        } else payload.serialSuffix = suffix;
         if (SAMPLE) payload.sample = '1';
         const res = await apiPost('createIR', payload);
         if (!res || res.status !== 'ok') {

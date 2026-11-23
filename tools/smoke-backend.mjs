@@ -1844,6 +1844,13 @@ r.ok('...and a company the register has never heard of resolves to itself, not t
 r.ok('...which BOTH scoping paths call, so the two can never disagree about a company\'s rows',
   /companySheetNames\(/.test(fnBody('customerIRS')) && /companySheetNames\(/.test(fnBody('filterGridToCompany')) &&
   /matchesAnyCompany\(/.test(fnBody('customerIRS')) && /matchesAnyCompany\(/.test(fnBody('filterGridToCompany')));
+r.ok('the customer scope counts app-created IRs from the registry, not only sheet rows',
+  /irRegistry\(\)/.test(fnBody('customerIRS')) &&
+  /fields\.companyName/.test(fnBody('customerIRS')) &&
+  /own\[n\] = true/.test(fnBody('customerIRS')));
+r.ok('a customer may report only against a serial in their own fleet, with manual entry allowed when it is empty',
+  /customerFleetHasSerial\(company, serial\)/.test(fnBody('createIRFromApp')) &&
+  /customerFleet\(company\)\.length/.test(fnBody('createIRFromApp')));
 r.ok('...and the alias comparison is the SAME normaliser the scope store uses',
   /sameCompany\(cell, names\[i\]\)/.test(fnBody('matchesAnyCompany')) && /sameCompanyKey\(/.test(fnBody('sameCompany')));
 r.ok('a company named only as a placeholder is not a company',

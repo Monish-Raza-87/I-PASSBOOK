@@ -3161,11 +3161,23 @@ const fb = ctx.submitCustomerFeedback({
   challenges: 'pre-release walkthrough'
 }, 'buyer@acme.com');
 const fbMail = mails[0];
-r.ok('pre-release feedback stays in the test mailboxes and is tagged',
+r.ok('pre-release feedback goes to the customer and copies Customer Relations',
   fb.status === 'ok' && !!fbMail &&
-  fbMail.to === 'customer.relations@indrones.com' &&
+  fbMail.to === 'buyer@acme.com' &&
   /PRE-RELEASE TEST EMAIL/.test(fbMail.subject) &&
-  !(fbMail.options && fbMail.options.cc), fbMail);
+  fbMail.options && fbMail.options.cc === 'customer.relations@indrones.com', fbMail);
+r.ok('...and the feedback email is a formatted table that thanks the customer',
+  !!fbMail && fbMail.options && /<table/.test(fbMail.options.htmlBody) &&
+  /Thank you/.test(fbMail.options.htmlBody) &&
+  /Customer Relations/.test(fbMail.options.htmlBody), fbMail && fbMail.body);
+
+ctx.savePortalConfig({ company: 'Acme', fleet: JSON.stringify([
+  { sn: 'S25001', model: 'SIGMA25G' }
+]) }, ADMIN);
+r.ok('a serial the company holds matches its fleet',
+  ctx.customerFleetHasSerial('Acme', 'S25-001'));
+r.ok('a serial the company does not hold is refused',
+  !ctx.customerFleetHasSerial('Acme', 'S25002'));
 
 ctx._storeMemo = {};
 const team = ctx.listTeam();

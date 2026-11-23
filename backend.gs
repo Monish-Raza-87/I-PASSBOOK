@@ -2488,6 +2488,41 @@ function describeDriveFolder_(folder, label, out) {
   catch (e) { out.push(label + ': sharing (unreadable)'); }
 }
 
+// EDITOR-RUN, NOT ROUTED. Repairs evidence uploaded BEFORE the addViewer fallback:
+// tries a public link first, then shares the file with the reporter named on the
+// ticket. Idempotent, and it never deletes or moves anything. Run it once after the
+// backend paste that added the fallback; new uploads repair themselves.
+function repairAppEvidenceSharing() {
+  var out = [];
+  var reg = null;
+  try { reg = irRegistry(); } catch (e) { return report('Could not read the IR registry: ' + ((e && e.message) || e)); }
+  Object.keys(reg.irs || {}).forEach(function (key) {
+    var rec = reg.irs[key];
+    if (!rec || rec.source !== 'app' || !rec.fields) return;
+    var email = String(rec.fields.contactEmail || '').trim();
+    if (!email || !/@/.test(email)) return;
+    ['evidenceFormN', 'evidenceFormQ'].forEach(function (fieldId) {
+      String(rec.fields[fieldId] || '').split(/[\s,]+/).filter(Boolean).forEach(function (link) {
+        var id = driveFileIdFromUrl(link);
+        if (!id) return;
+        try {
+          var file = DriveApp.getFileById(id);
+          var publicLink = false;
+          try {
+            file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+            publicLink = true;
+          } catch (e) { /* fall through to the named viewer */ }
+          if (!publicLink) file.addViewer(email);
+          out.push(rec.irNumber + ' | ' + file.getName() + ' -> ' + (publicLink ? 'anyone with the link' : email));
+        } catch (e) {
+          out.push(rec.irNumber + ' | ' + link + ' FAILED: ' + ((e && e.message) || e));
+        }
+      });
+    });
+  });
+  return report(out.length ? out.join('\n') : 'No app evidence links found.');
+}
+
 
 function folderIdFromUrl(value) {
   var s = String(value == null ? '' : value).trim();
@@ -6261,7 +6296,77 @@ function saveCustomerProfile(params, authEmail) {
   return result;
 }
 
-// POST submitFeedback - the in-app feedback form.
+// The feedback acknowledgement. One email, two audiences: the customer gets the
+// thank-you, Customer Relations is copied so it can act on it. The layout mirrors
+// the IR acknowledgement (a Field/Details table) rather than a wall of text.
+function feedbackAcknowledgementText(fields) {
+  fields = fields || {};
+  var lines = [
+    'Thank you for your I-PASSBOOK feedback',
+    '',
+    'Dear ' + String(fields.company || 'Customer') + ' team,',
+    '',
+    'Thank you for taking the time to share your feedback with Indrones. We value it:',
+    'it tells us what is working and what we need to improve, and it reaches the team',
+    'that can act on it.',
+    '',
+    'Customer Relations has been copied on this email and will review your feedback.',
+    '',
+    'Feedback details:',
+    'Field\tDetails',
+    'Company\t' + String(fields.company || ''),
+    'Submitted by\t' + String(fields.from || ''),
+    'Drone active and operational\t' + String(fields.droneActive || ''),
+    'Operates the UAS fluently\t' + String(fields.fluency || ''),
+    'Drone performance\t' + String(fields.droneRating || '') + '/5' +
+      (fields.droneReason ? ' - ' + String(fields.droneReason) : ''),
+    'Support and services\t' + String(fields.supportRating || '') + '/5' +
+      (fields.supportReason ? ' - ' + String(fields.supportReason) : ''),
+    'Operational challenges / suggestions\t' + String(fields.challenges || '-')
+  ];
+  if (fields.testimonial) lines.push('Willing to give a testimonial\t' + String(fields.testimonial));
+  lines.push('', 'Thank you for helping us keep your fleet flying.', '',
+             'Best regards,', 'The Indrones Support Team');
+  return lines.join('\n');
+}
+
+function feedbackAcknowledgementHtml(fields) {
+  fields = fields || {};
+  var esc = function (v) { return htmlEscape(String(v == null ? '' : v)); };
+  var rows = [
+    ['Company', esc(fields.company)],
+    ['Submitted by', esc(fields.from)],
+    ['Drone active and operational', esc(fields.droneActive)],
+    ['Operates the UAS fluently', esc(fields.fluency)],
+    ['Drone performance', esc(String(fields.droneRating || '') + '/5' +
+      (fields.droneReason ? ' — ' + String(fields.droneReason) : ''))],
+    ['Support and services', esc(String(fields.supportRating || '') + '/5' +
+      (fields.supportReason ? ' — ' + String(fields.supportReason) : ''))],
+    ['Operational challenges / suggestions', esc(fields.challenges || '-').replace(/\n/g, '<br>')]
+  ];
+  if (fields.testimonial) rows.push(['Willing to give a testimonial', esc(fields.testimonial)]);
+  var trs = rows.map(function (r) {
+    return '<tr><td style="border:1px solid #d9d9d9;padding:8px 10px;background:#f7f7f7;font-weight:600;vertical-align:top;width:42%">' +
+      r[0] + '</td><td style="border:1px solid #d9d9d9;padding:8px 10px;vertical-align:top">' +
+      (r[1] || '&mdash;') + '</td></tr>';
+  }).join('');
+  return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.55;color:#1a1a1b">' +
+    '<h2 style="font-size:18px;margin:0 0 14px">Thank you for your I-PASSBOOK feedback</h2>' +
+    '<p>Dear ' + esc(fields.company || 'Customer') + ' team,</p>' +
+    '<p>Thank you for taking the time to share your feedback with Indrones. We value it: it tells us what is working and what we need to improve, and it reaches the team that can act on it.</p>' +
+    '<p><b>Customer Relations</b> has been copied on this email and will review your feedback.</p>' +
+    '<p><b>Feedback details:</b></p>' +
+    '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:13px">' +
+      '<tr><th align="left" style="border:1px solid #d9d9d9;padding:8px 10px;background:#f0f0ee">Field</th>' +
+      '<th align="left" style="border:1px solid #d9d9d9;padding:8px 10px;background:#f0f0ee">Details</th></tr>' +
+      trs +
+    '</table>' +
+    '<p>Thank you for helping us keep your fleet flying.</p>' +
+    '<p>Best regards,<br>The Indrones Support Team</p>' +
+  '</div>';
+}
+
+
 //
 // The company comes from the session, never the body. The customer's words go to
 // Customer Relations by email (reply-to the customer, no CC) and a copy is kept in
@@ -6305,50 +6410,52 @@ function submitCustomerFeedback(params, authEmail) {
     throw new Error('Tell us whether you would give a testimonial.');
 
   var cr = portalRead().cr || {};
-  var to = String(cr.email || 'customer.relations@indrones.com').trim();
-  if (!to || !isMailRecipientAllowed(to)) throw new Error('The feedback inbox is not configured.');
+  var inbox = String(cr.email || 'customer.relations@indrones.com').trim();
+  if (!inbox || !isMailRecipientAllowed(inbox)) throw new Error('The feedback inbox is not configured.');
 
-  // Pre-release: feedback stays between the three test mailboxes too. The inbox is
-  // forced to Customer Relations and the internal account that is NOT sending is the
-  // only CC, so no real desk member sees a test message.
-  var preCc = [];
-  if (PRE_RELEASE_ACK) {
-    to = 'customer.relations@indrones.com';
-    preCc = irAcknowledgementCc(false, '').filter(function (a) {
-      return String(a).toLowerCase() !== to.toLowerCase();
-    });
-  }
+  var feedbackFields = {
+    company: company,
+    from: email,
+    droneActive: droneActive,
+    fluency: fluency,
+    droneRating: droneRating,
+    supportRating: supportRating,
+    droneReason: droneReason,
+    supportReason: supportReason,
+    challenges: challenges,
+    testimonial: average > 3 ? testimonial : ''
+  };
+  var body = feedbackAcknowledgementText(feedbackFields);
+  var html = feedbackAcknowledgementHtml(feedbackFields);
 
-
-  var lines = [
-    'Customer feedback',
-    '',
-    'Company: ' + company,
-    'From: ' + email,
-    'Is the drone active and operational? ' + droneActive,
-    'Can the customer operate the UAS fluently? ' + fluency,
-    'Drone performance: ' + droneRating + '/5' +
-      (droneLow && !supportLow ? ' - ' + droneReason : ''),
-    'Support and services: ' + supportRating + '/5' +
-      (supportLow ? ' - ' + supportReason : '')
-  ];
-  if (average > 3) lines.push('Willing to give a testimonial: ' + testimonial);
-  lines.push('', 'Operational challenges / suggestions:', challenges || '-',
-             '', '--', 'Sent from the I-PASSBOOK customer portal.');
-  var body = lines.join('\n');
+  // The customer is the To; Customer Relations is the desk that must act on it.
+  // PRE-RELEASE keeps the CC inside the three test mailboxes: the account that is
+  // not sending. Once PRE_RELEASE_ACK is false the CC is always Customer Relations.
+  var sender = '';
+  try { sender = String(Session.getEffectiveUser().getEmail() || '').trim().toLowerCase(); } catch (e) {}
+  var cc = PRE_RELEASE_ACK ? irAcknowledgementCc(false, '') : [inbox];
+  cc = cc.filter(function (a) {
+    var k = String(a || '').trim().toLowerCase();
+    return k && k !== String(email).toLowerCase() && k !== sender;
+  });
 
   var sent = false;
   if (mailQuotaOk('feedback')) {
     try {
       var feedbackSubject = (PRE_RELEASE_ACK ? '[' + PRE_RELEASE_SUBJECT_TAG + '] ' : '') +
-        'I-PASSBOOK feedback - ' + company + ' - ' + supportRating + '/5';
-      var feedbackOptions = { name: 'I-PASSBOOK', replyTo: email };
-      if (preCc.length) feedbackOptions.cc = preCc.join(',');
-      MailApp.sendEmail(to, feedbackSubject, body, feedbackOptions);
+        'Thank you for your I-PASSBOOK feedback - ' + company + ' - ' + supportRating + '/5';
+      var feedbackOptions = {
+        name: 'I-PASSBOOK',
+        replyTo: 'customer.relations@indrones.com',
+        htmlBody: html
+      };
+      if (cc.length) feedbackOptions.cc = cc.join(',');
+      MailApp.sendEmail(email, feedbackSubject, body, feedbackOptions);
       sent = true;
     } catch (e) { sent = false; }
   }
   if (!sent) throw new Error('Could not send the feedback just now. Try again in a moment.');
+
 
   // Keep a copy for the desk. The email is the record; this append is best-effort.
   try {
@@ -7453,10 +7560,25 @@ function createIRFromApp(params, authEmail) {
   if (!company) throw new Error('A company is required to raise an IR.');
   var model = String(params.droneModel || '').trim();
   if (!model) throw new Error('Select the UAS model.');
-  var serial = params.serialSuffix
-    ? serialForModelSuffix(model, params.serialSuffix)
-    : assertSerialForModel(model, params.droneSerial);
+  var serial;
+  if (String(params.serialFromFleet || '') === '1') {
+    // A serial picked from the company's own fleet is authoritative: the desk recorded
+    // it, so the format check that guards a hand-typed value must not reject it. The
+    // ownership check below still proves it is this company's aircraft.
+    serial = canonicalSerialValue(params.droneSerial);
+  } else {
+    serial = params.serialSuffix
+      ? serialForModelSuffix(model, params.serialSuffix)
+      : assertSerialForModel(model, params.droneSerial);
+  }
   if (!serial) throw new Error('Enter the UAS serial number.');
+  // A customer may only report against an aircraft the company actually holds. The
+  // list is the portal profile's fleet, which the desk controls. When the fleet is
+  // empty (not seeded yet) manual entry is allowed rather than blocking the report.
+  if (isCustomer && customerFleet(company).length && !customerFleetHasSerial(company, serial)) {
+    throw new Error('UAS serial "' + serial + '" is not registered to your company. ' +
+                    'Choose one of your aircraft from the list, or ask Customer Relations to add it.');
+  }
   var issueDesc = String(params.issueDesc || '').trim();
   if (!issueDesc) throw new Error('Describe the problem before submitting.');
   var contactEmail = String(params.contactEmail || '').trim() || usersKey(authEmail);
@@ -7565,10 +7687,19 @@ function createIRFromApp(params, authEmail) {
       try {
         uploaded.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       } catch (e) {
-        // The IR must still be raised: a sharing refusal (often a shared-drive or
-        // domain policy) leaves the file in the folder for the desk, which is better
-        // than losing the customer's report. The link may need the desk to share it.
+        // The IR must still be raised: a sharing refusal (often a domain policy that
+        // blocks public links) leaves the file in the folder for the desk. But the
+        // customer who uploaded it must be able to open it, so fall back to sharing
+        // the single file with the reporter's own address.
         Logger.log('Evidence link sharing failed for ' + f.name + ': ' + ((e && e.message) || e));
+        try {
+          if (contactEmail && /@/.test(contactEmail)) {
+            uploaded.addViewer(contactEmail);
+            Logger.log('Evidence "' + f.name + '" shared with reporter ' + contactEmail + '.');
+          }
+        } catch (e2) {
+          Logger.log('Evidence viewer share failed for ' + f.name + ': ' + ((e2 && e2.message) || e2));
+        }
       }
       (String(f.fieldId || '') === 'evidenceFormQ' ? linksQ : linksN).push(uploaded.getUrl());
     });
@@ -7900,6 +8031,20 @@ function customerIRS(company) {
     var k = irKey(row[irCol]);
     if (k) own[k] = true;
   }
+  // App-created IRs live in the registry, not the intake sheet, and listIRs already
+  // merges them in. If this scope check did not, the portal would list a ticket and
+  // then refuse to open it with "not one of your tickets" — the exact bug this closes.
+  try {
+    var reg = irRegistry();
+    Object.keys(reg.irs || {}).forEach(function (key) {
+      var rec = reg.irs[key];
+      if (!rec || typeof rec !== 'object') return;
+      var fields = rec.fields || {};
+      if (!matchesAnyCompany(fields.companyName, names)) return;
+      var n = irKey(rec.irNumber || key);
+      if (n) own[n] = true;
+    });
+  } catch (e) { /* an unreadable registry must not widen the scope */ }
   return own;
 }
 
@@ -7912,7 +8057,24 @@ function customerOwnsIR(company, irNumber) {
   return customerIRS(company)[k] === true;
 }
 
-// Which column of the intake header row names the customer's company.
+// The aircraft the company's portal profile holds. Empty is a real answer: until the
+// desk seeds a fleet, a customer has nothing to pick from and must be able to type
+// the serial manually. An unreadable store is treated the same way rather than
+// blocking a report.
+function customerFleet(company) {
+  try { return portalProfileFor(company).fleet || []; }
+  catch (e) { return []; }
+}
+
+function customerFleetHasSerial(company, serial) {
+  var key = serialKey(serial);
+  if (!key) return false;
+  return customerFleet(company).some(function (f) {
+    return serialKey(f && f.sn) === key;
+  });
+}
+
+
 //
 // BY SUBSTRING, never by letter. The form's questions have been reworded before and
 // a fixed column index would then silently point at the wrong field — and a wrong

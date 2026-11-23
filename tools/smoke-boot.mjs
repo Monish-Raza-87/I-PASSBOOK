@@ -481,6 +481,8 @@ const INTRO_DRIVER = `<script>
       videoReadyState: v ? v.readyState : null,
       videoErrorCode: v && v.error ? v.error.code : null,
       mp4Requests: mp4.length,
+      introKey: (function () { try { return localStorage.getItem('ipb_intro_ver'); } catch (e) { return 'blocked'; } })(),
+      appVersion: (function () { var el = document.querySelector('.app-version'); return el ? String(el.textContent || '').trim() : null; })(),
       warmPings: window.__warmPings || 0,
       warmPingUrl: window.__warmPingUrl || null,
       authDisplay: auth ? getComputedStyle(auth).display : null,
@@ -1010,9 +1012,11 @@ if (!secondIntro) { await new Promise(r => setTimeout(r, 2000)); secondIntro = a
 ok('the second open on the same device reports', !!secondIntro);
 if (secondIntro) {
   ok('a device that has already been given this version\'s intro is not given it again',
-    secondIntro.brandMode === 'rest', secondIntro.brandMode);
+    secondIntro.brandMode === 'rest',
+    { mode: secondIntro.brandMode, key: secondIntro.introKey, version: secondIntro.appVersion });
   ok('...and never fetches the video to find that out',
-    secondIntro.mp4Requests === 0, secondIntro.mp4Requests);
+    secondIntro.mp4Requests === 0,
+    { requests: secondIntro.mp4Requests, key: secondIntro.introKey, version: secondIntro.appVersion });
   ok('...and it is the resting panel, not an empty one, that it rests on',
     secondIntro.stageDisplay === 'block' && secondIntro.headClipped === true,
     { stage: secondIntro.stageDisplay, headClipped: secondIntro.headClipped });

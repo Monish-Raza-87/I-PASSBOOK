@@ -228,6 +228,13 @@ r.ok('evidence is capped at 50 MB and every staged file can be removed before su
   /rep-evidence-list/.test(portal) &&
   /evidence-remove/.test(portal) &&
   /staged\.splice\(idx, 1\)/.test(portal));
+r.ok('support history refreshes in place and the form prefers the customer fleet serials',
+  /id="reports-refresh"/.test(portal) &&
+  /reports-refresh'\)\.addEventListener/.test(portal) &&
+  /loadTickets\(\)/.test(portal) &&
+  /rep-fleet/.test(portal) &&
+  /serialFromFleet/.test(portal) &&
+  /My serial is not listed/.test(portal));
 r.ok('the feedback form is built in-app, not a Google Form link',
   /function openFeedbackForm\(\)/.test(portal) &&
   /apiPost\('submitFeedback'/.test(portal) &&

@@ -327,6 +327,7 @@
     <div class="reports-head">
       <h2>Support history</h2>
       <span class="bar-spacer"></span>
+      <button type="button" class="btn" id="reports-refresh" title="Load the latest reports">Refresh</button>
     </div>
     <p class="sub" id="reports-sub"></p>
 
@@ -741,24 +742,34 @@
         <h2>Customer support form</h2>
         <p class="sheet-note">Your report gets an IR number as soon as it is received.</p>
         <form id="report-form" class="report-grid" novalidate>
-          <div class="field">
-            <label for="rep-model">UAS model</label>
-            <select id="rep-model" required>
-              <option value="">Select the model</option>
-              ${REPORT_MODELS.map(m => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}
+          <div class="field" id="rep-fleet-wrap" hidden>
+            <label for="rep-fleet">Your aircraft</label>
+            <select id="rep-fleet">
+              <option value="">Select your registered aircraft</option>
             </select>
+            <p class="report-hint">Serial numbers registered to your company. Pick the aircraft you are reporting on.</p>
           </div>
-                    <div class="field">
-            <label for="rep-suffix">UAS serial number</label>
-            <div class="serial-wrap" id="rep-serial-prefixed">
-              <span class="serial-fixed" id="rep-prefix">S-</span>
-              <input id="rep-suffix" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3"
-                     placeholder="001" autocomplete="off">
+          <div id="rep-manual-serial" class="report-grid">
+            <div class="field">
+              <label for="rep-model">UAS model</label>
+              <select id="rep-model" required>
+                <option value="">Select the model</option>
+                ${REPORT_MODELS.map(m => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}
+              </select>
             </div>
-            <input id="rep-serial-full" type="text" placeholder="Full UAS serial number"
-                   autocomplete="off" hidden>
-            <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter a number from 1 to 999; 000 is not valid.</p>
+                      <div class="field">
+              <label for="rep-suffix">UAS serial number</label>
+              <div class="serial-wrap" id="rep-serial-prefixed">
+                <span class="serial-fixed" id="rep-prefix">S-</span>
+                <input id="rep-suffix" inputmode="numeric" pattern="[0-9]{1,3}" maxlength="3"
+                       placeholder="001" autocomplete="off">
+              </div>
+              <input id="rep-serial-full" type="text" placeholder="Full UAS serial number"
+                     autocomplete="off" hidden>
+              <p class="report-hint" id="rep-serial-hint">The model fixes the prefix. Enter a number from 1 to 999; 000 is not valid.</p>
+            </div>
           </div>
+
           <div class="report-grid two">
             <div class="field"><label for="rep-date">Date of incident</label><input id="rep-date" type="date" value="${today}"></div>
             <div class="field"><label for="rep-time">Time of incident</label><input id="rep-time" type="time"></div>
@@ -867,6 +878,48 @@
     };
     document.getElementById('rep-files').addEventListener('change', e => stage(e.target, 'evidenceFormN'));
     document.getElementById('rep-camera').addEventListener('change', e => stage(e.target, 'evidenceFormN'));
+
+    // The company's own aircraft, when the profile carries them. The dropdown is the
+    // primary path; the manual model + serial fields stay as the fallback for a fleet
+    // the desk has not seeded yet, or a profile read that failed.
+    const fleetWrap = document.getElementById('rep-fleet-wrap');
+    const fleetEl = document.getElementById('rep-fleet');
+    const manualWrap = document.getElementById('rep-manual-serial');
+    const fleet = (ME && ME.customerOf && Array.isArray(PROFILE.fleet))
+      ? PROFILE.fleet.filter(f => f && f.sn) : [];
+    let fleetChoice = null;
+    const showManualSerial = show => { manualWrap.hidden = !show; };
+    if (fleet.length) {
+      fleetWrap.hidden = false;
+      fleet.forEach((f, i) => {
+        const o = document.createElement('option');
+        o.value = String(i);
+        o.textContent = f.sn + (f.model ? ' · ' + f.model : '') + (f.uin ? ' · UIN ' + f.uin : '');
+        fleetEl.appendChild(o);
+      });
+      const manualOpt = document.createElement('option');
+      manualOpt.value = '__manual';
+      manualOpt.textContent = 'My serial is not listed — enter it manually';
+      fleetEl.appendChild(manualOpt);
+      showManualSerial(false);
+      fleetEl.addEventListener('change', () => {
+        msgEl.textContent = '';
+        if (fleetEl.value === '__manual') {
+          fleetChoice = null;
+          showManualSerial(true);
+        } else if (fleetEl.value !== '') {
+          fleetChoice = fleet[Number(fleetEl.value)] || null;
+          showManualSerial(false);
+        } else {
+          fleetChoice = null;
+          showManualSerial(false);
+        }
+      });
+    } else {
+      fleetWrap.hidden = true;
+      showManualSerial(true);
+    }
+
     const updateSerialMode = () => {
       const free = !!modelEl.value && reportFreeSerial(modelEl.value);
       prefixedEl.hidden = free;
@@ -886,15 +939,27 @@
       e.preventDefault();
       msgEl.className = 'msg err';
       msgEl.textContent = '';
-      const model = modelEl.value;
-      const freeSerial = reportFreeSerial(model);
+      const useFleet = !!fleetChoice;
+      const model = useFleet
+        ? String(fleetChoice.model || '').trim()
+        : String(modelEl.value || '').trim();
+      const freeSerial = useFleet ? false : reportFreeSerial(model);
       const team = employee ? document.getElementById('rep-team').value : '';
       const suffix = String(document.getElementById('rep-suffix').value || '').replace(/[^0-9]/g, '');
       const fullSerial = String(document.getElementById('rep-serial-full').value || '').trim();
       const desc = String(document.getElementById('rep-desc').value || '').trim();
-      if (!model) { msgEl.textContent = 'Select the UAS model.'; return; }
+      if (fleet.length && !useFleet && fleetEl.value !== '__manual') {
+        msgEl.textContent = 'Select your aircraft.';
+        return;
+      }
+      if (!model) {
+        msgEl.textContent = useFleet
+          ? 'That aircraft has no model on record. Ask Customer Relations to fix the fleet list.'
+          : 'Select the UAS model.';
+        return;
+      }
       if (employee && !team) { msgEl.textContent = 'Choose the team you belong to.'; return; }
-      if (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1)) {
+      if (!useFleet && (freeSerial ? !fullSerial : (!/^[0-9]{1,3}$/.test(suffix) || Number(suffix) < 1))) {
         msgEl.textContent = freeSerial
           ? 'Enter the UAS serial number.'
           : 'Enter a serial number from 1 to 999; 000 is not valid.';
@@ -931,7 +996,10 @@
           courierTracking: document.getElementById('rep-courier').value || '',
           files: JSON.stringify(files)
         };
-        if (freeSerial) payload.droneSerial = fullSerial;
+        if (useFleet) {
+          payload.droneSerial = String(fleetChoice.sn || '').trim();
+          payload.serialFromFleet = '1';
+        } else if (freeSerial) payload.droneSerial = fullSerial;
         else payload.serialSuffix = suffix;
         if (SAMPLE) payload.sample = '1';
         const res = await apiPost('createIR', payload);
@@ -2920,6 +2988,15 @@
       $('report-one').hidden = true;
       $('reports-list').hidden = false;
       $('reports').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    $('reports-refresh').addEventListener('click', async () => {
+      const btn = $('reports-refresh');
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.textContent = 'Refreshing…';
+      await loadTickets();
+      btn.textContent = 'Refresh';
+      btn.disabled = false;
     });
 
 

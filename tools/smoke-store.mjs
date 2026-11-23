@@ -3179,6 +3179,12 @@ r.ok('a serial the company holds matches its fleet',
 r.ok('a serial the company does not hold is refused',
   !ctx.customerFleetHasSerial('Acme', 'S25002'));
 
+let rs2 = '', rs2Bad = '';
+try { rs2 = ctx.assertSerialForModel('OTHER - RS2', 'rs2 1'); } catch (e) { rs2 = ''; }
+try { ctx.assertSerialForModel('OTHER - RS2', 'RS2-000'); } catch (e) { rs2Bad = e.message; }
+r.ok('RS2 accessory serials read RS2-XXX and refuse 000',
+  rs2 === 'RS2-001' && /RS2/.test(rs2Bad) && /000/.test(rs2Bad), { rs2, rs2Bad });
+
 ctx._storeMemo = {};
 const team = ctx.listTeam();
 r.ok('the roster answers with status ok and a list', team.status === 'ok' && Array.isArray(team.team), team);

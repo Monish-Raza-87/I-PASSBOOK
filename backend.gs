@@ -7559,9 +7559,21 @@ function createIRFromApp(params, authEmail) {
                            : String(params.companyName || '').trim();
   if (!company) throw new Error('A company is required to raise an IR.');
   var model = String(params.droneModel || '').trim();
-  if (!model) throw new Error('Select the UAS model.');
-  var serial;
-  if (String(params.serialFromFleet || '') === '1') {
+  if (!model) throw new Error('Select the product or UAS model.');
+  var modelKey = model.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  var isAgisoft = modelKey.indexOf('AGISOFT') > -1;
+  var isRs2 = modelKey === 'OTHERRS2' || modelKey === 'RS2';
+
+  // AGISOFT is software and carries no serial at all. RS2 is an accessory, so it has
+  // its own serial but is not one of the company's aircraft. The rest are airframes
+  // and follow the normal rules.
+  var serial = '';
+  if (isAgisoft) {
+    serial = '';
+  } else if (isRs2) {
+    serial = assertSerialForModel(model, params.droneSerial);
+    if (!serial) throw new Error('Enter the RS2 serial number.');
+  } else if (String(params.serialFromFleet || '') === '1') {
     // A serial picked from the company's own fleet is authoritative: the desk recorded
     // it, so the format check that guards a hand-typed value must not reject it. The
     // ownership check below still proves it is this company's aircraft.
@@ -7571,11 +7583,13 @@ function createIRFromApp(params, authEmail) {
       ? serialForModelSuffix(model, params.serialSuffix)
       : assertSerialForModel(model, params.droneSerial);
   }
-  if (!serial) throw new Error('Enter the UAS serial number.');
+  if (!serial && !isAgisoft) throw new Error('Enter the UAS serial number.');
   // A customer may only report against an aircraft the company actually holds. The
   // list is the portal profile's fleet, which the desk controls. When the fleet is
   // empty (not seeded yet) manual entry is allowed rather than blocking the report.
-  if (isCustomer && customerFleet(company).length && !customerFleetHasSerial(company, serial)) {
+  // AGISOFT (software) and RS2 (accessory) are deliberately outside that list.
+  if (isCustomer && !isAgisoft && !isRs2 && customerFleet(company).length &&
+      !customerFleetHasSerial(company, serial)) {
     throw new Error('UAS serial "' + serial + '" is not registered to your company. ' +
                     'Choose one of your aircraft from the list, or ask Customer Relations to add it.');
   }
@@ -11599,6 +11613,10 @@ function canonicalSerialValue(raw) {
   if (c75 && !/^V\d+$/.test(c75[1])) return 'S75-' + c75[1];
   var rd = /^(S100|S25P|S75|S25)[-_ .]?V[-_ .]?(\d{1,2})(?:\s*R\s*&\s*D)?$/.exec(s);
   if (rd) return rd[1] + '-V' + String(Number(rd[2]));
+  // RS2 is an accessory with its own RS2-XXX serial, so it is canonicalised
+  // separately from the airframes and never goes through a Sigma prefix.
+  var rs2 = /^RS2[-_ .]?(\d{1,3})$/.exec(s);
+  if (rs2) return 'RS2-' + ('00' + rs2[1]).slice(-3);
   var m = /^(S100|S25P|S75|S25)[-_ .]?(\d{1,3})$/.exec(s);
   if (!m) return s;
   var head = m[1] === 'S100' ? 'S100-' : m[1];
@@ -11633,6 +11651,10 @@ function serialNomenclatureProblem(serial) {
   // XXX is a natural-number body: 000 is not a serial, it is a placeholder. The
   // suffix form already refuses it; this keeps a hand-typed full serial honest too.
   if (/^(?:S100-|S25P|S75|S25)000$/.test(s)) return 'the serial body cannot be 000; use 001-999';
+  if (/^RS2/.test(s)) {
+    if (/^RS2-000$/.test(s)) return 'the RS2 serial body cannot be 000; use 001-999';
+    return /^RS2-\d{3}$/.test(s) ? '' : 'RS2 serials read RS2-XXX (001-999)';
+  }
   if (/^S100/.test(s)) return /^S100-\d{3}$/.test(s) || /^S100-V\d{1,2}$/.test(s) ? '' : 'SIGMA 100 serials read S100-XXX (R&D: S100-Vn)';
   if (/^S25P/.test(s)) return /^S25P\d{3}$/.test(s) || /^S25P-V\d{1,2}$/.test(s) ? '' : 'SIGMA 25 PRO serials read S25PXXX (R&D: S25P-Vn)';
   if (/^S75/.test(s)) return /^S75\d{3}$/.test(s) || /^S75-V\d{1,2}$/.test(s) ? '' : 'SIGMA 75 serials read S75XXX (R&D: S75-Vn)';

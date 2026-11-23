@@ -1520,6 +1520,10 @@ r.ok('serial rule is enforced for written serials and has a read-only audit',
   /function auditSerialNomenclature/.test(code) &&
   /serialNomenclatureProblem/.test(fnBody('assertSerialForModel')) &&
   /auditSerialNomenclature/.test(fnBody('A0_RUN_ADMIN_TASK')));
+r.ok('RS2 accessory serials read RS2-XXX, separate from the airframe prefixes',
+  /RS2-XXX/.test(fnBody('serialNomenclatureProblem')) &&
+  /RS2/.test(fnBody('canonicalSerialValue')) &&
+  /isRs2/.test(fnBody('createIRFromApp')));
 r.ok('nightly backup health has a visible editor report',
   /function auditNightlyBackup/.test(code) &&
   /readBackupHealth/.test(fnBody('auditNightlyBackup')) &&
@@ -1851,6 +1855,11 @@ r.ok('the customer scope counts app-created IRs from the registry, not only shee
 r.ok('a customer may report only against a serial in their own fleet, with manual entry allowed when it is empty',
   /customerFleetHasSerial\(company, serial\)/.test(fnBody('createIRFromApp')) &&
   /customerFleet\(company\)\.length/.test(fnBody('createIRFromApp')));
+r.ok('AGISOFT is software with no serial, and RS2 is an accessory outside the aircraft fleet',
+  /isAgisoft/.test(fnBody('createIRFromApp')) &&
+  /isRs2/.test(fnBody('createIRFromApp')) &&
+  /Enter the RS2 serial number/.test(fnBody('createIRFromApp')) &&
+  /!isAgisoft && !isRs2/.test(fnBody('createIRFromApp')));
 r.ok('...and the alias comparison is the SAME normaliser the scope store uses',
   /sameCompany\(cell, names\[i\]\)/.test(fnBody('matchesAnyCompany')) && /sameCompanyKey\(/.test(fnBody('sameCompany')));
 r.ok('a company named only as a placeholder is not a company',

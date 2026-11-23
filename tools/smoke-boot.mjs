@@ -934,13 +934,14 @@ async function runIntroLoad(ms, pagePath = INTRO_PATH, profile = introProfile) {
   // skips the video. Killing the process the instant the probe arrived could lose the
   // write and fail a working feature.
   //
-  // ⚠ 4000ms, AND IT IS A DISK-FLUSH WINDOW RATHER THAN A FUNCTIONAL WAIT. The write is
+  // ⚠ 8000ms, AND IT IS A DISK-FLUSH WINDOW RATHER THAN A FUNCTIONAL WAIT. The write is
   // issued when play() resolves — the probe only ever arrives after that, because
   // brandMode is set in the same breath — but Chrome flushes its LevelDB lazily, and
   // child.kill() on Windows is a hard terminate with no flush of its own. 1500ms was
   // enough on an idle machine and not enough when this suite runs inside smoke-all: it
-  // failed there and passed alone, which is the worst way for a test to be wrong.
-  if (got) await new Promise(r => setTimeout(r, 4000));
+  // failed there and passed alone, which is the worst way for a test to be wrong. 4000ms
+  // then failed the same way on a slower run, so the window is now 8000ms.
+  if (got) await new Promise(r => setTimeout(r, 8000));
   try { proc.kill(); } catch { /* already gone */ }
   // The NEXT load reuses this profile. On Windows `kill()` is a hard terminate and
   // does not promise the profile's lock has been released before the next Chrome

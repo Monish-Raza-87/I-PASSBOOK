@@ -221,7 +221,7 @@ r.ok('the report form fixes the prefix from the model and sends only the suffix'
   /S100-/.test(portal) && /S25P/.test(portal));
 r.ok('...and the rare platforms take a full serial instead of a guessed prefix',
   /OTHER - RS2/.test(portal) && /reportFreeSerial/.test(portal) &&
-  /payload\.droneSerial = fullSerial/.test(portal));
+  /rs2Serial : fullSerial/.test(portal));
 r.ok('evidence is capped at 50 MB and every staged file can be removed before submit',
   /MAX_EVIDENCE_BYTES = 50 \* 1024 \* 1024/.test(portal) &&
   /larger than 50 MB/.test(portal) &&
@@ -234,7 +234,15 @@ r.ok('support history refreshes in place and the form prefers the customer fleet
   /loadTickets\(\)/.test(portal) &&
   /rep-fleet/.test(portal) &&
   /serialFromFleet/.test(portal) &&
-  /My serial is not listed/.test(portal));
+  /Not listed \/ another product/.test(portal));
+r.ok('AGISOFT is software with no serial, while RS2 keeps its own serial field',
+  /reportNoSerial/.test(portal) &&
+  /reportIsRs2/.test(portal) &&
+  /AGISOFT \(software\)/.test(portal) &&
+  /RS2 \(accessory\)/.test(portal) &&
+  /RS2-XXX/.test(portal) &&
+  /Enter the RS2 serial number/.test(portal) &&
+  /AGISOFT is software, so no UAS serial is needed/.test(portal));
 r.ok('the feedback form is built in-app, not a Google Form link',
   /function openFeedbackForm\(\)/.test(portal) &&
   /apiPost\('submitFeedback'/.test(portal) &&

@@ -84,7 +84,7 @@ r.ok('the install layer is served, precached and cannot fall out of the deploy',
 r.head('the portal survives a lost connection');
 
 r.ok('the service worker falls back to the page the device actually opened',
-  /caches\.match\(req, \{ ignoreSearch: true \}\)/.test(swJs) &&
+  /cache\.match\(req, \{ ignoreSearch: true \}\)/.test(swJs) &&
   /caches\.match\('\.\/index\.html'\)/.test(swJs));
 
 r.ok('the report form keeps a draft, restores it, and clears it on a successful submit',

@@ -41,9 +41,15 @@ r.ok('the worker never intercepts its own script',
   /isOwnScript\(url\)\)\s*return;/.test(SW) &&
   /const isOwnScript = url => url\.split\('\?'\)\[0\] === self\.location\.href\.split\('\?'\)\[0\]/.test(SW),
   (SW.match(/[^\n]*isOwnScript[^\n]*/g) || []).join(' | '));
+// The guard's subject is the STATIC-ASSET branch: the probe is same-origin and
+// not a navigation, so it is branch 3 that would answer it from cache. The
+// navigation branch opens a cache of its own above this line too, which is why
+// the assertion looks for the branch-3 lookup AFTER the guard rather than the
+// first one in the file.
+const ownAt = SW.indexOf('if (isOwnScript(url)) return;');
+const assetCacheAt = SW.indexOf('caches.open(CACHE_NAME).then(cache =>', ownAt);
 r.ok('...and that guard sits BEFORE the cache lookup it would otherwise poison',
-  SW.indexOf('if (isOwnScript(url)) return;') < SW.indexOf('caches.open(CACHE_NAME).then(cache =>'),
-  SW.indexOf('if (isOwnScript(url)) return;') + ' vs ' + SW.indexOf('caches.open(CACHE_NAME).then(cache =>'));
+  ownAt > -1 && assetCacheAt > ownAt, { ownAt, assetCacheAt });
 
 // A brand new CACHE_NAME is only worth anything if the bodies inside it are new
 // too. Plain `cache.addAll(SHELL)` fetches through the HTTP cache, so gh-pages'
@@ -61,14 +67,31 @@ r.ok('...and SHELL is left as plain strings, so every other suite can still read
   !/new Request/.test(SW.slice(SW.indexOf('const SHELL'), SW.indexOf('const isBackend'))),
   SW.slice(SW.indexOf('const SHELL'), SW.indexOf('const isBackend')).slice(0, 80));
 
-// A navigation must revalidate rather than trust a ten-minute cached document.
-// 'no-cache' and not 'no-store': it is still a conditional request, so a 304
-// reuses the stored body and the HTTP entry the offline fallback needs survives.
-r.ok('navigations revalidate instead of trusting the HTTP cache',
-  /fetch\(req, \{ cache: 'no-cache' \}\)/.test(SW), (SW.match(/[^\n]*no-cache[^\n]*/) || [''])[0]);
-r.ok('...and the offline fallback serves the requested cached page, then index.html',
-  /caches\.match\(req, \{ ignoreSearch: true \}\)/.test(SW) &&
-  /caches\.match\('\.\/index\.html'\)/.test(SW));
+// OPENING THE APP MUST NOT WAIT FOR THE NETWORK. A navigation is answered from
+// the cached shell, and the newer page is fetched in the background, so the
+// previous build is usable immediately on a weak link. The refresh is also what
+// makes the NEXT launch newer even if the update notice is never tapped.
+const navAt = SW.indexOf("if (req.mode === 'navigate')");
+const navBlock = navAt > -1 ? SW.slice(navAt, SW.indexOf('return;', navAt)) : '';
+r.ok('a navigation is answered from the cached shell before the network is asked',
+  navBlock.length > 0 &&
+  /cache\.match\(req, \{ ignoreSearch: true \}\)/.test(navBlock) &&
+  /if \(cached\)/.test(navBlock) &&
+  navBlock.indexOf('cache.match(req, { ignoreSearch: true })') < navBlock.indexOf('return cached;'));
+r.ok('...and the newer page is still fetched in the background, so the NEXT launch moves forward',
+  /const network = fetch\(req, \{ cache: 'no-cache' \}\)/.test(navBlock) &&
+  /cache\.put\(req, resp\.clone\(\)\)/.test(navBlock) &&
+  navBlock.indexOf('void network;') > navBlock.indexOf('if (cached)'),
+  (navBlock.match(/[^\n]*network[^\n]*/g) || []).slice(0, 3));
+// 'no-cache' and not 'no-store': the refresh is still a conditional request, so
+// a 304 reuses the stored body rather than re-downloading the document.
+r.ok('...and that refresh revalidates instead of trusting the HTTP cache',
+  /fetch\(req, \{ cache: 'no-cache' \}\)/.test(navBlock),
+  (navBlock.match(/[^\n]*no-cache[^\n]*/) || [''])[0]);
+r.ok('...and a page this device has never opened takes the network, then the shell',
+  /return network\.then\(r => r \|\|/.test(navBlock) &&
+  /caches\.match\('\.\/index\.html'\)/.test(navBlock) &&
+  /caches\.match\('\.\/'\)/.test(navBlock));
 
 // skipWaiting is the reason a plain REFRESH delivers a new build — which is the
 // owner's actual habit, and the reason the classic waiting-worker pattern would

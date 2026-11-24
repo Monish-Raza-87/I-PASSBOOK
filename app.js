@@ -19,7 +19,7 @@
 // the "update available" notice. That comparison is only meaningful because the
 // two numbers are pinned together — which is why the pin is load-bearing and not
 // just a tidy convention.
-const APP_VERSION = 'v150';
+const APP_VERSION = 'v151';
 
 // Fill every version slot on the page. One writer, so there is one place to look
 // when the number is wrong — the slots themselves are static markup, present on
@@ -17747,9 +17747,12 @@ function saveTeamDirectory() {
   if (!isAdmin()) { showToast('Not authorized'); return; }
   try { localStorage.setItem('ipb_team_directory', JSON.stringify(teamDirectory)); } catch {}
   saveSentinel('__CONFIG__', 'team-directory', { entries: teamDirectory })
-    .then(r => showToast(r && r.status === 'ok'
-      ? 'Team directory saved'
-      : 'Saved locally (backend unreachable)'));
+    .then(r => {
+      // A success toast on a settings save is noise: the modal closes, which is the
+      // confirmation. Only a local-only save needs saying, because the next device
+      // will not see it.
+      if (!r || r.status !== 'ok') showToast('Saved on this device only (backend unreachable)');
+    });
 }
 function openTeamDirectoryModal() {
   if (!isAdmin()) { showToast('Only admins can edit the team directory'); return; }

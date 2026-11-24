@@ -360,4 +360,38 @@ r.ok('crLine reads the Customer Relations contact from the configuration',
 r.ok('...and types no address or number of its own',
   crBody.length > 0 && !/@/.test(crBody) && !/\+?\d[\d ]{6,}/.test(crBody));
 
+// ═══════════════════════════════════════════════════════════════════════════════
+r.head('the customer header is read in the sans face, while the data stays mono');
+// ═══════════════════════════════════════════════════════════════════════════════
+// The industrial skin sets a mono face on almost every small label. That is right for
+// an IR number and wrong for a menu read on a phone, so a final layer re-points the
+// word-bearing controls to the sans face. It has to be LAST in the sheet: a skin rule
+// of equal specificity would simply out-order it.
+const typeAt = portalCss.indexOf('CUSTOMER HEADER AND TYPE');
+const typeLayer = typeAt >= 0 ? portalCss.slice(typeAt) : '';
+r.ok('the type layer is real, and it is the last thing in the sheet',
+  typeAt > 0 && typeLayer.length > 400 && portalCss.lastIndexOf('}') > typeAt);
+const sansSel = ['.brand b', '.brand span', '.who', '.btn',
+  '.portal-nav button', '.portal-drop button', '.company-menu button'];
+const escSel = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+const sansMissed = sansSel.filter(s =>
+  !new RegExp(escSel(s) + '\\s*[,{][^}]*font-family:\\s*var\\(--sans\\)').test(typeLayer));
+r.ok('...and every word-bearing control in it takes the sans face',
+  sansMissed.length === 0, sansMissed);
+// The other half of the rule: the serial and UIN are data, and they keep the mono
+// face. Nothing in this layer may repaint them.
+r.ok('...and the serials, UINs and loop counts keep the mono face',
+  /\.fleet \.sn\s*\{[^}]*font-family:\s*var\(--mono\)/.test(portalCss) &&
+  /\.fleet \.uin b\s*\{[^}]*font-family:\s*var\(--mono\)/.test(portalCss) &&
+  !/--mono/.test(typeLayer));
+r.ok('the bright theme\'s section rules can be seen, instead of matching the page',
+  /:root:not\(\[data-theme="dark"\]\) section \+ section\s*\{\s*border-top-color:\s*var\(--line-strong\)/.test(portalCss));
+const narrowBar = (typeLayer.match(/@media \(max-width: 900px\)\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
+r.ok('below 900px the header wraps, and neither menu can leave the screen',
+  /\.bar-in\s*\{[^}]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto/.test(narrowBar) &&
+  /\.portal-nav\s*\{[^}]*flex-wrap:\s*wrap/.test(narrowBar) &&
+  /\.portal-drop\s*\{[^}]*max-width:\s*calc\(100vw - 24px\)/.test(narrowBar) &&
+  /\.portal-nav-drop:last-of-type \.portal-drop\s*\{[^}]*right:\s*0/.test(narrowBar),
+  (narrowBar.match(/\.portal-nav\s*\{[^}]*\}/) || [''])[0]);
+
 r.finish();

@@ -533,6 +533,9 @@ try {
   // model dropdown must own the serial prefix.
   await evaluate(`document.getElementById('raise-p').click()`);
   await SLEEP(180);
+  // The fixture company HAS a fleet, so the form opens on the aircraft picker. This
+  // block is about the manual model -> prefix rule, so take the explicit manual path.
+  await evaluate(`(() => { const f = document.getElementById('rep-fleet'); if (f) { f.value = '__manual'; f.dispatchEvent(new Event('change')); } })()`);
   ok('the in-app report form opens from the Report panel',
     await visible('#report-sheet') && await visible('#rep-model') && await visible('#rep-suffix'));
   await evaluate(`(() => { const m = document.getElementById('rep-model'); m.value = 'FUJIN'; m.dispatchEvent(new Event('change')); })()`);

@@ -36,6 +36,10 @@ r.ok('it declares the app shortcuts that open the customer portal',
   manifest.shortcuts.some(s => /customer\.html\?route=support\/new/.test(s.url)) &&
   manifest.shortcuts.some(s => /customer\.html\?route=support\/history/.test(s.url)));
 
+r.ok('the installed web app is declared, so a browser tab can tell it is installed',
+  Array.isArray(manifest.related_applications) &&
+  manifest.related_applications.some(a => a.platform === 'webapp' && /manifest\.json$/.test(a.url)));
+
 r.ok('the icons stay the two the app already ships',
   manifest.icons.map(i => i.src).join(',') === 'assets/icon-192.png,assets/icon-512.png');
 
@@ -58,7 +62,20 @@ r.ok('the install prompt is standalone-aware, iOS-aware, dismissible and test-sa
   /appinstalled/.test(pwaJs) &&
   /Add to Home Screen/.test(pwaJs) &&
   /ipb_install_dismissed_until/.test(pwaJs) &&
-  /navigator\.webdriver/.test(pwaJs));
+  /navigator\.webdriver/.test(pwaJs) &&
+  /HeadlessChrome/.test(pwaJs));
+
+r.ok('both doors declare the Android install capability',
+  /name="mobile-web-app-capable"/.test(indexHtml) &&
+  /name="mobile-web-app-capable"/.test(customerHtml));
+
+r.ok('iOS Chrome is told to use Safari, because Add to Home Screen there is a bookmark',
+  /isIosNonSafari/.test(pwaJs) &&
+  /Open this page in Safari/.test(pwaJs));
+
+r.ok('a browser tab that is already installed is told to open the home-screen app',
+  /getInstalledRelatedApps/.test(pwaJs) &&
+  /Open the installed app/.test(pwaJs));
 
 r.ok('the install layer is served, precached and cannot fall out of the deploy',
   /'pwa\.js'/.test(deploy) &&

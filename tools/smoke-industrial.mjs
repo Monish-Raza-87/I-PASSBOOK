@@ -363,6 +363,37 @@ r.ok('...and no phone rule in the file lowers a font size',
 r.ok('...and the auth buttons are raised, on a phone, to 44px',
   /#auth-container \.btn,[\s\S]{0,80}?height:\s*44px/.test(phoneBlock));
 
+// ── 7a. The phone is a different composition, not a smaller one ───────────────
+// Below 1024px the two-column split is dropped: the brand stage becomes a FIXED,
+// full-viewport field, the doors sit over it, and the film is now the ground the
+// page is read against. The scrim is not decoration — the film is light artwork,
+// and white type on it is only legible because a token paints the darkening.
+//
+// Those colours live as --landing-* tokens in base.css and not here, because this
+// file is checked for raw colours and colour functions: a `linear-gradient(` typed
+// into industrial.css would be exactly the failure that check exists to stop.
+r.head('the phone turns the film into the field, and the doors stand in front');
+const landingPhone = (css.match(/@media \(max-width: 1023px\)\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
+const landingTokens = new Set([...base.matchAll(/(--landing-[a-zA-Z0-9-]+)\s*:/g)].map(m => m[1]));
+const landingUsed = new Set([...landingPhone.matchAll(/var\(\s*(--landing-[a-zA-Z0-9-]+)/g)].map(m => m[1]));
+
+r.ok('the phone composition is a real 1023px block, the width the split hands over at',
+  landingPhone.length > 0 &&
+  /#auth-container\s*\{[\s\S]{0,200}?flex-direction:\s*column/.test(landingPhone));
+r.ok('...and the brand stage is pinned behind the page rather than stacked above it',
+  /#auth-container \.auth-brand-panel\s*\{[\s\S]{0,240}?position:\s*fixed[\s\S]{0,240}?inset:\s*0/.test(landingPhone));
+r.ok('...with the film cropped to fill it, not letterboxed inside its old square',
+  /\.brand-video\.brand-video\s*\{[^}]*object-fit:\s*cover/.test(landingPhone));
+r.ok('...and one scrim token, not a stack of local washes, keeps the type readable',
+  /#auth-container \.auth-brand-panel::after\s*\{[^}]*background:\s*var\(--landing-scrim\)/.test(landingPhone),
+  (landingPhone.match(/\.auth-brand-panel::after\s*\{[^}]*\}/) || [''])[0]);
+r.ok('...and the doors and their head sit in their own layer above it',
+  /\.auth-main\s*\{[\s\S]{0,240}?position:\s*relative[\s\S]{0,240}?z-index:\s*1/.test(landingPhone));
+r.ok('the landing ink and control colours are declared in base.css, and are not --ind-*',
+  landingUsed.size >= 6 && [...landingUsed].every(t => landingTokens.has(t)) &&
+  landingTokens.size > 0 && ![...landingTokens].some(t => /^--ind-/.test(t)),
+  { used: [...landingUsed], declared: [...landingTokens] });
+
 // ── 7b. The doors' one action ─────────────────────────────────────────────────
 // A bare `.btn` is the NEUTRAL button — components.css:14 fills it with
 // --surface-gray-10, near-black in light and near-white in dark. Nothing on the

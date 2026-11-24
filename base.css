@@ -119,6 +119,26 @@
   --ind-black:         #0b0b0b;
   --ind-white:         #f8f8f8;
 
+  /* The mobile landing's film field. Declared here for the same reason as the two
+     above: industrial.css names tokens and never writes a raw colour. The scrim is
+     a full gradient token because a `linear-gradient(` in industrial.css is caught
+     by the same rule as a raw hex. These are NOT --ind-* names: that prefix is
+     reserved for the app's palette, and smoke-industrial.mjs checks the colour
+     tokens industrial.css may spend. */
+  --landing-panel-ground: #0b0b0b;
+  --landing-scrim: linear-gradient(180deg,
+    rgba(8, 8, 8, 0.56) 0%,
+    rgba(8, 8, 8, 0.34) 30%,
+    rgba(8, 8, 8, 0.56) 58%,
+    rgba(8, 8, 8, 0.88) 100%);
+  --landing-ink: #f8f8f8;
+  --landing-ink-muted: rgba(255, 255, 255, 0.76);
+  --landing-ink-rule: rgba(255, 255, 255, 0.55);
+  --landing-select-bg: rgba(255, 255, 255, 0.92);
+  --landing-select-edge: rgba(255, 255, 255, 0.42);
+  --landing-select-ink: #0b0b0b;
+  --landing-mark: url("assets/icon-mark-silver.png");
+
   /* ── THE PAPER PAIR, BORROWED FROM THE COMPANY'S OWN SITE ──────────────────────
      indrones.com runs its full-width sections alternately pure white and warm
      off-white with one hairline between them — `bg-white` against `bg-[#F1F1EE]`,

@@ -29,6 +29,12 @@
     return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
   }
 
+  // Chrome/Firefox/Edge on iOS are WebKit shells: Add to Home Screen there creates a
+  // browser bookmark, not a standalone app. Safari is the only installer on iOS.
+  function isIosNonSafari() {
+    return isIos() && /CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+  }
+
   function isMobile() {
     try {
       return (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) ||
@@ -63,12 +69,12 @@
     return b;
   }
 
-  function show(ios) {
+  function show(ios, installed) {
     if (!document.body || document.getElementById(BANNER_ID)) return;
     var wrap = document.createElement('div');
     wrap.id = BANNER_ID;
     wrap.setAttribute('role', 'region');
-    wrap.setAttribute('aria-label', 'Install I-PASSBOOK');
+    wrap.setAttribute('aria-label', installed ? 'Open the installed app' : 'Install I-PASSBOOK');
     wrap.setAttribute('style', [
       'position:fixed',
       'left:50%',
@@ -92,17 +98,21 @@
     var text = document.createElement('div');
     text.setAttribute('style', 'flex:1;min-width:0');
     var strong = document.createElement('b');
-    strong.textContent = 'Install I-PASSBOOK';
+    strong.textContent = installed ? 'Open the installed app' : 'Install I-PASSBOOK';
     strong.setAttribute('style', 'display:block;font-size:14px');
     var note = document.createElement('span');
     note.setAttribute('style', 'display:block;color:#cfcfcb;font-size:12px;margin-top:2px');
-    note.textContent = ios
-      ? 'On iPhone: tap Share, then Add to Home Screen.'
-      : 'Opens from your home screen, like an app.';
+    note.textContent = installed
+      ? 'You are in the browser. Open I-PASSBOOK from your home screen for the app view.'
+      : (ios
+        ? (isIosNonSafari()
+          ? 'Open this page in Safari, then Share → Add to Home Screen.'
+          : 'On iPhone: tap Share, then Add to Home Screen.')
+        : 'Opens from your home screen, like an app.');
     text.appendChild(strong);
     text.appendChild(note);
 
-    var action = button(ios ? 'Got it' : 'Install', [
+    var action = button(installed || ios ? 'Got it' : 'Install', [
       'border:0',
       'border-radius:10px',
       'padding:8px 14px',
@@ -112,7 +122,7 @@
       'cursor:pointer',
       'white-space:nowrap'
     ].join(';'), function () {
-      if (ios) {
+      if (ios || installed) {
         rememberDismissal();
         hide();
         return;
@@ -149,7 +159,8 @@
   }
 
   function eligible() {
-    return !standalone() && !dismissed() && !navigator.webdriver && isMobile();
+    return !standalone() && !dismissed() && !navigator.webdriver &&
+      !/HeadlessChrome/i.test(navigator.userAgent || '') && isMobile();
   }
 
   // Attached at evaluation, not at DOMContentLoaded: the event can fire early on a
@@ -157,7 +168,7 @@
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     window.__ipbInstallPrompt = e;
-    if (eligible()) show(false);
+    if (eligible()) show(false, false);
   });
   window.addEventListener('appinstalled', function () {
     rememberDismissal();
@@ -174,8 +185,16 @@
 
     if (!eligible()) return;
 
+    // Installed already, but this window is the browser. Say it once, because a
+    // shortcut created by "Add to Home screen" can look exactly like this.
+    if (navigator.getInstalledRelatedApps) {
+      navigator.getInstalledRelatedApps().then(function (apps) {
+        if (apps && apps.length) show(false, true);
+      }).catch(function () { /* unsupported or refused */ });
+    }
+
     // iOS never fires the event above. Say it once, after the page has settled.
-    if (isIos()) setTimeout(function () { show(true); }, 2500);
+    if (isIos()) setTimeout(function () { show(true, false); }, 2500);
   }
 
   if (document.readyState === 'loading') {

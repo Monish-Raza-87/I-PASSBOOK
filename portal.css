@@ -547,11 +547,11 @@
   :root {
     --bg: #f1f1ee;
     --surface: #ffffff;
-    --surface-2: #f7f7f4;
+    --surface-2: #f5f5f1;
     --fg: #1a1a1b;
-    --fg-muted: #54545c;
-    --line: #e6e6e2;
-    --line-strong: #c4c4c8;
+    --fg-muted: #4d4d55;
+    --line: #d8d8d1;
+    --line-strong: #b3b3b8;
     --accent: #1a1a1b;
     --accent-fg: #ffffff;
     --accent-soft: #ffdf38;
@@ -1275,7 +1275,7 @@
   }
   .portal-nav-drop:hover > button::after,
   .portal-nav-drop.is-open > button::after { transform: rotate(225deg); }
-  .company-menu-wrap { --who-ink: #8a6d00; }
+  .company-menu-wrap { --who-ink: #6b5300; }
   :root[data-theme="dark"] .company-menu-wrap { --who-ink: var(--yellow); }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme]) .company-menu-wrap { --who-ink: var(--yellow); }
@@ -1621,3 +1621,87 @@
     font-size: 20px; font-weight: 800; text-transform: uppercase; margin-top: 8px;
   }
   .fleet-card.fleet-visual span { font-size: 12.5px; }
+/* ------------------------------------------------------------------------------
+   CUSTOMER HEADER AND TYPE — ONE VOICE FOR WORDS, MONO FOR NUMBERS
+   ------------------------------------------------------------------------------
+   The portal's industrial skin uses a monospace face for almost every small
+   label. That is right for an IR number or a serial, and wrong for a menu the
+   customer has to read on a phone. This final layer keeps the mono face for the
+   data and uses the sans face for the header, the tabs, the menus and buttons. */
+.brand b {
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  text-transform: none;
+}
+.brand span {
+  font-family: var(--sans);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.who {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  text-transform: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.btn {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: .01em;
+  text-transform: none;
+}
+.portal-nav button,
+.portal-drop button,
+.company-menu button {
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.portal-nav button { white-space: nowrap; }
+.portal-drop button { white-space: nowrap; }
+
+/* Bright theme: the rules between sections were almost the same value as the
+   page itself. A rule that cannot be seen is not a separator. */
+:root:not([data-theme="dark"]) section + section { border-top-color: var(--line-strong); }
+
+@media (max-width: 900px) {
+  .bar-in {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 8px;
+    row-gap: 4px;
+  }
+  .portal-nav {
+    flex-wrap: wrap;
+    overflow: visible;
+    margin: 4px -16px 0;
+    padding: 4px 16px;
+    border-top: 1px solid var(--line);
+    row-gap: 0;
+  }
+  .portal-nav button {
+    min-height: 36px;
+    padding: 8px 10px;
+    border-left: 0;
+  }
+  .portal-nav-drop > button { border-left: 0; }
+  .portal-nav-drop { flex: 0 0 auto; }
+  .portal-drop {
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: 100%;
+    min-width: 200px;
+    max-width: calc(100vw - 24px);
+  }
+  .portal-nav-drop:last-of-type .portal-drop { left: auto; right: 0; }
+}

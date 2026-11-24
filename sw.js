@@ -2,7 +2,8 @@
 // Strategy:
 //  - Apps Script backend (live data): ALWAYS network, NEVER cached — otherwise
 //    the IR list / passbook would freeze at the first response and never update.
-//  - Navigations: network-first, fall back to cached index.html when offline.
+//  - Navigations: the cached shell first, revalidated in the background — opening
+//    the app never waits for the network, and the next launch gets the newer page.
 //  - Same-origin static shell (HTML/CSS/JS/assets): stale-while-revalidate — serve
 //    the cached copy instantly, refresh it in the background.
 //  - The worker's OWN script: never intercepted (see 3a below). The app asks for
@@ -20,7 +21,7 @@
 // name from being filled with bodies the browser's HTTP cache had already gone
 // stale on. That combination — a new name AND fresh bodies inside it — is what
 // makes the app's "update available" check honest.
-const CACHE_NAME = 'ipassbook-v150';
+const CACHE_NAME = 'ipassbook-v152';
 const SHELL = [
   './',
   './index.html',
@@ -85,25 +86,37 @@ self.addEventListener('fetch', (event) => {
   // 1. Backend = always live. Do not intercept (let the browser fetch normally).
   if (isBackend(url)) return;
 
-  // 2. Navigations: network-first with offline fallback to the cached shell.
-  //    `cache: 'no-cache'` revalidates instead of trusting the HTTP cache: a
-  //    navigation fetch otherwise honours GitHub Pages' ~10-minute max-age and
-  //    can hand back yesterday's index.html. It is still a conditional request,
-  //    so a 304 reuses the stored body and the HTTP entry stays warm — which is
-  //    why this is 'no-cache' and not 'no-store' (that would re-download the
-  //    whole document on every open and throw away the entry the offline
-  //    fallback below depends on). Offline is unaffected: the revalidation fails,
-  //    fetch rejects, and the catch serves the cached shell.
+  // 2. Navigations: the cached shell is the answer; the network is the refresh.
+  //    Opening the app must not wait for a weak link — the previous build is
+  //    usable immediately, which is the point of installing the app at all. The
+  //    fetch below still runs, in the BACKGROUND, so nothing about this request
+  //    is held up by it. `cache: 'no-cache'` keeps that refresh honest: a plain
+  //    fetch would honour GitHub Pages' ~10-minute max-age and hand back
+  //    yesterday's index.html, while a conditional request can reuse a 304 body.
+  //    That refresh is what makes the NEXT launch newer even if nobody taps the
+  //    update notice. `ignoreSearch` lets a shortcut like customer.html?route=...
+  //    hit the page this device already opened. A page never opened has nothing
+  //    cached, so it takes the network path, then the app shell as the honest
+  //    fallback.
   if (req.mode === 'navigate') {
-    // A navigation to a page this device has already opened (customer.html, index.html)
-    // is served from the runtime cache when the network is gone. `ignoreSearch` is what
-    // makes a shortcut like customer.html?route=... hit the cached page. If this device
-    // has never opened that page, the app shell is the honest fallback.
     event.respondWith(
-      fetch(req, { cache: 'no-cache' })
-        .catch(() => caches.match(req, { ignoreSearch: true })
-          .then(r => r || caches.match('./index.html'))
-          .then(r => r || caches.match('./')))
+      caches.open(CACHE_NAME).then(cache =>
+        cache.match(req, { ignoreSearch: true }).then(cached => {
+          const network = fetch(req, { cache: 'no-cache' })
+            .then(resp => {
+              if (resp && resp.status === 200) cache.put(req, resp.clone()).catch(() => {});
+              return resp;
+            })
+            .catch(() => null);
+          if (cached) {
+            // Deliberately not awaited: this response has already been chosen.
+            void network;
+            return cached;
+          }
+          return network.then(r => r ||
+            caches.match('./index.html').then(x => x || caches.match('./')));
+        })
+      )
     );
     return;
   }

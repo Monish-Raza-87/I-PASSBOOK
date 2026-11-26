@@ -1687,7 +1687,10 @@
     mandates: 'panel-mandates',
     'mandates/sb': 'panel-mandates',
     'mandates/ack': 'panel-mandates',
-    offer: 'panel-offer'
+    offer: 'panel-offer',
+    // The footer's "Support" link points at the contact panel, which is why this
+    // route exists even though no header item names it.
+    contact: 'panel-contact'
   };
   function portalRouteFromHash() {
     const h = String(location.hash || '').replace(/^#\/?/, '').replace(/\/+$/, '');
@@ -1753,6 +1756,17 @@
   function openPanel(name) {
     document.body.classList.add('portal-panel-open');
     if (!PANEL_IDS[name]) name = 'history';
+    // THE CONTAINER COMES WITH THE PANEL. `portal-panel-open` hides the marketing
+    // band, so a panel shown without `#portal` is a page whose every section is
+    // hidden — header and footer only. The home route deliberately leaves #portal
+    // hidden, and the footer's Products/Support links and the company menu can
+    // reach this function from there, so this has to be the place that brings it
+    // back. The tiles are the home face of the same container; a panel replaces
+    // them.
+    const portal = $('portal');
+    if (portal) portal.hidden = false;
+    const tilesWrap = $('portal-tiles');
+    if (tilesWrap) tilesWrap.hidden = true;
     Object.keys(PANEL_IDS).forEach(k => {
       const el = document.getElementById(PANEL_IDS[k]);
       if (el) el.hidden = (k !== name);
@@ -1766,7 +1780,10 @@
     }
   }
   async function loadTickets() {
-    openPanel('history');
+    // No openPanel() here: boot() decides the route a moment later, and showing
+    // the history panel before that decision made the signed-in home flash the
+    // list and then hide the whole portal. The panels keep their markup state
+    // (hidden); showPortalPage() opens the one the route names.
     $('reports-list').hidden = false;
     $('report-one').hidden = true;
     $('reports-sub').textContent = 'Signed in as ' + ME.email + '.';
@@ -3294,7 +3311,22 @@
     document.querySelectorAll('a[data-open-panel]').forEach(a => {
       a.addEventListener('click', ev => {
         ev.preventDefault();
-        openPanel(a.getAttribute('data-open-panel'));
+        const name = a.getAttribute('data-open-panel');
+        // Signed out, there is no portal panel to open: #portal is the customer's
+        // private space and this page is not showing it to them. Send them to the
+        // public section that answers the same question instead.
+        if (!token() || !ME) {
+          const publicId = { library: 'products', contact: 'support' }[name];
+          const target = publicId && document.getElementById(publicId);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        // Signed in, go through the ROUTE so the URL, the nav and the panel all
+        // agree — and so the container is brought back by the same function that
+        // hides the marketing band (see openPanel's note).
+        const route = name === 'contact' ? 'contact' : name;
+        if (location.hash === '#/' + route) showPortalPage(route);
+        else location.hash = '#/' + route;
       });
     });
 

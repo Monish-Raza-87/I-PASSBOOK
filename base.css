@@ -2014,6 +2014,18 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   -webkit-mask: var(--wa-mask) center / contain no-repeat;
   mask: var(--wa-mask) center / contain no-repeat;
 }
+/* ON A PHONE THE CORNER IS A DISC IN THE PAGE, NOT A FLOATING PILL. The labelled
+   pill is a desktop convenience, but at 390px it landed across the Help & FAQ line
+   and the credit, and 165px of fixed furniture was the largest thing on the screen.
+   The markup's own note has always said the phone gets a glyph with no words; this
+   is that rule. The landing block in industrial.css puts it in the page's own flow
+   (its bottom-right margin, under the credit), so it cannot cover a door on a short
+   screen. */
+@media (max-width: 639px) {
+  .wa-corner { gap: 0; padding: 0; }
+  .wa-label { display: none; }
+  .wa-glyph { width: 46px; height: 46px; }
+}
 
 /* ── The foot of the landing page ──────────────────────────────────────────────
    The acknowledgement, and then the foot line. All three are centred like everything
@@ -2994,6 +3006,14 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   left: 50%;
   bottom: calc(1.25rem + var(--safe-b));
   transform: translateX(-50%) translateY(140%);
+  /* 140% DOWN IS NOT OFF SCREEN. On a phone the bar sits higher (above the bottom
+     nav) and 140% of a one-line pill still leaves its top edge — and the ::before
+     dot — peeking over the landing page's credit line when nothing is being said.
+     The pill is therefore not hit-testable and not painted until `.show`; the
+     transform stays because it is what slides it in. */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
   background: var(--surface-gray-10);
   color: var(--ink-base);
   border-radius: var(--radius-4);
@@ -3005,19 +3025,19 @@ html[data-sso="wait"] #sso-wait { display: flex; }
   box-shadow: var(--elevation-xl);
   max-width: min(420px, calc(100vw - 2rem));
   text-align: center;
-  /* Tappable, so it can always be dismissed by hand. `pointer-events: none` used to
-     be here, which made the one thing covering the form the one thing a user could
-     not get rid of — and when a throw orphaned the queue's timer it stayed up for
-     good. The pill takes the tap; the text inside does not, because a text node
-     would otherwise swallow it. */
-  pointer-events: auto;
   cursor: pointer;
 }
 #toast-text { pointer-events: none; }
 /* app.js toggles this class rather than writing a transform inline, so showToast()
    can never fight the stylesheet — it replaces the message and restarts the one
-   timer, and nothing here needs to know that. */
-#toast.show { transform: translateX(-50%) translateY(0); }
+   timer, and nothing here needs to know that. While shown the pill takes the tap
+   (so it can always be dismissed by hand); while hidden it must not take one. */
+#toast.show {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
 
 /* ── Made-with credit + build version ────────────────────────────────────────
    One line, written into the sign-in card AND the foot of the sidebar, so it is
